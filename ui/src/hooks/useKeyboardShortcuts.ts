@@ -35,7 +35,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     if (!activeSessionId) return
     try {
       const messages = await api.getMessages(activeSessionId, 50)
-      const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+      const lastAssistant = [...(messages ?? [])].reverse().find((m) => m.role === 'assistant')
       if (lastAssistant) {
         await api.toggleBookmark(lastAssistant.id, activeSessionId)
         void queryClient.invalidateQueries({ queryKey: ['bookmarks', activeSessionId] })

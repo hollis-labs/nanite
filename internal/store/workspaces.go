@@ -7,27 +7,27 @@ import (
 
 // Workspace represents a workspace record.
 type Workspace struct {
-	ID          string
-	Name        string
-	Description string
-	Icon        string
-	SortOrder   int
-	Settings    string
-	CreatedAt   string
-	UpdatedAt   string
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Icon        string `json:"icon"`
+	SortOrder   int    `json:"sort_order"`
+	Settings    string `json:"settings"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // Project represents a project within a workspace.
 type Project struct {
-	ID          string
-	WorkspaceID string
-	Name        string
-	Description string
-	RepoPath    string
-	Settings    string
-	SortOrder   int
-	CreatedAt   string
-	UpdatedAt   string
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	RepoPath    string `json:"repo_path"`
+	Settings    string `json:"settings"`
+	SortOrder   int    `json:"sort_order"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // ListWorkspaces returns all workspaces ordered by sort_order.
@@ -38,7 +38,7 @@ func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	}
 	defer rows.Close()
 
-	var out []Workspace
+	out := make([]Workspace, 0)
 	for rows.Next() {
 		var w Workspace
 		if err := rows.Scan(&w.ID, &w.Name, &w.Description, &w.Icon, &w.SortOrder, &w.Settings, &w.CreatedAt, &w.UpdatedAt); err != nil {
@@ -113,7 +113,7 @@ func (s *Store) ListProjects(workspaceID string) ([]Project, error) {
 	}
 	defer rows.Close()
 
-	var out []Project
+	out := make([]Project, 0)
 	for rows.Next() {
 		var p Project
 		if err := rows.Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.Description, &p.RepoPath, &p.Settings, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt); err != nil {

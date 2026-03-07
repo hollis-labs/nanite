@@ -45,7 +45,7 @@ export function WorkflowList() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-zinc-200">{wf.name}</span>
-                {wf.inputs.length > 0 && (
+                {(wf.inputs ?? []).length > 0 && (
                   <span className="text-xs text-zinc-500">
                     {wf.inputs.length} input{wf.inputs.length !== 1 ? 's' : ''}
                   </span>

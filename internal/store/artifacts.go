@@ -34,7 +34,7 @@ func (s *Store) ListArtifacts(sessionID string) ([]Artifact, error) {
 	}
 	defer rows.Close()
 
-	var out []Artifact
+	out := make([]Artifact, 0)
 	for rows.Next() {
 		var a Artifact
 		if err := rows.Scan(&a.ID, &a.SessionID, &a.MessageID, &a.Name, &a.MimeType,

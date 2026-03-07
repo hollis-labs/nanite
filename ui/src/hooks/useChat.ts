@@ -24,7 +24,7 @@ export function useChat(sessionId: string | null) {
     }
     try {
       const msgs = await api.getMessages(sessionId)
-      setMessages(msgs)
+      setMessages(msgs ?? [])
     } catch (err) {
       console.error('Failed to load messages:', err)
     }

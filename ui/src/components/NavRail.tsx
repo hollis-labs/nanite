@@ -1,6 +1,6 @@
 import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Workflow } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useAppStore } from '@/stores/useAppStore'
@@ -23,8 +23,19 @@ export function NavRail() {
 
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
+  const setActiveSession = useAppStore((s) => s.setActiveSession)
   const toggleWorkflowPanel = useLayoutStore((s) => s.toggleWorkflowPanel)
   const workflowPanelOpen = useLayoutStore((s) => s.workflowPanelOpen)
+  const setLeftSidebar = useLayoutStore((s) => s.setLeftSidebar)
+  const queryClient = useQueryClient()
+
+  const createSessionMutation = useMutation({
+    mutationFn: () => api.createSession({ workspace_id: activeWorkspaceId! }),
+    onSuccess: (newSession) => {
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      setActiveSession(newSession.id)
+    },
+  })
 
   const { data: workspaces = [], isLoading: loadingWorkspaces } = useQuery({
     queryKey: ['workspaces'],
@@ -124,6 +135,10 @@ export function NavRail() {
                 onClick={() => {
                   if (id === 'workflows') {
                     toggleWorkflowPanel()
+                  } else if (id === 'new') {
+                    if (activeWorkspaceId) createSessionMutation.mutate()
+                  } else if (id === 'search') {
+                    setLeftSidebar(true)
                   } else {
                     setActiveItem(id)
                   }

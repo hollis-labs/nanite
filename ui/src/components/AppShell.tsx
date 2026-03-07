@@ -30,7 +30,7 @@ export function AppShell() {
 
   useKeyboardShortcuts({
     focusComposer,
-    sessions: sessions.map((s) => ({ id: s.id })),
+    sessions: (sessions ?? []).map((s) => ({ id: s.id })),
   })
 
   return (

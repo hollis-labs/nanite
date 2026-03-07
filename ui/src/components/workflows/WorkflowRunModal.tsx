@@ -14,7 +14,7 @@ interface WorkflowRunModalProps {
 export function WorkflowRunModal({ workflow, onClose }: WorkflowRunModalProps) {
   const [formValues, setFormValues] = useState<Record<string, unknown>>(() => {
     const defaults: Record<string, unknown> = {}
-    for (const input of workflow.inputs) {
+    for (const input of workflow.inputs ?? []) {
       if (input.default !== undefined) {
         defaults[input.name] = input.default
       } else if (input.type === 'boolean') {
@@ -73,10 +73,10 @@ export function WorkflowRunModal({ workflow, onClose }: WorkflowRunModalProps) {
             <WorkflowResultCard result={result} />
           ) : (
             <form id="workflow-form" onSubmit={handleSubmit} className="space-y-4">
-              {workflow.inputs.length === 0 ? (
+              {(workflow.inputs ?? []).length === 0 ? (
                 <p className="text-sm text-zinc-500">This workflow has no inputs. Click Run to execute.</p>
               ) : (
-                workflow.inputs.map((input) => (
+                (workflow.inputs ?? []).map((input) => (
                   <div key={input.name} className="space-y-1.5">
                     <label className="block text-xs font-medium text-zinc-400">
                       {input.label || input.name}

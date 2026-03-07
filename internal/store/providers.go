@@ -4,31 +4,31 @@ import "fmt"
 
 // Provider represents a provider record.
 type Provider struct {
-	ID           string
-	Name         string
-	ProviderType string
-	BaseURL      string
-	IsEnabled    bool
-	Settings     string
-	CreatedAt    string
-	UpdatedAt    string
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ProviderType string `json:"provider_type"`
+	BaseURL      string `json:"base_url"`
+	IsEnabled    bool   `json:"is_enabled"`
+	Settings     string `json:"settings"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // Model represents a model record.
 type Model struct {
-	ID             string
-	ProviderID     string
-	ModelID        string
-	DisplayName    string
-	ContextWindow  int
-	MaxOutput      int
-	SupportsTools  bool
-	SupportsVision bool
-	IsEnabled      bool
-	Pricing        string
-	SortOrder      int
+	ID             string `json:"id"`
+	ProviderID     string `json:"provider_id"`
+	ModelID        string `json:"model_id"`
+	DisplayName    string `json:"display_name"`
+	ContextWindow  int    `json:"context_window"`
+	MaxOutput      int    `json:"max_output"`
+	SupportsTools  bool   `json:"supports_tools"`
+	SupportsVision bool   `json:"supports_vision"`
+	IsEnabled      bool   `json:"is_enabled"`
+	Pricing        string `json:"pricing"`
+	SortOrder      int    `json:"sort_order"`
 	// Joined field from provider.
-	ProviderType string
+	ProviderType string `json:"provider_type"`
 }
 
 // ListProviders returns all providers.
@@ -43,7 +43,7 @@ func (s *Store) ListProviders() ([]Provider, error) {
 	}
 	defer rows.Close()
 
-	var out []Provider
+	out := make([]Provider, 0)
 	for rows.Next() {
 		var p Provider
 		if err := rows.Scan(
@@ -73,7 +73,7 @@ func (s *Store) ListModels() ([]Model, error) {
 	}
 	defer rows.Close()
 
-	var out []Model
+	out := make([]Model, 0)
 	for rows.Next() {
 		var m Model
 		if err := rows.Scan(

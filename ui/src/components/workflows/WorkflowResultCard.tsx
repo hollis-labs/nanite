@@ -32,9 +32,9 @@ export function WorkflowResultCard({ result }: WorkflowResultCardProps) {
       </div>
 
       {/* Steps */}
-      {result.steps.length > 0 && (
+      {(result.steps ?? []).length > 0 && (
         <div className="space-y-1 pl-1">
-          {result.steps.map((step, i) => {
+          {(result.steps ?? []).map((step, i) => {
             const config = STATUS_CONFIG[step.status]
             const Icon = config.icon
             return (

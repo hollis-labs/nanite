@@ -12,38 +12,38 @@ import (
 
 // Session represents a chat session.
 type Session struct {
-	ID           string
-	ShortCode    string
-	Title        string
-	CustomName   string
-	WorkspaceID  string
-	ProjectID    string
-	ContextType  string
-	ContextID    string
-	Provider     string
-	Model        string
-	Status       string // active, paused, archived
-	IsPinned     bool
-	SortOrder    int
-	MessageCount int
-	Metadata     string
-	LastActivity string
-	CreatedAt    string
-	UpdatedAt    string
+	ID           string `json:"id"`
+	ShortCode    string `json:"short_code"`
+	Title        string `json:"title"`
+	CustomName   string `json:"custom_name"`
+	WorkspaceID  string `json:"workspace_id"`
+	ProjectID    string `json:"project_id"`
+	ContextType  string `json:"context_type"`
+	ContextID    string `json:"context_id"`
+	Provider     string `json:"provider"`
+	Model        string `json:"model"`
+	Status       string `json:"status"` // active, paused, archived
+	IsPinned     bool   `json:"is_pinned"`
+	SortOrder    int    `json:"sort_order"`
+	MessageCount int    `json:"message_count"`
+	Metadata     string `json:"metadata"`
+	LastActivity string `json:"last_activity"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // Message represents a chat message.
 type Message struct {
-	ID          string
-	SessionID   string
-	AgentID     string
-	Role        string // user, assistant, system, tool
-	Content     string
-	Envelope    string
-	Metadata    string
-	ParentID    string
-	IsCompacted bool
-	CreatedAt   string
+	ID          string `json:"id"`
+	SessionID   string `json:"session_id"`
+	AgentID     string `json:"agent_id"`
+	Role        string `json:"role"` // user, assistant, system, tool
+	Content     string `json:"content"`
+	Envelope    string `json:"envelope"`
+	Metadata    string `json:"metadata"`
+	ParentID    string `json:"parent_id"`
+	IsCompacted bool   `json:"is_compacted"`
+	CreatedAt   string `json:"created_at"`
 }
 
 // ListSessions returns sessions filtered by workspace, ordered by last_activity DESC.
@@ -65,7 +65,7 @@ func (s *Store) ListSessions(workspaceID string) ([]Session, error) {
 	}
 	defer rows.Close()
 
-	var out []Session
+	out := make([]Session, 0)
 	for rows.Next() {
 		var sess Session
 		if err := rows.Scan(
@@ -213,7 +213,7 @@ func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
 	}
 	defer rows.Close()
 
-	var out []Message
+	out := make([]Message, 0)
 	for rows.Next() {
 		var m Message
 		if err := rows.Scan(

@@ -30,7 +30,7 @@ func (s *Store) ListBookmarks(sessionID string) ([]Bookmark, error) {
 	}
 	defer rows.Close()
 
-	var out []Bookmark
+	out := make([]Bookmark, 0)
 	for rows.Next() {
 		var b Bookmark
 		if err := rows.Scan(&b.ID, &b.MessageID, &b.SessionID, &b.Note, &b.Tags, &b.CreatedAt); err != nil {

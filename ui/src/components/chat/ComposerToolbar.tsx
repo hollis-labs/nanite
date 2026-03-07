@@ -39,7 +39,8 @@ export function ComposerToolbar() {
   }
 
   const groupedModels: Provider[] = useMemo(() => {
-    if (providers && providers.length > 0) return providers
+    // Only use API providers if they have nested models arrays
+    if (providers && providers.length > 0 && providers[0].models) return providers
     // Fallback: group static models by provider field
     const groups = new Map<string, ModelOption[]>()
     for (const m of AVAILABLE_MODELS) {
@@ -54,7 +55,7 @@ export function ComposerToolbar() {
     }))
   }, [providers])
 
-  const allModels = useMemo(() => groupedModels.flatMap((p) => p.models), [groupedModels])
+  const allModels = useMemo(() => groupedModels.flatMap((p) => p.models ?? []), [groupedModels])
   const currentModel = allModels.find((m) => m.id === activeModel) || AVAILABLE_MODELS.find((m) => m.id === activeModel)
 
   // Close dropdowns on outside click
@@ -115,11 +116,11 @@ export function ComposerToolbar() {
               <div key={provider.id}>
                 <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   <span className="w-4 h-4 rounded bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
-                    {PROVIDER_ICONS[provider.id.toLowerCase()] || provider.name.charAt(0)}
+                    {PROVIDER_ICONS[provider.id?.toLowerCase()] || provider.name?.charAt(0) || '?'}
                   </span>
                   {provider.name}
                 </div>
-                {provider.models.map((model) => (
+                {(provider.models ?? []).map((model) => (
                   <button
                     key={model.id}
                     onClick={() => void handleModelSelect(model.id)}

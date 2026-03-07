@@ -9,32 +9,32 @@ import (
 
 // AgentProfile represents an agent profile record.
 type AgentProfile struct {
-	ID              string
-	Name            string
-	Slug            string
-	Avatar          string
-	SystemPrompt    string
-	Description     string
-	Modes           string
-	DefaultMode     string
-	DefaultModel    string
-	MCPServers      string
-	ToolPermissions string
-	CanExecute      bool
-	Settings        string
-	CreatedAt       string
-	UpdatedAt       string
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Slug            string `json:"slug"`
+	Avatar          string `json:"avatar"`
+	SystemPrompt    string `json:"system_prompt"`
+	Description     string `json:"description"`
+	Modes           string `json:"modes"`
+	DefaultMode     string `json:"default_mode"`
+	DefaultModel    string `json:"default_model"`
+	MCPServers      string `json:"mcp_servers"`
+	ToolPermissions string `json:"tool_permissions"`
+	CanExecute      bool   `json:"can_execute"`
+	Settings        string `json:"settings"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // AgentMode represents a mode configuration for an agent.
 type AgentMode struct {
-	ID             string
-	AgentID        string
-	Slug           string
-	Name           string
-	PromptAddendum string
-	ToolOverrides  string
-	Settings       string
+	ID             string `json:"id"`
+	AgentID        string `json:"agent_id"`
+	Slug           string `json:"slug"`
+	Name           string `json:"name"`
+	PromptAddendum string `json:"prompt_addendum"`
+	ToolOverrides  string `json:"tool_overrides"`
+	Settings       string `json:"settings"`
 }
 
 // GetAgentBySlug returns an agent profile by its slug.
@@ -161,7 +161,7 @@ func (s *Store) ListAgentModes(agentID string) ([]AgentMode, error) {
 	}
 	defer rows.Close()
 
-	var out []AgentMode
+	out := make([]AgentMode, 0)
 	for rows.Next() {
 		var m AgentMode
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.Slug, &m.Name, &m.PromptAddendum, &m.ToolOverrides, &m.Settings); err != nil {
@@ -197,11 +197,11 @@ func (s *Store) CreateAgentMode(m *AgentMode) error {
 
 // SessionAgent represents a record in the session_agents table.
 type SessionAgent struct {
-	SessionID string
-	AgentID   string
-	Mode      string
-	JoinedAt  string
-	IsPrimary bool
+	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id"`
+	Mode      string `json:"mode"`
+	JoinedAt  string `json:"joined_at"`
+	IsPrimary bool   `json:"is_primary"`
 }
 
 // GetSessionPrimaryAgent returns the primary agent for a session.
@@ -256,7 +256,7 @@ func (s *Store) ListSessionAgents(sessionID string) ([]SessionAgent, error) {
 	}
 	defer rows.Close()
 
-	var out []SessionAgent
+	out := make([]SessionAgent, 0)
 	for rows.Next() {
 		var sa SessionAgent
 		if err := rows.Scan(&sa.SessionID, &sa.AgentID, &sa.Mode, &sa.JoinedAt, &sa.IsPrimary); err != nil {
@@ -280,7 +280,7 @@ func (s *Store) ListAgents() ([]AgentProfile, error) {
 	}
 	defer rows.Close()
 
-	var out []AgentProfile
+	out := make([]AgentProfile, 0)
 	for rows.Next() {
 		var a AgentProfile
 		if err := rows.Scan(

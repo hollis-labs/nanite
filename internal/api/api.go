@@ -55,6 +55,23 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents/{id}/modes", a.handleListAgentModes)
 	mux.HandleFunc("POST /api/agents/{id}/modes", a.handleCreateAgentMode)
 
+	// Session compaction
+	mux.HandleFunc("POST /api/sessions/{id}/compact", a.handleCompactSession)
+
+	// Bookmarks
+	mux.HandleFunc("GET /api/sessions/{id}/bookmarks", a.handleListBookmarks)
+	mux.HandleFunc("POST /api/bookmarks", a.handleCreateBookmark)
+	mux.HandleFunc("DELETE /api/bookmarks/{id}", a.handleDeleteBookmark)
+	mux.HandleFunc("POST /api/messages/{id}/bookmark", a.handleToggleBookmark)
+
+	// Artifacts
+	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifacts)
+	mux.HandleFunc("GET /api/artifacts/{id}/download", a.handleDownloadArtifact)
+	mux.HandleFunc("POST /api/artifacts/upload", a.handleUploadArtifact)
+
+	// Slash commands
+	mux.HandleFunc("GET /api/commands", a.handleListCommands)
+
 	// Providers & Models
 	mux.HandleFunc("GET /api/providers", a.handleListProviders)
 	mux.HandleFunc("GET /api/models", a.handleListModels)

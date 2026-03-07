@@ -291,6 +291,31 @@ func (s *Store) CreateMessage(msg *Message) error {
 	return tx.Commit()
 }
 
+// UpdateMessageContent updates a message's content and compaction flag.
+func (s *Store) UpdateMessageContent(id, content string, isCompacted bool) error {
+	_, err := s.DB.Exec(
+		`UPDATE messages SET content = ?, is_compacted = ? WHERE id = ?`,
+		content, isCompacted, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update message content %s: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateSessionCompaction saves a compaction summary on a session.
+func (s *Store) UpdateSessionCompaction(id, summary string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(
+		`UPDATE sessions SET compaction_summary = ?, compacted_at = ?, updated_at = ? WHERE id = ?`,
+		summary, now, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update session compaction %s: %w", id, err)
+	}
+	return nil
+}
+
 // nullIfEmpty returns nil if s is empty, otherwise returns s. Used for nullable TEXT columns.
 func nullIfEmpty(val string) interface{} {
 	if val == "" {

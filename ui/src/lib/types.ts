@@ -120,6 +120,28 @@ export interface ApprovalRequest {
   details?: string
 }
 
+// --- Bookmarks ---
+
+export interface Bookmark {
+  id: string
+  message_id: string
+  session_id: string
+  note: string
+  tags: string[]
+  created_at: string
+}
+
+// --- Artifacts ---
+
+export interface Artifact {
+  id: string
+  session_id: string
+  name: string
+  mime_type: string
+  size: number
+  created_at: string
+}
+
 // --- Tool Calls ---
 
 export interface ToolCall {

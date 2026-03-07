@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, Bookmark, Artifact } from './types'
 
 const API_BASE = '/api'
 
@@ -92,5 +92,35 @@ export const api = {
     })
     if (!res.ok) throw new Error(`Failed to pin session: ${res.status}`)
     return res.json()
+  },
+
+  // Bookmarks
+  listBookmarks: async (sessionId: string): Promise<Bookmark[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/bookmarks`)
+    if (!res.ok) throw new Error(`Failed to list bookmarks: ${res.status}`)
+    return res.json()
+  },
+
+  toggleBookmark: async (messageId: string, sessionId: string): Promise<void> => {
+    await fetch(`${API_BASE}/messages/${messageId}/bookmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    })
+  },
+
+  // Artifacts
+  listArtifacts: async (sessionId: string): Promise<Artifact[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/artifacts`)
+    if (!res.ok) throw new Error(`Failed to list artifacts: ${res.status}`)
+    return res.json()
+  },
+
+  // Compact
+  compactSession: async (sessionId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/compact`, {
+      method: 'POST',
+    })
+    if (!res.ok) throw new Error(`Failed to compact session: ${res.status}`)
   },
 }

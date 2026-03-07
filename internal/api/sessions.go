@@ -175,6 +175,45 @@ func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+
+	// Load all messages for the session.
+	messages, err := a.Store.ListMessages(sessionID, 1000)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// MVP: concatenate all message contents, truncate to 2000 chars.
+	var total int
+	var summary string
+	for _, m := range messages {
+		if total+len(m.Content) > 2000 {
+			summary += m.Content[:2000-total]
+			total = 2000
+			break
+		}
+		summary += m.Content + "\n"
+		total += len(m.Content) + 1
+	}
+
+	// Save compaction summary on session.
+	if err := a.Store.UpdateSessionCompaction(sessionID, summary); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Mark all messages as compacted.
+	for _, m := range messages {
+		if !m.IsCompacted {
+			_ = a.Store.UpdateMessageContent(m.ID, m.Content, true)
+		}
+	}
+
+	a.jsonResp(w, http.StatusOK, map[string]string{"summary": summary})
+}
+
 func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 

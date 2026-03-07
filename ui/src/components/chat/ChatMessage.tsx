@@ -1,4 +1,4 @@
-import { Bot, User, Copy, Check } from 'lucide-react'
+import { Bot, User, Copy, Check, Bookmark, BookmarkCheck } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import type { Message, AgentMode, Envelope } from '@/lib/types'
 import { MessageContent } from './MessageContent'
@@ -37,9 +37,11 @@ const MODE_LABEL_STYLES: Record<AgentMode, string> = {
 
 interface ChatMessageProps {
   message: Message
+  isBookmarked?: boolean
+  onToggleBookmark?: (messageId: string) => void
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, isBookmarked = false, onToggleBookmark }: ChatMessageProps) {
   const [copied, setCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
   const activeMode = useChatStore((s) => s.activeMode)
@@ -49,6 +51,10 @@ export function ChatMessage({ message }: ChatMessageProps) {
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }, [message.content])
+
+  const handleBookmark = useCallback(() => {
+    onToggleBookmark?.(message.id)
+  }, [message.id, onToggleBookmark])
 
   const isUser = message.role === 'user'
   const avatarStyle = isUser
@@ -72,6 +78,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       className={`flex gap-3 group ${isUser ? 'flex-row-reverse' : ''}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      data-message-id={message.id}
     >
       {/* Avatar */}
       <div
@@ -95,6 +102,10 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <span className="text-xs text-zinc-600">
               {formatRelativeTime(message.created_at)}
             </span>
+          )}
+          {/* Persistent bookmark indicator */}
+          {isBookmarked && !hovered && (
+            <BookmarkCheck className="w-3.5 h-3.5 text-amber-500" />
           )}
         </div>
         <div
@@ -123,6 +134,21 @@ export function ChatMessage({ message }: ChatMessageProps) {
               aria-label="Copy message"
             >
               {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              onClick={handleBookmark}
+              className={`p-1 rounded transition-colors ${
+                isBookmarked
+                  ? 'text-amber-500 hover:text-amber-400 hover:bg-zinc-800'
+                  : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800'
+              }`}
+              aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'}
+            >
+              {isBookmarked ? (
+                <BookmarkCheck className="w-3.5 h-3.5" />
+              ) : (
+                <Bookmark className="w-3.5 h-3.5" />
+              )}
             </button>
           </div>
         )}

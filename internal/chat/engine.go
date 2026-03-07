@@ -34,6 +34,7 @@ type Usage struct {
 type Engine struct {
 	Store     *store.Store
 	Providers *provider.Registry
+	Broker    *ContextBroker
 	streams   sync.Map // map[string]chan StreamEvent
 }
 
@@ -42,6 +43,7 @@ func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
 	return &Engine{
 		Store:     s,
 		Providers: providers,
+		Broker:    NewContextBroker(s),
 	}
 }
 
@@ -135,24 +137,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 	}
 
-	// Assemble system prompt.
-	systemPrompt := assembleSystemPrompt(agent, mode, workspace)
-
-	// Load recent messages.
-	messages, err := e.Store.ListMessages(sessionID, 50)
+	// Assemble context via broker.
+	systemPrompt, chatMessages, err := e.Broker.AssembleContext(session, agent, mode, workspace)
 	if err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("load messages: %v", err)}
+		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("assemble context: %v", err)}
 		return
-	}
-
-	// Convert to provider messages.
-	chatMessages := make([]provider.ChatMessage, len(messages))
-	for i, m := range messages {
-		role := m.Role
-		if role == "system" || role == "tool" {
-			role = "user" // Anthropic API only accepts user/assistant
-		}
-		chatMessages[i] = provider.ChatMessage{Role: role, Content: m.Content}
 	}
 
 	// Resolve model: session > agent default > global fallback.
@@ -237,6 +226,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		log.Printf("chat: failed to save assistant message: %v", err)
 		ch <- StreamEvent{Type: "error", Error: "failed to save response"}
 		return
+	}
+
+	// Prune old tool messages after saving.
+	if err := e.Broker.PruneAfterTurn(sessionID); err != nil {
+		log.Printf("chat: prune after turn failed: %v", err)
 	}
 
 	// Emit stream_end.

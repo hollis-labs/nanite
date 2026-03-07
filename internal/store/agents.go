@@ -244,6 +244,29 @@ func (s *Store) EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bo
 	return nil
 }
 
+// ListSessionAgents returns all agents in a given session.
+func (s *Store) ListSessionAgents(sessionID string) ([]SessionAgent, error) {
+	rows, err := s.DB.Query(
+		`SELECT session_id, agent_id, mode, joined_at, is_primary
+		 FROM session_agents WHERE session_id = ?
+		 ORDER BY joined_at`, sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list session agents: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SessionAgent
+	for rows.Next() {
+		var sa SessionAgent
+		if err := rows.Scan(&sa.SessionID, &sa.AgentID, &sa.Mode, &sa.JoinedAt, &sa.IsPrimary); err != nil {
+			return nil, fmt.Errorf("scan session agent: %w", err)
+		}
+		out = append(out, sa)
+	}
+	return out, rows.Err()
+}
+
 // ListAgents returns all agent profiles.
 func (s *Store) ListAgents() ([]AgentProfile, error) {
 	rows, err := s.DB.Query(

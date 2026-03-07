@@ -1,15 +1,17 @@
-import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2 } from 'lucide-react'
+import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Workflow } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useAppStore } from '@/stores/useAppStore'
+import { useLayoutStore } from '@/stores/useLayoutStore'
 import { api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
 
 const navItems = [
   { icon: MessageSquare, label: 'Chat', id: 'chat' },
   { icon: Search, label: 'Search', id: 'search' },
+  { icon: Workflow, label: 'Workflows', id: 'workflows' },
   { icon: Plus, label: 'New Chat', id: 'new' },
   { icon: Settings, label: 'Settings', id: 'settings' },
 ] as const
@@ -21,6 +23,8 @@ export function NavRail() {
 
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
+  const toggleWorkflowPanel = useLayoutStore((s) => s.toggleWorkflowPanel)
+  const workflowPanelOpen = useLayoutStore((s) => s.workflowPanelOpen)
 
   const { data: workspaces = [], isLoading: loadingWorkspaces } = useQuery({
     queryKey: ['workspaces'],
@@ -105,22 +109,31 @@ export function NavRail() {
       <div className="w-8 border-t border-zinc-700 mb-2" />
 
       <div className="flex flex-col items-center gap-1 flex-1">
-        {navItems.map(({ icon: Icon, label, id }) => (
-          <Tooltip key={id} content={label} side="right">
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`w-10 h-10 rounded-lg ${
-                activeItem === id
-                  ? 'bg-zinc-800 text-indigo-400'
-                  : 'text-zinc-400 hover:text-zinc-100'
-              }`}
-              onClick={() => setActiveItem(id)}
-            >
-              <Icon className="w-5 h-5" />
-            </Button>
-          </Tooltip>
-        ))}
+        {navItems.map(({ icon: Icon, label, id }) => {
+          const isActive = id === 'workflows' ? workflowPanelOpen : activeItem === id
+          return (
+            <Tooltip key={id} content={label} side="right">
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`w-10 h-10 rounded-lg ${
+                  isActive
+                    ? 'bg-zinc-800 text-indigo-400'
+                    : 'text-zinc-400 hover:text-zinc-100'
+                }`}
+                onClick={() => {
+                  if (id === 'workflows') {
+                    toggleWorkflowPanel()
+                  } else {
+                    setActiveItem(id)
+                  }
+                }}
+              >
+                <Icon className="w-5 h-5" />
+              </Button>
+            </Tooltip>
+          )
+        })}
       </div>
       <div className="mt-auto">
         <Tooltip content="Account" side="right">

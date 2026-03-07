@@ -73,13 +73,64 @@ export const MODE_COLORS: Record<AgentMode, string> = {
 export interface ModelOption {
   id: string
   label: string
+  provider?: string
+}
+
+export interface Provider {
+  id: string
+  name: string
+  models: ModelOption[]
 }
 
 export const AVAILABLE_MODELS: ModelOption[] = [
-  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
-  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
-  { id: 'claude-haiku-35-20241022', label: 'Claude Haiku' },
+  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', provider: 'anthropic' },
+  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', provider: 'anthropic' },
+  { id: 'claude-haiku-35-20241022', label: 'Claude Haiku', provider: 'anthropic' },
 ]
+
+// --- Workflows ---
+
+export interface WorkflowInput {
+  name: string
+  type: 'text' | 'textarea' | 'select' | 'number' | 'boolean'
+  label: string
+  required: boolean
+  default?: string | number | boolean
+  options?: string[]
+}
+
+export interface Workflow {
+  name: string
+  description: string
+  inputs: WorkflowInput[]
+}
+
+export interface StepResult {
+  name: string
+  status: 'pending' | 'running' | 'done' | 'error'
+  output?: string
+  error?: string
+}
+
+export interface WorkflowResult {
+  workflow: string
+  status: 'pending' | 'running' | 'done' | 'error'
+  steps: StepResult[]
+  output?: string
+}
+
+// --- Session Agents ---
+
+export interface SessionAgent {
+  id: string
+  agent_id: string
+  session_id: string
+  name: string
+  slug: string
+  avatar: string
+  role: 'primary' | 'participant'
+  status: 'active' | 'idle' | 'offline'
+}
 
 // --- Envelopes ---
 

@@ -242,6 +242,41 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 }
 
+// SendAgentMessage allows one agent session to send a message to another session.
+// The message is stored with the sending agent's ID and processed as if from a user
+// but with agent attribution.
+func (e *Engine) SendAgentMessage(fromSessionID, toSessionID, content string) (string, error) {
+	// Look up the sending agent.
+	var fromAgentID string
+	sa, err := e.Store.GetSessionPrimaryAgent(fromSessionID)
+	if err != nil {
+		fromAgentID = "unknown"
+	} else {
+		fromAgentID = sa.AgentID
+	}
+
+	// Create the message in the target session with agent attribution.
+	msg := &store.Message{
+		ID:        uuid.New().String(),
+		SessionID: toSessionID,
+		AgentID:   fromAgentID,
+		Role:      "user",
+		Content:   content,
+		Metadata:  fmt.Sprintf(`{"source":"agent","from_session":"%s","from_agent":"%s"}`, fromSessionID, fromAgentID),
+	}
+	if err := e.Store.CreateMessage(msg); err != nil {
+		return "", fmt.Errorf("create agent message: %w", err)
+	}
+
+	// Start async generation in the target session.
+	assistantMsgID := uuid.New().String()
+	ch := make(chan StreamEvent, 128)
+	e.streams.Store(assistantMsgID, ch)
+	go e.generateResponse(context.Background(), toSessionID, assistantMsgID, content, ch)
+
+	return assistantMsgID, nil
+}
+
 // autoTitle generates a title for a session from the first user message.
 func (e *Engine) autoTitle(sessionID, userContent, model string) {
 	prov, ok := e.Providers.Get("anthropic")

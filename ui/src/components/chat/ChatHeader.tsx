@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot, ChevronDown } from 'lucide-react'
+import { PanelLeft, PanelRight, Bot, ChevronDown, Users } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -8,6 +8,7 @@ import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
 import { AGENT_MODES, type AgentMode } from '@/lib/types'
+import { AgentRoster } from './AgentRoster'
 
 const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; border: string; text: string }> = {
   default: { bg: 'bg-blue-500/15', border: 'border-blue-500/25', text: 'text-blue-400' },
@@ -28,6 +29,7 @@ export function ChatHeader() {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const [modeDropdownOpen, setModeDropdownOpen] = useState(false)
+  const [rosterOpen, setRosterOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const modeDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -37,6 +39,13 @@ export function ChatHeader() {
     enabled: !!activeSessionId,
   })
 
+  const { data: sessionAgents = [] } = useQuery({
+    queryKey: ['session-agents', activeSessionId],
+    queryFn: () => api.listSessionAgents(activeSessionId!),
+    enabled: !!activeSessionId,
+  })
+
+  const agentCount = sessionAgents.length
   const title = session?.custom_name || session?.title || 'New Chat'
   const shortCode = session?.short_code
 
@@ -174,6 +183,18 @@ export function ChatHeader() {
         </div>
       </div>
       <div className="flex items-center gap-1">
+        {/* Agent count badge */}
+        {agentCount > 1 && (
+          <Tooltip content="View agents in session" side="bottom">
+            <button
+              onClick={() => setRosterOpen(true)}
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>{agentCount}</span>
+            </button>
+          </Tooltip>
+        )}
         <Tooltip content={rightOpen ? 'Hide widgets (Cmd+/)' : 'Show widgets (Cmd+/)'} side="bottom">
           <Button
             variant="ghost"
@@ -185,6 +206,11 @@ export function ChatHeader() {
           </Button>
         </Tooltip>
       </div>
+
+      {/* Agent Roster modal */}
+      {rosterOpen && activeSessionId && (
+        <AgentRoster sessionId={activeSessionId} onClose={() => setRosterOpen(false)} />
+      )}
     </header>
   )
 }

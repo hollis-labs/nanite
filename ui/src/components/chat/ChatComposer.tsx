@@ -1,17 +1,21 @@
+import { useEffect, useCallback } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { SendHorizonal, Square } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ComposerToolbar } from './ComposerToolbar'
+import { SlashCommandExtension } from './extensions/SlashCommandExtension'
+import { slashCommandSuggestion } from './extensions/slashCommandSuggestion'
 
 interface ChatComposerProps {
   onSend: (content: string) => void
   isStreaming?: boolean
   onStop?: () => void
+  onEditorReady?: (focus: () => void) => void
 }
 
-export function ChatComposer({ onSend, isStreaming = false, onStop }: ChatComposerProps) {
+export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorReady }: ChatComposerProps) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -25,7 +29,10 @@ export function ChatComposer({ onSend, isStreaming = false, onStop }: ChatCompos
         listItem: false,
       }),
       Placeholder.configure({
-        placeholder: 'Message Mentat... (Enter to send, Shift+Enter for new line)',
+        placeholder: 'Message Mentat... (Enter to send, Shift+Enter for new line, / for commands)',
+      }),
+      SlashCommandExtension.configure({
+        suggestion: slashCommandSuggestion,
       }),
     ],
     editorProps: {
@@ -35,6 +42,10 @@ export function ChatComposer({ onSend, isStreaming = false, onStop }: ChatCompos
       },
       handleKeyDown(_view, event) {
         if (event.key === 'Enter' && !event.shiftKey) {
+          // Don't send if the slash command menu is open
+          // The suggestion plugin handles Enter when its menu is active
+          const text = editor?.getText().trim() ?? ''
+          if (!text) return false
           event.preventDefault()
           handleSend()
           return true
@@ -45,13 +56,22 @@ export function ChatComposer({ onSend, isStreaming = false, onStop }: ChatCompos
     content: '',
   })
 
-  const handleSend = () => {
+  // Expose focus callback to parent
+  useEffect(() => {
+    if (editor && onEditorReady) {
+      onEditorReady(() => {
+        editor.commands.focus()
+      })
+    }
+  }, [editor, onEditorReady])
+
+  const handleSend = useCallback(() => {
     if (!editor) return
     const text = editor.getText().trim()
     if (!text) return
     onSend(text)
     editor.commands.clearContent()
-  }
+  }, [editor, onSend])
 
   const hasContent = editor ? editor.getText().trim().length > 0 : false
 

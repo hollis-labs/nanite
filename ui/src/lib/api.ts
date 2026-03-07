@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, Bookmark, Artifact } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent } from './types'
 
 const API_BASE = '/api'
 
@@ -122,5 +122,59 @@ export const api = {
       method: 'POST',
     })
     if (!res.ok) throw new Error(`Failed to compact session: ${res.status}`)
+  },
+
+  // Workflows
+  listWorkflows: async (): Promise<Workflow[]> => {
+    const res = await fetch(`${API_BASE}/workflows`)
+    if (!res.ok) throw new Error(`Failed to list workflows: ${res.status}`)
+    return res.json()
+  },
+
+  getWorkflow: async (name: string): Promise<Workflow> => {
+    const res = await fetch(`${API_BASE}/workflows/${name}`)
+    if (!res.ok) throw new Error(`Failed to get workflow: ${res.status}`)
+    return res.json()
+  },
+
+  runWorkflow: async (name: string, inputs: Record<string, unknown>): Promise<WorkflowResult> => {
+    const res = await fetch(`${API_BASE}/workflows/${name}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(inputs),
+    })
+    if (!res.ok) throw new Error(`Failed to run workflow: ${res.status}`)
+    return res.json()
+  },
+
+  // Providers
+  listProviders: async (): Promise<Provider[]> => {
+    const res = await fetch(`${API_BASE}/providers`)
+    if (!res.ok) throw new Error(`Failed to list providers: ${res.status}`)
+    return res.json()
+  },
+
+  // Session Agents
+  listSessionAgents: async (sessionId: string): Promise<SessionAgent[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/agents`)
+    if (!res.ok) throw new Error(`Failed to list session agents: ${res.status}`)
+    return res.json()
+  },
+
+  addSessionAgent: async (sessionId: string, agentId: string, role: 'primary' | 'participant'): Promise<SessionAgent> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: agentId, role }),
+    })
+    if (!res.ok) throw new Error(`Failed to add agent to session: ${res.status}`)
+    return res.json()
+  },
+
+  removeSessionAgent: async (sessionId: string, agentId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/agents/${agentId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error(`Failed to remove agent from session: ${res.status}`)
   },
 }

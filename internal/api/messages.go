@@ -32,6 +32,34 @@ func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *API) handleAgentMessage(w http.ResponseWriter, r *http.Request) {
+	toSessionID := r.PathValue("id")
+
+	var req struct {
+		FromSessionID string `json:"from_session_id"`
+		Content       string `json:"content"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.FromSessionID == "" || req.Content == "" {
+		a.errorResp(w, http.StatusBadRequest, "from_session_id and content are required")
+		return
+	}
+
+	msgID, err := a.Engine.SendAgentMessage(req.FromSessionID, toSessionID, req.Content)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusAccepted, map[string]string{
+		"message_id": msgID,
+		"stream_url": fmt.Sprintf("/api/stream/%s", msgID),
+	})
+}
+
 func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("messageID")
 

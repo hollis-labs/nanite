@@ -35,7 +35,7 @@ func New(s *store.Store, a *api.API, port int, dev bool) *Server {
 
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe() error {
-	handler := s.recoverMiddleware(s.loggingMiddleware(s.corsMiddleware(s.mux)))
+	handler := s.recoverMiddleware(s.loggingMiddleware(basicAuthMiddleware(s.corsMiddleware(s.mux))))
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("mentat-chat listening on %s (dev=%v)", addr, s.dev)
 	return http.ListenAndServe(addr, handler)

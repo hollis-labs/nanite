@@ -35,13 +35,32 @@ const MODE_LABEL_STYLES: Record<AgentMode, string> = {
   writer: 'text-amber-400',
 }
 
+// Agent colors for multi-agent sessions — deterministic by agent_id
+const AGENT_COLORS = [
+  { border: 'ring-indigo-500', badge: 'bg-indigo-500/15 text-indigo-400' },
+  { border: 'ring-emerald-500', badge: 'bg-emerald-500/15 text-emerald-400' },
+  { border: 'ring-orange-500', badge: 'bg-orange-500/15 text-orange-400' },
+  { border: 'ring-pink-500', badge: 'bg-pink-500/15 text-pink-400' },
+  { border: 'ring-cyan-500', badge: 'bg-cyan-500/15 text-cyan-400' },
+]
+
+function agentColorIndex(agentId: string): number {
+  let hash = 0
+  for (let i = 0; i < agentId.length; i++) {
+    hash = (hash * 31 + agentId.charCodeAt(i)) | 0
+  }
+  return Math.abs(hash) % AGENT_COLORS.length
+}
+
 interface ChatMessageProps {
   message: Message
   isBookmarked?: boolean
   onToggleBookmark?: (messageId: string) => void
+  agentName?: string
+  isMultiAgent?: boolean
 }
 
-export function ChatMessage({ message, isBookmarked = false, onToggleBookmark }: ChatMessageProps) {
+export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, agentName, isMultiAgent = false }: ChatMessageProps) {
   const [copied, setCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
   const activeMode = useChatStore((s) => s.activeMode)
@@ -82,7 +101,11 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark }:
     >
       {/* Avatar */}
       <div
-        className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}
+        className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text} ${
+          isMultiAgent && !isUser && message.agent_id
+            ? `ring-2 ${AGENT_COLORS[agentColorIndex(message.agent_id)].border}`
+            : ''
+        }`}
       >
         {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
@@ -91,8 +114,13 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark }:
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-col items-end' : ''}`}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-medium text-zinc-500">
-            {isUser ? 'You' : 'Mentat'}
+            {isUser ? 'You' : (agentName || 'Mentat')}
           </span>
+          {isMultiAgent && !isUser && message.agent_id && (
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${AGENT_COLORS[agentColorIndex(message.agent_id)].badge}`}>
+              agent
+            </span>
+          )}
           {!isUser && activeMode !== 'default' && (
             <span className={`text-xs font-medium ${MODE_LABEL_STYLES[activeMode]}`}>
               · {activeMode}

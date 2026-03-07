@@ -6,12 +6,15 @@ import (
 
 	"github.com/hollis-labs/mentat-chat/internal/chat"
 	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat-chat/internal/workflow"
 )
 
 // API holds dependencies for HTTP handlers.
 type API struct {
-	Store  *store.Store
-	Engine *chat.Engine
+	Store          *store.Store
+	Engine         *chat.Engine
+	WorkflowLoader *workflow.Loader
+	WorkflowEngine *workflow.Engine
 }
 
 // New creates a new API instance.
@@ -75,6 +78,18 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Providers & Models
 	mux.HandleFunc("GET /api/providers", a.handleListProviders)
 	mux.HandleFunc("GET /api/models", a.handleListModels)
+
+	// Workflows
+	mux.HandleFunc("GET /api/workflows", a.handleListWorkflows)
+	mux.HandleFunc("GET /api/workflows/{name}", a.handleGetWorkflow)
+	mux.HandleFunc("POST /api/workflows/{name}/run", a.handleRunWorkflow)
+
+	// Agent-to-agent messaging
+	mux.HandleFunc("POST /api/sessions/{id}/agent-message", a.handleAgentMessage)
+
+	// Multi-agent group sessions
+	mux.HandleFunc("GET /api/sessions/{id}/agents", a.handleListSessionAgents)
+	mux.HandleFunc("POST /api/sessions/{id}/agents", a.handleAddSessionAgent)
 }
 
 // jsonResp writes a JSON response with the given status code.

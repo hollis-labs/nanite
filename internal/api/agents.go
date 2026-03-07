@@ -164,6 +164,59 @@ func (a *API) handleListAgentModes(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, modes)
 }
 
+func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	agents, err := a.Store.ListSessionAgents(sessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, agents)
+}
+
+func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+
+	var req struct {
+		AgentID string `json:"agent_id"`
+		Role    string `json:"role"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.AgentID == "" {
+		a.errorResp(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+
+	// Verify agent exists.
+	if _, err := a.Store.GetAgent(req.AgentID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	// Determine mode: use role as mode if provided, otherwise "default".
+	mode := req.Role
+	if mode == "" {
+		mode = "default"
+	}
+
+	// Add as non-primary (primary is already set on session creation).
+	if err := a.Store.EnsureSessionAgent(sessionID, req.AgentID, mode, false); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Return the updated agents list.
+	agents, err := a.Store.ListSessionAgents(sessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusCreated, agents)
+}
+
 func (a *API) handleCreateAgentMode(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 

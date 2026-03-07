@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
-import { AVAILABLE_MODELS, AGENT_MODES, type AgentMode } from '@/lib/types'
+import { AVAILABLE_MODELS, AGENT_MODES, type AgentMode, type ModelOption, type Provider } from '@/lib/types'
 
 const MODE_DOT_COLORS: Record<AgentMode, string> = {
   default: 'bg-blue-400',
@@ -24,7 +25,37 @@ export function ComposerToolbar() {
   const modelRef = useRef<HTMLDivElement>(null)
   const modeRef = useRef<HTMLDivElement>(null)
 
-  const currentModel = AVAILABLE_MODELS.find((m) => m.id === activeModel)
+  // Fetch providers from API, fall back to static AVAILABLE_MODELS grouped as "Anthropic"
+  const { data: providers } = useQuery({
+    queryKey: ['providers'],
+    queryFn: api.listProviders,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const PROVIDER_ICONS: Record<string, string> = {
+    anthropic: 'A',
+    openai: 'O',
+    ollama: 'L',
+  }
+
+  const groupedModels: Provider[] = useMemo(() => {
+    if (providers && providers.length > 0) return providers
+    // Fallback: group static models by provider field
+    const groups = new Map<string, ModelOption[]>()
+    for (const m of AVAILABLE_MODELS) {
+      const p = m.provider || 'anthropic'
+      if (!groups.has(p)) groups.set(p, [])
+      groups.get(p)!.push(m)
+    }
+    return Array.from(groups.entries()).map(([id, models]) => ({
+      id,
+      name: id.charAt(0).toUpperCase() + id.slice(1),
+      models,
+    }))
+  }, [providers])
+
+  const allModels = useMemo(() => groupedModels.flatMap((p) => p.models), [groupedModels])
+  const currentModel = allModels.find((m) => m.id === activeModel) || AVAILABLE_MODELS.find((m) => m.id === activeModel)
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -79,22 +110,29 @@ export function ComposerToolbar() {
         </button>
 
         {modelOpen && (
-          <div className="absolute bottom-full left-0 mb-1 w-48 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
-            <div className="px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-              Model
-            </div>
-            {AVAILABLE_MODELS.map((model) => (
-              <button
-                key={model.id}
-                onClick={() => void handleModelSelect(model.id)}
-                className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${
-                  model.id === activeModel
-                    ? 'bg-zinc-800 text-zinc-100'
-                    : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
-                }`}
-              >
-                {model.label}
-              </button>
+          <div className="absolute bottom-full left-0 mb-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 max-h-72 overflow-y-auto">
+            {groupedModels.map((provider) => (
+              <div key={provider.id}>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                  <span className="w-4 h-4 rounded bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
+                    {PROVIDER_ICONS[provider.id.toLowerCase()] || provider.name.charAt(0)}
+                  </span>
+                  {provider.name}
+                </div>
+                {provider.models.map((model) => (
+                  <button
+                    key={model.id}
+                    onClick={() => void handleModelSelect(model.id)}
+                    className={`w-full text-left px-3 pl-8 py-1.5 text-sm transition-colors ${
+                      model.id === activeModel
+                        ? 'bg-zinc-800 text-zinc-100'
+                        : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                    }`}
+                  >
+                    {model.label}
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
         )}

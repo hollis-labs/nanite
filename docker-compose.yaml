@@ -1,0 +1,17 @@
+services:
+  mentat-chat:
+    build: .
+    ports:
+      - "8090:8090"
+    volumes:
+      - mentat-data:/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-}
+      - MENTAT_AUTH_USER=${MENTAT_AUTH_USER:-}
+      - MENTAT_AUTH_PASSWORD=${MENTAT_AUTH_PASSWORD:-}
+    restart: unless-stopped
+
+volumes:
+  mentat-data:

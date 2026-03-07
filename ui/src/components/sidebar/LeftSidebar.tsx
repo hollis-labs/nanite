@@ -1,4 +1,5 @@
-import { Plus, Hash, Pin, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { Plus, Hash, Pin, PinOff, Loader2 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { ScrollArea } from '@/components/ui/ScrollArea'
@@ -43,6 +44,16 @@ export function LeftSidebar() {
     },
     onError: (err) => {
       console.error('Failed to create session:', err)
+    },
+  })
+
+  const pinMutation = useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => api.pinSession(id, pinned),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    },
+    onError: (err) => {
+      console.error('Failed to toggle pin:', err)
     },
   })
 
@@ -109,6 +120,7 @@ export function LeftSidebar() {
                     session={session}
                     isActive={session.id === activeSessionId}
                     onClick={() => setActiveSession(session.id)}
+                    onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
                   />
                 ))}
               </>
@@ -128,6 +140,7 @@ export function LeftSidebar() {
                     session={session}
                     isActive={session.id === activeSessionId}
                     onClick={() => setActiveSession(session.id)}
+                    onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
                   />
                 ))}
               </>
@@ -143,17 +156,22 @@ function SessionItem({
   session,
   isActive,
   onClick,
+  onTogglePin,
 }: {
   session: Session
   isActive: boolean
   onClick: () => void
+  onTogglePin: () => void
 }) {
+  const [hovered, setHovered] = useState(false)
   const displayTitle = session.custom_name || session.title || `#${session.short_code}`
 
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2 px-2 py-2 rounded-md text-sm text-left transition-colors ${
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`w-full flex items-center gap-2 px-2 py-2 rounded-md text-sm text-left transition-colors group ${
         isActive
           ? 'bg-zinc-800/60 text-zinc-100'
           : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
@@ -162,6 +180,26 @@ function SessionItem({
       <Hash className="w-3.5 h-3.5 shrink-0 opacity-50" />
       <span className="truncate flex-1">{displayTitle}</span>
       <div className="flex items-center gap-2 shrink-0">
+        {hovered && (
+          <span
+            role="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onTogglePin()
+            }}
+            className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            aria-label={session.is_pinned ? 'Unpin session' : 'Pin session'}
+          >
+            {session.is_pinned ? (
+              <PinOff className="w-3 h-3" />
+            ) : (
+              <Pin className="w-3 h-3" />
+            )}
+          </span>
+        )}
+        {!hovered && session.is_pinned && (
+          <Pin className="w-3 h-3 text-zinc-600" />
+        )}
         {session.message_count > 0 && (
           <span className="text-xs text-zinc-600 tabular-nums">{session.message_count}</span>
         )}

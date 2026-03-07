@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -92,15 +93,33 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		return
 	}
 
-	// Load agent profile (hardcoded "mentat" for now).
-	agent, err := e.Store.GetAgentBySlug("mentat")
+	// Look up the primary agent from session_agents.
+	var agentID, modeName string
+	sa, err := e.Store.GetSessionPrimaryAgent(sessionID)
 	if err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("load agent: %v", err)}
-		return
+		// No session_agent record — auto-create one with the default agent.
+		log.Printf("chat: no primary agent for session %s, auto-assigning mentat-001", sessionID)
+		if err := e.Store.EnsureSessionAgent(sessionID, "mentat-001", "default", true); err != nil {
+			log.Printf("chat: failed to auto-assign agent: %v", err)
+		}
+		agentID = "mentat-001"
+		modeName = "default"
+	} else {
+		agentID = sa.AgentID
+		modeName = sa.Mode
+	}
+
+	agent, err := e.Store.GetAgent(agentID)
+	if err != nil {
+		// Fallback to slug lookup for backwards compatibility.
+		agent, err = e.Store.GetAgentBySlug("mentat")
+		if err != nil {
+			ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("load agent: %v", err)}
+			return
+		}
 	}
 
 	// Load agent mode.
-	modeName := "default"
 	mode, err := e.Store.GetAgentMode(agent.ID, modeName)
 	if err != nil {
 		log.Printf("chat: could not load agent mode %s/%s: %v (using base prompt)", agent.ID, modeName, err)
@@ -136,6 +155,15 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		chatMessages[i] = provider.ChatMessage{Role: role, Content: m.Content}
 	}
 
+	// Resolve model: session > agent default > global fallback.
+	model := session.Model
+	if model == "" && agent.DefaultModel != "" {
+		model = agent.DefaultModel
+	}
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
+	}
+
 	// Get provider.
 	prov, ok := e.Providers.Get("anthropic")
 	if !ok {
@@ -147,7 +175,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID, AgentID: agent.ID}
 
 	// Call provider.
-	provCh, err := prov.StreamChat(ctx, systemPrompt, chatMessages, session.Model)
+	provCh, err := prov.StreamChat(ctx, systemPrompt, chatMessages, model)
 	if err != nil {
 		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("start stream: %v", err)}
 		return
@@ -185,13 +213,25 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 	}
 
+	// Parse envelopes from the response content.
+	responseContent := fullContent.String()
+	envelopes, cleanContent := ParseEnvelopes(responseContent)
+
+	var envelopeJSON string
+	if len(envelopes) > 0 {
+		if data, err := json.Marshal(envelopes); err == nil {
+			envelopeJSON = string(data)
+		}
+	}
+
 	// Save assistant message to DB.
 	assistantMsg := &store.Message{
 		ID:        assistantMsgID,
 		SessionID: sessionID,
 		AgentID:   agent.ID,
 		Role:      "assistant",
-		Content:   fullContent.String(),
+		Content:   cleanContent,
+		Envelope:  envelopeJSON,
 	}
 	if err := e.Store.CreateMessage(assistantMsg); err != nil {
 		log.Printf("chat: failed to save assistant message: %v", err)
@@ -204,7 +244,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Auto-title: if session has no title, generate one asynchronously.
 	if session.Title == "" {
-		go e.autoTitle(sessionID, userContent, session.Model)
+		go e.autoTitle(sessionID, userContent, model)
 	}
 }
 

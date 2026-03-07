@@ -48,6 +48,13 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Auto-assign the Mentat agent as primary.
+	if err := a.Store.EnsureSessionAgent(sess.ID, "mentat-001", "default", true); err != nil {
+		// Log but don't fail — session was created successfully.
+		_ = err
+	}
+
 	a.jsonResp(w, http.StatusCreated, sess)
 }
 
@@ -119,6 +126,53 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
+}
+
+func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Mode == "" {
+		a.errorResp(w, http.StatusBadRequest, "mode is required")
+		return
+	}
+
+	// Get the primary agent for this session.
+	sa, err := a.Store.GetSessionPrimaryAgent(sessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusNotFound, "no primary agent for session")
+		return
+	}
+
+	// Verify the mode exists for this agent.
+	if _, err := a.Store.GetAgentMode(sa.AgentID, req.Mode); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "unknown mode: "+req.Mode)
+		return
+	}
+
+	// Update the mode.
+	if err := a.Store.SetSessionAgentMode(sessionID, sa.AgentID, req.Mode); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Return updated session info.
+	sess, err := a.Store.GetSession(sessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusOK, map[string]any{
+		"session": sess,
+		"mode":    req.Mode,
+	})
 }
 
 func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) {

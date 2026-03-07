@@ -3,7 +3,16 @@ import { MessageSquare, Bot } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import { ChatMessage } from './ChatMessage'
 import { MessageContent } from './MessageContent'
-import type { Message } from '@/lib/types'
+import { ToolCallIndicator } from './ToolCallIndicator'
+import { useChatStore } from '@/stores/useChatStore'
+import type { Message, AgentMode } from '@/lib/types'
+
+const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
+  default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
+  architect: { bg: 'bg-purple-500/15', text: 'text-purple-400' },
+  planner: { bg: 'bg-green-500/15', text: 'text-green-400' },
+  writer: { bg: 'bg-amber-500/15', text: 'text-amber-400' },
+}
 
 interface ChatTranscriptProps {
   messages: Message[]
@@ -14,11 +23,15 @@ interface ChatTranscriptProps {
 export function ChatTranscript({ messages, isStreaming, streamingContent }: ChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const activeMode = useChatStore((s) => s.activeMode)
+  const toolCalls = useChatStore((s) => s.toolCalls)
+
+  const avatarStyle = MODE_AVATAR_STYLES[activeMode]
 
   // Auto-scroll to bottom on new messages or streaming updates
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, streamingContent])
+  }, [messages.length, streamingContent, toolCalls.length])
 
   if (messages.length === 0 && !isStreaming) {
     return (
@@ -39,10 +52,24 @@ export function ChatTranscript({ messages, isStreaming, streamingContent }: Chat
           <ChatMessage key={msg.id} message={msg} />
         ))}
 
+        {/* Tool call indicators during streaming */}
+        {isStreaming && toolCalls.length > 0 && (
+          <div className="flex gap-3">
+            <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}>
+              <Bot className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0 space-y-1">
+              {toolCalls.map((tc) => (
+                <ToolCallIndicator key={tc.id} toolCall={tc} />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Streaming message */}
         {isStreaming && streamingContent && (
           <div className="flex gap-3">
-            <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 bg-indigo-500/15 text-indigo-400">
+            <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}>
               <Bot className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
@@ -53,9 +80,9 @@ export function ChatTranscript({ messages, isStreaming, streamingContent }: Chat
         )}
 
         {/* Streaming indicator (before any content arrives) */}
-        {isStreaming && !streamingContent && (
+        {isStreaming && !streamingContent && toolCalls.length === 0 && (
           <div className="flex gap-3">
-            <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 bg-indigo-500/15 text-indigo-400">
+            <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}>
               <Bot className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">

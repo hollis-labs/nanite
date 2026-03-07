@@ -1,11 +1,20 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot } from 'lucide-react'
+import { PanelLeft, PanelRight, Bot, ChevronDown } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
+import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
+import { AGENT_MODES, type AgentMode } from '@/lib/types'
+
+const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; border: string; text: string }> = {
+  default: { bg: 'bg-blue-500/15', border: 'border-blue-500/25', text: 'text-blue-400' },
+  architect: { bg: 'bg-purple-500/15', border: 'border-purple-500/25', text: 'text-purple-400' },
+  planner: { bg: 'bg-green-500/15', border: 'border-green-500/25', text: 'text-green-400' },
+  writer: { bg: 'bg-amber-500/15', border: 'border-amber-500/25', text: 'text-amber-400' },
+}
 
 export function ChatHeader() {
   const toggleLeftSidebar = useLayoutStore((s) => s.toggleLeftSidebar)
@@ -13,10 +22,14 @@ export function ChatHeader() {
   const leftOpen = useLayoutStore((s) => s.leftSidebarOpen)
   const rightOpen = useLayoutStore((s) => s.rightRailOpen)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const activeMode = useChatStore((s) => s.activeMode)
+  const setActiveMode = useChatStore((s) => s.setActiveMode)
 
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
+  const [modeDropdownOpen, setModeDropdownOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const modeDropdownRef = useRef<HTMLDivElement>(null)
 
   const { data: session } = useQuery({
     queryKey: ['session', activeSessionId],
@@ -39,6 +52,19 @@ export function ChatHeader() {
     }
   }, [isEditing])
 
+  // Close mode dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (modeDropdownRef.current && !modeDropdownRef.current.contains(e.target as Node)) {
+        setModeDropdownOpen(false)
+      }
+    }
+    if (modeDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [modeDropdownOpen])
+
   const handleSave = useCallback(async () => {
     if (!activeSessionId) return
     const trimmed = editValue.trim()
@@ -60,6 +86,20 @@ export function ChatHeader() {
       setIsEditing(false)
     }
   }, [handleSave])
+
+  const handleModeSelect = useCallback(async (mode: AgentMode) => {
+    setActiveMode(mode)
+    setModeDropdownOpen(false)
+    if (activeSessionId) {
+      try {
+        await api.switchMode(activeSessionId, mode)
+      } catch (err) {
+        console.error('Failed to switch mode:', err)
+      }
+    }
+  }, [activeSessionId, setActiveMode])
+
+  const modeStyle = MODE_BADGE_STYLES[activeMode]
 
   return (
     <header className="flex items-center justify-between px-4 h-12 border-b border-zinc-800 shrink-0">
@@ -92,9 +132,44 @@ export function ChatHeader() {
               )}
             </div>
           )}
-          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/15 border border-indigo-500/25">
-            <Bot className="w-3 h-3 text-indigo-400" />
-            <span className="text-xs text-indigo-400">Agent</span>
+
+          {/* Mode badge + dropdown */}
+          <div className="relative" ref={modeDropdownRef}>
+            <button
+              onClick={() => setModeDropdownOpen((o) => !o)}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${modeStyle.bg} border ${modeStyle.border} transition-colors hover:brightness-125`}
+            >
+              <Bot className={`w-3 h-3 ${modeStyle.text}`} />
+              <span className={`text-xs ${modeStyle.text}`}>
+                Mentat{activeMode !== 'default' ? ` \u00B7 ${activeMode}` : ''}
+              </span>
+              <ChevronDown className={`w-3 h-3 ${modeStyle.text}`} />
+            </button>
+
+            {modeDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+                <div className="px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                  Agent Mode
+                </div>
+                {AGENT_MODES.map((mode) => {
+                  const style = MODE_BADGE_STYLES[mode]
+                  return (
+                    <button
+                      key={mode}
+                      onClick={() => void handleModeSelect(mode)}
+                      className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
+                        mode === activeMode
+                          ? 'bg-zinc-800 text-zinc-100'
+                          : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${style.bg.replace('/15', '')}`} />
+                      <span className="capitalize">{mode}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

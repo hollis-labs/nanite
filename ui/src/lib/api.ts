@@ -72,4 +72,25 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to list agents: ${res.status}`)
     return res.json()
   },
+
+  // Mode
+  switchMode: async (sessionId: string, mode: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+    if (!res.ok) throw new Error(`Failed to switch mode: ${res.status}`)
+  },
+
+  // Pin/Unpin
+  pinSession: async (id: string, pinned: boolean): Promise<Session> => {
+    const res = await fetch(`${API_BASE}/sessions/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_pinned: pinned }),
+    })
+    if (!res.ok) throw new Error(`Failed to pin session: ${res.status}`)
+    return res.json()
+  },
 }

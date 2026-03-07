@@ -1,7 +1,9 @@
 import { Bot, User, Copy, Check } from 'lucide-react'
 import { useState, useCallback } from 'react'
-import type { Message } from '@/lib/types'
+import type { Message, AgentMode, Envelope } from '@/lib/types'
 import { MessageContent } from './MessageContent'
+import { EnvelopeRenderer } from './envelopes/EnvelopeRenderer'
+import { useChatStore } from '@/stores/useChatStore'
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
@@ -19,6 +21,20 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString()
 }
 
+const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
+  default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
+  architect: { bg: 'bg-purple-500/15', text: 'text-purple-400' },
+  planner: { bg: 'bg-green-500/15', text: 'text-green-400' },
+  writer: { bg: 'bg-amber-500/15', text: 'text-amber-400' },
+}
+
+const MODE_LABEL_STYLES: Record<AgentMode, string> = {
+  default: 'text-blue-400',
+  architect: 'text-purple-400',
+  planner: 'text-green-400',
+  writer: 'text-amber-400',
+}
+
 interface ChatMessageProps {
   message: Message
 }
@@ -26,6 +42,7 @@ interface ChatMessageProps {
 export function ChatMessage({ message }: ChatMessageProps) {
   const [copied, setCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
+  const activeMode = useChatStore((s) => s.activeMode)
 
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(message.content)
@@ -34,6 +51,21 @@ export function ChatMessage({ message }: ChatMessageProps) {
   }, [message.content])
 
   const isUser = message.role === 'user'
+  const avatarStyle = isUser
+    ? { bg: 'bg-zinc-800', text: 'text-zinc-400' }
+    : MODE_AVATAR_STYLES[activeMode]
+
+  // Parse envelope if present
+  let envelope: Envelope | null = null
+  if (message.envelope) {
+    try {
+      envelope = typeof message.envelope === 'string'
+        ? JSON.parse(message.envelope) as Envelope
+        : message.envelope as unknown as Envelope
+    } catch {
+      // ignore parse errors
+    }
+  }
 
   return (
     <div
@@ -43,11 +75,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
     >
       {/* Avatar */}
       <div
-        className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${
-          isUser
-            ? 'bg-zinc-800 text-zinc-400'
-            : 'bg-indigo-500/15 text-indigo-400'
-        }`}
+        className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}
       >
         {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
@@ -58,6 +86,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
           <span className="text-xs font-medium text-zinc-500">
             {isUser ? 'You' : 'Mentat'}
           </span>
+          {!isUser && activeMode !== 'default' && (
+            <span className={`text-xs font-medium ${MODE_LABEL_STYLES[activeMode]}`}>
+              · {activeMode}
+            </span>
+          )}
           {hovered && (
             <span className="text-xs text-zinc-600">
               {formatRelativeTime(message.created_at)}
@@ -73,6 +106,13 @@ export function ChatMessage({ message }: ChatMessageProps) {
         >
           <MessageContent content={message.content} role={message.role} />
         </div>
+
+        {/* Envelope rendering */}
+        {envelope && !isUser && (
+          <div className="mt-3">
+            <EnvelopeRenderer envelope={envelope} />
+          </div>
+        )}
 
         {/* Actions */}
         {hovered && !isUser && (

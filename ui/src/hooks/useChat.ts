@@ -1,12 +1,21 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { api } from '@/lib/api'
+import { useChatStore } from '@/stores/useChatStore'
 import type { Message, StreamEvent } from '@/lib/types'
 
 export function useChat(sessionId: string | null) {
   const [messages, setMessages] = useState<Message[]>([])
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [streamingContent, setStreamingContent] = useState('')
   const eventSourceRef = useRef<EventSource | null>(null)
+
+  const isStreaming = useChatStore((s) => s.isStreaming)
+  const streamingContent = useChatStore((s) => s.streamingContent)
+  const setStreaming = useChatStore((s) => s.setStreaming)
+  const setStreamingSessionId = useChatStore((s) => s.setStreamingSessionId)
+  const appendStreamContent = useChatStore((s) => s.appendStreamContent)
+  const clearStream = useChatStore((s) => s.clearStream)
+  const addToolCall = useChatStore((s) => s.addToolCall)
+  const updateToolCall = useChatStore((s) => s.updateToolCall)
+  const clearToolCalls = useChatStore((s) => s.clearToolCalls)
 
   const loadMessages = useCallback(async () => {
     if (!sessionId) {
@@ -41,8 +50,9 @@ export function useChat(sessionId: string | null) {
       created_at: new Date().toISOString(),
     }
     setMessages(prev => [...prev, tempUserMsg])
-    setIsStreaming(true)
-    setStreamingContent('')
+    setStreaming(true)
+    setStreamingSessionId(sessionId)
+    clearToolCalls()
 
     try {
       const { message_id } = await api.sendMessage({ session_id: sessionId, content })
@@ -56,7 +66,28 @@ export function useChat(sessionId: string | null) {
         const data: StreamEvent = JSON.parse(e.data as string)
         if (data.content) {
           accumulated += data.content
-          setStreamingContent(accumulated)
+          appendStreamContent(data.content)
+        }
+      })
+
+      es.addEventListener('tool_call', (e: MessageEvent) => {
+        const data: StreamEvent = JSON.parse(e.data as string)
+        if (data.tool) {
+          addToolCall({
+            id: data.message_id || `tc-${Date.now()}`,
+            tool: data.tool,
+            status: 'running',
+          })
+        }
+      })
+
+      es.addEventListener('tool_result', (e: MessageEvent) => {
+        const data: StreamEvent = JSON.parse(e.data as string)
+        if (data.message_id) {
+          updateToolCall(data.message_id, {
+            status: data.error ? 'error' : 'done',
+            summary: data.summary || data.error,
+          })
         }
       })
 
@@ -74,37 +105,36 @@ export function useChat(sessionId: string | null) {
           created_at: new Date().toISOString(),
         }
         setMessages(prev => [...prev, assistantMsg])
-        setStreamingContent('')
-        setIsStreaming(false)
+        clearStream()
         es.close()
         eventSourceRef.current = null
       })
 
       es.addEventListener('error', () => {
-        setIsStreaming(false)
+        clearStream()
         es.close()
         eventSourceRef.current = null
       })
 
       // Also handle native EventSource errors
       es.onerror = () => {
-        setIsStreaming(false)
+        clearStream()
         es.close()
         eventSourceRef.current = null
       }
     } catch (err) {
       console.error('Send failed:', err)
-      setIsStreaming(false)
+      clearStream()
     }
-  }, [sessionId])
+  }, [sessionId, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls])
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
       eventSourceRef.current = null
     }
-    setIsStreaming(false)
-  }, [])
+    clearStream()
+  }, [clearStream])
 
   return { messages, isStreaming, streamingContent, sendMessage, loadMessages, stopStreaming }
 }

@@ -44,8 +44,20 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// SSE stream
 	mux.HandleFunc("GET /api/stream/{messageID}", a.handleStream)
 
+	// Session mode switching
+	mux.HandleFunc("POST /api/sessions/{id}/mode", a.handleSwitchSessionMode)
+
 	// Agents
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)
+	mux.HandleFunc("POST /api/agents", a.handleCreateAgent)
+	mux.HandleFunc("GET /api/agents/{id}", a.handleGetAgent)
+	mux.HandleFunc("PUT /api/agents/{id}", a.handleUpdateAgent)
+	mux.HandleFunc("GET /api/agents/{id}/modes", a.handleListAgentModes)
+	mux.HandleFunc("POST /api/agents/{id}/modes", a.handleCreateAgentMode)
+
+	// Providers & Models
+	mux.HandleFunc("GET /api/providers", a.handleListProviders)
+	mux.HandleFunc("GET /api/models", a.handleListModels)
 }
 
 // jsonResp writes a JSON response with the given status code.

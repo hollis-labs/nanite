@@ -1,0 +1,41 @@
+# Go
+/mentat-chat
+/cmd/mentat-chat/mentat-chat
+*.exe
+*.test
+*.out
+vendor/
+
+# Node / React
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# SQLite
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Build
+/dist/
+/build/
+/tmp/
+
+# Agent state (managed by services)
+.agentrc/state/

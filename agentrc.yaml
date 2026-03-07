@@ -1,0 +1,19 @@
+project: mentat-chat
+version: 1
+role: volon-managed
+boot_profiles:
+  - meta-agent
+write_paths:
+  - .agentrc/tasks/
+  - .agentrc/logs/
+  - .agentrc/bootstrap.md
+  - .agentrc/pcc/tasks/
+  - outbox/
+  - adr/
+  - cmd/
+  - internal/
+  - ui/
+  - docs/
+protected_paths:
+  - .agentrc/state/
+  - .agentrc/pcc/global/

@@ -93,6 +93,11 @@ func (o *Ollama) StreamChat(ctx context.Context, systemPrompt string, messages [
 	return ch, nil
 }
 
+// StreamChatWithTools delegates to StreamChat, ignoring tools (not yet supported for Ollama).
+func (o *Ollama) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+	return o.StreamChat(ctx, systemPrompt, messages, model)
+}
+
 // readStream parses the newline-delimited JSON stream from Ollama.
 func (o *Ollama) readStream(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
 	defer close(ch)

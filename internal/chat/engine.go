@@ -9,18 +9,25 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/mentat-chat/internal/mcp"
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/store"
 )
 
+// maxToolIterations prevents infinite tool-use loops.
+const maxToolIterations = 10
+
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
-	Type      string `json:"type"`                 // stream_start, delta, stream_end, error
+	Type      string `json:"type"`                 // stream_start, delta, stream_end, error, tool_call, tool_result
 	Content   string `json:"content,omitempty"`
 	MessageID string `json:"message_id,omitempty"`
 	AgentID   string `json:"agent_id,omitempty"`
 	Usage     *Usage `json:"usage,omitempty"`
 	Error     string `json:"error,omitempty"`
+	Tool      string `json:"tool,omitempty"`      // tool name for tool_call/tool_result
+	ToolID    string `json:"tool_id,omitempty"`    // tool_use_id
+	Summary   string `json:"summary,omitempty"`    // tool result summary
 }
 
 // Usage contains token usage for a completed response.
@@ -32,10 +39,11 @@ type Usage struct {
 
 // Engine orchestrates chat sessions, provider calls, and streaming.
 type Engine struct {
-	Store     *store.Store
-	Providers *provider.Registry
-	Broker    *ContextBroker
-	streams   sync.Map // map[string]chan StreamEvent
+	Store      *store.Store
+	Providers  *provider.Registry
+	Broker     *ContextBroker
+	MCPManager *mcp.Manager
+	streams    sync.Map // map[string]chan StreamEvent
 }
 
 // NewEngine creates a new chat engine.
@@ -163,43 +171,145 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Emit stream_start.
 	ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID, AgentID: agent.ID}
 
-	// Call provider.
-	provCh, err := prov.StreamChat(ctx, systemPrompt, chatMessages, model)
-	if err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("start stream: %v", err)}
-		return
+	// Get available tools from MCP manager.
+	var tools []provider.ToolDefinition
+	if e.MCPManager != nil && e.MCPManager.HasTools() {
+		tools = e.MCPManager.GetTools()
 	}
 
-	// Accumulate content and forward events.
+	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
 	var finalUsage *Usage
 
-	for evt := range provCh {
-		switch evt.Type {
-		case "delta":
-			fullContent.WriteString(evt.Content)
-			ch <- StreamEvent{Type: "delta", Content: evt.Content}
-		case "usage":
-			if evt.Usage != nil {
-				if finalUsage == nil {
-					finalUsage = &Usage{}
-				}
-				if evt.Usage.InputTokens > 0 {
-					finalUsage.InputTokens = evt.Usage.InputTokens
-				}
-				if evt.Usage.OutputTokens > 0 {
-					finalUsage.OutputTokens = evt.Usage.OutputTokens
-				}
-				if evt.Usage.StopReason != "" {
-					finalUsage.StopReason = evt.Usage.StopReason
-				}
-			}
-		case "error":
-			ch <- StreamEvent{Type: "error", Error: evt.Error}
-			return
-		case "done":
-			// Will handle below.
+	for iteration := 0; iteration < maxToolIterations; iteration++ {
+		// Call provider with or without tools.
+		var provCh <-chan provider.StreamEvent
+		if len(tools) > 0 {
+			provCh, err = prov.StreamChatWithTools(ctx, systemPrompt, chatMessages, model, tools)
+		} else {
+			provCh, err = prov.StreamChat(ctx, systemPrompt, chatMessages, model)
 		}
+		if err != nil {
+			ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("start stream: %v", err)}
+			return
+		}
+
+		// Accumulate content and tool_use blocks from this turn.
+		var turnContent strings.Builder
+		var toolUseBlocks []provider.ToolUseBlock
+		var stopReason string
+
+		for evt := range provCh {
+			switch evt.Type {
+			case "delta":
+				turnContent.WriteString(evt.Content)
+				fullContent.WriteString(evt.Content)
+				ch <- StreamEvent{Type: "delta", Content: evt.Content}
+			case "tool_use":
+				if evt.ToolUse != nil {
+					toolUseBlocks = append(toolUseBlocks, *evt.ToolUse)
+				}
+			case "usage":
+				if evt.Usage != nil {
+					if finalUsage == nil {
+						finalUsage = &Usage{}
+					}
+					if evt.Usage.InputTokens > 0 {
+						finalUsage.InputTokens += evt.Usage.InputTokens
+					}
+					if evt.Usage.OutputTokens > 0 {
+						finalUsage.OutputTokens += evt.Usage.OutputTokens
+					}
+					if evt.Usage.StopReason != "" {
+						stopReason = evt.Usage.StopReason
+						finalUsage.StopReason = evt.Usage.StopReason
+					}
+				}
+			case "error":
+				ch <- StreamEvent{Type: "error", Error: evt.Error}
+				return
+			case "done":
+				// Will handle below.
+			}
+		}
+
+		// If no tool use, we are done.
+		if stopReason != "tool_use" || len(toolUseBlocks) == 0 {
+			break
+		}
+
+		// Build the assistant message with content blocks (text + tool_use).
+		var assistantBlocks []provider.ContentBlock
+		if text := turnContent.String(); text != "" {
+			assistantBlocks = append(assistantBlocks, provider.ContentBlock{
+				Type: "text",
+				Text: text,
+			})
+		}
+		for _, tu := range toolUseBlocks {
+			assistantBlocks = append(assistantBlocks, provider.ContentBlock{
+				Type:  "tool_use",
+				ID:    tu.ID,
+				Name:  tu.Name,
+				Input: tu.Input,
+			})
+		}
+		chatMessages = append(chatMessages, provider.ChatMessage{
+			Role:          "assistant",
+			ContentBlocks: assistantBlocks,
+		})
+
+		// Execute each tool and build tool_result blocks.
+		var resultBlocks []provider.ContentBlock
+		for _, tu := range toolUseBlocks {
+			// Emit tool_call event to the client.
+			ch <- StreamEvent{
+				Type:   "tool_call",
+				Tool:   tu.Name,
+				ToolID: tu.ID,
+			}
+
+			var resultText string
+			if e.MCPManager != nil {
+				result, execErr := e.MCPManager.ExecuteTool(ctx, tu.Name, tu.Input)
+				if execErr != nil {
+					resultText = fmt.Sprintf("Error: %v", execErr)
+					log.Printf("chat: tool %s failed: %v", tu.Name, execErr)
+				} else {
+					resultText = result
+				}
+			} else {
+				resultText = "Error: no MCP manager configured"
+			}
+
+			// Truncate very long tool results for the summary sent to the client.
+			summary := resultText
+			if len(summary) > 500 {
+				summary = summary[:500] + "... (truncated)"
+			}
+
+			// Emit tool_result event to the client.
+			ch <- StreamEvent{
+				Type:    "tool_result",
+				Tool:    tu.Name,
+				ToolID:  tu.ID,
+				Summary: summary,
+			}
+
+			resultBlocks = append(resultBlocks, provider.ContentBlock{
+				Type:      "tool_result",
+				ToolUseID: tu.ID,
+				Content:   resultText,
+			})
+		}
+
+		// Append tool results as a user message.
+		chatMessages = append(chatMessages, provider.ChatMessage{
+			Role:          "user",
+			ContentBlocks: resultBlocks,
+		})
+
+		// Loop back for the next provider call.
 	}
 
 	// Parse envelopes from the response content.

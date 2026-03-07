@@ -30,20 +30,49 @@ func NewAnthropic() *Anthropic {
 
 // anthropicRequest is the request body for the Anthropic Messages API.
 type anthropicRequest struct {
-	Model     string              `json:"model"`
-	MaxTokens int                 `json:"max_tokens"`
-	System    string              `json:"system,omitempty"`
-	Messages  []anthropicMessage  `json:"messages"`
-	Stream    bool                `json:"stream"`
+	Model     string           `json:"model"`
+	MaxTokens int              `json:"max_tokens"`
+	System    string           `json:"system,omitempty"`
+	Messages  []any            `json:"messages"`
+	Stream    bool             `json:"stream"`
+	Tools     []ToolDefinition `json:"tools,omitempty"`
 }
 
-type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+// marshalMessages converts ChatMessage slice to the Anthropic API format.
+// Simple text messages use {"role": "...", "content": "..."}.
+// Multi-block messages use {"role": "...", "content": [...]}.
+func marshalMessages(messages []ChatMessage) []any {
+	result := make([]any, len(messages))
+	for i, m := range messages {
+		if len(m.ContentBlocks) > 0 {
+			// Multi-block message (tool results, tool use responses).
+			result[i] = map[string]any{
+				"role":    m.Role,
+				"content": m.ContentBlocks,
+			}
+		} else {
+			// Simple text message.
+			result[i] = map[string]any{
+				"role":    m.Role,
+				"content": m.Content,
+			}
+		}
+	}
+	return result
 }
 
 // StreamChat implements Provider.StreamChat using Anthropic's streaming SSE API.
 func (a *Anthropic) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+	return a.streamChatInternal(ctx, systemPrompt, messages, model, nil)
+}
+
+// StreamChatWithTools implements Provider.StreamChatWithTools using Anthropic's streaming SSE API with tool definitions.
+func (a *Anthropic) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+	return a.streamChatInternal(ctx, systemPrompt, messages, model, tools)
+}
+
+// streamChatInternal is the shared implementation for StreamChat and StreamChatWithTools.
+func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
 	if a.apiKey == "" {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
 	}
@@ -52,17 +81,15 @@ func (a *Anthropic) StreamChat(ctx context.Context, systemPrompt string, message
 		model = "claude-sonnet-4-20250514"
 	}
 
-	msgs := make([]anthropicMessage, len(messages))
-	for i, m := range messages {
-		msgs[i] = anthropicMessage{Role: m.Role, Content: m.Content}
-	}
-
 	body := anthropicRequest{
 		Model:     model,
 		MaxTokens: 8192,
 		System:    systemPrompt,
-		Messages:  msgs,
+		Messages:  marshalMessages(messages),
 		Stream:    true,
+	}
+	if len(tools) > 0 {
+		body.Tools = tools
 	}
 
 	payload, err := json.Marshal(body)
@@ -94,13 +121,26 @@ func (a *Anthropic) StreamChat(ctx context.Context, systemPrompt string, message
 	return ch, nil
 }
 
+// toolUseAccumulator tracks state for an in-progress tool_use content block.
+type toolUseAccumulator struct {
+	id        string
+	name      string
+	inputJSON strings.Builder
+}
+
 // readSSE parses the SSE stream from Anthropic and emits StreamEvents.
 func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
 	defer close(ch)
 	defer body.Close()
 
 	scanner := bufio.NewScanner(body)
+	// Increase buffer size for large tool input JSON.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
 	var eventType string
+	var currentToolUse *toolUseAccumulator
+	var currentBlockIdx int
+	_ = currentBlockIdx // tracked for correlation
 
 	for scanner.Scan() {
 		select {
@@ -119,7 +159,7 @@ func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- S
 
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
-			a.handleSSEData(eventType, data, ch)
+			a.handleSSEData(eventType, data, ch, &currentToolUse, &currentBlockIdx)
 			continue
 		}
 	}
@@ -130,17 +170,75 @@ func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- S
 }
 
 // handleSSEData processes a single SSE data payload based on event type.
-func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent) {
+func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent, currentToolUse **toolUseAccumulator, currentBlockIdx *int) {
 	switch eventType {
+	case "content_block_start":
+		var payload struct {
+			Index        int `json:"index"`
+			ContentBlock struct {
+				Type  string `json:"type"`
+				ID    string `json:"id,omitempty"`
+				Name  string `json:"name,omitempty"`
+				Text  string `json:"text,omitempty"`
+			} `json:"content_block"`
+		}
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			return
+		}
+		*currentBlockIdx = payload.Index
+		if payload.ContentBlock.Type == "tool_use" {
+			*currentToolUse = &toolUseAccumulator{
+				id:   payload.ContentBlock.ID,
+				name: payload.ContentBlock.Name,
+			}
+		} else {
+			*currentToolUse = nil
+		}
+
 	case "content_block_delta":
 		var payload struct {
+			Index int `json:"index"`
 			Delta struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
+				Type           string `json:"type"`
+				Text           string `json:"text"`
+				PartialJSON    string `json:"partial_json,omitempty"`
 			} `json:"delta"`
 		}
-		if err := json.Unmarshal([]byte(data), &payload); err == nil && payload.Delta.Type == "text_delta" {
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			return
+		}
+
+		switch payload.Delta.Type {
+		case "text_delta":
 			ch <- StreamEvent{Type: "delta", Content: payload.Delta.Text}
+		case "input_json_delta":
+			if *currentToolUse != nil {
+				(*currentToolUse).inputJSON.WriteString(payload.Delta.PartialJSON)
+			}
+		}
+
+	case "content_block_stop":
+		if *currentToolUse != nil {
+			tu := *currentToolUse
+			var input map[string]any
+			raw := tu.inputJSON.String()
+			if raw != "" {
+				if err := json.Unmarshal([]byte(raw), &input); err != nil {
+					// If JSON parsing fails, send the raw string as a single "input" key.
+					input = map[string]any{"_raw": raw}
+				}
+			} else {
+				input = map[string]any{}
+			}
+			ch <- StreamEvent{
+				Type: "tool_use",
+				ToolUse: &ToolUseBlock{
+					ID:    tu.id,
+					Name:  tu.name,
+					Input: input,
+				},
+			}
+			*currentToolUse = nil
 		}
 
 	case "message_delta":
@@ -206,16 +304,11 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 		model = "claude-sonnet-4-20250514"
 	}
 
-	msgs := make([]anthropicMessage, len(messages))
-	for i, m := range messages {
-		msgs[i] = anthropicMessage{Role: m.Role, Content: m.Content}
-	}
-
 	body := anthropicRequest{
 		Model:     model,
 		MaxTokens: 128,
 		System:    systemPrompt,
-		Messages:  msgs,
+		Messages:  marshalMessages(messages),
 		Stream:    false,
 	}
 

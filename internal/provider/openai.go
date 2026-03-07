@@ -171,6 +171,11 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 	}
 }
 
+// StreamChatWithTools delegates to StreamChat, ignoring tools (not yet supported for OpenAI).
+func (o *OpenAI) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+	return o.StreamChat(ctx, systemPrompt, messages, model)
+}
+
 // Complete makes a non-streaming completion call to OpenAI.
 func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
 	if o.apiKey == "" {

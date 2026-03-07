@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/hollis-labs/mentat-chat/internal/api"
 	"github.com/hollis-labs/mentat-chat/internal/chat"
+	"github.com/hollis-labs/mentat-chat/internal/mcp"
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/server"
 	"github.com/hollis-labs/mentat-chat/internal/store"
@@ -72,6 +74,33 @@ func cmdServe(args []string) {
 
 	// Create chat engine.
 	engine := chat.NewEngine(s, registry)
+
+	// Set up MCP manager for tool use.
+	mcpManager := mcp.NewManager()
+	mcpServers := []struct {
+		name   string
+		envKey string
+		defURL string
+	}{
+		{"volon", "MCP_VOLON_URL", "http://127.0.0.1:8085/mcp"},
+		{"hadron", "MCP_HADRON_URL", "http://127.0.0.1:8095/mcp"},
+		{"cortex", "MCP_CORTEX_URL", "http://127.0.0.1:8080/mcp"},
+	}
+
+	for _, srv := range mcpServers {
+		url := os.Getenv(srv.envKey)
+		if url == "" {
+			url = srv.defURL
+		}
+		mcpManager.AddServer(srv.name, url)
+	}
+
+	// Discover tools from MCP servers (best-effort; servers may not be running).
+	if err := mcpManager.DiscoverTools(context.Background()); err != nil {
+		log.Printf("WARNING: MCP tool discovery failed: %v", err)
+	}
+
+	engine.MCPManager = mcpManager
 
 	// Load workflow definitions.
 	wfLoader := workflow.NewLoader(*workflowDir)

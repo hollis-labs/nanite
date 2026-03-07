@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/hollis-labs/mentat-chat/internal/api"
 	"github.com/hollis-labs/mentat-chat/internal/chat"
@@ -59,7 +61,6 @@ func cmdServe(args []string) {
 		log.Println("anthropic provider registered")
 	} else {
 		log.Println("WARNING: ANTHROPIC_API_KEY not set — chat will not work")
-		// Still register the provider so routes exist; it will return errors on use.
 		registry.Register("anthropic", provider.NewAnthropic())
 	}
 
@@ -75,25 +76,9 @@ func cmdServe(args []string) {
 	// Create chat engine.
 	engine := chat.NewEngine(s, registry)
 
-	// Set up MCP manager for tool use.
+	// Set up MCP manager with stdio transports (matching ~/.claude.json config).
 	mcpManager := mcp.NewManager()
-	mcpServers := []struct {
-		name   string
-		envKey string
-		defURL string
-	}{
-		{"volon", "MCP_VOLON_URL", "http://127.0.0.1:8085/mcp"},
-		{"hadron", "MCP_HADRON_URL", "http://127.0.0.1:8095/mcp"},
-		{"cortex", "MCP_CORTEX_URL", "http://127.0.0.1:8080/mcp"},
-	}
-
-	for _, srv := range mcpServers {
-		url := os.Getenv(srv.envKey)
-		if url == "" {
-			url = srv.defURL
-		}
-		mcpManager.AddServer(srv.name, url)
-	}
+	setupMCPServers(mcpManager)
 
 	// Discover tools from MCP servers (best-effort; servers may not be running).
 	if err := mcpManager.DiscoverTools(context.Background()); err != nil {
@@ -101,6 +86,16 @@ func cmdServe(args []string) {
 	}
 
 	engine.MCPManager = mcpManager
+
+	// Clean up MCP subprocesses on shutdown.
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		log.Println("shutting down MCP transports...")
+		mcpManager.Close()
+		os.Exit(0)
+	}()
 
 	// Load workflow definitions.
 	wfLoader := workflow.NewLoader(*workflowDir)
@@ -120,5 +115,54 @@ func cmdServe(args []string) {
 	srv := server.New(s, a, *port, *dev)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
+	}
+}
+
+// setupMCPServers configures MCP server connections.
+// Uses stdio transports matching the ~/.claude.json MCP server config.
+func setupMCPServers(m *mcp.Manager) {
+	home, _ := os.UserHomeDir()
+
+	// Volon — task/sprint/project management
+	volonBin := home + "/Projects-apps/volon/volon"
+	if _, err := os.Stat(volonBin); err == nil {
+		m.AddStdioServer("volon", volonBin, []string{
+			"--repo", home + "/Projects-apps/volon",
+			"mcp",
+		}, nil)
+	} else {
+		log.Printf("mcp: volon binary not found at %s, skipping", volonBin)
+	}
+
+	// Hadron — blueprint/automation engine
+	hadronBin := home + "/Projects-apps/hadron/bin/hadrond"
+	if _, err := os.Stat(hadronBin); err == nil {
+		m.AddStdioServer("hadron", hadronBin, []string{
+			"mcp",
+			"-db", home + "/.hadron/state/hadron.db",
+			"-logs", home + "/.hadron/logs",
+			"-data", home + "/.hadron",
+			"-token", "mentat-local-dev",
+			"-token-scopes", "run.write,schedule.write,pipeline.write",
+		}, nil)
+	} else {
+		log.Printf("mcp: hadron binary not found at %s, skipping", hadronBin)
+	}
+
+	// Cortex — context/memory registry
+	cortexBin := home + "/Projects-apps/cortex/contextd"
+	cortexToken := os.Getenv("CORTEX_MCP_TOKEN")
+	if cortexToken == "" {
+		cortexToken = "35bcccce3c726d9f269e6cf0c80a6557553a099004b19a174e2e46886fc2b979"
+	}
+	if _, err := os.Stat(cortexBin); err == nil {
+		m.AddStdioServer("cortex", cortexBin, []string{
+			"mcp",
+			"-token", cortexToken,
+		}, []string{
+			"CONTEXTD_ROOT=" + home + "/.cortex",
+		})
+	} else {
+		log.Printf("mcp: cortex binary not found at %s, skipping", cortexBin)
 	}
 }

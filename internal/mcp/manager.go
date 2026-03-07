@@ -10,10 +10,16 @@ import (
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 )
 
+// Transport is the interface for MCP server connections (stdio or HTTP).
+type Transport interface {
+	ListTools(ctx context.Context) ([]Tool, error)
+	CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolResult, error)
+}
+
 // Manager holds multiple MCP server connections and provides unified tool access.
 type Manager struct {
-	servers map[string]*HTTPTransport // name -> transport
-	tools   []toolEntry              // all discovered tools with server association
+	servers map[string]Transport // name -> transport
+	tools   []toolEntry          // all discovered tools with server association
 	mu      sync.RWMutex
 }
 
@@ -26,17 +32,29 @@ type toolEntry struct {
 // NewManager creates a new MCP Manager.
 func NewManager() *Manager {
 	return &Manager{
-		servers: make(map[string]*HTTPTransport),
+		servers: make(map[string]Transport),
 	}
 }
 
-// AddServer registers an MCP server by name and URL.
+// AddServer registers an MCP server with the given transport.
 // Call DiscoverTools() after adding all servers.
-func (m *Manager) AddServer(name, url string) {
+func (m *Manager) AddServer(name string, transport Transport) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.servers[name] = NewHTTPTransport(url)
-	log.Printf("mcp: added server %q at %s", name, url)
+	m.servers[name] = transport
+	log.Printf("mcp: added server %q", name)
+}
+
+// AddHTTPServer registers an HTTP-based MCP server.
+func (m *Manager) AddHTTPServer(name, url string) {
+	m.AddServer(name, NewHTTPTransport(url))
+	log.Printf("mcp: server %q using HTTP transport at %s", name, url)
+}
+
+// AddStdioServer registers a stdio-based MCP server (subprocess).
+func (m *Manager) AddStdioServer(name, command string, args []string, env []string) {
+	m.AddServer(name, NewStdioTransport(command, args, env))
+	log.Printf("mcp: server %q using stdio transport: %s %s", name, command, strings.Join(args, " "))
 }
 
 // DiscoverTools queries all registered servers for their tools.
@@ -128,6 +146,18 @@ func (m *Manager) HasTools() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.tools) > 0
+}
+
+// Close shuts down all transports that implement io.Closer.
+func (m *Manager) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for name, transport := range m.servers {
+		if closer, ok := transport.(interface{ Close() error }); ok {
+			closer.Close()
+			log.Printf("mcp: closed transport for %s", name)
+		}
+	}
 }
 
 // parsePrefixedToolName splits "mcp__server__tool_name" into server and tool name.

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/hollis-labs/mentat-chat/internal/chat"
+	"github.com/hollis-labs/mentat-chat/internal/mcp"
 	"github.com/hollis-labs/mentat-chat/internal/store"
 	"github.com/hollis-labs/mentat-chat/internal/toolbroker"
 	"github.com/hollis-labs/mentat-chat/internal/workflow"
@@ -15,6 +16,7 @@ type API struct {
 	Store          *store.Store
 	Engine         *chat.Engine
 	ToolBroker     *toolbroker.ToolBroker
+	MCPManager     *mcp.Manager
 	WorkflowLoader *workflow.Loader
 	WorkflowEngine *workflow.Engine
 }
@@ -101,6 +103,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tools", a.handleListTools)
 	mux.HandleFunc("GET /api/tools/servers", a.handleListToolServers)
 	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
+	mux.HandleFunc("POST /api/tools/refresh", a.handleRefreshTools)
 	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
 
 	// Skills

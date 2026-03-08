@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/mentat-chat/internal/provider"
+	"github.com/hollis-labs/mentat-chat/internal/store"
 	"github.com/hollis-labs/tiamat-tool-broker/broker"
 )
 
@@ -264,6 +265,104 @@ func (m *Manager) ListServers() []ServerInfo {
 		})
 	}
 	return infos
+}
+
+// DiscoveryDiff reports the changes found during auto-discovery.
+type DiscoveryDiff struct {
+	Added   []string `json:"added"`
+	Removed []string `json:"removed"`
+	Total   int      `json:"total"`
+}
+
+// AutoDiscover runs tool discovery and syncs results with the skills table.
+// New tools get auto-created as skills (category="auto-discovered"),
+// and tools that have disappeared are flagged.
+func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryDiff, error) {
+	// Run standard discovery first.
+	if err := m.DiscoverTools(ctx); err != nil {
+		return nil, fmt.Errorf("discover tools: %w", err)
+	}
+
+	diff := &DiscoveryDiff{}
+
+	m.mu.RLock()
+	currentTools := make(map[string]toolEntry, len(m.tools))
+	for _, entry := range m.tools {
+		prefixed := fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name)
+		currentTools[prefixed] = entry
+	}
+	diff.Total = len(currentTools)
+	m.mu.RUnlock()
+
+	// Load existing auto-discovered skills from DB.
+	existingSkills, err := s.ListSkills()
+	if err != nil {
+		return nil, fmt.Errorf("list skills: %w", err)
+	}
+
+	existingSlugs := make(map[string]*store.Skill, len(existingSkills))
+	for i := range existingSkills {
+		existingSlugs[existingSkills[i].Slug] = &existingSkills[i]
+	}
+
+	// Create skills for new tools.
+	for prefixed, entry := range currentTools {
+		slug := toolNameToSlug(prefixed)
+		if _, exists := existingSlugs[slug]; exists {
+			continue
+		}
+
+		sk := &store.Skill{
+			Name:         entry.tool.Name,
+			Slug:         slug,
+			Description:  entry.tool.Description,
+			Category:     "auto-discovered",
+			ToolBindings: fmt.Sprintf(`[%q]`, entry.tool.Name),
+			IsBuiltin:    false,
+			Settings:     fmt.Sprintf(`{"server":%q,"auto_discovered":true}`, entry.serverName),
+		}
+		if err := s.CreateSkill(sk); err != nil {
+			log.Printf("mcp: auto-discover failed to create skill %s: %v", slug, err)
+			continue
+		}
+		diff.Added = append(diff.Added, prefixed)
+		log.Printf("mcp: auto-discovered new tool → skill %s", slug)
+	}
+
+	// Flag removed tools by updating their settings.
+	for slug, sk := range existingSlugs {
+		if sk.Category != "auto-discovered" {
+			continue
+		}
+		// Check if any current tool matches this slug.
+		found := false
+		for prefixed := range currentTools {
+			if toolNameToSlug(prefixed) == slug {
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Mark as removed in settings.
+			sk.Settings = strings.Replace(sk.Settings, `"auto_discovered":true`, `"auto_discovered":true,"removed":true`, 1)
+			if err := s.UpdateSkill(sk); err != nil {
+				log.Printf("mcp: auto-discover failed to flag removed skill %s: %v", slug, err)
+			}
+			diff.Removed = append(diff.Removed, slug)
+			log.Printf("mcp: auto-discover flagged removed tool: %s", slug)
+		}
+	}
+
+	log.Printf("mcp: auto-discovery complete — %d total, %d added, %d removed",
+		diff.Total, len(diff.Added), len(diff.Removed))
+	return diff, nil
+}
+
+// toolNameToSlug converts a prefixed tool name to a URL-safe slug.
+func toolNameToSlug(name string) string {
+	slug := strings.ReplaceAll(name, "__", "-")
+	slug = strings.ReplaceAll(slug, "_", "-")
+	return slug
 }
 
 // Close shuts down all transports that implement io.Closer.

@@ -119,10 +119,13 @@ func cmdServe(args []string) {
 	// Initialize the tool broker with default rules before discovery.
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
 
-	// Discover tools from MCP servers (best-effort; servers may not be running).
-	// Tools are automatically registered with the broker during discovery.
-	if err := mcpManager.DiscoverTools(context.Background()); err != nil {
-		log.Printf("WARNING: MCP tool discovery failed: %v", err)
+	// Discover tools from MCP servers and auto-sync with skills table.
+	diff, err := mcpManager.AutoDiscover(context.Background(), s)
+	if err != nil {
+		log.Printf("WARNING: MCP auto-discovery failed: %v", err)
+	} else {
+		log.Printf("MCP auto-discovery: %d tools total, %d added, %d removed",
+			diff.Total, len(diff.Added), len(diff.Removed))
 	}
 
 	engine.MCPManager = mcpManager
@@ -164,6 +167,7 @@ func cmdServe(args []string) {
 
 	// Create API layer.
 	a := api.New(s, engine)
+	a.MCPManager = mcpManager
 	a.WorkflowLoader = wfLoader
 	a.WorkflowEngine = wfEngine
 

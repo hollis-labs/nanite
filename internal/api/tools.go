@@ -71,6 +71,23 @@ func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, tools)
 }
 
+// handleRefreshTools triggers MCP tool discovery and syncs with skills table.
+// POST /api/tools/refresh
+func (a *API) handleRefreshTools(w http.ResponseWriter, r *http.Request) {
+	if a.MCPManager == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
+		return
+	}
+
+	diff, err := a.MCPManager.AutoDiscover(r.Context(), a.Store)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusOK, diff)
+}
+
 // handleListAgentTools returns tools available to a specific agent (filtered by permissions).
 // GET /api/agents/{id}/tools
 func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {

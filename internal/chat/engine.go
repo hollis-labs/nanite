@@ -46,12 +46,13 @@ type Usage struct {
 
 // Engine orchestrates chat sessions, provider calls, and streaming.
 type Engine struct {
-	Store      *store.Store
-	Providers  *provider.Registry
-	Broker     *ContextBroker
-	MCPManager *mcp.Manager
-	Activity   *ActivityEmitter
-	streams    sync.Map // map[string]chan StreamEvent
+	Store        *store.Store
+	Providers    *provider.Registry
+	Broker       *ContextBroker
+	MCPManager   *mcp.Manager
+	Orchestrator *Orchestrator
+	Activity     *ActivityEmitter
+	streams      sync.Map // map[string]chan StreamEvent
 }
 
 // NewEngine creates a new chat engine.
@@ -353,7 +354,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			toolSpan.End()
 
 			// Truncate for the LLM context; save full output to disk if large.
-			tr := truncate.Output(resultText, tu.Name)
+			// If the session has multi-agent capability, hint delegation instead of narrowing.
+			canDelegate := e.Orchestrator != nil && e.Orchestrator.HasDecomposer()
+			tr := truncate.Output(resultText, tu.Name, truncate.WithDelegationHint(canDelegate))
 
 			// Emit tool_result event to the client (use full result for UI summary).
 			summary := resultText

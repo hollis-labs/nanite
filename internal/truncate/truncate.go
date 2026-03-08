@@ -20,6 +20,22 @@ const (
 	RetentionDuration = 7 * 24 * time.Hour
 )
 
+// OutputOption configures Output behavior.
+type OutputOption func(*outputConfig)
+
+type outputConfig struct {
+	canDelegate bool
+}
+
+// WithDelegationHint enables the delegation hint when the session supports
+// multi-agent task decomposition. When true, truncated results suggest
+// delegating to a research agent; when false, they suggest narrowing queries.
+func WithDelegationHint(canDelegate bool) OutputOption {
+	return func(c *outputConfig) {
+		c.canDelegate = canDelegate
+	}
+}
+
 // Result holds the (possibly truncated) output and metadata.
 type Result struct {
 	// Content is the text to send to the LLM (truncated if needed).
@@ -42,7 +58,13 @@ func outputDir() string {
 
 // Output truncates text if it exceeds MaxChars or MaxLines.
 // If truncated, the full output is saved to disk and a pointer is included.
-func Output(text string, toolName string) Result {
+// Options can be passed to customize behavior (see WithDelegationHint).
+func Output(text string, toolName string, opts ...OutputOption) Result {
+	cfg := outputConfig{}
+	for _, o := range opts {
+		o(&cfg)
+	}
+
 	lines := strings.Split(text, "\n")
 	originalLen := len(text)
 
@@ -61,7 +83,11 @@ func Output(text string, toolName string) Result {
 	if err := os.WriteFile(outPath, []byte(text), 0644); err != nil {
 		log.Printf("truncate: failed to save output to %s: %v", outPath, err)
 		// Fall back to simple truncation without file pointer.
-		truncated := text[:MaxChars] + "\n\n[truncated — use a more specific query for details]"
+		fallbackHint := "Use more specific queries to narrow the results."
+		if cfg.canDelegate {
+			fallbackHint = "Consider delegating to a research agent to process the full output."
+		}
+		truncated := text[:MaxChars] + "\n\n[truncated — " + fallbackHint + "]"
 		return Result{
 			Content:     truncated,
 			Truncated:   true,
@@ -89,12 +115,20 @@ func Output(text string, toolName string) Result {
 	remainingLines := len(lines) - lineCount
 	remainingBytes := originalLen - preview.Len()
 
+	var actionHint string
+	if cfg.canDelegate {
+		actionHint = "Consider delegating to a research agent to process the full output. " +
+			"The data above shows the shape and structure — a focused sub-agent can analyze the complete result."
+	} else {
+		actionHint = "Use more specific queries or filters to narrow the results. " +
+			"The data above shows the shape and structure — refine your query based on what you see."
+	}
+
 	hint := fmt.Sprintf(
 		"\n\n... %d more lines (%d bytes) truncated ...\n\n"+
 			"Full output saved to: %s\n"+
-			"To explore: use more specific queries or filters to narrow the results. "+
-			"The data above shows the shape and structure — refine your query based on what you see.",
-		remainingLines, remainingBytes, outPath,
+			"%s",
+		remainingLines, remainingBytes, outPath, actionHint,
 	)
 
 	return Result{

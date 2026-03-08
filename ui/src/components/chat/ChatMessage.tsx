@@ -153,13 +153,14 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, a
           </div>
         )}
 
-        {/* Actions */}
-        {hovered && !isUser && (
-          <div className="flex items-center gap-1 mt-1">
+        {/* Actions — always rendered to avoid layout shift, opacity toggles on hover */}
+        {!isUser && (
+          <div className={`flex items-center gap-1 mt-1 transition-opacity duration-150 ${hovered ? 'opacity-100' : 'opacity-0'}`}>
             <button
               onClick={handleCopy}
               className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
               aria-label="Copy message"
+              tabIndex={hovered ? 0 : -1}
             >
               {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
@@ -171,6 +172,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, a
                   : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800'
               }`}
               aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'}
+              tabIndex={hovered ? 0 : -1}
             >
               {isBookmarked ? (
                 <BookmarkCheck className="w-3.5 h-3.5" />

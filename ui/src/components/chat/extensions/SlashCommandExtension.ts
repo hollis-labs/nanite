@@ -16,6 +16,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'compact', description: 'Compact session context', category: 'session' },
   { name: 'new', description: 'Create new chat session', category: 'session' },
   { name: 'bookmark', description: 'Bookmark last message', category: 'tools' },
+  { name: 'template', description: 'Apply a template to format the last response', category: 'tools' },
   { name: 'help', description: 'Show available commands', category: 'help' },
 ]
 

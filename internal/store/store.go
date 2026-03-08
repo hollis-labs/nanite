@@ -53,6 +53,7 @@ func (s *Store) migrate() error {
 	files := []string{
 		"migrations/001_initial.sql",
 		"migrations/002_add_session_tags.sql",
+		"migrations/003_add_templates.sql",
 	}
 
 	for _, f := range files {

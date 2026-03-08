@@ -68,6 +68,9 @@ func cmdServe(args []string) {
 	if err := s.Seed(); err != nil {
 		log.Fatalf("failed to seed database: %v", err)
 	}
+	if err := s.SeedBuiltinTemplates(); err != nil {
+		log.Fatalf("failed to seed templates: %v", err)
+	}
 
 	// Set up provider registry.
 	registry := provider.NewRegistry()

@@ -94,6 +94,14 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Token usage
 	mux.HandleFunc("GET /api/sessions/{id}/usage", a.handleGetSessionUsage)
 	mux.HandleFunc("GET /api/usage/summary", a.handleGetUsageSummary)
+
+	// Templates
+	mux.HandleFunc("GET /api/templates", a.handleListTemplates)
+	mux.HandleFunc("POST /api/templates", a.handleCreateTemplate)
+	mux.HandleFunc("GET /api/templates/{name}", a.handleGetTemplate)
+	mux.HandleFunc("PUT /api/templates/{name}", a.handleUpdateTemplate)
+	mux.HandleFunc("DELETE /api/templates/{name}", a.handleDeleteTemplate)
+	mux.HandleFunc("POST /api/templates/{name}/apply", a.handleApplyTemplate)
 }
 
 // jsonResp writes a JSON response with the given status code.

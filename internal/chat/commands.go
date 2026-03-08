@@ -17,6 +17,7 @@ var BuiltinCommands = []SlashCommand{
 	{Name: "clear", Description: "Clear session messages", Category: "session"},
 	{Name: "new", Description: "Create new chat session", Category: "session"},
 	{Name: "bookmark", Description: "Bookmark the last message", Category: "tools"},
+	{Name: "template", Description: "Apply a template to format the last response", Category: "tools"},
 	{Name: "help", Description: "Show available commands", Category: "help"},
 }
 

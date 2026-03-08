@@ -24,6 +24,16 @@ go test ./...
 cd ui && npm install && npm run build
 ```
 
+## Run
+
+```bash
+# Start the server (default port 8090)
+./mentat-chat serve
+
+# With options
+./mentat-chat serve -port 8090 -db ./mentat-chat.db -workflows ./workflows -dev
+```
+
 ## Architecture
 
 - `cmd/mentat-chat/` — Entry point

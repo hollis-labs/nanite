@@ -2,7 +2,7 @@ project: mentat-chat
 version: 1
 role: volon-managed
 boot_profiles:
-  - meta-agent
+  - worker
 write_paths:
   - .agentrc/tasks/
   - .agentrc/logs/

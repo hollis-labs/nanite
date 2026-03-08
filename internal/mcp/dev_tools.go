@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -94,6 +95,19 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 			},
 		},
 		{
+			Name:        "dev_glob",
+			Description: "Find files matching a glob pattern. Supports ** for recursive matching. Results sorted by modification time (newest first).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"pattern":     map[string]any{"type": "string", "description": "Glob pattern (e.g. **/*.go, src/**/*.ts)"},
+					"directory":   map[string]any{"type": "string", "description": "Directory to search in (must be in allowed paths)"},
+					"max_results": map[string]any{"type": "integer", "description": "Maximum results to return (default 50)"},
+				},
+				"required": []string{"pattern", "directory"},
+			},
+		},
+		{
 			Name:        "dev_bash",
 			Description: "Execute a shell command. Captures stdout and stderr. Process is killed on timeout.",
 			InputSchema: map[string]any{
@@ -118,6 +132,8 @@ func (d *DevToolsTransport) CallTool(_ context.Context, name string, args map[st
 		return d.callGrep(args)
 	case "dev_write":
 		return d.callWrite(args)
+	case "dev_glob":
+		return d.callGlob(args)
 	case "dev_bash":
 		return d.callBash(args)
 	default:
@@ -293,6 +309,117 @@ func (d *DevToolsTransport) callWrite(args map[string]any) (*ToolResult, error) 
 	}
 
 	return textResult(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
+}
+
+func (d *DevToolsTransport) callGlob(args map[string]any) (*ToolResult, error) {
+	pattern, _ := args["pattern"].(string)
+	dir, _ := args["directory"].(string)
+	if pattern == "" || dir == "" {
+		return errorResult("pattern and directory are required"), nil
+	}
+	if err := d.isAllowed(dir); err != nil {
+		return errorResult(err.Error()), nil
+	}
+
+	maxResults := intArg(args, "max_results", 50)
+	if maxResults < 1 {
+		maxResults = 1
+	}
+
+	type fileEntry struct {
+		path    string
+		modTime time.Time
+	}
+	var matches []fileEntry
+
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			base := filepath.Base(path)
+			if base == ".git" || base == "node_modules" || base == "vendor" || base == "dist" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		relPath, err := filepath.Rel(dir, path)
+		if err != nil {
+			return nil
+		}
+
+		if globMatch(pattern, relPath) {
+			info, err := entry.Info()
+			if err != nil {
+				return nil
+			}
+			matches = append(matches, fileEntry{path: relPath, modTime: info.ModTime()})
+		}
+		return nil
+	})
+	if err != nil {
+		return errorResult(fmt.Sprintf("walk error: %v", err)), nil
+	}
+
+	// Sort by modification time, newest first.
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].modTime.After(matches[j].modTime)
+	})
+
+	if len(matches) == 0 {
+		return textResult("no matches found"), nil
+	}
+
+	var sb strings.Builder
+	count := len(matches)
+	if count > maxResults {
+		count = maxResults
+	}
+	fmt.Fprintf(&sb, "Found %d file(s)", len(matches))
+	if len(matches) > maxResults {
+		fmt.Fprintf(&sb, " (showing first %d)", maxResults)
+	}
+	sb.WriteString(":\n\n")
+	for i := 0; i < count; i++ {
+		fmt.Fprintf(&sb, "%s\n", matches[i].path)
+	}
+	return textResult(sb.String()), nil
+}
+
+// globMatch matches a path against a pattern supporting ** for recursive matching.
+func globMatch(pattern, path string) bool {
+	// Split pattern and path into segments.
+	patParts := strings.Split(filepath.ToSlash(pattern), "/")
+	pathParts := strings.Split(filepath.ToSlash(path), "/")
+	return globMatchParts(patParts, pathParts)
+}
+
+func globMatchParts(patParts, pathParts []string) bool {
+	if len(patParts) == 0 {
+		return len(pathParts) == 0
+	}
+
+	if patParts[0] == "**" {
+		rest := patParts[1:]
+		// ** can match zero or more path segments.
+		for i := 0; i <= len(pathParts); i++ {
+			if globMatchParts(rest, pathParts[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if len(pathParts) == 0 {
+		return false
+	}
+
+	matched, _ := filepath.Match(patParts[0], pathParts[0])
+	if !matched {
+		return false
+	}
+	return globMatchParts(patParts[1:], pathParts[1:])
 }
 
 func (d *DevToolsTransport) callBash(args map[string]any) (*ToolResult, error) {

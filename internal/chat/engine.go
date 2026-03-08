@@ -175,6 +175,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID, AgentID: agent.ID}
 
 	// Get available tools from MCP manager.
+	// TODO: detect intent from user message and call GetToolsForIntent
 	var tools []provider.ToolDefinition
 	if e.MCPManager != nil && e.MCPManager.HasTools() {
 		tools = e.MCPManager.GetTools()

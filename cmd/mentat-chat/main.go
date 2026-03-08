@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/mentat-chat/internal/store"
 	"github.com/hollis-labs/mentat-chat/internal/truncate"
 	"github.com/hollis-labs/mentat-chat/internal/workflow"
+	"github.com/hollis-labs/tiamat-tool-broker/broker"
 )
 
 func main() {
@@ -82,7 +83,11 @@ func cmdServe(args []string) {
 	mcpManager := mcp.NewManager()
 	setupMCPServers(mcpManager)
 
+	// Initialize the tool broker with default rules before discovery.
+	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
+
 	// Discover tools from MCP servers (best-effort; servers may not be running).
+	// Tools are automatically registered with the broker during discovery.
 	if err := mcpManager.DiscoverTools(context.Background()); err != nil {
 		log.Printf("WARNING: MCP tool discovery failed: %v", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/hollis-labs/mentat-chat/internal/provider"
+	"github.com/hollis-labs/tiamat-tool-broker/broker"
 )
 
 // Transport is the interface for MCP server connections (stdio or HTTP).
@@ -20,6 +21,7 @@ type Transport interface {
 type Manager struct {
 	servers map[string]Transport // name -> transport
 	tools   []toolEntry          // all discovered tools with server association
+	Broker  *broker.LocalBroker  // intent-aware tool broker
 	mu      sync.RWMutex
 }
 
@@ -81,49 +83,71 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 		log.Printf("mcp: discovered %d tools from %s", len(tools), name)
 	}
 
-	// Count how many will actually be exposed to the LLM.
-	var excluded int
-	for _, entry := range m.tools {
-		if m.isExcluded(entry.tool.Name) {
-			excluded++
+	// Register tools with the broker if available.
+	if m.Broker != nil {
+		var brokerTools []broker.ToolDefinition
+		for _, entry := range m.tools {
+			brokerTools = append(brokerTools, broker.ToolDefinition{
+				Name:        entry.tool.Name,
+				Description: entry.tool.Description,
+				InputSchema: entry.tool.InputSchema,
+				Server:      entry.serverName,
+			})
 		}
+		m.Broker.RegisterTools(brokerTools)
+		log.Printf("mcp: registered %d tools with broker", len(brokerTools))
 	}
-	log.Printf("mcp: total %d tools from %d servers (%d exposed to LLM, %d filtered)", totalTools, len(m.servers), totalTools-excluded, excluded)
+
+	log.Printf("mcp: total %d tools from %d servers", totalTools, len(m.servers))
 	return nil
 }
 
-// defaultExcludePatterns filters out tools that bloat the LLM context.
-// These tools are still callable via ExecuteTool but not advertised to the LLM.
-// The agent can discover them via list/search tools on each server.
-var defaultExcludePatterns = []string{
-	"hadron_bp_", // 70+ individual blueprint tools — use hadron_blueprints_list + hadron_run_enqueue instead
+// GetTools returns available tools as provider.ToolDefinition slice, filtered
+// by the broker's default rules (intent "*"). Tool names are prefixed with "mcp__<server>__".
+func (m *Manager) GetTools() []provider.ToolDefinition {
+	return m.GetToolsForIntent("*", nil)
 }
 
-// GetTools returns available tools as provider.ToolDefinition slice, filtered
-// to exclude context-heavy patterns. Tool names are prefixed with "mcp__<server>__".
-func (m *Manager) GetTools() []provider.ToolDefinition {
+// GetToolsForIntent returns tools filtered by the broker for the given intent and hints.
+// If no broker is configured, returns all tools unfiltered.
+func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	defs := make([]provider.ToolDefinition, 0, len(m.tools))
-	for _, entry := range m.tools {
-		if m.isExcluded(entry.tool.Name) {
-			continue
-		}
+	// If no broker, fall back to returning all tools.
+	if m.Broker == nil {
+		return m.getAllToolsLocked()
+	}
+
+	result, err := m.Broker.SelectTools(context.Background(), intent, hints)
+	if err != nil {
+		log.Printf("mcp: broker SelectTools error: %v — returning all tools", err)
+		return m.getAllToolsLocked()
+	}
+
+	// Convert broker ToolDefinitions back to provider.ToolDefinition with prefixed names.
+	defs := make([]provider.ToolDefinition, 0, len(result.Tools))
+	for _, t := range result.Tools {
 		defs = append(defs, provider.ToolDefinition{
-			Name:        fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name),
-			Description: entry.tool.Description,
-			InputSchema: entry.tool.InputSchema,
+			Name:        fmt.Sprintf("mcp__%s__%s", t.Server, t.Name),
+			Description: t.Description,
+			InputSchema: t.InputSchema,
 		})
 	}
+
+	log.Printf("mcp: broker selected %d/%d tools for intent %q (%s)", result.Count, result.Total, intent, result.Rationale)
 	return defs
 }
 
-// GetAllTools returns ALL tools including excluded ones. Used for diagnostics.
+// GetAllTools returns ALL tools unfiltered. Used for diagnostics.
 func (m *Manager) GetAllTools() []provider.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.getAllToolsLocked()
+}
 
+// getAllToolsLocked returns all tools without filtering. Caller must hold mu.RLock.
+func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
 	defs := make([]provider.ToolDefinition, 0, len(m.tools))
 	for _, entry := range m.tools {
 		defs = append(defs, provider.ToolDefinition{
@@ -133,16 +157,6 @@ func (m *Manager) GetAllTools() []provider.ToolDefinition {
 		})
 	}
 	return defs
-}
-
-// isExcluded checks if a tool name matches any exclude pattern.
-func (m *Manager) isExcluded(name string) bool {
-	for _, pattern := range defaultExcludePatterns {
-		if strings.HasPrefix(name, pattern) {
-			return true
-		}
-	}
-	return false
 }
 
 // ExecuteTool routes a tool call to the correct server and returns the result as text.

@@ -2,13 +2,20 @@ package mcp
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // GeneralToolsTransport provides general-purpose utility tools
@@ -56,6 +63,73 @@ func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 				},
 			},
 		},
+		{
+			Name:        "base64_encode",
+			Description: "Encode a string to base64.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input": map[string]any{"type": "string", "description": "String to encode"},
+				},
+				"required": []string{"input"},
+			},
+		},
+		{
+			Name:        "base64_decode",
+			Description: "Decode a base64 string.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input": map[string]any{"type": "string", "description": "Base64 string to decode"},
+				},
+				"required": []string{"input"},
+			},
+		},
+		{
+			Name:        "url_encode",
+			Description: "URL percent-encode a string.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input": map[string]any{"type": "string", "description": "String to encode"},
+				},
+				"required": []string{"input"},
+			},
+		},
+		{
+			Name:        "url_decode",
+			Description: "Decode a URL percent-encoded string.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input": map[string]any{"type": "string", "description": "URL-encoded string to decode"},
+				},
+				"required": []string{"input"},
+			},
+		},
+		{
+			Name:        "hash",
+			Description: "Compute a hash of an input string. Supports sha256 and md5.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input":     map[string]any{"type": "string", "description": "String to hash"},
+					"algorithm": map[string]any{"type": "string", "description": "Hash algorithm: sha256 (default) or md5"},
+				},
+				"required": []string{"input"},
+			},
+		},
+		{
+			Name:        "math_eval",
+			Description: "Evaluate a basic arithmetic expression with +, -, *, /, ^, parentheses, and floats.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"expression": map[string]any{"type": "string", "description": "Arithmetic expression to evaluate"},
+				},
+				"required": []string{"expression"},
+			},
+		},
 	}, nil
 }
 
@@ -68,6 +142,18 @@ func (g *GeneralToolsTransport) CallTool(_ context.Context, name string, args ma
 		return g.callJSONParse(args)
 	case "datetime":
 		return g.callDatetime(args)
+	case "base64_encode":
+		return g.callBase64Encode(args)
+	case "base64_decode":
+		return g.callBase64Decode(args)
+	case "url_encode":
+		return g.callURLEncode(args)
+	case "url_decode":
+		return g.callURLDecode(args)
+	case "hash":
+		return g.callHash(args)
+	case "math_eval":
+		return g.callMathEval(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -240,4 +326,237 @@ func parseDateMath(expr string) (time.Duration, error) {
 	}
 
 	return time.Duration(sign*n) * multiplier, nil
+}
+
+func (g *GeneralToolsTransport) callBase64Encode(args map[string]any) (*ToolResult, error) {
+	input, _ := args["input"].(string)
+	if input == "" {
+		return errorResult("input is required"), nil
+	}
+	return textResult(base64.StdEncoding.EncodeToString([]byte(input))), nil
+}
+
+func (g *GeneralToolsTransport) callBase64Decode(args map[string]any) (*ToolResult, error) {
+	input, _ := args["input"].(string)
+	if input == "" {
+		return errorResult("input is required"), nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(input)
+	if err != nil {
+		return errorResult(fmt.Sprintf("decode error: %v", err)), nil
+	}
+	return textResult(string(decoded)), nil
+}
+
+func (g *GeneralToolsTransport) callURLEncode(args map[string]any) (*ToolResult, error) {
+	input, _ := args["input"].(string)
+	if input == "" {
+		return errorResult("input is required"), nil
+	}
+	return textResult(url.QueryEscape(input)), nil
+}
+
+func (g *GeneralToolsTransport) callURLDecode(args map[string]any) (*ToolResult, error) {
+	input, _ := args["input"].(string)
+	if input == "" {
+		return errorResult("input is required"), nil
+	}
+	decoded, err := url.QueryUnescape(input)
+	if err != nil {
+		return errorResult(fmt.Sprintf("decode error: %v", err)), nil
+	}
+	return textResult(decoded), nil
+}
+
+func (g *GeneralToolsTransport) callHash(args map[string]any) (*ToolResult, error) {
+	input, _ := args["input"].(string)
+	if input == "" {
+		return errorResult("input is required"), nil
+	}
+	algorithm, _ := args["algorithm"].(string)
+	if algorithm == "" {
+		algorithm = "sha256"
+	}
+
+	switch algorithm {
+	case "sha256":
+		h := sha256.Sum256([]byte(input))
+		return textResult(hex.EncodeToString(h[:])), nil
+	case "md5":
+		h := md5.Sum([]byte(input))
+		return textResult(hex.EncodeToString(h[:])), nil
+	default:
+		return errorResult(fmt.Sprintf("unsupported algorithm %q (use sha256 or md5)", algorithm)), nil
+	}
+}
+
+func (g *GeneralToolsTransport) callMathEval(args map[string]any) (*ToolResult, error) {
+	expr, _ := args["expression"].(string)
+	if expr == "" {
+		return errorResult("expression is required"), nil
+	}
+
+	result, err := evalExpr(expr)
+	if err != nil {
+		return errorResult(fmt.Sprintf("eval error: %v", err)), nil
+	}
+
+	// Format nicely: show integer if whole number.
+	if result == float64(int64(result)) && !math.IsInf(result, 0) {
+		return textResult(strconv.FormatInt(int64(result), 10)), nil
+	}
+	return textResult(strconv.FormatFloat(result, 'g', -1, 64)), nil
+}
+
+// --- math expression parser (recursive descent) ---
+
+type mathParser struct {
+	input string
+	pos   int
+}
+
+func evalExpr(expr string) (float64, error) {
+	p := &mathParser{input: strings.TrimSpace(expr)}
+	result, err := p.parseExpr()
+	if err != nil {
+		return 0, err
+	}
+	p.skipSpaces()
+	if p.pos < len(p.input) {
+		return 0, fmt.Errorf("unexpected character at position %d: %q", p.pos, string(p.input[p.pos]))
+	}
+	return result, nil
+}
+
+func (p *mathParser) parseExpr() (float64, error) {
+	return p.parseAddSub()
+}
+
+func (p *mathParser) parseAddSub() (float64, error) {
+	left, err := p.parseMulDiv()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		p.skipSpaces()
+		if p.pos >= len(p.input) {
+			return left, nil
+		}
+		op := p.input[p.pos]
+		if op != '+' && op != '-' {
+			return left, nil
+		}
+		p.pos++
+		right, err := p.parseMulDiv()
+		if err != nil {
+			return 0, err
+		}
+		if op == '+' {
+			left += right
+		} else {
+			left -= right
+		}
+	}
+}
+
+func (p *mathParser) parseMulDiv() (float64, error) {
+	left, err := p.parsePower()
+	if err != nil {
+		return 0, err
+	}
+	for {
+		p.skipSpaces()
+		if p.pos >= len(p.input) {
+			return left, nil
+		}
+		op := p.input[p.pos]
+		if op != '*' && op != '/' {
+			return left, nil
+		}
+		p.pos++
+		right, err := p.parsePower()
+		if err != nil {
+			return 0, err
+		}
+		if op == '*' {
+			left *= right
+		} else {
+			if right == 0 {
+				return 0, fmt.Errorf("division by zero")
+			}
+			left /= right
+		}
+	}
+}
+
+func (p *mathParser) parsePower() (float64, error) {
+	base, err := p.parseUnary()
+	if err != nil {
+		return 0, err
+	}
+	p.skipSpaces()
+	if p.pos < len(p.input) && p.input[p.pos] == '^' {
+		p.pos++
+		exp, err := p.parsePower() // right-associative
+		if err != nil {
+			return 0, err
+		}
+		return math.Pow(base, exp), nil
+	}
+	return base, nil
+}
+
+func (p *mathParser) parseUnary() (float64, error) {
+	p.skipSpaces()
+	if p.pos < len(p.input) && p.input[p.pos] == '-' {
+		p.pos++
+		val, err := p.parseUnary()
+		if err != nil {
+			return 0, err
+		}
+		return -val, nil
+	}
+	if p.pos < len(p.input) && p.input[p.pos] == '+' {
+		p.pos++
+		return p.parseUnary()
+	}
+	return p.parseAtom()
+}
+
+func (p *mathParser) parseAtom() (float64, error) {
+	p.skipSpaces()
+	if p.pos >= len(p.input) {
+		return 0, fmt.Errorf("unexpected end of expression")
+	}
+
+	// Parenthesized expression.
+	if p.input[p.pos] == '(' {
+		p.pos++
+		val, err := p.parseExpr()
+		if err != nil {
+			return 0, err
+		}
+		p.skipSpaces()
+		if p.pos >= len(p.input) || p.input[p.pos] != ')' {
+			return 0, fmt.Errorf("missing closing parenthesis")
+		}
+		p.pos++
+		return val, nil
+	}
+
+	// Number.
+	start := p.pos
+	for p.pos < len(p.input) && (unicode.IsDigit(rune(p.input[p.pos])) || p.input[p.pos] == '.') {
+		p.pos++
+	}
+	if p.pos == start {
+		return 0, fmt.Errorf("unexpected character: %q", string(p.input[p.pos]))
+	}
+	return strconv.ParseFloat(p.input[start:p.pos], 64)
+}
+
+func (p *mathParser) skipSpaces() {
+	for p.pos < len(p.input) && p.input[p.pos] == ' ' {
+		p.pos++
+	}
 }

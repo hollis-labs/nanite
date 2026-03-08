@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -93,6 +94,14 @@ func cmdServe(args []string) {
 	// Set up MCP manager with stdio transports (matching ~/.claude.json config).
 	mcpManager := mcp.NewManager()
 	setupMCPServers(mcpManager)
+
+	// Register built-in dev tools (grep, read, write) scoped to common project dirs.
+	homeDir, _ := os.UserHomeDir()
+	devTools := mcp.NewDevToolsTransport([]string{
+		filepath.Join(homeDir, "Projects-apps"),
+		filepath.Join(homeDir, "Projects"),
+	})
+	mcpManager.AddServer("dev", devTools)
 
 	// Initialize the tool broker with default rules before discovery.
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())

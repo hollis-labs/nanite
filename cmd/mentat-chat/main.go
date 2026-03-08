@@ -77,6 +77,9 @@ func cmdServe(args []string) {
 	if err := s.SeedBuiltinPromptTemplates(); err != nil {
 		log.Fatalf("failed to seed prompt templates: %v", err)
 	}
+	if err := s.SeedAgentSkillBindings(); err != nil {
+		log.Fatalf("failed to seed agent skill bindings: %v", err)
+	}
 
 	// Set up provider registry.
 	registry := provider.NewRegistry()

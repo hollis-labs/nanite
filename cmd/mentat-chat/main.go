@@ -165,6 +165,10 @@ func cmdServe(args []string) {
 	wfEngine := workflow.NewEngine(registry, s)
 	wfEngine.MCPManager = mcpManager
 
+	// Wire workflow engine into chat engine for /workflow triggers.
+	engine.WorkflowEngine = wfEngine
+	engine.WorkflowLoader = wfLoader
+
 	// Create API layer.
 	a := api.New(s, engine)
 	a.MCPManager = mcpManager

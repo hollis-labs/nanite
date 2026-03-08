@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/mentat-chat/internal/store"
 	"github.com/hollis-labs/mentat-chat/internal/toolbroker"
 	"github.com/hollis-labs/mentat-chat/internal/truncate"
+	"github.com/hollis-labs/mentat-chat/internal/workflow"
 )
 
 // maxToolIterations prevents infinite tool-use loops.
@@ -47,14 +48,16 @@ type Usage struct {
 
 // Engine orchestrates chat sessions, provider calls, and streaming.
 type Engine struct {
-	Store        *store.Store
-	Providers    *provider.Registry
-	Broker       *ContextBroker
-	MCPManager   *mcp.Manager
-	ToolBroker   *toolbroker.ToolBroker
-	Orchestrator *Orchestrator
-	Activity     *ActivityEmitter
-	streams      sync.Map // map[string]chan StreamEvent
+	Store          *store.Store
+	Providers      *provider.Registry
+	Broker         *ContextBroker
+	MCPManager     *mcp.Manager
+	ToolBroker     *toolbroker.ToolBroker
+	Orchestrator   *Orchestrator
+	Activity       *ActivityEmitter
+	WorkflowEngine *workflow.Engine
+	WorkflowLoader *workflow.Loader
+	streams        sync.Map // map[string]chan StreamEvent
 }
 
 // NewEngine creates a new chat engine.
@@ -78,6 +81,11 @@ func (e *Engine) HandleMessage(sessionID, content string) (string, error) {
 	}
 	if err := e.Store.CreateMessage(userMsg); err != nil {
 		return "", fmt.Errorf("create user message: %w", err)
+	}
+
+	// Check for /workflow trigger.
+	if strings.HasPrefix(content, "/workflow ") {
+		return e.handleWorkflowTrigger(sessionID, content, userMsg.ID)
 	}
 
 	// Create assistant message ID and stream channel.
@@ -194,19 +202,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		go e.Activity.EmitSessionStart(ctx, sessionID, agent.ID, model)
 	}
 
-	// Get available tools — prefer ToolBroker (intent-aware) over raw MCP Manager.
+	// Get available tools — filter by agent's assigned skills, then ToolBroker, then MCP Manager.
 	var tools []provider.ToolDefinition
-	if e.ToolBroker != nil {
-		selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, userContent, nil, session.WorkspaceID, agentID)
-		if err != nil {
-			log.Printf("chat: tool broker selection failed: %v — falling back to MCP manager", err)
-		} else {
-			tools = selected
-		}
-	}
-	if len(tools) == 0 && e.MCPManager != nil && e.MCPManager.HasTools() {
-		tools = e.MCPManager.GetTools()
-	}
+	tools = e.getToolsForAgent(ctx, agentID, userContent, session.WorkspaceID)
 
 	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
@@ -616,4 +614,165 @@ func (e *Engine) autoTags(sessionID, model string) {
 	if err := e.Store.UpdateSessionTags(sessionID, string(tagsJSON)); err != nil {
 		log.Printf("chat: auto-tags update failed: %v", err)
 	}
+}
+
+// getToolsForAgent returns the filtered tool list for an agent based on assigned skills.
+// Falls back to ToolBroker or raw MCP Manager if no skills are assigned.
+func (e *Engine) getToolsForAgent(ctx context.Context, agentID, intent, workspaceID string) []provider.ToolDefinition {
+	// Try skill-based filtering first.
+	skills, err := e.Store.ListAgentSkills(agentID)
+	if err == nil && len(skills) > 0 {
+		// Build allowed tool set from skill bindings.
+		allowedTools := make(map[string]bool)
+		for _, sk := range skills {
+			var tools []string
+			if err := json.Unmarshal([]byte(sk.ToolBindings), &tools); err == nil {
+				for _, t := range tools {
+					allowedTools[t] = true
+				}
+			}
+		}
+
+		if len(allowedTools) > 0 {
+			// Get all tools and filter.
+			var allTools []provider.ToolDefinition
+			if e.ToolBroker != nil {
+				selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, intent, nil, workspaceID, agentID)
+				if err == nil {
+					allTools = selected
+				}
+			}
+			if len(allTools) == 0 && e.MCPManager != nil && e.MCPManager.HasTools() {
+				allTools = e.MCPManager.GetTools()
+			}
+
+			// Filter to only tools matching skill bindings.
+			filtered := make([]provider.ToolDefinition, 0)
+			for _, t := range allTools {
+				// Check both the full prefixed name and the base tool name.
+				baseName := t.Name
+				if parts := strings.SplitN(t.Name, "__", 3); len(parts) == 3 {
+					baseName = parts[2]
+				}
+				if allowedTools[t.Name] || allowedTools[baseName] {
+					filtered = append(filtered, t)
+				}
+			}
+
+			log.Printf("chat: skill-filtered tools for agent %s: %d/%d", agentID, len(filtered), len(allTools))
+			return filtered
+		}
+	}
+
+	// Fall back to ToolBroker or MCP Manager.
+	if e.ToolBroker != nil {
+		selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, intent, nil, workspaceID, agentID)
+		if err != nil {
+			log.Printf("chat: tool broker selection failed: %v — falling back to MCP manager", err)
+		} else {
+			return selected
+		}
+	}
+	if e.MCPManager != nil && e.MCPManager.HasTools() {
+		return e.MCPManager.GetTools()
+	}
+	return nil
+}
+
+// handleWorkflowTrigger detects "/workflow <name>" messages and routes to the workflow engine.
+func (e *Engine) handleWorkflowTrigger(sessionID, content, userMsgID string) (string, error) {
+	if e.WorkflowEngine == nil || e.WorkflowLoader == nil {
+		return "", fmt.Errorf("workflow engine not configured")
+	}
+
+	// Parse: /workflow <name> [key=value ...]
+	parts := strings.Fields(content)
+	if len(parts) < 2 {
+		return "", fmt.Errorf("usage: /workflow <name> [key=value ...]")
+	}
+	wfName := parts[1]
+
+	def, ok := e.WorkflowLoader.Get(wfName)
+	if !ok {
+		return "", fmt.Errorf("workflow %q not found", wfName)
+	}
+
+	// Parse inputs from remaining args.
+	inputs := map[string]string{
+		"session_id": sessionID,
+	}
+	for _, arg := range parts[2:] {
+		kv := strings.SplitN(arg, "=", 2)
+		if len(kv) == 2 {
+			inputs[kv[0]] = kv[1]
+		}
+	}
+
+	// Create assistant message for workflow output.
+	assistantMsgID := uuid.New().String()
+	ch := make(chan StreamEvent, 128)
+	e.streams.Store(assistantMsgID, ch)
+
+	go func() {
+		defer func() {
+			close(ch)
+			e.streams.Delete(assistantMsgID)
+		}()
+
+		ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID}
+
+		result, err := e.WorkflowEngine.Execute(context.Background(), def, inputs)
+		if err != nil {
+			ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("workflow error: %v", err)}
+			return
+		}
+
+		output := fmt.Sprintf("**Workflow: %s**\n\n%s", wfName, result.FinalOutput)
+		ch <- StreamEvent{Type: "delta", Content: output}
+
+		// Save assistant message.
+		msg := &store.Message{
+			ID:        assistantMsgID,
+			SessionID: sessionID,
+			Role:      "assistant",
+			Content:   output,
+			Metadata:  fmt.Sprintf(`{"source":"workflow","workflow":"%s"}`, wfName),
+		}
+		if err := e.Store.CreateMessage(msg); err != nil {
+			log.Printf("chat: failed to save workflow result: %v", err)
+		}
+
+		ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID}
+	}()
+
+	return assistantMsgID, nil
+}
+
+// RecomposeSystemPrompt recomposes the system prompt after a mode change mid-session.
+// This is called when the mode is switched via the API.
+func (e *Engine) RecomposeSystemPrompt(sessionID, agentID, newMode string) (string, error) {
+	agent, err := e.Store.GetAgent(agentID)
+	if err != nil {
+		return "", fmt.Errorf("get agent: %w", err)
+	}
+
+	mode, err := e.Store.GetAgentMode(agentID, newMode)
+	if err != nil {
+		log.Printf("chat: mode %s not found for agent %s, using empty mode", newMode, agentID)
+		mode = &store.AgentMode{}
+	}
+
+	session, err := e.Store.GetSession(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("get session: %w", err)
+	}
+
+	var workspace *store.Workspace
+	if session.WorkspaceID != "" {
+		workspace, _ = e.Store.GetWorkspace(session.WorkspaceID)
+	}
+
+	skillList := buildSkillList(e.Store, agentID)
+	prompt := assembleSystemPromptFromTemplates(e.Store, agent, mode, workspace, skillList)
+	return prompt, nil
 }

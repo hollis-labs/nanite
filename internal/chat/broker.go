@@ -28,12 +28,13 @@ func NewContextBroker(s *store.Store) *ContextBroker {
 }
 
 // AssembleContext builds the full context for a turn:
-// 1. System prompt (from agent + mode + workspace)
+// 1. System prompt (from prompt templates or legacy agent + mode + workspace)
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
 func (cb *ContextBroker) AssembleContext(session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
-	// 1. Build the system prompt.
-	systemPrompt := assembleSystemPrompt(agent, mode, workspace)
+	// 1. Build the system prompt using prompt templates.
+	skillList := buildSkillList(cb.Store, agent.ID)
+	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList)
 
 	// 2. Load messages from DB. Start with a generous limit.
 	messages, err := cb.Store.ListMessages(session.ID, 200)

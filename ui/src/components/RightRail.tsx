@@ -4,6 +4,7 @@ import { SessionInfoWidget } from './widgets/SessionInfoWidget'
 import { BookmarksWidget } from './widgets/BookmarksWidget'
 import { ContextBudgetWidget } from './widgets/ContextBudgetWidget'
 import { AgentStatusWidget } from './widgets/AgentStatusWidget'
+import { TokenUsageWidget } from './widgets/TokenUsageWidget'
 
 export function RightRail() {
   const open = useLayoutStore((s) => s.rightRailOpen)
@@ -26,6 +27,7 @@ export function RightRail() {
             <SessionInfoWidget />
             <BookmarksWidget />
             <ContextBudgetWidget />
+            <TokenUsageWidget />
             <AgentStatusWidget />
           </div>
         </ScrollArea>

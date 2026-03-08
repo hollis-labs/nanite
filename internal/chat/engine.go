@@ -10,6 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	tiamatotel "github.com/hollis-labs/tiamat-otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/hollis-labs/mentat-chat/internal/mcp"
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/store"
@@ -46,6 +50,7 @@ type Engine struct {
 	Providers  *provider.Registry
 	Broker     *ContextBroker
 	MCPManager *mcp.Manager
+	Activity   *ActivityEmitter
 	streams    sync.Map // map[string]chan StreamEvent
 }
 
@@ -94,6 +99,13 @@ func (e *Engine) GetStream(messageID string) (<-chan StreamEvent, bool) {
 
 // generateResponse loads context, calls the provider, streams events, and saves the result.
 func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan StreamEvent) {
+	ctx, span := tiamatotel.StartSpan(ctx, "mentat-chat.generateResponse")
+	span.SetAttributes(
+		attribute.String("mentat.session.id", sessionID),
+		attribute.String("mentat.message.id", assistantMsgID),
+	)
+	defer span.End()
+
 	defer func() {
 		close(ch)
 		e.streams.Delete(assistantMsgID)
@@ -174,6 +186,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Emit stream_start.
 	ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID, AgentID: agent.ID}
 
+	// Notify Volon that this chat session is active.
+	if e.Activity != nil {
+		go e.Activity.EmitSessionStart(ctx, sessionID, agent.ID, model)
+	}
+
 	// Get available tools from MCP manager.
 	// TODO: detect intent from user message and call GetToolsForIntent
 	var tools []provider.ToolDefinition
@@ -187,6 +204,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	for iteration := 0; iteration < maxToolIterations; iteration++ {
 		// Call provider with or without tools.
+		provCtx, provSpan := tiamatotel.StartSpan(ctx, "mentat-chat.provider.call")
+		provSpan.SetAttributes(
+			attribute.String("mentat.model", model),
+			attribute.Int("mentat.iteration", iteration),
+			attribute.Int("mentat.tools.count", len(tools)),
+			attribute.Int("mentat.messages.count", len(chatMessages)),
+		)
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
 			// Estimate context size for debugging.
@@ -199,15 +223,21 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			}
 			contextChars += len(systemPrompt)
 			log.Printf("chat: tool-use iteration %d — %d tools, %d messages, ~%d context chars (~%d tokens)", iteration, len(tools), len(chatMessages), contextChars, contextChars/4)
-			provCh, err = prov.StreamChatWithTools(ctx, systemPrompt, chatMessages, model, tools)
+			provCh, err = prov.StreamChatWithTools(provCtx, systemPrompt, chatMessages, model, tools)
 		} else {
-			provCh, err = prov.StreamChat(ctx, systemPrompt, chatMessages, model)
+			provCh, err = prov.StreamChat(provCtx, systemPrompt, chatMessages, model)
 		}
 		if err != nil {
+			provSpan.RecordError(err)
+			provSpan.SetStatus(codes.Error, err.Error())
+			provSpan.End()
 			log.Printf("chat: provider stream error on iteration %d: %v", iteration, err)
 			e.Store.LogEvent(sessionID, "provider_error", "error",
 				fmt.Sprintf("iteration %d: %v", iteration, err),
 				fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d}`, model, len(tools), len(chatMessages)))
+			if e.Activity != nil {
+				go e.Activity.EmitError(ctx, sessionID, "provider_error", err.Error())
+			}
 			ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("start stream: %v", err)}
 			return
 		}
@@ -251,6 +281,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			}
 		}
 
+		provSpan.End()
+
 		// If no tool use, we are done.
 		if stopReason != "tool_use" || len(toolUseBlocks) == 0 {
 			break
@@ -292,21 +324,33 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			}
 
 			var resultText string
+			toolCtx, toolSpan := tiamatotel.ToolCallSpan(ctx, tu.Name)
 			if e.MCPManager != nil {
-				result, execErr := e.MCPManager.ExecuteTool(ctx, tu.Name, tu.Input)
+				result, execErr := e.MCPManager.ExecuteTool(toolCtx, tu.Name, tu.Input)
 				if execErr != nil {
 					resultText = fmt.Sprintf("Error: %v", execErr)
+					toolSpan.RecordError(execErr)
+					toolSpan.SetStatus(codes.Error, execErr.Error())
 					log.Printf("chat: tool %s failed: %v", tu.Name, execErr)
 					e.Store.LogEvent(sessionID, "tool_error", "error",
 						fmt.Sprintf("%s: %v", tu.Name, execErr), "{}")
+					if e.Activity != nil {
+						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, false, 0)
+					}
 				} else {
 					resultText = result
+					toolSpan.SetAttributes(attribute.Int("mentat.tool.result_len", len(result)))
 					e.Store.LogEvent(sessionID, "tool_call", "tool",
 						tu.Name, fmt.Sprintf(`{"result_len":%d}`, len(result)))
+					if e.Activity != nil {
+						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, true, len(result))
+					}
 				}
 			} else {
 				resultText = "Error: no MCP manager configured"
+				toolSpan.SetStatus(codes.Error, "no MCP manager configured")
 			}
+			toolSpan.End()
 
 			// Truncate for the LLM context; save full output to disk if large.
 			tr := truncate.Output(resultText, tu.Name)
@@ -393,6 +437,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Emit stream_end.
 	ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: finalUsage}
 
+	// Notify Volon that the response is complete.
+	if e.Activity != nil && finalUsage != nil {
+		go e.Activity.EmitResponseComplete(ctx, sessionID, agent.ID, model, finalUsage.InputTokens, finalUsage.OutputTokens)
+	}
+
 	// Auto-title: if session has no title, generate one asynchronously.
 	if session.Title == "" {
 		go e.autoTitle(sessionID, userContent, model)
@@ -436,6 +485,11 @@ func (e *Engine) SendAgentMessage(fromSessionID, toSessionID, content string) (s
 
 // autoTitle generates a title for a session from the first user message.
 func (e *Engine) autoTitle(sessionID, userContent, model string) {
+	ctx, span := tiamatotel.StartSpan(context.Background(), "mentat-chat.autoTitle")
+	span.SetAttributes(attribute.String("mentat.session.id", sessionID))
+	defer span.End()
+	_ = ctx
+
 	prov, ok := e.Providers.Get("anthropic")
 	if !ok {
 		return

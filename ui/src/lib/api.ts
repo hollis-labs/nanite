@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary } from './types'
 
 const API_BASE = '/api'
 
@@ -182,6 +182,12 @@ export const api = {
   getSessionUsage: async (sessionId: string): Promise<SessionUsageSummary> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/usage`)
     if (!res.ok) throw new Error(`Failed to get session usage: ${res.status}`)
+    return res.json()
+  },
+
+  getUsageSummary: async (): Promise<GlobalUsageSummary> => {
+    const res = await fetch(`${API_BASE}/usage/summary`)
+    if (!res.ok) throw new Error(`Failed to get usage summary: ${res.status}`)
     return res.json()
   },
 }

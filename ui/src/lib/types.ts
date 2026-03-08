@@ -66,6 +66,22 @@ export interface SessionUsageSummary {
   message_count: number
 }
 
+export interface ModelUsage {
+  model: string
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number
+}
+
+export interface GlobalUsageSummary {
+  total_input: number
+  total_output: number
+  total_tokens: number
+  total_cost: number
+  by_model: ModelUsage[]
+}
+
 // --- Agent Modes ---
 
 export const AGENT_MODES = ['default', 'architect', 'planner', 'writer'] as const

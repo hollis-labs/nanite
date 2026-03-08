@@ -7,6 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	tiamatotel "github.com/hollis-labs/tiamat-otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/tiamat-tool-broker/broker"
 )
@@ -61,6 +65,9 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 
 // DiscoverTools queries all registered servers for their tools.
 func (m *Manager) DiscoverTools(ctx context.Context) error {
+	ctx, span := tiamatotel.StartSpan(ctx, "mentat-chat.mcp.discoverTools")
+	defer span.End()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -97,6 +104,11 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 		m.Broker.RegisterTools(brokerTools)
 		log.Printf("mcp: registered %d tools with broker", len(brokerTools))
 	}
+
+	span.SetAttributes(
+		attribute.Int("mentat.mcp.tools.total", totalTools),
+		attribute.Int("mentat.mcp.servers.count", len(m.servers)),
+	)
 
 	log.Printf("mcp: total %d tools from %d servers", totalTools, len(m.servers))
 	return nil
@@ -162,22 +174,38 @@ func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
 // ExecuteTool routes a tool call to the correct server and returns the result as text.
 // Tool names are expected in the format "mcp__<server>__<tool_name>".
 func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string]any) (string, error) {
+	ctx, span := tiamatotel.ToolCallSpan(ctx, name)
+	defer span.End()
+
 	serverName, toolName, err := parsePrefixedToolName(name)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", err
 	}
+
+	span.SetAttributes(
+		attribute.String("mentat.mcp.server", serverName),
+		attribute.String("mentat.mcp.tool", toolName),
+	)
 
 	m.mu.RLock()
 	transport, ok := m.servers[serverName]
 	m.mu.RUnlock()
 
 	if !ok {
-		return "", fmt.Errorf("unknown MCP server: %s", serverName)
+		err := fmt.Errorf("unknown MCP server: %s", serverName)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
 	}
 
 	result, err := transport.CallTool(ctx, toolName, input)
 	if err != nil {
-		return "", fmt.Errorf("call tool %s on %s: %w", toolName, serverName, err)
+		err = fmt.Errorf("call tool %s on %s: %w", toolName, serverName, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
 	}
 
 	// Concatenate text content blocks.
@@ -192,9 +220,13 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 	}
 
 	if result.IsError {
-		return "", fmt.Errorf("tool error: %s", sb.String())
+		err := fmt.Errorf("tool error: %s", sb.String())
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
 	}
 
+	span.SetAttributes(attribute.Int("mentat.mcp.result_len", sb.Len()))
 	return sb.String(), nil
 }
 

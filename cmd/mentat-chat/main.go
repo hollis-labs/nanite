@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	tiamatotel "github.com/hollis-labs/tiamat-otel"
+
 	"github.com/hollis-labs/mentat-chat/internal/api"
 	"github.com/hollis-labs/mentat-chat/internal/chat"
 	"github.com/hollis-labs/mentat-chat/internal/mcp"
@@ -44,6 +46,15 @@ func cmdServe(args []string) {
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
 	workflowDir := fs.String("workflows", "./workflows", "Directory containing workflow YAML files")
 	fs.Parse(args)
+
+	// Initialise OpenTelemetry tracing (tiamat-otel).
+	otelCtx := context.Background()
+	otelShutdown, otelErr := tiamatotel.Init(otelCtx, tiamatotel.WithServiceName("mentat-chat"))
+	if otelErr != nil {
+		log.Printf("warning: OTel init failed: %v", otelErr)
+	} else {
+		defer otelShutdown(otelCtx)
+	}
 
 	// Open store and run migrations.
 	s, err := store.New(*dbPath)
@@ -93,6 +104,10 @@ func cmdServe(args []string) {
 	}
 
 	engine.MCPManager = mcpManager
+
+	// Set up activity emitter to push events to Volon's GUI server.
+	engine.Activity = chat.NewActivityEmitter("")
+	log.Println("activity emitter initialized (target: Volon GUI server)")
 
 	// Clean up MCP subprocesses on shutdown.
 	go func() {

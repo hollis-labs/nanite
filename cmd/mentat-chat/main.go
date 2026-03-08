@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/hollis-labs/mentat-chat/internal/api"
 	"github.com/hollis-labs/mentat-chat/internal/chat"
@@ -15,6 +16,7 @@ import (
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/server"
 	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat-chat/internal/truncate"
 	"github.com/hollis-labs/mentat-chat/internal/workflow"
 )
 
@@ -95,6 +97,16 @@ func cmdServe(args []string) {
 		log.Println("shutting down MCP transports...")
 		mcpManager.Close()
 		os.Exit(0)
+	}()
+
+	// Periodic cleanup of saved tool outputs (every hour, removes files older than 7 days).
+	go func() {
+		truncate.Cleanup() // run once on startup
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			truncate.Cleanup()
+		}
 	}()
 
 	// Load workflow definitions.

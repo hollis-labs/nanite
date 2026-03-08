@@ -13,14 +13,12 @@ import (
 	"github.com/hollis-labs/mentat-chat/internal/mcp"
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat-chat/internal/truncate"
 )
 
 // maxToolIterations prevents infinite tool-use loops.
 const maxToolIterations = 10
 
-// maxToolResultChars caps the size of a tool result sent back to the LLM.
-// Full results are still sent to the client UI via SSE; only the LLM context is truncated.
-const maxToolResultChars = 4000
 
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
@@ -309,13 +307,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				resultText = "Error: no MCP manager configured"
 			}
 
-			// Truncate very long tool results for the summary sent to the client.
+			// Truncate for the LLM context; save full output to disk if large.
+			tr := truncate.Output(resultText, tu.Name)
+
+			// Emit tool_result event to the client (use full result for UI summary).
 			summary := resultText
 			if len(summary) > 500 {
 				summary = summary[:500] + "... (truncated)"
 			}
-
-			// Emit tool_result event to the client.
 			ch <- StreamEvent{
 				Type:    "tool_result",
 				Tool:    tu.Name,
@@ -323,16 +322,18 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				Summary: summary,
 			}
 
-			// Truncate large results for the LLM context to control token usage.
-			llmResult := resultText
-			if len(llmResult) > maxToolResultChars {
-				llmResult = llmResult[:maxToolResultChars] + "\n\n[truncated — use a more specific query or tool to get full details]"
+			if tr.Truncated {
+				log.Printf("chat: tool %s result truncated: %d → %d chars (saved to %s)",
+					tu.Name, tr.OriginalLen, len(tr.Content), tr.OutputPath)
+				e.Store.LogEvent(sessionID, "tool_truncated", "context",
+					tu.Name, fmt.Sprintf(`{"original_len":%d,"truncated_len":%d,"output_path":%q}`,
+						tr.OriginalLen, len(tr.Content), tr.OutputPath))
 			}
 
 			resultBlocks = append(resultBlocks, provider.ContentBlock{
 				Type:      "tool_result",
 				ToolUseID: tu.ID,
-				Content:   llmResult,
+				Content:   tr.Content,
 			})
 		}
 

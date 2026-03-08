@@ -151,14 +151,16 @@ func cmdServe(args []string) {
 		}
 	}()
 
-	// Load workflow definitions.
+	// Load workflow definitions from files and database.
 	wfLoader := workflow.NewLoader(*workflowDir)
+	wfLoader.SetDB(s.DB)
 	if err := wfLoader.LoadAll(); err != nil {
-		log.Printf("WARNING: failed to load workflows from %s: %v", *workflowDir, err)
+		log.Printf("WARNING: failed to load workflows: %v", err)
 	} else {
-		log.Printf("loaded %d workflow(s) from %s", len(wfLoader.List()), *workflowDir)
+		log.Printf("loaded %d workflow(s)", len(wfLoader.List()))
 	}
 	wfEngine := workflow.NewEngine(registry, s)
+	wfEngine.MCPManager = mcpManager
 
 	// Create API layer.
 	a := api.New(s, engine)

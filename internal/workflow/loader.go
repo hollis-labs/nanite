@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,9 +11,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Loader loads and manages workflow definitions from YAML files.
+// Loader loads and manages workflow definitions from YAML files and the database.
 type Loader struct {
 	dir       string
+	db        *sql.DB
 	workflows map[string]*WorkflowDef
 }
 
@@ -23,9 +26,31 @@ func NewLoader(dir string) *Loader {
 	}
 }
 
-// LoadAll reads all YAML workflow files from the configured directory.
-// Files must have .yaml or .yml extension.
+// SetDB sets the database connection for loading workflows from the workflows table.
+func (l *Loader) SetDB(db *sql.DB) {
+	l.db = db
+}
+
+// LoadAll reads all YAML workflow files from the configured directory
+// and also loads enabled workflows from the database.
 func (l *Loader) LoadAll() error {
+	// Load from YAML files.
+	if err := l.loadFromFiles(); err != nil {
+		return err
+	}
+
+	// Load from database (if connected).
+	if l.db != nil {
+		if err := l.loadFromDB(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// loadFromFiles reads workflow YAML files from the directory.
+func (l *Loader) loadFromFiles() error {
 	entries, err := os.ReadDir(l.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -60,6 +85,43 @@ func (l *Loader) LoadAll() error {
 	}
 
 	return nil
+}
+
+// loadFromDB reads enabled workflow definitions from the workflows table.
+func (l *Loader) loadFromDB() error {
+	rows, err := l.db.Query(
+		`SELECT name, definition FROM workflows WHERE is_enabled = TRUE`,
+	)
+	if err != nil {
+		return fmt.Errorf("query workflows from db: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name, definition string
+		if err := rows.Scan(&name, &definition); err != nil {
+			return fmt.Errorf("scan workflow row: %w", err)
+		}
+
+		var def WorkflowDef
+		// Try JSON first, then YAML.
+		if err := json.Unmarshal([]byte(definition), &def); err != nil {
+			if err := yaml.Unmarshal([]byte(definition), &def); err != nil {
+				return fmt.Errorf("parse workflow %q definition: %w", name, err)
+			}
+		}
+
+		if def.Name == "" {
+			def.Name = name
+		}
+
+		// DB workflows do not overwrite file-based workflows.
+		if _, exists := l.workflows[def.Name]; !exists {
+			l.workflows[def.Name] = &def
+		}
+	}
+
+	return rows.Err()
 }
 
 // loadFile parses a single YAML workflow file.

@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/hollis-labs/mentat-chat/internal/mcp"
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/store"
 )
@@ -30,7 +31,7 @@ type InputDef struct {
 // StepDef represents a single step in a workflow.
 type StepDef struct {
 	Name   string            `yaml:"name"   json:"name"`
-	Action string            `yaml:"action" json:"action"` // llm_call, store_artifact, create_task
+	Action string            `yaml:"action" json:"action"` // llm_call, store_artifact, create_task, mcp_call, conditional
 	Params map[string]string `yaml:"params" json:"params"`
 }
 
@@ -51,8 +52,9 @@ type WorkflowResult struct {
 
 // Engine executes workflow definitions.
 type Engine struct {
-	Providers *provider.Registry
-	Store     *store.Store
+	Providers  *provider.Registry
+	Store      *store.Store
+	MCPManager *mcp.Manager
 }
 
 // NewEngine creates a new workflow Engine.
@@ -123,7 +125,27 @@ func (e *Engine) Execute(ctx context.Context, def *WorkflowDef, inputs map[strin
 			}
 
 		case "create_task":
-			output, err := e.executeCreateTask(resolvedParams)
+			output, err := e.executeCreateTask(ctx, resolvedParams)
+			if err != nil {
+				stepResult.Error = err.Error()
+				log.Printf("workflow: step %q failed: %v", step.Name, err)
+			} else {
+				stepResult.Output = output
+				lastOutput = output
+			}
+
+		case "mcp_call":
+			output, err := e.executeMCPCall(ctx, resolvedParams)
+			if err != nil {
+				stepResult.Error = err.Error()
+				log.Printf("workflow: step %q failed: %v", step.Name, err)
+			} else {
+				stepResult.Output = output
+				lastOutput = output
+			}
+
+		case "conditional":
+			output, err := e.executeConditional(ctx, resolvedParams, inputs, stepOutputs)
 			if err != nil {
 				stepResult.Error = err.Error()
 				log.Printf("workflow: step %q failed: %v", step.Name, err)
@@ -220,8 +242,8 @@ func (e *Engine) executeStoreArtifact(params map[string]string) (string, error) 
 	return fmt.Sprintf("artifact:%s", artifact.ID), nil
 }
 
-// executeCreateTask creates a placeholder task record (logged for now, as Volon integration is external).
-func (e *Engine) executeCreateTask(params map[string]string) (string, error) {
+// executeCreateTask creates a task via Volon MCP if available, otherwise logs a placeholder.
+func (e *Engine) executeCreateTask(ctx context.Context, params map[string]string) (string, error) {
 	title := params["title"]
 	if title == "" {
 		return "", fmt.Errorf("create_task requires a 'title' param")
@@ -230,8 +252,113 @@ func (e *Engine) executeCreateTask(params map[string]string) (string, error) {
 	description := params["description"]
 	project := params["project"]
 
-	// Log the task creation as a placeholder. In production, this would call the Volon MCP.
-	log.Printf("workflow: create_task placeholder — title=%q project=%q description=%q", title, project, description)
+	// Try to create via Volon MCP.
+	if e.MCPManager != nil {
+		toolName := "mcp__volon__volon_task_create"
+		args := map[string]any{
+			"title":       title,
+			"description": description,
+		}
+		if project != "" {
+			args["project_id"] = project
+		}
 
+		result, err := e.MCPManager.ExecuteTool(ctx, toolName, args)
+		if err != nil {
+			log.Printf("workflow: create_task via Volon failed: %v — using placeholder", err)
+		} else {
+			log.Printf("workflow: created task via Volon MCP: %s", title)
+			return result, nil
+		}
+	}
+
+	// Fallback to placeholder.
+	log.Printf("workflow: create_task placeholder — title=%q project=%q description=%q", title, project, description)
 	return fmt.Sprintf("task_placeholder:%s", title), nil
+}
+
+// executeMCPCall calls an MCP tool by constructing the prefixed name from server + tool params.
+func (e *Engine) executeMCPCall(ctx context.Context, params map[string]string) (string, error) {
+	server := params["server"]
+	tool := params["tool"]
+	if server == "" || tool == "" {
+		return "", fmt.Errorf("mcp_call requires 'server' and 'tool' params")
+	}
+
+	if e.MCPManager == nil {
+		return "", fmt.Errorf("MCP manager not configured")
+	}
+
+	toolName := fmt.Sprintf("mcp__%s__%s", server, tool)
+
+	// Build arguments from remaining params (excluding server and tool).
+	args := make(map[string]any)
+	for k, v := range params {
+		if k != "server" && k != "tool" {
+			args[k] = v
+		}
+	}
+
+	result, err := e.MCPManager.ExecuteTool(ctx, toolName, args)
+	if err != nil {
+		return "", fmt.Errorf("mcp_call %s: %w", toolName, err)
+	}
+
+	return result, nil
+}
+
+// executeConditional evaluates a condition and runs then_action or else_action.
+// The condition is a simple non-empty/truthy check on a resolved value.
+func (e *Engine) executeConditional(ctx context.Context, params map[string]string, inputs map[string]string, stepOutputs map[string]string) (string, error) {
+	condition := params["condition"]
+	thenAction := params["then_action"]
+	elseAction := params["else_action"]
+
+	if thenAction == "" {
+		return "", fmt.Errorf("conditional requires 'then_action' param")
+	}
+
+	// Evaluate condition: non-empty and not "false" or "0" means truthy.
+	truthy := condition != "" && condition != "false" && condition != "0" && condition != "null"
+
+	var action string
+	if truthy {
+		action = thenAction
+		log.Printf("workflow: conditional — condition %q is truthy, executing then_action", condition)
+	} else {
+		if elseAction == "" {
+			log.Printf("workflow: conditional — condition %q is falsy, no else_action", condition)
+			return "skipped", nil
+		}
+		action = elseAction
+		log.Printf("workflow: conditional — condition %q is falsy, executing else_action", condition)
+	}
+
+	// Parse the action as "action_type:param1=val1,param2=val2" or just execute as a step name reference.
+	// For simplicity, treat the action as a step action with inline params.
+	parts := strings.SplitN(action, ":", 2)
+	actionType := parts[0]
+	actionParams := make(map[string]string)
+	if len(parts) > 1 {
+		for _, kv := range strings.Split(parts[1], ",") {
+			pair := strings.SplitN(kv, "=", 2)
+			if len(pair) == 2 {
+				actionParams[pair[0]] = resolveTemplates(pair[1], inputs, stepOutputs)
+			}
+		}
+	}
+
+	switch actionType {
+	case "llm_call":
+		return e.executeLLMCall(ctx, actionParams)
+	case "mcp_call":
+		return e.executeMCPCall(ctx, actionParams)
+	case "store_artifact":
+		return e.executeStoreArtifact(actionParams)
+	case "create_task":
+		return e.executeCreateTask(ctx, actionParams)
+	default:
+		// Treat as a literal output value.
+		return action, nil
+	}
 }

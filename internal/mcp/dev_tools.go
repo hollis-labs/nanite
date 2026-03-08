@@ -108,6 +108,20 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 			},
 		},
 		{
+			Name:        "dev_edit",
+			Description: "Edit a file by replacing a string. If replace_all is false, old_string must appear exactly once in the file.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":        map[string]any{"type": "string", "description": "Absolute file path to edit"},
+					"old_string":  map[string]any{"type": "string", "description": "Text to find and replace"},
+					"new_string":  map[string]any{"type": "string", "description": "Replacement text"},
+					"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences (default false)"},
+				},
+				"required": []string{"path", "old_string", "new_string"},
+			},
+		},
+		{
 			Name:        "dev_bash",
 			Description: "Execute a shell command. Captures stdout and stderr. Process is killed on timeout.",
 			InputSchema: map[string]any{
@@ -134,6 +148,8 @@ func (d *DevToolsTransport) CallTool(_ context.Context, name string, args map[st
 		return d.callWrite(args)
 	case "dev_glob":
 		return d.callGlob(args)
+	case "dev_edit":
+		return d.callEdit(args)
 	case "dev_bash":
 		return d.callBash(args)
 	default:
@@ -309,6 +325,64 @@ func (d *DevToolsTransport) callWrite(args map[string]any) (*ToolResult, error) 
 	}
 
 	return textResult(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
+}
+
+func (d *DevToolsTransport) callEdit(args map[string]any) (*ToolResult, error) {
+	path, _ := args["path"].(string)
+	oldStr, _ := args["old_string"].(string)
+	newStr, _ := args["new_string"].(string)
+	if path == "" || oldStr == "" {
+		return errorResult("path and old_string are required"), nil
+	}
+	if oldStr == newStr {
+		return errorResult("old_string and new_string must be different"), nil
+	}
+	if err := d.isAllowed(path); err != nil {
+		return errorResult(err.Error()), nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return errorResult(fmt.Sprintf("read: %v", err)), nil
+	}
+	content := string(data)
+
+	replaceAll, _ := args["replace_all"].(bool)
+
+	count := strings.Count(content, oldStr)
+	if count == 0 {
+		return errorResult("old_string not found in file"), nil
+	}
+	if !replaceAll && count > 1 {
+		return errorResult(fmt.Sprintf("old_string appears %d times — provide more context to make it unique, or set replace_all=true", count)), nil
+	}
+
+	var newContent string
+	if replaceAll {
+		newContent = strings.ReplaceAll(content, oldStr, newStr)
+	} else {
+		newContent = strings.Replace(content, oldStr, newStr, 1)
+	}
+
+	if err := os.WriteFile(path, []byte(newContent), 0o644); err != nil {
+		return errorResult(fmt.Sprintf("write: %v", err)), nil
+	}
+
+	// Build a summary showing the line number of the first replacement.
+	lines := strings.Split(content, "\n")
+	lineNum := 0
+	for i, line := range lines {
+		if strings.Contains(line, strings.Split(oldStr, "\n")[0]) {
+			lineNum = i + 1
+			break
+		}
+	}
+
+	msg := fmt.Sprintf("Replaced %d occurrence(s) in %s", count, path)
+	if lineNum > 0 {
+		msg += fmt.Sprintf(" (first at line %d)", lineNum)
+	}
+	return textResult(msg), nil
 }
 
 func (d *DevToolsTransport) callGlob(args map[string]any) (*ToolResult, error) {

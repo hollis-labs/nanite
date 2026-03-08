@@ -296,22 +296,12 @@ export interface Skill {
   slug: string
   category: string
   description: string
-  tool_bindings: ToolBinding[]
-  input_schema: Record<string, unknown> | null
+  tool_bindings: string
+  input_schema: string
   is_builtin: boolean
+  settings: string
   created_at: string
   updated_at: string
-}
-
-export interface AgentSkill {
-  id: string
-  agent_id: string
-  skill_id: string
-  skill_name: string
-  skill_slug: string
-  skill_category: string
-  config_override: Record<string, unknown> | null
-  created_at: string
 }
 
 // --- Prompt Templates ---
@@ -330,21 +320,10 @@ export interface PromptTemplate {
   name: string
   slug: string
   scope: 'system' | 'mode' | 'skill' | 'context'
-  template_body: string
-  variables: TemplateVariable[]
+  template: string
+  variables: string
   priority: number
   is_builtin: boolean
   created_at: string
   updated_at: string
-}
-
-export interface AgentTemplate {
-  id: string
-  agent_id: string
-  template_id: string
-  template_name: string
-  template_slug: string
-  template_scope: string
-  priority: number
-  assigned_at: string
 }

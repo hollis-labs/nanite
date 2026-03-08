@@ -213,7 +213,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
             }`}
             disabled={!hasContent}
             onClick={onSend}
-            title="Send (Cmd+Enter)"
+            title="Send (Enter)"
           >
             <SendHorizonal className="w-3.5 h-3.5" />
           </Button>

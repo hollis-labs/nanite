@@ -111,7 +111,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
           <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-blue-900/30 border border-blue-700/50">
             <CheckCircle className="w-4 h-4 text-blue-400" />
             <span className="text-sm text-blue-300">
-              Discovery complete: +{refreshResult.added.length} -{refreshResult.removed.length} (total: {refreshResult.total})
+              Discovery complete: +{(refreshResult.added ?? []).length} -{(refreshResult.removed ?? []).length} (total: {refreshResult.total})
             </span>
             <button onClick={() => setRefreshResult(null)}>
               <X className="w-4 h-4 text-blue-400 hover:text-blue-300" />

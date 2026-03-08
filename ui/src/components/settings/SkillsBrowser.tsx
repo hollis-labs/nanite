@@ -6,7 +6,6 @@ import {
   Save,
   Loader2,
   ChevronLeft,
-  Badge,
   Wrench,
   Code2,
   Settings,
@@ -16,6 +15,14 @@ import {
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import type { Skill, ToolBinding } from '@/lib/types'
+
+function parseToolBindings(s: string): ToolBinding[] {
+  try { return JSON.parse(s) } catch { return [] }
+}
+
+function parseInputSchema(s: string): Record<string, unknown> | null {
+  try { const v = JSON.parse(s); return v && typeof v === 'object' ? v : null } catch { return null }
+}
 
 interface SkillsBrowserProps {}
 
@@ -77,61 +84,28 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
     },
   })
 
-  const parseToolBindings = (toolBindingsString: string): ToolBinding[] => {
-    try {
-      return JSON.parse(toolBindingsString)
-    } catch {
-      return []
-    }
-  }
-
   const handleCreateSkill = useCallback((formData: FormData) => {
-    const toolBindingsString = formData.get('tool_bindings') as string
-    const toolBindings = parseToolBindings(toolBindingsString || '[]')
-
-    let inputSchema = null
-    const inputSchemaString = formData.get('input_schema') as string
-    if (inputSchemaString) {
-      try {
-        inputSchema = JSON.parse(inputSchemaString)
-      } catch {
-        inputSchema = null
-      }
-    }
-
     const data = {
       name: formData.get('name') as string,
       slug: formData.get('slug') as string,
       category: formData.get('category') as string,
       description: formData.get('description') as string,
-      tool_bindings: toolBindings,
-      input_schema: inputSchema,
+      tool_bindings: formData.get('tool_bindings') as string || '[]',
+      input_schema: formData.get('input_schema') as string || '{}',
+      settings: '{}',
     }
     createMutation.mutate(data)
   }, [createMutation])
 
   const handleUpdateSkill = useCallback((formData: FormData) => {
     if (!editingSkill) return
-    const toolBindingsString = formData.get('tool_bindings') as string
-    const toolBindings = parseToolBindings(toolBindingsString || '[]')
-
-    let inputSchema = null
-    const inputSchemaString = formData.get('input_schema') as string
-    if (inputSchemaString) {
-      try {
-        inputSchema = JSON.parse(inputSchemaString)
-      } catch {
-        inputSchema = null
-      }
-    }
-
     const data = {
       name: formData.get('name') as string,
       slug: formData.get('slug') as string,
       category: formData.get('category') as string,
       description: formData.get('description') as string,
-      tool_bindings: toolBindings,
-      input_schema: inputSchema,
+      tool_bindings: formData.get('tool_bindings') as string || '[]',
+      input_schema: formData.get('input_schema') as string || '{}',
     }
     updateMutation.mutate({ id: editingSkill.id, data })
   }, [editingSkill, updateMutation])
@@ -199,9 +173,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                       <div className="flex items-center gap-2">
                         <h3 className="font-medium text-zinc-100 truncate">{skill.name}</h3>
                         {skill.is_builtin && (
-                          <span title="Built-in skill">
-                            <Badge className="w-3 h-3 rounded-full bg-blue-500" />
-                          </span>
+                          <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in skill" />
                         )}
                       </div>
                       <p className="text-sm text-zinc-400 truncate">{skill.slug}</p>
@@ -213,7 +185,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                       {skill.category}
                     </span>
                     <span className="text-xs text-zinc-500">
-                      {skill.tool_bindings.length} tool{skill.tool_bindings.length !== 1 ? 's' : ''}
+                      {parseToolBindings(skill.tool_bindings).length} tool{parseToolBindings(skill.tool_bindings).length !== 1 ? 's' : ''}
                     </span>
                   </div>
 
@@ -432,7 +404,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               <textarea
                 name="tool_bindings"
                 rows={5}
-                defaultValue={JSON.stringify(skill.tool_bindings, null, 2)}
+                defaultValue={skill.tool_bindings}
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
               />
             </div>
@@ -442,7 +414,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               <textarea
                 name="input_schema"
                 rows={5}
-                defaultValue={skill.input_schema ? JSON.stringify(skill.input_schema, null, 2) : ''}
+                defaultValue={skill.input_schema || '{}'}
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
               />
             </div>
@@ -488,9 +460,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               <h2 className="text-xl font-semibold text-zinc-100 flex items-center gap-2">
                 {skill.name}
                 {skill.is_builtin && (
-                  <span title="Built-in skill">
-                    <Badge className="w-3 h-3 rounded-full bg-blue-500" />
-                  </span>
+                  <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in skill" />
                 )}
               </h2>
               <p className="text-sm text-zinc-400">{skill.slug}</p>
@@ -549,14 +519,14 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
           <div className="space-y-4">
             <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
               <Wrench className="w-5 h-5" />
-              Tool Bindings ({skill.tool_bindings.length})
+              Tool Bindings ({parseToolBindings(skill.tool_bindings).length})
             </h3>
 
             <div className="space-y-2">
-              {skill.tool_bindings.length === 0 ? (
+              {parseToolBindings(skill.tool_bindings).length === 0 ? (
                 <p className="text-zinc-500 text-center py-4">No tool bindings configured</p>
               ) : (
-                skill.tool_bindings.map((binding, index) => (
+                parseToolBindings(skill.tool_bindings).map((binding, index) => (
                   <div
                     key={index}
                     className="bg-zinc-800 rounded-lg p-3 flex items-center gap-3"
@@ -578,7 +548,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         </div>
 
         {/* Input Schema */}
-        {skill.input_schema && (
+        {parseInputSchema(skill.input_schema) && (
           <div className="space-y-4">
             <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
               <Code2 className="w-5 h-5" />
@@ -587,7 +557,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
 
             <div className="bg-zinc-800 rounded-lg p-4">
               <pre className="text-xs text-zinc-300 overflow-x-auto font-mono">
-                {JSON.stringify(skill.input_schema, null, 2)}
+                {skill.input_schema}
               </pre>
             </div>
           </div>

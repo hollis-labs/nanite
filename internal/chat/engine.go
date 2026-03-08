@@ -616,67 +616,26 @@ func (e *Engine) autoTags(sessionID, model string) {
 	}
 }
 
-// getToolsForAgent returns the filtered tool list for an agent based on assigned skills.
-// Falls back to ToolBroker or raw MCP Manager if no skills are assigned.
+// getToolsForAgent returns the tool list for an agent.
+// Starts with all broker-selected tools, then ensures skill-bound tools are included.
+// Skills augment the available tools — they don't restrict them.
 func (e *Engine) getToolsForAgent(ctx context.Context, agentID, intent, workspaceID string) []provider.ToolDefinition {
-	// Try skill-based filtering first.
-	skills, err := e.Store.ListAgentSkills(agentID)
-	if err == nil && len(skills) > 0 {
-		// Build allowed tool set from skill bindings.
-		allowedTools := make(map[string]bool)
-		for _, sk := range skills {
-			var tools []string
-			if err := json.Unmarshal([]byte(sk.ToolBindings), &tools); err == nil {
-				for _, t := range tools {
-					allowedTools[t] = true
-				}
-			}
-		}
-
-		if len(allowedTools) > 0 {
-			// Get all tools and filter.
-			var allTools []provider.ToolDefinition
-			if e.ToolBroker != nil {
-				selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, intent, nil, workspaceID, agentID)
-				if err == nil {
-					allTools = selected
-				}
-			}
-			if len(allTools) == 0 && e.MCPManager != nil && e.MCPManager.HasTools() {
-				allTools = e.MCPManager.GetTools()
-			}
-
-			// Filter to only tools matching skill bindings.
-			filtered := make([]provider.ToolDefinition, 0)
-			for _, t := range allTools {
-				// Check both the full prefixed name and the base tool name.
-				baseName := t.Name
-				if parts := strings.SplitN(t.Name, "__", 3); len(parts) == 3 {
-					baseName = parts[2]
-				}
-				if allowedTools[t.Name] || allowedTools[baseName] {
-					filtered = append(filtered, t)
-				}
-			}
-
-			log.Printf("chat: skill-filtered tools for agent %s: %d/%d", agentID, len(filtered), len(allTools))
-			return filtered
-		}
-	}
-
-	// Fall back to ToolBroker or MCP Manager.
+	// Get all broker-selected tools.
+	var allTools []provider.ToolDefinition
 	if e.ToolBroker != nil {
 		selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, intent, nil, workspaceID, agentID)
 		if err != nil {
 			log.Printf("chat: tool broker selection failed: %v — falling back to MCP manager", err)
 		} else {
-			return selected
+			allTools = selected
 		}
 	}
-	if e.MCPManager != nil && e.MCPManager.HasTools() {
-		return e.MCPManager.GetTools()
+	if len(allTools) == 0 && e.MCPManager != nil && e.MCPManager.HasTools() {
+		allTools = e.MCPManager.GetTools()
 	}
-	return nil
+
+	log.Printf("chat: broker selected %d tools for agent %s", len(allTools), agentID)
+	return allTools
 }
 
 // handleWorkflowTrigger detects "/workflow <name>" messages and routes to the workflow engine.

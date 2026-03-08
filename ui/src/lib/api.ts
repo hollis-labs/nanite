@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, Skill, AgentSkill, PromptTemplate, AgentTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection } from './types'
 
 const API_BASE = '/api'
 
@@ -291,14 +291,14 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to delete skill: ${res.status}`)
   },
 
-  // Agent Skills
-  listAgentSkills: async (agentId: string): Promise<AgentSkill[]> => {
+  // Agent Skills (returns Skill[], not a join-table type)
+  listAgentSkills: async (agentId: string): Promise<Skill[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/skills`)
     if (!res.ok) throw new Error(`Failed to list agent skills: ${res.status}`)
     return res.json()
   },
 
-  assignSkillToAgent: async (agentId: string, data: { skill_id: string; config_override?: Record<string, unknown> }): Promise<AgentSkill> => {
+  assignSkillToAgent: async (agentId: string, data: { skill_id: string; config?: Record<string, unknown> }): Promise<Skill> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/skills`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -353,14 +353,14 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to delete prompt template: ${res.status}`)
   },
 
-  // Agent Templates
-  listAgentTemplates: async (agentId: string): Promise<AgentTemplate[]> => {
+  // Agent Templates (returns PromptTemplate[], not a join-table type)
+  listAgentTemplates: async (agentId: string): Promise<PromptTemplate[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`)
     if (!res.ok) throw new Error(`Failed to list agent templates: ${res.status}`)
     return res.json()
   },
 
-  assignTemplateToAgent: async (agentId: string, data: { template_id: string }): Promise<AgentTemplate> => {
+  assignTemplateToAgent: async (agentId: string, data: { template_id: string }): Promise<PromptTemplate> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

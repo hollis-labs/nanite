@@ -213,12 +213,12 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
   // Get available skills (not yet assigned to this agent)
   const availableSkills = allSkills.filter(skill =>
-    !agentSkills.some(agentSkill => agentSkill.skill_id === skill.id)
+    !agentSkills.some(s => s.id === skill.id)
   )
 
   // Get available templates (not yet assigned to this agent)
   const availableTemplates = allTemplates.filter(template =>
-    !agentTemplates.some(agentTemplate => agentTemplate.template_id === template.id)
+    !agentTemplates.some(t => t.id === template.id)
   )
 
   // Helper functions for templates
@@ -829,22 +829,22 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
             {agentSkills.length === 0 ? (
               <p className="text-zinc-500 text-center py-4">No skills assigned</p>
             ) : (
-              agentSkills.map((agentSkill) => (
+              agentSkills.map((skill) => (
                 <div
-                  key={agentSkill.id}
+                  key={skill.id}
                   className="bg-zinc-800 rounded-lg p-3 flex items-center justify-between"
                 >
                   <div>
-                    <h4 className="font-medium text-zinc-200">{agentSkill.skill_name}</h4>
+                    <h4 className="font-medium text-zinc-200">{skill.name}</h4>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs bg-zinc-700 text-zinc-300 px-2 py-1 rounded">
-                        {agentSkill.skill_category}
+                        {skill.category}
                       </span>
-                      <span className="text-xs text-zinc-400">{agentSkill.skill_slug}</span>
+                      <span className="text-xs text-zinc-400">{skill.slug}</span>
                     </div>
                   </div>
                   <Button
-                    onClick={() => handleRemoveSkill(agentSkill.skill_id)}
+                    onClick={() => handleRemoveSkill(skill.id)}
                     variant="ghost"
                     size="icon"
                     className="text-red-400 hover:text-red-300"
@@ -887,7 +887,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                             {skill.category}
                           </span>
                           <span className="text-xs text-zinc-400">
-                            {skill.tool_bindings.length} tool{skill.tool_bindings.length !== 1 ? 's' : ''}
+                            {JSON.parse(skill.tool_bindings || '[]').length} tool{JSON.parse(skill.tool_bindings || '[]').length !== 1 ? 's' : ''}
                           </span>
                           {skill.is_builtin && (
                             <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in skill" />
@@ -939,26 +939,26 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               // Sort by priority (descending)
               [...agentTemplates]
                 .sort((a, b) => b.priority - a.priority)
-                .map((agentTemplate) => (
+                .map((tmpl) => (
                   <div
-                    key={agentTemplate.id}
+                    key={tmpl.id}
                     className="bg-zinc-800 rounded-lg p-3 flex items-center justify-between"
                   >
                     <div>
-                      <h4 className="font-medium text-zinc-200">{agentTemplate.template_name}</h4>
+                      <h4 className="font-medium text-zinc-200">{tmpl.name}</h4>
                       <div className="flex items-center gap-2 mt-1">
-                        <div className={`w-3 h-3 rounded-full ${getScopeBadgeColor(agentTemplate.template_scope)}`} />
+                        <div className={`w-3 h-3 rounded-full ${getScopeBadgeColor(tmpl.scope)}`} />
                         <span className="text-xs text-zinc-300 capitalize">
-                          {agentTemplate.template_scope}
+                          {tmpl.scope}
                         </span>
-                        <span className="text-xs text-zinc-400">{agentTemplate.template_slug}</span>
+                        <span className="text-xs text-zinc-400">{tmpl.slug}</span>
                         <span className="text-xs bg-zinc-700 text-zinc-300 px-2 py-1 rounded">
-                          Priority: {agentTemplate.priority}
+                          Priority: {tmpl.priority}
                         </span>
                       </div>
                     </div>
                     <Button
-                      onClick={() => handleRemoveTemplate(agentTemplate.template_id)}
+                      onClick={() => handleRemoveTemplate(tmpl.id)}
                       variant="ghost"
                       size="icon"
                       className="text-red-400 hover:text-red-300"
@@ -1012,7 +1012,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                               Priority: {template.priority}
                             </span>
                             <span className="text-xs text-zinc-500">
-                              {template.variables.length} var{template.variables.length !== 1 ? 's' : ''}
+                              {JSON.parse(template.variables || '[]').length} var{JSON.parse(template.variables || '[]').length !== 1 ? 's' : ''}
                             </span>
                           </div>
                         </div>
@@ -1050,10 +1050,10 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 <div className="space-y-4">
                   {[...agentTemplates]
                     .sort((a, b) => b.priority - a.priority)
-                    .map((template) => (
-                      <div key={template.id} className="border-l-2 border-zinc-600 pl-3">
+                    .map((tmpl) => (
+                      <div key={tmpl.id} className="border-l-2 border-zinc-600 pl-3">
                         <div className="text-zinc-400 mb-1">
-                          # {template.template_name} ({template.template_scope}, priority: {template.priority})
+                          # {tmpl.name} ({tmpl.scope}, priority: {tmpl.priority})
                         </div>
                         <div className="text-zinc-300">
                           [Template body would be rendered here with variable substitution]

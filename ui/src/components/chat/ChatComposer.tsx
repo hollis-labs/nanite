@@ -26,7 +26,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         listItem: false,
       }),
       Placeholder.configure({
-        placeholder: 'Message Mentat... (Cmd+Enter to send, / for commands)',
+        placeholder: 'Message Mentat... (Enter to send, / for commands)',
       }),
       SlashCommandExtension.configure({
         suggestion: slashCommandSuggestion,
@@ -38,15 +38,18 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           'bg-transparent text-sm text-zinc-100 placeholder:text-zinc-600 outline-none min-h-[40px] max-h-[120px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm prose-invert',
       },
       handleKeyDown(_view, event) {
-        // Cmd+Enter (Mac) or Ctrl+Enter (Win/Linux) to send
-        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        if (event.key === 'Enter') {
+          // Cmd+Enter or Shift+Enter inserts newline
+          if (event.metaKey || event.ctrlKey || event.shiftKey) {
+            return false // let TipTap handle newline
+          }
+          // Plain Enter sends
           const text = editor?.getText().trim() ?? ''
           if (!text) return false
           event.preventDefault()
           handleSend()
           return true
         }
-        // Plain Enter inserts newline (default TipTap behavior)
         return false
       },
     },

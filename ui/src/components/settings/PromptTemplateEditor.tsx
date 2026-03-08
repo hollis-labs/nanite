@@ -15,6 +15,10 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import type { PromptTemplate, TemplateVariable } from '@/lib/types'
 
+function parseVariables(s: string): TemplateVariable[] {
+  try { return JSON.parse(s) } catch { return [] }
+}
+
 interface PromptTemplateEditorProps {}
 
 export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
@@ -66,22 +70,12 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
   })
 
   const handleCreateTemplate = useCallback((formData: FormData) => {
-    const variablesString = formData.get('variables') as string
-    let variables: TemplateVariable[] = []
-
-    try {
-      variables = variablesString ? JSON.parse(variablesString) : []
-    } catch (e) {
-      alert('Invalid JSON in variables field')
-      return
-    }
-
     const data = {
       name: formData.get('name') as string,
       slug: formData.get('slug') as string,
       scope: formData.get('scope') as 'system' | 'mode' | 'skill' | 'context',
-      template_body: formData.get('template_body') as string,
-      variables,
+      template: formData.get('template') as string,
+      variables: formData.get('variables') as string || '[]',
       priority: parseInt(formData.get('priority') as string) || 0,
     }
     createMutation.mutate(data)
@@ -89,23 +83,12 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
 
   const handleUpdateTemplate = useCallback((formData: FormData) => {
     if (!editingTemplate) return
-
-    const variablesString = formData.get('variables') as string
-    let variables: TemplateVariable[] = []
-
-    try {
-      variables = variablesString ? JSON.parse(variablesString) : []
-    } catch (e) {
-      alert('Invalid JSON in variables field')
-      return
-    }
-
     const data = {
       name: formData.get('name') as string,
       slug: formData.get('slug') as string,
       scope: formData.get('scope') as 'system' | 'mode' | 'skill' | 'context',
-      template_body: formData.get('template_body') as string,
-      variables,
+      template: formData.get('template') as string,
+      variables: formData.get('variables') as string || '[]',
       priority: parseInt(formData.get('priority') as string) || 0,
     }
     updateMutation.mutate({ id: editingTemplate.id, data })
@@ -114,10 +97,10 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
   const renderTemplatePreview = useMemo(() => {
     if (!templateDetail) return ''
 
-    let preview = templateDetail.template_body
+    let preview = templateDetail.template
 
     // Replace variables with sample values
-    templateDetail.variables.forEach(variable => {
+    parseVariables(templateDetail.variables).forEach(variable => {
       const placeholder = `{{${variable.name}}}`
       let value = previewVariables[variable.name] || variable.default || `[${variable.name}]`
 
@@ -194,7 +177,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                       <p className="text-sm text-zinc-400">{template.slug}</p>
                       <span className="text-xs text-zinc-500">Priority: {template.priority}</span>
                       <span className="text-xs text-zinc-500">
-                        {template.variables.length} variable{template.variables.length !== 1 ? 's' : ''}
+                        {parseVariables(template.variables).length} variable{parseVariables(template.variables).length !== 1 ? 's' : ''}
                       </span>
                     </div>
                   </div>
@@ -282,7 +265,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           <div>
             <label className="block text-sm font-medium text-zinc-300 mb-2">Template Body</label>
             <textarea
-              name="template_body"
+              name="template"
               required
               rows={12}
               className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
@@ -418,10 +401,10 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-2">Template Body</label>
               <textarea
-                name="template_body"
+                name="template"
                 required
                 rows={12}
-                defaultValue={template.template_body}
+                defaultValue={template.template}
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
               />
             </div>
@@ -433,7 +416,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               <textarea
                 name="variables"
                 rows={6}
-                defaultValue={JSON.stringify(template.variables, null, 2)}
+                defaultValue={template.variables}
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
               />
             </div>
@@ -534,12 +517,12 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               </div>
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Variables ({template.variables.length})</label>
-                {template.variables.length === 0 ? (
+                <label className="text-sm font-medium text-zinc-400">Variables ({parseVariables(template.variables).length})</label>
+                {parseVariables(template.variables).length === 0 ? (
                   <p className="text-zinc-500 text-sm">No variables defined</p>
                 ) : (
                   <div className="space-y-2 mt-1">
-                    {template.variables.map((variable, index) => (
+                    {parseVariables(template.variables).map((variable, index) => (
                       <div key={index} className="bg-zinc-900 rounded p-2 text-xs">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-mono text-zinc-300">{variable.name}</span>
@@ -563,7 +546,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               <div>
                 <label className="text-sm font-medium text-zinc-400">Template Body</label>
                 <pre className="text-xs text-zinc-300 bg-zinc-900 rounded p-2 mt-1 overflow-x-auto max-h-40 overflow-y-auto font-mono whitespace-pre-wrap">
-                  {template.template_body}
+                  {template.template}
                 </pre>
               </div>
             </div>
@@ -588,11 +571,11 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
             {showPreview && (
               <div className="space-y-3">
                 {/* Variable Inputs */}
-                {template.variables.length > 0 && (
+                {parseVariables(template.variables).length > 0 && (
                   <div className="bg-zinc-800 rounded-lg p-4">
                     <h4 className="font-medium text-zinc-200 mb-3">Sample Values</h4>
                     <div className="space-y-3">
-                      {template.variables.map((variable) => (
+                      {parseVariables(template.variables).map((variable) => (
                         <div key={variable.name}>
                           <label className="block text-sm text-zinc-400 mb-1">
                             {variable.name}

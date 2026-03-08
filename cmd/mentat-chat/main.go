@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	tiamatotel "github.com/hollis-labs/tiamat-otel"
 
 	"github.com/hollis-labs/mentat-chat/internal/api"
@@ -19,6 +20,7 @@ import (
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/server"
 	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat-chat/internal/toolbroker"
 	"github.com/hollis-labs/mentat-chat/internal/truncate"
 	"github.com/hollis-labs/mentat-chat/internal/workflow"
 	"github.com/hollis-labs/tiamat-tool-broker/broker"
@@ -41,6 +43,11 @@ func main() {
 }
 
 func cmdServe(args []string) {
+	// Load .env file if present (never overrides existing env vars).
+	if err := godotenv.Load(); err == nil {
+		log.Println("loaded .env file")
+	}
+
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
 	dbPath := fs.String("db", "./mentat-chat.db", "SQLite database path")
@@ -133,6 +140,10 @@ func cmdServe(args []string) {
 
 	engine.MCPManager = mcpManager
 
+	// Create tool broker for permission-checked tool access.
+	tb := toolbroker.New(mcpManager, s, nil)
+	engine.ToolBroker = tb
+
 	// Set up activity emitter to push events to Volon's GUI server.
 	engine.Activity = chat.NewActivityEmitter("")
 	log.Println("activity emitter initialized (target: Volon GUI server)")
@@ -175,6 +186,7 @@ func cmdServe(args []string) {
 	// Create API layer.
 	a := api.New(s, engine)
 	a.MCPManager = mcpManager
+	a.ToolBroker = tb
 	a.WorkflowLoader = wfLoader
 	a.WorkflowEngine = wfEngine
 

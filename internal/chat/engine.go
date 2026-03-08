@@ -382,6 +382,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		log.Printf("chat: prune after turn failed: %v", err)
 	}
 
+	// Record token usage.
+	if finalUsage != nil && (finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0) {
+		if err := e.Store.RecordUsage(sessionID, assistantMsgID, model, finalUsage.InputTokens, finalUsage.OutputTokens); err != nil {
+			log.Printf("chat: failed to record token usage: %v", err)
+		}
+	}
+
 	// Emit stream_end.
 	ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: finalUsage}
 

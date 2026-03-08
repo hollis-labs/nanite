@@ -90,6 +90,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Multi-agent group sessions
 	mux.HandleFunc("GET /api/sessions/{id}/agents", a.handleListSessionAgents)
 	mux.HandleFunc("POST /api/sessions/{id}/agents", a.handleAddSessionAgent)
+
+	// Token usage
+	mux.HandleFunc("GET /api/sessions/{id}/usage", a.handleGetSessionUsage)
+	mux.HandleFunc("GET /api/usage/summary", a.handleGetUsageSummary)
 }
 
 // jsonResp writes a JSON response with the given status code.

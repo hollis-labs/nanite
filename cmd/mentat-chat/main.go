@@ -106,6 +106,10 @@ func cmdServe(args []string) {
 	})
 	mcpManager.AddServer("dev", devTools)
 
+	// Register built-in general utility tools.
+	generalTools := mcp.NewGeneralToolsTransport()
+	mcpManager.AddServer("general", generalTools)
+
 	// Initialize the tool broker with default rules before discovery.
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
 

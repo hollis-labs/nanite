@@ -71,10 +71,10 @@ export function useChat(sessionId: string | null) {
       })
 
       es.addEventListener('tool_call', (e: MessageEvent) => {
-        const data: StreamEvent = JSON.parse(e.data as string)
+        const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string }
         if (data.tool) {
           addToolCall({
-            id: data.message_id || `tc-${Date.now()}`,
+            id: data.tool_id || data.message_id || `tc-${Date.now()}`,
             tool: data.tool,
             status: 'running',
           })
@@ -82,9 +82,10 @@ export function useChat(sessionId: string | null) {
       })
 
       es.addEventListener('tool_result', (e: MessageEvent) => {
-        const data: StreamEvent = JSON.parse(e.data as string)
-        if (data.message_id) {
-          updateToolCall(data.message_id, {
+        const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string }
+        const toolId = data.tool_id || data.message_id
+        if (toolId) {
+          updateToolCall(toolId, {
             status: data.error ? 'error' : 'done',
             summary: data.summary || data.error,
           })
@@ -110,17 +111,60 @@ export function useChat(sessionId: string | null) {
         eventSourceRef.current = null
       })
 
-      es.addEventListener('error', () => {
+      es.addEventListener('error', (e: MessageEvent) => {
+        // Custom SSE error event from the backend (has data).
+        if (e.data) {
+          try {
+            const data: StreamEvent = JSON.parse(e.data as string)
+            const errMsg = data.error || 'Unknown streaming error'
+            console.error('Stream error from backend:', errMsg)
+            accumulated += `\n\n**Error:** ${errMsg}`
+            appendStreamContent(`\n\n**Error:** ${errMsg}`)
+          } catch {
+            console.error('Stream error (unparseable):', e.data)
+          }
+        }
+        // Finalize the stream with whatever we have.
+        if (accumulated) {
+          const assistantMsg: Message = {
+            id: message_id,
+            session_id: sessionId,
+            agent_id: '',
+            role: 'assistant',
+            content: accumulated,
+            envelope: null,
+            metadata: '{}',
+            created_at: new Date().toISOString(),
+          }
+          setMessages(prev => [...prev, assistantMsg])
+        }
         clearStream()
         es.close()
         eventSourceRef.current = null
       })
 
-      // Also handle native EventSource errors
+      // Handle native EventSource connection errors (no data).
       es.onerror = () => {
-        clearStream()
-        es.close()
-        eventSourceRef.current = null
+        // Only handle if the custom error listener above didn't already fire.
+        if (eventSourceRef.current) {
+          console.error('SSE connection lost')
+          if (accumulated) {
+            const assistantMsg: Message = {
+              id: message_id,
+              session_id: sessionId,
+              agent_id: '',
+              role: 'assistant',
+              content: accumulated,
+              envelope: null,
+              metadata: '{}',
+              created_at: new Date().toISOString(),
+            }
+            setMessages(prev => [...prev, assistantMsg])
+          }
+          clearStream()
+          es.close()
+          eventSourceRef.current = null
+        }
       }
     } catch (err) {
       console.error('Send failed:', err)

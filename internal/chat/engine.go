@@ -185,11 +185,16 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Call provider with or without tools.
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
+			log.Printf("chat: tool-use iteration %d — %d tools, %d messages in context", iteration, len(tools), len(chatMessages))
 			provCh, err = prov.StreamChatWithTools(ctx, systemPrompt, chatMessages, model, tools)
 		} else {
 			provCh, err = prov.StreamChat(ctx, systemPrompt, chatMessages, model)
 		}
 		if err != nil {
+			log.Printf("chat: provider stream error on iteration %d: %v", iteration, err)
+			e.Store.LogEvent(sessionID, "provider_error", "error",
+				fmt.Sprintf("iteration %d: %v", iteration, err),
+				fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d}`, model, len(tools), len(chatMessages)))
 			ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("start stream: %v", err)}
 			return
 		}
@@ -247,11 +252,15 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			})
 		}
 		for _, tu := range toolUseBlocks {
+			input := tu.Input
+			if input == nil {
+				input = map[string]any{}
+			}
 			assistantBlocks = append(assistantBlocks, provider.ContentBlock{
 				Type:  "tool_use",
 				ID:    tu.ID,
 				Name:  tu.Name,
-				Input: tu.Input,
+				Input: &input,
 			})
 		}
 		chatMessages = append(chatMessages, provider.ChatMessage{
@@ -275,8 +284,12 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				if execErr != nil {
 					resultText = fmt.Sprintf("Error: %v", execErr)
 					log.Printf("chat: tool %s failed: %v", tu.Name, execErr)
+					e.Store.LogEvent(sessionID, "tool_error", "error",
+						fmt.Sprintf("%s: %v", tu.Name, execErr), "{}")
 				} else {
 					resultText = result
+					e.Store.LogEvent(sessionID, "tool_call", "tool",
+						tu.Name, fmt.Sprintf(`{"result_len":%d}`, len(result)))
 				}
 			} else {
 				resultText = "Error: no MCP manager configured"

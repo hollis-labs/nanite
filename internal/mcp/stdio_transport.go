@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // StdioTransport implements MCP over a subprocess stdin/stdout.
@@ -99,11 +100,36 @@ func (t *StdioTransport) call(ctx context.Context, method string, params any) (*
 		return nil, fmt.Errorf("write to stdin: %w", err)
 	}
 
-	// Read response line
-	line, err := t.stdout.ReadBytes('\n')
-	if err != nil {
+	// Read response line with timeout.
+	type readResult struct {
+		line []byte
+		err  error
+	}
+	readCh := make(chan readResult, 1)
+	go func() {
+		line, err := t.stdout.ReadBytes('\n')
+		readCh <- readResult{line, err}
+	}()
+
+	timeout := 30 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = time.Until(deadline)
+	}
+
+	var line []byte
+	select {
+	case res := <-readCh:
+		if res.err != nil {
+			t.started = false
+			return nil, fmt.Errorf("read from stdout: %w", res.err)
+		}
+		line = res.line
+	case <-time.After(timeout):
 		t.started = false
-		return nil, fmt.Errorf("read from stdout: %w", err)
+		return nil, fmt.Errorf("timeout waiting for response from %s after %s", t.command, timeout)
+	case <-ctx.Done():
+		t.started = false
+		return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
 
 	var rpcResp JSONRPCResponse

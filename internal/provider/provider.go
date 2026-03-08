@@ -17,14 +17,16 @@ type ToolUseBlock struct {
 }
 
 // ContentBlock represents a content block in a multi-block message.
+// NOTE: Input uses a pointer to distinguish "absent" from "empty object".
+// Anthropic requires the input field on tool_use blocks even when empty.
 type ContentBlock struct {
-	Type      string         `json:"type"`                    // text, tool_use, tool_result
-	Text      string         `json:"text,omitempty"`          // text block
-	ID        string         `json:"id,omitempty"`            // tool_use block ID
-	Name      string         `json:"name,omitempty"`          // tool_use tool name
-	Input     map[string]any `json:"input,omitempty"`         // tool_use input
-	ToolUseID string         `json:"tool_use_id,omitempty"`   // tool_result reference
-	Content   string         `json:"content,omitempty"`       // tool_result text
+	Type      string          `json:"type"`                    // text, tool_use, tool_result
+	Text      string          `json:"text,omitempty"`          // text block
+	ID        string          `json:"id,omitempty"`            // tool_use block ID
+	Name      string          `json:"name,omitempty"`          // tool_use tool name
+	Input     *map[string]any `json:"input,omitempty"`         // tool_use input (always set for tool_use blocks)
+	ToolUseID string          `json:"tool_use_id,omitempty"`   // tool_result reference
+	Content   string          `json:"content,omitempty"`       // tool_result text
 }
 
 // StreamEvent represents a single event from a streaming provider response.

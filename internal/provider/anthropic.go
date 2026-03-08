@@ -83,7 +83,7 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 
 	body := anthropicRequest{
 		Model:     model,
-		MaxTokens: 8192,
+		MaxTokens: 16384,
 		System:    systemPrompt,
 		Messages:  marshalMessages(messages),
 		Stream:    true,

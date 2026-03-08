@@ -81,25 +81,68 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 		log.Printf("mcp: discovered %d tools from %s", len(tools), name)
 	}
 
-	log.Printf("mcp: total %d tools from %d servers", totalTools, len(m.servers))
+	// Count how many will actually be exposed to the LLM.
+	var excluded int
+	for _, entry := range m.tools {
+		if m.isExcluded(entry.tool.Name) {
+			excluded++
+		}
+	}
+	log.Printf("mcp: total %d tools from %d servers (%d exposed to LLM, %d filtered)", totalTools, len(m.servers), totalTools-excluded, excluded)
 	return nil
 }
 
-// GetTools returns all available tools as provider.ToolDefinition slice.
-// Tool names are prefixed with "mcp__<server>__" to match Claude Code convention.
+// defaultExcludePatterns filters out tools that bloat the LLM context.
+// These tools are still callable via ExecuteTool but not advertised to the LLM.
+// The agent can discover them via list/search tools on each server.
+var defaultExcludePatterns = []string{
+	"hadron_bp_", // 70+ individual blueprint tools — use hadron_blueprints_list + hadron_run_enqueue instead
+}
+
+// GetTools returns available tools as provider.ToolDefinition slice, filtered
+// to exclude context-heavy patterns. Tool names are prefixed with "mcp__<server>__".
 func (m *Manager) GetTools() []provider.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	defs := make([]provider.ToolDefinition, len(m.tools))
-	for i, entry := range m.tools {
-		defs[i] = provider.ToolDefinition{
+	defs := make([]provider.ToolDefinition, 0, len(m.tools))
+	for _, entry := range m.tools {
+		if m.isExcluded(entry.tool.Name) {
+			continue
+		}
+		defs = append(defs, provider.ToolDefinition{
 			Name:        fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name),
 			Description: entry.tool.Description,
 			InputSchema: entry.tool.InputSchema,
-		}
+		})
 	}
 	return defs
+}
+
+// GetAllTools returns ALL tools including excluded ones. Used for diagnostics.
+func (m *Manager) GetAllTools() []provider.ToolDefinition {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	defs := make([]provider.ToolDefinition, 0, len(m.tools))
+	for _, entry := range m.tools {
+		defs = append(defs, provider.ToolDefinition{
+			Name:        fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name),
+			Description: entry.tool.Description,
+			InputSchema: entry.tool.InputSchema,
+		})
+	}
+	return defs
+}
+
+// isExcluded checks if a tool name matches any exclude pattern.
+func (m *Manager) isExcluded(name string) bool {
+	for _, pattern := range defaultExcludePatterns {
+		if strings.HasPrefix(name, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // ExecuteTool routes a tool call to the correct server and returns the result as text.

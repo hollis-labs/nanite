@@ -50,19 +50,31 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	data, err := migrationsFS.ReadFile("migrations/001_initial.sql")
-	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+	files := []string{
+		"migrations/001_initial.sql",
+		"migrations/002_add_session_tags.sql",
 	}
 
-	statements := strings.Split(string(data), ";")
-	for _, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
+	for _, f := range files {
+		data, err := migrationsFS.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", f, err)
 		}
-		if _, err := s.DB.Exec(stmt); err != nil {
-			return fmt.Errorf("exec migration statement: %w\nSQL: %s", err, stmt)
+
+		statements := strings.Split(string(data), ";")
+		for _, stmt := range statements {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if _, err := s.DB.Exec(stmt); err != nil {
+				// SQLite ALTER TABLE ADD COLUMN fails with "duplicate column"
+				// if the column already exists; treat as idempotent.
+				if strings.Contains(err.Error(), "duplicate column") {
+					continue
+				}
+				return fmt.Errorf("exec migration statement: %w\nSQL: %s", err, stmt)
+			}
 		}
 	}
 	return nil

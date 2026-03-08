@@ -446,6 +446,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	if session.Title == "" {
 		go e.autoTitle(sessionID, userContent, model)
 	}
+
+	// Auto-tags: generate tags after every response (overwrites previous).
+	go e.autoTags(sessionID, model)
 }
 
 // SendAgentMessage allows one agent session to send a message to another session.
@@ -519,5 +522,63 @@ func (e *Engine) autoTitle(sessionID, userContent, model string) {
 	sess.Title = title
 	if err := e.Store.UpdateSession(sess); err != nil {
 		log.Printf("chat: auto-title update failed: %v", err)
+	}
+}
+
+// autoTags generates 2-5 tags for a session based on recent messages.
+func (e *Engine) autoTags(sessionID, model string) {
+	prov, ok := e.Providers.Get("anthropic")
+	if !ok {
+		return
+	}
+
+	// Fetch last 10 messages for context.
+	msgs, err := e.Store.ListMessages(sessionID, 10)
+	if err != nil {
+		log.Printf("chat: auto-tags list messages failed: %v", err)
+		return
+	}
+	if len(msgs) < 2 {
+		return // Need at least a user+assistant exchange.
+	}
+
+	// Build a digest of the conversation.
+	var sb strings.Builder
+	for _, m := range msgs {
+		if m.Role == "user" || m.Role == "assistant" {
+			content := m.Content
+			if len(content) > 300 {
+				content = content[:300]
+			}
+			fmt.Fprintf(&sb, "%s: %s\n", m.Role, content)
+		}
+	}
+
+	prompt := "Generate 2-5 short tags (1-2 words each, lowercase) that describe this conversation's topics. Return ONLY a JSON array of strings, e.g. [\"go\",\"refactoring\",\"api design\"]. No explanation."
+	tagMsgs := []provider.ChatMessage{
+		{Role: "user", Content: sb.String()},
+	}
+
+	raw, err := prov.Complete(context.Background(), prompt, tagMsgs, model)
+	if err != nil {
+		log.Printf("chat: auto-tags generation failed: %v", err)
+		return
+	}
+
+	raw = strings.TrimSpace(raw)
+
+	// Validate it's a JSON array of strings.
+	var tags []string
+	if err := json.Unmarshal([]byte(raw), &tags); err != nil {
+		log.Printf("chat: auto-tags parse failed: %v (raw: %s)", err, raw)
+		return
+	}
+	if len(tags) == 0 || len(tags) > 5 {
+		return
+	}
+
+	tagsJSON, _ := json.Marshal(tags)
+	if err := e.Store.UpdateSessionTags(sessionID, string(tagsJSON)); err != nil {
+		log.Printf("chat: auto-tags update failed: %v", err)
 	}
 }

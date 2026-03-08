@@ -17,6 +17,7 @@ export interface Session {
   is_pinned: boolean
   sort_order: number
   message_count: number
+  tags: string
   last_activity: string
   created_at: string
 }

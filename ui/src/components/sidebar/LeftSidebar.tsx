@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Plus, Hash, Pin, PinOff, Loader2 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -166,47 +166,71 @@ function SessionItem({
   const [hovered, setHovered] = useState(false)
   const displayTitle = session.custom_name || session.title || `#${session.short_code}`
 
+  // Parse tags from JSON string.
+  const tags: string[] = useMemo(() => {
+    try {
+      const parsed = JSON.parse(session.tags || '[]')
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }, [session.tags])
+
   return (
     <button
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`w-full flex items-center gap-2 px-2 py-2 rounded-md text-sm text-left transition-colors group ${
+      className={`w-full flex flex-col gap-1 px-2 py-2 rounded-md text-sm text-left transition-colors group ${
         isActive
           ? 'bg-zinc-800/60 text-zinc-100'
           : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
       }`}
     >
-      <Hash className="w-3.5 h-3.5 shrink-0 opacity-50" />
-      <span className="truncate flex-1">{displayTitle}</span>
-      <div className="flex items-center gap-2 shrink-0">
-        {hovered && (
-          <span
-            role="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onTogglePin()
-            }}
-            className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
-            aria-label={session.is_pinned ? 'Unpin session' : 'Pin session'}
-          >
-            {session.is_pinned ? (
-              <PinOff className="w-3 h-3" />
-            ) : (
-              <Pin className="w-3 h-3" />
-            )}
+      <div className="flex items-center gap-2 w-full">
+        <Hash className="w-3.5 h-3.5 shrink-0 opacity-50" />
+        <span className="truncate flex-1">{displayTitle}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {hovered && (
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onTogglePin()
+              }}
+              className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+              aria-label={session.is_pinned ? 'Unpin session' : 'Pin session'}
+            >
+              {session.is_pinned ? (
+                <PinOff className="w-3 h-3" />
+              ) : (
+                <Pin className="w-3 h-3" />
+              )}
+            </span>
+          )}
+          {!hovered && session.is_pinned && (
+            <Pin className="w-3 h-3 text-zinc-600" />
+          )}
+          {session.message_count > 0 && (
+            <span className="text-xs text-zinc-600 tabular-nums">{session.message_count}</span>
+          )}
+          <span className="text-xs text-zinc-600">
+            {formatRelativeTime(session.last_activity)}
           </span>
-        )}
-        {!hovered && session.is_pinned && (
-          <Pin className="w-3 h-3 text-zinc-600" />
-        )}
-        {session.message_count > 0 && (
-          <span className="text-xs text-zinc-600 tabular-nums">{session.message_count}</span>
-        )}
-        <span className="text-xs text-zinc-600">
-          {formatRelativeTime(session.last_activity)}
-        </span>
+        </div>
       </div>
+      {tags.length > 0 && (
+        <div className="flex gap-1 flex-wrap pl-5">
+          {tags.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              className="text-[10px] px-1.5 py-0 rounded-full bg-zinc-800 text-zinc-500 leading-relaxed"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
     </button>
   )
 }

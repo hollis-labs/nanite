@@ -26,6 +26,7 @@ type Session struct {
 	IsPinned     bool   `json:"is_pinned"`
 	SortOrder    int    `json:"sort_order"`
 	MessageCount int    `json:"message_count"`
+	Tags         string `json:"tags"` // JSON array of strings, e.g. '["go","refactor"]'
 	Metadata     string `json:"metadata"`
 	LastActivity string `json:"last_activity"`
 	CreatedAt    string `json:"created_at"`
@@ -54,7 +55,8 @@ func (s *Store) ListSessions(workspaceID string) ([]Session, error) {
 		        COALESCE(context_type,''), COALESCE(context_id,''),
 		        COALESCE(provider,''), COALESCE(model,''),
 		        status, is_pinned, sort_order, message_count,
-		        COALESCE(metadata,'{}'), last_activity, created_at, updated_at
+		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
+		        last_activity, created_at, updated_at
 		 FROM sessions
 		 WHERE workspace_id = ?
 		 ORDER BY last_activity DESC`,
@@ -74,7 +76,7 @@ func (s *Store) ListSessions(workspaceID string) ([]Session, error) {
 			&sess.ContextType, &sess.ContextID,
 			&sess.Provider, &sess.Model,
 			&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
-			&sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
+			&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
@@ -92,7 +94,8 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		        COALESCE(context_type,''), COALESCE(context_id,''),
 		        COALESCE(provider,''), COALESCE(model,''),
 		        status, is_pinned, sort_order, message_count,
-		        COALESCE(metadata,'{}'), last_activity, created_at, updated_at
+		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
+		        last_activity, created_at, updated_at
 		 FROM sessions WHERE id = ?`, id,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
@@ -100,7 +103,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		&sess.ContextType, &sess.ContextID,
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
-		&sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
+		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", id, err)
@@ -161,6 +164,19 @@ func (s *Store) UpdateSession(sess *Session) error {
 		return fmt.Errorf("update session: %w", err)
 	}
 	sess.UpdatedAt = now
+	return nil
+}
+
+// UpdateSessionTags sets the tags JSON array on a session.
+func (s *Store) UpdateSessionTags(id, tagsJSON string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(
+		`UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ?`,
+		tagsJSON, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update session tags %s: %w", id, err)
+	}
 	return nil
 }
 

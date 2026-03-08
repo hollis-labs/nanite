@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hollis-labs/mentat-chat/internal/mcp"
@@ -16,6 +17,10 @@ import (
 
 // maxToolIterations prevents infinite tool-use loops.
 const maxToolIterations = 10
+
+// maxToolResultChars caps the size of a tool result sent back to the LLM.
+// Full results are still sent to the client UI via SSE; only the LLM context is truncated.
+const maxToolResultChars = 4000
 
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
@@ -185,7 +190,16 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Call provider with or without tools.
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
-			log.Printf("chat: tool-use iteration %d — %d tools, %d messages in context", iteration, len(tools), len(chatMessages))
+			// Estimate context size for debugging.
+			var contextChars int
+			for _, m := range chatMessages {
+				contextChars += len(m.Content)
+				for _, b := range m.ContentBlocks {
+					contextChars += len(b.Text) + len(b.Content)
+				}
+			}
+			contextChars += len(systemPrompt)
+			log.Printf("chat: tool-use iteration %d — %d tools, %d messages, ~%d context chars (~%d tokens)", iteration, len(tools), len(chatMessages), contextChars, contextChars/4)
 			provCh, err = prov.StreamChatWithTools(ctx, systemPrompt, chatMessages, model, tools)
 		} else {
 			provCh, err = prov.StreamChat(ctx, systemPrompt, chatMessages, model)
@@ -309,10 +323,16 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				Summary: summary,
 			}
 
+			// Truncate large results for the LLM context to control token usage.
+			llmResult := resultText
+			if len(llmResult) > maxToolResultChars {
+				llmResult = llmResult[:maxToolResultChars] + "\n\n[truncated — use a more specific query or tool to get full details]"
+			}
+
 			resultBlocks = append(resultBlocks, provider.ContentBlock{
 				Type:      "tool_result",
 				ToolUseID: tu.ID,
-				Content:   resultText,
+				Content:   llmResult,
 			})
 		}
 
@@ -321,6 +341,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			Role:          "user",
 			ContentBlocks: resultBlocks,
 		})
+
+		// Brief pause between iterations to avoid rate limit spikes.
+		if iteration > 0 {
+			time.Sleep(1 * time.Second)
+		}
 
 		// Loop back for the next provider call.
 	}

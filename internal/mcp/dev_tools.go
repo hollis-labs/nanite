@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // DevToolsTransport provides built-in developer tools (grep, read, write)
@@ -91,6 +93,19 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 				"required": []string{"path", "content"},
 			},
 		},
+		{
+			Name:        "dev_bash",
+			Description: "Execute a shell command. Captures stdout and stderr. Process is killed on timeout.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"command":     map[string]any{"type": "string", "description": "Shell command to execute"},
+					"working_dir": map[string]any{"type": "string", "description": "Working directory (must be in allowed paths, defaults to first allowed path)"},
+					"timeout":     map[string]any{"type": "integer", "description": "Timeout in seconds (default 30, max 120)"},
+				},
+				"required": []string{"command"},
+			},
+		},
 	}, nil
 }
 
@@ -103,6 +118,8 @@ func (d *DevToolsTransport) CallTool(_ context.Context, name string, args map[st
 		return d.callGrep(args)
 	case "dev_write":
 		return d.callWrite(args)
+	case "dev_bash":
+		return d.callBash(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -276,6 +293,53 @@ func (d *DevToolsTransport) callWrite(args map[string]any) (*ToolResult, error) 
 	}
 
 	return textResult(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
+}
+
+func (d *DevToolsTransport) callBash(args map[string]any) (*ToolResult, error) {
+	command, _ := args["command"].(string)
+	if command == "" {
+		return errorResult("command is required"), nil
+	}
+
+	workDir, _ := args["working_dir"].(string)
+	if workDir == "" {
+		if len(d.AllowedPaths) > 0 {
+			workDir = d.AllowedPaths[0]
+		}
+	} else {
+		if err := d.isAllowed(workDir); err != nil {
+			return errorResult(err.Error()), nil
+		}
+	}
+
+	timeout := intArg(args, "timeout", 30)
+	if timeout < 1 {
+		timeout = 1
+	}
+	if timeout > 120 {
+		timeout = 120
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = workDir
+
+	out, err := cmd.CombinedOutput()
+	output := string(out)
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return errorResult(fmt.Sprintf("command timed out after %ds\n%s", timeout, output)), nil
+	}
+	if err != nil {
+		return errorResult(fmt.Sprintf("exit error: %v\n%s", err, output)), nil
+	}
+
+	if output == "" {
+		output = "(no output)"
+	}
+	return textResult(output), nil
 }
 
 // --- helpers ---

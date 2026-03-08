@@ -6,6 +6,7 @@ import (
 
 	"github.com/hollis-labs/mentat-chat/internal/chat"
 	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat-chat/internal/toolbroker"
 	"github.com/hollis-labs/mentat-chat/internal/workflow"
 )
 
@@ -13,6 +14,7 @@ import (
 type API struct {
 	Store          *store.Store
 	Engine         *chat.Engine
+	ToolBroker     *toolbroker.ToolBroker
 	WorkflowLoader *workflow.Loader
 	WorkflowEngine *workflow.Engine
 }
@@ -94,6 +96,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Token usage
 	mux.HandleFunc("GET /api/sessions/{id}/usage", a.handleGetSessionUsage)
 	mux.HandleFunc("GET /api/usage/summary", a.handleGetUsageSummary)
+
+	// Tools (Tool Broker)
+	mux.HandleFunc("GET /api/tools", a.handleListTools)
+	mux.HandleFunc("GET /api/tools/servers", a.handleListToolServers)
+	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
+	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
 
 	// Templates
 	mux.HandleFunc("GET /api/templates", a.handleListTemplates)

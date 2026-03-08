@@ -237,6 +237,35 @@ func (m *Manager) HasTools() bool {
 	return len(m.tools) > 0
 }
 
+// ServerInfo describes an MCP server's status and tool count.
+type ServerInfo struct {
+	Name      string `json:"name"`
+	ToolCount int    `json:"tool_count"`
+	Connected bool   `json:"connected"`
+}
+
+// ListServers returns information about all registered MCP servers.
+func (m *Manager) ListServers() []ServerInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Count tools per server.
+	toolCounts := make(map[string]int)
+	for _, entry := range m.tools {
+		toolCounts[entry.serverName]++
+	}
+
+	infos := make([]ServerInfo, 0, len(m.servers))
+	for name := range m.servers {
+		infos = append(infos, ServerInfo{
+			Name:      name,
+			ToolCount: toolCounts[name],
+			Connected: true, // registered means connected
+		})
+	}
+	return infos
+}
+
 // Close shuts down all transports that implement io.Closer.
 func (m *Manager) Close() {
 	m.mu.Lock()

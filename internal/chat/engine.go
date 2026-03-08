@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/mentat-chat/internal/mcp"
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat-chat/internal/toolbroker"
 	"github.com/hollis-labs/mentat-chat/internal/truncate"
 )
 
@@ -50,6 +51,7 @@ type Engine struct {
 	Providers    *provider.Registry
 	Broker       *ContextBroker
 	MCPManager   *mcp.Manager
+	ToolBroker   *toolbroker.ToolBroker
 	Orchestrator *Orchestrator
 	Activity     *ActivityEmitter
 	streams      sync.Map // map[string]chan StreamEvent
@@ -192,10 +194,17 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		go e.Activity.EmitSessionStart(ctx, sessionID, agent.ID, model)
 	}
 
-	// Get available tools from MCP manager.
-	// TODO: detect intent from user message and call GetToolsForIntent
+	// Get available tools — prefer ToolBroker (intent-aware) over raw MCP Manager.
 	var tools []provider.ToolDefinition
-	if e.MCPManager != nil && e.MCPManager.HasTools() {
+	if e.ToolBroker != nil {
+		selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, userContent, nil, session.WorkspaceID, agentID)
+		if err != nil {
+			log.Printf("chat: tool broker selection failed: %v — falling back to MCP manager", err)
+		} else {
+			tools = selected
+		}
+	}
+	if len(tools) == 0 && e.MCPManager != nil && e.MCPManager.HasTools() {
 		tools = e.MCPManager.GetTools()
 	}
 
@@ -326,7 +335,30 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 			var resultText string
 			toolCtx, toolSpan := tiamatotel.ToolCallSpan(ctx, tu.Name)
-			if e.MCPManager != nil {
+			if e.ToolBroker != nil {
+				// Use ToolBroker for permission-checked execution.
+				result, execErr := e.ToolBroker.CallTool(toolCtx, agentID, tu.Name, tu.Input)
+				if execErr != nil {
+					resultText = fmt.Sprintf("Error: %v", execErr)
+					toolSpan.RecordError(execErr)
+					toolSpan.SetStatus(codes.Error, execErr.Error())
+					log.Printf("chat: tool %s failed: %v", tu.Name, execErr)
+					e.Store.LogEvent(sessionID, "tool_error", "error",
+						fmt.Sprintf("%s: %v", tu.Name, execErr), "{}")
+					if e.Activity != nil {
+						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, false, 0)
+					}
+				} else {
+					resultText = result
+					toolSpan.SetAttributes(attribute.Int("mentat.tool.result_len", len(result)))
+					e.Store.LogEvent(sessionID, "tool_call", "tool",
+						tu.Name, fmt.Sprintf(`{"result_len":%d,"agent_id":%q}`, len(result), agentID))
+					if e.Activity != nil {
+						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, true, len(result))
+					}
+				}
+			} else if e.MCPManager != nil {
+				// Fallback to direct MCP Manager (no permission checks).
 				result, execErr := e.MCPManager.ExecuteTool(toolCtx, tu.Name, tu.Input)
 				if execErr != nil {
 					resultText = fmt.Sprintf("Error: %v", execErr)
@@ -348,8 +380,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				}
 			} else {
-				resultText = "Error: no MCP manager configured"
-				toolSpan.SetStatus(codes.Error, "no MCP manager configured")
+				resultText = "Error: no tool broker or MCP manager configured"
+				toolSpan.SetStatus(codes.Error, "no tool broker or MCP manager configured")
 			}
 			toolSpan.End()
 

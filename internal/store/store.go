@@ -55,6 +55,7 @@ func (s *Store) migrate() error {
 		"migrations/002_add_session_tags.sql",
 		"migrations/003_add_templates.sql",
 		"migrations/004_add_skills.sql",
+		"migrations/005_add_prompt_templates.sql",
 	}
 
 	for _, f := range files {

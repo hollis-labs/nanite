@@ -1,0 +1,192 @@
+package api
+
+import (
+	"net/http"
+
+	"github.com/hollis-labs/mentat-chat/internal/store"
+)
+
+func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
+	skills, err := a.Store.ListSkills()
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, skills)
+}
+
+func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name         string `json:"name"`
+		Slug         string `json:"slug"`
+		Description  string `json:"description"`
+		Category     string `json:"category"`
+		ToolBindings string `json:"tool_bindings"`
+		InputSchema  string `json:"input_schema"`
+		Settings     string `json:"settings"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Name == "" || req.Slug == "" {
+		a.errorResp(w, http.StatusBadRequest, "name and slug are required")
+		return
+	}
+
+	sk := &store.Skill{
+		Name:         req.Name,
+		Slug:         req.Slug,
+		Description:  req.Description,
+		Category:     req.Category,
+		ToolBindings: req.ToolBindings,
+		InputSchema:  req.InputSchema,
+		Settings:     req.Settings,
+	}
+	if err := a.Store.CreateSkill(sk); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusCreated, sk)
+}
+
+func (a *API) handleGetSkill(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sk, err := a.Store.GetSkill(id)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sk == nil {
+		a.errorResp(w, http.StatusNotFound, "skill not found")
+		return
+	}
+	a.jsonResp(w, http.StatusOK, sk)
+}
+
+func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	existing, err := a.Store.GetSkill(id)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing == nil {
+		a.errorResp(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	var req struct {
+		Name         *string `json:"name"`
+		Slug         *string `json:"slug"`
+		Description  *string `json:"description"`
+		Category     *string `json:"category"`
+		ToolBindings *string `json:"tool_bindings"`
+		InputSchema  *string `json:"input_schema"`
+		Settings     *string `json:"settings"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	if req.Name != nil {
+		existing.Name = *req.Name
+	}
+	if req.Slug != nil {
+		existing.Slug = *req.Slug
+	}
+	if req.Description != nil {
+		existing.Description = *req.Description
+	}
+	if req.Category != nil {
+		existing.Category = *req.Category
+	}
+	if req.ToolBindings != nil {
+		existing.ToolBindings = *req.ToolBindings
+	}
+	if req.InputSchema != nil {
+		existing.InputSchema = *req.InputSchema
+	}
+	if req.Settings != nil {
+		existing.Settings = *req.Settings
+	}
+
+	if err := a.Store.UpdateSkill(existing); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, existing)
+}
+
+func (a *API) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := a.Store.DeleteSkill(id); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (a *API) handleListAgentSkills(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	skills, err := a.Store.ListAgentSkills(agentID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, skills)
+}
+
+func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+
+	var req struct {
+		SkillID string `json:"skill_id"`
+		Config  string `json:"config"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.SkillID == "" {
+		a.errorResp(w, http.StatusBadRequest, "skill_id is required")
+		return
+	}
+
+	// Verify agent exists.
+	if _, err := a.Store.GetAgent(agentID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	// Verify skill exists.
+	sk, err := a.Store.GetSkill(req.SkillID)
+	if err != nil || sk == nil {
+		a.errorResp(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	if err := a.Store.AssignSkillToAgent(agentID, req.SkillID, req.Config); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	skills, err := a.Store.ListAgentSkills(agentID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusCreated, skills)
+}
+
+func (a *API) handleRemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	skillID := r.PathValue("skillId")
+
+	if err := a.Store.RemoveSkillFromAgent(agentID, skillID); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
+}

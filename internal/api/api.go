@@ -103,6 +103,16 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
 	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
 
+	// Skills
+	mux.HandleFunc("GET /api/skills", a.handleListSkills)
+	mux.HandleFunc("POST /api/skills", a.handleCreateSkill)
+	mux.HandleFunc("GET /api/skills/{id}", a.handleGetSkill)
+	mux.HandleFunc("PUT /api/skills/{id}", a.handleUpdateSkill)
+	mux.HandleFunc("DELETE /api/skills/{id}", a.handleDeleteSkill)
+	mux.HandleFunc("GET /api/agents/{id}/skills", a.handleListAgentSkills)
+	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleAssignAgentSkill)
+	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRemoveAgentSkill)
+
 	// Templates
 	mux.HandleFunc("GET /api/templates", a.handleListTemplates)
 	mux.HandleFunc("POST /api/templates", a.handleCreateTemplate)

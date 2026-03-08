@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, Skill, AgentSkill, PromptTemplate, AgentTemplate } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, Skill, AgentSkill, PromptTemplate, AgentTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection } from './types'
 
 const API_BASE = '/api'
 
@@ -375,5 +375,36 @@ export const api = {
       method: 'DELETE',
     })
     if (!res.ok) throw new Error(`Failed to remove template from agent: ${res.status}`)
+  },
+
+  // Tools & MCP
+  fetchTools: async (): Promise<ToolDefinition[]> => {
+    const res = await fetch(`${API_BASE}/tools`)
+    if (!res.ok) throw new Error(`Failed to fetch tools: ${res.status}`)
+    return res.json()
+  },
+
+  fetchToolServers: async (): Promise<ServerInfo[]> => {
+    const res = await fetch(`${API_BASE}/tools/servers`)
+    if (!res.ok) throw new Error(`Failed to fetch tool servers: ${res.status}`)
+    return res.json()
+  },
+
+  refreshTools: async (): Promise<DiscoveryDiff> => {
+    const res = await fetch(`${API_BASE}/tools/refresh`, {
+      method: 'POST',
+    })
+    if (!res.ok) throw new Error(`Failed to refresh tools: ${res.status}`)
+    return res.json()
+  },
+
+  selectTools: async (intent: string): Promise<ToolSelection[]> => {
+    const res = await fetch(`${API_BASE}/tools/select`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intent }),
+    })
+    if (!res.ok) throw new Error(`Failed to select tools: ${res.status}`)
+    return res.json()
   },
 }

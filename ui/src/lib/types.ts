@@ -257,6 +257,32 @@ export interface ToolCall {
   summary?: string
 }
 
+// --- Tool Management ---
+
+export interface ToolDefinition {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+}
+
+export interface ServerInfo {
+  name: string
+  tool_count: number
+  connected: boolean
+}
+
+export interface DiscoveryDiff {
+  added: string[]
+  removed: string[]
+  total: number
+}
+
+export interface ToolSelection {
+  name: string
+  description: string
+  server?: string
+}
+
 // --- Skills ---
 
 export interface ToolBinding {

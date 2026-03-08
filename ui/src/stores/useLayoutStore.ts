@@ -6,6 +6,7 @@ interface LayoutState {
   rightRailOpen: boolean
   artifactsDrawerOpen: boolean
   workflowPanelOpen: boolean
+  currentPage: 'chat' | 'settings'
   toggleLeftSidebar: () => void
   toggleRightRail: () => void
   toggleArtifactsDrawer: () => void
@@ -14,6 +15,7 @@ interface LayoutState {
   setRightRail: (open: boolean) => void
   setArtifactsDrawer: (open: boolean) => void
   setWorkflowPanel: (open: boolean) => void
+  setCurrentPage: (page: 'chat' | 'settings') => void
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -23,6 +25,7 @@ export const useLayoutStore = create<LayoutState>()(
       rightRailOpen: true,
       artifactsDrawerOpen: false,
       workflowPanelOpen: false,
+      currentPage: 'chat',
       toggleLeftSidebar: () =>
         set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),
       toggleRightRail: () =>
@@ -35,6 +38,7 @@ export const useLayoutStore = create<LayoutState>()(
       setRightRail: (open) => set({ rightRailOpen: open }),
       setArtifactsDrawer: (open) => set({ artifactsDrawerOpen: open }),
       setWorkflowPanel: (open) => set({ workflowPanelOpen: open }),
+      setCurrentPage: (page) => set({ currentPage: page }),
     }),
     {
       name: 'mentat-chat-layout',

@@ -46,6 +46,34 @@ export interface Agent {
   can_execute: boolean
 }
 
+export interface AgentProfile {
+  id: string
+  name: string
+  slug: string
+  avatar: string
+  system_prompt: string
+  description: string
+  modes: string
+  default_mode: string
+  default_model: string
+  mcp_servers: string
+  tool_permissions: string
+  can_execute: boolean
+  settings: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentModeProfile {
+  id: string
+  agent_id: string
+  slug: string
+  name: string
+  prompt_addendum: string
+  tool_overrides: string
+  settings: string
+}
+
 export interface StreamEvent {
   type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result'
   content?: string
@@ -227,4 +255,70 @@ export interface ToolCall {
   tool: string
   status: 'running' | 'done' | 'error'
   summary?: string
+}
+
+// --- Skills ---
+
+export interface ToolBinding {
+  server: string
+  tool: string
+}
+
+export interface Skill {
+  id: string
+  name: string
+  slug: string
+  category: string
+  description: string
+  tool_bindings: ToolBinding[]
+  input_schema: Record<string, unknown> | null
+  is_builtin: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentSkill {
+  id: string
+  agent_id: string
+  skill_id: string
+  skill_name: string
+  skill_slug: string
+  skill_category: string
+  config_override: Record<string, unknown> | null
+  created_at: string
+}
+
+// --- Prompt Templates ---
+
+export interface TemplateVariable {
+  name: string
+  type: 'text' | 'textarea' | 'number' | 'boolean' | 'select'
+  required: boolean
+  default?: string | number | boolean
+  description?: string
+  options?: string[]
+}
+
+export interface PromptTemplate {
+  id: string
+  name: string
+  slug: string
+  scope: 'system' | 'mode' | 'skill' | 'context'
+  template_body: string
+  variables: TemplateVariable[]
+  priority: number
+  is_builtin: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentTemplate {
+  id: string
+  agent_id: string
+  template_id: string
+  template_name: string
+  template_slug: string
+  template_scope: string
+  priority: number
+  assigned_at: string
 }

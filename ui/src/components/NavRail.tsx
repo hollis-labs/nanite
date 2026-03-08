@@ -27,6 +27,8 @@ export function NavRail() {
   const toggleWorkflowPanel = useLayoutStore((s) => s.toggleWorkflowPanel)
   const workflowPanelOpen = useLayoutStore((s) => s.workflowPanelOpen)
   const setLeftSidebar = useLayoutStore((s) => s.setLeftSidebar)
+  const currentPage = useLayoutStore((s) => s.currentPage)
+  const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
   const queryClient = useQueryClient()
 
   const createSessionMutation = useMutation({
@@ -121,7 +123,10 @@ export function NavRail() {
 
       <div className="flex flex-col items-center gap-1 flex-1">
         {navItems.map(({ icon: Icon, label, id }) => {
-          const isActive = id === 'workflows' ? workflowPanelOpen : activeItem === id
+          const isActive = id === 'workflows' ? workflowPanelOpen :
+                          id === 'settings' ? currentPage === 'settings' :
+                          id === 'chat' ? currentPage === 'chat' :
+                          activeItem === id
           return (
             <Tooltip key={id} content={label} side="right">
               <Button
@@ -139,6 +144,12 @@ export function NavRail() {
                     if (activeWorkspaceId) createSessionMutation.mutate()
                   } else if (id === 'search') {
                     setLeftSidebar(true)
+                  } else if (id === 'settings') {
+                    setCurrentPage('settings')
+                    setActiveItem(id)
+                  } else if (id === 'chat') {
+                    setCurrentPage('chat')
+                    setActiveItem(id)
                   } else {
                     setActiveItem(id)
                   }

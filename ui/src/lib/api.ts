@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, Skill, AgentSkill, PromptTemplate, AgentTemplate } from './types'
 
 const API_BASE = '/api'
 
@@ -72,6 +72,68 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to list agents: ${res.status}`)
     return res.json()
   },
+
+  // Agent Profiles (management)
+  listAgentProfiles: async (): Promise<AgentProfile[]> => {
+    const res = await fetch(`${API_BASE}/agents`)
+    if (!res.ok) throw new Error(`Failed to list agent profiles: ${res.status}`)
+    return res.json()
+  },
+
+  getAgentProfile: async (id: string): Promise<{ agent: AgentProfile; modes: AgentModeProfile[] }> => {
+    const res = await fetch(`${API_BASE}/agents/${id}`)
+    if (!res.ok) throw new Error(`Failed to get agent profile: ${res.status}`)
+    return res.json()
+  },
+
+  createAgentProfile: async (data: Omit<AgentProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AgentProfile> => {
+    const res = await fetch(`${API_BASE}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to create agent profile: ${res.status}`)
+    return res.json()
+  },
+
+  updateAgentProfile: async (id: string, data: Partial<AgentProfile>): Promise<AgentProfile> => {
+    const res = await fetch(`${API_BASE}/agents/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to update agent profile: ${res.status}`)
+    return res.json()
+  },
+
+  // Note: DELETE agent endpoint not implemented in backend yet
+  // deleteAgentProfile: async (id: string): Promise<void> => {
+  //   const res = await fetch(`${API_BASE}/agents/${id}`, { method: 'DELETE' })
+  //   if (!res.ok) throw new Error(`Failed to delete agent profile: ${res.status}`)
+  // },
+
+  // Agent Modes
+  listAgentModes: async (agentId: string): Promise<AgentModeProfile[]> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/modes`)
+    if (!res.ok) throw new Error(`Failed to list agent modes: ${res.status}`)
+    return res.json()
+  },
+
+  createAgentMode: async (agentId: string, data: Omit<AgentModeProfile, 'id' | 'agent_id'>): Promise<AgentModeProfile> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/modes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to create agent mode: ${res.status}`)
+    return res.json()
+  },
+
+  // Note: DELETE mode endpoint not implemented in backend yet
+  // deleteAgentMode: async (agentId: string, modeId: string): Promise<void> => {
+  //   const res = await fetch(`${API_BASE}/agents/${agentId}/modes/${modeId}`, { method: 'DELETE' })
+  //   if (!res.ok) throw new Error(`Failed to delete agent mode: ${res.status}`)
+  // },
 
   // Mode
   switchMode: async (sessionId: string, mode: string): Promise<void> => {
@@ -189,5 +251,129 @@ export const api = {
     const res = await fetch(`${API_BASE}/usage/summary`)
     if (!res.ok) throw new Error(`Failed to get usage summary: ${res.status}`)
     return res.json()
+  },
+
+  // Skills
+  listSkills: async (): Promise<Skill[]> => {
+    const res = await fetch(`${API_BASE}/skills`)
+    if (!res.ok) throw new Error(`Failed to list skills: ${res.status}`)
+    return res.json()
+  },
+
+  getSkill: async (id: string): Promise<Skill> => {
+    const res = await fetch(`${API_BASE}/skills/${id}`)
+    if (!res.ok) throw new Error(`Failed to get skill: ${res.status}`)
+    return res.json()
+  },
+
+  createSkill: async (data: Omit<Skill, 'id' | 'created_at' | 'updated_at' | 'is_builtin'>): Promise<Skill> => {
+    const res = await fetch(`${API_BASE}/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to create skill: ${res.status}`)
+    return res.json()
+  },
+
+  updateSkill: async (id: string, data: Partial<Omit<Skill, 'id' | 'created_at' | 'updated_at' | 'is_builtin'>>): Promise<Skill> => {
+    const res = await fetch(`${API_BASE}/skills/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to update skill: ${res.status}`)
+    return res.json()
+  },
+
+  deleteSkill: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/skills/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to delete skill: ${res.status}`)
+  },
+
+  // Agent Skills
+  listAgentSkills: async (agentId: string): Promise<AgentSkill[]> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/skills`)
+    if (!res.ok) throw new Error(`Failed to list agent skills: ${res.status}`)
+    return res.json()
+  },
+
+  assignSkillToAgent: async (agentId: string, data: { skill_id: string; config_override?: Record<string, unknown> }): Promise<AgentSkill> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to assign skill to agent: ${res.status}`)
+    return res.json()
+  },
+
+  removeSkillFromAgent: async (agentId: string, skillId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/skills/${skillId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error(`Failed to remove skill from agent: ${res.status}`)
+  },
+
+  // Prompt Templates
+  listPromptTemplates: async (): Promise<PromptTemplate[]> => {
+    const res = await fetch(`${API_BASE}/prompt-templates`)
+    if (!res.ok) throw new Error(`Failed to list prompt templates: ${res.status}`)
+    return res.json()
+  },
+
+  getPromptTemplate: async (id: string): Promise<PromptTemplate> => {
+    const res = await fetch(`${API_BASE}/prompt-templates/${id}`)
+    if (!res.ok) throw new Error(`Failed to get prompt template: ${res.status}`)
+    return res.json()
+  },
+
+  createPromptTemplate: async (data: Omit<PromptTemplate, 'id' | 'created_at' | 'updated_at' | 'is_builtin'>): Promise<PromptTemplate> => {
+    const res = await fetch(`${API_BASE}/prompt-templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to create prompt template: ${res.status}`)
+    return res.json()
+  },
+
+  updatePromptTemplate: async (id: string, data: Partial<Omit<PromptTemplate, 'id' | 'created_at' | 'updated_at' | 'is_builtin'>>): Promise<PromptTemplate> => {
+    const res = await fetch(`${API_BASE}/prompt-templates/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to update prompt template: ${res.status}`)
+    return res.json()
+  },
+
+  deletePromptTemplate: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/prompt-templates/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to delete prompt template: ${res.status}`)
+  },
+
+  // Agent Templates
+  listAgentTemplates: async (agentId: string): Promise<AgentTemplate[]> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`)
+    if (!res.ok) throw new Error(`Failed to list agent templates: ${res.status}`)
+    return res.json()
+  },
+
+  assignTemplateToAgent: async (agentId: string, data: { template_id: string }): Promise<AgentTemplate> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to assign template to agent: ${res.status}`)
+    return res.json()
+  },
+
+  removeTemplateFromAgent: async (agentId: string, templateId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates/${templateId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error(`Failed to remove template from agent: ${res.status}`)
   },
 }

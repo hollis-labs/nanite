@@ -8,11 +8,14 @@ import { ArtifactsDrawer } from './drawers/ArtifactsDrawer'
 import { WorkflowPanel } from './workflows/WorkflowPanel'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useAppStore } from '@/stores/useAppStore'
+import { useLayoutStore } from '@/stores/useLayoutStore'
 import { api } from '@/lib/api'
+import SettingsPage from './settings/SettingsPage'
 
 export function AppShell() {
   const focusRef = useRef<(() => void) | null>(null)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
+  const currentPage = useLayoutStore((s) => s.currentPage)
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeWorkspaceId],
@@ -36,9 +39,13 @@ export function AppShell() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-zinc-950">
       <NavRail />
-      <LeftSidebar />
-      <ChatMain onEditorReady={handleEditorReady} />
-      <RightRail />
+      {currentPage === 'chat' && <LeftSidebar />}
+      {currentPage === 'chat' ? (
+        <ChatMain onEditorReady={handleEditorReady} />
+      ) : currentPage === 'settings' ? (
+        <SettingsPage />
+      ) : null}
+      {currentPage === 'chat' && <RightRail />}
       <ArtifactsDrawer />
       <WorkflowPanel />
     </div>

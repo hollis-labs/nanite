@@ -1,5 +1,6 @@
-project: mentat-chat
 version: 1
+project:
+  name: mentat
 role: volon-managed
 boot_profiles:
   - worker
@@ -17,3 +18,9 @@ write_paths:
 protected_paths:
   - .agentrc/state/
   - .agentrc/pcc/global/
+
+executor:
+  mode: direct
+  unsafe_mode: true
+  timeout_seconds: 600
+  max_agent_depth: 3

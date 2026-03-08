@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useChatStore } from '@/stores/useChatStore'
 import type { Message, StreamEvent } from '@/lib/types'
@@ -6,6 +7,8 @@ import type { Message, StreamEvent } from '@/lib/types'
 export function useChat(sessionId: string | null) {
   const [messages, setMessages] = useState<Message[]>([])
   const eventSourceRef = useRef<EventSource | null>(null)
+
+  const queryClient = useQueryClient()
 
   const isStreaming = useChatStore((s) => s.isStreaming)
   const streamingContent = useChatStore((s) => s.streamingContent)
@@ -109,6 +112,10 @@ export function useChat(sessionId: string | null) {
         clearStream()
         es.close()
         eventSourceRef.current = null
+
+        // Refresh widgets that depend on session usage data
+        void queryClient.invalidateQueries({ queryKey: ['session-usage', sessionId] })
+        void queryClient.invalidateQueries({ queryKey: ['session', sessionId] })
       })
 
       es.addEventListener('error', (e: MessageEvent) => {
@@ -170,7 +177,7 @@ export function useChat(sessionId: string | null) {
       console.error('Send failed:', err)
       clearStream()
     }
-  }, [sessionId, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls])
+  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls])
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {

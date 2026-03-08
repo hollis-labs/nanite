@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary } from './types'
 
 const API_BASE = '/api'
 
@@ -176,5 +176,12 @@ export const api = {
       method: 'DELETE',
     })
     if (!res.ok) throw new Error(`Failed to remove agent from session: ${res.status}`)
+  },
+
+  // Token Usage
+  getSessionUsage: async (sessionId: string): Promise<SessionUsageSummary> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/usage`)
+    if (!res.ok) throw new Error(`Failed to get session usage: ${res.status}`)
+    return res.json()
   },
 }

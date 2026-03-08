@@ -56,6 +56,16 @@ export interface StreamEvent {
   summary?: string
 }
 
+// --- Token Usage ---
+
+export interface SessionUsageSummary {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number
+  message_count: number
+}
+
 // --- Agent Modes ---
 
 export const AGENT_MODES = ['default', 'architect', 'planner', 'writer'] as const

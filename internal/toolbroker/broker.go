@@ -162,6 +162,43 @@ func (tb *ToolBroker) CheckPermission(agentID, toolName string) bool {
 	return perms.CheckPermission(toolName)
 }
 
+// ToolSummary is a lightweight tool description without the full schema.
+type ToolSummary struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Server      string `json:"server,omitempty"`
+}
+
+// ListToolSummaries returns name+description only for all registered tools (no InputSchema).
+func (tb *ToolBroker) ListToolSummaries() []ToolSummary {
+	allTools := tb.ListTools()
+	summaries := make([]ToolSummary, 0, len(allTools))
+	for _, t := range allTools {
+		summaries = append(summaries, ToolSummary{
+			Name:        t.Name,
+			Description: t.Description,
+		})
+	}
+	return summaries
+}
+
+// GetToolsByNames returns full tool definitions for the given names.
+func (tb *ToolBroker) GetToolsByNames(names []string) []provider.ToolDefinition {
+	allTools := tb.ListTools()
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
+	var result []provider.ToolDefinition
+	for _, t := range allTools {
+		if nameSet[t.Name] {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
 // ListTools returns all registered tools as provider.ToolDefinition.
 func (tb *ToolBroker) ListTools() []provider.ToolDefinition {
 	if tb.MCPManager == nil {

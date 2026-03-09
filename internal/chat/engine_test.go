@@ -6,6 +6,7 @@ import (
 
 	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat-chat/internal/toolbroker"
 )
 
 func newTestEngine(t *testing.T) *Engine {
@@ -91,6 +92,96 @@ func TestAssembleSystemPrompt(t *testing.T) {
 				t.Errorf("expected system prompt to contain %q, got: %s", tt.wantSub, result)
 			}
 		})
+	}
+}
+
+func TestBuildToolCatalog(t *testing.T) {
+	tests := []struct {
+		name      string
+		summaries []toolbroker.ToolSummary
+		wantEmpty bool
+		wantSub   string
+	}{
+		{
+			name:      "empty summaries",
+			summaries: nil,
+			wantEmpty: true,
+		},
+		{
+			name: "single tool",
+			summaries: []toolbroker.ToolSummary{
+				{Name: "search_files", Description: "Search for files by pattern"},
+			},
+			wantSub: "- search_files: Search for files by pattern",
+		},
+		{
+			name: "includes header",
+			summaries: []toolbroker.ToolSummary{
+				{Name: "tool_a", Description: "Does A"},
+			},
+			wantSub: "Available tools (use request_tools to get full details):",
+		},
+		{
+			name: "truncates long descriptions",
+			summaries: []toolbroker.ToolSummary{
+				{Name: "long_tool", Description: "This is a very long description that exceeds one hundred and twenty characters and should be truncated with an ellipsis at the end"},
+			},
+			wantSub: "...",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildToolCatalog(tt.summaries)
+			if tt.wantEmpty {
+				if result != "" {
+					t.Errorf("expected empty catalog, got %q", result)
+				}
+				return
+			}
+			if !containsStr(result, tt.wantSub) {
+				t.Errorf("expected catalog to contain %q, got:\n%s", tt.wantSub, result)
+			}
+		})
+	}
+}
+
+func TestRequestToolsDef_HasCorrectSchema(t *testing.T) {
+	if requestToolsDef.Name != "request_tools" {
+		t.Errorf("expected name=request_tools, got %s", requestToolsDef.Name)
+	}
+	if requestToolsDef.Description == "" {
+		t.Error("expected non-empty description")
+	}
+	if requestToolsDef.InputSchema == nil {
+		t.Fatal("expected non-nil InputSchema")
+	}
+
+	// Verify schema structure.
+	props, ok := requestToolsDef.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties in input schema")
+	}
+	toolNames, ok := props["tool_names"].(map[string]any)
+	if !ok {
+		t.Fatal("expected tool_names in properties")
+	}
+	if toolNames["type"] != "array" {
+		t.Errorf("expected tool_names type=array, got %v", toolNames["type"])
+	}
+
+	required, ok := requestToolsDef.InputSchema["required"].([]any)
+	if !ok {
+		t.Fatal("expected required field in schema")
+	}
+	if len(required) != 1 || required[0] != "tool_names" {
+		t.Errorf("expected required=[tool_names], got %v", required)
+	}
+}
+
+func TestProgressiveDiscoveryThreshold(t *testing.T) {
+	if ProgressiveDiscoveryThreshold != 20 {
+		t.Errorf("expected threshold=20, got %d", ProgressiveDiscoveryThreshold)
 	}
 }
 

@@ -25,6 +25,45 @@ import (
 // maxToolIterations prevents infinite tool-use loops.
 const maxToolIterations = 10
 
+// ProgressiveDiscoveryThreshold is the tool count above which progressive
+// discovery is used instead of sending all tool schemas to the LLM.
+const ProgressiveDiscoveryThreshold = 20
+
+// requestToolsDef is a meta-tool the LLM can call to request full schemas
+// for specific tools from the catalog.
+var requestToolsDef = provider.ToolDefinition{
+	Name:        "request_tools",
+	Description: "Request full schemas for specific tools by name. Call this when you need to use a tool from the catalog.",
+	InputSchema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"tool_names": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "List of tool names to load",
+			},
+		},
+		"required": []any{"tool_names"},
+	},
+}
+
+// buildToolCatalog formats tool summaries as a compact catalog string for
+// injection into the system prompt during progressive discovery.
+func buildToolCatalog(summaries []toolbroker.ToolSummary) string {
+	if len(summaries) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Available tools (use request_tools to get full details):\n")
+	for _, s := range summaries {
+		desc := s.Description
+		if len(desc) > 120 {
+			desc = desc[:120] + "..."
+		}
+		fmt.Fprintf(&sb, "- %s: %s\n", s.Name, desc)
+	}
+	return sb.String()
+}
 
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
@@ -217,8 +256,16 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 
 	// Get available tools — filter by agent's assigned skills, then ToolBroker, then MCP Manager.
-	var tools []provider.ToolDefinition
-	tools = e.getToolsForAgent(ctx, agentID, userContent, session.WorkspaceID)
+	selection := e.getToolsForAgent(ctx, agentID, userContent, session.WorkspaceID)
+	tools := selection.Tools
+
+	// If progressive discovery is active, inject the tool catalog into the system prompt.
+	if selection.Progressive && selection.Catalog != "" {
+		systemPrompt = systemPrompt + "\n\n" + selection.Catalog
+	}
+
+	// Track loaded tools for progressive discovery (tools loaded via request_tools).
+	loadedTools := make(map[string]bool)
 
 	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
@@ -345,6 +392,57 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Execute each tool and build tool_result blocks.
 		var resultBlocks []provider.ContentBlock
 		for _, tu := range toolUseBlocks {
+			// Handle request_tools meta-tool for progressive discovery.
+			if tu.Name == "request_tools" && selection.Progressive && e.ToolBroker != nil {
+				ch <- StreamEvent{
+					Type:   "tool_call",
+					Tool:   tu.Name,
+					ToolID: tu.ID,
+				}
+
+				var requestedNames []string
+				if names, ok := tu.Input["tool_names"]; ok {
+					if nameList, ok := names.([]any); ok {
+						for _, n := range nameList {
+							if s, ok := n.(string); ok {
+								requestedNames = append(requestedNames, s)
+							}
+						}
+					}
+				}
+
+				// Look up full tool definitions and add to the active tool set.
+				newTools := e.ToolBroker.GetToolsByNames(requestedNames)
+				var loaded []string
+				for _, nt := range newTools {
+					if !loadedTools[nt.Name] {
+						loadedTools[nt.Name] = true
+						tools = append(tools, nt)
+						loaded = append(loaded, nt.Name)
+					}
+				}
+
+				rtResult := fmt.Sprintf("Loaded %d tool(s): %s", len(loaded), strings.Join(loaded, ", "))
+				if len(loaded) == 0 && len(requestedNames) > 0 {
+					rtResult = fmt.Sprintf("No tools found matching: %s", strings.Join(requestedNames, ", "))
+				}
+				log.Printf("chat: request_tools loaded %d tools: %v", len(loaded), loaded)
+
+				ch <- StreamEvent{
+					Type:    "tool_result",
+					Tool:    tu.Name,
+					ToolID:  tu.ID,
+					Summary: rtResult,
+				}
+
+				resultBlocks = append(resultBlocks, provider.ContentBlock{
+					Type:      "tool_result",
+					ToolUseID: tu.ID,
+					Content:   rtResult,
+				})
+				continue
+			}
+
 			// Emit tool_call event to the client.
 			ch <- StreamEvent{
 				Type:   "tool_call",
@@ -703,10 +801,18 @@ func ExtractIntent(userMessage string) (intent string, hints []string) {
 	return intent, keywords
 }
 
+// toolSelection holds the result of tool selection, including progressive discovery info.
+type toolSelection struct {
+	Tools       []provider.ToolDefinition // tools to send to the LLM
+	Catalog     string                    // non-empty when progressive discovery is active
+	Progressive bool                      // true when using progressive discovery
+}
+
 // getToolsForAgent returns the tool list for an agent.
-// Starts with all broker-selected tools, then ensures skill-bound tools are included.
-// Skills augment the available tools — they don't restrict them.
-func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, workspaceID string) []provider.ToolDefinition {
+// When the total tool count exceeds ProgressiveDiscoveryThreshold, progressive
+// discovery is used: only the request_tools meta-tool is sent, and a compact
+// catalog is injected into the system prompt.
+func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, workspaceID string) toolSelection {
 	// Extract intent from user message instead of passing raw content or wildcard.
 	intent, hints := ExtractIntent(userMessage)
 	log.Printf("chat: extracted intent=%q hints=%v from user message", intent, hints)
@@ -735,7 +841,22 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 	} else {
 		log.Printf("chat: broker selected 0 tools for agent %s", agentID)
 	}
-	return allTools
+
+	// Check if progressive discovery should be used.
+	if len(allTools) > ProgressiveDiscoveryThreshold && e.ToolBroker != nil {
+		summaries := e.ToolBroker.ListToolSummaries()
+		catalog := buildToolCatalog(summaries)
+		log.Printf("chat: progressive discovery active — %d tools in catalog, sending request_tools meta-tool", len(summaries))
+		return toolSelection{
+			Tools:       []provider.ToolDefinition{requestToolsDef},
+			Catalog:     catalog,
+			Progressive: true,
+		}
+	}
+
+	return toolSelection{
+		Tools: allTools,
+	}
 }
 
 // handleWorkflowTrigger detects "/workflow <name>" messages and routes to the workflow engine.

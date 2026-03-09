@@ -148,6 +148,44 @@ func TestDefaultConfig_HasTokenBudget(t *testing.T) {
 	}
 }
 
+func TestListToolSummaries_ReturnsNameAndDescription(t *testing.T) {
+	cfg := DefaultConfig()
+	tb := New(nil, nil, cfg)
+
+	// ListToolSummaries with no MCP manager returns empty.
+	summaries := tb.ListToolSummaries()
+	if len(summaries) != 0 {
+		t.Errorf("expected 0 summaries without MCP manager, got %d", len(summaries))
+	}
+}
+
+func TestToolSummary_HasCorrectFields(t *testing.T) {
+	s := ToolSummary{
+		Name:        "test_tool",
+		Description: "A test tool",
+		Server:      "test-server",
+	}
+	if s.Name != "test_tool" {
+		t.Errorf("expected Name=test_tool, got %s", s.Name)
+	}
+	if s.Description != "A test tool" {
+		t.Errorf("expected Description='A test tool', got %s", s.Description)
+	}
+	if s.Server != "test-server" {
+		t.Errorf("expected Server=test-server, got %s", s.Server)
+	}
+}
+
+func TestGetToolsByNames_NoMCPManager(t *testing.T) {
+	cfg := DefaultConfig()
+	tb := New(nil, nil, cfg)
+
+	result := tb.GetToolsByNames([]string{"tool_a", "tool_b"})
+	if len(result) != 0 {
+		t.Errorf("expected 0 tools without MCP manager, got %d", len(result))
+	}
+}
+
 func TestConfig_RulesFor_MergesOverrides(t *testing.T) {
 	cfg := DefaultConfig()
 	baseCount := len(cfg.Rules)

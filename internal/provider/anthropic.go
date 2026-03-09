@@ -18,18 +18,21 @@ const anthropicAPI = "https://api.anthropic.com/v1/messages"
 
 // Anthropic implements the Provider interface for the Anthropic Messages API.
 type Anthropic struct {
-	apiKey   string
-	client   *http.Client
-	Retry    RetryConfig
-	OnStatus StatusCallback // optional; called during retries to report status
+	apiKey         string
+	client         *http.Client
+	Retry          RetryConfig
+	OnStatus       StatusCallback // optional; called during retries to report status
+	CircuitBreaker *CircuitBreaker
+	OnCircuitOpen  func() // called when the circuit breaker trips
 }
 
 // NewAnthropic creates a new Anthropic provider. It reads ANTHROPIC_API_KEY from the environment.
 func NewAnthropic() *Anthropic {
 	return &Anthropic{
-		apiKey: os.Getenv("ANTHROPIC_API_KEY"),
-		client: &http.Client{},
-		Retry:  DefaultRetryConfig(),
+		apiKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		client:         &http.Client{},
+		Retry:          DefaultRetryConfig(),
+		CircuitBreaker: NewCircuitBreaker(3),
 	}
 }
 
@@ -102,6 +105,11 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	// Check if the circuit breaker is open before attempting.
+	if a.CircuitBreaker != nil && a.CircuitBreaker.IsOpen() {
+		return nil, fmt.Errorf("circuit breaker open: provider rate limited after multiple retries")
+	}
+
 	// Retry loop with exponential backoff for rate limits and server errors.
 	var resp *http.Response
 	var lastErr error
@@ -120,6 +128,9 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		}
 
 		if resp.StatusCode == http.StatusOK {
+			if a.CircuitBreaker != nil {
+				a.CircuitBreaker.RecordSuccess()
+			}
 			break // success
 		}
 
@@ -134,6 +145,15 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		}
 
 		if !RetryableStatusCode(resp.StatusCode) || attempt == a.Retry.MaxRetries {
+			// Record failure on circuit breaker when retries are exhausted.
+			if a.CircuitBreaker != nil && attempt == a.Retry.MaxRetries {
+				if tripped := a.CircuitBreaker.RecordFailure(); tripped {
+					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					if a.OnCircuitOpen != nil {
+						a.OnCircuitOpen()
+					}
+				}
+			}
 			return nil, apiErr
 		}
 

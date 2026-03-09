@@ -53,6 +53,14 @@ export const api = {
     return res.json()
   },
 
+  retryStream: async (sessionId: string): Promise<{ message_id: string; stream_url: string }> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/retry`, {
+      method: 'POST',
+    })
+    if (!res.ok) throw new Error(`Failed to retry: ${res.status}`)
+    return res.json()
+  },
+
   getMessages: async (sessionId: string, limit = 50): Promise<Message[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?limit=${limit}`)
     if (!res.ok) throw new Error(`Failed to get messages: ${res.status}`)

@@ -40,6 +40,8 @@ export function useChat(sessionId: string | null) {
   const addChatError = useChatStore((s) => s.addChatError)
   const statusMessage = useChatStore((s) => s.statusMessage)
   const setStatusMessage = useChatStore((s) => s.setStatusMessage)
+  const circuitOpen = useChatStore((s) => s.circuitOpen)
+  const setCircuitOpen = useChatStore((s) => s.setCircuitOpen)
 
   const loadMessages = useCallback(async () => {
     if (!sessionId) {
@@ -123,6 +125,11 @@ export function useChat(sessionId: string | null) {
         if (data.content) {
           setStatusMessage(data.content)
         }
+      })
+
+      es.addEventListener('circuit_open', () => {
+        setCircuitOpen(true)
+        // Do NOT close the EventSource — keep it open for potential retry.
       })
 
       es.addEventListener('stream_end', (e: MessageEvent) => {
@@ -220,7 +227,7 @@ export function useChat(sessionId: string | null) {
       console.error('Send failed:', err)
       clearStream()
     }
-  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addChatError, setStatusMessage])
+  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addChatError, setStatusMessage, setCircuitOpen])
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {
@@ -230,5 +237,95 @@ export function useChat(sessionId: string | null) {
     clearStream()
   }, [clearStream])
 
-  return { messages, isStreaming, streamingContent, statusMessage, sendMessage, loadMessages, stopStreaming }
+  const retryStream = useCallback(async () => {
+    if (!sessionId) return
+    setCircuitOpen(false)
+
+    try {
+      const { message_id } = await api.retryStream(sessionId)
+
+      // Close old event source if still open.
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+      }
+
+      // Open a new SSE connection for the retry.
+      const es = new EventSource(`/api/stream/${message_id}`)
+      eventSourceRef.current = es
+      setStreaming(true)
+
+      es.addEventListener('delta', (e: MessageEvent) => {
+        const data: StreamEvent = JSON.parse(e.data as string)
+        if (data.content) {
+          appendStreamContent(data.content)
+          setStatusMessage(null)
+        }
+      })
+
+      es.addEventListener('stream_end', (e: MessageEvent) => {
+        const data: StreamEvent = JSON.parse(e.data as string)
+        const assistantMsg: Message = {
+          id: message_id,
+          session_id: sessionId,
+          agent_id: data.agent_id || '',
+          role: 'assistant',
+          content: useChatStore.getState().streamingContent,
+          envelope: null,
+          metadata: JSON.stringify(data.usage || {}),
+          created_at: new Date().toISOString(),
+        }
+        setMessages(prev => [...prev, assistantMsg])
+        clearStream()
+        es.close()
+        eventSourceRef.current = null
+      })
+
+      es.addEventListener('circuit_open', () => {
+        setCircuitOpen(true)
+      })
+
+      es.addEventListener('error', () => {
+        clearStream()
+        es.close()
+        eventSourceRef.current = null
+      })
+
+      es.onerror = () => {
+        if (eventSourceRef.current) {
+          clearStream()
+          es.close()
+          eventSourceRef.current = null
+        }
+      }
+    } catch (err) {
+      console.error('Retry failed:', err)
+      clearStream()
+    }
+  }, [sessionId, setCircuitOpen, setStreaming, appendStreamContent, setStatusMessage, clearStream])
+
+  const dismissCircuit = useCallback(() => {
+    setCircuitOpen(false)
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+    // Save partial content with interruption note.
+    const partial = useChatStore.getState().streamingContent
+    if (partial && sessionId) {
+      const msg: Message = {
+        id: `partial-${Date.now()}`,
+        session_id: sessionId,
+        agent_id: '',
+        role: 'assistant',
+        content: partial + '\n\n_(Response interrupted: provider rate limited)_',
+        envelope: null,
+        metadata: '{}',
+        created_at: new Date().toISOString(),
+      }
+      setMessages(prev => [...prev, msg])
+    }
+    clearStream()
+  }, [sessionId, setCircuitOpen, clearStream])
+
+  return { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sendMessage, loadMessages, stopStreaming, retryStream, dismissCircuit }
 }

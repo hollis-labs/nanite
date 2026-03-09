@@ -60,6 +60,25 @@ func (a *API) handleAgentMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *API) handleRetryStream(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		a.errorResp(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+
+	msgID, err := a.Engine.RetryLastMessage(sessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusAccepted, map[string]string{
+		"message_id": msgID,
+		"stream_url": fmt.Sprintf("/api/stream/%s", msgID),
+	})
+}
+
 func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("messageID")
 

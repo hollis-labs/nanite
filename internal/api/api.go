@@ -51,6 +51,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// SSE stream
 	mux.HandleFunc("GET /api/stream/{messageID}", a.handleStream)
 
+	// Retry (circuit breaker reset + re-generate)
+	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)
+
 	// Session mode switching
 	mux.HandleFunc("POST /api/sessions/{id}/mode", a.handleSwitchSessionMode)
 

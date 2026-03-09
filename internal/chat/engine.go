@@ -28,7 +28,7 @@ const maxToolIterations = 10
 
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
-	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status
+	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status, circuit_open
 	Content         string     `json:"content,omitempty"`
 	MessageID       string     `json:"message_id,omitempty"`
 	AgentID         string     `json:"agent_id,omitempty"`
@@ -195,10 +195,16 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		return
 	}
 
-	// Wire status callback for retry notifications.
+	// Wire status callback for retry notifications and circuit breaker.
 	if ap, ok := prov.(*provider.Anthropic); ok {
 		ap.OnStatus = func(message string) {
 			ch <- StreamEvent{Type: "status", Content: message}
+		}
+		ap.OnCircuitOpen = func() {
+			ch <- StreamEvent{
+				Type:    "circuit_open",
+				Content: "Provider rate limited after multiple retries. Would you like to keep trying?",
+			}
 		}
 	}
 
@@ -800,6 +806,45 @@ func (e *Engine) handleWorkflowTrigger(sessionID, content, userMsgID string) (st
 
 		ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID}
 	}()
+
+	return assistantMsgID, nil
+}
+
+// RetryLastMessage resets the circuit breaker and re-triggers generation for a session.
+// It finds the last user message and re-generates a response.
+func (e *Engine) RetryLastMessage(sessionID string) (string, error) {
+	// Reset the circuit breaker on the anthropic provider.
+	prov, ok := e.Providers.Get("anthropic")
+	if ok {
+		if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil {
+			ap.CircuitBreaker.Reset()
+			log.Printf("chat: circuit breaker reset for retry on session %s", sessionID)
+		}
+	}
+
+	// Find the last user message in this session.
+	allMsgs, err := e.Store.ListMessages(sessionID, 50)
+	if err != nil {
+		return "", fmt.Errorf("list messages for retry: %w", err)
+	}
+
+	var userContent string
+	for i := len(allMsgs) - 1; i >= 0; i-- {
+		if allMsgs[i].Role == "user" {
+			userContent = allMsgs[i].Content
+			break
+		}
+	}
+	if userContent == "" {
+		return "", fmt.Errorf("no user message found in session %s", sessionID)
+	}
+
+	// Create a new assistant message and stream channel.
+	assistantMsgID := uuid.New().String()
+	ch := make(chan StreamEvent, 128)
+	e.streams.Store(assistantMsgID, ch)
+
+	go e.generateResponse(context.Background(), sessionID, assistantMsgID, userContent, ch)
 
 	return assistantMsgID, nil
 }

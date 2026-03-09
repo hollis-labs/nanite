@@ -88,7 +88,7 @@ export interface ChatError {
 }
 
 export interface StreamEvent {
-  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result' | 'status'
+  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result' | 'status' | 'circuit_open'
   content?: string
   message_id?: string
   agent_id?: string

@@ -27,6 +27,10 @@ interface ChatState {
   dismissChatError: (id: string) => void
   clearChatErrors: () => void
 
+  // Circuit breaker
+  circuitOpen: boolean
+  setCircuitOpen: (open: boolean) => void
+
   // Mode
   activeMode: AgentMode
   setActiveMode: (mode: AgentMode) => void
@@ -71,6 +75,10 @@ export const useChatStore = create<ChatState>((set) => ({
       ),
     })),
   clearChatErrors: () => set({ chatErrors: [] }),
+
+  // Circuit breaker
+  circuitOpen: false,
+  setCircuitOpen: (open: boolean) => set({ circuitOpen: open }),
 
   // Mode
   activeMode: 'default' as AgentMode,

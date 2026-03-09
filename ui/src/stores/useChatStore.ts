@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ToolCall, AgentMode } from '@/lib/types'
+import type { ToolCall, AgentMode, ChatError } from '@/lib/types'
 
 interface ChatState {
   // Streaming
@@ -11,11 +11,21 @@ interface ChatState {
   appendStreamContent: (content: string) => void
   clearStream: () => void
 
+  // Status messages (transient, e.g. retry notifications)
+  statusMessage: string | null
+  setStatusMessage: (msg: string | null) => void
+
   // Tool calls
   toolCalls: ToolCall[]
   addToolCall: (tc: ToolCall) => void
   updateToolCall: (id: string, update: Partial<ToolCall>) => void
   clearToolCalls: () => void
+
+  // Chat errors
+  chatErrors: ChatError[]
+  addChatError: (error: ChatError) => void
+  dismissChatError: (id: string) => void
+  clearChatErrors: () => void
 
   // Mode
   activeMode: AgentMode
@@ -35,7 +45,11 @@ export const useChatStore = create<ChatState>((set) => ({
   setStreamingSessionId: (id) => set({ streamingSessionId: id }),
   appendStreamContent: (content) =>
     set((state) => ({ streamingContent: state.streamingContent + content })),
-  clearStream: () => set({ streamingContent: '', isStreaming: false, streamingSessionId: null }),
+  clearStream: () => set({ streamingContent: '', isStreaming: false, streamingSessionId: null, statusMessage: null }),
+
+  // Status messages
+  statusMessage: null,
+  setStatusMessage: (msg) => set({ statusMessage: msg }),
 
   // Tool calls
   toolCalls: [],
@@ -46,11 +60,23 @@ export const useChatStore = create<ChatState>((set) => ({
     })),
   clearToolCalls: () => set({ toolCalls: [] }),
 
+  // Chat errors
+  chatErrors: [],
+  addChatError: (error: ChatError) =>
+    set((state: ChatState) => ({ chatErrors: [...state.chatErrors, error] })),
+  dismissChatError: (id: string) =>
+    set((state: ChatState) => ({
+      chatErrors: state.chatErrors.map((e: ChatError) =>
+        e.id === id ? { ...e, dismissed: true } : e
+      ),
+    })),
+  clearChatErrors: () => set({ chatErrors: [] }),
+
   // Mode
-  activeMode: 'default',
-  setActiveMode: (mode) => set({ activeMode: mode }),
+  activeMode: 'default' as AgentMode,
+  setActiveMode: (mode: AgentMode) => set({ activeMode: mode }),
 
   // Model
   activeModel: 'claude-sonnet-4-20250514',
-  setActiveModel: (model) => set({ activeModel: model }),
+  setActiveModel: (model: string) => set({ activeModel: model }),
 }))

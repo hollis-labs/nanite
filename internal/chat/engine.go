@@ -28,15 +28,16 @@ const maxToolIterations = 10
 
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
-	Type      string `json:"type"`                 // stream_start, delta, stream_end, error, tool_call, tool_result
-	Content   string `json:"content,omitempty"`
-	MessageID string `json:"message_id,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
-	Usage     *Usage `json:"usage,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Tool      string `json:"tool,omitempty"`      // tool name for tool_call/tool_result
-	ToolID    string `json:"tool_id,omitempty"`    // tool_use_id
-	Summary   string `json:"summary,omitempty"`    // tool result summary
+	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status
+	Content         string     `json:"content,omitempty"`
+	MessageID       string     `json:"message_id,omitempty"`
+	AgentID         string     `json:"agent_id,omitempty"`
+	Usage           *Usage     `json:"usage,omitempty"`
+	Error           string     `json:"error,omitempty"`
+	StructuredError *ChatError `json:"structured_error,omitempty"`
+	Tool            string     `json:"tool,omitempty"`              // tool name for tool_call/tool_result
+	ToolID          string     `json:"tool_id,omitempty"`           // tool_use_id
+	Summary         string     `json:"summary,omitempty"`           // tool result summary
 }
 
 // Usage contains token usage for a completed response.
@@ -125,7 +126,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Load session.
 	session, err := e.Store.GetSession(sessionID)
 	if err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("load session: %v", err)}
+		ch <- errorEvent(ErrorCodeInternal, "Failed to load session", map[string]interface{}{"raw": err.Error()})
 		return
 	}
 
@@ -150,7 +151,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Fallback to slug lookup for backwards compatibility.
 		agent, err = e.Store.GetAgentBySlug("mentat")
 		if err != nil {
-			ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("load agent: %v", err)}
+			ch <- errorEvent(ErrorCodeInternal, "Failed to load agent", map[string]interface{}{"raw": err.Error()})
 			return
 		}
 	}
@@ -174,7 +175,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Assemble context via broker.
 	systemPrompt, chatMessages, err := e.Broker.AssembleContext(session, agent, mode, workspace)
 	if err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("assemble context: %v", err)}
+		ch <- errorEvent(ErrorCodeInternal, "Failed to assemble context", map[string]interface{}{"raw": err.Error()})
 		return
 	}
 
@@ -190,8 +191,15 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Get provider.
 	prov, ok := e.Providers.Get("anthropic")
 	if !ok {
-		ch <- StreamEvent{Type: "error", Error: "anthropic provider not registered"}
+		ch <- errorEvent(ErrorCodeProviderError, "Anthropic provider not registered", map[string]interface{}{"raw": "anthropic provider not registered"})
 		return
+	}
+
+	// Wire status callback for retry notifications.
+	if ap, ok := prov.(*provider.Anthropic); ok {
+		ap.OnStatus = func(message string) {
+			ch <- StreamEvent{Type: "status", Content: message}
+		}
 	}
 
 	// Emit stream_start.
@@ -246,7 +254,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			if e.Activity != nil {
 				go e.Activity.EmitError(ctx, sessionID, "provider_error", err.Error())
 			}
-			ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("start stream: %v", err)}
+			ch <- errorEvent(classifyError(err), "Provider streaming failed", map[string]interface{}{
+				"raw":   err.Error(),
+				"model": model,
+				"tools": len(tools),
+			})
 			return
 		}
 
@@ -282,7 +294,10 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				}
 			case "error":
-				ch <- StreamEvent{Type: "error", Error: evt.Error}
+				ch <- errorEvent(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", map[string]interface{}{
+					"raw":   evt.Error,
+					"model": model,
+				})
 				return
 			case "done":
 				// Will handle below.
@@ -451,7 +466,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 	if err := e.Store.CreateMessage(assistantMsg); err != nil {
 		log.Printf("chat: failed to save assistant message: %v", err)
-		ch <- StreamEvent{Type: "error", Error: "failed to save response"}
+		ch <- errorEvent(ErrorCodeInternal, "Failed to save response", map[string]interface{}{"raw": err.Error()})
 		return
 	}
 
@@ -616,14 +631,84 @@ func (e *Engine) autoTags(sessionID, model string) {
 	}
 }
 
+// intentStopWords are common words filtered out during intent extraction.
+var intentStopWords = map[string]bool{
+	"a": true, "an": true, "the": true, "is": true, "are": true, "was": true,
+	"were": true, "be": true, "been": true, "being": true, "have": true,
+	"has": true, "had": true, "do": true, "does": true, "did": true,
+	"will": true, "would": true, "could": true, "should": true, "may": true,
+	"might": true, "shall": true, "can": true, "to": true, "of": true,
+	"in": true, "for": true, "on": true, "with": true, "at": true,
+	"by": true, "from": true, "as": true, "into": true, "about": true,
+	"that": true, "this": true, "it": true, "its": true, "i": true,
+	"me": true, "my": true, "we": true, "our": true, "you": true,
+	"your": true, "he": true, "she": true, "they": true, "them": true,
+	"and": true, "or": true, "but": true, "not": true, "no": true,
+	"if": true, "then": true, "so": true, "just": true, "also": true,
+	"very": true, "too": true, "some": true, "any": true, "all": true,
+	"what": true, "how": true, "when": true, "where": true, "which": true,
+	"who": true, "why": true, "please": true, "thanks": true, "hi": true,
+	"hello": true, "hey": true, "like": true, "want": true, "need": true,
+	"thing": true, "things": true, "make": true, "let": true, "get": true,
+}
+
+// ExtractIntent derives an intent string and keyword hints from a user message.
+// It extracts meaningful words (skipping stop words and short tokens) and
+// returns a short intent phrase plus up to 10 keyword hints.
+func ExtractIntent(userMessage string) (intent string, hints []string) {
+	// Normalize: lowercase, replace common punctuation with spaces.
+	msg := strings.ToLower(userMessage)
+	for _, ch := range []string{",", ".", "!", "?", ";", ":", "'", "\"", "(", ")", "[", "]", "{", "}", "\n", "\t"} {
+		msg = strings.ReplaceAll(msg, ch, " ")
+	}
+
+	words := strings.Fields(msg)
+	seen := make(map[string]bool)
+	var keywords []string
+
+	for _, w := range words {
+		if len(w) < 3 {
+			continue
+		}
+		if intentStopWords[w] {
+			continue
+		}
+		if seen[w] {
+			continue
+		}
+		seen[w] = true
+		keywords = append(keywords, w)
+		if len(keywords) >= 10 {
+			break
+		}
+	}
+
+	if len(keywords) == 0 {
+		return "general", nil
+	}
+
+	// Build a short intent from the first 3 keywords.
+	intentWords := keywords
+	if len(intentWords) > 3 {
+		intentWords = intentWords[:3]
+	}
+	intent = strings.Join(intentWords, " ")
+
+	return intent, keywords
+}
+
 // getToolsForAgent returns the tool list for an agent.
 // Starts with all broker-selected tools, then ensures skill-bound tools are included.
 // Skills augment the available tools — they don't restrict them.
-func (e *Engine) getToolsForAgent(ctx context.Context, agentID, intent, workspaceID string) []provider.ToolDefinition {
+func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, workspaceID string) []provider.ToolDefinition {
+	// Extract intent from user message instead of passing raw content or wildcard.
+	intent, hints := ExtractIntent(userMessage)
+	log.Printf("chat: extracted intent=%q hints=%v from user message", intent, hints)
+
 	// Get all broker-selected tools.
 	var allTools []provider.ToolDefinition
 	if e.ToolBroker != nil {
-		selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, intent, nil, workspaceID, agentID)
+		selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
 		if err != nil {
 			log.Printf("chat: tool broker selection failed: %v — falling back to MCP manager", err)
 		} else {
@@ -634,7 +719,16 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, intent, workspac
 		allTools = e.MCPManager.GetTools()
 	}
 
-	log.Printf("chat: broker selected %d tools for agent %s", len(allTools), agentID)
+	// Log tool token usage for observability (actual pruning happens in the broker).
+	if len(allTools) > 0 {
+		toolChars := 0
+		for _, t := range allTools {
+			toolChars += len(t.Name) + len(t.Description)
+		}
+		log.Printf("chat: broker selected %d tools for agent %s (~%d tool tokens)", len(allTools), agentID, toolChars/4)
+	} else {
+		log.Printf("chat: broker selected 0 tools for agent %s", agentID)
+	}
 	return allTools
 }
 
@@ -682,7 +776,10 @@ func (e *Engine) handleWorkflowTrigger(sessionID, content, userMsgID string) (st
 
 		result, err := e.WorkflowEngine.Execute(context.Background(), def, inputs)
 		if err != nil {
-			ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("workflow error: %v", err)}
+			ch <- errorEvent(ErrorCodeInternal, "Workflow execution failed", map[string]interface{}{
+				"raw":      err.Error(),
+				"workflow": wfName,
+			})
 			return
 		}
 

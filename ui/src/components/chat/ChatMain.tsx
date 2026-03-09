@@ -11,7 +11,7 @@ interface ChatMainProps {
 
 export function ChatMain({ onEditorReady }: ChatMainProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const { messages, isStreaming, streamingContent, sendMessage, stopStreaming } =
+  const { messages, isStreaming, streamingContent, statusMessage, sendMessage, stopStreaming } =
     useChat(activeSessionId)
 
   if (!activeSessionId) {
@@ -32,6 +32,11 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
         isStreaming={isStreaming}
         streamingContent={streamingContent}
       />
+      {statusMessage && (
+        <div className="px-4 py-1.5 text-xs text-amber-400 bg-amber-950/30 border-t border-amber-900/40 animate-pulse">
+          {statusMessage}
+        </div>
+      )}
       <ChatComposer
         onSend={sendMessage}
         isStreaming={isStreaming}

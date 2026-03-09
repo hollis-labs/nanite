@@ -94,6 +94,83 @@ func TestAssembleSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestExtractIntent(t *testing.T) {
+	tests := []struct {
+		name       string
+		message    string
+		wantIntent string
+		wantHints  int // minimum number of hints expected
+	}{
+		{
+			name:       "simple code request",
+			message:    "Please search for files matching the pattern",
+			wantIntent: "search files matching",
+			wantHints:  3,
+		},
+		{
+			name:       "empty message returns general",
+			message:    "",
+			wantIntent: "general",
+			wantHints:  0,
+		},
+		{
+			name:       "only stop words returns general",
+			message:    "hi, I would just to",
+			wantIntent: "general",
+			wantHints:  0,
+		},
+		{
+			name:       "filters short words",
+			message:    "go to the file and read it",
+			wantIntent: "file read",
+			wantHints:  2,
+		},
+		{
+			name:       "deduplicates keywords",
+			message:    "search search search for files",
+			wantIntent: "search files",
+			wantHints:  2,
+		},
+		{
+			name:       "limits to 10 hints",
+			message:    "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november",
+			wantIntent: "alpha bravo charlie",
+			wantHints:  10,
+		},
+		{
+			name:       "strips punctuation",
+			message:    "What's the database schema? Check the migrations!",
+			wantIntent: "database schema check",
+			wantHints:  3,
+		},
+		{
+			name:       "never returns wildcard",
+			message:    "* do something",
+			wantIntent: "something",
+			wantHints:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			intent, hints := ExtractIntent(tt.message)
+
+			if intent != tt.wantIntent {
+				t.Errorf("intent = %q, want %q", intent, tt.wantIntent)
+			}
+
+			if len(hints) < tt.wantHints {
+				t.Errorf("got %d hints, want at least %d (hints: %v)", len(hints), tt.wantHints, hints)
+			}
+
+			// Verify intent is never wildcard or empty.
+			if intent == "*" || intent == "" {
+				t.Errorf("intent must never be wildcard or empty, got %q", intent)
+			}
+		})
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || findSubstring(s, sub))
 }

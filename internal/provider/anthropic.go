@@ -7,17 +7,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 const anthropicAPI = "https://api.anthropic.com/v1/messages"
 
 // Anthropic implements the Provider interface for the Anthropic Messages API.
 type Anthropic struct {
-	apiKey string
-	client *http.Client
+	apiKey   string
+	client   *http.Client
+	Retry    RetryConfig
+	OnStatus StatusCallback // optional; called during retries to report status
 }
 
 // NewAnthropic creates a new Anthropic provider. It reads ANTHROPIC_API_KEY from the environment.
@@ -25,6 +29,7 @@ func NewAnthropic() *Anthropic {
 	return &Anthropic{
 		apiKey: os.Getenv("ANTHROPIC_API_KEY"),
 		client: &http.Client{},
+		Retry:  DefaultRetryConfig(),
 	}
 }
 
@@ -97,24 +102,60 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", anthropicAPI, bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", a.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
+	// Retry loop with exponential backoff for rate limits and server errors.
+	var resp *http.Response
+	var lastErr error
+	for attempt := 0; attempt <= a.Retry.MaxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", anthropicAPI, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-api-key", a.apiKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
+		resp, err = a.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("send request: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			break // success
+		}
+
+		// Read the error body.
 		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("anthropic API error %d: %s", resp.StatusCode, string(errBody))
+		resp.Body.Close()
+
+		apiErr := &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    string(errBody),
+			RetryAfter: ParseRetryAfter(resp.Header.Get("Retry-After")),
+		}
+
+		if !RetryableStatusCode(resp.StatusCode) || attempt == a.Retry.MaxRetries {
+			return nil, apiErr
+		}
+
+		// Calculate delay.
+		delay := a.Retry.BackoffDelay(attempt, apiErr.RetryAfter)
+		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
+			resp.StatusCode, attempt+1, a.Retry.MaxRetries, delay)
+
+		if a.OnStatus != nil {
+			a.OnStatus(fmt.Sprintf("Rate limited, retrying in %s... (attempt %d/%d)",
+				delay.Round(time.Millisecond), attempt+1, a.Retry.MaxRetries))
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+		case <-time.After(delay):
+		}
+
+		lastErr = apiErr
 	}
+	_ = lastErr
 
 	ch := make(chan StreamEvent, 64)
 	go a.readSSE(ctx, resp.Body, ch)
@@ -317,24 +358,50 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", anthropicAPI, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", a.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
+	// Retry loop with exponential backoff for rate limits and server errors.
+	var resp *http.Response
+	for attempt := 0; attempt <= a.Retry.MaxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", anthropicAPI, bytes.NewReader(payload))
+		if err != nil {
+			return "", fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-api-key", a.apiKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
 
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		resp, err = a.client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("send request: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			break // success — fall through to decode
+		}
+
+		errBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		apiErr := &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    string(errBody),
+			RetryAfter: ParseRetryAfter(resp.Header.Get("Retry-After")),
+		}
+
+		if !RetryableStatusCode(resp.StatusCode) || attempt == a.Retry.MaxRetries {
+			return "", apiErr
+		}
+
+		delay := a.Retry.BackoffDelay(attempt, apiErr.RetryAfter)
+		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
+			resp.StatusCode, attempt+1, a.Retry.MaxRetries, delay)
+
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+		case <-time.After(delay):
+		}
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("anthropic API error %d: %s", resp.StatusCode, string(errBody))
-	}
 
 	var result struct {
 		Content []struct {

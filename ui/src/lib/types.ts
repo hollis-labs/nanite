@@ -74,13 +74,32 @@ export interface AgentModeProfile {
   settings: string
 }
 
+// --- Chat Errors ---
+
+export type ChatErrorCode = 'rate_limit' | 'tool_error' | 'provider_error' | 'internal_error'
+
+export interface ChatError {
+  id: string
+  code: ChatErrorCode
+  message: string
+  details?: Record<string, unknown>
+  timestamp: string
+  dismissed?: boolean
+}
+
 export interface StreamEvent {
-  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result'
+  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result' | 'status'
   content?: string
   message_id?: string
   agent_id?: string
   usage?: { input_tokens: number; output_tokens: number; stop_reason: string }
   error?: string
+  structured_error?: {
+    code: ChatErrorCode
+    message: string
+    details?: Record<string, unknown>
+    timestamp: string
+  }
   tool?: string
   summary?: string
 }

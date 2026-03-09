@@ -9,9 +9,11 @@ import (
 
 func TestSelectTools_ReturnsTools(t *testing.T) {
 	cfg := &Config{
-		Rules:              broker.DefaultRules(),
-		WorkspaceOverrides: make(map[string][]broker.Rule),
-		AgentOverrides:     make(map[string][]broker.Rule),
+		Rules:               broker.DefaultRules(),
+		WorkspaceOverrides:  make(map[string][]broker.Rule),
+		AgentOverrides:      make(map[string][]broker.Rule),
+		ToolTokenBudgetPct:  DefaultToolTokenBudgetPct,
+		ContextWindowTokens: DefaultContextWindowTokens,
 	}
 	tb := New(nil, nil, cfg)
 
@@ -61,6 +63,88 @@ func TestDefaultConfig_HasRules(t *testing.T) {
 	cfg := DefaultConfig()
 	if len(cfg.Rules) == 0 {
 		t.Error("expected default config to have rules")
+	}
+}
+
+func TestEstimateToolTokens(t *testing.T) {
+	tools := []broker.ToolDefinition{
+		{Name: "tool_a", Server: "test", Description: "A short description"},
+		{Name: "tool_b", Server: "test", Description: "Another description for testing"},
+	}
+
+	tokens := EstimateToolTokens(tools)
+	if tokens <= 0 {
+		t.Errorf("expected positive token estimate, got %d", tokens)
+	}
+
+	// Tokens should increase with more tools.
+	moreTools := append(tools, broker.ToolDefinition{
+		Name: "tool_c", Server: "test", Description: "Yet another tool with a longer description for estimation",
+	})
+	moreTokens := EstimateToolTokens(moreTools)
+	if moreTokens <= tokens {
+		t.Errorf("expected more tokens with more tools: %d <= %d", moreTokens, tokens)
+	}
+}
+
+func TestPruneToolsToTokenBudget_UnderBudget(t *testing.T) {
+	tools := []broker.ToolDefinition{
+		{Name: "tool_a", Server: "test", Description: "Short"},
+		{Name: "tool_b", Server: "test", Description: "Short"},
+	}
+
+	// Give a very large budget — all tools should pass through.
+	result := PruneToolsToTokenBudget(tools, 100000)
+	if len(result) != len(tools) {
+		t.Errorf("expected %d tools unchanged, got %d", len(tools), len(result))
+	}
+}
+
+func TestPruneToolsToTokenBudget_OverBudget(t *testing.T) {
+	tools := []broker.ToolDefinition{
+		{Name: "tool_a", Server: "test", Description: "First tool"},
+		{Name: "tool_b", Server: "test", Description: "Second tool"},
+		{Name: "tool_c", Server: "test", Description: "Third tool"},
+		{Name: "tool_d", Server: "test", Description: "Fourth tool"},
+		{Name: "tool_e", Server: "test", Description: "Fifth tool"},
+	}
+
+	// Set budget to only fit ~1 tool.
+	result := PruneToolsToTokenBudget(tools, 20)
+	if len(result) >= len(tools) {
+		t.Errorf("expected fewer tools after pruning, got %d (original %d)", len(result), len(tools))
+	}
+	if len(result) == 0 {
+		t.Error("expected at least 1 tool to remain")
+	}
+}
+
+func TestPruneToolsToTokenBudget_KeepsAtLeastOne(t *testing.T) {
+	tools := []broker.ToolDefinition{
+		{Name: "big_tool", Server: "test", Description: "A very long description that should exceed any tiny budget we set for testing purposes to ensure at least one tool is always kept"},
+	}
+
+	// Budget of 1 token — still must keep at least 1 tool.
+	result := PruneToolsToTokenBudget(tools, 1)
+	if len(result) != 1 {
+		t.Errorf("expected exactly 1 tool retained, got %d", len(result))
+	}
+}
+
+func TestPruneToolsToTokenBudget_EmptySlice(t *testing.T) {
+	result := PruneToolsToTokenBudget(nil, 100)
+	if len(result) != 0 {
+		t.Errorf("expected 0 tools for nil input, got %d", len(result))
+	}
+}
+
+func TestDefaultConfig_HasTokenBudget(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.ToolTokenBudgetPct != DefaultToolTokenBudgetPct {
+		t.Errorf("expected ToolTokenBudgetPct=%f, got %f", DefaultToolTokenBudgetPct, cfg.ToolTokenBudgetPct)
+	}
+	if cfg.ContextWindowTokens != DefaultContextWindowTokens {
+		t.Errorf("expected ContextWindowTokens=%d, got %d", DefaultContextWindowTokens, cfg.ContextWindowTokens)
 	}
 }
 

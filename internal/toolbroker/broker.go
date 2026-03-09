@@ -2,6 +2,7 @@ package toolbroker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 
@@ -13,6 +14,10 @@ import (
 
 // MaxSelectedTools is the maximum number of tools returned by SelectTools.
 const MaxSelectedTools = 15
+
+// DefaultFallbackToolCount is the number of tools returned when intent is
+// a wildcard or empty — a minimal safe set instead of everything.
+const DefaultFallbackToolCount = 5
 
 // ToolBroker mediates all tool access: selection, permissions, and execution.
 type ToolBroker struct {
@@ -44,9 +49,22 @@ func (tb *ToolBroker) RegisterTools(tools []broker.ToolDefinition) {
 	log.Printf("toolbroker: registered %d tools", len(tools))
 }
 
+// isWildcardIntent returns true if the intent is a wildcard or empty string.
+func isWildcardIntent(intent string) bool {
+	return intent == "" || intent == "*"
+}
+
 // SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools.
 // Optionally scoped by workspace and agent for rule overrides.
+// If intent is "*" or empty, logs a warning and returns a minimal fallback set.
 func (tb *ToolBroker) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]broker.ToolDefinition, error) {
+	// Reject wildcard intent — fall back to a minimal safe set.
+	if isWildcardIntent(intent) {
+		log.Printf("toolbroker: WARNING wildcard/empty intent received (workspace=%s, agent=%s) — returning fallback set of %d tools",
+			workspaceID, agentID, DefaultFallbackToolCount)
+		intent = "general"
+	}
+
 	// Load rules with overrides if scoped.
 	if workspaceID != "" || agentID != "" {
 		rules := tb.Config.RulesFor(workspaceID, agentID)
@@ -63,8 +81,26 @@ func (tb *ToolBroker) SelectTools(ctx context.Context, intent string, hints []st
 		tools = tools[:MaxSelectedTools]
 	}
 
-	log.Printf("toolbroker: selected %d/%d tools for intent %q (workspace=%s, agent=%s)",
-		len(tools), result.Total, intent, workspaceID, agentID)
+	// Apply token budget pruning.
+	budgetPct := tb.Config.ToolTokenBudgetPct
+	if budgetPct <= 0 {
+		budgetPct = DefaultToolTokenBudgetPct
+	}
+	ctxWindow := tb.Config.ContextWindowTokens
+	if ctxWindow <= 0 {
+		ctxWindow = DefaultContextWindowTokens
+	}
+	tokenBudget := int(budgetPct * float64(ctxWindow))
+
+	beforeCount := len(tools)
+	tools = PruneToolsToTokenBudget(tools, tokenBudget)
+	if len(tools) < beforeCount {
+		log.Printf("toolbroker: pruned %d tools to %d due to token budget (%d tokens)",
+			beforeCount, len(tools), tokenBudget)
+	}
+
+	log.Printf("toolbroker: selected %d/%d tools for intent %q (workspace=%s, agent=%s, tool_tokens=%d, budget=%d)",
+		len(tools), result.Total, intent, workspaceID, agentID, EstimateToolTokens(tools), tokenBudget)
 
 	return tools, nil
 }
@@ -140,4 +176,56 @@ func (tb *ToolBroker) ListServers() []mcp.ServerInfo {
 		return nil
 	}
 	return tb.MCPManager.ListServers()
+}
+
+// EstimateToolTokens estimates the total token count for a set of tool definitions
+// by serializing each to JSON and dividing by 4 (consistent with chat.EstimateTokens).
+func EstimateToolTokens(tools []broker.ToolDefinition) int {
+	total := 0
+	for _, t := range tools {
+		data, err := json.Marshal(t)
+		if err != nil {
+			// Fallback: estimate from name + description length.
+			n := len(t.Name) + len(t.Description)
+			if n == 0 {
+				n = 4
+			}
+			total += n / 4
+			continue
+		}
+		n := len(data) / 4
+		if n == 0 {
+			n = 1
+		}
+		total += n
+	}
+	return total
+}
+
+// PruneToolsToTokenBudget removes tools from the end of the slice (lowest priority)
+// until the total estimated tokens fits within the given budget.
+// At least one tool is always retained.
+func PruneToolsToTokenBudget(tools []broker.ToolDefinition, budgetTokens int) []broker.ToolDefinition {
+	if len(tools) == 0 {
+		return tools
+	}
+
+	total := EstimateToolTokens(tools)
+	if total <= budgetTokens {
+		return tools
+	}
+
+	// Remove from end until under budget, keeping at least 1.
+	for len(tools) > 1 && total > budgetTokens {
+		last := tools[len(tools)-1]
+		data, _ := json.Marshal(last)
+		tokens := len(data) / 4
+		if tokens == 0 {
+			tokens = 1
+		}
+		total -= tokens
+		tools = tools[:len(tools)-1]
+	}
+
+	return tools
 }

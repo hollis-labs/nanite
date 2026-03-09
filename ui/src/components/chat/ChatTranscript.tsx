@@ -5,6 +5,7 @@ import { ScrollArea } from '@/components/ui/ScrollArea'
 import { ChatMessage } from './ChatMessage'
 import { MessageContent } from './MessageContent'
 import { ToolCallIndicator } from './ToolCallIndicator'
+import { ErrorBanner } from './ErrorBanner'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
@@ -28,6 +29,8 @@ export function ChatTranscript({ messages, isStreaming, streamingContent }: Chat
   const bottomRef = useRef<HTMLDivElement>(null)
   const activeMode = useChatStore((s) => s.activeMode)
   const toolCalls = useChatStore((s) => s.toolCalls)
+  const chatErrors = useChatStore((s) => s.chatErrors)
+  const dismissChatError = useChatStore((s) => s.dismissChatError)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const queryClient = useQueryClient()
 
@@ -63,7 +66,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent }: Chat
   // Auto-scroll to bottom on new messages or streaming updates
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, streamingContent, toolCalls.length])
+  }, [messages.length, streamingContent, toolCalls.length, chatErrors.length])
 
   if (messages.length === 0 && !isStreaming) {
     return (
@@ -132,6 +135,11 @@ export function ChatTranscript({ messages, isStreaming, streamingContent }: Chat
             </div>
           </div>
         )}
+
+        {/* Error banners */}
+        {chatErrors.filter((e) => !e.dismissed).map((error) => (
+          <ErrorBanner key={error.id} error={error} onDismiss={dismissChatError} />
+        ))}
 
         <div ref={bottomRef} />
       </div>

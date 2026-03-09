@@ -2,7 +2,25 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useChatStore } from '@/stores/useChatStore'
-import type { Message, StreamEvent } from '@/lib/types'
+import type { Message, StreamEvent, ChatError, ChatErrorCode } from '@/lib/types'
+
+let errorCounter = 0
+
+function makeChatError(
+  code: ChatErrorCode,
+  message: string,
+  details?: Record<string, unknown>,
+  timestamp?: string
+): ChatError {
+  errorCounter += 1
+  return {
+    id: `err-${Date.now()}-${errorCounter}`,
+    code,
+    message,
+    details,
+    timestamp: timestamp || new Date().toISOString(),
+  }
+}
 
 export function useChat(sessionId: string | null) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -19,6 +37,9 @@ export function useChat(sessionId: string | null) {
   const addToolCall = useChatStore((s) => s.addToolCall)
   const updateToolCall = useChatStore((s) => s.updateToolCall)
   const clearToolCalls = useChatStore((s) => s.clearToolCalls)
+  const addChatError = useChatStore((s) => s.addChatError)
+  const statusMessage = useChatStore((s) => s.statusMessage)
+  const setStatusMessage = useChatStore((s) => s.setStatusMessage)
 
   const loadMessages = useCallback(async () => {
     if (!sessionId) {
@@ -70,6 +91,8 @@ export function useChat(sessionId: string | null) {
         if (data.content) {
           accumulated += data.content
           appendStreamContent(data.content)
+          // Clear any transient status message when content starts flowing.
+          setStatusMessage(null)
         }
       })
 
@@ -92,6 +115,13 @@ export function useChat(sessionId: string | null) {
             status: data.error ? 'error' : 'done',
             summary: data.summary || data.error,
           })
+        }
+      })
+
+      es.addEventListener('status', (e: MessageEvent) => {
+        const data: StreamEvent = JSON.parse(e.data as string)
+        if (data.content) {
+          setStatusMessage(data.content)
         }
       })
 
@@ -123,10 +153,23 @@ export function useChat(sessionId: string | null) {
         if (e.data) {
           try {
             const data: StreamEvent = JSON.parse(e.data as string)
-            const errMsg = data.error || 'Unknown streaming error'
-            console.error('Stream error from backend:', errMsg)
-            accumulated += `\n\n**Error:** ${errMsg}`
-            appendStreamContent(`\n\n**Error:** ${errMsg}`)
+
+            // Handle structured error from backend
+            if (data.structured_error) {
+              const se = data.structured_error
+              addChatError(makeChatError(se.code, se.message, se.details, se.timestamp))
+              // Append a brief user-friendly message to the chat
+              const brief = `\n\n_Error: ${se.message}_`
+              accumulated += brief
+              appendStreamContent(brief)
+            } else {
+              // Fallback for unstructured errors
+              const errMsg = data.error || 'Unknown streaming error'
+              console.error('Stream error from backend:', errMsg)
+              addChatError(makeChatError('internal_error', errMsg))
+              accumulated += `\n\n_Error: ${errMsg}_`
+              appendStreamContent(`\n\n_Error: ${errMsg}_`)
+            }
           } catch {
             console.error('Stream error (unparseable):', e.data)
           }
@@ -177,7 +220,7 @@ export function useChat(sessionId: string | null) {
       console.error('Send failed:', err)
       clearStream()
     }
-  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls])
+  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addChatError, setStatusMessage])
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {
@@ -187,5 +230,5 @@ export function useChat(sessionId: string | null) {
     clearStream()
   }, [clearStream])
 
-  return { messages, isStreaming, streamingContent, sendMessage, loadMessages, stopStreaming }
+  return { messages, isStreaming, streamingContent, statusMessage, sendMessage, loadMessages, stopStreaming }
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -133,6 +134,9 @@ func cmdServe(args []string) {
 	selfTools := mcp.NewSelfToolsTransport(s)
 	mcpManager.AddServer("self", selfTools)
 
+	// Load user-configured MCP servers from the database.
+	loadPersistedMCPServers(s, mcpManager)
+
 	// Initialize the tool broker with default rules before discovery.
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
 
@@ -256,5 +260,41 @@ func setupMCPServers(m *mcp.Manager) {
 		})
 	} else {
 		log.Printf("mcp: cortex binary not found at %s, skipping", cortexBin)
+	}
+}
+
+// loadPersistedMCPServers loads user-configured MCP servers from the database
+// and registers them with the MCP manager.
+func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
+	servers, err := s.ListMCPServers()
+	if err != nil {
+		log.Printf("WARNING: failed to load persisted MCP servers: %v", err)
+		return
+	}
+
+	for _, cfg := range servers {
+		if !cfg.Enabled {
+			continue
+		}
+		switch cfg.TransportType {
+		case "stdio":
+			var args []string
+			if cfg.Args != "" && cfg.Args != "[]" {
+				json.Unmarshal([]byte(cfg.Args), &args)
+			}
+			var envVars []string
+			if cfg.Env != "" && cfg.Env != "[]" {
+				json.Unmarshal([]byte(cfg.Env), &envVars)
+			}
+			m.AddStdioServer(cfg.Name, cfg.Command, args, envVars)
+		case "sse":
+			m.AddHTTPServer(cfg.Name, cfg.URL)
+		default:
+			log.Printf("mcp: unknown transport type %q for server %s, skipping", cfg.TransportType, cfg.Name)
+		}
+	}
+
+	if len(servers) > 0 {
+		log.Printf("mcp: loaded %d user-configured server(s) from database", len(servers))
 	}
 }

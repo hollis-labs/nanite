@@ -101,6 +101,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Token usage
 	mux.HandleFunc("GET /api/sessions/{id}/usage", a.handleGetSessionUsage)
 	mux.HandleFunc("GET /api/usage/summary", a.handleGetUsageSummary)
+	mux.HandleFunc("GET /api/sessions/{id}/context-breakdown", a.handleGetContextBreakdown)
 
 	// Tools (Tool Broker)
 	mux.HandleFunc("GET /api/tools", a.handleListTools)
@@ -140,6 +141,21 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents/{id}/assigned-modes", a.handleListAgentAssignedModes)
 	mux.HandleFunc("POST /api/agents/{id}/assigned-modes", a.handleAssignModeToAgent)
 	mux.HandleFunc("DELETE /api/agents/{id}/assigned-modes/{modeId}", a.handleUnassignModeFromAgent)
+
+	// Volon proxy
+	mux.HandleFunc("POST /api/volon/backlog", a.handleCreateVolonBacklog)
+	mux.HandleFunc("GET /api/volon/backlog", a.handleVolonListBacklog)
+	mux.HandleFunc("GET /api/volon/sprints", a.handleVolonListSprints)
+	mux.HandleFunc("GET /api/volon/tasks", a.handleVolonListTasks)
+	mux.HandleFunc("POST /api/volon/tasks/{id}/transition", a.handleVolonTransitionTask)
+	mux.HandleFunc("POST /api/volon/backlog/{id}/promote", a.handleVolonPromoteBacklog)
+	mux.HandleFunc("DELETE /api/volon/tasks/{id}", a.handleVolonDeleteTask)
+
+	// MCP Servers (user-managed)
+	mux.HandleFunc("GET /api/mcp-servers", a.handleListMCPServers)
+	mux.HandleFunc("POST /api/mcp-servers", a.handleCreateMCPServer)
+	mux.HandleFunc("PUT /api/mcp-servers/{name}", a.handleUpdateMCPServer)
+	mux.HandleFunc("DELETE /api/mcp-servers/{name}", a.handleDeleteMCPServer)
 
 	// Output Templates
 	mux.HandleFunc("GET /api/templates", a.handleListTemplates)

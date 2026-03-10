@@ -57,6 +57,7 @@ func (s *Store) migrate() error {
 		"migrations/004_add_skills.sql",
 		"migrations/005_add_prompt_templates.sql",
 		"migrations/006_add_modes.sql",
+		"migrations/007_add_mcp_servers.sql",
 	}
 
 	for _, f := range files {

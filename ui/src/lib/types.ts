@@ -104,6 +104,32 @@ export interface StreamEvent {
   summary?: string
 }
 
+// --- Context Breakdown ---
+
+export interface MessageTokenDetail {
+  id: string
+  role: string
+  content_preview: string
+  tokens: number
+  is_compacted: boolean
+}
+
+export interface ToolTokenDetail {
+  name: string
+  tokens: number
+}
+
+export interface ContextBreakdown {
+  system_prompt_tokens: number
+  messages: MessageTokenDetail[]
+  message_tokens_total: number
+  tools: ToolTokenDetail[]
+  tool_tokens_total: number
+  total: number
+  ceiling: number
+  estimated_cost_usd: number
+}
+
 // --- Token Usage ---
 
 export interface SessionUsageSummary {
@@ -300,6 +326,56 @@ export interface ToolSelection {
   name: string
   description: string
   server?: string
+}
+
+export interface MCPServerConfig {
+  id: string
+  name: string
+  transport_type: 'stdio' | 'sse'
+  command: string
+  url: string
+  args: string
+  env: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+// --- Volon (Sprint Planning) ---
+
+export interface VolonSprint {
+  id: string
+  project_id: string
+  name: string
+  goal: string
+  status: string
+  start_date: string
+  end_date: string
+  created_at: string
+  updated_at: string
+}
+
+export interface VolonTask {
+  id: string
+  sprint_id: string
+  project_id: string
+  title: string
+  body: string
+  priority: string
+  status: string
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface VolonBacklogItem {
+  id: string
+  project_id: string
+  title: string
+  body: string
+  priority: string
+  tags: string[]
+  created_at: string
 }
 
 // --- Skills ---

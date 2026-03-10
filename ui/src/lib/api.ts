@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem } from './types'
 
 const API_BASE = '/api'
 
@@ -261,6 +261,12 @@ export const api = {
     return res.json()
   },
 
+  getContextBreakdown: async (sessionId: string): Promise<ContextBreakdown> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-breakdown`)
+    if (!res.ok) throw new Error(`Failed to get context breakdown: ${res.status}`)
+    return res.json()
+  },
+
   // Skills
   listSkills: async (): Promise<Skill[]> => {
     const res = await fetch(`${API_BASE}/skills`)
@@ -385,6 +391,26 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to remove template from agent: ${res.status}`)
   },
 
+  // Volon Backlog
+  createVolonBacklogItem: async (data: {
+    title: string
+    body: string
+    priority: string
+    tags?: string[]
+    project_id?: string
+  }): Promise<Record<string, unknown>> => {
+    const res = await fetch(`${API_BASE}/volon/backlog`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to create backlog item: ${res.status}`)
+    }
+    return res.json()
+  },
+
   // Tools & MCP
   fetchTools: async (): Promise<ToolDefinition[]> => {
     const res = await fetch(`${API_BASE}/tools`)
@@ -413,6 +439,100 @@ export const api = {
       body: JSON.stringify({ intent }),
     })
     if (!res.ok) throw new Error(`Failed to select tools: ${res.status}`)
+    return res.json()
+  },
+
+  // MCP Servers (user-managed)
+  listMCPServers: async (): Promise<MCPServerConfig[]> => {
+    const res = await fetch(`${API_BASE}/mcp-servers`)
+    if (!res.ok) throw new Error(`Failed to list MCP servers: ${res.status}`)
+    return res.json()
+  },
+
+  addMCPServer: async (config: Omit<MCPServerConfig, 'id' | 'created_at' | 'updated_at'>): Promise<MCPServerConfig> => {
+    const res = await fetch(`${API_BASE}/mcp-servers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to add MCP server: ${res.status}`)
+    }
+    return res.json()
+  },
+
+  updateMCPServer: async (name: string, config: Partial<MCPServerConfig>): Promise<MCPServerConfig> => {
+    const res = await fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to update MCP server: ${res.status}`)
+    }
+    return res.json()
+  },
+
+  deleteMCPServer: async (name: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error(`Failed to delete MCP server: ${res.status}`)
+  },
+
+  // Volon (Sprint Planning)
+  getVolonSprints: async (projectId?: string): Promise<{ items: VolonSprint[]; count: number }> => {
+    const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''
+    const res = await fetch(`${API_BASE}/volon/sprints${params}`)
+    if (!res.ok) throw new Error(`Failed to list sprints: ${res.status}`)
+    return res.json()
+  },
+
+  getVolonTasks: async (sprintId?: string, status?: string, projectId?: string): Promise<{ items: VolonTask[]; count: number }> => {
+    const params = new URLSearchParams()
+    if (sprintId) params.set('sprint_id', sprintId)
+    if (status) params.set('status', status)
+    if (projectId) params.set('project_id', projectId)
+    const qs = params.toString()
+    const res = await fetch(`${API_BASE}/volon/tasks${qs ? `?${qs}` : ''}`)
+    if (!res.ok) throw new Error(`Failed to list tasks: ${res.status}`)
+    return res.json()
+  },
+
+  getVolonBacklog: async (projectId?: string): Promise<{ items: VolonBacklogItem[]; count: number }> => {
+    const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''
+    const res = await fetch(`${API_BASE}/volon/backlog${params}`)
+    if (!res.ok) throw new Error(`Failed to list backlog: ${res.status}`)
+    return res.json()
+  },
+
+  transitionVolonTask: async (id: string, status: string): Promise<unknown> => {
+    const res = await fetch(`${API_BASE}/volon/tasks/${encodeURIComponent(id)}/transition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    })
+    if (!res.ok) throw new Error(`Failed to transition task: ${res.status}`)
+    return res.json()
+  },
+
+  promoteBacklogItem: async (id: string, sprintId: string): Promise<unknown> => {
+    const res = await fetch(`${API_BASE}/volon/backlog/${encodeURIComponent(id)}/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_id: sprintId }),
+    })
+    if (!res.ok) throw new Error(`Failed to promote backlog item: ${res.status}`)
+    return res.json()
+  },
+
+  deleteVolonTask: async (id: string): Promise<unknown> => {
+    const res = await fetch(`${API_BASE}/volon/tasks/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error(`Failed to delete task: ${res.status}`)
     return res.json()
   },
 }

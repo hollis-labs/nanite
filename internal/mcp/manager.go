@@ -52,6 +52,35 @@ func (m *Manager) AddServer(name string, transport Transport) {
 	log.Printf("mcp: added server %q", name)
 }
 
+// RemoveServer unregisters an MCP server, closing its transport if possible.
+func (m *Manager) RemoveServer(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	transport, ok := m.servers[name]
+	if !ok {
+		return
+	}
+
+	// Close the transport if it supports it.
+	if closer, ok := transport.(interface{ Close() error }); ok {
+		closer.Close()
+	}
+
+	delete(m.servers, name)
+
+	// Remove tools that belonged to this server.
+	filtered := m.tools[:0]
+	for _, entry := range m.tools {
+		if entry.serverName != name {
+			filtered = append(filtered, entry)
+		}
+	}
+	m.tools = filtered
+
+	log.Printf("mcp: removed server %q", name)
+}
+
 // AddHTTPServer registers an HTTP-based MCP server.
 func (m *Manager) AddHTTPServer(name, url string) {
 	m.AddServer(name, NewHTTPTransport(url))

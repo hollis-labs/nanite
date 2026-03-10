@@ -55,6 +55,11 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = err
 	}
 
+	// Emit session creation event to Volon (fire-and-forget).
+	if a.Engine != nil && a.Engine.Activity != nil {
+		go a.Engine.Activity.EmitSessionCreated(r.Context(), sess.ID, sess.WorkspaceID)
+	}
+
 	a.jsonResp(w, http.StatusCreated, sess)
 }
 
@@ -125,6 +130,12 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Emit session ended event to Volon (fire-and-forget).
+	if a.Engine != nil && a.Engine.Activity != nil {
+		go a.Engine.Activity.EmitSessionEnded(r.Context(), id)
+	}
+
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
 }
 

@@ -27,7 +27,7 @@ const maxToolIterations = 10
 
 // ProgressiveDiscoveryThreshold is the tool count above which progressive
 // discovery is used instead of sending all tool schemas to the LLM.
-const ProgressiveDiscoveryThreshold = 20
+const ProgressiveDiscoveryThreshold = 5
 
 // requestToolsDef is a meta-tool the LLM can call to request full schemas
 // for specific tools from the catalog.
@@ -57,8 +57,8 @@ func buildToolCatalog(summaries []toolbroker.ToolSummary) string {
 	sb.WriteString("Available tools (use request_tools to get full details):\n")
 	for _, s := range summaries {
 		desc := s.Description
-		if len(desc) > 120 {
-			desc = desc[:120] + "..."
+		if len(desc) > 80 {
+			desc = desc[:80] + "..."
 		}
 		fmt.Fprintf(&sb, "- %s: %s\n", s.Name, desc)
 	}
@@ -180,6 +180,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 		agentID = "mentat-001"
 		modeName = "default"
+		if e.Activity != nil {
+			go e.Activity.EmitAgentAssigned(ctx, sessionID, agentID, modeName)
+		}
 	} else {
 		agentID = sa.AgentID
 		modeName = sa.Mode
@@ -212,7 +215,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 
 	// Assemble context via broker.
-	systemPrompt, chatMessages, err := e.Broker.AssembleContext(session, agent, mode, workspace)
+	systemPrompt, chatMessages, err := e.Broker.AssembleContext(ctx, session, agent, mode, workspace)
 	if err != nil {
 		ch <- errorEvent(ErrorCodeInternal, "Failed to assemble context", map[string]interface{}{"raw": err.Error()})
 		return
@@ -272,6 +275,24 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	var finalUsage *Usage
 
 	for iteration := 0; iteration < maxToolIterations; iteration++ {
+		// Enforce unified token budget before every provider call.
+		chatMessages, tools, breakdown, budgetErr := EnforceTokenBudget(systemPrompt, chatMessages, tools, 0)
+		if budgetErr != nil {
+			log.Printf("chat: token budget enforcement refused to send: %v", budgetErr)
+			if e.Activity != nil {
+				go e.Activity.EmitContextBudgetExceeded(ctx, sessionID, breakdown.Total, breakdown.Ceiling)
+			}
+			ch <- errorEvent(ErrorCodeInternal, "Context too large after all reductions",
+				map[string]interface{}{
+					"total":   breakdown.Total,
+					"ceiling": breakdown.Ceiling,
+					"system":  breakdown.System,
+					"msgs":    breakdown.Messages,
+					"tools":   breakdown.Tools,
+				})
+			return
+		}
+
 		// Call provider with or without tools.
 		provCtx, provSpan := tiamatotel.StartSpan(ctx, "mentat-chat.provider.call")
 		provSpan.SetAttributes(
@@ -279,19 +300,12 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			attribute.Int("mentat.iteration", iteration),
 			attribute.Int("mentat.tools.count", len(tools)),
 			attribute.Int("mentat.messages.count", len(chatMessages)),
+			attribute.Int("mentat.tokens.total", breakdown.Total),
+			attribute.Int("mentat.tokens.ceiling", breakdown.Ceiling),
 		)
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
-			// Estimate context size for debugging.
-			var contextChars int
-			for _, m := range chatMessages {
-				contextChars += len(m.Content)
-				for _, b := range m.ContentBlocks {
-					contextChars += len(b.Text) + len(b.Content)
-				}
-			}
-			contextChars += len(systemPrompt)
-			log.Printf("chat: tool-use iteration %d — %d tools, %d messages, ~%d context chars (~%d tokens)", iteration, len(tools), len(chatMessages), contextChars, contextChars/4)
+			log.Printf("chat: tool-use iteration %d — %d tools, %d messages, ~%d tokens (ceiling=%d)", iteration, len(tools), len(chatMessages), breakdown.Total, breakdown.Ceiling)
 			provCh, err = prov.StreamChatWithTools(provCtx, systemPrompt, chatMessages, model, tools)
 		} else {
 			provCh, err = prov.StreamChat(provCtx, systemPrompt, chatMessages, model)
@@ -305,7 +319,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				fmt.Sprintf("iteration %d: %v", iteration, err),
 				fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d}`, model, len(tools), len(chatMessages)))
 			if e.Activity != nil {
+				errCode := classifyError(err)
 				go e.Activity.EmitError(ctx, sessionID, "provider_error", err.Error())
+				if errCode == ErrorCodeRateLimit {
+					go e.Activity.EmitRateLimitHit(ctx, sessionID, "anthropic", 0)
+				}
 			}
 			ch <- errorEvent(classifyError(err), "Provider streaming failed", map[string]interface{}{
 				"raw":   err.Error(),
@@ -543,6 +561,19 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Brief pause between iterations to avoid rate limit spikes.
 		if iteration > 0 {
 			time.Sleep(1 * time.Second)
+		}
+
+		// Check circuit breaker before next iteration — stop if tripped.
+		if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil && ap.CircuitBreaker.IsOpen() {
+			log.Printf("chat: circuit breaker open, stopping tool-use loop at iteration %d", iteration)
+			if e.Activity != nil {
+				go e.Activity.EmitCircuitBreakerTripped(ctx, sessionID, "anthropic")
+			}
+			ch <- StreamEvent{
+				Type:    "circuit_open",
+				Content: "Provider rate limited. Tool-use loop stopped. Would you like to retry?",
+			}
+			break
 		}
 
 		// Loop back for the next provider call.
@@ -827,19 +858,10 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 			allTools = selected
 		}
 	}
-	if len(allTools) == 0 && e.MCPManager != nil && e.MCPManager.HasTools() {
-		allTools = e.MCPManager.GetTools()
-	}
-
-	// Log tool token usage for observability (actual pruning happens in the broker).
-	if len(allTools) > 0 {
-		toolChars := 0
-		for _, t := range allTools {
-			toolChars += len(t.Name) + len(t.Description)
-		}
-		log.Printf("chat: broker selected %d tools for agent %s (~%d tool tokens)", len(allTools), agentID, toolChars/4)
+	if len(allTools) == 0 {
+		log.Printf("chat: WARNING broker returned 0 tools for agent %s — proceeding without tools (LLM can still respond)", agentID)
 	} else {
-		log.Printf("chat: broker selected 0 tools for agent %s", agentID)
+		log.Printf("chat: broker selected %d tools for agent %s (~%d tool tokens)", len(allTools), agentID, EstimateToolDefTokens(allTools))
 	}
 
 	// Check if progressive discovery should be used.

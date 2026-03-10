@@ -145,8 +145,8 @@ func cmdServe(args []string) {
 	engine.ToolBroker = tb
 
 	// Set up activity emitter to push events to Volon's GUI server.
+	// Configured via VOLON_URL or VOLON_GUI_URL env var; disabled when unset.
 	engine.Activity = chat.NewActivityEmitter("")
-	log.Println("activity emitter initialized (target: Volon GUI server)")
 
 	// Clean up MCP subprocesses on shutdown.
 	go func() {

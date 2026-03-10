@@ -11,12 +11,28 @@ import (
 	"time"
 )
 
+// Activity event type constants for the Volon activity feed.
+const (
+	EventSessionCreated        = "chat_session_created"
+	EventSessionEnded          = "chat_session_ended"
+	EventSessionActive         = "chat_session_active"
+	EventAgentAssigned         = "chat_agent_assigned"
+	EventToolExecuted          = "chat_tool_call"
+	EventRateLimitHit          = "chat_rate_limit_hit"
+	EventCircuitBreakerTripped = "chat_circuit_breaker_tripped"
+	EventContextBudgetExceeded = "chat_context_budget_exceeded"
+	EventResponseComplete      = "chat_response_complete"
+	EventError                 = "chat_error"
+)
+
 // ActivityEmitter sends activity events to Volon's GUI server so chat sessions
-// appear in the unified activity feed.
+// appear in the unified activity feed. When the Volon URL is empty (disabled),
+// all Emit calls are no-ops.
 type ActivityEmitter struct {
-	baseURL    string
-	client     *http.Client
-	projectID  string // default project_id for events
+	baseURL   string
+	client    *http.Client
+	projectID string // default project_id for events
+	disabled  bool
 }
 
 // activityEvent is the JSON payload accepted by POST /v1/activity/events.
@@ -31,24 +47,33 @@ type activityEvent struct {
 }
 
 // NewActivityEmitter creates an emitter that posts to the given Volon GUI server URL.
-// If url is empty, it falls back to VOLON_GUI_URL env var, then http://localhost:8085.
+// Resolution order: explicit url arg > VOLON_URL env > VOLON_GUI_URL env > disabled.
+// If no URL is resolved the emitter is created in disabled mode (all emits are no-ops).
 func NewActivityEmitter(url string) *ActivityEmitter {
+	if url == "" {
+		url = os.Getenv("VOLON_URL")
+	}
 	if url == "" {
 		url = os.Getenv("VOLON_GUI_URL")
 	}
-	if url == "" {
-		url = "http://localhost:8085"
+	disabled := url == ""
+	if disabled {
+		log.Println("activity: no VOLON_URL set — activity emitter disabled")
 	}
 	return &ActivityEmitter{
 		baseURL:   url,
 		client:    &http.Client{Timeout: 5 * time.Second},
 		projectID: "mentat-chat",
+		disabled:  disabled,
 	}
 }
 
 // Emit sends an activity event to Volon. It never returns an error — failures
 // are logged and silently dropped so chat flow is never blocked.
 func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
+	if e.disabled {
+		return
+	}
 	if ev.ProjectID == "" {
 		ev.ProjectID = e.projectID
 	}
@@ -71,7 +96,7 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		log.Printf("activity: send error: %v", err)
+		log.Printf("activity: send error (volon unreachable): %v", err)
 		return
 	}
 	resp.Body.Close()
@@ -80,10 +105,31 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 	}
 }
 
+// EmitSessionCreated records that a new chat session was created.
+func (e *ActivityEmitter) EmitSessionCreated(ctx context.Context, sessionID, workspaceID string) {
+	e.Emit(ctx, activityEvent{
+		EventType:   EventSessionCreated,
+		EntityType:  "chat_session",
+		EntityID:    sessionID,
+		EntityTitle: "Session created",
+		Payload:     fmt.Sprintf(`{"workspace_id":%q}`, workspaceID),
+	})
+}
+
+// EmitSessionEnded records that a chat session was archived/ended.
+func (e *ActivityEmitter) EmitSessionEnded(ctx context.Context, sessionID string) {
+	e.Emit(ctx, activityEvent{
+		EventType:   EventSessionEnded,
+		EntityType:  "chat_session",
+		EntityID:    sessionID,
+		EntityTitle: "Session ended",
+	})
+}
+
 // EmitSessionStart records that a chat session started generating a response.
 func (e *ActivityEmitter) EmitSessionStart(ctx context.Context, sessionID, agentID, model string) {
 	e.Emit(ctx, activityEvent{
-		EventType:   "chat_session_active",
+		EventType:   EventSessionActive,
 		EntityType:  "chat_session",
 		EntityID:    sessionID,
 		EntityTitle: "Chat session started",
@@ -92,10 +138,22 @@ func (e *ActivityEmitter) EmitSessionStart(ctx context.Context, sessionID, agent
 	})
 }
 
+// EmitAgentAssigned records that an agent was assigned to a session.
+func (e *ActivityEmitter) EmitAgentAssigned(ctx context.Context, sessionID, agentID, mode string) {
+	e.Emit(ctx, activityEvent{
+		EventType:   EventAgentAssigned,
+		EntityType:  "chat_session",
+		EntityID:    sessionID,
+		EntityTitle: "Agent assigned: " + agentID,
+		Actor:       agentID,
+		Payload:     fmt.Sprintf(`{"agent_id":%q,"mode":%q}`, agentID, mode),
+	})
+}
+
 // EmitResponseComplete records a completed assistant response with token counts.
 func (e *ActivityEmitter) EmitResponseComplete(ctx context.Context, sessionID, agentID, model string, inputTokens, outputTokens int) {
 	e.Emit(ctx, activityEvent{
-		EventType:   "chat_response_complete",
+		EventType:   EventResponseComplete,
 		EntityType:  "chat_session",
 		EntityID:    sessionID,
 		EntityTitle: "Response complete",
@@ -111,7 +169,7 @@ func (e *ActivityEmitter) EmitToolCall(ctx context.Context, sessionID, toolName 
 		status = "error"
 	}
 	e.Emit(ctx, activityEvent{
-		EventType:   "chat_tool_call",
+		EventType:   EventToolExecuted,
 		EntityType:  "chat_session",
 		EntityID:    sessionID,
 		EntityTitle: toolName,
@@ -119,10 +177,43 @@ func (e *ActivityEmitter) EmitToolCall(ctx context.Context, sessionID, toolName 
 	})
 }
 
+// EmitRateLimitHit records a rate limit error from a provider.
+func (e *ActivityEmitter) EmitRateLimitHit(ctx context.Context, sessionID, providerName string, retryAfter time.Duration) {
+	e.Emit(ctx, activityEvent{
+		EventType:   EventRateLimitHit,
+		EntityType:  "chat_session",
+		EntityID:    sessionID,
+		EntityTitle: "Rate limit hit",
+		Payload:     fmt.Sprintf(`{"provider":%q,"retry_after_seconds":%.1f}`, providerName, retryAfter.Seconds()),
+	})
+}
+
+// EmitCircuitBreakerTripped records that the circuit breaker opened for a provider.
+func (e *ActivityEmitter) EmitCircuitBreakerTripped(ctx context.Context, sessionID, providerName string) {
+	e.Emit(ctx, activityEvent{
+		EventType:   EventCircuitBreakerTripped,
+		EntityType:  "chat_session",
+		EntityID:    sessionID,
+		EntityTitle: "Circuit breaker tripped",
+		Payload:     fmt.Sprintf(`{"provider":%q}`, providerName),
+	})
+}
+
+// EmitContextBudgetExceeded records that the token budget ceiling was exceeded.
+func (e *ActivityEmitter) EmitContextBudgetExceeded(ctx context.Context, sessionID string, total, ceiling int) {
+	e.Emit(ctx, activityEvent{
+		EventType:   EventContextBudgetExceeded,
+		EntityType:  "chat_session",
+		EntityID:    sessionID,
+		EntityTitle: "Context budget exceeded",
+		Payload:     fmt.Sprintf(`{"total_tokens":%d,"ceiling_tokens":%d}`, total, ceiling),
+	})
+}
+
 // EmitError records an error during chat processing.
 func (e *ActivityEmitter) EmitError(ctx context.Context, sessionID, errorType, detail string) {
 	e.Emit(ctx, activityEvent{
-		EventType:   "chat_error",
+		EventType:   EventError,
 		EntityType:  "chat_session",
 		EntityID:    sessionID,
 		EntityTitle: errorType,

@@ -22,7 +22,7 @@ import (
 
 const anthropicAPI = "https://api.anthropic.com/v1/messages"
 
-// Anthropic implements the Provider interface for the Anthropic Messages API.
+// Anthropic implements the Provider and CacheableProvider interfaces for the Anthropic Messages API.
 type Anthropic struct {
 	apiKey         string
 	client         *http.Client
@@ -31,6 +31,7 @@ type Anthropic struct {
 	CircuitBreaker *CircuitBreaker
 	OnCircuitOpen  func() // called when the circuit breaker trips
 	RateTracker    *TokenRateTracker
+	cacheHints     []CacheHint // set via SetCacheHints before each request
 }
 
 // NewAnthropic creates a new Anthropic provider. It reads ANTHROPIC_API_KEY from the environment.
@@ -44,6 +45,35 @@ func NewAnthropic() *Anthropic {
 	}
 }
 
+// SetCacheHints implements CacheableProvider. It stores the hints so that
+// subsequent calls to buildSystemBlocks, buildToolsWithCacheControl, and
+// marshalMessages apply cache_control markers accordingly.
+func (a *Anthropic) SetCacheHints(hints []CacheHint) {
+	a.cacheHints = hints
+}
+
+// hasCacheHint checks whether the stored hints include one matching the given position.
+func (a *Anthropic) hasCacheHint(position string) bool {
+	for _, h := range a.cacheHints {
+		if h.Position == position {
+			return true
+		}
+	}
+	return false
+}
+
+// recentMessageCacheCount returns the number of "recent_message" hints,
+// which controls how many trailing user messages get cache_control markers.
+func (a *Anthropic) recentMessageCacheCount() int {
+	count := 0
+	for _, h := range a.cacheHints {
+		if h.Position == "recent_message" {
+			count++
+		}
+	}
+	return count
+}
+
 // anthropicRequest is the request body for the Anthropic Messages API.
 type anthropicRequest struct {
 	Model     string `json:"model"`
@@ -54,7 +84,24 @@ type anthropicRequest struct {
 	Tools     []any  `json:"tools,omitempty"`
 }
 
-// buildSystemBlocks wraps a system prompt in a content block with cache_control ephemeral.
+// buildSystemBlocks wraps a system prompt in a content block.
+// If the provider has a "system" cache hint, the block gets cache_control ephemeral.
+func (a *Anthropic) buildSystemBlocks(systemPrompt string) []map[string]any {
+	if systemPrompt == "" {
+		return nil
+	}
+	block := map[string]any{
+		"type": "text",
+		"text": systemPrompt,
+	}
+	if a.hasCacheHint("system") {
+		block["cache_control"] = map[string]string{"type": "ephemeral"}
+	}
+	return []map[string]any{block}
+}
+
+// buildSystemBlocksStatic is the legacy static version used by tests and non-method callers.
+// It always applies cache_control for backwards compatibility.
 func buildSystemBlocks(systemPrompt string) []map[string]any {
 	if systemPrompt == "" {
 		return nil
@@ -70,8 +117,30 @@ func buildSystemBlocks(systemPrompt string) []map[string]any {
 	}
 }
 
-// buildToolsWithCacheControl converts tool definitions to []any and marks the
-// last tool with cache_control ephemeral so Anthropic caches the tool list.
+// buildToolsWithCacheControl converts tool definitions to []any.
+// If the provider has a "tools" cache hint, the last tool gets cache_control ephemeral.
+func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
+	if len(tools) == 0 {
+		return nil
+	}
+	shouldCache := a.hasCacheHint("tools")
+	result := make([]any, len(tools))
+	for i, t := range tools {
+		entry := map[string]any{
+			"name":         t.Name,
+			"description":  t.Description,
+			"input_schema": t.InputSchema,
+		}
+		if shouldCache && i == len(tools)-1 {
+			entry["cache_control"] = map[string]string{"type": "ephemeral"}
+		}
+		result[i] = entry
+	}
+	return result
+}
+
+// buildToolsWithCacheControlStatic is the legacy static version for tests.
+// It always marks the last tool with cache_control.
 func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {
 		return nil
@@ -92,13 +161,25 @@ func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 }
 
 // marshalMessages converts ChatMessage slice to the Anthropic API format.
-// Simple text messages use {"role": "...", "content": "..."}.
-// Multi-block messages use {"role": "...", "content": [...]}.
-// The last 2 user messages are marked with cache_control ephemeral for prompt caching.
+// The number of trailing user messages that receive cache_control is driven
+// by the "recent_message" cache hints.
+func (a *Anthropic) marshalMessages(messages []ChatMessage) []any {
+	cacheCount := a.recentMessageCacheCount()
+	return marshalMessagesWithCacheCount(messages, cacheCount)
+}
+
+// marshalMessages is the legacy static version used by existing tests.
+// It always caches the last 2 user messages for backwards compatibility.
 func marshalMessages(messages []ChatMessage) []any {
-	// Find the indices of the last 2 user messages for cache marking.
-	userIndices := make([]int, 0, 2)
-	for i := len(messages) - 1; i >= 0 && len(userIndices) < 2; i-- {
+	return marshalMessagesWithCacheCount(messages, 2)
+}
+
+// marshalMessagesWithCacheCount is the shared implementation.
+// cacheCount controls how many of the trailing user messages get cache_control.
+func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any {
+	// Find the indices of the last N user messages for cache marking.
+	userIndices := make([]int, 0, cacheCount)
+	for i := len(messages) - 1; i >= 0 && len(userIndices) < cacheCount; i-- {
 		if messages[i].Role == "user" {
 			userIndices = append(userIndices, i)
 		}
@@ -211,12 +292,12 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 	body := anthropicRequest{
 		Model:     model,
 		MaxTokens: 16384,
-		System:    buildSystemBlocks(systemPrompt),
-		Messages:  marshalMessages(messages),
+		System:    a.buildSystemBlocks(systemPrompt),
+		Messages:  a.marshalMessages(messages),
 		Stream:    true,
 	}
 	if len(tools) > 0 {
-		body.Tools = buildToolsWithCacheControl(tools)
+		body.Tools = a.buildToolsWithCacheControl(tools)
 	}
 
 	payload, err := json.Marshal(body)
@@ -598,8 +679,8 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 	body := anthropicRequest{
 		Model:     model,
 		MaxTokens: 128,
-		System:    buildSystemBlocks(systemPrompt),
-		Messages:  marshalMessages(messages),
+		System:    a.buildSystemBlocks(systemPrompt),
+		Messages:  a.marshalMessages(messages),
 		Stream:    false,
 	}
 

@@ -170,12 +170,13 @@ func TestRequestToolsDef_HasCorrectSchema(t *testing.T) {
 		t.Errorf("expected tool_names type=array, got %v", toolNames["type"])
 	}
 
-	required, ok := requestToolsDef.InputSchema["required"].([]any)
+	// Verify intent property exists (added for intent-driven selection).
+	intentProp, ok := props["intent"].(map[string]any)
 	if !ok {
-		t.Fatal("expected required field in schema")
+		t.Fatal("expected intent in properties")
 	}
-	if len(required) != 1 || required[0] != "tool_names" {
-		t.Errorf("expected required=[tool_names], got %v", required)
+	if intentProp["type"] != "string" {
+		t.Errorf("expected intent type=string, got %v", intentProp["type"])
 	}
 }
 

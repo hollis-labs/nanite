@@ -30,22 +30,9 @@ const maxToolIterations = 10
 const ProgressiveDiscoveryThreshold = 5
 
 // requestToolsDef is a meta-tool the LLM can call to request full schemas
-// for specific tools from the catalog.
-var requestToolsDef = provider.ToolDefinition{
-	Name:        "request_tools",
-	Description: "Request full schemas for specific tools by name. Call this when you need to use a tool from the catalog.",
-	InputSchema: map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"tool_names": map[string]any{
-				"type":        "array",
-				"items":       map[string]any{"type": "string"},
-				"description": "List of tool names to load",
-			},
-		},
-		"required": []any{"tool_names"},
-	},
-}
+// for specific tools by name or by describing intent. Delegates to
+// toolbroker.RequestToolsMetaTool() for the canonical definition.
+var requestToolsDef = toolbroker.RequestToolsMetaTool()
 
 // buildToolCatalog formats tool summaries as a compact catalog string for
 // injection into the system prompt during progressive discovery.
@@ -250,6 +237,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 	}
 
+	// Apply cache hints if the provider supports prompt caching.
+	if cacheable, ok := prov.(provider.CacheableProvider); ok {
+		cacheable.SetCacheHints(provider.DefaultCacheStrategy())
+	}
+
 	// Emit stream_start.
 	ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID, AgentID: agent.ID}
 
@@ -418,19 +410,10 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					ToolID: tu.ID,
 				}
 
-				var requestedNames []string
-				if names, ok := tu.Input["tool_names"]; ok {
-					if nameList, ok := names.([]any); ok {
-						for _, n := range nameList {
-							if s, ok := n.(string); ok {
-								requestedNames = append(requestedNames, s)
-							}
-						}
-					}
-				}
+				// Delegate to ToolBroker.HandleRequestTools which supports
+				// both explicit tool_names and intent-based selection.
+				newTools, rtResult := e.ToolBroker.HandleRequestTools(tu.Input)
 
-				// Look up full tool definitions and add to the active tool set.
-				newTools := e.ToolBroker.GetToolsByNames(requestedNames)
 				var loaded []string
 				for _, nt := range newTools {
 					if !loadedTools[nt.Name] {
@@ -440,10 +423,6 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				}
 
-				rtResult := fmt.Sprintf("Loaded %d tool(s): %s", len(loaded), strings.Join(loaded, ", "))
-				if len(loaded) == 0 && len(requestedNames) > 0 {
-					rtResult = fmt.Sprintf("No tools found matching: %s", strings.Join(requestedNames, ", "))
-				}
 				log.Printf("chat: request_tools loaded %d tools: %v", len(loaded), loaded)
 
 				ch <- StreamEvent{

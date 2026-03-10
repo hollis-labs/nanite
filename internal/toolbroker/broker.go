@@ -25,6 +25,7 @@ type ToolBroker struct {
 	MCPManager *mcp.Manager
 	Store      *store.Store
 	Config     *Config
+	Builtins   *BuiltinToolRegistry
 }
 
 // New creates a new ToolBroker.
@@ -40,6 +41,7 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolBroker {
 		MCPManager: mcpManager,
 		Store:      s,
 		Config:     cfg,
+		Builtins:   NewBuiltinToolRegistry(),
 	}
 }
 
@@ -106,13 +108,24 @@ func (tb *ToolBroker) SelectTools(ctx context.Context, intent string, hints []st
 }
 
 // SelectToolsAsProvider returns selected tools converted to provider.ToolDefinition format.
+// Built-in tools are always prepended and do not count against selection limits.
 func (tb *ToolBroker) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]provider.ToolDefinition, error) {
 	tools, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
 		return nil, err
 	}
 
-	defs := make([]provider.ToolDefinition, 0, len(tools))
+	// Start with built-in tools — always available regardless of MCP status.
+	var defs []provider.ToolDefinition
+	if tb.Builtins != nil {
+		builtins := tb.Builtins.GetBuiltins()
+		defs = make([]provider.ToolDefinition, 0, len(builtins)+len(tools))
+		defs = append(defs, builtins...)
+	} else {
+		defs = make([]provider.ToolDefinition, 0, len(tools))
+	}
+
+	// Append broker-selected MCP tools.
 	for _, t := range tools {
 		name := t.Name
 		if t.Server != "" {
@@ -200,11 +213,21 @@ func (tb *ToolBroker) GetToolsByNames(names []string) []provider.ToolDefinition 
 }
 
 // ListTools returns all registered tools as provider.ToolDefinition.
+// Built-in tools are always included regardless of MCP manager status.
 func (tb *ToolBroker) ListTools() []provider.ToolDefinition {
-	if tb.MCPManager == nil {
-		return nil
+	var all []provider.ToolDefinition
+
+	// Always include built-in tools.
+	if tb.Builtins != nil {
+		all = append(all, tb.Builtins.GetBuiltins()...)
 	}
-	return tb.MCPManager.GetAllTools()
+
+	// Include MCP-discovered tools.
+	if tb.MCPManager != nil {
+		all = append(all, tb.MCPManager.GetAllTools()...)
+	}
+
+	return all
 }
 
 // ListServers returns information about registered MCP servers.

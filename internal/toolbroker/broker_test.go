@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hollis-labs/mentat-chat/internal/mcp"
+	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/tiamat-tool-broker/broker"
 )
 
@@ -207,4 +209,250 @@ func TestConfig_RulesFor_MergesOverrides(t *testing.T) {
 	if len(rules2) != baseCount {
 		t.Errorf("expected %d rules without overrides, got %d", baseCount, len(rules2))
 	}
+}
+
+// --- mockTransport implements mcp.Transport for testing ---
+
+type mockTransport struct {
+	tools []mcp.Tool
+}
+
+func (m *mockTransport) ListTools(_ context.Context) ([]mcp.Tool, error) {
+	return m.tools, nil
+}
+
+func (m *mockTransport) CallTool(_ context.Context, _ string, _ map[string]any) (*mcp.ToolResult, error) {
+	return &mcp.ToolResult{}, nil
+}
+
+// newTestBrokerWithTools creates a ToolBroker backed by an MCP manager
+// populated with the given provider.ToolDefinition set (via a mock transport).
+func newTestBrokerWithTools(tools []provider.ToolDefinition) *ToolBroker {
+	mgr := mcp.NewManager()
+
+	mcpTools := make([]mcp.Tool, len(tools))
+	for i, t := range tools {
+		mcpTools[i] = mcp.Tool{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		}
+	}
+	mgr.AddServer("test", &mockTransport{tools: mcpTools})
+	_ = mgr.DiscoverTools(context.Background())
+
+	cfg := DefaultConfig()
+	tb := New(mgr, nil, cfg)
+	return tb
+}
+
+// --- SelectByIntent tests ---
+
+func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
+	tools := []provider.ToolDefinition{
+		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
+		{Name: "volon_sprint_list", Description: "List all sprints"},
+		{Name: "cortex_context_view", Description: "View a context packet"},
+		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
+	}
+	tb := newTestBrokerWithTools(tools)
+
+	// Intent about tasks should find the task tool.
+	result := tb.SelectByIntent("create task backlog", 10)
+	if len(result) == 0 {
+		t.Fatal("expected at least one tool for intent 'create task backlog'")
+	}
+
+	// The top result should be the task_create tool (highest score).
+	found := false
+	for _, r := range result {
+		if r.Name == "mcp__test__volon_task_create" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected volon_task_create in results, got %v", namesOf(result))
+	}
+}
+
+func TestSelectByIntent_RespectsMaxTools(t *testing.T) {
+	tools := []provider.ToolDefinition{
+		{Name: "tool_sprint_a", Description: "Sprint tool A"},
+		{Name: "tool_sprint_b", Description: "Sprint tool B"},
+		{Name: "tool_sprint_c", Description: "Sprint tool C"},
+		{Name: "tool_sprint_d", Description: "Sprint tool D"},
+		{Name: "tool_sprint_e", Description: "Sprint tool E"},
+	}
+	tb := newTestBrokerWithTools(tools)
+
+	result := tb.SelectByIntent("sprint tool", 2)
+	if len(result) > 2 {
+		t.Errorf("expected at most 2 tools, got %d", len(result))
+	}
+}
+
+func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
+	tools := []provider.ToolDefinition{
+		{Name: "volon_task_create", Description: "Create a new task"},
+		{Name: "cortex_context_view", Description: "View a context packet"},
+	}
+	tb := newTestBrokerWithTools(tools)
+
+	// Intent with words that don't match anything.
+	result := tb.SelectByIntent("xylophone quantum zebra", 10)
+	if len(result) != 0 {
+		t.Errorf("expected 0 tools for unrelated intent, got %d: %v", len(result), namesOf(result))
+	}
+}
+
+func TestSelectByIntent_EmptyIntent(t *testing.T) {
+	tools := []provider.ToolDefinition{
+		{Name: "volon_task_create", Description: "Create a new task"},
+	}
+	tb := newTestBrokerWithTools(tools)
+
+	result := tb.SelectByIntent("", 10)
+	if len(result) != 0 {
+		t.Errorf("expected 0 tools for empty intent, got %d", len(result))
+	}
+}
+
+func TestSelectByIntent_NoMCPManager(t *testing.T) {
+	tb := New(nil, nil, DefaultConfig())
+	result := tb.SelectByIntent("create task", 10)
+	if len(result) != 0 {
+		t.Errorf("expected 0 tools without MCP manager, got %d", len(result))
+	}
+}
+
+// --- Scoring unit tests ---
+
+func TestScoreToolAgainstIntent(t *testing.T) {
+	tool := provider.ToolDefinition{
+		Name:        "volon_task_create",
+		Description: "Create a new task in the backlog",
+	}
+
+	// "task" appears in both name (+2) and description (+1) = 3
+	// "create" appears in both name (+2) and description (+1) = 3
+	// "backlog" appears in description (+1) = 1
+	score := scoreToolAgainstIntent(tool, []string{"task", "create", "backlog"})
+	if score < 3 {
+		t.Errorf("expected score >= 3 for matching intent, got %d", score)
+	}
+
+	// No matching words.
+	score = scoreToolAgainstIntent(tool, []string{"pipeline", "deploy"})
+	if score != 0 {
+		t.Errorf("expected score 0 for non-matching intent, got %d", score)
+	}
+}
+
+func TestTokeniseIntent(t *testing.T) {
+	words := tokeniseIntent("Create a new sprint for the project")
+	// "create" (6), "new" (3), "sprint" (6), "project" (7)
+	// "the" and "for" are stop words; "a" is < 3 chars
+	if len(words) == 0 {
+		t.Fatal("expected at least one word from intent")
+	}
+	found := false
+	for _, w := range words {
+		if w == "sprint" {
+			found = true
+		}
+		if w == "the" || w == "for" || w == "a" {
+			t.Errorf("stop word or short word %q should have been filtered", w)
+		}
+	}
+	if !found {
+		t.Errorf("expected 'sprint' in tokenised words, got %v", words)
+	}
+}
+
+// --- Meta-tool tests ---
+
+func TestRequestToolsMetaTool_HasCorrectSchema(t *testing.T) {
+	def := RequestToolsMetaTool()
+	if def.Name != "request_tools" {
+		t.Errorf("expected name 'request_tools', got %q", def.Name)
+	}
+	if def.InputSchema == nil {
+		t.Fatal("expected non-nil InputSchema")
+	}
+	props, ok := def.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties in InputSchema")
+	}
+	if _, ok := props["tool_names"]; !ok {
+		t.Error("expected tool_names in properties")
+	}
+	if _, ok := props["intent"]; !ok {
+		t.Error("expected intent in properties")
+	}
+}
+
+func TestHandleRequestTools_ByIntent(t *testing.T) {
+	tools := []provider.ToolDefinition{
+		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
+		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
+	}
+	tb := newTestBrokerWithTools(tools)
+
+	matched, summary := tb.HandleRequestTools(map[string]any{
+		"intent": "create task",
+	})
+
+	if len(matched) == 0 {
+		t.Fatalf("expected matched tools for intent 'create task', got 0. Summary: %s", summary)
+	}
+	if summary == "No matching tools found." {
+		t.Error("expected non-empty match summary")
+	}
+}
+
+func TestHandleRequestTools_ByName(t *testing.T) {
+	tools := []provider.ToolDefinition{
+		{Name: "volon_task_create", Description: "Create a task"},
+		{Name: "hadron_pipeline_run", Description: "Run a pipeline"},
+	}
+	tb := newTestBrokerWithTools(tools)
+
+	matched, _ := tb.HandleRequestTools(map[string]any{
+		"tool_names": []any{"mcp__test__volon_task_create"},
+	})
+
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 tool matched by name, got %d", len(matched))
+	}
+	if matched[0].Name != "mcp__test__volon_task_create" {
+		t.Errorf("expected mcp__test__volon_task_create, got %s", matched[0].Name)
+	}
+}
+
+func TestHandleRequestTools_NoMatch(t *testing.T) {
+	tools := []provider.ToolDefinition{
+		{Name: "volon_task_create", Description: "Create a task"},
+	}
+	tb := newTestBrokerWithTools(tools)
+
+	matched, summary := tb.HandleRequestTools(map[string]any{
+		"intent": "xylophone quantum zebra",
+	})
+
+	if len(matched) != 0 {
+		t.Errorf("expected 0 matched tools, got %d", len(matched))
+	}
+	if summary != "No matching tools found." {
+		t.Errorf("expected 'No matching tools found.' summary, got %q", summary)
+	}
+}
+
+// namesOf extracts tool names from a slice of ToolDefinition.
+func namesOf(tools []provider.ToolDefinition) []string {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	return names
 }

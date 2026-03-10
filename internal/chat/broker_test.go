@@ -1,10 +1,12 @@
 package chat
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/mentat-chat/internal/provider"
 	"github.com/hollis-labs/mentat-chat/internal/store"
 )
 
@@ -70,7 +72,7 @@ func TestAssembleContext(t *testing.T) {
 		}
 	}
 
-	systemPrompt, messages, err := cb.AssembleContext(sess, agent, mode, workspace)
+	systemPrompt, messages, err := cb.AssembleContext(context.Background(), sess, agent, mode, workspace)
 	if err != nil {
 		t.Fatalf("AssembleContext: %v", err)
 	}
@@ -124,7 +126,7 @@ func TestAssembleContextBudgetEnforcement(t *testing.T) {
 		}
 	}
 
-	_, messages, err := cb.AssembleContext(sess, agent, &store.AgentMode{}, nil)
+	_, messages, err := cb.AssembleContext(context.Background(), sess, agent, &store.AgentMode{}, nil)
 	if err != nil {
 		t.Fatalf("AssembleContext: %v", err)
 	}
@@ -137,5 +139,141 @@ func TestAssembleContextBudgetEnforcement(t *testing.T) {
 	// Should always keep at least 1 message.
 	if len(messages) < 1 {
 		t.Error("expected at least 1 message to remain after budget enforcement")
+	}
+}
+
+func TestEnforceTokenBudget_UnderCeiling(t *testing.T) {
+	sys := "You are a helpful assistant."
+	msgs := []provider.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there!"},
+	}
+	tools := []provider.ToolDefinition{
+		{Name: "test_tool", Description: "A test tool"},
+	}
+
+	outMsgs, outTools, bd, err := EnforceTokenBudget(sys, msgs, tools, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outMsgs) != 2 {
+		t.Errorf("expected 2 messages, got %d", len(outMsgs))
+	}
+	if len(outTools) != 1 {
+		t.Errorf("expected 1 tool, got %d", len(outTools))
+	}
+	if bd.Total > bd.Ceiling {
+		t.Errorf("total %d should be under ceiling %d", bd.Total, bd.Ceiling)
+	}
+}
+
+func TestEnforceTokenBudget_PrunesToolResults(t *testing.T) {
+	sys := "Short."
+	// Build messages with old tool results that should get pruned.
+	bigResult := strings.Repeat("x", 4000) // ~1000 tokens
+	msgs := []provider.ChatMessage{
+		{Role: "user", Content: "first"},
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "tu1", Name: "search"},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu1", Content: bigResult},
+		}},
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "tu2", Name: "search"},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu2", Content: bigResult},
+		}},
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "tu3", Name: "search"},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu3", Content: bigResult},
+		}},
+		{Role: "user", Content: "last question"},
+	}
+
+	// Use a tight ceiling to force pruning.
+	outMsgs, _, _, err := EnforceTokenBudget(sys, msgs, nil, 2000)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The oldest tool result (tu1) should have been pruned.
+	for _, m := range outMsgs {
+		for _, b := range m.ContentBlocks {
+			if b.Type == "tool_result" && b.ToolUseID == "tu1" {
+				if len(b.Content) > 200 {
+					t.Errorf("old tool result tu1 should be pruned, but has %d chars", len(b.Content))
+				}
+			}
+		}
+	}
+}
+
+func TestEnforceTokenBudget_RefusesOversize(t *testing.T) {
+	// System prompt alone exceeds the ceiling.
+	sys := strings.Repeat("a", 4000) // ~1000 tokens
+	msgs := []provider.ChatMessage{
+		{Role: "user", Content: strings.Repeat("b", 4000)},
+	}
+
+	_, _, _, err := EnforceTokenBudget(sys, msgs, nil, 100) // ceiling of 100 tokens
+	if err == nil {
+		t.Error("expected error for oversized context, got nil")
+	}
+}
+
+func TestPruneToolResultsInMemory(t *testing.T) {
+	big := strings.Repeat("x", 1000)
+	msgs := []provider.ChatMessage{
+		// Round 1 (old — should be pruned)
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "tu1", Name: "search"},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu1", Content: big},
+		}},
+		// Round 2 (old — should be pruned)
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "tu2", Name: "fetch"},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu2", Content: big},
+		}},
+		// Round 3 (recent — keep)
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "tu3", Name: "write"},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu3", Content: big},
+		}},
+		// Round 4 (recent — keep)
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "tu4", Name: "read"},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "tu4", Content: big},
+		}},
+	}
+
+	result := pruneToolResultsInMemory(msgs)
+
+	// tu1 should be pruned (round 1, >2 rounds old)
+	for _, m := range result {
+		for _, b := range m.ContentBlocks {
+			if b.Type == "tool_result" && b.ToolUseID == "tu1" {
+				if !strings.HasPrefix(b.Content, "[pruned:") {
+					t.Errorf("tu1 should be pruned, got: %s", b.Content[:50])
+				}
+			}
+			// tu3 and tu4 should be kept
+			if b.Type == "tool_result" && (b.ToolUseID == "tu3" || b.ToolUseID == "tu4") {
+				if strings.HasPrefix(b.Content, "[pruned:") {
+					t.Errorf("%s should NOT be pruned", b.ToolUseID)
+				}
+			}
+		}
 	}
 }

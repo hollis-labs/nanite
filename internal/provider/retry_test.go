@@ -85,25 +85,63 @@ func TestParseRetryAfter(t *testing.T) {
 func TestBackoffDelay(t *testing.T) {
 	cfg := DefaultRetryConfig()
 
+	// With jitter, delay is in range [base*0.75, base]. Test within that range.
 	tests := []struct {
 		attempt    int
 		retryAfter time.Duration
-		want       time.Duration
+		wantMin    time.Duration // base * 0.75
+		wantMax    time.Duration // base (no jitter)
 	}{
-		{0, 0, 1 * time.Second},  // 1s * 2^0
-		{1, 0, 2 * time.Second},  // 1s * 2^1
-		{2, 0, 4 * time.Second},  // 1s * 2^2
-		{3, 0, 8 * time.Second},  // 1s * 2^3 = 8s (capped at MaxDelay)
-		{4, 0, 8 * time.Second},  // 1s * 2^4 = 16s but capped at 8s
-		{0, 3 * time.Second, 3 * time.Second}, // retry-after takes precedence
-		{0, 20 * time.Second, 8 * time.Second}, // retry-after capped at MaxDelay
+		{0, 0, 750 * time.Millisecond, 1 * time.Second},   // base 1s
+		{1, 0, 1500 * time.Millisecond, 2 * time.Second},  // base 2s
+		{2, 0, 3 * time.Second, 4 * time.Second},           // base 4s
+		{3, 0, 6 * time.Second, 8 * time.Second},           // base 8s (capped)
+		{4, 0, 6 * time.Second, 8 * time.Second},           // base 16s capped to 8s
+		{0, 3 * time.Second, 2250 * time.Millisecond, 3 * time.Second},  // retry-after 3s
+		{0, 20 * time.Second, 15 * time.Second, 20 * time.Second},       // retry-after 20s (not capped at MaxDelay anymore)
 	}
 	for _, tt := range tests {
 		got := cfg.BackoffDelay(tt.attempt, tt.retryAfter)
-		if got != tt.want {
-			t.Errorf("BackoffDelay(attempt=%d, retryAfter=%v) = %v, want %v",
-				tt.attempt, tt.retryAfter, got, tt.want)
+		if got < tt.wantMin || got > tt.wantMax {
+			t.Errorf("BackoffDelay(attempt=%d, retryAfter=%v) = %v, want [%v, %v]",
+				tt.attempt, tt.retryAfter, got, tt.wantMin, tt.wantMax)
 		}
+	}
+}
+
+func TestIsTokenRateLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			"token rate limit",
+			&APIError{StatusCode: 429, Message: `exceed your organization's rate limit of 30,000 input tokens per minute`},
+			true,
+		},
+		{
+			"request rate limit",
+			&APIError{StatusCode: 429, Message: `rate limit exceeded, please retry`},
+			false,
+		},
+		{
+			"non-429",
+			&APIError{StatusCode: 500, Message: `input tokens server error`},
+			false,
+		},
+		{
+			"non-API error",
+			errors.New("connection refused"),
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsTokenRateLimit(tt.err); got != tt.want {
+				t.Errorf("IsTokenRateLimit() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

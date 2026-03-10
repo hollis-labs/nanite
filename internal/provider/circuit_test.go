@@ -3,6 +3,7 @@ package provider
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestCircuitBreaker_TripsAfterThreshold(t *testing.T) {
@@ -172,5 +173,53 @@ func TestCircuitBreaker_State(t *testing.T) {
 
 	if cb.State() != CircuitOpen {
 		t.Fatalf("expected CircuitOpen, got %d", cb.State())
+	}
+}
+
+func TestCircuitBreaker_HalfOpen(t *testing.T) {
+	cb := NewCircuitBreaker(1)
+	cb.cooldown = 10 * time.Millisecond // very short for testing
+
+	// Trip the circuit.
+	cb.RecordFailure()
+	if !cb.IsOpen() {
+		t.Fatal("expected circuit to be open")
+	}
+
+	// Wait for cooldown to expire.
+	time.Sleep(20 * time.Millisecond)
+
+	// Should transition to half-open (IsOpen returns false to allow probe).
+	if cb.IsOpen() {
+		t.Fatal("expected circuit to transition to half-open after cooldown")
+	}
+	if cb.State() != CircuitHalfOpen {
+		t.Fatalf("expected CircuitHalfOpen, got %d", cb.State())
+	}
+
+	// A success in half-open should close the circuit.
+	cb.RecordSuccess()
+	if cb.State() != CircuitClosed {
+		t.Fatalf("expected CircuitClosed after success in half-open, got %d", cb.State())
+	}
+}
+
+func TestCircuitBreaker_HalfOpenProbeFailure(t *testing.T) {
+	cb := NewCircuitBreaker(1)
+	cb.cooldown = 10 * time.Millisecond
+
+	// Trip the circuit.
+	cb.RecordFailure()
+
+	// Wait for cooldown.
+	time.Sleep(20 * time.Millisecond)
+
+	// Transition to half-open.
+	cb.IsOpen() // triggers transition
+
+	// Probe fails — should go back to open.
+	cb.RecordFailure()
+	if cb.State() != CircuitOpen {
+		t.Fatalf("expected CircuitOpen after failed probe, got %d", cb.State())
 	}
 }

@@ -180,8 +180,8 @@ func TestRequestToolsDef_HasCorrectSchema(t *testing.T) {
 }
 
 func TestProgressiveDiscoveryThreshold(t *testing.T) {
-	if ProgressiveDiscoveryThreshold != 20 {
-		t.Errorf("expected threshold=20, got %d", ProgressiveDiscoveryThreshold)
+	if ProgressiveDiscoveryThreshold != 5 {
+		t.Errorf("expected threshold=5, got %d", ProgressiveDiscoveryThreshold)
 	}
 }
 

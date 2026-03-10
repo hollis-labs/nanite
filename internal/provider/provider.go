@@ -40,9 +40,11 @@ type StreamEvent struct {
 
 // Usage contains token usage information.
 type Usage struct {
-	InputTokens  int
-	OutputTokens int
-	StopReason   string
+	InputTokens          int
+	OutputTokens         int
+	CacheCreationTokens  int
+	CacheReadTokens      int
+	StopReason           string
 }
 
 // ChatMessage represents a single message in a conversation.

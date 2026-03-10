@@ -4,11 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// MaxRetryAfter is the maximum retry-after duration we'll respect from the server.
+// This is intentionally much higher than MaxDelay to honour server guidance.
+const MaxRetryAfter = 60 * time.Second
 
 // RetryConfig controls exponential backoff behaviour.
 type RetryConfig struct {
@@ -90,20 +95,45 @@ func ParseRetryAfter(header string) time.Duration {
 	return 0
 }
 
-// BackoffDelay calculates the delay for a given attempt using exponential backoff.
-// If retryAfter is non-zero it is used instead (but capped at MaxDelay).
+// BackoffDelay calculates the delay for a given attempt using exponential backoff
+// with jitter. If retryAfter is non-zero it is used instead, capped at MaxRetryAfter
+// (60s) to respect server guidance. Computed backoff is capped at MaxDelay (8s).
+// Jitter subtracts 0-25% of the delay to prevent thundering herd.
 func (c RetryConfig) BackoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	var delay time.Duration
 	if retryAfter > 0 {
-		if retryAfter > c.MaxDelay {
-			return c.MaxDelay
+		// Respect the server's retry-after, capped at 60s (not MaxDelay).
+		delay = retryAfter
+		if delay > MaxRetryAfter {
+			delay = MaxRetryAfter
 		}
-		return retryAfter
+	} else {
+		delay = time.Duration(float64(c.InitialDelay) * math.Pow(c.Multiplier, float64(attempt)))
+		if delay > c.MaxDelay {
+			delay = c.MaxDelay
+		}
 	}
-	delay := time.Duration(float64(c.InitialDelay) * math.Pow(c.Multiplier, float64(attempt)))
-	if delay > c.MaxDelay {
-		delay = c.MaxDelay
-	}
+
+	// Apply jitter: subtract 0-25% of the delay.
+	jitter := time.Duration(rand.Int63n(int64(delay) / 4))
+	delay -= jitter
+
 	return delay
+}
+
+// IsTokenRateLimit returns true if the error is a 429 caused by exceeding
+// the input token rate limit (as opposed to a transient request rate limit).
+// Token-rate 429s cannot be fixed by retrying the same payload.
+func IsTokenRateLimit(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.StatusCode != http.StatusTooManyRequests {
+		return false
+	}
+	lower := strings.ToLower(apiErr.Message)
+	return strings.Contains(lower, "input tokens") || strings.Contains(lower, "input_tokens")
 }
 
 // StatusCallback is called during retries to report status to the caller.

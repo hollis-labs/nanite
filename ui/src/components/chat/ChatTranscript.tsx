@@ -22,9 +22,10 @@ interface ChatTranscriptProps {
   messages: Message[]
   isStreaming: boolean
   streamingContent: string
+  onSendMessage?: (content: string) => void
 }
 
-export function ChatTranscript({ messages, isStreaming, streamingContent }: ChatTranscriptProps) {
+export function ChatTranscript({ messages, isStreaming, streamingContent, onSendMessage }: ChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const activeMode = useChatStore((s) => s.activeMode)
@@ -89,6 +90,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent }: Chat
             message={msg}
             isBookmarked={bookmarkedMessageIds.has(msg.id)}
             onToggleBookmark={handleToggleBookmark}
+            onSendMessage={onSendMessage}
           />
         ))}
 

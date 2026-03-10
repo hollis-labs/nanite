@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot, ChevronDown, Users } from 'lucide-react'
+import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -9,6 +9,7 @@ import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
 import { AGENT_MODES, type AgentMode } from '@/lib/types'
 import { AgentRoster } from './AgentRoster'
+import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 
 const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; border: string; text: string }> = {
   default: { bg: 'bg-blue-500/15', border: 'border-blue-500/25', text: 'text-blue-400' },
@@ -183,6 +184,15 @@ export function ChatHeader() {
         </div>
       </div>
       <div className="flex items-center gap-1">
+        {/* Sprint planning */}
+        <Tooltip content="Sprint Planning" side="bottom">
+          <button
+            onClick={() => useSprintPlanningStore.getState().openSprintPlanning()}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
         {/* Agent count badge */}
         {agentCount > 1 && (
           <Tooltip content="View agents in session" side="bottom">

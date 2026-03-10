@@ -121,10 +121,12 @@ export interface ToolTokenDetail {
 
 export interface ContextBreakdown {
   system_prompt_tokens: number
+  system_prompt_preview: string
   messages: MessageTokenDetail[]
   message_tokens_total: number
   tools: ToolTokenDetail[]
   tool_tokens_total: number
+  tools_available: number
   total: number
   ceiling: number
   estimated_cost_usd: number
@@ -136,6 +138,8 @@ export interface SessionUsageSummary {
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
   estimated_cost_usd: number
   message_count: number
 }

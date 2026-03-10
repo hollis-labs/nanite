@@ -11,11 +11,16 @@ import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { api } from '@/lib/api'
 import SettingsPage from './settings/SettingsPage'
+import { SprintPlanningModal } from './modals/SprintPlanningModal'
+import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 
 export function AppShell() {
   const focusRef = useRef<(() => void) | null>(null)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const currentPage = useLayoutStore((s) => s.currentPage)
+  const sprintOpen = useSprintPlanningStore((s) => s.isOpen)
+  const sprintProjectId = useSprintPlanningStore((s) => s.projectId)
+  const closeSprintPlanning = useSprintPlanningStore((s) => s.closeSprintPlanning)
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeWorkspaceId],
@@ -48,6 +53,12 @@ export function AppShell() {
       {currentPage === 'chat' && <RightRail />}
       <ArtifactsDrawer />
       <WorkflowPanel />
+      {sprintOpen && (
+        <SprintPlanningModal
+          projectId={sprintProjectId}
+          onClose={closeSprintPlanning}
+        />
+      )}
     </div>
   )
 }

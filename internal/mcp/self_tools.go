@@ -136,5 +136,40 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"name", "slug", "definition"},
 			},
 		},
+		// UI trigger tools — open frontend modals/panels
+		{
+			Name:        "mentat_open_sprint_planning",
+			Description: "Open the sprint planning modal in the UI. Use when the user asks to review sprints, plan work, or manage tasks and backlog.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"project_id": map[string]any{"type": "string", "description": "Optional project ID to scope the view (omit for all projects)"},
+				},
+			},
+		},
+		// Builder tools — interactive step-by-step creation flows
+		{
+			Name:        "mentat_start_builder",
+			Description: "Start a step-by-step creation wizard for agents, skills, or prompt templates. NOT for asking arbitrary questions — only for creating new entities. You MUST provide builder_name (agent, skill, or prompt_template). After starting, use mentat_builder_step for each subsequent step.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"builder_name": map[string]any{"type": "string", "description": "Builder to start: agent, skill, or prompt_template. Omit to list available builders."},
+				},
+			},
+		},
+		{
+			Name:        "mentat_builder_step",
+			Description: "Submit a value for the current step in an active builder flow. Returns the next step prompt or the final result.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"builder_name": map[string]any{"type": "string", "description": "Name of the active builder (agent, skill, or prompt_template)"},
+					"step_name":    map[string]any{"type": "string", "description": "Name of the step to submit a value for"},
+					"value":        map[string]any{"type": "string", "description": "The value for this step"},
+				},
+				"required": []string{"builder_name", "step_name"},
+			},
+		},
 	}
 }

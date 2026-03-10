@@ -31,6 +31,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
         messages={messages}
         isStreaming={isStreaming}
         streamingContent={streamingContent}
+        onSendMessage={sendMessage}
       />
       {circuitOpen && (
         <div className="mx-4 mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">

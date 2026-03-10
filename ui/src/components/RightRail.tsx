@@ -15,14 +15,14 @@ export function RightRail() {
         open ? 'w-96' : 'w-0'
       }`}
     >
-      <div className="min-w-96">
+      <div className="min-w-96 h-full flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-zinc-800">
+        <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
           <h2 className="text-sm font-semibold text-zinc-100">Widgets</h2>
         </div>
 
         {/* Widget cards */}
-        <ScrollArea className="flex-1 h-[calc(100%-48px)]">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="p-3 space-y-3">
             <SessionInfoWidget />
             <BookmarksWidget />

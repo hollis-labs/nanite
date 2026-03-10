@@ -36,15 +36,18 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"mentat_create_skill":    false,
-		"mentat_list_skills":     false,
-		"mentat_update_skill":    false,
-		"mentat_delete_skill":    false,
-		"mentat_create_agent":    false,
-		"mentat_list_agents":     false,
-		"mentat_update_agent":    false,
-		"mentat_list_workflows":  false,
-		"mentat_create_workflow": false,
+		"mentat_create_skill":          false,
+		"mentat_list_skills":           false,
+		"mentat_update_skill":          false,
+		"mentat_delete_skill":          false,
+		"mentat_create_agent":          false,
+		"mentat_list_agents":           false,
+		"mentat_update_agent":          false,
+		"mentat_list_workflows":        false,
+		"mentat_create_workflow":       false,
+		"mentat_open_sprint_planning":  false,
+		"mentat_start_builder":         false,
+		"mentat_builder_step":          false,
 	}
 
 	for _, tool := range tools {

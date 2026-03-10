@@ -207,6 +207,13 @@ export function MessageContent({ content, role }: { content: string; role: 'user
     },
   }), [])
 
+  // Strip envelope blocks from content so they don't render as raw JSON
+  // (during streaming, envelopes haven't been extracted yet).
+  const displayContent = useMemo(() =>
+    content.replace(/```(?:volon-envelope|mentat-envelope)\s*\n[\s\S]*?```/g, '').trim(),
+    [content]
+  )
+
   if (role === 'user') {
     return (
       <div className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap">
@@ -218,7 +225,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
   return (
     <div className="text-sm text-zinc-200 leading-relaxed prose-dark">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {content}
+        {displayContent}
       </ReactMarkdown>
     </div>
   )

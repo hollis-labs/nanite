@@ -253,11 +253,29 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
                 tokens={breakdown.system_prompt_tokens}
                 totalCeiling={breakdown.ceiling}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-zinc-500">
-                    Estimated tokens from agent system prompt and templates
-                  </span>
-                  <CopyButton text={`System prompt: ${breakdown.system_prompt_tokens} tokens`} />
+                <div className="space-y-2">
+                  {breakdown.system_prompt_preview ? (
+                    <>
+                      <div className="max-h-40 overflow-y-auto">
+                        <pre className="text-xs text-zinc-400 whitespace-pre-wrap break-words font-mono leading-relaxed">
+                          {breakdown.system_prompt_preview}
+                        </pre>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-zinc-800/50">
+                        <span className="text-xs text-zinc-500">
+                          {breakdown.system_prompt_tokens} tokens
+                          {breakdown.system_prompt_preview.endsWith('...') && ' (preview truncated)'}
+                        </span>
+                        <CopyButton text={breakdown.system_prompt_preview} />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-500">
+                        {breakdown.system_prompt_tokens} tokens (no preview available)
+                      </span>
+                    </div>
+                  )}
                 </div>
               </AccordionSection>
 
@@ -280,21 +298,26 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
                 </div>
               </AccordionSection>
 
-              {/* Tools */}
+              {/* Tool Calls */}
               <AccordionSection
-                title={`Tools (${breakdown.tools.length})`}
+                title={`Tool Calls (${breakdown.tools.length})`}
                 icon={<Wrench className="w-3.5 h-3.5 text-green-400" />}
                 tokens={breakdown.tool_tokens_total}
                 totalCeiling={breakdown.ceiling}
               >
-                <div className="max-h-48 overflow-y-auto">
-                  {breakdown.tools.length === 0 ? (
-                    <span className="text-xs text-zinc-600">No tools loaded</span>
-                  ) : (
-                    breakdown.tools.map((tool) => (
-                      <ToolRow key={tool.name} tool={tool} />
-                    ))
-                  )}
+                <div className="space-y-1">
+                  <div className="text-xs text-zinc-500 pb-1">
+                    {breakdown.tools_available} tools available
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {breakdown.tools.length === 0 ? (
+                      <span className="text-xs text-zinc-600">No tool calls in this session</span>
+                    ) : (
+                      breakdown.tools.map((tool, i) => (
+                        <ToolRow key={`${tool.name}-${i}`} tool={tool} />
+                      ))
+                    )}
+                  </div>
                 </div>
               </AccordionSection>
 
@@ -311,7 +334,7 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
                   <span className="text-zinc-500">Messages</span>
                   <span className="text-zinc-300 text-right font-mono">{formatTokens(breakdown.message_tokens_total)}</span>
 
-                  <span className="text-zinc-500">Tools</span>
+                  <span className="text-zinc-500">Tool calls</span>
                   <span className="text-zinc-300 text-right font-mono">{formatTokens(breakdown.tool_tokens_total)}</span>
 
                   <span className="text-zinc-500 font-medium pt-1 border-t border-zinc-800">Total</span>

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/hollis-labs/mentat-chat/internal/mcp"
 	"github.com/hollis-labs/mentat-chat/internal/provider"
@@ -141,6 +142,7 @@ func (tb *ToolBroker) SelectToolsAsProvider(ctx context.Context, intent string, 
 }
 
 // CallTool executes a tool call after checking permissions. Routes through the MCP Manager.
+// Built-in tools (no mcp__ prefix) are routed to the "self" MCP server automatically.
 func (tb *ToolBroker) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
 	// Check permissions.
 	if !tb.CheckPermission(agentID, toolName) {
@@ -151,7 +153,20 @@ func (tb *ToolBroker) CallTool(ctx context.Context, agentID, toolName string, ar
 		return "", fmt.Errorf("no MCP manager configured")
 	}
 
-	return tb.MCPManager.ExecuteTool(ctx, toolName, args)
+	// Built-in tools don't have the mcp__ prefix. Route them to the "self" server.
+	execName := toolName
+	if !strings.HasPrefix(toolName, "mcp__") {
+		if tb.Builtins != nil {
+			for _, b := range tb.Builtins.GetBuiltins() {
+				if b.Name == toolName {
+					execName = fmt.Sprintf("mcp__self__%s", toolName)
+					break
+				}
+			}
+		}
+	}
+
+	return tb.MCPManager.ExecuteTool(ctx, execName, args)
 }
 
 // GetPermissions loads tool permissions for an agent from the store.

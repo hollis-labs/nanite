@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useChatStore } from '@/stores/useChatStore'
+import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 import type { Message, StreamEvent, ChatError, ChatErrorCode } from '@/lib/types'
 
 let errorCounter = 0
@@ -106,6 +107,11 @@ export function useChat(sessionId: string | null) {
             tool: data.tool,
             status: 'running',
           })
+
+          // UI-trigger tools: open frontend modals/panels when the agent calls them.
+          if (data.tool === 'mentat_open_sprint_planning') {
+            useSprintPlanningStore.getState().openSprintPlanning()
+          }
         }
       })
 

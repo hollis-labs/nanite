@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hollis-labs/mentat-chat/internal/builders"
 	"github.com/hollis-labs/mentat-chat/internal/store"
 )
 
@@ -13,12 +14,18 @@ import (
 // create and manage its own skills, agent profiles, and workflows
 // through the same store layer the API uses.
 type SelfToolsTransport struct {
-	Store *store.Store
+	Store           *store.Store
+	BuilderRegistry *builders.Registry
+	BuilderSessions *builders.SessionManager
 }
 
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
 func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
-	return &SelfToolsTransport{Store: s}
+	return &SelfToolsTransport{
+		Store:           s,
+		BuilderRegistry: builders.DefaultRegistry(s),
+		BuilderSessions: builders.NewSessionManager(),
+	}
 }
 
 // ListTools returns all self-service tool definitions.
@@ -47,6 +54,12 @@ func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[
 		return st.callListWorkflows(args)
 	case "mentat_create_workflow":
 		return st.callCreateWorkflow(args)
+	case "mentat_open_sprint_planning":
+		return textResult("Sprint planning modal opened in the UI."), nil
+	case "mentat_start_builder":
+		return st.callStartBuilder(args)
+	case "mentat_builder_step":
+		return st.callBuilderStep(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -294,6 +307,28 @@ func (st *SelfToolsTransport) callCreateWorkflow(args map[string]any) (*ToolResu
 
 	out, _ := json.Marshal(w)
 	return textResult(fmt.Sprintf("Created workflow %q (id=%s)\n%s", w.Name, w.ID, string(out))), nil
+}
+
+// --- builder handlers ---
+
+func (st *SelfToolsTransport) callStartBuilder(args map[string]any) (*ToolResult, error) {
+	// Use a fixed session key — builders are per-transport, not per-chat-session.
+	// The chat session ID would be better but isn't available here.
+	sessionKey := "default"
+	result, err := builders.HandleStartBuilder(st.BuilderRegistry, st.BuilderSessions, sessionKey, args)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	return textResult(result), nil
+}
+
+func (st *SelfToolsTransport) callBuilderStep(args map[string]any) (*ToolResult, error) {
+	sessionKey := "default"
+	result, err := builders.HandleBuilderStep(st.BuilderRegistry, st.BuilderSessions, sessionKey, args)
+	if err != nil {
+		return errorResult(err.Error()), nil
+	}
+	return textResult(result), nil
 }
 
 // --- helpers ---

@@ -58,3 +58,13 @@ func (s *Store) ListEvents(category string, limit int) ([]EventLog, error) {
 	}
 	return out, nil
 }
+
+// CountSessionToolCalls returns the number of tool_call events for a session.
+func (s *Store) CountSessionToolCalls(sessionID string) int {
+	var count int
+	_ = s.DB.QueryRow(
+		`SELECT COUNT(*) FROM event_log WHERE session_id = ? AND event_type = 'tool_call'`,
+		sessionID,
+	).Scan(&count)
+	return count
+}

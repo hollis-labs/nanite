@@ -1,5 +1,5 @@
 import { Bot, User, Copy, Check, Bookmark, BookmarkCheck } from 'lucide-react'
-import { useState, useCallback } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import type { Message, AgentMode, Envelope } from '@/lib/types'
 import { MessageContent } from './MessageContent'
 import { EnvelopeRenderer } from './envelopes/EnvelopeRenderer'
@@ -56,11 +56,12 @@ interface ChatMessageProps {
   message: Message
   isBookmarked?: boolean
   onToggleBookmark?: (messageId: string) => void
+  onSendMessage?: (content: string) => void
   agentName?: string
   isMultiAgent?: boolean
 }
 
-export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, agentName, isMultiAgent = false }: ChatMessageProps) {
+export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, onSendMessage, agentName, isMultiAgent = false }: ChatMessageProps) {
   const [copied, setCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
   const activeMode = useChatStore((s) => s.activeMode)
@@ -80,17 +81,46 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, a
     ? { bg: 'bg-zinc-800', text: 'text-zinc-400' }
     : MODE_AVATAR_STYLES[activeMode]
 
-  // Parse envelope if present
-  let envelope: Envelope | null = null
-  if (message.envelope) {
-    try {
-      envelope = typeof message.envelope === 'string'
-        ? JSON.parse(message.envelope) as Envelope
-        : message.envelope as unknown as Envelope
-    } catch {
-      // ignore parse errors
+  // Parse envelope — from saved envelope field or from streaming content.
+  const envelope = useMemo<Envelope | null>(() => {
+    // Helper: merge an array of envelopes into one.
+    const mergeEnvelopes = (arr: Envelope[]): Envelope => {
+      const merged: Envelope = { kind: arr[0].kind, version: arr[0].version, type: arr[0].type }
+      for (const env of arr) {
+        if (env.proposals) merged.proposals = [...(merged.proposals ?? []), ...env.proposals]
+        if (env.questions) merged.questions = [...(merged.questions ?? []), ...env.questions]
+        if (env.approval && !merged.approval) merged.approval = env.approval
+        if (env.status && !merged.status) merged.status = env.status
+      }
+      return merged
     }
-  }
+
+    // 1. Try the saved envelope field (set after message is persisted).
+    if (message.envelope) {
+      try {
+        const raw = typeof message.envelope === 'string'
+          ? JSON.parse(message.envelope)
+          : message.envelope
+        if (Array.isArray(raw) && raw.length > 0) return mergeEnvelopes(raw)
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Envelope
+      } catch { /* ignore */ }
+    }
+
+    // 2. During streaming, extract from content (envelope field not set yet).
+    if (message.content) {
+      const pattern = /```(?:volon-envelope|mentat-envelope)\s*\n([\s\S]*?)```/g
+      const envelopes: Envelope[] = []
+      let match
+      while ((match = pattern.exec(message.content)) !== null) {
+        try {
+          envelopes.push(JSON.parse(match[1].trim()))
+        } catch { /* incomplete JSON during streaming — skip */ }
+      }
+      if (envelopes.length > 0) return mergeEnvelopes(envelopes)
+    }
+
+    return null
+  }, [message.envelope, message.content])
 
   return (
     <div
@@ -149,7 +179,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, a
         {/* Envelope rendering */}
         {envelope && !isUser && (
           <div className="mt-3">
-            <EnvelopeRenderer envelope={envelope} />
+            <EnvelopeRenderer envelope={envelope} onSendMessage={onSendMessage} />
           </div>
         )}
 

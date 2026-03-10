@@ -5,9 +5,10 @@ import { ApprovalCard } from './ApprovalCard'
 
 interface EnvelopeRendererProps {
   envelope: Envelope
+  onSendMessage?: (content: string) => void
 }
 
-export function EnvelopeRenderer({ envelope }: EnvelopeRendererProps) {
+export function EnvelopeRenderer({ envelope, onSendMessage }: EnvelopeRendererProps) {
   return (
     <div className="space-y-3">
       {envelope.proposals?.map((proposal, i) => (
@@ -15,7 +16,7 @@ export function EnvelopeRenderer({ envelope }: EnvelopeRendererProps) {
       ))}
 
       {envelope.questions && envelope.questions.length > 0 && (
-        <QuestionForm questions={envelope.questions} />
+        <QuestionForm questions={envelope.questions} onSubmit={onSendMessage} />
       )}
 
       {envelope.approval && (

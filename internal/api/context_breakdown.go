@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/hollis-labs/mentat-chat/internal/chat"
@@ -23,14 +24,16 @@ type ToolTokenDetail struct {
 
 // ContextBreakdownResponse is the full context breakdown for a session.
 type ContextBreakdownResponse struct {
-	SystemPromptTokens int                  `json:"system_prompt_tokens"`
-	Messages           []MessageTokenDetail `json:"messages"`
-	MessageTokensTotal int                  `json:"message_tokens_total"`
-	Tools              []ToolTokenDetail    `json:"tools"`
-	ToolTokensTotal    int                  `json:"tool_tokens_total"`
-	Total              int                  `json:"total"`
-	Ceiling            int                  `json:"ceiling"`
-	EstimatedCostUSD   float64              `json:"estimated_cost_usd"`
+	SystemPromptTokens  int                  `json:"system_prompt_tokens"`
+	SystemPromptPreview string               `json:"system_prompt_preview"`
+	Messages            []MessageTokenDetail `json:"messages"`
+	MessageTokensTotal  int                  `json:"message_tokens_total"`
+	Tools               []ToolTokenDetail    `json:"tools"`
+	ToolTokensTotal     int                  `json:"tool_tokens_total"`
+	ToolsAvailable      int                  `json:"tools_available"`
+	Total               int                  `json:"total"`
+	Ceiling             int                  `json:"ceiling"`
+	EstimatedCostUSD    float64              `json:"estimated_cost_usd"`
 }
 
 func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) {
@@ -62,40 +65,46 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 		msgTokensTotal += tokens
 	}
 
-	// Get tools if tool broker is available.
-	toolDetails := make([]ToolTokenDetail, 0)
-	toolTokensTotal := 0
-	if a.ToolBroker != nil && a.ToolBroker.MCPManager != nil {
-		allTools := a.ToolBroker.MCPManager.GetAllTools()
-		for _, t := range allTools {
-			tokens := chat.EstimateTokens(t.Name + t.Description)
-			if tokens < 4 {
-				tokens = 4
-			}
-			toolDetails = append(toolDetails, ToolTokenDetail{
-				Name:   t.Name,
-				Tokens: tokens,
-			})
-			toolTokensTotal += tokens
-		}
-	}
-
-	// Estimate system prompt tokens (rough: we don't have the assembled prompt here,
-	// but we can give an estimate based on typical system prompt size).
-	// Use a reasonable default estimate.
+	// Get the session's agent and its system prompt.
+	systemPrompt := ""
 	systemTokens := 500 // base estimate
 	if a.Engine != nil {
-		// Try to get a better estimate from the session's agent config.
 		session, err := a.Store.GetSession(sessionID)
 		if err == nil && session != nil {
 			agents, err := a.Store.ListSessionAgents(session.ID)
 			if err == nil && len(agents) > 0 {
 				agent, err := a.Store.GetAgent(agents[0].AgentID)
 				if err == nil && agent != nil {
-					systemTokens = chat.EstimateTokens(agent.SystemPrompt)
+					systemPrompt = agent.SystemPrompt
+					systemTokens = chat.EstimateTokens(systemPrompt)
 				}
 			}
 		}
+	}
+
+	// Count tool calls from the event log (tool results aren't stored as messages).
+	toolCallCount := a.Store.CountSessionToolCalls(sessionID)
+	toolDetails := make([]ToolTokenDetail, 0)
+	toolTokensTotal := 0
+	if toolCallCount > 0 {
+		// Estimate ~50 tokens per tool call for input/output overhead.
+		toolTokensTotal = toolCallCount * 50
+		toolDetails = append(toolDetails, ToolTokenDetail{
+			Name:   fmt.Sprintf("%d tool calls", toolCallCount),
+			Tokens: toolTokensTotal,
+		})
+	}
+
+	// Total available tools (for display, not context cost).
+	toolsAvailable := 0
+	if a.ToolBroker != nil {
+		toolsAvailable = len(a.ToolBroker.ListTools())
+	}
+
+	// System prompt preview for the inspector.
+	systemPreview := systemPrompt
+	if len(systemPreview) > 500 {
+		systemPreview = systemPreview[:500] + "..."
 	}
 
 	ceiling := int(float64(chat.DefaultContextWindow) * chat.HardCeilingPct)
@@ -109,14 +118,16 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := ContextBreakdownResponse{
-		SystemPromptTokens: systemTokens,
-		Messages:           msgDetails,
-		MessageTokensTotal: msgTokensTotal,
-		Tools:              toolDetails,
-		ToolTokensTotal:    toolTokensTotal,
-		Total:              total,
-		Ceiling:            ceiling,
-		EstimatedCostUSD:   costUSD,
+		SystemPromptTokens:  systemTokens,
+		SystemPromptPreview: systemPreview,
+		Messages:            msgDetails,
+		MessageTokensTotal:  msgTokensTotal,
+		Tools:               toolDetails,
+		ToolTokensTotal:     toolTokensTotal,
+		ToolsAvailable:      toolsAvailable,
+		Total:               total,
+		Ceiling:             ceiling,
+		EstimatedCostUSD:    costUSD,
 	}
 
 	a.jsonResp(w, http.StatusOK, resp)

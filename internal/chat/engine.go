@@ -68,9 +68,11 @@ type StreamEvent struct {
 
 // Usage contains token usage for a completed response.
 type Usage struct {
-	InputTokens  int    `json:"input_tokens"`
-	OutputTokens int    `json:"output_tokens"`
-	StopReason   string `json:"stop_reason"`
+	InputTokens         int    `json:"input_tokens"`
+	OutputTokens        int    `json:"output_tokens"`
+	CacheCreationTokens int    `json:"cache_creation_tokens"`
+	CacheReadTokens     int    `json:"cache_read_tokens"`
+	StopReason          string `json:"stop_reason"`
 }
 
 // Engine orchestrates chat sessions, provider calls, and streaming.
@@ -261,6 +263,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Track loaded tools for progressive discovery (tools loaded via request_tools).
 	loadedTools := make(map[string]bool)
+	// Consecutive request_tools calls that returned zero new tools.
+	consecutiveEmptyRequests := 0
+	// Total request_tools calls across all iterations — hard cap to prevent loops.
+	totalRequestToolsCalls := 0
+	const maxRequestToolsCalls = 3
+	// Track repeated tool results to detect stuck loops (tool_name -> last result hash).
+	lastToolResults := make(map[string]string)
+	toolRepeatCount := make(map[string]int)
 
 	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
@@ -351,6 +361,12 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					if evt.Usage.OutputTokens > 0 {
 						finalUsage.OutputTokens += evt.Usage.OutputTokens
 					}
+					if evt.Usage.CacheCreationTokens > 0 {
+						finalUsage.CacheCreationTokens += evt.Usage.CacheCreationTokens
+					}
+					if evt.Usage.CacheReadTokens > 0 {
+						finalUsage.CacheReadTokens += evt.Usage.CacheReadTokens
+					}
 					if evt.Usage.StopReason != "" {
 						stopReason = evt.Usage.StopReason
 						finalUsage.StopReason = evt.Usage.StopReason
@@ -410,6 +426,28 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					ToolID: tu.ID,
 				}
 
+				totalRequestToolsCalls++
+
+				// Hard cap: stop after maxRequestToolsCalls total calls, or 2 consecutive empties.
+				if totalRequestToolsCalls > maxRequestToolsCalls || consecutiveEmptyRequests >= 2 {
+					reason := fmt.Sprintf("consecutive_empty=%d, total_calls=%d", consecutiveEmptyRequests, totalRequestToolsCalls)
+					rtResult := "Tool discovery limit reached (" + reason + "). No more request_tools calls will be processed. Proceed with the tools you already have — do NOT call request_tools again."
+					log.Printf("chat: request_tools halted — %s", reason)
+
+					ch <- StreamEvent{
+						Type:    "tool_result",
+						Tool:    tu.Name,
+						ToolID:  tu.ID,
+						Summary: rtResult,
+					}
+					resultBlocks = append(resultBlocks, provider.ContentBlock{
+						Type:      "tool_result",
+						ToolUseID: tu.ID,
+						Content:   rtResult,
+					})
+					continue
+				}
+
 				// Delegate to ToolBroker.HandleRequestTools which supports
 				// both explicit tool_names and intent-based selection.
 				newTools, rtResult := e.ToolBroker.HandleRequestTools(tu.Input)
@@ -423,7 +461,18 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				}
 
-				log.Printf("chat: request_tools loaded %d tools: %v", len(loaded), loaded)
+				if len(loaded) == 0 {
+					consecutiveEmptyRequests++
+					if consecutiveEmptyRequests == 1 {
+						// First failure: hint to rephrase.
+						rtResult = rtResult + "\n\nNo new tools were loaded for this request. If you believe the right tools exist, try rephrasing your intent with different keywords. Otherwise, proceed with the tools you have."
+					}
+				} else {
+					// Successful load resets the counter.
+					consecutiveEmptyRequests = 0
+				}
+
+				log.Printf("chat: request_tools loaded %d tools (consecutive_empty=%d): %v", len(loaded), consecutiveEmptyRequests, loaded)
 
 				ch <- StreamEvent{
 					Type:    "tool_result",
@@ -498,6 +547,31 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				toolSpan.SetStatus(codes.Error, "no tool broker or MCP manager configured")
 			}
 			toolSpan.End()
+
+			// Detect stuck loops: if the same tool returns the exact same result, escalate.
+			if prev, ok := lastToolResults[tu.Name]; ok && prev == resultText {
+				toolRepeatCount[tu.Name]++
+				repeats := toolRepeatCount[tu.Name]
+				if repeats >= 3 {
+					// Hard block: replace result entirely so the LLM cannot continue.
+					resultText = fmt.Sprintf("ERROR: Tool %q has been called %d times with identical results. "+
+						"This tool is now BLOCKED for this session turn. "+
+						"You MUST stop calling this tool and either try a completely different approach "+
+						"or tell the user: \"I was unable to complete this task because the tool returned the same result repeatedly.\"",
+						tu.Name, repeats+1)
+					log.Printf("chat: tool %s BLOCKED after %d identical results", tu.Name, repeats+1)
+				} else if repeats >= 1 {
+					// Warning on 2nd repeat.
+					resultText = resultText + "\n\nWARNING: This tool has returned the same result " +
+						fmt.Sprintf("%d times in a row. You are likely stuck in a loop. ", repeats+1) +
+						"Do NOT call this tool again with the same arguments. " +
+						"Either provide different arguments or inform the user that this task cannot be completed."
+					log.Printf("chat: tool %s repeat detected (%d times)", tu.Name, repeats+1)
+				}
+			} else {
+				toolRepeatCount[tu.Name] = 0
+			}
+			lastToolResults[tu.Name] = resultText
 
 			// Truncate for the LLM context; save full output to disk if large.
 			// If the session has multi-agent capability, hint delegation instead of narrowing.
@@ -591,7 +665,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Record token usage.
 	if finalUsage != nil && (finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0) {
-		if err := e.Store.RecordUsage(sessionID, assistantMsgID, model, finalUsage.InputTokens, finalUsage.OutputTokens); err != nil {
+		if err := e.Store.RecordUsage(sessionID, assistantMsgID, model, finalUsage.InputTokens, finalUsage.OutputTokens, finalUsage.CacheCreationTokens, finalUsage.CacheReadTokens); err != nil {
 			log.Printf("chat: failed to record token usage: %v", err)
 		}
 	}

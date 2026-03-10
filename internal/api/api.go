@@ -129,6 +129,18 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/{id}/prompt-templates", a.handleAssignAgentPromptTemplate)
 	mux.HandleFunc("DELETE /api/agents/{id}/prompt-templates/{templateId}", a.handleRemoveAgentPromptTemplate)
 
+	// Modes (first-class reusable modes)
+	mux.HandleFunc("GET /api/modes", a.handleListModes)
+	mux.HandleFunc("POST /api/modes", a.handleCreateMode)
+	mux.HandleFunc("GET /api/modes/{id}", a.handleGetMode)
+	mux.HandleFunc("PUT /api/modes/{id}", a.handleUpdateMode)
+	mux.HandleFunc("DELETE /api/modes/{id}", a.handleDeleteMode)
+
+	// Agent ↔ Mode assignments (many-to-many)
+	mux.HandleFunc("GET /api/agents/{id}/assigned-modes", a.handleListAgentAssignedModes)
+	mux.HandleFunc("POST /api/agents/{id}/assigned-modes", a.handleAssignModeToAgent)
+	mux.HandleFunc("DELETE /api/agents/{id}/assigned-modes/{modeId}", a.handleUnassignModeFromAgent)
+
 	// Output Templates
 	mux.HandleFunc("GET /api/templates", a.handleListTemplates)
 	mux.HandleFunc("POST /api/templates", a.handleCreateTemplate)

@@ -84,6 +84,9 @@ func cmdServe(args []string) {
 	if err := s.SeedBuiltinPromptTemplates(); err != nil {
 		log.Fatalf("failed to seed prompt templates: %v", err)
 	}
+	if err := s.SeedBuiltinModes(); err != nil {
+		log.Fatalf("failed to seed modes: %v", err)
+	}
 	if err := s.SeedAgentSkillBindings(); err != nil {
 		log.Fatalf("failed to seed agent skill bindings: %v", err)
 	}
@@ -126,6 +129,10 @@ func cmdServe(args []string) {
 	generalTools := mcp.NewGeneralToolsTransport()
 	mcpManager.AddServer("general", generalTools)
 
+	// Register self-service tools (skill/agent/workflow CRUD).
+	selfTools := mcp.NewSelfToolsTransport(s)
+	mcpManager.AddServer("self", selfTools)
+
 	// Initialize the tool broker with default rules before discovery.
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
 
@@ -142,6 +149,12 @@ func cmdServe(args []string) {
 
 	// Create tool broker for permission-checked tool access.
 	tb := toolbroker.New(mcpManager, s, nil)
+
+	// Register self-service tools as built-in (always available).
+	selfToolDefs := mcp.SelfToolProviderDefinitions()
+	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
+	log.Printf("registered %d self-service built-in tools", len(selfToolDefs))
+
 	engine.ToolBroker = tb
 
 	// Set up activity emitter to push events to Volon's GUI server.

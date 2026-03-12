@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/mentat-chat/internal/builders"
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/builders"
+	"github.com/hollis-labs/mentat/internal/store"
 )
 
 // SelfToolsTransport provides self-service tools that let the agent

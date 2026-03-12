@@ -86,7 +86,7 @@ func (d *DevToolsTransport) callExample(args map[string]any) (*ToolResult, error
 
 ### 4. Register the Transport (if new)
 
-In `cmd/mentat-chat/main.go`, add the server:
+In `cmd/mentat/main.go`, add the server:
 
 ```go
 myTransport := mcp.NewMyTransport()

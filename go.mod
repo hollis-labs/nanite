@@ -1,4 +1,4 @@
-module github.com/hollis-labs/mentat-chat
+module github.com/hollis-labs/mentat
 
 go 1.25.3
 

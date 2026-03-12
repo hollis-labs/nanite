@@ -38,7 +38,7 @@
 │             │                                               │
 │  ┌──────────┴───────────┐                                   │
 │  │   SQLite (modernc)   │                                   │
-│  │   mentat-chat.db     │                                   │
+│  │   mentat.db     │                                   │
 │  └──────────────────────┘                                   │
 └─────────────┬───────────────────────────────────────────────┘
               │
@@ -57,7 +57,7 @@
 ### 2.1 Package Layout
 
 ```
-cmd/mentat-chat/
+cmd/mentat/
   main.go                    -- entry point, flag parsing, server start
 
 internal/
@@ -559,10 +559,10 @@ cd ui && npm run dev
 cd ui && npm run build
 
 # Embed in Go binary
-go build -o mentat-chat ./cmd/mentat-chat
+go build -o mentat ./cmd/mentat
 
 # Single binary serves both API and SPA
-./mentat-chat serve --port 8090
+./mentat serve --port 8090
 ```
 
 ### 6.3 Docker (VPS)
@@ -570,9 +570,9 @@ go build -o mentat-chat ./cmd/mentat-chat
 FROM golang:1.25 AS builder
 # ... build steps ...
 FROM gcr.io/distroless/static
-COPY --from=builder /app/mentat-chat /mentat-chat
+COPY --from=builder /app/mentat /mentat
 EXPOSE 8090
-ENTRYPOINT ["/mentat-chat", "serve"]
+ENTRYPOINT ["/mentat", "serve"]
 ```
 
 ## 7. Security Considerations

@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/hollis-labs/mentat-chat/internal/provider"
+import "github.com/hollis-labs/mentat/internal/provider"
 
 // SelfToolProviderDefinitions returns all self-service tool definitions
 // in provider.ToolDefinition format, suitable for registering as built-ins.

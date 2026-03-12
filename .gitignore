@@ -1,6 +1,6 @@
 # Go
-/mentat-chat
-/cmd/mentat-chat/mentat-chat
+/mentat
+/cmd/mentat/mentat
 *.exe
 *.test
 *.out

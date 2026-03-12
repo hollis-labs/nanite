@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/mentat-chat/internal/provider"
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/store"
 )
 
 func newTestBroker(t *testing.T) (*ContextBroker, *store.Store) {

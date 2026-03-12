@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/store"
 )
 
 // NewSkillBuilder returns a Builder that creates Skill records.

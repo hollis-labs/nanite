@@ -3,7 +3,7 @@ package toolbroker
 import (
 	"testing"
 
-	"github.com/hollis-labs/mentat-chat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/provider"
 )
 
 func TestRegisterBuiltins(t *testing.T) {

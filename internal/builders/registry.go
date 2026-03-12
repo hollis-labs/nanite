@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/store"
 )
 
 // Registry holds named builders and provides lookup and enumeration.

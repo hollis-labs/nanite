@@ -14,12 +14,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/mentat-chat/internal/mcp"
-	"github.com/hollis-labs/mentat-chat/internal/provider"
-	"github.com/hollis-labs/mentat-chat/internal/store"
-	"github.com/hollis-labs/mentat-chat/internal/toolbroker"
-	"github.com/hollis-labs/mentat-chat/internal/truncate"
-	"github.com/hollis-labs/mentat-chat/internal/workflow"
+	"github.com/hollis-labs/mentat/internal/mcp"
+	"github.com/hollis-labs/mentat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/mentat/internal/toolbroker"
+	"github.com/hollis-labs/mentat/internal/truncate"
+	"github.com/hollis-labs/mentat/internal/workflow"
 )
 
 // maxToolIterations prevents infinite tool-use loops.
@@ -139,7 +139,7 @@ func (e *Engine) GetStream(messageID string) (<-chan StreamEvent, bool) {
 
 // generateResponse loads context, calls the provider, streams events, and saves the result.
 func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan StreamEvent) {
-	ctx, span := tiamatotel.StartSpan(ctx, "mentat-chat.generateResponse")
+	ctx, span := tiamatotel.StartSpan(ctx, "mentat.generateResponse")
 	span.SetAttributes(
 		attribute.String("mentat.session.id", sessionID),
 		attribute.String("mentat.message.id", assistantMsgID),
@@ -296,7 +296,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 
 		// Call provider with or without tools.
-		provCtx, provSpan := tiamatotel.StartSpan(ctx, "mentat-chat.provider.call")
+		provCtx, provSpan := tiamatotel.StartSpan(ctx, "mentat.provider.call")
 		provSpan.SetAttributes(
 			attribute.String("mentat.model", model),
 			attribute.Int("mentat.iteration", iteration),
@@ -724,7 +724,7 @@ func (e *Engine) SendAgentMessage(fromSessionID, toSessionID, content string) (s
 
 // autoTitle generates a title for a session from the first user message.
 func (e *Engine) autoTitle(sessionID, userContent, model string) {
-	ctx, span := tiamatotel.StartSpan(context.Background(), "mentat-chat.autoTitle")
+	ctx, span := tiamatotel.StartSpan(context.Background(), "mentat.autoTitle")
 	span.SetAttributes(attribute.String("mentat.session.id", sessionID))
 	defer span.End()
 	_ = ctx

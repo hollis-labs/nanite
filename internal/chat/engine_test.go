@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/mentat-chat/internal/provider"
-	"github.com/hollis-labs/mentat-chat/internal/store"
-	"github.com/hollis-labs/mentat-chat/internal/toolbroker"
+	"github.com/hollis-labs/mentat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/mentat/internal/toolbroker"
 )
 
 func newTestEngine(t *testing.T) *Engine {

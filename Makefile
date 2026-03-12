@@ -2,7 +2,7 @@
 
 # Build React SPA then embed in Go binary
 build: build-ui
-	go build -o mentat-chat ./cmd/mentat-chat
+	go build -o mentat ./cmd/mentat
 
 build-ui:
 	cd ui && npm run build
@@ -15,7 +15,7 @@ dev:
 
 # Clean build artifacts
 clean:
-	rm -f mentat-chat
+	rm -f mentat
 	rm -rf ui/dist
 
 # Run Go tests
@@ -24,4 +24,4 @@ test:
 
 # Run with default settings
 run: build
-	./mentat-chat serve --port 8090
+	./mentat serve --port 8090

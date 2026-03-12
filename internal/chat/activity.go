@@ -63,7 +63,7 @@ func NewActivityEmitter(url string) *ActivityEmitter {
 	return &ActivityEmitter{
 		baseURL:   url,
 		client:    &http.Client{Timeout: 5 * time.Second},
-		projectID: "mentat-chat",
+		projectID: "mentat",
 		disabled:  disabled,
 	}
 }
@@ -78,7 +78,7 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 		ev.ProjectID = e.projectID
 	}
 	if ev.Actor == "" {
-		ev.Actor = "mentat-chat"
+		ev.Actor = "mentat"
 	}
 
 	body, err := json.Marshal(ev)

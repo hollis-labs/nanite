@@ -10,7 +10,7 @@
 **Goal:** Runnable skeleton — Go server serves React SPA, SQLite connected, 4-column layout renders.
 
 ### Tasks
-- S0-01: Initialize Go module, cmd/mentat-chat entry point
+- S0-01: Initialize Go module, cmd/mentat entry point
 - S0-02: SQLite store with embedded migrations (all tables from ARCHITECTURE.md)
 - S0-03: HTTP server with router (chi or stdlib mux), static file serving
 - S0-04: React project (Vite + TypeScript + Tailwind 4 + shadcn/ui) in ui/
@@ -21,7 +21,7 @@
 - S0-09: Embed built React SPA in Go binary (go:embed)
 - S0-10: Seed data: default workspace, Mentat agent profile
 
-**Exit criteria:** `go run ./cmd/mentat-chat` serves the 4-column layout on localhost:8090 with panel toggles working.
+**Exit criteria:** `go run ./cmd/mentat` serves the 4-column layout on localhost:8090 with panel toggles working.
 
 ---
 

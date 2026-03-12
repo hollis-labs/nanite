@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/store"
 )
 
 // assembleSystemPrompt builds the full system prompt from agent profile, mode, and workspace context.

@@ -235,7 +235,7 @@ Message-level bookmarks with optional notes. Scoped to session, queryable across
 ## 12. Deployment
 
 ### 12.1 Local
-Single Go binary embeds React SPA. `mentat-chat serve` starts on localhost.
+Single Go binary embeds React SPA. `mentat serve` starts on localhost.
 
 ### 12.2 VPS
 Docker container. Same binary, exposed on HTTPS. Connects to remote Tiamat services (Volon, Cortex, Hadron running on VPS).

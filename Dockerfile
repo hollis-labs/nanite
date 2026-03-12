@@ -15,15 +15,15 @@ RUN go mod download
 COPY . .
 # Copy built UI into the embed directory
 COPY --from=ui-build /app/ui/dist ./internal/server/ui_dist/
-RUN CGO_ENABLED=0 go build -o mentat-chat ./cmd/mentat-chat
+RUN CGO_ENABLED=0 go build -o mentat ./cmd/mentat
 
 # Stage 3: Minimal runtime image
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 RUN adduser -D -u 1000 mentat
 WORKDIR /app
-COPY --from=go-build /app/mentat-chat .
+COPY --from=go-build /app/mentat .
 RUN mkdir -p /data && chown mentat:mentat /data
 USER mentat
 EXPOSE 8090
-ENTRYPOINT ["./mentat-chat", "serve", "-db", "/data/mentat-chat.db"]
+ENTRYPOINT ["./mentat", "serve", "-db", "/data/mentat.db"]

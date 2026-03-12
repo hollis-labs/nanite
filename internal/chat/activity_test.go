@@ -100,8 +100,8 @@ func TestActivityEmitter_SendsToVolon(t *testing.T) {
 		if ev.EventType != expectedTypes[i] {
 			t.Errorf("event %d: expected type %q, got %q", i, expectedTypes[i], ev.EventType)
 		}
-		if ev.ProjectID != "mentat-chat" {
-			t.Errorf("event %d: expected project_id 'mentat-chat', got %q", i, ev.ProjectID)
+		if ev.ProjectID != "mentat" {
+			t.Errorf("event %d: expected project_id 'mentat', got %q", i, ev.ProjectID)
 		}
 	}
 }

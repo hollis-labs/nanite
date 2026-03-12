@@ -63,8 +63,8 @@ export function VolonBacklogButton({ contextBody, projectId, className }: VolonB
         title: title.trim(),
         body: notes.trim(),
         priority,
-        tags: ['mentat-chat', 'context-inspector'],
-        project_id: projectId || 'mentat-chat',
+        tags: ['mentat', 'context-inspector'],
+        project_id: projectId || 'mentat',
       })
       setStatus('success')
       setTimeout(() => {

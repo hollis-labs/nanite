@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/hollis-labs/mentat-chat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/provider"
 )
 
 // RequestToolsMetaTool returns the provider.ToolDefinition for the

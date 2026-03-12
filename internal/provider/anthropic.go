@@ -271,7 +271,7 @@ func (a *Anthropic) StreamChatWithTools(ctx context.Context, systemPrompt string
 
 // streamChatInternal is the shared implementation for StreamChat and StreamChatWithTools.
 func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	ctx, span := tiamatotel.StartSpan(ctx, "mentat-chat.provider.anthropic.stream")
+	ctx, span := tiamatotel.StartSpan(ctx, "mentat.provider.anthropic.stream")
 	span.SetAttributes(
 		attribute.String("mentat.provider", "anthropic"),
 		attribute.String("mentat.model", model),
@@ -659,7 +659,7 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 
 // Complete makes a non-streaming completion call.
 func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
-	ctx, span := tiamatotel.StartSpan(ctx, "mentat-chat.provider.anthropic.complete")
+	ctx, span := tiamatotel.StartSpan(ctx, "mentat.provider.anthropic.complete")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("mentat.provider", "anthropic"),

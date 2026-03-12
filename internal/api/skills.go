@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/store"
 )
 
 func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {

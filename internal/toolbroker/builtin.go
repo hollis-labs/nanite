@@ -3,7 +3,7 @@ package toolbroker
 import (
 	"sync"
 
-	"github.com/hollis-labs/mentat-chat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/provider"
 )
 
 // BuiltinToolRegistry holds built-in tool definitions that are always available

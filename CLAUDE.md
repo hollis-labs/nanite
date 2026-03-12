@@ -22,19 +22,19 @@ Mentat is the unified meta-agent and chat application for Project Tiamat. It com
 
 ```bash
 # Backend
-go build ./cmd/mentat-chat/
+go build ./cmd/mentat/
 go test ./...
 
 # Frontend
 cd ui && npm install && npm run build
 
 # Run (default port 8090)
-./mentat-chat serve -port 8090 -db ./mentat-chat.db -dev
+./mentat serve -port 8090 -db ./mentat.db -dev
 ```
 
 ## Architecture
 
-- `cmd/mentat-chat/` — Entry point
+- `cmd/mentat/` — Entry point
 - `internal/api/` — HTTP API handlers
 - `internal/chat/` — Chat engine (orchestration, context, broker)
 - `internal/mcp/` — MCP client integration

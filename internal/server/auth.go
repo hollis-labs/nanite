@@ -35,7 +35,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		// Check Basic Auth credentials.
 		reqUser, reqPass, ok := r.BasicAuth()
 		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="mentat-chat"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="mentat"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -44,7 +44,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		passMatch := subtle.ConstantTimeCompare([]byte(reqPass), []byte(pass)) == 1
 
 		if !userMatch || !passMatch {
-			w.Header().Set("WWW-Authenticate", `Basic realm="mentat-chat"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="mentat"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

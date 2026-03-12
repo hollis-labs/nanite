@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/mentat-chat/internal/provider"
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/store"
 	"github.com/hollis-labs/tiamat-tool-broker/broker"
 )
 
@@ -95,7 +95,7 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 
 // DiscoverTools queries all registered servers for their tools.
 func (m *Manager) DiscoverTools(ctx context.Context) error {
-	ctx, span := tiamatotel.StartSpan(ctx, "mentat-chat.mcp.discoverTools")
+	ctx, span := tiamatotel.StartSpan(ctx, "mentat.mcp.discoverTools")
 	defer span.End()
 
 	m.mu.Lock()

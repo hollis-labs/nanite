@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/hollis-labs/mentat-chat/internal/chat"
+	"github.com/hollis-labs/mentat/internal/chat"
 )
 
 func (a *API) handleListCommands(w http.ResponseWriter, r *http.Request) {

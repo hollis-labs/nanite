@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/hollis-labs/mentat-chat/internal/chat"
+	"github.com/hollis-labs/mentat/internal/chat"
 )
 
 // MessageTokenDetail holds per-message token information.

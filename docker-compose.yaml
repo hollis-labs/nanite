@@ -1,5 +1,5 @@
 services:
-  mentat-chat:
+  mentat:
     build: .
     ports:
       - "8090:8090"

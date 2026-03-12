@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/hollis-labs/mentat-chat/internal/api"
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/api"
+	"github.com/hollis-labs/mentat/internal/store"
 )
 
 // Server is the HTTP server for Mentat Chat.
@@ -37,7 +37,7 @@ func New(s *store.Store, a *api.API, port int, dev bool) *Server {
 func (s *Server) ListenAndServe() error {
 	handler := s.recoverMiddleware(s.loggingMiddleware(basicAuthMiddleware(s.corsMiddleware(s.mux))))
 	addr := fmt.Sprintf(":%d", s.port)
-	log.Printf("mentat-chat listening on %s (dev=%v)", addr, s.dev)
+	log.Printf("mentat listening on %s (dev=%v)", addr, s.dev)
 	return http.ListenAndServe(addr, handler)
 }
 

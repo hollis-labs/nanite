@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/hollis-labs/mentat-chat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/provider"
 )
 
 // SubTask represents a discrete unit of work decomposed from a complex task.

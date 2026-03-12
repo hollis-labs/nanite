@@ -9,8 +9,8 @@ import (
 	tiamatotel "github.com/hollis-labs/tiamat-otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/hollis-labs/mentat-chat/internal/provider"
-	"github.com/hollis-labs/mentat-chat/internal/store"
+	"github.com/hollis-labs/mentat/internal/provider"
+	"github.com/hollis-labs/mentat/internal/store"
 )
 
 // DefaultBudgetPct is the default fraction of the context window to use.
@@ -47,7 +47,7 @@ func NewContextBroker(s *store.Store) *ContextBroker {
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
 func (cb *ContextBroker) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
-	_, span := tiamatotel.StartSpan(ctx, "mentat-chat.broker.assembleContext")
+	_, span := tiamatotel.StartSpan(ctx, "mentat.broker.assembleContext")
 	defer span.End()
 
 	span.SetAttributes(

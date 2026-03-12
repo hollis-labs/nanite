@@ -222,7 +222,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Get provider.
 	prov, ok := e.Providers.Get("anthropic")
 	if !ok {
-		ch <- errorEvent(ErrorCodeProviderError, "Anthropic provider not registered", map[string]interface{}{"raw": "anthropic provider not registered"})
+		ch <- errorEvent(ErrorCodeProviderError, "Anthropic provider not available — ANTHROPIC_API_KEY is not set. Add it to your .env file and restart the server.", map[string]interface{}{"raw": "anthropic provider not registered — missing API key"})
 		return
 	}
 

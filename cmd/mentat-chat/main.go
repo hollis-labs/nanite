@@ -94,17 +94,28 @@ func cmdServe(args []string) {
 
 	// Set up provider registry.
 	registry := provider.NewRegistry()
+	var missingProviders []string
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		registry.Register("anthropic", provider.NewAnthropic())
 		log.Println("anthropic provider registered")
 	} else {
-		log.Println("WARNING: ANTHROPIC_API_KEY not set — chat will not work")
-		registry.Register("anthropic", provider.NewAnthropic())
+		missingProviders = append(missingProviders, "ANTHROPIC_API_KEY")
 	}
 
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		registry.Register("openai", provider.NewOpenAI())
 		log.Println("openai provider registered")
+	}
+
+	if len(missingProviders) > 0 {
+		log.Println("╔══════════════════════════════════════════════════════════════╗")
+		log.Println("║  WARNING: Missing API keys — chat will not work!            ║")
+		for _, k := range missingProviders {
+			log.Printf("║  • %s not set                                  ║", k)
+		}
+		log.Println("║                                                              ║")
+		log.Println("║  Create a .env file or export the variable before starting.  ║")
+		log.Println("╚══════════════════════════════════════════════════════════════╝")
 	}
 
 	// Always register Ollama — it requires no API key (local service).

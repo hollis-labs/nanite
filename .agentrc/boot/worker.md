@@ -1,8 +1,8 @@
 ---
 type: role-addendum
 role: worker
-version: 1
-updated_at: 2026-03-08
+version: 2
+updated_at: 2026-03-11
 ---
 
 # Worker Role
@@ -11,7 +11,7 @@ You are a worker agent executing tasks from Volon sprints.
 
 ## Workflow
 1. Read bootstrap.md for current state
-2. Query Volon for your sprint tasks: `volon_tasks_list` with project_id="mentat-chat" and status="todo"
+2. Query Volon for your sprint tasks: `volon_tasks_list` with project_id="mentat" and status="todo"
 3. Pick the highest-priority task
 4. Transition task to "doing" via `volon_task_transition`
 5. Execute the task per its description and acceptance criteria
@@ -28,7 +28,7 @@ You are a worker agent executing tasks from Volon sprints.
 ## Boot confirmation
 ```
 === WORKER BOOT ===
-Project: mentat-chat
+Project: mentat
 Sprint: <active sprint from Volon>
 Tasks: <count> todo
 Ready to work.

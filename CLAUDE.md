@@ -1,17 +1,22 @@
-# Mentat Chat — agent boot
+# Mentat — agent boot
 
-## Agent Auto-Boot Override
+## Agent Auto-Boot
 
-This repo boots as `worker`. **Skip profile selection** — go directly to:
+This repo supports multiple boot profiles. Follow the standard auto-boot sequence:
 
-4. Read `.agentrc/agent-boot.md`
-5. Read `.agentrc/boot/worker.md`
-6. Read `.agentrc/bootstrap.md`
-7. Follow the worker profile instructions — emit boot confirmation and begin work
+1. Read `.agentrc/agent-boot.md`
+2. List `.agentrc/boot/*.md` for available profiles
+3. If one profile → auto-select; if multiple → ask user
+4. Read `.agentrc/boot/<selected-profile>.md`
+5. Read `.agentrc/bootstrap.md`
+6. Follow the profile instructions — emit boot confirmation and begin work
 
-## Project Overview
+## What Mentat Is
 
-Mentat Chat is a conversational AI interface with a Go backend and React/TypeScript frontend. It provides a chat UI that connects to multiple LLM providers via MCP, with conversation persistence, message truncation, and workflow orchestration.
+Mentat is the unified meta-agent and chat application for Project Tiamat. It combines:
+- **Go backend**: HTTP API, chat engine, MCP integration, multi-provider LLM support, SQLite persistence
+- **React frontend**: Chat UI, settings, agent management, workflow orchestration
+- **CLI integration**: Portfolio orchestration, skills, slash commands, hooks
 
 ## Build & Test
 
@@ -22,30 +27,23 @@ go test ./...
 
 # Frontend
 cd ui && npm install && npm run build
-```
 
-## Run
-
-```bash
-# Start the server (default port 8090)
-./mentat-chat serve
-
-# With options
-./mentat-chat serve -port 8090 -db ./mentat-chat.db -workflows ./workflows -dev
+# Run (default port 8090)
+./mentat-chat serve -port 8090 -db ./mentat-chat.db -dev
 ```
 
 ## Architecture
 
 - `cmd/mentat-chat/` — Entry point
 - `internal/api/` — HTTP API handlers
-- `internal/chat/` — Chat session management
+- `internal/chat/` — Chat engine (orchestration, context, broker)
 - `internal/mcp/` — MCP client integration
-- `internal/provider/` — LLM provider abstractions
-- `internal/server/` — HTTP server setup
+- `internal/provider/` — LLM provider abstractions (Anthropic, OpenAI, Ollama)
 - `internal/store/` — SQLite persistence layer
-- `internal/truncate/` — Message truncation logic
+- `internal/builders/` — Agent/skill builders
+- `internal/toolbroker/` — Tool selection and intent analysis
 - `internal/workflow/` — Workflow orchestration
-- `ui/src/components/` — React UI components
-- `ui/src/hooks/` — React hooks
-- `ui/src/lib/` — Utility functions
-- `ui/src/stores/` — Zustand state stores
+- `ui/src/` — React frontend
+- `config/` — Mentat config (repos, service URLs)
+- `docs/` — Architecture, process, planning docs
+- `adr/` — Architecture decision records

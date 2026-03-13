@@ -1,25 +1,32 @@
 ---
 version: 1
 type: bootstrap
-iteration: 1
-updated_at: 2026-03-11T00:00:00Z
+iteration: 2
+updated_at: 2026-03-13T17:45:00Z
 ---
 
 # Mentat Bootstrap
 
 ## Current state
-- Iteration 1 (post-consolidation)
-- Status: Unified project created from mentat clone. Migration in progress via MMA.
+- Iteration 2 (post-planning session)
+- Status: 3 new epics created, agentrc synced, worktrees cleaned
 - Tasks: Check Volon with project_id="mentat"
-- Boot profiles: meta-agent, worker
+- Boot profiles: meta-agent, worker, analyst, architect, reviewer, ops-tester
 
-## What happened
-- mentat-new created as clone of mentat (full git history preserved)
-- Behavior rules, tool-first architecture, tool-broker design docs migrated
-- Project portfolio docs stored in Cortex (app/mentat/projects namespace)
-- Boot profiles: meta-agent added, worker updated for project_id="mentat"
-- PCC and boot system migrated from mentat CLI patterns
+## What happened (iteration 2 — 2026-03-13)
+- Oriented from zero context using parallel sub-agents (Volon + Cortex + git + agentrc)
+- Created 3 epics, 9 sprints, 40 tasks (TASK-20260313-055 through TASK-20260313-094)
+  - EPIC-20260313-31488: Unified Session Context (Profile, Mode, Scope, Lens)
+  - EPIC-20260313-86433: Agent Taxonomy & Specification System
+  - EPIC-20260313-90324: Context Capture Pipeline (Active + Passive)
+- Cleaned 117 stale volon worktrees (22GB), deleted 326 merged branches
+- Synced agentrc: pulled hooks + boot profiles from volon, renamed worker→analyst
+- Saved 3 memories, 1 Nanite note (#74), 1 Cortex session record
+- Formalized: agent taxonomy, Mentat responsibilities, capture model, mode system
 
 ## Next steps
-- Remaining MMA migration tasks (MC-005 through MC-021)
-- Once migration complete: rename mentat-new → mentat
+- Activate USC-S1-SCHEMA-FOUNDATION sprint and begin implementation
+- Write ADR-011 (Unified Session Context) and ADR-012 (Agent Spec)
+- Review 5 unmerged volon agent branches
+- Commit remaining volon working tree changes
+- Build /reorient skill to encode the orientation workflow demonstrated this session

@@ -19,7 +19,7 @@ Parse the user's input for the backlog title and any details. If the input inclu
 Launch an Agent with this prompt (fill in from user input):
 
 ```
-You are a backlog capture agent for Project Tiamat / Fragments Engine. Create a well-structured backlog item.
+You are a backlog capture agent for Fragments Engine. Create a well-structured backlog item.
 
 ## Input from user:
 {USER_INPUT}

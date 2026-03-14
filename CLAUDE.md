@@ -13,7 +13,7 @@ This repo supports multiple boot profiles. Follow the standard auto-boot sequenc
 
 ## What Mentat Is
 
-Mentat is the unified meta-agent and chat application for Project Tiamat. It combines:
+Mentat is the unified meta-agent and chat application for Fragments Engine. It combines:
 - **Go backend**: HTTP API, chat engine, MCP integration, multi-provider LLM support, SQLite persistence
 - **React frontend**: Chat UI, settings, agent management, workflow orchestration
 - **CLI integration**: Portfolio orchestration, skills, slash commands, hooks

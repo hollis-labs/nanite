@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	tiamatotel "github.com/hollis-labs/tiamat-otel"
+	tiamatotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/mentat/internal/provider"

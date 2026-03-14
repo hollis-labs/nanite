@@ -4,7 +4,7 @@
 
 ## Problem
 
-Tiamat currently exposes **124+ MCP tools** across three services (Volon, Hadron, Cortex), and the number grows with every Hadron blueprint. The current approach to tool availability has several compounding costs:
+Fragments Engine currently exposes **124+ MCP tools** across three services (Volon, Hadron, Cortex), and the number grows with every Hadron blueprint. The current approach to tool availability has several compounding costs:
 
 1. **Context bloat.** Every tool definition (~150 tokens per tool) is serialized into the LLM's system prompt. 124 tools consume ~18,600 tokens before the conversation starts.
 
@@ -20,7 +20,7 @@ A **Tool Broker** that selects relevant MCP tools based on intent, task context,
 
 | Layer | Where it runs | What it does |
 |-------|--------------|--------------|
-| **Shared Go module** (`tiamat-tool-broker`) | Imported by any Go app | Core interfaces, rule engine, matching logic |
+| **Shared Go module** (`tool-broker`) | Imported by any Go app | Core interfaces, rule engine, matching logic |
 | **Local broker** (embedded) | Inside Mentat, CLI tools, agents | Fast, offline, config-driven tool filtering |
 | **Broker service** (optional) | Standalone HTTP/MCP server | Cross-app tool discovery, user-managed rules, permissions |
 
@@ -114,7 +114,7 @@ Web UI for tool inventory, rule editor, intent mappings.
 
 ## Open Questions
 
-1. **Where does the module live?** Standalone `tiamat-tool-broker` repo vs package inside `tiamat-otel`.
+1. **Where does the module live?** Standalone `tool-broker` repo vs package inside `otel`.
 2. **Intent detection at the LLM boundary?** Caller passes intent vs broker infers from first user message vs two-phase with summaries.
 3. **Should the broker service be part of Cortex?** Avoids a new service but risks scope creep.
 4. **Dynamic tool sets.** Handling server availability gracefully — selecting tools from a down server should warn, not error.

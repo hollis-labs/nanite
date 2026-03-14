@@ -38,5 +38,5 @@ Mentat uses Cortex for:
 - Service lifecycle manager
 
 Mentat uses Cerberus for:
-- starting/stopping/restarting Tiamat services
+- starting/stopping/restarting Fragments Engine services
 - health monitoring

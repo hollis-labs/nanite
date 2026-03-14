@@ -37,4 +37,4 @@ Fragments Engine is a full-stack agent framework where each component has a dist
 3. **Composable**: Each project is useful standalone, better together
 4. **Observable**: OTel instrumentation across all projects
 5. **Agent-native**: Built for AI agent consumption (MCP, structured context, deterministic state)
-6. **Self-managing**: Tiamat should increasingly manage itself via Mentat
+6. **Self-managing**: Fragments Engine should increasingly manage itself via Mentat

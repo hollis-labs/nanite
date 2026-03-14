@@ -1,6 +1,6 @@
 # Mentat Chat
 
-Keyboard-first, multi-agent chat client for Project Tiamat.
+Keyboard-first, multi-agent chat client for Fragments Engine.
 
 ## What is this?
 
@@ -30,7 +30,7 @@ make build
 
 ## Key Concepts
 
-- **Workspaces** scope context (Project Tiamat, Writing, Personal)
+- **Workspaces** scope context (Fragments Engine, Writing, Personal)
 - **Sessions** are individual conversations with persistent history
 - **Mentat** is a cognitive agent — it plans and delegates, never executes directly
 - **Worker agents** handle tool calls and execution via MCP

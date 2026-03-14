@@ -1,6 +1,6 @@
 # Commit All
 
-Commit pending changes across all managed Tiamat projects with a consistent commit message.
+Commit pending changes across all managed Fragments Engine projects with a consistent commit message.
 
 ## When to use
 

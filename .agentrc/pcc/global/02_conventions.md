@@ -11,9 +11,9 @@ updated_at: "2026-03-13"
 - Module: `github.com/hollis-labs/mentat`
 - Go version: 1.25
 - Standard Go project layout: `cmd/` for binaries, `internal/` for private packages
-- Local `replace` directives for shared modules: `tiamat-otel`, `tiamat-tool-broker`
+- Local `replace` directives for shared modules: `otel`, `tool-broker`
 - SQLite via `modernc.org/sqlite` (pure Go, no CGO required)
-- OTel instrumentation via `tiamat-otel` shared library
+- OTel instrumentation via `otel` shared library
 
 ## Frontend
 

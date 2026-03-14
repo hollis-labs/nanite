@@ -30,7 +30,7 @@ Module: `github.com/hollis-labs/mentat` (Go 1.25)
 
 - Backend: Go HTTP API on port 8090, SQLite persistence
 - Frontend: React + TypeScript SPA
-- Dependencies: tiamat-otel (observability), tiamat-tool-broker (intent-based tool selection)
+- Dependencies: otel (observability), tool-broker (intent-based tool selection)
 - MCP servers: Volon, Hadron, Cortex, Cerberus (configured in `~/.claude.json`)
 - 11 skills, 14 slash commands, boot profiles (orchestrator, worker)
 

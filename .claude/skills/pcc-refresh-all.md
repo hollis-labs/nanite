@@ -1,6 +1,6 @@
 # PCC Refresh All
 
-Refresh Project Context Cache across all managed Tiamat projects, then sync to Cortex.
+Refresh Project Context Cache across all managed Fragments Engine projects, then sync to Cortex.
 
 ## When to use
 

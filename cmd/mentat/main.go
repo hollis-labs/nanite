@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	tiamatotel "github.com/hollis-labs/tiamat-otel"
+	tiamatotel "github.com/hollis-labs/otel"
 
 	"github.com/hollis-labs/mentat/internal/api"
 	"github.com/hollis-labs/mentat/internal/chat"
@@ -26,7 +26,7 @@ import (
 	"github.com/hollis-labs/mentat/internal/toolbroker"
 	"github.com/hollis-labs/mentat/internal/truncate"
 	"github.com/hollis-labs/mentat/internal/workflow"
-	"github.com/hollis-labs/tiamat-tool-broker/broker"
+	"github.com/hollis-labs/tool-broker/broker"
 )
 
 func main() {

@@ -3,7 +3,7 @@ package toolbroker
 import (
 	"log"
 
-	"github.com/hollis-labs/tiamat-tool-broker/broker"
+	"github.com/hollis-labs/tool-broker/broker"
 )
 
 // DefaultToolTokenBudgetPct is the default fraction of the context window reserved for tool definitions.

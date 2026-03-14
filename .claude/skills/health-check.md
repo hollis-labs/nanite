@@ -1,6 +1,6 @@
 # Health Check
 
-Check all Tiamat services and display a unified health status dashboard.
+Check all Fragments Engine services and display a unified health status dashboard.
 
 ## When to use
 

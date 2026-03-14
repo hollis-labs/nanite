@@ -1,6 +1,6 @@
 # Git Status All
 
-Show git status across all managed Tiamat projects in a unified view.
+Show git status across all managed Fragments Engine projects in a unified view.
 
 ## When to use
 

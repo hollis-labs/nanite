@@ -8,7 +8,7 @@ updated_at: 2026-03-11
 
 ## What is Mentat
 
-Mentat is the unified meta-agent and chat application for Project Tiamat. It combines a Go backend + React frontend with portfolio orchestration capabilities. It manages a portfolio of software projects and provides a conversational AI interface with MCP integration, multi-agent coordination, and workflow orchestration.
+Mentat is the unified meta-agent and chat application for Fragments Engine. It combines a Go backend + React frontend with portfolio orchestration capabilities. It manages a portfolio of software projects and provides a conversational AI interface with MCP integration, multi-agent coordination, and workflow orchestration.
 
 ## Ground truth
 

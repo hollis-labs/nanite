@@ -69,7 +69,7 @@
 
 ## Sprint 3: MCP + Tools
 
-**Goal:** Connect to Tiamat MCP servers. Worker agents execute tool calls. Mentat delegates.
+**Goal:** Connect to Fragments Engine MCP servers. Worker agents execute tool calls. Mentat delegates.
 
 ### Tasks
 - S3-01: MCP client in Go (stdio transport for local MCP servers)
@@ -119,7 +119,7 @@
 - S5-03: Deterministic workflow engine (YAML parser + executor)
 - S5-04: Workflow input modals (dynamic forms from YAML definition)
 - S5-05: Docker build (multi-stage, distroless base)
-- S5-06: VPS deployment config (docker-compose with Tiamat services)
+- S5-06: VPS deployment config (docker-compose with Fragments Engine services)
 - S5-07: Basic auth for VPS deployment
 - S5-08: MCP HTTP transport (for remote MCP servers)
 - S5-09: Agent-to-agent direct communication (no user in loop)

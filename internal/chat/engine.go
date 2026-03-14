@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	tiamatotel "github.com/hollis-labs/tiamat-otel"
+	tiamatotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 

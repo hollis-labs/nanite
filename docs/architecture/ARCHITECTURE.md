@@ -45,7 +45,7 @@
               │  MCP (stdio/HTTP)
               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  Tiamat Services (MCP)                      │
+│              Fragments Engine Services (MCP)                 │
 │                                                             │
 │  Volon (tasks, sprints)  │  Cortex (context, PCC)          │
 │  Hadron (blueprints)     │  Custom MCP servers              │

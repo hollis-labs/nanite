@@ -4,16 +4,16 @@ go 1.25.3
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/hollis-labs/tiamat-otel v0.0.0
-	github.com/hollis-labs/tiamat-tool-broker v0.0.0
+	github.com/hollis-labs/otel v0.0.0
+	github.com/hollis-labs/tool-broker v0.0.0
 	go.opentelemetry.io/otel v1.41.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
 
-replace github.com/hollis-labs/tiamat-otel => ../tiamat-otel
+replace github.com/hollis-labs/otel => ../tiamat-otel
 
-replace github.com/hollis-labs/tiamat-tool-broker => ../tiamat-tool-broker
+replace github.com/hollis-labs/tool-broker => ../tiamat-tool-broker
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

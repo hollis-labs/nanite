@@ -9,7 +9,7 @@
 
 ## 1. Vision
 
-Mentat Chat is a keyboard-first, multi-agent chat client purpose-built for working with AI agents across multiple contexts. It is the primary interface for Project Tiamat — replacing the CLI-based Mentat with a proper GUI while preserving the cognitive agent model, deterministic workflows, and tool-first architecture that make Tiamat effective.
+Mentat Chat is a keyboard-first, multi-agent chat client purpose-built for working with AI agents across multiple contexts. It is the primary interface for Fragments Engine — replacing the CLI-based Mentat with a proper GUI while preserving the cognitive agent model, deterministic workflows, and tool-first architecture that make Fragments Engine effective.
 
 Mentat Chat is NOT an IDE, NOT a project manager, NOT a dashboard. It is a **conversational command center** where a human and one or more AI agents plan, discuss, delegate, and execute work across any domain.
 
@@ -20,21 +20,21 @@ Mentat Chat is NOT an IDE, NOT a project manager, NOT a dashboard. It is a **con
 3. **Mentat doesn't do work** — The primary agent (Mentat) is a cognitive partner. It plans, delegates, manages context, and coordinates. Worker agents do the actual tool calls and execution.
 4. **Agents talk to agents** — Multi-agent communication is first-class. Mentat spawns sessions with workers, delegates tasks, reports back. The user can observe or participate.
 5. **Keyboard-first** — Minimal buttons/UI chrome. Modals, drawers, overlays used cleverly for rich output. Every panel has a keyboard shortcut.
-6. **Local-first, cloud-ready** — Runs locally as a single binary. Deployable to a VPS for remote access to Project Tiamat.
+6. **Local-first, cloud-ready** — Runs locally as a single binary. Deployable to a VPS for remote access to Fragments Engine.
 
 ## 3. Users
 
-**Primary user:** Chrispian (solo operator managing Project Tiamat, small web businesses, writing, personal planning)
+**Primary user:** Chrispian (solo operator managing Fragments Engine, small web businesses, writing, personal planning)
 
 **Agent users:** Mentat (primary cognitive agent), worker agents (code, research, review), specialist agents (per-project)
 
 ## 4. Use Cases
 
-### 4.1 Project Tiamat Management
+### 4.1 Fragments Engine Management
 - Plan sprints, create tasks, review progress via conversation with Mentat
 - Mentat delegates coding tasks to worker agents in separate sessions
 - User reviews agent work, approves proposals, provides direction
-- Context automatically scoped to Tiamat workspace
+- Context automatically scoped to Fragments Engine workspace
 
 ### 4.2 Small Web Businesses
 - Discuss business strategy, marketing, product decisions
@@ -65,7 +65,7 @@ Mentat Chat is NOT an IDE, NOT a project manager, NOT a dashboard. It is a **con
 ## 5. Information Architecture
 
 ```
-Workspace (e.g., "Project Tiamat", "Writing", "Personal")
+Workspace (e.g., "Fragments Engine", "Writing", "Personal")
   Project (optional — e.g., "Volon", "Hadron", "Novel Draft")
     Chat Session (conversation with context)
       Messages (user, agent, system, tool results)
@@ -238,7 +238,7 @@ Message-level bookmarks with optional notes. Scoped to session, queryable across
 Single Go binary embeds React SPA. `mentat serve` starts on localhost.
 
 ### 12.2 VPS
-Docker container. Same binary, exposed on HTTPS. Connects to remote Tiamat services (Volon, Cortex, Hadron running on VPS).
+Docker container. Same binary, exposed on HTTPS. Connects to remote Fragments Engine services (Volon, Cortex, Hadron running on VPS).
 
 ## 13. Non-Goals (MVP)
 

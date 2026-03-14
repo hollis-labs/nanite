@@ -10,7 +10,7 @@ updated_at: "2026-03-13"
 
 - **Backend**: Go 1.25, HTTP API, SQLite (modernc.org/sqlite, pure Go)
 - **Frontend**: React + TypeScript SPA (`ui/src/`)
-- **Observability**: OpenTelemetry via tiamat-otel shared library
+- **Observability**: OpenTelemetry via otel shared library
 
 ## Directory Layout
 

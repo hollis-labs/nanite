@@ -1,10 +1,10 @@
 # Tool-First Architecture
 
-> Tiamat uses service-backed tools as the primary interface. The GUI/apps are the primary harness. CLI tools are consumers.
+> Fragments Engine uses service-backed tools as the primary interface. The GUI/apps are the primary harness. CLI tools are consumers.
 
 ## Core Principle
 
-**All state writes go through Tiamat services.** Never write state directly to files.
+**All state writes go through Fragments Engine services.** Never write state directly to files.
 
 | Service | Owns | MCP tools |
 |---------|------|-----------|
@@ -20,7 +20,7 @@
 
 ## One Central Database Per Service
 
-- Volon: one SQLite DB for all tasks/sprints/projects across all Tiamat projects
+- Volon: one SQLite DB for all tasks/sprints/projects across all Fragments Engine projects
 - Cortex: one SQLite DB for all context records
 - Hadron: one SQLite DB for all blueprint runs/schedules
 - Mentat: one SQLite DB for agents, skills, prompts, workflows, MCP servers

@@ -7,13 +7,13 @@ import (
 	"strings"
 	"sync"
 
-	tiamatotel "github.com/hollis-labs/tiamat-otel"
+	tiamatotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/mentat/internal/provider"
 	"github.com/hollis-labs/mentat/internal/store"
-	"github.com/hollis-labs/tiamat-tool-broker/broker"
+	"github.com/hollis-labs/tool-broker/broker"
 )
 
 // Transport is the interface for MCP server connections (stdio or HTTP).

@@ -32,8 +32,8 @@ projects:
     role: content-ops
     description: Content operations pipelines, passive capture
 
-  - id: tiamat-otel
-    path: ~/Projects-apps/tiamat-otel
+  - id: otel
+    path: ~/Projects-apps/tiamat-otel  # folder rename deferred (TASK-080)
     role: instrumentation
     description: Shared OTel instrumentation library
 

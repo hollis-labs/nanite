@@ -9,7 +9,7 @@
 5. **Decompose before executing.** Every prompt with `expected_deliverables` must produce child tasks — one per deliverable — before work begins.
 6. **Attempt Hadron first** for automatable work (cloning, building, deploying, linting). If no blueprint exists or it fails, create a backlog task to fix it, then proceed manually.
 
-## Project Tiamat
+## Fragments Engine
 
 Mentat is one component of a larger agent framework:
 

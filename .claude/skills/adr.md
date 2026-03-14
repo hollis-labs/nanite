@@ -19,7 +19,7 @@ Parse the user's input for the decision summary. If no explicit summary, use rec
 Launch an Agent with this prompt (fill in {DECISION_SUMMARY} from user input):
 
 ```
-You are an ADR writer for Project Tiamat / Fragments Engine. Write a formal Architecture Decision Record.
+You are an ADR writer for Fragments Engine. Write a formal Architecture Decision Record.
 
 ## Decision to capture:
 {DECISION_SUMMARY}

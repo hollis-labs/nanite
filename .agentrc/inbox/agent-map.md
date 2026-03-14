@@ -10,6 +10,7 @@
 | **lead** | Project Lead | active | Orchestration, Iteration 4, planning | All — final authority |
 | **toolbroker-agent** | Worker | active | TASK-165: Universal ToolBroker | tiamat-tool-broker/*, volon/internal/toolclient/* |
 | **contextbroker-agent** | Worker | active | TASK-168: Universal ContextBroker | mentat/internal/contextbroker/*, mentat/internal/chat/context_client.go |
+| **context-arch-agent** | Worker | active | EPIC-21360 S1: Boot & Directives | CLAUDE.md, MEMORY.md, .agentrc/boot/*.md |
 | **tools-agent** | Worker | **done** | EPIC-11418 S2+S3: 21/21 tasks complete | .claude/skills/* (committed) |
 | **conduit-agent** | Worker | idle | EPIC-65311 complete | — |
 

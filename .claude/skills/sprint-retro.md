@@ -1,106 +1,140 @@
 # sprint-retro
 
-Analyze a completed sprint with velocity metrics, insights, and improvement suggestions.
+Interactive sprint retrospective — analyze sprint velocity and patterns, present keep/drop/try items for voting, execute adopted items as tasks, and persist retro to Cortex.
 
 ## Usage
+
 `/sprint-retro <sprint_id> [--project <project_id>]`
 
 **sprint_id**: The Volon sprint ID to analyze
 **--project**: Project ID (default: from agentrc.yaml)
 
-## Examples
-- `/sprint-retro SPR-20260314-TOOLS-S2-SKILLS-AND-COMMANDS`
-- `/sprint-retro SPR-20260314-PREFLIGHT-P1 --project mentat`
-
 ## Instructions
 
-1. **Fetch sprint data**:
-   - Use `volon_sprint_get` with the sprint ID
-   - Use `volon_tasks_list` filtered by sprint_id to get all tasks
-   - For each task, note: status, priority, title, created_at, updated_at
+### 1. Gather and analyze sprint data
 
-2. **Calculate velocity metrics**:
-   - Total tasks in sprint
-   - Tasks completed (done)
-   - Tasks still open (todo/doing)
-   - Tasks blocked
-   - Tasks paused
-   - Completion rate: `done / total * 100`
-   - Estimate effort distribution: count by priority (A/B/C) and by effort tags if available
+- Use `volon_sprint_get` with the sprint ID
+- Use `volon_tasks_list` filtered by sprint_id to get all tasks
+- For each task, note: status, priority, title, created_at, updated_at, tags
 
-3. **Analyze execution pattern**:
-   - Order of task completion (which were done first?)
-   - Were quick wins prioritized? (effort-small tasks done early)
-   - Were any tasks blocked for extended periods?
-   - Did any tasks get added mid-sprint?
+**Calculate velocity metrics:**
+- Total tasks, completed, open, blocked, paused
+- Completion rate: `done / total * 100`
+- By priority: A/B/C distribution and completion rates
+- By effort: small/medium/large distribution if tags available
 
-4. **Check for scope creep**:
-   - Compare task count at sprint creation vs current
-   - Identify tasks added after sprint start
-   - Note if sprint scope expanded
+**Analyze patterns:**
+- Order of completion (quick wins first?)
+- Blocked duration (how long were blocked tasks stuck?)
+- Scope creep (tasks added after sprint start)
 
-5. **Cross-reference with git history**:
-   - Use `git log --since=<sprint_start> --until=<sprint_end>` to see commits
-   - Map commits to tasks where possible (look for TASK-ID in commit messages)
-   - Count commits per task for effort distribution
+**Cross-reference git:**
+```bash
+git log --oneline --since="<sprint_start>" --format="%h %s" 2>/dev/null
+```
 
-6. **Generate insights**:
-   - What went well? (completed on time, clean execution)
-   - What was challenging? (blocked tasks, scope changes)
-   - Patterns: were similar types of tasks consistently faster/slower?
-   - Dependencies: did cross-project dependencies cause delays?
-
-7. **Suggest improvements**:
-   - Based on patterns, what should change in next sprint?
-   - Are there process improvements to capture?
-   - Should task sizing be adjusted?
-
-## Display Format
+### 2. Show retro summary header
 
 ```
 === SPRINT RETROSPECTIVE ===
 Sprint: <sprint_id>
 Project: <project_id>
-Status: <sprint status>
 
 VELOCITY:
-  Total tasks: <N>
-  Completed: <N> (<percent>%)
-  In progress: <N>
-  Blocked: <N>
-  Paused: <N>
-
-  By priority: A=<N> B=<N> C=<N>
-
-EXECUTION TIMELINE:
-  1. <task_id> — <title> (completed <date>)
-  2. <task_id> — <title> (completed <date>)
-  ...
-  <remaining>: <task_id> — <title> (status: <status>)
+  Total: <N> | Done: <N> (<percent>%) | Open: <N> | Blocked: <N>
+  By priority: A=<done>/<total> B=<done>/<total> C=<done>/<total>
 
 SCOPE:
-  Original tasks: <N>
-  Added mid-sprint: <N>
-  Scope change: <+/- N> (<percent>% change)
+  Original: <N> tasks | Added mid-sprint: <N> | Change: <+/- N>
+```
 
-INSIGHTS:
-  + <what went well>
-  + <what went well>
-  - <what was challenging>
-  - <what was challenging>
+### 3. Present keep/drop/try — interactive dialog
 
-IMPROVEMENTS:
-  1. <suggestion>
-  2. <suggestion>
-  3. <suggestion>
+Based on the analysis, generate insights and present them as votable items.
 
-CARRY-FORWARD:
-  <tasks to move to next sprint, if any>
+**Question 1: Keep items** (multiSelect) — what worked well
+- **header**: "Keep"
+- **question**: `Which practices should we keep doing?`
+- **options** (up to 4, generated from analysis):
+  - e.g., "Quick wins first — small tasks completed early, kept momentum"
+  - e.g., "Parallel agents — 3 agents ran without conflicts"
+  - e.g., "ADR-before-code — decisions documented before implementation"
+- **multiSelect**: true
+
+**Question 2: Drop items** (multiSelect) — what didn't work
+- **header**: "Drop"
+- **question**: `Which practices should we stop or change?`
+- **options** (up to 4, generated from analysis):
+  - e.g., "Scope creep — 5 tasks added mid-sprint, diluted focus"
+  - e.g., "Missing acceptance criteria — 3 tasks had no clear done state"
+- **multiSelect**: true
+
+**Question 3: Try items** (multiSelect) — experiments for next sprint
+- **header**: "Try"
+- **question**: `Which experiments should we try next sprint?`
+- **options** (up to 4, generated from patterns):
+  - e.g., "Sprint size cap — limit to 10 tasks max"
+  - e.g., "Daily triage — review unassigned tasks each session"
+  - e.g., "Blocker SLA — escalate blocked tasks after 24h"
+- **multiSelect**: true
+
+### 4. Execute adopted items
+
+For confirmed **Try** items:
+- Create a Volon task for each in the next sprint (or backlog if no next sprint exists)
+- Tag with `retro`, `experiment`
+
+For confirmed **Keep** items:
+- Note in the retro record (no action needed beyond documentation)
+
+For confirmed **Drop** items:
+- Note in the retro record
+- If a drop item maps to a process change, create a task for it
+
+### 5. Persist retro to Cortex
+
+Use `context_write` to store the retro record:
+- Namespace: "retros"
+- Key: sprint ID
+- Content: full retro summary with velocity, keep/drop/try selections, and action items
+
+### 6. Show results summary
+
+```
+=== RETRO COMPLETE ===
+Sprint: <sprint_id>
+
+KEEP (confirmed):
+  - <item>
+
+DROP (confirmed):
+  - <item>
+
+TRY (adopted — tasks created):
+  - TASK-<id>: <experiment description>
+
+VELOCITY SNAPSHOT:
+  Completion: <percent>%
+  Scope change: <+/- N>
+
+Retro persisted to Cortex: retros/<sprint_id>
+Next: Run /sprint-review to handle remaining tasks, or /epic-plan to plan ahead.
 === END RETRO ===
 ```
 
 ## When to Use
+
 - When a sprint is completed or nearly completed
 - During planning for the next sprint (review the last one first)
 - When the user asks for a sprint summary or retrospective
 - At the end of an iteration
+
+## Invariants
+
+- Always show velocity metrics before interactive voting
+- Generate insights from data — don't present empty categories
+- Adopted "Try" items must become real Volon tasks
+- Always persist to Cortex for historical tracking
+- If sprint has no completed tasks, skip velocity analysis and note it
+
+$ARGUMENTS

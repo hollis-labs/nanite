@@ -1,8 +1,9 @@
 # code-review
 
-Structured code review with a portfolio-aware checklist. Reviews changed files against quality gates (ADR-021) and Fragments Engine conventions.
+Interactive code review — run quality checks against changed files, present findings with per-finding actions (accept, fix now, create task, discuss), and execute selected fixes.
 
 ## Usage
+
 `/code-review [scope]`
 
 **scope** (optional): What to review. Defaults to uncommitted changes.
@@ -11,95 +12,145 @@ Structured code review with a portfolio-aware checklist. Reviews changed files a
 - `<commit-hash>` — review a specific commit
 - `<file-path>` — review a specific file
 
-## Examples
-- `/code-review` — review uncommitted changes
-- `/code-review branch` — review full branch diff
-- `/code-review internal/chat/engine.go` — review specific file
-
 ## Instructions
 
-1. **Determine scope and get the diff**:
-   - Default: `git diff` (unstaged) + `git diff --cached` (staged)
-   - `staged`: `git diff --cached`
-   - `branch`: `git diff main...HEAD`
-   - Commit hash: `git show <hash>`
-   - File path: read the file + `git diff <file>`
+### 1. Determine scope and get the diff
 
-2. **Identify changed files and their types**:
-   - Go files (`.go`)
-   - TypeScript/React files (`.ts`, `.tsx`)
-   - Config files (`.yaml`, `.json`, `.toml`)
-   - Markdown/docs (`.md`)
-   - Skills/commands (`.claude/skills/`)
+- Default: `git diff` (unstaged) + `git diff --cached` (staged)
+- `staged`: `git diff --cached`
+- `branch`: `git diff main...HEAD`
+- Commit hash: `git show <hash>`
+- File path: read the file + `git diff <file>`
 
-3. **Run the review checklist** on each changed file:
+### 2. Identify changed files and run review checklist
 
-   ### Go Checklist
-   - [ ] Error handling: errors wrapped with context (`fmt.Errorf("...: %w", err)`)
-   - [ ] No `interface{}` or `map[string]any` — use typed structs
-   - [ ] No bare `panic()` — return errors instead
-   - [ ] Context propagation: functions accept `context.Context` where appropriate
-   - [ ] Resource cleanup: `defer` for Close/Unlock/Cancel
-   - [ ] Naming: follows Go conventions (camelCase unexported, PascalCase exported)
-   - [ ] No hardcoded paths or magic strings — use constants or config
-   - [ ] OTel: spans and attributes follow observability contract
-   - [ ] MCP: tools follow naming conventions (`<service>_<action>`)
-   - [ ] Tests: changed logic has corresponding test updates
+**Go Checklist:**
+- Error handling: errors wrapped with context (`fmt.Errorf("...: %w", err)`)
+- No `interface{}` or `map[string]any` — use typed structs
+- No bare `panic()` — return errors instead
+- Context propagation: functions accept `context.Context` where appropriate
+- Resource cleanup: `defer` for Close/Unlock/Cancel
+- Naming: follows Go conventions
+- No hardcoded paths or magic strings
+- OTel: spans and attributes follow observability contract
+- MCP: tools follow naming conventions
+- Tests: changed logic has corresponding test updates
 
-   ### TypeScript/React Checklist
-   - [ ] No `any` types — use proper TypeScript types
-   - [ ] Components: props typed, no inline styles
-   - [ ] State management: appropriate use of hooks
-   - [ ] No console.log left in (use proper logging)
-   - [ ] Accessibility: semantic HTML, ARIA where needed
+**TypeScript/React Checklist:**
+- No `any` types — use proper TypeScript types
+- Components: props typed, no inline styles
+- State management: appropriate use of hooks
+- No console.log left in
+- Accessibility: semantic HTML, ARIA where needed
 
-   ### Portfolio-Aware Checks
-   - [ ] Cross-project impact: does this change affect shared modules (core/otel, core/mcp, core/broker)?
-   - [ ] MCP compatibility: do tool signatures match what other projects expect?
-   - [ ] Naming conventions: follows `docs/architecture/naming-conventions.md`
-   - [ ] No new `tiamat-` or `fe-` prefixes (use `core` or service name)
-   - [ ] Config changes: do they need mirroring in other projects?
-   - [ ] Breaking changes: are they documented? Do dependents need updates?
+**Portfolio-Aware Checks:**
+- Cross-project impact on shared modules
+- MCP compatibility
+- Naming conventions per docs
+- No new `tiamat-` or `fe-` prefixes
+- Config changes needing mirroring
+- Breaking changes documented
 
-   ### Security Checks
-   - [ ] No secrets/credentials in code
-   - [ ] SQL: parameterized queries, no string concatenation
-   - [ ] Input validation at system boundaries
-   - [ ] No command injection vectors
+**Security Checks:**
+- No secrets/credentials in code
+- SQL: parameterized queries
+- Input validation at system boundaries
+- No command injection vectors
 
-4. **Rate each file**: PASS, WARN (non-blocking suggestions), FAIL (must fix)
+Rate each finding: FAIL (must fix), WARN (suggestion), INFO (note).
 
-5. **Output the review**:
+### 3. Show review summary header
 
 ```
 === CODE REVIEW ===
 Scope: <description>
 Files reviewed: <N>
+Findings: <N> FAIL | <N> WARN | <N> INFO
+```
 
-<file_path> — <PASS|WARN|FAIL>
-  [FAIL] <issue description>
-    Line <N>: <code snippet>
-    Fix: <suggestion>
-  [WARN] <suggestion>
-    Line <N>: <code snippet>
+If there are no FAIL or WARN findings, skip the interactive step and show:
+```
+All clear — no issues found. Ready to commit.
+=== END REVIEW ===
+```
 
-<file_path> — PASS
-  No issues found.
+### 4. Present findings — interactive dialog
 
-SUMMARY:
-  PASS: <N> files
-  WARN: <N> files (<N> warnings total)
-  FAIL: <N> files (<N> issues total)
+Present findings using `AskUserQuestion`, up to **4 findings per call** (one question per finding, single-select).
 
-<If any FAIL>
-  Action required: Fix FAIL issues before committing.
-<If only WARN/PASS>
-  Ready to commit. Consider addressing warnings.
+**Question format per finding:**
+- **header**: Severity (e.g., "FAIL", "WARN") — max 12 chars
+- **question**: `[<file>:<line>] <issue description> — what should we do?`
+- **options**:
+  1. **Fix now** — "Apply the suggested fix inline"
+  2. **Accept (not an issue)** — "Acknowledge and move on"
+  3. **Create task** — "Create a Volon follow-up task for later"
+  4. **Discuss** — "Need more context before deciding"
+- **multiSelect**: false
+- **preview**: Show the code context (file path, line number, surrounding code, and suggested fix)
+
+Present FAIL findings first, then WARN. Skip INFO findings in interactive mode (just list them in the summary).
+
+### 5. Handle "Discuss" selections
+
+- Print full context: file, surrounding code, why this was flagged, what the checklist says
+- Ask follow-up with options minus "Discuss" (replace with "Skip for now")
+
+### 6. Execute selected actions
+
+After all decisions collected:
+
+1. **Fix now**: Apply the edit using the Edit tool. Show the diff.
+2. **Accept**: No action — record as acknowledged
+3. **Create task**: Use `volon_task_create` with finding details (file, line, issue, suggestion)
+4. **Skipped**: No action, report only
+
+Handle partial failures — if an edit fails, log and continue.
+
+### 7. Show results summary
+
+```
+=== REVIEW COMPLETE ===
+Scope: <description>
+
+FIXED:
+  - <file>:<line> — <issue> (applied fix)
+
+ACCEPTED:
+  - <file>:<line> — <issue> (acknowledged)
+
+TASKS CREATED:
+  - TASK-<id>: <file>:<line> — <issue>
+
+SKIPPED:
+  - <file>:<line> — <issue>
+
+INFO (no action needed):
+  - <file>:<line> — <note>
+
+Totals: <N> fixed, <N> accepted, <N> tasks created, <N> skipped
+Failed edits: <N or "none">
+
+<If any FAIL findings remain unfixed>
+  Warning: <N> FAIL findings not yet resolved. Fix before committing.
+<Else>
+  Ready to commit.
 === END REVIEW ===
 ```
 
 ## When to Use
+
 - Before committing changes
 - Before marking a Volon task as done (Gate 2 per ADR-021)
 - When reviewing another agent's work
 - When the user asks for a review or quality check
+
+## Invariants
+
+- Never apply fixes without user selection
+- Always present FAIL findings before WARN
+- Skip interactive step if no actionable findings
+- Show code context in previews for informed decisions
+- Created tasks must include file, line, and full issue description
+
+$ARGUMENTS

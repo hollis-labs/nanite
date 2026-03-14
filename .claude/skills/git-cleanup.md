@@ -1,152 +1,133 @@
-# Git Cleanup
+# git-cleanup
 
-Comprehensive cleanup of stale git worktrees, branches, and references across all managed Fragments Engine projects. Supersedes the narrower `/worktree-cleanup` skill.
+Interactive git cleanup — inventory worktrees and stale branches across the portfolio, cross-reference with Volon task status, present findings with per-item actions (clean, keep, investigate), and execute batch cleanup.
 
 ## When to use
 
-- When warned about excessive agent worktrees (> 5 detected by the `worktree-check.sh` hook)
+- When warned about excessive agent worktrees (> 5 detected by `worktree-check.sh` hook)
 - Before starting a large multi-agent session to reclaim disk space
 - During periodic maintenance or end-of-sprint housekeeping
 - When agent branch clutter makes `git branch` output unreadable
 
-## Procedure
+## Usage
+
+`/git-cleanup [--project <project_id>]`
+
+**--project**: Scope to a single project (default: scan all projects in repos.yaml)
+
+## Instructions
 
 ### Phase 1 — Inventory
 
-1. **Read the project list.** Parse `config/repos.yaml` (in the Mentat repo) to get all project IDs and paths. Expand `~` to `$HOME`.
+1. **Read the project list.** Parse `config/repos.yaml` to get all project IDs and paths. Expand `~` to `$HOME`.
 
-2. **Enumerate worktrees.** For each project path, run via Bash:
+2. **Enumerate worktrees.** For each project path:
    ```bash
    cd <project_path> && git worktree list 2>/dev/null
    ```
    Record every worktree that is NOT the main working tree.
 
-3. **Enumerate agent branches.** For each project path, run via Bash:
+3. **Enumerate agent branches.** For each project path:
    ```bash
    cd <project_path> && git branch --list 'agent/*' --list 'worktree-agent-*' 2>/dev/null
    ```
-   Also check for top-level `*-agent-*` directories under `~/Projects-apps/`.
 
-### Phase 2 — Git status check
+### Phase 2 — Status enrichment
 
 4. **Check for uncommitted changes** in every non-main worktree:
    ```bash
    cd <worktree_path> && git status --short 2>/dev/null
    ```
-   Flag any worktree that has output (dirty state). These require special handling.
+   Flag any with output as dirty.
 
-### Phase 3 — Volon cross-reference
+5. **Extract task IDs from branch names** and **query Volon** for task status:
+   - done/archived → safe to remove
+   - doing/blocked → KEEP
+   - not found → check commit age
 
-5. **Extract task IDs from branch names.** Agent branches typically encode a task ID or session hash (e.g., `agent/TASK-20260314-098`, `worktree-agent-a9447a70`). Extract any recognizable task identifiers.
-
-6. **Query Volon for task status.** Use the `volon_tasks_list` MCP tool (with appropriate `project_id`) to look up each extracted task ID. Classify:
-   - **done** or **archived** — safe to remove
-   - **doing** or **in_progress** — KEEP (active work)
-   - **blocked** — KEEP (may resume)
-   - **not found** — treat as stale if also inactive (see Phase 4)
-
-### Phase 4 — Stale branch detection
-
-7. **Check branch activity.** For branches that did not match a Volon task (or whose task was not found), check last commit age:
+6. **Check branch activity** for unmatched branches:
    ```bash
    cd <project_path> && git log -1 --format="%ci" <branch_name> 2>/dev/null
    ```
-   Branches with no commits in 7+ days are considered stale.
+   Branches with no commits in 7+ days are stale (14+ days if Volon unreachable).
 
-8. **Check remote tracking.** For each stale branch, check whether it has been pushed:
-   ```bash
-   git branch -r --list "origin/<branch_name>" 2>/dev/null
-   ```
-   Remote-only cleanup (pruning) is separate from local branch deletion.
+### Phase 3 — Present cleanup plan — interactive dialog
 
-### Phase 5 — Present plan
+7. **Show inventory summary:**
+```
+=== GIT CLEANUP ===
+Projects scanned: <N>
+Worktrees found: <N> (main excluded)
+Agent branches: <N>
+Safe to remove: <N> | Active (keep): <N> | Dirty (needs review): <N>
+```
 
-9. **Build and display the cleanup plan.** Present a table to the user BEFORE executing anything:
+8. **Present safe removals** using `AskUserQuestion` with **multiSelect: true**.
 
-   ```
-   === GIT CLEANUP PLAN ===
+**Question format** (batch of up to 4 items):
+- **header**: "Safe" or "Dirty"
+- **question**: `Select items to clean up:`
+- **options** (up to 4):
+  - **label**: `[<project>] <branch or worktree name>`
+  - **description**: Task status, last commit age, dirty state
+  - **preview**: Show worktree path, branch name, Volon task status, last commit date, dirty files (if any)
+- **multiSelect**: true
 
-   Project: volon (~/Projects-apps/volon)
-   | Item                        | Type     | Task        | Status   | Last Commit  | Dirty | Action       |
-   |-----------------------------|----------|-------------|----------|--------------|-------|--------------|
-   | .claude/worktrees/agent-X   | worktree | TASK-Y      | done     | 5 days ago   | no    | REMOVE       |
-   | .claude/worktrees/agent-Z   | worktree | TASK-W      | doing    | 1 hour ago   | no    | KEEP         |
-   | worktree-agent-a9447a70     | branch   | (none)      | stale    | 12 days ago  | n/a   | DELETE       |
-   | .claude/worktrees/agent-Q   | worktree | TASK-R      | done     | 3 days ago   | YES   | NEEDS REVIEW |
+Present safe items first. Then present dirty items separately with explicit warnings.
 
-   [repeat for each project with findings]
+9. **Items marked dirty** get their own batch with stronger warnings:
+- Preview must show the full dirty file list
+- Description must say "HAS UNCOMMITTED CHANGES — will be lost"
 
-   Summary:
-   - Worktrees to remove: N
-   - Branches to delete: N
-   - Items kept (active): N
-   - Items needing review (dirty): N
-   - Estimated disk reclaim: ~N MB (if measurable)
+### Phase 4 — Execute on confirmation
 
-   Proceed? [present options: all safe items / select individually / abort]
-   ```
-
-10. **Items marked NEEDS REVIEW** must be presented separately with their dirty file list, and the user must explicitly confirm each one.
-
-### Phase 6 — Execute on confirmation
-
-11. **Remove worktrees** (only confirmed items):
+10. **Remove confirmed worktrees:**
     ```bash
     cd <parent_repo> && git worktree remove <worktree_path>
     ```
-    If removal fails due to untracked files AND the user has confirmed force-removal for that specific worktree:
-    ```bash
-    git worktree remove --force <worktree_path>
-    ```
+    Use `--force` ONLY for dirty worktrees that the user explicitly confirmed.
 
-12. **Delete local branches** (only confirmed stale branches):
+11. **Delete confirmed branches:**
     ```bash
     cd <parent_repo> && git branch -d <branch_name>
     ```
-    Use `-D` only if `-d` fails because the branch is not fully merged AND the user confirms.
+    Use `-D` only if `-d` fails AND the user confirmed force deletion.
 
-### Phase 7 — Prune references
-
-13. **Prune worktree metadata** in each project that had removals:
+12. **Prune references** in each affected project:
     ```bash
-    cd <project_path> && git worktree prune
+    cd <project_path> && git worktree prune && git remote prune origin
     ```
 
-14. **Prune remote references** in each project:
-    ```bash
-    cd <project_path> && git remote prune origin
-    ```
+### Phase 5 — Show results summary
 
-15. **Report results.** After all operations, present a summary:
-    ```
-    === GIT CLEANUP COMPLETE ===
-    Worktrees removed: N
-    Branches deleted: N
-    References pruned: N projects
-    Items kept: N
-    ```
-    Log the full list of removed items to stderr for audit trail.
+```
+=== CLEANUP COMPLETE ===
+
+REMOVED:
+  - [<project>] <worktree/branch> (task: <status>)
+
+KEPT (active):
+  - [<project>] <worktree/branch> (task: <status>)
+
+NOT SELECTED:
+  - [<project>] <worktree/branch>
+
+Totals: <N> removed, <N> kept, <N> deferred
+References pruned: <N> projects
+Failed removals: <N or "none">
+=== END CLEANUP ===
+```
 
 ## Safety invariants
 
-These rules are non-negotiable. Violating any of them is a hard failure.
+These rules are non-negotiable:
 
-- **NEVER remove worktrees for tasks in `doing`, `in_progress`, or `blocked` status.** These represent active or paused work.
-- **NEVER remove worktrees with uncommitted changes** without per-worktree explicit user confirmation. Present the dirty file list first.
-- **NEVER force-delete branches (`-D`)** without explicit user confirmation for that specific branch.
-- **Always present the full cleanup plan** (Phase 5) before executing any destructive operation.
-- **Never delete the main/master branch** or the current checked-out branch of any project.
-- **Never push deletions to remote** (no `git push origin --delete`). This skill handles local cleanup only. Remote branch cleanup is a separate, more dangerous operation.
-- **Log every removal** to stderr so the user has an audit trail.
-- **If Volon is unreachable**, skip the cross-reference phase and note it in the plan. Fall back to commit-age heuristics only, and be more conservative (require 14+ days stale instead of 7).
+- **NEVER remove worktrees for tasks in `doing` or `blocked` status** without explicit override
+- **NEVER remove dirty worktrees** without per-item explicit user confirmation showing the dirty file list
+- **NEVER force-delete branches (`-D`)** without explicit user confirmation for that specific branch
+- **Always present the full plan** before executing any destructive operation
+- **Never delete main/master** or the current checked-out branch
+- **Never push deletions to remote** — local cleanup only
+- **If Volon is unreachable**, note it and use 14+ day stale threshold instead of 7
 
-## Output
-
-Console output only. No file writes. All destructive operations require confirmation.
-
-## References
-
-- `config/repos.yaml` — managed project paths
-- `.claude/hooks/worktree-check.sh` — PostToolUse hook that triggers cleanup warnings
-- Volon MCP `volon_tasks_list` — task status cross-referencing
-- Supersedes the older `/worktree-cleanup` skill (which now redirects here)
+$ARGUMENTS

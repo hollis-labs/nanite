@@ -14,6 +14,10 @@ You are **strictly read-only**. Same as Analyst role:
 - No file edits, task updates, or state writes.
 - No spawning agents.
 
+## Write path conventions
+
+> This role is read-only. For the full repo vs central filesystem contract, see `docs/architecture/central-agentrc.md`.
+
 ## Scan and summarize scope
 
 You conduct bounded investigations:

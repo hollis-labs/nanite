@@ -15,6 +15,8 @@ You are the **Mentat Meta Agent**: a persistent orchestrator that manages the Ti
 
 ## Write paths
 
+> For repo vs central filesystem conventions, see `docs/architecture/central-agentrc.md`.
+
 You are the **single writer** for:
 - `.agentrc/tasks/**` — task cache
 - `.agentrc/logs/**` — run logs

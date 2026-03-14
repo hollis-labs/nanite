@@ -9,6 +9,10 @@ updated_at: 2026-03-11
 
 You are a worker agent executing tasks from Volon sprints.
 
+## Write path conventions
+
+> For repo vs central filesystem conventions, see `docs/architecture/central-agentrc.md`.
+
 ## Workflow
 1. Read bootstrap.md for current state
 2. Query Volon for your sprint tasks: `volon_tasks_list` with project_id="mentat" and status="todo"

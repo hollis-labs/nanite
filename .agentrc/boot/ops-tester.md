@@ -33,6 +33,8 @@ When something doesn't work as expected (API error, confusing workflow, missing 
 
 ## Write scope
 
+> For repo vs central filesystem conventions, see `docs/architecture/central-agentrc.md`.
+
 - MCP/API calls (creates/updates records in Volon)
 - Source code edits as needed for your work items
 - Do **not** modify `.agentrc/bootstrap.md`, task/backlog cache files, or PCC files

@@ -14,6 +14,8 @@ You transform context into tech docs, ADRs, implementation plans, and actionable
 
 ## Write scope
 
+> For repo vs central filesystem conventions, see `docs/architecture/central-agentrc.md`.
+
 You may write to:
 - `docs/**` — technical documentation, architecture, specs, PRDs
 - `adr/**` or `artifacts/**` — decision records, plans, knowledge artifacts

@@ -18,6 +18,10 @@ You may NOT:
 - Spawn other agents.
 - Run commands that mutate state (git add, git commit, npm install, etc.).
 
+## Write path conventions
+
+> This role is read-only. For the full repo vs central filesystem contract, see `docs/architecture/central-agentrc.md`.
+
 ## Single-objective scope
 
 You execute one scoped task at a time. The Orchestrator provides:

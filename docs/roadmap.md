@@ -1,10 +1,14 @@
-# Project Tiamat — Roadmap
+# Fragments Engine — Roadmap
 
-> Ported from mentat CLI. Last major update: 2026-03-06.
+> Last updated: 2026-03-13.
 
 ## Vision
 
-Project Tiamat is a full-stack agent framework where each component has a distinct role. The end state is a self-managing development platform: Mentat orchestrates, Volon tracks, Hadron automates, Cortex remembers, Nanite captures, and Carrier processes — all connected via MCP and OTel.
+Fragments Engine is a full-stack agent framework where each component has a distinct role. The end state is a self-managing development platform: Mentat orchestrates, Volon tracks, Hadron automates, Cortex remembers, Nanite captures, and Carrier processes — all connected via MCP and OTel.
+
+## Purpose
+
+**Context continuity at scale.** Everything in the portfolio serves this: the orientation workflow (`/reorient`), the session context model (Profile, Mode, Scope, Lens), the capture pipeline (active via Mentat + passive via Carrier), the agent taxonomy (Special/System, Primary/Secondary), the PCC system — all reduce the cost of starting or resuming work across a multi-project portfolio. We are building infrastructure so that agents and humans lose less between sessions.
 
 ## Milestones
 

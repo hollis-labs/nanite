@@ -1,0 +1,53 @@
+# Fragments Engine — Managed Projects
+# Used by portfolio skills: /git-status-all, /commit-all, /pcc-refresh-all, /standup, /reorient
+
+projects:
+  - id: volon
+    path: ~/Projects-apps/volon
+    role: orchestration
+    description: Task/sprint/project management, agent scheduling, queue runner
+
+  - id: conduit
+    path: ~/Projects-apps/mentat  # will be ~/Projects-apps/conduit after rename
+    role: chat-harness
+    description: Provider-agnostic multi-agent chat application
+
+  - id: cortex
+    path: ~/Projects-apps/cortex
+    role: memory
+    description: Context registry, namespaces, PCC, vector search
+
+  - id: hadron
+    path: ~/Projects-apps/hadron
+    role: automation
+    description: Blueprints, pipelines, scheduler, cron
+
+  - id: nanite
+    path: ~/Projects-apps/nanite
+    role: notes
+    description: Notes, documentation, inbox (Wails desktop + CLI)
+
+  - id: carrier
+    path: ~/Projects-apps/carrier
+    role: content-ops
+    description: Content operations pipelines, passive capture
+
+  - id: tiamat-otel
+    path: ~/Projects-apps/tiamat-otel
+    role: instrumentation
+    description: Shared OTel instrumentation library
+
+  - id: cerberus
+    path: ~/Projects-apps/cerberus
+    role: service-management
+    description: Service lifecycle management daemon
+
+  - id: sigil
+    path: ~/Projects-apps/sigil
+    role: ui-generation
+    description: Declarative YAML-to-UI code generation (Go/Templ, React/shadcn)
+
+  - id: lnklst
+    path: ~/Projects-apps/lnklst
+    role: app
+    description: Link management / bookmarking application

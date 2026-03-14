@@ -1,32 +1,39 @@
 ---
 version: 1
 type: bootstrap
-iteration: 2
-updated_at: 2026-03-13T17:45:00Z
+iteration: 3
+updated_at: 2026-03-14T02:30:00Z
 ---
 
 # Mentat Bootstrap
 
 ## Current state
-- Iteration 2 (post-planning session)
-- Status: 3 new epics created, agentrc synced, worktrees cleaned
-- Tasks: Check Volon with project_id="mentat"
+- Iteration 3 (post-deep-planning session)
+- Status: 8 epics created, full system audit complete, cleanup done
+- Tasks: Check Volon with project_id="mentat" (and project_id="volon" for stabilization)
 - Boot profiles: meta-agent, worker, analyst, architect, reviewer, ops-tester
+- /reorient skill: BUILT AND TESTED — use it for orientation
 
-## What happened (iteration 2 — 2026-03-13)
-- Oriented from zero context using parallel sub-agents (Volon + Cortex + git + agentrc)
-- Created 3 epics, 9 sprints, 40 tasks (TASK-20260313-055 through TASK-20260313-094)
-  - EPIC-20260313-31488: Unified Session Context (Profile, Mode, Scope, Lens)
-  - EPIC-20260313-86433: Agent Taxonomy & Specification System
-  - EPIC-20260313-90324: Context Capture Pipeline (Active + Passive)
-- Cleaned 117 stale volon worktrees (22GB), deleted 326 merged branches
-- Synced agentrc: pulled hooks + boot profiles from volon, renamed worker→analyst
-- Saved 3 memories, 1 Nanite note (#74), 1 Cortex session record
-- Formalized: agent taxonomy, Mentat responsibilities, capture model, mode system
+## What happened (iteration 3 — 2026-03-13/14)
+- Oriented from zero context, built and tested /reorient skill
+- Created 8 epics, 22 sprints, 101 tasks across mentat + volon
+- Designed: Conduit separation (ADR-013), plugin system, central filesystem (ADR-015)
+- Designed: session context (Profile/Mode/Scope/Lens), agent taxonomy, capture pipeline
+- Full system audit: 14 projects, 1396 tasks, 201 sprints — identified critical Volon issues
+- Cleanup: 117 worktrees (22GB), 326 branches, 22 test artifacts, agentrc sync, PCC creation
+- Key decision: chat app = Conduit (harness), Mentat = Special Agent (cognitive assistant)
+
+## Active epics (priority order)
+1. EPIC-20260314-56630: Volon Stabilization (claim race, E2E, agent sessions) — VOLON
+2. EPIC-20260314-65311: Demo-Ready Conduit (Docker, delegation, Cortex, compaction)
+3. EPIC-20260313-08947: Conduit Separation (rename, central agentrc) — via MMA agent
+4. EPIC-20260313-31488: Unified Session Context (Profile/Mode/Scope/Lens)
+5. EPIC-20260313-86433: Agent Taxonomy & Specification
+6. EPIC-20260313-90324: Context Capture Pipeline (Active + Passive)
+7. EPIC-20260314-61212: Plugin System & Agent-Native UI (includes A2A messaging)
 
 ## Next steps
-- Activate USC-S1-SCHEMA-FOUNDATION sprint and begin implementation
-- Write ADR-011 (Unified Session Context) and ADR-012 (Agent Spec)
-- Review 5 unmerged volon agent branches
-- Commit remaining volon working tree changes
-- Build /reorient skill to encode the orientation workflow demonstrated this session
+- Execute Conduit rename via MMA-style parallel agent process
+- Activate Volon stabilization sprint (VSTAB-S1-CRITICAL-FIXES)
+- Continue planning sessions for remaining topics
+- Begin Phase 1 implementation

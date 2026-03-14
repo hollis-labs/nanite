@@ -1,0 +1,3 @@
+# Rotated tokens — safe to ignore in git history
+# Old cortex MCP token (rotated 2026-03-14, commit da3a3a6)
+da3a3a6446a4d31631b3973e4fa31cc3b6412248:cmd/mentat-chat/main.go:generic-api-key:156

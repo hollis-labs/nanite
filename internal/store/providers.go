@@ -2,8 +2,8 @@ package store
 
 import "fmt"
 
-// Provider represents a provider record.
-type Provider struct {
+// ProviderConfig represents a provider record.
+type ProviderConfig struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	ProviderType string `json:"provider_type"`
@@ -32,7 +32,7 @@ type Model struct {
 }
 
 // ListProviders returns all providers.
-func (s *Store) ListProviders() ([]Provider, error) {
+func (s *Store) ListProviders() ([]ProviderConfig, error) {
 	rows, err := s.DB.Query(
 		`SELECT id, name, provider_type, COALESCE(base_url,''), is_enabled,
 		        settings, created_at, updated_at
@@ -43,9 +43,9 @@ func (s *Store) ListProviders() ([]Provider, error) {
 	}
 	defer rows.Close()
 
-	out := make([]Provider, 0)
+	out := make([]ProviderConfig, 0)
 	for rows.Next() {
-		var p Provider
+		var p ProviderConfig
 		if err := rows.Scan(
 			&p.ID, &p.Name, &p.ProviderType, &p.BaseURL, &p.IsEnabled,
 			&p.Settings, &p.CreatedAt, &p.UpdatedAt,

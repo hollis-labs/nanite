@@ -1,0 +1,50 @@
+# Mentat — mise task runner configuration
+# https://mise.jdx.dev/
+
+[tools]
+go = "1.25.3"
+node = "22"
+
+[tasks.build]
+description = "Build Go binary (embeds UI if ui/dist exists)"
+run = "go build -o mentat ./cmd/mentat"
+
+[tasks.test]
+description = "Run all Go tests"
+run = "go test ./..."
+
+[tasks.lint]
+description = "Run go vet on all packages"
+run = "go vet ./..."
+
+[tasks.serve]
+description = "Run mentat in dev mode on port 8090"
+depends = ["build"]
+run = "./mentat serve --port 8090 -dev"
+
+[tasks.ui-install]
+description = "Install frontend dependencies"
+run = "cd ui && npm install"
+
+[tasks.ui-build]
+description = "Build the React frontend"
+run = "cd ui && npm run build"
+
+[tasks.ui-dev]
+description = "Run frontend dev server"
+run = "cd ui && npm run dev"
+
+[tasks.ui-lint]
+description = "Lint frontend code"
+run = "cd ui && npm run lint"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = """
+rm -f mentat
+rm -rf ui/dist
+"""
+
+[tasks.all]
+description = "Build UI then Go binary"
+depends = ["ui-build", "build"]

@@ -97,8 +97,8 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 
 	// Total available tools (for display, not context cost).
 	toolsAvailable := 0
-	if a.ToolBroker != nil {
-		toolsAvailable = len(a.ToolBroker.ListTools())
+	if a.ToolClient != nil {
+		toolsAvailable = len(a.ToolClient.ListTools())
 	}
 
 	// System prompt preview for the inspector.

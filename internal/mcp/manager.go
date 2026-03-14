@@ -16,15 +16,15 @@ import (
 	"github.com/hollis-labs/tool-broker/broker"
 )
 
-// Transport is the interface for MCP server connections (stdio or HTTP).
-type Transport interface {
+// MCPTransport is the interface for MCP server connections (stdio or HTTP).
+type MCPTransport interface {
 	ListTools(ctx context.Context) ([]Tool, error)
 	CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolResult, error)
 }
 
 // Manager holds multiple MCP server connections and provides unified tool access.
 type Manager struct {
-	servers map[string]Transport // name -> transport
+	servers map[string]MCPTransport // name -> transport
 	tools   []toolEntry          // all discovered tools with server association
 	Broker  *broker.LocalBroker  // intent-aware tool broker
 	mu      sync.RWMutex
@@ -39,13 +39,13 @@ type toolEntry struct {
 // NewManager creates a new MCP Manager.
 func NewManager() *Manager {
 	return &Manager{
-		servers: make(map[string]Transport),
+		servers: make(map[string]MCPTransport),
 	}
 }
 
 // AddServer registers an MCP server with the given transport.
 // Call DiscoverTools() after adding all servers.
-func (m *Manager) AddServer(name string, transport Transport) {
+func (m *Manager) AddServer(name string, transport MCPTransport) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.servers[name] = transport

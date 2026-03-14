@@ -1,8 +1,12 @@
-.PHONY: build dev clean test
+.PHONY: build install dev clean test
 
 # Build React SPA then embed in Go binary
 build: build-ui
 	go build -o mentat ./cmd/mentat
+
+# Install to ~/go/bin/ (used by MCP and Cerberus)
+install: build-ui
+	go install ./cmd/mentat
 
 build-ui:
 	cd ui && npm run build

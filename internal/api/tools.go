@@ -7,12 +7,12 @@ import (
 // handleListTools returns all registered tools.
 // GET /api/tools
 func (a *API) handleListTools(w http.ResponseWriter, r *http.Request) {
-	if a.ToolBroker == nil {
+	if a.ToolClient == nil {
 		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 
-	tools := a.ToolBroker.ListTools()
+	tools := a.ToolClient.ListTools()
 
 	type toolItem struct {
 		Name        string `json:"name"`
@@ -33,20 +33,20 @@ func (a *API) handleListTools(w http.ResponseWriter, r *http.Request) {
 // handleListToolServers returns MCP server info.
 // GET /api/tools/servers
 func (a *API) handleListToolServers(w http.ResponseWriter, r *http.Request) {
-	if a.ToolBroker == nil {
+	if a.ToolClient == nil {
 		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 
-	servers := a.ToolBroker.ListServers()
+	servers := a.ToolClient.ListServers()
 	a.jsonResp(w, http.StatusOK, servers)
 }
 
 // handleSelectTools previews tool selection for an intent.
 // POST /api/tools/select
 func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
-	if a.ToolBroker == nil {
-		a.errorResp(w, http.StatusServiceUnavailable, "tool broker not configured")
+	if a.ToolClient == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "tool client not configured")
 		return
 	}
 
@@ -62,7 +62,7 @@ func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
 		req.Intent = "*"
 	}
 
-	tools, err := a.ToolBroker.SelectTools(r.Context(), req.Intent, req.Hints, "", "")
+	tools, err := a.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "")
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -93,14 +93,14 @@ func (a *API) handleRefreshTools(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
-	if a.ToolBroker == nil {
+	if a.ToolClient == nil {
 		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 
 	// Get all tools and filter by agent permissions.
-	allTools := a.ToolBroker.ListTools()
-	perms := a.ToolBroker.GetPermissions(agentID)
+	allTools := a.ToolClient.ListTools()
+	perms := a.ToolClient.GetPermissions(agentID)
 
 	type toolItem struct {
 		Name        string `json:"name"`

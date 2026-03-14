@@ -1,4 +1,4 @@
-package toolbroker
+package toolclient
 
 import (
 	"encoding/json"
@@ -39,7 +39,7 @@ const DefaultMaxIntentResults = 10
 // HandleRequestTools processes a request_tools meta-tool call.
 // It resolves tools by exact name and/or by intent scoring, returning the
 // matched tool definitions as a JSON-encoded result string.
-func (tb *ToolBroker) HandleRequestTools(input map[string]any) ([]provider.ToolDefinition, string) {
+func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]provider.ToolDefinition, string) {
 	var byName []provider.ToolDefinition
 	var byIntent []provider.ToolDefinition
 
@@ -62,7 +62,7 @@ func (tb *ToolBroker) HandleRequestTools(input map[string]any) ([]provider.ToolD
 	if intentStr, ok := input["intent"]; ok {
 		if s, ok := intentStr.(string); ok && s != "" {
 			byIntent = tb.SelectByIntent(s, DefaultMaxIntentResults)
-			log.Printf("toolbroker: request_tools intent=%q matched %d tools", s, len(byIntent))
+			log.Printf("toolclient: request_tools intent=%q matched %d tools", s, len(byIntent))
 		}
 	}
 

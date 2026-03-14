@@ -1,4 +1,4 @@
-package toolbroker
+package toolclient
 
 import (
 	"sort"
@@ -16,7 +16,7 @@ const MinIntentScore = 1
 // using simple keyword overlap (substring matches in tool name and
 // description) and returns the top maxTools results sorted by relevance.
 // If no tool scores above MinIntentScore, an empty slice is returned.
-func (tb *ToolBroker) SelectByIntent(intent string, maxTools int) []provider.ToolDefinition {
+func (tb *ToolClient) SelectByIntent(intent string, maxTools int) []provider.ToolDefinition {
 	allTools := tb.ListTools()
 	if len(allTools) == 0 || intent == "" {
 		return nil

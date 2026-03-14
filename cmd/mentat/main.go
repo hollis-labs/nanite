@@ -23,7 +23,7 @@ import (
 	"github.com/hollis-labs/mentat/internal/provider"
 	"github.com/hollis-labs/mentat/internal/server"
 	"github.com/hollis-labs/mentat/internal/store"
-	"github.com/hollis-labs/mentat/internal/toolbroker"
+	"github.com/hollis-labs/mentat/internal/toolclient"
 	"github.com/hollis-labs/mentat/internal/truncate"
 	"github.com/hollis-labs/mentat/internal/workflow"
 	"github.com/hollis-labs/tool-broker/broker"
@@ -180,14 +180,19 @@ func cmdServe(args []string) {
 	engine.MCPManager = mcpManager
 
 	// Create tool broker for permission-checked tool access.
-	tb := toolbroker.New(mcpManager, s, nil)
+	tb := toolclient.New(mcpManager, s, nil)
 
 	// Register self-service tools as built-in (always available).
 	selfToolDefs := mcp.SelfToolProviderDefinitions()
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	log.Printf("registered %d self-service built-in tools", len(selfToolDefs))
 
-	engine.ToolBroker = tb
+	engine.ToolClient = tb
+
+	// Set up orchestrator for task decomposition and delegation.
+	orchestrator := chat.NewOrchestrator(registry, mcpManager)
+	engine.Orchestrator = orchestrator
+	log.Println("orchestrator initialized (decomposition + delegation enabled)")
 
 	// Set up activity emitter to push events to Volon's GUI server.
 	// Configured via VOLON_URL or VOLON_GUI_URL env var; disabled when unset.
@@ -231,7 +236,7 @@ func cmdServe(args []string) {
 	// Create API layer.
 	a := api.New(s, engine)
 	a.MCPManager = mcpManager
-	a.ToolBroker = tb
+	a.ToolClient = tb
 	a.WorkflowLoader = wfLoader
 	a.WorkflowEngine = wfEngine
 
@@ -277,7 +282,7 @@ func setupMCPServers(m *mcp.Manager) {
 	cortexBin := home + "/Projects-apps/cortex/contextd"
 	cortexToken := os.Getenv("CORTEX_MCP_TOKEN")
 	if cortexToken == "" {
-		cortexToken = "35bcccce3c726d9f269e6cf0c80a6557553a099004b19a174e2e46886fc2b979"
+		cortexToken = "5c116cf443a1e70de66f6ac242e1f06161837dca1f7a62a3bd63494bb0b0d4bb"
 	}
 	if _, err := os.Stat(cortexBin); err == nil {
 		m.AddStdioServer("cortex", cortexBin, []string{

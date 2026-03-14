@@ -7,7 +7,7 @@ import (
 	"github.com/hollis-labs/mentat/internal/chat"
 	"github.com/hollis-labs/mentat/internal/mcp"
 	"github.com/hollis-labs/mentat/internal/store"
-	"github.com/hollis-labs/mentat/internal/toolbroker"
+	"github.com/hollis-labs/mentat/internal/toolclient"
 	"github.com/hollis-labs/mentat/internal/workflow"
 )
 
@@ -15,7 +15,7 @@ import (
 type API struct {
 	Store          *store.Store
 	Engine         *chat.Engine
-	ToolBroker     *toolbroker.ToolBroker
+	ToolClient     *toolclient.ToolClient
 	MCPManager     *mcp.Manager
 	WorkflowLoader *workflow.Loader
 	WorkflowEngine *workflow.Engine
@@ -93,6 +93,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Agent-to-agent messaging
 	mux.HandleFunc("POST /api/sessions/{id}/agent-message", a.handleAgentMessage)
+
+	// Delegation
+	mux.HandleFunc("POST /api/sessions/{id}/delegate", a.handleDelegateTask)
+	mux.HandleFunc("POST /api/sessions/{id}/delegate-aggregate", a.handleDelegateAndAggregate)
 
 	// Multi-agent group sessions
 	mux.HandleFunc("GET /api/sessions/{id}/agents", a.handleListSessionAgents)

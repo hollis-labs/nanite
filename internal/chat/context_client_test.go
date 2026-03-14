@@ -10,7 +10,7 @@ import (
 	"github.com/hollis-labs/mentat/internal/store"
 )
 
-func newTestBroker(t *testing.T) (*ContextBroker, *store.Store) {
+func newTestBroker(t *testing.T) (*ContextClient, *store.Store) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := store.New(dbPath)
@@ -18,7 +18,7 @@ func newTestBroker(t *testing.T) (*ContextBroker, *store.Store) {
 		t.Fatalf("store.New: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
-	return NewContextBroker(s), s
+	return NewContextClient(s), s
 }
 
 func TestEstimateTokens(t *testing.T) {

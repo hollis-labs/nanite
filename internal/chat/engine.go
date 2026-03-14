@@ -18,13 +18,13 @@ import (
 	"github.com/hollis-labs/mentat/internal/mcp"
 	"github.com/hollis-labs/mentat/internal/provider"
 	"github.com/hollis-labs/mentat/internal/store"
-	"github.com/hollis-labs/mentat/internal/toolbroker"
+	"github.com/hollis-labs/mentat/internal/toolclient"
 	"github.com/hollis-labs/mentat/internal/truncate"
 	"github.com/hollis-labs/mentat/internal/workflow"
 )
 
 // maxToolIterations prevents infinite tool-use loops.
-const maxToolIterations = 10
+const maxToolIterations = 6
 
 // ProgressiveDiscoveryThreshold is the tool count above which progressive
 // discovery is used instead of sending all tool schemas to the LLM.
@@ -32,12 +32,12 @@ const ProgressiveDiscoveryThreshold = 5
 
 // requestToolsDef is a meta-tool the LLM can call to request full schemas
 // for specific tools by name or by describing intent. Delegates to
-// toolbroker.RequestToolsMetaTool() for the canonical definition.
-var requestToolsDef = toolbroker.RequestToolsMetaTool()
+// toolclient.RequestToolsMetaTool() for the canonical definition.
+var requestToolsDef = toolclient.RequestToolsMetaTool()
 
 // buildToolCatalog formats tool summaries as a compact catalog string for
 // injection into the system prompt during progressive discovery.
-func buildToolCatalog(summaries []toolbroker.ToolSummary) string {
+func buildToolCatalog(summaries []toolclient.ToolSummary) string {
 	if len(summaries) == 0 {
 		return ""
 	}
@@ -80,9 +80,9 @@ type Usage struct {
 type Engine struct {
 	Store          *store.Store
 	Providers      *provider.Registry
-	Broker         *ContextBroker
+	Broker         *ContextClient
 	MCPManager     *mcp.Manager
-	ToolBroker     *toolbroker.ToolBroker
+	ToolClient     *toolclient.ToolClient
 	Orchestrator   *Orchestrator
 	Activity       *ActivityEmitter
 	OutputFilters  *filter.Chain // post-LLM output filters (nil = no filtering)
@@ -96,7 +96,7 @@ func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
 	return &Engine{
 		Store:     s,
 		Providers: providers,
-		Broker:    NewContextBroker(s),
+		Broker:    NewContextClient(s),
 	}
 }
 
@@ -254,7 +254,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		go e.Activity.EmitSessionStart(ctx, sessionID, agent.ID, model)
 	}
 
-	// Get available tools — filter by agent's assigned skills, then ToolBroker, then MCP Manager.
+	// Get available tools — filter by agent's assigned skills, then ToolClient, then MCP Manager.
 	selection := e.getToolsForAgent(ctx, agentID, userContent, session.WorkspaceID)
 	tools := selection.Tools
 
@@ -273,6 +273,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Track repeated tool results to detect stuck loops (tool_name -> last result hash).
 	lastToolResults := make(map[string]string)
 	toolRepeatCount := make(map[string]int)
+	// blockedTools tracks tools that have been hard-blocked due to repeated identical results.
+	// Checked BEFORE execution to prevent the tool from running at all.
+	blockedTools := make(map[string]bool)
 
 	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
@@ -421,7 +424,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		var resultBlocks []provider.ContentBlock
 		for _, tu := range toolUseBlocks {
 			// Handle request_tools meta-tool for progressive discovery.
-			if tu.Name == "request_tools" && selection.Progressive && e.ToolBroker != nil {
+			if tu.Name == "request_tools" && selection.Progressive && e.ToolClient != nil {
 				ch <- StreamEvent{
 					Type:   "tool_call",
 					Tool:   tu.Name,
@@ -450,9 +453,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					continue
 				}
 
-				// Delegate to ToolBroker.HandleRequestTools which supports
+				// Delegate to ToolClient.HandleRequestTools which supports
 				// both explicit tool_names and intent-based selection.
-				newTools, rtResult := e.ToolBroker.HandleRequestTools(tu.Input)
+				newTools, rtResult := e.ToolClient.HandleRequestTools(tu.Input)
 
 				var loaded []string
 				for _, nt := range newTools {
@@ -498,11 +501,30 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				ToolID: tu.ID,
 			}
 
+			// Pre-execution check: skip tools that have been blocked due to repeated identical results.
+			if blockedTools[tu.Name] {
+				blockedResult := fmt.Sprintf("BLOCKED: Tool %q was blocked because it returned identical results multiple times. "+
+					"Do NOT call this tool again. Use a different approach or inform the user.", tu.Name)
+				log.Printf("chat: tool %s SKIPPED (blocked)", tu.Name)
+				ch <- StreamEvent{
+					Type:    "tool_result",
+					Tool:    tu.Name,
+					ToolID:  tu.ID,
+					Summary: blockedResult,
+				}
+				resultBlocks = append(resultBlocks, provider.ContentBlock{
+					Type:      "tool_result",
+					ToolUseID: tu.ID,
+					Content:   blockedResult,
+				})
+				continue
+			}
+
 			var resultText string
 			toolCtx, toolSpan := tiamatotel.ToolCallSpan(ctx, tu.Name)
-			if e.ToolBroker != nil {
-				// Use ToolBroker for permission-checked execution.
-				result, execErr := e.ToolBroker.CallTool(toolCtx, agentID, tu.Name, tu.Input)
+			if e.ToolClient != nil {
+				// Use ToolClient for permission-checked execution.
+				result, execErr := e.ToolClient.CallTool(toolCtx, agentID, tu.Name, tu.Input)
 				if execErr != nil {
 					resultText = fmt.Sprintf("Error: %v", execErr)
 					toolSpan.RecordError(execErr)
@@ -545,8 +567,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				}
 			} else {
-				resultText = "Error: no tool broker or MCP manager configured"
-				toolSpan.SetStatus(codes.Error, "no tool broker or MCP manager configured")
+				resultText = "Error: no tool client or MCP manager configured"
+				toolSpan.SetStatus(codes.Error, "no tool client or MCP manager configured")
 			}
 			toolSpan.End()
 
@@ -554,16 +576,17 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			if prev, ok := lastToolResults[tu.Name]; ok && prev == resultText {
 				toolRepeatCount[tu.Name]++
 				repeats := toolRepeatCount[tu.Name]
-				if repeats >= 3 {
-					// Hard block: replace result entirely so the LLM cannot continue.
+				if repeats >= 2 {
+					// Hard block after 3rd identical result: block future calls entirely.
+					blockedTools[tu.Name] = true
 					resultText = fmt.Sprintf("ERROR: Tool %q has been called %d times with identical results. "+
 						"This tool is now BLOCKED for this session turn. "+
 						"You MUST stop calling this tool and either try a completely different approach "+
 						"or tell the user: \"I was unable to complete this task because the tool returned the same result repeatedly.\"",
 						tu.Name, repeats+1)
-					log.Printf("chat: tool %s BLOCKED after %d identical results", tu.Name, repeats+1)
-				} else if repeats >= 1 {
-					// Warning on 2nd repeat.
+					log.Printf("chat: tool %s BLOCKED after %d identical results — future calls will be skipped", tu.Name, repeats+1)
+				} else {
+					// Warning on 2nd identical result.
 					resultText = resultText + "\n\nWARNING: This tool has returned the same result " +
 						fmt.Sprintf("%d times in a row. You are likely stuck in a loop. ", repeats+1) +
 						"Do NOT call this tool again with the same arguments. " +
@@ -910,10 +933,10 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 
 	// Get all broker-selected tools.
 	var allTools []provider.ToolDefinition
-	if e.ToolBroker != nil {
-		selected, err := e.ToolBroker.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
+	if e.ToolClient != nil {
+		selected, err := e.ToolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
 		if err != nil {
-			log.Printf("chat: tool broker selection failed: %v — falling back to MCP manager", err)
+			log.Printf("chat: tool client selection failed: %v — falling back to MCP manager", err)
 		} else {
 			allTools = selected
 		}
@@ -925,8 +948,8 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 	}
 
 	// Check if progressive discovery should be used.
-	if len(allTools) > ProgressiveDiscoveryThreshold && e.ToolBroker != nil {
-		summaries := e.ToolBroker.ListToolSummaries()
+	if len(allTools) > ProgressiveDiscoveryThreshold && e.ToolClient != nil {
+		summaries := e.ToolClient.ListToolSummaries()
 		catalog := buildToolCatalog(summaries)
 		log.Printf("chat: progressive discovery active — %d tools in catalog, sending request_tools meta-tool", len(summaries))
 		return toolSelection{

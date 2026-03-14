@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/hollis-labs/mentat/internal/chat"
 )
 
 func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +60,79 @@ func (a *API) handleAgentMessage(w http.ResponseWriter, r *http.Request) {
 		"message_id": msgID,
 		"stream_url": fmt.Sprintf("/api/stream/%s", msgID),
 	})
+}
+
+func (a *API) handleDelegateTask(w http.ResponseWriter, r *http.Request) {
+	parentSessionID := r.PathValue("id")
+	if parentSessionID == "" {
+		a.errorResp(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	var req struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		AgentID     string `json:"agent_id,omitempty"`
+		Mode        string `json:"mode,omitempty"`
+		Model       string `json:"model,omitempty"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Title == "" || req.Description == "" {
+		a.errorResp(w, http.StatusBadRequest, "title and description are required")
+		return
+	}
+
+	result, err := a.Engine.DelegateTask(r.Context(), chat.DelegationRequest{
+		ParentSessionID: parentSessionID,
+		Title:           req.Title,
+		Description:     req.Description,
+		AgentID:         req.AgentID,
+		Mode:            req.Mode,
+		Model:           req.Model,
+	})
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusOK, result)
+}
+
+func (a *API) handleDelegateAndAggregate(w http.ResponseWriter, r *http.Request) {
+	parentSessionID := r.PathValue("id")
+	if parentSessionID == "" {
+		a.errorResp(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	var req struct {
+		Message string `json:"message"`
+		Model   string `json:"model,omitempty"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Message == "" {
+		a.errorResp(w, http.StatusBadRequest, "message is required")
+		return
+	}
+
+	model := req.Model
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
+	}
+
+	result, err := a.Engine.DelegateAndAggregate(r.Context(), parentSessionID, req.Message, model)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusOK, result)
 }
 
 func (a *API) handleRetryStream(w http.ResponseWriter, r *http.Request) {

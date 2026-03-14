@@ -1,0 +1,13 @@
+.git
+.agentrc
+.claude
+node_modules
+ui/node_modules
+ui/dist
+*.db
+*.db-wal
+*.db-shm
+mentat
+mentat.exe
+docs
+adr

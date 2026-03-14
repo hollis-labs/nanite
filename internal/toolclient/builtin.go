@@ -1,4 +1,4 @@
-package toolbroker
+package toolclient
 
 import (
 	"sync"

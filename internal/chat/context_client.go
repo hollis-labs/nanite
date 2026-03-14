@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	tiamatotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/hollis-labs/mentat/internal/contextbroker"
 	"github.com/hollis-labs/mentat/internal/provider"
 	"github.com/hollis-labs/mentat/internal/store"
 )
@@ -28,15 +30,16 @@ const HardCeilingPct = 0.80
 // tool results are replaced with compact references.
 const ToolResultPruneAge = 2
 
-// ContextBroker assembles and manages context for chat turns.
-type ContextBroker struct {
-	Store     *store.Store
-	BudgetPct float64 // fraction of context window to use (default 0.75)
+// ContextClient assembles and manages context for chat turns.
+type ContextClient struct {
+	Store         *store.Store
+	BudgetPct     float64                // fraction of context window to use (default 0.75)
+	ContextBroker *contextbroker.Broker  // universal context retrieval (nil = disabled)
 }
 
-// NewContextBroker creates a new ContextBroker with default settings.
-func NewContextBroker(s *store.Store) *ContextBroker {
-	return &ContextBroker{
+// NewContextClient creates a new ContextClient with default settings.
+func NewContextClient(s *store.Store) *ContextClient {
+	return &ContextClient{
 		Store:     s,
 		BudgetPct: DefaultBudgetPct,
 	}
@@ -46,7 +49,7 @@ func NewContextBroker(s *store.Store) *ContextBroker {
 // 1. System prompt (from prompt templates or legacy agent + mode + workspace)
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
-func (cb *ContextBroker) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
+func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
 	_, span := tiamatotel.StartSpan(ctx, "mentat.broker.assembleContext")
 	defer span.End()
 
@@ -58,6 +61,11 @@ func (cb *ContextBroker) AssembleContext(ctx context.Context, session *store.Ses
 	// 1. Build the system prompt using prompt templates.
 	skillList := buildSkillList(cb.Store, agent.ID)
 	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList)
+
+	// 1b. Enrich system prompt with universal context retrieval.
+	if cb.ContextBroker != nil {
+		systemPrompt = cb.enrichWithContextBroker(ctx, systemPrompt, session, agent)
+	}
 
 	// 2. Load messages from DB. Start with a generous limit.
 	messages, err := cb.Store.ListMessages(session.ID, 200)
@@ -119,7 +127,7 @@ func EstimateTokens(text string) int {
 // PruneAfterTurn compacts old tool results in the message history.
 // Tool-role messages older than 2 turns from the end with content longer
 // than 500 chars are replaced with a structured compaction marker.
-func (cb *ContextBroker) PruneAfterTurn(sessionID string) error {
+func (cb *ContextClient) PruneAfterTurn(sessionID string) error {
 	messages, err := cb.Store.ListMessages(sessionID, 1000)
 	if err != nil {
 		return err
@@ -290,6 +298,92 @@ func EnforceTokenBudget(
 	// Step 4: Still over — refuse to send.
 	return messages, tools, breakdown, fmt.Errorf(
 		"context exceeds hard ceiling after all reductions: %d tokens > %d ceiling", total, ceiling)
+}
+
+// enrichWithContextBroker calls the universal ContextBroker to fetch
+// multi-source context and appends it to the system prompt.
+func (cb *ContextClient) enrichWithContextBroker(ctx context.Context, systemPrompt string, session *store.Session, agent *store.AgentProfile) string {
+	// Derive intent from the session's most recent user message.
+	intentType := contextbroker.IntentCustom
+	var keywords []string
+	messages, err := cb.Store.ListMessages(session.ID, 5)
+	if err == nil && len(messages) > 0 {
+		// Find last user message.
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == "user" {
+				_, keywords = ExtractIntent(messages[i].Content)
+				intentType = classifyContextIntent(messages[i].Content)
+				break
+			}
+		}
+	}
+
+	intent := contextbroker.Intent{
+		Type:      intentType,
+		Keywords:  keywords,
+		Scope:     session.ProjectID,
+		SessionID: session.ID,
+		AgentID:   agent.ID,
+	}
+
+	packet, err := cb.ContextBroker.Fetch(ctx, intent)
+	if err != nil {
+		log.Printf("broker: context enrichment failed: %v", err)
+		return systemPrompt
+	}
+
+	if packet == nil || len(packet.Items) == 0 {
+		return systemPrompt
+	}
+
+	formatted := contextbroker.FormatPacket(packet)
+	if formatted == "" {
+		return systemPrompt
+	}
+
+	log.Printf("broker: enriched system prompt with %d context items (~%d tokens)",
+		packet.Manifest.ItemCount, packet.TokenEstimate)
+
+	return systemPrompt + "\n\n" + formatted
+}
+
+// classifyContextIntent maps user message keywords to a ContextBroker intent type.
+func classifyContextIntent(userMessage string) string {
+	lower := userMessage
+	if len(lower) > 500 {
+		lower = lower[:500]
+	}
+
+	// Simple keyword-based classification.
+	switch {
+	case matchesAny(lower, "debug", "error", "bug", "fix", "broken", "crash", "fail"):
+		return contextbroker.IntentDebugIssue
+	case matchesAny(lower, "write", "implement", "add", "create", "build", "code"):
+		return contextbroker.IntentWriteCode
+	case matchesAny(lower, "plan", "design", "feature", "epic", "roadmap"):
+		return contextbroker.IntentPlanFeature
+	case matchesAny(lower, "why", "decision", "adr", "chose", "rationale"):
+		return contextbroker.IntentRecallDecision
+	case matchesAny(lower, "resume", "continue", "pick up", "where we left"):
+		return contextbroker.IntentResumeTask
+	case matchesAny(lower, "boot", "start", "init", "setup", "project"):
+		return contextbroker.IntentBootProject
+	case matchesAny(lower, "review", "session", "history", "what happened"):
+		return contextbroker.IntentReviewSession
+	default:
+		return contextbroker.IntentCustom
+	}
+}
+
+// matchesAny returns true if the text contains any of the given substrings.
+func matchesAny(text string, subs ...string) bool {
+	lower := strings.ToLower(text)
+	for _, sub := range subs {
+		if strings.Contains(lower, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // pruneToolResultsInMemory replaces tool_result content blocks older than the

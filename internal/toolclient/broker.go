@@ -1,4 +1,4 @@
-package toolbroker
+package toolclient
 
 import (
 	"context"
@@ -20,36 +20,36 @@ const MaxSelectedTools = 15
 // a wildcard or empty — a minimal safe set instead of everything.
 const DefaultFallbackToolCount = 5
 
-// ToolBroker mediates all tool access: selection, permissions, and execution.
-type ToolBroker struct {
-	Broker     *broker.LocalBroker
-	MCPManager *mcp.Manager
-	Store      *store.Store
-	Config     *Config
-	Builtins   *BuiltinToolRegistry
+// ToolClient mediates all tool access: selection, permissions, and execution.
+type ToolClient struct {
+	LocalBroker *broker.LocalBroker
+	MCPManager  *mcp.Manager
+	Store       *store.Store
+	Config      *Config
+	Builtins    *BuiltinToolRegistry
 }
 
-// New creates a new ToolBroker.
-func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolBroker {
+// New creates a new ToolClient.
+func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}
 
 	lb := broker.NewLocalBroker(nil, cfg.Rules)
 
-	return &ToolBroker{
-		Broker:     lb,
-		MCPManager: mcpManager,
-		Store:      s,
-		Config:     cfg,
-		Builtins:   NewBuiltinToolRegistry(),
+	return &ToolClient{
+		LocalBroker: lb,
+		MCPManager:  mcpManager,
+		Store:       s,
+		Config:      cfg,
+		Builtins:    NewBuiltinToolRegistry(),
 	}
 }
 
 // RegisterTools registers tool definitions with the underlying broker.
-func (tb *ToolBroker) RegisterTools(tools []broker.ToolDefinition) {
-	tb.Broker.RegisterTools(tools)
-	log.Printf("toolbroker: registered %d tools", len(tools))
+func (tb *ToolClient) RegisterTools(tools []broker.ToolDefinition) {
+	tb.LocalBroker.RegisterTools(tools)
+	log.Printf("toolclient: registered %d tools", len(tools))
 }
 
 // isWildcardIntent returns true if the intent is a wildcard or empty string.
@@ -60,10 +60,10 @@ func isWildcardIntent(intent string) bool {
 // SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools.
 // Optionally scoped by workspace and agent for rule overrides.
 // If intent is "*" or empty, logs a warning and returns a minimal fallback set.
-func (tb *ToolBroker) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]broker.ToolDefinition, error) {
+func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]broker.ToolDefinition, error) {
 	// Reject wildcard intent — fall back to a minimal safe set.
 	if isWildcardIntent(intent) {
-		log.Printf("toolbroker: WARNING wildcard/empty intent received (workspace=%s, agent=%s) — returning fallback set of %d tools",
+		log.Printf("toolclient: WARNING wildcard/empty intent received (workspace=%s, agent=%s) — returning fallback set of %d tools",
 			workspaceID, agentID, DefaultFallbackToolCount)
 		intent = "general"
 	}
@@ -71,10 +71,10 @@ func (tb *ToolBroker) SelectTools(ctx context.Context, intent string, hints []st
 	// Load rules with overrides if scoped.
 	if workspaceID != "" || agentID != "" {
 		rules := tb.Config.RulesFor(workspaceID, agentID)
-		tb.Broker.LoadRules(rules)
+		tb.LocalBroker.LoadRules(rules)
 	}
 
-	result, err := tb.Broker.SelectTools(ctx, intent, hints)
+	result, err := tb.LocalBroker.SelectTools(ctx, intent, hints)
 	if err != nil {
 		return nil, fmt.Errorf("select tools: %w", err)
 	}
@@ -98,11 +98,11 @@ func (tb *ToolBroker) SelectTools(ctx context.Context, intent string, hints []st
 	beforeCount := len(tools)
 	tools = PruneToolsToTokenBudget(tools, tokenBudget)
 	if len(tools) < beforeCount {
-		log.Printf("toolbroker: pruned %d tools to %d due to token budget (%d tokens)",
+		log.Printf("toolclient: pruned %d tools to %d due to token budget (%d tokens)",
 			beforeCount, len(tools), tokenBudget)
 	}
 
-	log.Printf("toolbroker: selected %d/%d tools for intent %q (workspace=%s, agent=%s, tool_tokens=%d, budget=%d)",
+	log.Printf("toolclient: selected %d/%d tools for intent %q (workspace=%s, agent=%s, tool_tokens=%d, budget=%d)",
 		len(tools), result.Total, intent, workspaceID, agentID, EstimateToolTokens(tools), tokenBudget)
 
 	return tools, nil
@@ -110,7 +110,7 @@ func (tb *ToolBroker) SelectTools(ctx context.Context, intent string, hints []st
 
 // SelectToolsAsProvider returns selected tools converted to provider.ToolDefinition format.
 // Built-in tools are always prepended and do not count against selection limits.
-func (tb *ToolBroker) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]provider.ToolDefinition, error) {
+func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]provider.ToolDefinition, error) {
 	tools, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
 		return nil, err
@@ -143,7 +143,7 @@ func (tb *ToolBroker) SelectToolsAsProvider(ctx context.Context, intent string, 
 
 // CallTool executes a tool call after checking permissions. Routes through the MCP Manager.
 // Built-in tools (no mcp__ prefix) are routed to the "self" MCP server automatically.
-func (tb *ToolBroker) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
+func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
 	// Check permissions.
 	if !tb.CheckPermission(agentID, toolName) {
 		return "", fmt.Errorf("tool %q denied for agent %q", toolName, agentID)
@@ -170,14 +170,14 @@ func (tb *ToolBroker) CallTool(ctx context.Context, agentID, toolName string, ar
 }
 
 // GetPermissions loads tool permissions for an agent from the store.
-func (tb *ToolBroker) GetPermissions(agentID string) ToolPermissions {
+func (tb *ToolClient) GetPermissions(agentID string) ToolPermissions {
 	if tb.Store == nil {
 		return ToolPermissions{MaxCallsPerTurn: DefaultMaxCallsPerTurn}
 	}
 
 	agent, err := tb.Store.GetAgent(agentID)
 	if err != nil {
-		log.Printf("toolbroker: could not load agent %s for permissions: %v", agentID, err)
+		log.Printf("toolclient: could not load agent %s for permissions: %v", agentID, err)
 		return ToolPermissions{MaxCallsPerTurn: DefaultMaxCallsPerTurn}
 	}
 
@@ -185,7 +185,7 @@ func (tb *ToolBroker) GetPermissions(agentID string) ToolPermissions {
 }
 
 // CheckPermission returns true if the agent is allowed to use the named tool.
-func (tb *ToolBroker) CheckPermission(agentID, toolName string) bool {
+func (tb *ToolClient) CheckPermission(agentID, toolName string) bool {
 	perms := tb.GetPermissions(agentID)
 	return perms.CheckPermission(toolName)
 }
@@ -198,7 +198,7 @@ type ToolSummary struct {
 }
 
 // ListToolSummaries returns name+description only for all registered tools (no InputSchema).
-func (tb *ToolBroker) ListToolSummaries() []ToolSummary {
+func (tb *ToolClient) ListToolSummaries() []ToolSummary {
 	allTools := tb.ListTools()
 	summaries := make([]ToolSummary, 0, len(allTools))
 	for _, t := range allTools {
@@ -211,7 +211,7 @@ func (tb *ToolBroker) ListToolSummaries() []ToolSummary {
 }
 
 // GetToolsByNames returns full tool definitions for the given names.
-func (tb *ToolBroker) GetToolsByNames(names []string) []provider.ToolDefinition {
+func (tb *ToolClient) GetToolsByNames(names []string) []provider.ToolDefinition {
 	allTools := tb.ListTools()
 	nameSet := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -229,7 +229,7 @@ func (tb *ToolBroker) GetToolsByNames(names []string) []provider.ToolDefinition 
 
 // ListTools returns all registered tools as provider.ToolDefinition.
 // Built-in tools are always included regardless of MCP manager status.
-func (tb *ToolBroker) ListTools() []provider.ToolDefinition {
+func (tb *ToolClient) ListTools() []provider.ToolDefinition {
 	var all []provider.ToolDefinition
 
 	// Always include built-in tools.
@@ -246,7 +246,7 @@ func (tb *ToolBroker) ListTools() []provider.ToolDefinition {
 }
 
 // ListServers returns information about registered MCP servers.
-func (tb *ToolBroker) ListServers() []mcp.ServerInfo {
+func (tb *ToolClient) ListServers() []mcp.ServerInfo {
 	if tb.MCPManager == nil {
 		return nil
 	}

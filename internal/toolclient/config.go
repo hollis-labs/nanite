@@ -1,4 +1,4 @@
-package toolbroker
+package toolclient
 
 import (
 	"log"
@@ -51,7 +51,7 @@ func LoadConfig(path string) *Config {
 
 	rules, err := broker.LoadRulesFromFile(path)
 	if err != nil {
-		log.Printf("toolbroker: failed to load rules from %s: %v (using defaults)", path, err)
+		log.Printf("toolclient: failed to load rules from %s: %v (using defaults)", path, err)
 		return DefaultConfig()
 	}
 

@@ -30,13 +30,42 @@ You are the **single writer** for:
 
 1. **Read bootstrap** → current state, where we left off
 2. **Emit boot confirmation**
-3. **Check Volon** → `volon_tasks_list` with project_id="mentat"
-4. **Pick task** → highest-priority open task
-5. **Claim task** → `volon_task_transition` to "doing"
-6. **Execute** → carry out the task within its scope
-7. **Update task** → `volon_task_transition` to "done" (or "blocked")
-8. **Update Cortex** → `context_write` with key findings
-9. **Update bootstrap** → reflect new state
+3. **Check inbox** → `/check-inbox` for messages from other agents or the lead
+4. **Check Volon** → `volon_tasks_list` with project_id="mentat"
+5. **Pick task** → highest-priority open task
+6. **Claim task** → `volon_task_transition` to "doing"
+7. **Execute** → carry out the task within its scope
+8. **Update task** → `volon_task_transition` to "done" (or "blocked")
+9. **Update Cortex** → `context_write` with key findings
+10. **Update bootstrap** → reflect new state
+11. **Notify lead** → `/send-message lead info` with task completion summary
+
+## A2A Messaging
+
+You participate in a multi-agent system. Communication goes through `.agentrc/inbox/`.
+
+- **Your inbox**: `.agentrc/inbox/<your_session_id>/` (or `.agentrc/inbox/lead/` if you are the project lead)
+- **Check inbox**: At boot, before each task, and when prompted
+- **Send messages**: Use `/send-message <to> <type> <subject> — <body>`
+- **Escalate to human**: `/send-message owner <type> <subject> — <body>` (surfaces to the user)
+- **Broadcast**: `/send-message all <type> <subject> — <body>` (all agents see it)
+
+**Roles:**
+- **Project Lead** (meta-agent, this role): Orchestrates, makes architectural decisions, assigns work
+- **Owner**: The human. Business/product decisions, final approvals, blockers
+- **Worker agents**: Focused Mentat instances that execute specific task scopes
+
+**When to message the lead:**
+- Task complete or blocked
+- Need a decision that affects other agents' work
+- Found something unexpected (dead code, security issue, naming conflict)
+- Need context about another agent's work
+
+**When to message the owner:**
+- Need a business/product decision
+- Rename/move operations (owner reviews end-state first)
+- Any risk-high task before executing
+- Any breaking-change task before executing
 
 ## Transition signals
 
@@ -68,9 +97,14 @@ Ready. What would you like to focus on?
 === END MENTAT BOOT ===
 ```
 
+## Task completion checklist
+
+Before transitioning any task to "done", follow the standard quality gates defined in `docs/process/task-completion-workflow.md`. This includes scoped lint, tests, build verification, artifact attachment, and lead notification as applicable.
+
 ## Constraints
 
 - Never skip task updates in Volon
 - Never rely on conversation context — re-ground from files and Volon
 - Never proceed with non-trivial decisions without recording an ADR
+- Always apply required tags (risk, domain, type, effort) when creating tasks. See docs/process/tag-taxonomy.md.
 - If confidence drops below 90%, PAUSE and explain

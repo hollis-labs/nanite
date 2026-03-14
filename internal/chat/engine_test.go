@@ -6,7 +6,7 @@ import (
 
 	"github.com/hollis-labs/mentat/internal/provider"
 	"github.com/hollis-labs/mentat/internal/store"
-	"github.com/hollis-labs/mentat/internal/toolbroker"
+	"github.com/hollis-labs/mentat/internal/toolclient"
 )
 
 func newTestEngine(t *testing.T) *Engine {
@@ -98,7 +98,7 @@ func TestAssembleSystemPrompt(t *testing.T) {
 func TestBuildToolCatalog(t *testing.T) {
 	tests := []struct {
 		name      string
-		summaries []toolbroker.ToolSummary
+		summaries []toolclient.ToolSummary
 		wantEmpty bool
 		wantSub   string
 	}{
@@ -109,21 +109,21 @@ func TestBuildToolCatalog(t *testing.T) {
 		},
 		{
 			name: "single tool",
-			summaries: []toolbroker.ToolSummary{
+			summaries: []toolclient.ToolSummary{
 				{Name: "search_files", Description: "Search for files by pattern"},
 			},
 			wantSub: "- search_files: Search for files by pattern",
 		},
 		{
 			name: "includes header",
-			summaries: []toolbroker.ToolSummary{
+			summaries: []toolclient.ToolSummary{
 				{Name: "tool_a", Description: "Does A"},
 			},
 			wantSub: "Available tools (use request_tools to get full details):",
 		},
 		{
 			name: "truncates long descriptions",
-			summaries: []toolbroker.ToolSummary{
+			summaries: []toolclient.ToolSummary{
 				{Name: "long_tool", Description: "This is a very long description that exceeds one hundred and twenty characters and should be truncated with an ellipsis at the end"},
 			},
 			wantSub: "...",

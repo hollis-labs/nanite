@@ -1,4 +1,4 @@
-package toolbroker
+package toolclient
 
 import (
 	"context"
@@ -211,7 +211,7 @@ func TestConfig_RulesFor_MergesOverrides(t *testing.T) {
 	}
 }
 
-// --- mockTransport implements mcp.Transport for testing ---
+// --- mockTransport implements mcp.MCPTransport for testing ---
 
 type mockTransport struct {
 	tools []mcp.Tool
@@ -225,9 +225,9 @@ func (m *mockTransport) CallTool(_ context.Context, _ string, _ map[string]any) 
 	return &mcp.ToolResult{}, nil
 }
 
-// newTestBrokerWithTools creates a ToolBroker backed by an MCP manager
+// newTestBrokerWithTools creates a ToolClient backed by an MCP manager
 // populated with the given provider.ToolDefinition set (via a mock transport).
-func newTestBrokerWithTools(tools []provider.ToolDefinition) *ToolBroker {
+func newTestBrokerWithTools(tools []provider.ToolDefinition) *ToolClient {
 	mgr := mcp.NewManager()
 
 	mcpTools := make([]mcp.Tool, len(tools))

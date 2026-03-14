@@ -24,6 +24,10 @@ You are a worker agent executing tasks from Volon sprints.
 8. Transition task to "done" via `volon_task_transition`
 9. Repeat from step 2
 
+## Task completion checklist
+
+Before transitioning any task to "done" (step 8), follow the standard quality gates defined in `docs/process/task-completion-workflow.md`. This includes scoped lint, tests, build verification, artifact attachment, and lead notification as applicable.
+
 ## If blocked
 - Transition task to "blocked" with description of the blocker
 - Move to next available task if possible

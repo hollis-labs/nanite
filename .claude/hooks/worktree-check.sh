@@ -21,7 +21,7 @@ done
 
 if [ "$count" -gt "$THRESHOLD" ]; then
   echo "WARNING: $count agent worktrees detected in $SEARCH_ROOT (threshold: $THRESHOLD)." >&2
-  echo "Consider running /worktree-cleanup to reclaim disk space." >&2
+  echo "Consider running /git-cleanup to reclaim disk space." >&2
 fi
 
 exit 0

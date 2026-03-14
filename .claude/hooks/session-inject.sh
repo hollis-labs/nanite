@@ -1,0 +1,1 @@
+/Users/chrispian/.agentrc/hooks/shared/session-inject.sh

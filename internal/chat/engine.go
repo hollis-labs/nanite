@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
+	"github.com/hollis-labs/mentat/internal/filter"
 	"github.com/hollis-labs/mentat/internal/mcp"
 	"github.com/hollis-labs/mentat/internal/provider"
 	"github.com/hollis-labs/mentat/internal/store"
@@ -84,6 +85,7 @@ type Engine struct {
 	ToolBroker     *toolbroker.ToolBroker
 	Orchestrator   *Orchestrator
 	Activity       *ActivityEmitter
+	OutputFilters  *filter.Chain // post-LLM output filters (nil = no filtering)
 	WorkflowEngine *workflow.Engine
 	WorkflowLoader *workflow.Loader
 	streams        sync.Map // map[string]chan StreamEvent
@@ -632,8 +634,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Loop back for the next provider call.
 	}
 
-	// Parse envelopes from the response content.
+	// Apply output filters (e.g. strip emoji) before parsing envelopes.
 	responseContent := fullContent.String()
+	if e.OutputFilters != nil && e.OutputFilters.Len() > 0 {
+		responseContent = e.OutputFilters.Apply(responseContent)
+	}
+
+	// Parse envelopes from the response content.
 	envelopes, cleanContent := ParseEnvelopes(responseContent)
 
 	var envelopeJSON string

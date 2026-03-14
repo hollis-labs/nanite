@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"github.com/hollis-labs/mentat/internal/api"
 	"github.com/hollis-labs/mentat/internal/chat"
+	"github.com/hollis-labs/mentat/internal/filter"
 	"github.com/hollis-labs/mentat/internal/mcp"
 	"github.com/hollis-labs/mentat/internal/provider"
 	"github.com/hollis-labs/mentat/internal/server"
@@ -124,6 +126,21 @@ func cmdServe(args []string) {
 
 	// Create chat engine.
 	engine := chat.NewEngine(s, registry)
+
+	// Configure output filters. Default: strip emoji from LLM responses.
+	// Additional filters can be added to the chain here or via MENTAT_OUTPUT_FILTERS env var.
+	outputFilters := filter.NewChain()
+	if envFilters := os.Getenv("MENTAT_OUTPUT_FILTERS"); envFilters != "" {
+		// Comma-separated list of filter names, e.g. "no_emoji,trim"
+		names := splitFilterNames(envFilters)
+		outputFilters = filter.FromNames(names)
+		log.Printf("output filters from MENTAT_OUTPUT_FILTERS: %v", outputFilters.Names())
+	} else {
+		// Default: enable no_emoji filter
+		outputFilters.Add("no_emoji", filter.NoEmoji)
+		log.Printf("output filters (default): %v", outputFilters.Names())
+	}
+	engine.OutputFilters = outputFilters
 
 	// Set up MCP manager with stdio transports (matching ~/.claude.json config).
 	mcpManager := mcp.NewManager()
@@ -308,4 +325,16 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 	if len(servers) > 0 {
 		log.Printf("mcp: loaded %d user-configured server(s) from database", len(servers))
 	}
+}
+
+// splitFilterNames splits a comma-separated filter list into trimmed names.
+func splitFilterNames(s string) []string {
+	var names []string
+	for _, part := range strings.Split(s, ",") {
+		name := strings.TrimSpace(part)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }

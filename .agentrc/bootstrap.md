@@ -1,15 +1,15 @@
 ---
 version: 1
 type: bootstrap
-iteration: 5
-updated_at: 2026-03-14T20:00:00Z
+iteration: 6
+updated_at: 2026-03-14T23:45:00Z
 ---
 
 # Mentat Bootstrap
 
 ## Current state
-- Iteration 5 (post-foundation sprint)
-- Status: Quality gates, naming cleanup, GUI fixes, task flow enforcement, ToolBroker+ContextBroker universalized, 21 skills/workflows built, agent context architecture S1 complete
+- Iteration 6 (Interactive Agent UX complete)
+- Status: 9 interactive dialog skills built, 8 slash commands registered, pattern + anatomy docs written, EPIC-41370 done
 - A2A messaging system operational — tested with 5 agents, zero conflicts
 - Tasks: Check Volon with project_id="mentat" (and project_id="volon")
 - Boot profiles updated with: inbox checking, task completion checklist, tag enforcement
@@ -48,6 +48,12 @@ updated_at: 2026-03-14T20:00:00Z
 - Volon executor MEMORY_DIR env var
 - Session-inject.sh slimmed (100→8 lines, added FRAG_ROLE env)
 
+### Iteration 6: Interactive Agent UX (EPIC-41370 — DONE)
+- Interactive dialog pattern doc + skill/command anatomy doc
+- 9 skills upgraded with AskUserQuestion dialogs: sprint-review, task-triage, drift-resolve, code-review, epic-plan, session-handoff, memory-audit, git-cleanup, sprint-retro
+- 8 new slash commands registered (session-handoff is agent-only)
+- Both sprints closed (S1: 5/5, S2: 5/5), epic done
+
 ## Active epics (priority order)
 1. EPIC-20260314-21360: Agent Context Architecture (S1 done, S2+S3 remain — GATED)
 2. EPIC-20260314-64269: Quality Gates (S1 4/5 done, S2+S3 remain)
@@ -56,6 +62,9 @@ updated_at: 2026-03-14T20:00:00Z
 5. EPIC-20260313-08947: Conduit Separation
 6. EPIC-20260314-51504: Core Library Consolidation
 7. EPIC-20260314-14784: Frag CLI & Agent Integration (B priority)
+
+## Completed epics
+- EPIC-20260314-41370: Interactive Agent UX — Structured Dialogs (10/10 tasks, 2026-03-14)
 
 ## Next steps
 - Execute EPIC-21360 S2 (hooks & enforcement) when ready

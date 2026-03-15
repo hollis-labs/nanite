@@ -1,8 +1,10 @@
-# Mentat Chat — Architecture Document
+# CONDUIT — Architecture Document
 
-**Version:** 1.0
-**Date:** 2026-03-07
-**Status:** Draft
+**Version:** 2.0
+**Date:** 2026-03-15
+**Status:** Active
+
+> CONDUIT is the agent-agnostic chat harness. Mentat is a Special Agent that runs inside it. See ADR-013 for the separation rationale.
 
 ---
 
@@ -10,7 +12,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Mentat Chat Binary                       │
+│                     CONDUIT Binary                          │
 │                                                             │
 │  ┌──────────────────────┐  ┌─────────────────────────────┐  │
 │  │   Go API Server      │  │   Embedded React SPA        │  │
@@ -57,7 +59,7 @@
 ### 2.1 Package Layout
 
 ```
-cmd/mentat/
+cmd/conduit/
   main.go                    -- entry point, flag parsing, server start
 
 internal/
@@ -143,7 +145,7 @@ The chat engine orchestrates a single turn:
    → Emit stream_end event
 ```
 
-**Key design: Mentat (primary agent) never executes tools directly.** When Mentat needs work done, it creates a delegation envelope that the chat engine routes to a worker agent session.
+**Key design: The primary agent (e.g., Mentat) never executes tools directly.** When it needs work done, it creates a delegation envelope that the chat engine routes to a worker agent session. CONDUIT handles the routing — the agent profile determines the behavior.
 
 ### 2.3 Context Broker
 
@@ -559,10 +561,10 @@ cd ui && npm run dev
 cd ui && npm run build
 
 # Embed in Go binary
-go build -o mentat ./cmd/mentat
+go build -o conduit ./cmd/conduit
 
 # Single binary serves both API and SPA
-./mentat serve --port 8090
+./conduit serve --port 8090
 ```
 
 ### 6.3 Docker (VPS)
@@ -570,9 +572,9 @@ go build -o mentat ./cmd/mentat
 FROM golang:1.25 AS builder
 # ... build steps ...
 FROM gcr.io/distroless/static
-COPY --from=builder /app/mentat /mentat
+COPY --from=builder /app/conduit /conduit
 EXPOSE 8090
-ENTRYPOINT ["/mentat", "serve"]
+ENTRYPOINT ["/conduit", "serve"]
 ```
 
 ## 7. Security Considerations

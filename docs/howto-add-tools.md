@@ -1,6 +1,6 @@
-# How to Add MCP Tools to Mentat Chat
+# How to Add MCP Tools to CONDUIT
 
-This guide covers adding new tools to the built-in MCP tool transports in Mentat Chat.
+This guide covers adding new tools to the built-in MCP tool transports in CONDUIT.
 
 ## Transport Types
 
@@ -86,7 +86,7 @@ func (d *DevToolsTransport) callExample(args map[string]any) (*ToolResult, error
 
 ### 4. Register the Transport (if new)
 
-In `cmd/mentat/main.go`, add the server:
+In `cmd/conduit/main.go`, add the server:
 
 ```go
 myTransport := mcp.NewMyTransport()

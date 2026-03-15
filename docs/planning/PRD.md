@@ -1,24 +1,26 @@
-# Mentat Chat — Product Requirements Document
+# CONDUIT — Product Requirements Document
 
-**Version:** 1.0
-**Date:** 2026-03-07
-**Status:** Draft
+**Version:** 2.0
+**Date:** 2026-03-15
+**Status:** Active
 **Author:** Chrispian + Mentat
 
 ---
 
 ## 1. Vision
 
-Mentat Chat is a keyboard-first, multi-agent chat client purpose-built for working with AI agents across multiple contexts. It is the primary interface for Fragments Engine — replacing the CLI-based Mentat with a proper GUI while preserving the cognitive agent model, deterministic workflows, and tool-first architecture that make Fragments Engine effective.
+CONDUIT is a keyboard-first, provider-agnostic, multi-agent chat harness purpose-built for working with AI agents across multiple contexts. It is the primary interface for Fragments Engine — providing a proper GUI for conversational AI orchestration while preserving the cognitive agent model, deterministic workflows, and tool-first architecture that make Fragments Engine effective.
 
-Mentat Chat is NOT an IDE, NOT a project manager, NOT a dashboard. It is a **conversational command center** where a human and one or more AI agents plan, discuss, delegate, and execute work across any domain.
+CONDUIT is NOT an IDE, NOT a project manager, NOT a dashboard. It is a **conversational command center** — an agent-agnostic harness where a human and one or more AI agents (including Mentat, the primary cognitive agent) plan, discuss, delegate, and execute work across any domain.
+
+**Key distinction (ADR-013):** CONDUIT is the harness — it doesn't think, agents think. Any Special Agent can run inside it. Mentat is one such agent, responsible for context continuity, cognitive aid, planning, and cross-project coordination.
 
 ## 2. Core Principles
 
 1. **Chat-first** — Everything happens through conversation. The UI exists to support chat, not replace it.
 2. **Context is king** — Smart context scoping per session. The right information at the right time, never polluting the conversation.
-3. **Mentat doesn't do work** — The primary agent (Mentat) is a cognitive partner. It plans, delegates, manages context, and coordinates. Worker agents do the actual tool calls and execution.
-4. **Agents talk to agents** — Multi-agent communication is first-class. Mentat spawns sessions with workers, delegates tasks, reports back. The user can observe or participate.
+3. **Harness, not agent** — CONDUIT is infrastructure. It routes messages, manages sessions, assembles context, and renders UI. Agents (Mentat, workers, specialists) do the thinking and tool execution.
+4. **Agents talk to agents** — Multi-agent communication is first-class. Agents spawn sessions with workers, delegate tasks, report back. The user can observe or participate.
 5. **Keyboard-first** — Minimal buttons/UI chrome. Modals, drawers, overlays used cleverly for rich output. Every panel has a keyboard shortcut.
 6. **Local-first, cloud-ready** — Runs locally as a single binary. Deployable to a VPS for remote access to Fragments Engine.
 
@@ -26,7 +28,7 @@ Mentat Chat is NOT an IDE, NOT a project manager, NOT a dashboard. It is a **con
 
 **Primary user:** Chrispian (solo operator managing Fragments Engine, small web businesses, writing, personal planning)
 
-**Agent users:** Mentat (primary cognitive agent), worker agents (code, research, review), specialist agents (per-project)
+**Agent users:** Any Special Agent profile loaded in CONDUIT — Mentat (primary cognitive agent), worker agents (code, research, review), specialist agents (per-project). Agents are pluggable; CONDUIT ships with Mentat as the default but any agent profile can be selected.
 
 ## 4. Use Cases
 
@@ -235,7 +237,7 @@ Message-level bookmarks with optional notes. Scoped to session, queryable across
 ## 12. Deployment
 
 ### 12.1 Local
-Single Go binary embeds React SPA. `mentat serve` starts on localhost.
+Single Go binary embeds React SPA. `conduit serve` starts on localhost.
 
 ### 12.2 VPS
 Docker container. Same binary, exposed on HTTPS. Connects to remote Fragments Engine services (Volon, Cortex, Hadron running on VPS).

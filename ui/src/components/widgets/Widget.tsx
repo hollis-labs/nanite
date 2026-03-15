@@ -9,7 +9,7 @@ interface WidgetProps {
 }
 
 export function Widget({ id, title, icon: Icon, children }: WidgetProps) {
-  const storageKey = `mentat-widget-${id}`
+  const storageKey = `conduit-widget-${id}`
 
   const [minimized, setMinimized] = useState(() => {
     try {

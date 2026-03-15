@@ -354,11 +354,11 @@ Use Hadron when the user wants to automate builds, run maintenance tasks, set up
 ### Platform Self-Service
 
 You can manage the platform itself — agents, skills, workflows, and more:
-- **Builders**: ` + "`mentat_start_builder`" + ` / ` + "`mentat_builder_step`" + ` — step-by-step creation wizards for agents, skills, prompt templates
-- **Agents**: ` + "`mentat_create_agent`" + ` / ` + "`mentat_list_agents`" + ` / ` + "`mentat_update_agent`" + `
-- **Skills**: ` + "`mentat_create_skill`" + ` / ` + "`mentat_list_skills`" + ` / ` + "`mentat_update_skill`" + ` / ` + "`mentat_delete_skill`" + `
-- **Workflows**: ` + "`mentat_create_workflow`" + ` / ` + "`mentat_list_workflows`" + `
-- **UI**: ` + "`mentat_open_sprint_planning`" + ` — opens the sprint planning modal
+- **Builders**: ` + "`conduit_start_builder`" + ` / ` + "`conduit_builder_step`" + ` — step-by-step creation wizards for agents, skills, prompt templates
+- **Agents**: ` + "`conduit_create_agent`" + ` / ` + "`conduit_list_agents`" + ` / ` + "`conduit_update_agent`" + `
+- **Skills**: ` + "`conduit_create_skill`" + ` / ` + "`conduit_list_skills`" + ` / ` + "`conduit_update_skill`" + ` / ` + "`conduit_delete_skill`" + `
+- **Workflows**: ` + "`conduit_create_workflow`" + ` / ` + "`conduit_list_workflows`" + `
+- **UI**: ` + "`conduit_open_sprint_planning`" + ` — opens the sprint planning modal
 
 You can also create your own database tables for scratch state, caches, or permanent storage. If permanent, document the table's purpose so no process deletes it accidentally.
 

@@ -144,7 +144,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-col items-end' : ''}`}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-medium text-zinc-500">
-            {isUser ? 'You' : (agentName || 'Mentat')}
+            {isUser ? 'You' : (agentName || 'Conduit')}
           </span>
           {isMultiAgent && !isUser && message.agent_id && (
             <span className={`text-xs px-1.5 py-0.5 rounded-full ${AGENT_COLORS[agentColorIndex(message.agent_id)].badge}`}>

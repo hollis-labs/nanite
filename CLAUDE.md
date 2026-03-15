@@ -28,19 +28,19 @@ Mentat is the unified meta-agent and chat application for Fragments Engine. It c
 
 ```bash
 # Backend
-go build ./cmd/mentat/
+go build ./cmd/conduit/
 go test ./...
 
 # Frontend
 cd ui && npm install && npm run build
 
 # Run (default port 8090)
-./mentat serve -port 8090 -db ./mentat.db -dev
+./conduit serve -port 8090 -db ./mentat.db -dev
 ```
 
 ## Architecture
 
-- `cmd/mentat/` — Entry point
+- `cmd/conduit/` — Entry point
 - `internal/api/` — HTTP API handlers
 - `internal/chat/` — Chat engine (orchestration, context, broker)
 - `internal/mcp/` — MCP client integration
@@ -50,6 +50,6 @@ cd ui && npm install && npm run build
 - `internal/toolbroker/` — Tool selection and intent analysis
 - `internal/workflow/` — Workflow orchestration
 - `ui/src/` — React frontend
-- `config/` — Mentat config (repos, service URLs)
+- `config/` — Conduit config (repos, service URLs)
 - `docs/` — Architecture, process, planning docs
 - `adr/` — Architecture decision records

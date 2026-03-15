@@ -23,7 +23,7 @@ export function AgentStatusWidget() {
       <div className="space-y-2.5">
         <div className="flex justify-between text-xs">
           <span className="text-zinc-500">Agent</span>
-          <span className="text-zinc-300">Mentat</span>
+          <span className="text-zinc-300">Conduit</span>
         </div>
         <div className="flex justify-between text-xs items-center">
           <span className="text-zinc-500">Mode</span>

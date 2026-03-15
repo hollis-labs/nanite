@@ -151,7 +151,7 @@ export function ChatHeader() {
             >
               <Bot className={`w-3 h-3 ${modeStyle.text}`} />
               <span className={`text-xs ${modeStyle.text}`}>
-                Mentat{activeMode !== 'default' ? ` \u00B7 ${activeMode}` : ''}
+                Conduit{activeMode !== 'default' ? ` \u00B7 ${activeMode}` : ''}
               </span>
               <ChevronDown className={`w-3 h-3 ${modeStyle.text}`} />
             </button>

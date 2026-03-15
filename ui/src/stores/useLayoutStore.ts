@@ -41,7 +41,7 @@ export const useLayoutStore = create<LayoutState>()(
       setCurrentPage: (page) => set({ currentPage: page }),
     }),
     {
-      name: 'mentat-layout',
+      name: 'conduit-layout',
     }
   )
 )

@@ -14,8 +14,8 @@ Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
    ```bash
    cd ~/Projects-apps/mentat
    cd ui && npm install && npm run build && cd ..
-   go build ./cmd/mentat/
-   ./mentat serve -port 8090 -dev  # -dev skips embedded SPA, uses Vite proxy
+   go build ./cmd/conduit/
+   ./conduit serve -port 8090 -dev  # -dev skips embedded SPA, uses Vite proxy
    ```
    Or with Docker:
    ```bash

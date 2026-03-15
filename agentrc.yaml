@@ -1,6 +1,6 @@
 version: 1
 project:
-  name: mentat
+  name: conduit
 role: volon-managed
 boot_profiles:
   - worker

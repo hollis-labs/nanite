@@ -26,7 +26,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         listItem: false,
       }),
       Placeholder.configure({
-        placeholder: 'Message Mentat... (Enter to send, / for commands)',
+        placeholder: 'Message Conduit... (Enter to send, / for commands)',
       }),
       SlashCommandExtension.configure({
         suggestion: slashCommandSuggestion,
@@ -93,7 +93,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         />
       </div>
       <p className="text-center text-xs text-zinc-600 mt-2">
-        Mentat Chat may produce inaccurate information.
+        Conduit may produce inaccurate information.
       </p>
     </div>
   )

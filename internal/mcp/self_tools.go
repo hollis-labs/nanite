@@ -150,7 +150,7 @@ func selfToolDefinitions() []Tool {
 		// Builder tools — interactive step-by-step creation flows
 		{
 			Name:        "conduit_start_builder",
-			Description: "Start a step-by-step creation wizard for agents, skills, or prompt templates. NOT for asking arbitrary questions — only for creating new entities. You MUST provide builder_name (agent, skill, or prompt_template). After starting, use mentat_builder_step for each subsequent step.",
+			Description: "Start a step-by-step creation wizard for agents, skills, or prompt templates. NOT for asking arbitrary questions — only for creating new entities. You MUST provide builder_name (agent, skill, or prompt_template). After starting, use conduit_builder_step for each subsequent step.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

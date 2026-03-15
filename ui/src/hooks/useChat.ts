@@ -109,7 +109,7 @@ export function useChat(sessionId: string | null) {
           })
 
           // UI-trigger tools: open frontend modals/panels when the agent calls them.
-          if (data.tool === 'mentat_open_sprint_planning') {
+          if (data.tool === 'conduit_open_sprint_planning') {
             useSprintPlanningStore.getState().openSprintPlanning()
           }
         }

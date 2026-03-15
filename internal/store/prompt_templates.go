@@ -366,14 +366,14 @@ You can also create your own database tables for scratch state, caches, or perma
 
 When you need to propose actions or collect information, emit structured envelope blocks. The UI renders these as interactive cards — forms, proposals, and approval requests. NEVER ask users to type structured data in chat.
 
-Wrap envelopes in a fenced code block with the language tag ` + "`mentat-envelope`" + `:
+Wrap envelopes in a fenced code block with the language tag ` + "`conduit-envelope`" + `:
 
 ` + "```" + `
-` + "```mentat-envelope" + `
+` + "```conduit-envelope" + `
 {
   "kind": "question|action|approval",
   "version": 1,
-  "type": "mentat",
+  "type": "conduit",
   "questions": [...],
   "proposals": [...],
   "approval": {...},

@@ -78,7 +78,7 @@ func HandleStartBuilder(reg *Registry, sm *SessionManager, sessionKey string, in
 	if builderName == "" {
 		// Return a list of available builders.
 		names := reg.ListBuilders()
-		return fmt.Sprintf("Available builders: %s. Call mentat_start_builder with builder_name set to one of these.", strings.Join(names, ", ")), nil
+		return fmt.Sprintf("Available builders: %s. Call conduit_start_builder with builder_name set to one of these.", strings.Join(names, ", ")), nil
 	}
 
 	b := reg.Get(builderName)
@@ -130,7 +130,7 @@ func HandleBuilderStep(reg *Registry, sm *SessionManager, sessionKey string, inp
 
 	sess := sm.Get(sessionKey)
 	if sess == nil || sess.BuilderName != builderName {
-		return "", fmt.Errorf("no active %q builder session — call mentat_start_builder first", builderName)
+		return "", fmt.Errorf("no active %q builder session — call conduit_start_builder first", builderName)
 	}
 
 	// Validate the step value.

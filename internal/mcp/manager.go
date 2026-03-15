@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/mentat/internal/provider"
-	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/tool-broker/broker"
 )
 
@@ -95,7 +95,7 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 
 // DiscoverTools queries all registered servers for their tools.
 func (m *Manager) DiscoverTools(ctx context.Context) error {
-	ctx, span := tiamatotel.StartSpan(ctx, "mentat.mcp.discoverTools")
+	ctx, span := tiamatotel.StartSpan(ctx, "conduit.mcp.discoverTools")
 	defer span.End()
 
 	m.mu.Lock()
@@ -136,8 +136,8 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	}
 
 	span.SetAttributes(
-		attribute.Int("mentat.mcp.tools.total", totalTools),
-		attribute.Int("mentat.mcp.servers.count", len(m.servers)),
+		attribute.Int("conduit.mcp.tools.total", totalTools),
+		attribute.Int("conduit.mcp.servers.count", len(m.servers)),
 	)
 
 	log.Printf("mcp: total %d tools from %d servers", totalTools, len(m.servers))
@@ -215,8 +215,8 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 	}
 
 	span.SetAttributes(
-		attribute.String("mentat.mcp.server", serverName),
-		attribute.String("mentat.mcp.tool", toolName),
+		attribute.String("conduit.mcp.server", serverName),
+		attribute.String("conduit.mcp.tool", toolName),
 	)
 
 	m.mu.RLock()
@@ -256,7 +256,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		return "", err
 	}
 
-	span.SetAttributes(attribute.Int("mentat.mcp.result_len", sb.Len()))
+	span.SetAttributes(attribute.Int("conduit.mcp.result_len", sb.Len()))
 	return sb.String(), nil
 }
 

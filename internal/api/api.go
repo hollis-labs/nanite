@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/hollis-labs/mentat/internal/chat"
-	"github.com/hollis-labs/mentat/internal/mcp"
-	"github.com/hollis-labs/mentat/internal/store"
-	"github.com/hollis-labs/mentat/internal/toolclient"
-	"github.com/hollis-labs/mentat/internal/workflow"
+	"github.com/hollis-labs/conduit/internal/chat"
+	"github.com/hollis-labs/conduit/internal/mcp"
+	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/conduit/internal/toolclient"
+	"github.com/hollis-labs/conduit/internal/workflow"
 )
 
 // API holds dependencies for HTTP handlers.

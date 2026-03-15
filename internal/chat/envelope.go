@@ -10,7 +10,7 @@ import (
 type Envelope struct {
 	Kind      string     `json:"kind"`
 	Version   int        `json:"version"`
-	Type      string     `json:"type"`                // standard, mentat, custom
+	Type      string     `json:"type"`                // standard, conduit, custom
 	Proposals []Proposal `json:"proposals,omitempty"`
 	Questions []Question `json:"questions,omitempty"`
 	Status    *Status    `json:"status,omitempty"`
@@ -38,8 +38,8 @@ type Status struct {
 	Progress float64 `json:"progress"`
 }
 
-// envelopePattern matches fenced code blocks with volon-envelope or mentat-envelope language tags.
-var envelopePattern = regexp.MustCompile("(?s)```(?:volon-envelope|mentat-envelope)\\s*\n(.*?)```")
+// envelopePattern matches fenced code blocks with volon-envelope or conduit-envelope language tags.
+var envelopePattern = regexp.MustCompile("(?s)```(?:volon-envelope|conduit-envelope)\\s*\n(.*?)```")
 
 // ParseEnvelopes extracts envelope blocks from assistant message content.
 // Returns the parsed envelopes and the remaining text with envelope blocks removed.

@@ -44,8 +44,8 @@ func TestParseEnvelopes(t *testing.T) {
 }
 
 func TestParseEnvelopesMentatTag(t *testing.T) {
-	input := "```mentat-envelope\n" +
-		`{"kind":"question","version":1,"type":"mentat","questions":[{"prompt":"Choose one","type":"select","options":["a","b"],"required":true}]}` +
+	input := "```conduit-envelope\n" +
+		`{"kind":"question","version":1,"type":"conduit","questions":[{"prompt":"Choose one","type":"select","options":["a","b"],"required":true}]}` +
 		"\n```"
 
 	envelopes, _ := ParseEnvelopes(input)

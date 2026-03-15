@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/mentat/internal/builders"
-	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/conduit/internal/builders"
+	"github.com/hollis-labs/conduit/internal/store"
 )
 
 // SelfToolsTransport provides self-service tools that let the agent
@@ -36,29 +36,29 @@ func (st *SelfToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 // CallTool dispatches to the appropriate handler based on tool name.
 func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[string]any) (*ToolResult, error) {
 	switch name {
-	case "mentat_create_skill":
+	case "conduit_create_skill":
 		return st.callCreateSkill(args)
-	case "mentat_list_skills":
+	case "conduit_list_skills":
 		return st.callListSkills(args)
-	case "mentat_update_skill":
+	case "conduit_update_skill":
 		return st.callUpdateSkill(args)
-	case "mentat_delete_skill":
+	case "conduit_delete_skill":
 		return st.callDeleteSkill(args)
-	case "mentat_create_agent":
+	case "conduit_create_agent":
 		return st.callCreateAgent(args)
-	case "mentat_list_agents":
+	case "conduit_list_agents":
 		return st.callListAgents(args)
-	case "mentat_update_agent":
+	case "conduit_update_agent":
 		return st.callUpdateAgent(args)
-	case "mentat_list_workflows":
+	case "conduit_list_workflows":
 		return st.callListWorkflows(args)
-	case "mentat_create_workflow":
+	case "conduit_create_workflow":
 		return st.callCreateWorkflow(args)
-	case "mentat_open_sprint_planning":
+	case "conduit_open_sprint_planning":
 		return textResult("Sprint planning modal opened in the UI."), nil
-	case "mentat_start_builder":
+	case "conduit_start_builder":
 		return st.callStartBuilder(args)
-	case "mentat_builder_step":
+	case "conduit_builder_step":
 		return st.callBuilderStep(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil

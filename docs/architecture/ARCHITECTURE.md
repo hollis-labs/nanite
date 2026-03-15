@@ -54,6 +54,16 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## 1.1 Agent Profiles
+
+Special Agent profiles are defined as YAML files in `config/agents/*.yaml`. Each file declares the agent's identity, capabilities, modes, MCP server bindings, and tool permissions. CONDUIT loads these at startup and seeds them into the `agent_profiles` and `agent_modes` tables.
+
+Current profiles:
+- **mentat.yaml** — Cognitive partner. `can_execute: false`. Delegates to workers. Has access to Volon, Cortex, Hadron, Cerberus MCP servers.
+- **worker.yaml** — General execution agent. `can_execute: true`. Full tool access. Spawned by lead agents for task scopes.
+
+Per ADR-013, Mentat transitions from being the application to being an agent that runs inside CONDUIT. The YAML profiles are the canonical source; the SQLite seed data (`internal/store/seed.go`) provides backward-compatible defaults but will converge on loading from these files.
+
 ## 2. Go Backend Architecture
 
 ### 2.1 Package Layout

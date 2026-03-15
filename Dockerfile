@@ -15,15 +15,15 @@ RUN go mod download
 COPY . .
 # Copy built UI into the embed directory
 COPY --from=ui-build /app/ui/dist ./internal/server/ui_dist/
-RUN CGO_ENABLED=0 go build -o mentat ./cmd/mentat
+RUN CGO_ENABLED=0 go build -o conduit ./cmd/conduit
 
 # Stage 3: Minimal runtime image
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
-RUN adduser -D -u 1000 mentat
+RUN adduser -D -u 1000 conduit
 WORKDIR /app
-COPY --from=go-build /app/mentat .
-RUN mkdir -p /data && chown mentat:mentat /data
-USER mentat
+COPY --from=go-build /app/conduit .
+RUN mkdir -p /data && chown conduit:conduit /data
+USER conduit
 EXPOSE 8090
-ENTRYPOINT ["./mentat", "serve", "-db", "/data/mentat.db"]
+ENTRYPOINT ["./conduit", "serve", "-db", "/data/conduit.db"]

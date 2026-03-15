@@ -210,7 +210,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
   // Strip envelope blocks from content so they don't render as raw JSON
   // (during streaming, envelopes haven't been extracted yet).
   const displayContent = useMemo(() =>
-    content.replace(/```(?:volon-envelope|mentat-envelope)\s*\n[\s\S]*?```/g, '').trim(),
+    content.replace(/```(?:volon-envelope|conduit-envelope)\s*\n[\s\S]*?```/g, '').trim(),
     [content]
   )
 

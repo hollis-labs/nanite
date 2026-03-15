@@ -16,22 +16,22 @@ import (
 	"github.com/joho/godotenv"
 	tiamatotel "github.com/hollis-labs/otel"
 
-	"github.com/hollis-labs/mentat/internal/api"
-	"github.com/hollis-labs/mentat/internal/chat"
-	"github.com/hollis-labs/mentat/internal/filter"
-	"github.com/hollis-labs/mentat/internal/mcp"
-	"github.com/hollis-labs/mentat/internal/provider"
-	"github.com/hollis-labs/mentat/internal/server"
-	"github.com/hollis-labs/mentat/internal/store"
-	"github.com/hollis-labs/mentat/internal/toolclient"
-	"github.com/hollis-labs/mentat/internal/truncate"
-	"github.com/hollis-labs/mentat/internal/workflow"
+	"github.com/hollis-labs/conduit/internal/api"
+	"github.com/hollis-labs/conduit/internal/chat"
+	"github.com/hollis-labs/conduit/internal/filter"
+	"github.com/hollis-labs/conduit/internal/mcp"
+	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/server"
+	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/conduit/internal/toolclient"
+	"github.com/hollis-labs/conduit/internal/truncate"
+	"github.com/hollis-labs/conduit/internal/workflow"
 	"github.com/hollis-labs/tool-broker/broker"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: mentat <command>")
+		fmt.Fprintln(os.Stderr, "usage: conduit <command>")
 		fmt.Fprintln(os.Stderr, "commands: serve")
 		os.Exit(1)
 	}
@@ -53,14 +53,14 @@ func cmdServe(args []string) {
 
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
-	dbPath := fs.String("db", "./mentat.db", "SQLite database path")
+	dbPath := fs.String("db", "./conduit.db", "SQLite database path")
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
 	workflowDir := fs.String("workflows", "./workflows", "Directory containing workflow YAML files")
 	fs.Parse(args)
 
 	// Initialise OpenTelemetry tracing (tiamat-otel).
 	otelCtx := context.Background()
-	otelShutdown, otelErr := tiamatotel.Init(otelCtx, tiamatotel.WithServiceName("mentat"))
+	otelShutdown, otelErr := tiamatotel.Init(otelCtx, tiamatotel.WithServiceName("conduit"))
 	if otelErr != nil {
 		log.Printf("warning: OTel init failed: %v", otelErr)
 	} else {

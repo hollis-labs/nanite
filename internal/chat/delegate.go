@@ -12,7 +12,7 @@ import (
 	tiamatotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/conduit/internal/store"
 )
 
 // DelegationRequest describes a task to delegate to a worker agent session.

@@ -2,7 +2,7 @@
 
 # Build React SPA then embed in Go binary
 build: build-ui
-	go build -o mentat ./cmd/mentat
+	go build -o conduit ./cmd/conduit
 
 # Install to ~/go/bin/ (used by MCP and Cerberus)
 install: build-ui
@@ -19,7 +19,7 @@ dev:
 
 # Clean build artifacts
 clean:
-	rm -f mentat
+	rm -f conduit
 	rm -rf ui/dist
 
 # Run Go tests
@@ -28,4 +28,4 @@ test:
 
 # Run with default settings
 run: build
-	./mentat serve --port 8090
+	./conduit serve --port 8090

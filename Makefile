@@ -6,7 +6,7 @@ build: build-ui
 
 # Install to ~/go/bin/ (used by MCP and Cerberus)
 install: build-ui
-	go install ./cmd/mentat
+	go install ./cmd/conduit
 
 build-ui:
 	cd ui && npm run build

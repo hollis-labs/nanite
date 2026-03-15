@@ -7,7 +7,7 @@ ui/dist
 *.db
 *.db-wal
 *.db-shm
-mentat
-mentat.exe
+conduit
+conduit.exe
 docs
 adr

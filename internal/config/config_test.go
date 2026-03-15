@@ -31,7 +31,7 @@ hooks_dir: ~/.agentrc/hooks/shared
 version: 1
 project:
   name: conduit
-  root: ~/Projects-apps/mentat
+  root: ~/Projects-apps/fragments-engine/conduit
 role: volon-managed
 boot_profiles:
   - worker
@@ -162,10 +162,10 @@ func TestProjectRoot_ExpandsTilde(t *testing.T) {
 	}
 
 	cfg := &Config{
-		Project: ProjectConfig{Root: "~/Projects-apps/mentat"},
+		Project: ProjectConfig{Root: "~/Projects-apps/fragments-engine/conduit"},
 	}
 	got := cfg.ProjectRoot()
-	want := filepath.Join(home, "Projects-apps/mentat")
+	want := filepath.Join(home, "Projects-apps/fragments-engine/conduit")
 	if got != want {
 		t.Errorf("ProjectRoot() = %q, want %q", got, want)
 	}

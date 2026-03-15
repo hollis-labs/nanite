@@ -1,4 +1,4 @@
-# Mentat — mise task runner configuration
+# Conduit — mise task runner configuration
 # https://mise.jdx.dev/
 
 [tools]
@@ -7,7 +7,7 @@ node = "22"
 
 [tasks.build]
 description = "Build Go binary (embeds UI if ui/dist exists)"
-run = "go build -o mentat ./cmd/mentat"
+run = "go build -o conduit ./cmd/conduit"
 
 [tasks.test]
 description = "Run all Go tests"
@@ -18,9 +18,9 @@ description = "Run go vet on all packages"
 run = "go vet ./..."
 
 [tasks.serve]
-description = "Run mentat in dev mode on port 8090"
+description = "Run conduit in dev mode on port 8090"
 depends = ["build"]
-run = "./mentat serve --port 8090 -dev"
+run = "./conduit serve --port 8090 -dev"
 
 [tasks.ui-install]
 description = "Install frontend dependencies"
@@ -41,7 +41,7 @@ run = "cd ui && npm run lint"
 [tasks.clean]
 description = "Remove build artifacts"
 run = """
-rm -f mentat
+rm -f conduit
 rm -rf ui/dist
 """
 

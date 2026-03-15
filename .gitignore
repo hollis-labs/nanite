@@ -1,6 +1,6 @@
 # Go
-/mentat
-/cmd/mentat/mentat
+/conduit
+/cmd/conduit/conduit
 *.exe
 *.test
 *.out

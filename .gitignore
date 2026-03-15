@@ -41,3 +41,4 @@ Thumbs.db
 .agentrc/state/
 .agentrc/.session-unclean.flag
 .claude/worktrees/
+conduit

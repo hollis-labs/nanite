@@ -55,6 +55,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-end.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

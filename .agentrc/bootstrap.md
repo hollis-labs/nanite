@@ -2,7 +2,7 @@
 version: 1
 type: bootstrap
 iteration: 6
-updated_at: 2026-03-14T23:45:00Z
+updated_at: 2026-03-14T00:00:00Z
 ---
 
 # Mentat Bootstrap
@@ -55,16 +55,30 @@ updated_at: 2026-03-14T23:45:00Z
 - Both sprints closed (S1: 5/5, S2: 5/5), epic done
 
 ## Active epics (priority order)
+### A-priority
 1. EPIC-20260314-21360: Agent Context Architecture (S1 done, S2+S3 remain — GATED)
 2. EPIC-20260314-64269: Quality Gates (S1 4/5 done, S2+S3 remain)
 3. EPIC-20260314-11418: Portfolio Tools (S1 MCP tools remain, S2+S3 done)
-4. EPIC-20260314-83904: Volon GUI Polish (8 done, TASK-105 Triage UI deferred)
-5. EPIC-20260313-08947: Conduit Separation
-6. EPIC-20260314-51504: Core Library Consolidation
-7. EPIC-20260314-14784: Frag CLI & Agent Integration (B priority)
+4. EPIC-20260314-65311: Demo-Ready Conduit — End-to-End Polish
+5. EPIC-20260313-08947: Conduit Separation — Extract Chat App from Mentat Agent Identity
+6. EPIC-20260314-19068: CLI Tooling — tokf, Filtering, Task Runners & Agent Execution Control
+### B-priority
+7. EPIC-20260314-08295: Unified Tool Pipeline — Extend ToolBroker with Gating, Filtering & CLI (ADR-023)
+8. EPIC-20260314-51504: Core Library Consolidation
+9. EPIC-20260314-14784: Frag CLI & Special Agent Deep Integration
+10. EPIC-20260314-61212: Conduit Plugin System & Agent-Native UI
+11. EPIC-20260314-85672: Agent Infrastructure & Developer Tooling
+12. EPIC-20260314-48213: Carrier Absorption — App → Special Agent + Shared Ingest Library (ADR-016)
+13. EPIC-20260314-34219: Event-Driven Architecture — Cross-Project Pub/Sub & Reactive Wiring
+14. EPIC-20260313-86433: Agent Taxonomy & Specification System
+15. EPIC-20260313-90324: Context Capture Pipeline — Active, Passive, Autocapture & Analysis
+16. EPIC-20260313-31488: Unified Session Context — Profiles, Modes, Scope & Lens
 
 ## Completed epics
 - EPIC-20260314-41370: Interactive Agent UX — Structured Dialogs (10/10 tasks, 2026-03-14)
+- EPIC-20260314-11561: Preflight — Stabilization, Cleanup & Foundation (2026-03-14)
+- EPIC-20260314-80737: Fragments Engine Rebrand & Portfolio Reorganization (2026-03-14)
+- EPIC-20260314-02338: High-ROI Skills — merged into EPIC-11418 (2026-03-14)
 
 ## Next steps
 - Execute EPIC-21360 S2 (hooks & enforcement) when ready

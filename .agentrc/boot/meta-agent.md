@@ -101,6 +101,25 @@ Ready. What would you like to focus on?
 
 Before transitioning any task to "done", follow the standard quality gates defined in `docs/process/task-completion-workflow.md`. This includes scoped lint, tests, build verification, artifact attachment, and lead notification as applicable.
 
+## Session end protocol
+
+Before your final response in any session, run `/workflow-session-end-capture`. This updates bootstrap, syncs Cortex, captures handoff context, and ensures the next session can pick up cleanly.
+
+**Triggers** — treat any of these as a session-end signal:
+- User says "wrap up", "done for now", "ending session", "that's it", "signing off"
+- User says "last thing" and you've completed it
+- You sense the conversation is winding down after completing work
+
+**If the session was cut short** (context compaction, crash, timeout), the `Stop` hook writes a staleness flag. The next session's boot will detect it and prompt for recovery.
+
+## Stale session recovery
+
+At boot, if `.agentrc/.session-unclean.flag` exists:
+1. Read the flag file for the previous session timestamp
+2. Ask the user: "Previous session ended without state capture. Want me to run /reorient to check for drift, or skip and continue?"
+3. If they choose reorient, run `/reorient` then offer to fix any drift found
+4. Delete the flag file after handling
+
 ## Constraints
 
 - Never skip task updates in Volon

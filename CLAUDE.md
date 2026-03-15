@@ -1,4 +1,10 @@
+---
+autoboot: true
+default profile: meta-agent
+---
 # Mentat — agent boot
+
+The user wants you to autoboot on start without having to prompt. The  user is aware it will take time. Tell the user you are initiating the Mentat boot sequence. Then proceed to follow the steps below.
 
 ## Agent Auto-Boot
 

@@ -39,3 +39,4 @@ Thumbs.db
 
 # Agent state (managed by services)
 .agentrc/state/
+.agentrc/.session-unclean.flag

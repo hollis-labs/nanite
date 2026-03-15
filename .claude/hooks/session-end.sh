@@ -3,7 +3,9 @@
 # The next session's boot sequence detects this and offers recovery
 set -euo pipefail
 
-ROOT="$PWD"
+# Resolve project root from script location (works even when CWD drifts at Stop time)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FLAG_FILE="$ROOT/.agentrc/.session-unclean.flag"
 AGENT_DIR="$ROOT/.agentrc"
 

@@ -285,7 +285,7 @@ func setupMCPServers(m *mcp.Manager) {
 			"-db", home + "/.hadron/state/hadron.db",
 			"-logs", home + "/.hadron/logs",
 			"-data", home + "/.hadron",
-			"-token", "mentat-local-dev",
+			"-token", "conduit-local-dev",
 			"-token-scopes", "run.write,schedule.write,pipeline.write",
 		}, nil)
 	} else {

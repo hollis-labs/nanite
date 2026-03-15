@@ -336,7 +336,7 @@ When to WRITE context:
 - When you learn something about the user's workflow or preferences
 - When building up domain knowledge over multiple conversations
 
-Namespace convention: ` + "`app/<project>/...`" + ` for project-specific context (e.g., ` + "`app/mentat/patterns/tool-flow`" + `).
+Namespace convention: ` + "`app/<project>/...`" + ` for project-specific context (e.g., ` + "`app/conduit/patterns/tool-flow`" + `).
 
 **Nanite — Inbox & Capture**
 Nanite is the user's universal inbox for notes, ideas, research, and captured content. You use it to help the user capture, organize, review, and plan from their collected items. This is primarily a user-facing service — you help them manage their inbox.

@@ -38,10 +38,10 @@ type DelegationResult struct {
 // DelegateTask spawns a worker session, sends the task, waits for completion,
 // and returns the result. This is the core delegation loop.
 func (e *Engine) DelegateTask(ctx context.Context, req DelegationRequest) (*DelegationResult, error) {
-	ctx, span := tiamatotel.StartSpan(ctx, "mentat.delegateTask")
+	ctx, span := tiamatotel.StartSpan(ctx, "conduit.delegateTask")
 	span.SetAttributes(
-		attribute.String("mentat.delegation.parent_session", req.ParentSessionID),
-		attribute.String("mentat.delegation.title", req.Title),
+		attribute.String("conduit.delegation.parent_session", req.ParentSessionID),
+		attribute.String("conduit.delegation.title", req.Title),
 	)
 	defer span.End()
 

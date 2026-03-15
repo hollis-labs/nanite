@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/conduit/internal/store"
 )
 
 func newTestAPI(t *testing.T) (*API, *http.ServeMux) {

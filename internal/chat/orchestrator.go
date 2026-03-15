@@ -7,8 +7,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/hollis-labs/mentat/internal/mcp"
-	"github.com/hollis-labs/mentat/internal/provider"
+	"github.com/hollis-labs/conduit/internal/mcp"
+	"github.com/hollis-labs/conduit/internal/provider"
 )
 
 // OrchestrationPlan represents the plan for executing decomposed sub-tasks.

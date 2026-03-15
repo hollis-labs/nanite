@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hollis-labs/mentat/internal/mcp"
-	"github.com/hollis-labs/mentat/internal/provider"
+	"github.com/hollis-labs/conduit/internal/mcp"
+	"github.com/hollis-labs/conduit/internal/provider"
 	"github.com/hollis-labs/tiamat-tool-broker/broker"
 )
 

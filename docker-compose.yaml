@@ -1,17 +1,17 @@
 services:
-  mentat:
+  conduit:
     build: .
     ports:
       - "8090:8090"
     volumes:
-      - mentat-data:/data
+      - conduit-data:/data
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-}
-      - MENTAT_AUTH_USER=${MENTAT_AUTH_USER:-}
-      - MENTAT_AUTH_PASSWORD=${MENTAT_AUTH_PASSWORD:-}
+      - CONDUIT_AUTH_USER=${CONDUIT_AUTH_USER:-}
+      - CONDUIT_AUTH_PASSWORD=${CONDUIT_AUTH_PASSWORD:-}
     restart: unless-stopped
 
 volumes:
-  mentat-data:
+  conduit-data:

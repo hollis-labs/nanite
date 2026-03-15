@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 
-	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/conduit/internal/store"
 )
 
 func (a *API) handleListBookmarks(w http.ResponseWriter, r *http.Request) {

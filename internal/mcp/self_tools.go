@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/hollis-labs/mentat/internal/provider"
+import "github.com/hollis-labs/conduit/internal/provider"
 
 // SelfToolProviderDefinitions returns all self-service tool definitions
 // in provider.ToolDefinition format, suitable for registering as built-ins.
@@ -21,7 +21,7 @@ func SelfToolProviderDefinitions() []provider.ToolDefinition {
 func selfToolDefinitions() []Tool {
 	return []Tool{
 		{
-			Name:        "mentat_create_skill",
+			Name:        "conduit_create_skill",
 			Description: "Create a new skill. Skills bind tool names to a category and description.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -37,7 +37,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_list_skills",
+			Name:        "conduit_list_skills",
 			Description: "List all skills. Returns name, slug, category, and description for each.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -47,7 +47,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_update_skill",
+			Name:        "conduit_update_skill",
 			Description: "Update an existing skill by ID. Only provided fields are changed.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -64,7 +64,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_delete_skill",
+			Name:        "conduit_delete_skill",
 			Description: "Delete a skill by ID. Only non-builtin skills can be deleted.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -75,7 +75,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_create_agent",
+			Name:        "conduit_create_agent",
 			Description: "Create a new agent profile with a name, slug, system prompt, and optional default model.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -90,7 +90,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_list_agents",
+			Name:        "conduit_list_agents",
 			Description: "List all agent profiles. Returns name, slug, description, and default model.",
 			InputSchema: map[string]any{
 				"type":       "object",
@@ -98,7 +98,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_update_agent",
+			Name:        "conduit_update_agent",
 			Description: "Update an existing agent profile by ID. Only provided fields are changed.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -114,7 +114,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_list_workflows",
+			Name:        "conduit_list_workflows",
 			Description: "List all workflows. Returns name, slug, trigger, and enabled status.",
 			InputSchema: map[string]any{
 				"type":       "object",
@@ -122,7 +122,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_create_workflow",
+			Name:        "conduit_create_workflow",
 			Description: "Create a new workflow with a name, slug, trigger type, and JSON/YAML definition.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -138,7 +138,7 @@ func selfToolDefinitions() []Tool {
 		},
 		// UI trigger tools — open frontend modals/panels
 		{
-			Name:        "mentat_open_sprint_planning",
+			Name:        "conduit_open_sprint_planning",
 			Description: "Open the sprint planning modal in the UI. Use when the user asks to review sprints, plan work, or manage tasks and backlog.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -149,7 +149,7 @@ func selfToolDefinitions() []Tool {
 		},
 		// Builder tools — interactive step-by-step creation flows
 		{
-			Name:        "mentat_start_builder",
+			Name:        "conduit_start_builder",
 			Description: "Start a step-by-step creation wizard for agents, skills, or prompt templates. NOT for asking arbitrary questions — only for creating new entities. You MUST provide builder_name (agent, skill, or prompt_template). After starting, use mentat_builder_step for each subsequent step.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -159,7 +159,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "mentat_builder_step",
+			Name:        "conduit_builder_step",
 			Description: "Submit a value for the current step in an active builder flow. Returns the next step prompt or the final result.",
 			InputSchema: map[string]any{
 				"type": "object",

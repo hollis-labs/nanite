@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/conduit/internal/store"
 )
 
 func newTestStore(t *testing.T) *store.Store {
@@ -453,7 +453,7 @@ func TestBuilderStep_NoActiveSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no session active")
 	}
-	if !strings.Contains(err.Error(), "mentat_start_builder") {
+	if !strings.Contains(err.Error(), "conduit_start_builder") {
 		t.Errorf("expected error to mention mentat_start_builder, got: %v", err)
 	}
 }

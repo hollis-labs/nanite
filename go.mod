@@ -1,4 +1,4 @@
-module github.com/hollis-labs/mentat
+module github.com/hollis-labs/conduit
 
 go 1.25.3
 

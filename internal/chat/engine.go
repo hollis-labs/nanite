@@ -14,12 +14,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/mentat/internal/mcp"
-	"github.com/hollis-labs/mentat/internal/provider"
-	"github.com/hollis-labs/mentat/internal/store"
-	"github.com/hollis-labs/mentat/internal/toolbroker"
-	"github.com/hollis-labs/mentat/internal/truncate"
-	"github.com/hollis-labs/mentat/internal/workflow"
+	"github.com/hollis-labs/conduit/internal/mcp"
+	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/conduit/internal/toolbroker"
+	"github.com/hollis-labs/conduit/internal/truncate"
+	"github.com/hollis-labs/conduit/internal/workflow"
 )
 
 // maxToolIterations prevents infinite tool-use loops.
@@ -139,10 +139,10 @@ func (e *Engine) GetStream(messageID string) (<-chan StreamEvent, bool) {
 
 // generateResponse loads context, calls the provider, streams events, and saves the result.
 func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan StreamEvent) {
-	ctx, span := tiamatotel.StartSpan(ctx, "mentat.generateResponse")
+	ctx, span := tiamatotel.StartSpan(ctx, "conduit.generateResponse")
 	span.SetAttributes(
-		attribute.String("mentat.session.id", sessionID),
-		attribute.String("mentat.message.id", assistantMsgID),
+		attribute.String("conduit.session.id", sessionID),
+		attribute.String("conduit.message.id", assistantMsgID),
 	)
 	defer span.End()
 
@@ -296,14 +296,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 
 		// Call provider with or without tools.
-		provCtx, provSpan := tiamatotel.StartSpan(ctx, "mentat.provider.call")
+		provCtx, provSpan := tiamatotel.StartSpan(ctx, "conduit.provider.call")
 		provSpan.SetAttributes(
-			attribute.String("mentat.model", model),
-			attribute.Int("mentat.iteration", iteration),
-			attribute.Int("mentat.tools.count", len(tools)),
-			attribute.Int("mentat.messages.count", len(chatMessages)),
-			attribute.Int("mentat.tokens.total", breakdown.Total),
-			attribute.Int("mentat.tokens.ceiling", breakdown.Ceiling),
+			attribute.String("conduit.model", model),
+			attribute.Int("conduit.iteration", iteration),
+			attribute.Int("conduit.tools.count", len(tools)),
+			attribute.Int("conduit.messages.count", len(chatMessages)),
+			attribute.Int("conduit.tokens.total", breakdown.Total),
+			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
 		)
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
@@ -513,7 +513,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				} else {
 					resultText = result
-					toolSpan.SetAttributes(attribute.Int("mentat.tool.result_len", len(result)))
+					toolSpan.SetAttributes(attribute.Int("conduit.tool.result_len", len(result)))
 					e.Store.LogEvent(sessionID, "tool_call", "tool",
 						tu.Name, fmt.Sprintf(`{"result_len":%d,"agent_id":%q}`, len(result), agentID))
 					if e.Activity != nil {
@@ -535,7 +535,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				} else {
 					resultText = result
-					toolSpan.SetAttributes(attribute.Int("mentat.tool.result_len", len(result)))
+					toolSpan.SetAttributes(attribute.Int("conduit.tool.result_len", len(result)))
 					e.Store.LogEvent(sessionID, "tool_call", "tool",
 						tu.Name, fmt.Sprintf(`{"result_len":%d}`, len(result)))
 					if e.Activity != nil {
@@ -724,8 +724,8 @@ func (e *Engine) SendAgentMessage(fromSessionID, toSessionID, content string) (s
 
 // autoTitle generates a title for a session from the first user message.
 func (e *Engine) autoTitle(sessionID, userContent, model string) {
-	ctx, span := tiamatotel.StartSpan(context.Background(), "mentat.autoTitle")
-	span.SetAttributes(attribute.String("mentat.session.id", sessionID))
+	ctx, span := tiamatotel.StartSpan(context.Background(), "conduit.autoTitle")
+	span.SetAttributes(attribute.String("conduit.session.id", sessionID))
 	defer span.End()
 	_ = ctx
 

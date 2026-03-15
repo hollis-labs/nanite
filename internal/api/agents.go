@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/conduit/internal/store"
 )
 
 func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {

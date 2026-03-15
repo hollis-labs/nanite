@@ -9,8 +9,8 @@ import (
 	tiamatotel "github.com/hollis-labs/tiamat-otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/hollis-labs/mentat/internal/provider"
-	"github.com/hollis-labs/mentat/internal/store"
+	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/store"
 )
 
 // DefaultBudgetPct is the default fraction of the context window to use.
@@ -47,12 +47,12 @@ func NewContextBroker(s *store.Store) *ContextBroker {
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
 func (cb *ContextBroker) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
-	_, span := tiamatotel.StartSpan(ctx, "mentat.broker.assembleContext")
+	_, span := tiamatotel.StartSpan(ctx, "conduit.broker.assembleContext")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("mentat.session.id", session.ID),
-		attribute.String("mentat.agent.id", agent.ID),
+		attribute.String("conduit.session.id", session.ID),
+		attribute.String("conduit.agent.id", agent.ID),
 	)
 
 	// 1. Build the system prompt using prompt templates.
@@ -95,10 +95,10 @@ func (cb *ContextBroker) AssembleContext(ctx context.Context, session *store.Ses
 	}
 
 	span.SetAttributes(
-		attribute.Int("mentat.broker.system_tokens", systemTokens),
-		attribute.Int("mentat.broker.message_count", len(chatMessages)),
-		attribute.Int("mentat.broker.total_tokens", totalTokens),
-		attribute.Int("mentat.broker.budget", budget),
+		attribute.Int("conduit.broker.system_tokens", systemTokens),
+		attribute.Int("conduit.broker.message_count", len(chatMessages)),
+		attribute.Int("conduit.broker.total_tokens", totalTokens),
+		attribute.Int("conduit.broker.budget", budget),
 	)
 
 	log.Printf("broker: assembled context — system=%d tokens, messages=%d, total=%d tokens (budget=%d)",

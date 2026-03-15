@@ -1,6 +1,7 @@
 version: 1
 project:
   name: conduit
+  root: ~/Projects-apps/mentat
 role: volon-managed
 boot_profiles:
   - worker

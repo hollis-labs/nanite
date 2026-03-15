@@ -16,6 +16,8 @@ import (
 	"github.com/joho/godotenv"
 	tiamatotel "github.com/hollis-labs/otel"
 
+	"github.com/hollis-labs/conduit/internal/config"
+
 	"github.com/hollis-labs/conduit/internal/api"
 	"github.com/hollis-labs/conduit/internal/chat"
 	"github.com/hollis-labs/conduit/internal/filter"
@@ -46,6 +48,18 @@ func main() {
 }
 
 func cmdServe(args []string) {
+	// Load agentrc config (user-level + project-level, merged).
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Printf("warning: failed to load agentrc config: %v", cfgErr)
+	} else {
+		name := cfg.Project.Name
+		if name == "" {
+			name = "(unnamed)"
+		}
+		log.Printf("config loaded — project: %s, role: %s, root: %s", name, cfg.Role, cfg.ProjectRoot())
+	}
+
 	// Load .env file if present (never overrides existing env vars).
 	if err := godotenv.Load(); err == nil {
 		log.Println("loaded .env file")

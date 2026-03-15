@@ -6,9 +6,11 @@ updated_at: 2026-03-11
 
 # Agent Boot — Mentat
 
-## What is Mentat
+## What is CONDUIT and Mentat
 
-Mentat is the unified meta-agent and chat application for Fragments Engine. It combines a Go backend + React frontend with portfolio orchestration capabilities. It manages a portfolio of software projects and provides a conversational AI interface with MCP integration, multi-agent coordination, and workflow orchestration.
+**CONDUIT** is the agent-agnostic chat harness for Fragments Engine. It is the application — a Go backend + React frontend that provides multi-agent AI chat with MCP integration, delegation, and context continuity. Binary: `conduit`. Module: `github.com/hollis-labs/conduit`.
+
+**Mentat** is a Special Agent that runs inside CONDUIT. It is NOT an application — it is an agent profile (`config/agents/mentat.yaml`) loadable by any compatible chat system. Mentat provides cognitive aid, portfolio orchestration, planning, and cross-project coordination. There is no "Mentat Chat" — there is only CONDUIT with the Mentat agent loaded.
 
 ## Ground truth
 
@@ -32,7 +34,8 @@ Mentat is the unified meta-agent and chat application for Fragments Engine. It c
 |---|---|
 | Current state | `.agentrc/bootstrap.md` → Volon MCP |
 | System config | `agentrc.yaml` |
-| Mentat config | `config/mentat.yaml` |
+| Conduit config | `config/mentat.yaml` |
+| Agent profiles | `config/agents/*.yaml` |
 | Managed projects | `config/repos.yaml` |
 | Behavior rules | `docs/process/00_behavior-rules.md` |
 | Architecture | `docs/architecture/ARCHITECTURE.md` |

@@ -1,16 +1,16 @@
 ---
 version: 1
 type: bootstrap
-iteration: 6
-updated_at: 2026-03-14T00:00:00Z
+iteration: 7
+updated_at: 2026-03-15T01:30:00Z
 ---
 
 # Mentat Bootstrap
 
 ## Current state
-- Iteration 6 (Interactive Agent UX complete)
-- Status: 9 interactive dialog skills built, 8 slash commands registered, pattern + anatomy docs written, EPIC-41370 done
-- A2A messaging system operational — tested with 5 agents, zero conflicts
+- Iteration 7 (Volon GUI Polish + ADR-025 + Conduit Separation)
+- Status: 11 GUI tasks closed (EPIC-83904), ADR-025 accepted, Conduit separation in progress
+- A2A messaging system operational — ADR-025 extends to GUI-based A2A via Volon comments
 - Tasks: Check Volon with project_id="mentat" (and project_id="volon")
 - Boot profiles updated with: inbox checking, task completion checklist, tag enforcement
 
@@ -54,14 +54,20 @@ updated_at: 2026-03-14T00:00:00Z
 - 8 new slash commands registered (session-handoff is agent-only)
 - Both sprints closed (S1: 5/5, S2: 5/5), epic done
 
+### Iteration 7: Volon GUI Polish + A2A Architecture (2026-03-15)
+- ADR-025: Volon A2A Messaging & Queue Management — extend comments for GUI-based A2A
+- 11 GUI tasks closed across 2 sprints (EPIC-83904): overflow, table layout, null badge, approve endpoint, triage keyboard shortcuts, CopyableId gaps, cross-entity search confirmed, pagination confirmed
+- 4 pre-existing TS build errors fixed (TaskDraft optionals, RowActionsDropdown asChild, ProjectViewPage sprint_id type, setDraft null guard)
+- Session-end hook fixed (resolve root from script location, not $PWD)
+- Conduit separation in progress by parallel agent (ADR-013)
+
 ## Active epics (priority order)
 ### A-priority
 1. EPIC-20260314-21360: Agent Context Architecture (S1 done, S2+S3 remain — GATED)
 2. EPIC-20260314-64269: Quality Gates (S1 4/5 done, S2+S3 remain)
 3. EPIC-20260314-11418: Portfolio Tools (S1 MCP tools remain, S2+S3 done)
 4. EPIC-20260314-65311: Demo-Ready Conduit — End-to-End Polish
-5. EPIC-20260313-08947: Conduit Separation — Extract Chat App from Mentat Agent Identity
-6. EPIC-20260314-19068: CLI Tooling — tokf, Filtering, Task Runners & Agent Execution Control
+5. EPIC-20260314-19068: CLI Tooling — tokf, Filtering, Task Runners & Agent Execution Control
 ### B-priority
 7. EPIC-20260314-08295: Unified Tool Pipeline — Extend ToolBroker with Gating, Filtering & CLI (ADR-023)
 8. EPIC-20260314-51504: Core Library Consolidation
@@ -75,6 +81,7 @@ updated_at: 2026-03-14T00:00:00Z
 16. EPIC-20260313-31488: Unified Session Context — Profiles, Modes, Scope & Lens
 
 ## Completed epics
+- EPIC-20260313-08947: Conduit Separation — Extract Chat App from Mentat Agent Identity (23/23 tasks, 2026-03-15)
 - EPIC-20260314-41370: Interactive Agent UX — Structured Dialogs (10/10 tasks, 2026-03-14)
 - EPIC-20260314-11561: Preflight — Stabilization, Cleanup & Foundation (2026-03-14)
 - EPIC-20260314-80737: Fragments Engine Rebrand & Portfolio Reorganization (2026-03-14)
@@ -84,4 +91,5 @@ updated_at: 2026-03-14T00:00:00Z
 - Execute EPIC-21360 S2 (hooks & enforcement) when ready
 - S3 cross-project rollout GATED — requires lead+owner review session
 - Remaining: TASK-174 (go-playground/validator), EPIC-11418 S1 (MCP tools)
-- Consider: Conduit Separation or Core Consolidation for next major iteration
+- Deploy shared hooks to 9 managed projects (S3 migration plan ready)
+- fe-core provider extraction planned (ADR-019, 4-6 day effort)

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useMemo, useCallback } from 'react'
-import { Bot } from 'lucide-react'
+import { useEffect, useRef, useMemo, useCallback, useState, useLayoutEffect } from 'react'
+import { Bot, ArrowDown } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import { ChatMessage } from './ChatMessage'
@@ -35,7 +35,48 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const queryClient = useQueryClient()
 
+  // Track if user is scrolled to bottom - auto-scroll only when at bottom
+  const [isAtBottom, setIsAtBottom] = useState(true)
+  const [userHasScrolled, setUserHasScrolled] = useState(false)
+
   const avatarStyle = MODE_AVATAR_STYLES[activeMode]
+
+  // Check if user is near the bottom of the scroll area
+  const checkScrollPosition = useCallback(() => {
+    const scrollElement = scrollRef.current
+    if (!scrollElement) return
+
+    const { scrollTop, scrollHeight, clientHeight } = scrollElement
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+
+    // Use thresholds: >100px = pause auto-scroll, <50px = resume auto-scroll
+    if (distanceFromBottom > 100) {
+      setIsAtBottom(false)
+      setUserHasScrolled(true)
+    } else if (distanceFromBottom < 50) {
+      setIsAtBottom(true)
+      // Don't clear userHasScrolled immediately - let them get very close to bottom
+      if (distanceFromBottom < 10) {
+        setUserHasScrolled(false)
+      }
+    }
+  }, [])
+
+  // Add scroll event listener
+  useEffect(() => {
+    const scrollElement = scrollRef.current
+    if (!scrollElement) return
+
+    scrollElement.addEventListener('scroll', checkScrollPosition)
+    return () => {
+      scrollElement.removeEventListener('scroll', checkScrollPosition)
+    }
+  }, [checkScrollPosition])
+
+  // Also check scroll position when content changes (not just user scroll)
+  useLayoutEffect(() => {
+    checkScrollPosition()
+  }, [messages.length, streamingContent, toolCalls.length, chatErrors.length, checkScrollPosition])
 
   // Fetch bookmarks for the active session
   const { data: bookmarks = [] } = useQuery({
@@ -64,10 +105,20 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
     [activeSessionId, toggleBookmarkMutation]
   )
 
-  // Auto-scroll to bottom on new messages or streaming updates
-  useEffect(() => {
+  // Scroll to bottom function
+  const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, streamingContent, toolCalls.length, chatErrors.length])
+    setIsAtBottom(true)
+    setUserHasScrolled(false)
+  }, [])
+
+  // Auto-scroll to bottom on new messages or streaming updates
+  // Only when user is at bottom AND hasn't manually scrolled up
+  useEffect(() => {
+    if (isAtBottom && !userHasScrolled) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages.length, streamingContent, toolCalls.length, chatErrors.length, isAtBottom, userHasScrolled])
 
   if (messages.length === 0 && !isStreaming) {
     return (
@@ -82,7 +133,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   }
 
   return (
-    <ScrollArea className="flex-1 px-4 py-6" ref={scrollRef}>
+    <ScrollArea className="flex-1 px-4 py-6 relative" ref={scrollRef}>
       <div className="max-w-3xl mx-auto space-y-6">
         {messages.map((msg) => (
           <ChatMessage
@@ -90,7 +141,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
             message={msg}
             isBookmarked={bookmarkedMessageIds.has(msg.id)}
             onToggleBookmark={handleToggleBookmark}
-            onSendMessage={onSendMessage}
+            {...(onSendMessage && { onSendMessage })}
           />
         ))}
 
@@ -145,6 +196,17 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
 
         <div ref={bottomRef} />
       </div>
+
+      {/* Scroll to bottom button - shown when user has scrolled up */}
+      {userHasScrolled && !isAtBottom && (
+        <button
+          onClick={scrollToBottom}
+          className="absolute bottom-4 right-4 bg-blue-500 hover:bg-blue-600 text-white rounded-full p-3 shadow-lg transition-all duration-200 hover:scale-105"
+          aria-label="Scroll to bottom"
+        >
+          <ArrowDown className="w-5 h-5" />
+        </button>
+      )}
     </ScrollArea>
   )
 }

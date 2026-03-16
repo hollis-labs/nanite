@@ -11,9 +11,9 @@ require (
 	modernc.org/sqlite v1.46.1
 )
 
-replace github.com/hollis-labs/otel => ../tiamat-otel
+replace github.com/hollis-labs/otel => ../../otel
 
-replace github.com/hollis-labs/tool-broker => ../tiamat-tool-broker
+replace github.com/hollis-labs/tool-broker => ../../tiamat-tool-broker
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

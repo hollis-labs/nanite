@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
 	tiamatotel "github.com/hollis-labs/otel"
+	"github.com/joho/godotenv"
 
 	"github.com/hollis-labs/conduit/internal/config"
 
@@ -72,7 +72,7 @@ func cmdServe(args []string) {
 	workflowDir := fs.String("workflows", "./workflows", "Directory containing workflow YAML files")
 	fs.Parse(args)
 
-	// Initialise OpenTelemetry tracing (tiamat-otel).
+	// Initialise OpenTelemetry tracing (otel).
 	otelCtx := context.Background()
 	otelShutdown, otelErr := tiamatotel.Init(otelCtx, tiamatotel.WithServiceName("conduit"))
 	if otelErr != nil {

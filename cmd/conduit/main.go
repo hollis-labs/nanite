@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	tiamatotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/otel"
 	"github.com/joho/godotenv"
 
 	"github.com/hollis-labs/conduit/internal/config"
@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/chat"
 	"github.com/hollis-labs/conduit/internal/filter"
 	"github.com/hollis-labs/conduit/internal/mcp"
+	"github.com/hollis-labs/conduit/internal/plugin"
 	"github.com/hollis-labs/conduit/internal/provider"
 	"github.com/hollis-labs/conduit/internal/server"
 	"github.com/hollis-labs/conduit/internal/store"
@@ -74,7 +75,7 @@ func cmdServe(args []string) {
 
 	// Initialise OpenTelemetry tracing (otel).
 	otelCtx := context.Background()
-	otelShutdown, otelErr := tiamatotel.Init(otelCtx, tiamatotel.WithServiceName("conduit"))
+	otelShutdown, otelErr := feotel.Init(otelCtx, feotel.WithServiceName("conduit"))
 	if otelErr != nil {
 		log.Printf("warning: OTel init failed: %v", otelErr)
 	} else {
@@ -254,8 +255,19 @@ func cmdServe(args []string) {
 	a.WorkflowLoader = wfLoader
 	a.WorkflowEngine = wfEngine
 
+	// Create plugin host.
+	logger := plugin.NewLogger("conduit-plugin")
+	pluginHost := plugin.NewHost(nil, logger)
+
+	// Register core services for plugin access
+	pluginHost.RegisterService("store", s)
+	pluginHost.RegisterService("engine", engine)
+	pluginHost.RegisterService("mcp", mcpManager)
+	pluginHost.RegisterService("toolclient", tb)
+	log.Println("plugin host initialized")
+
 	// Start HTTP server.
-	srv := server.New(s, a, *port, *dev)
+	srv := server.New(s, a, *port, *dev, pluginHost)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
 	}

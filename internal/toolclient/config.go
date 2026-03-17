@@ -14,7 +14,7 @@ const DefaultContextWindowTokens = 200000
 
 // Config holds tool broker configuration.
 type Config struct {
-	// Rules are the base rules (from tiamat-tool-broker defaults or custom YAML).
+	// Rules are the base rules (from tool-broker lib defaults or custom YAML).
 	Rules []broker.Rule
 
 	// WorkspaceOverrides maps workspace ID to additional rules.
@@ -32,7 +32,7 @@ type Config struct {
 	ContextWindowTokens int
 }
 
-// DefaultConfig returns a Config using the default rules from tiamat-tool-broker.
+// DefaultConfig returns a Config using the default rules from tool-broker lib.
 func DefaultConfig() *Config {
 	return &Config{
 		Rules:               broker.DefaultRules(),

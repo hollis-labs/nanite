@@ -208,3 +208,17 @@ func (o *Ollama) Complete(ctx context.Context, systemPrompt string, messages []C
 
 	return strings.TrimSpace(result.Message.Content), nil
 }
+
+// Capabilities returns the capabilities supported by the Ollama provider.
+func (o *Ollama) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{
+		SupportsStreamJSON:          true,  // Ollama supports streaming responses
+		SupportsPreToolHooks:        false, // No direct pre-tool hook support
+		SupportsPostToolHooks:       false, // No direct post-tool hook support
+		SupportsSystemPromptCaching: false, // No prompt caching support in current implementation
+		SupportsToolCalling:         false, // Tool calling not implemented (StreamChatWithTools ignores tools)
+		SupportsBatch:               false, // No batch API support in current implementation
+		SupportsImageInput:          false, // Most Ollama models don't support image inputs (depends on model)
+		MaxTokens:                   0,     // Variable depending on specific model loaded in Ollama
+	}
+}

@@ -239,3 +239,17 @@ func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []C
 	}
 	return "", nil
 }
+
+// Capabilities returns the capabilities supported by the OpenAI provider.
+func (o *OpenAI) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{
+		SupportsStreamJSON:          true,  // OpenAI supports streaming responses
+		SupportsPreToolHooks:        false, // No direct pre-tool hook support
+		SupportsPostToolHooks:       false, // No direct post-tool hook support
+		SupportsSystemPromptCaching: false, // No prompt caching support in current implementation
+		SupportsToolCalling:         false, // Tool calling not implemented (StreamChatWithTools ignores tools)
+		SupportsBatch:               false, // No batch API support in current implementation
+		SupportsImageInput:          true,  // GPT-4o and GPT-4 Turbo support image inputs
+		MaxTokens:                   128000, // GPT-4o supports up to 128k tokens
+	}
+}

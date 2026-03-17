@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	tiamatotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/conduit/internal/contextbroker"
@@ -50,7 +50,7 @@ func NewContextClient(s *store.Store) *ContextClient {
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
 func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
-	_, span := tiamatotel.StartSpan(ctx, "conduit.broker.assembleContext")
+	_, span := feotel.StartSpan(ctx, "conduit.broker.assembleContext")
 	defer span.End()
 
 	span.SetAttributes(

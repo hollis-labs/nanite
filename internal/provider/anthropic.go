@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	tiamatotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -271,7 +271,7 @@ func (a *Anthropic) StreamChatWithTools(ctx context.Context, systemPrompt string
 
 // streamChatInternal is the shared implementation for StreamChat and StreamChatWithTools.
 func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	ctx, span := tiamatotel.StartSpan(ctx, "conduit.provider.anthropic.stream")
+	ctx, span := feotel.StartSpan(ctx, "conduit.provider.anthropic.stream")
 	span.SetAttributes(
 		attribute.String("conduit.provider", "anthropic"),
 		attribute.String("conduit.model", model),
@@ -659,7 +659,7 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 
 // Complete makes a non-streaming completion call.
 func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
-	ctx, span := tiamatotel.StartSpan(ctx, "conduit.provider.anthropic.complete")
+	ctx, span := feotel.StartSpan(ctx, "conduit.provider.anthropic.complete")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("conduit.provider", "anthropic"),
@@ -751,4 +751,18 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 		}
 	}
 	return "", nil
+}
+
+// Capabilities returns the capabilities supported by the Anthropic provider.
+func (a *Anthropic) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{
+		SupportsStreamJSON:          true,  // Anthropic supports streaming with tool use
+		SupportsPreToolHooks:        false, // No direct pre-tool hook support
+		SupportsPostToolHooks:       false, // No direct post-tool hook support
+		SupportsSystemPromptCaching: true,  // Anthropic supports prompt caching
+		SupportsToolCalling:         true,  // Anthropic supports function calling
+		SupportsBatch:               false, // No batch API support in current implementation
+		SupportsImageInput:          true,  // Anthropic supports image inputs
+		MaxTokens:                   200000, // Claude 3.5 Sonnet supports up to 200k tokens
+	}
 }

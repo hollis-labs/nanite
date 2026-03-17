@@ -27,7 +27,7 @@ func (s *Store) Seed() error {
 	for _, w := range []struct {
 		id, name, desc string
 	}{
-		{"tiamat", "Project Tiamat", "AI-augmented software development portfolio"},
+		{"fragments-engine", "Fragments Engine", "AI-augmented software development portfolio"},
 		{"personal", "Personal", "Personal planning and goals"},
 	} {
 		if _, err := tx.Exec(
@@ -234,7 +234,7 @@ func (s *Store) SeedAgentSkillBindings() error {
 		ptBySlug[pt.Slug] = pt.ID
 	}
 
-	// Mentat: all Tiamat skills (general + encoding), can_execute=false
+	// Mentat: all Fragments Engine skills (general + encoding), can_execute=false
 	mentatSkills := []string{"math-evaluate", "encoding-convert"}
 	for _, slug := range mentatSkills {
 		if id, ok := skillBySlug[slug]; ok {

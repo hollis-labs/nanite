@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	tiamatotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
@@ -95,7 +95,7 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 
 // DiscoverTools queries all registered servers for their tools.
 func (m *Manager) DiscoverTools(ctx context.Context) error {
-	ctx, span := tiamatotel.StartSpan(ctx, "conduit.mcp.discoverTools")
+	ctx, span := feotel.StartSpan(ctx, "conduit.mcp.discoverTools")
 	defer span.End()
 
 	m.mu.Lock()
@@ -204,7 +204,7 @@ func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
 // ExecuteTool routes a tool call to the correct server and returns the result as text.
 // Tool names are expected in the format "mcp__<server>__<tool_name>".
 func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string]any) (string, error) {
-	ctx, span := tiamatotel.ToolCallSpan(ctx, name)
+	ctx, span := feotel.ToolCallSpan(ctx, name)
 	defer span.End()
 
 	serverName, toolName, err := parsePrefixedToolName(name)

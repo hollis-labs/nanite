@@ -2,6 +2,26 @@ package provider
 
 import "context"
 
+// ProviderCapabilities describes the capabilities supported by a provider.
+type ProviderCapabilities struct {
+	// SupportsStreamJSON indicates if the provider supports streaming responses with JSON tools
+	SupportsStreamJSON bool
+	// SupportsPreToolHooks indicates if the provider supports pre-tool execution hooks
+	SupportsPreToolHooks bool
+	// SupportsPostToolHooks indicates if the provider supports post-tool execution hooks
+	SupportsPostToolHooks bool
+	// SupportsSystemPromptCaching indicates if the provider supports system prompt caching
+	SupportsSystemPromptCaching bool
+	// SupportsToolCalling indicates if the provider supports tool/function calling
+	SupportsToolCalling bool
+	// SupportsBatch indicates if the provider supports batch processing
+	SupportsBatch bool
+	// SupportsImageInput indicates if the provider supports image inputs
+	SupportsImageInput bool
+	// MaxTokens indicates the maximum token limit for this provider (0 means no limit specified)
+	MaxTokens int
+}
+
 // ToolDefinition describes a tool available to the LLM.
 type ToolDefinition struct {
 	Name        string         `json:"name"`
@@ -62,4 +82,6 @@ type Provider interface {
 	StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error)
 	// Complete makes a simple non-streaming completion call.
 	Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error)
+	// Capabilities returns the capabilities supported by this provider.
+	Capabilities() ProviderCapabilities
 }

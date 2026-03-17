@@ -60,8 +60,8 @@ func TestAssembleSystemPrompt(t *testing.T) {
 			name:      "agent with workspace",
 			agent:     &store.AgentProfile{SystemPrompt: "Base prompt."},
 			mode:      nil,
-			workspace: &store.Workspace{Name: "Tiamat", Description: "AI portfolio"},
-			wantSub:   "Workspace: Tiamat - AI portfolio",
+			workspace: &store.Workspace{Name: "Fragments Engine", Description: "AI portfolio"},
+			wantSub:   "Workspace: Fragments Engine - AI portfolio",
 		},
 		{
 			name:      "all components",

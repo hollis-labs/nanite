@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	tiamatotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
@@ -141,7 +141,7 @@ func (e *Engine) GetStream(messageID string) (<-chan StreamEvent, bool) {
 
 // generateResponse loads context, calls the provider, streams events, and saves the result.
 func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan StreamEvent) {
-	ctx, span := tiamatotel.StartSpan(ctx, "conduit.generateResponse")
+	ctx, span := feotel.StartSpan(ctx, "conduit.generateResponse")
 	span.SetAttributes(
 		attribute.String("conduit.session.id", sessionID),
 		attribute.String("conduit.message.id", assistantMsgID),
@@ -301,7 +301,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 
 		// Call provider with or without tools.
-		provCtx, provSpan := tiamatotel.StartSpan(ctx, "conduit.provider.call")
+		provCtx, provSpan := feotel.StartSpan(ctx, "conduit.provider.call")
 		provSpan.SetAttributes(
 			attribute.String("conduit.model", model),
 			attribute.Int("conduit.iteration", iteration),
@@ -521,7 +521,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			}
 
 			var resultText string
-			toolCtx, toolSpan := tiamatotel.ToolCallSpan(ctx, tu.Name)
+			toolCtx, toolSpan := feotel.ToolCallSpan(ctx, tu.Name)
 			if e.ToolClient != nil {
 				// Use ToolClient for permission-checked execution.
 				result, execErr := e.ToolClient.CallTool(toolCtx, agentID, tu.Name, tu.Input)
@@ -754,7 +754,7 @@ func (e *Engine) SendAgentMessage(fromSessionID, toSessionID, content string) (s
 
 // autoTitle generates a title for a session from the first user message.
 func (e *Engine) autoTitle(sessionID, userContent, model string) {
-	ctx, span := tiamatotel.StartSpan(context.Background(), "conduit.autoTitle")
+	ctx, span := feotel.StartSpan(context.Background(), "conduit.autoTitle")
 	span.SetAttributes(attribute.String("conduit.session.id", sessionID))
 	defer span.End()
 	_ = ctx

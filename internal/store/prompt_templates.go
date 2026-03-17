@@ -286,7 +286,7 @@ Use these tools when appropriate to accomplish tasks. Each skill provides specif
 // It is injected for EVERY agent at priority 5 (before all other templates)
 // and is NOT assigned per-agent — the composition layer adds it automatically.
 // This is the "Mentat identity" layer: it defines WHO Mentat is and HOW it
-// operates within the Tiamat ecosystem. Mentat doesn't discover what to do —
+// operates within the Fragments Engine ecosystem. Mentat doesn't discover what to do —
 // it was born knowing. Tool discovery is for syntax, not purpose.
 var PlatformPromptTemplate = PromptTemplate{
 	Name:     "Platform Capabilities",

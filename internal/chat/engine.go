@@ -525,12 +525,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			}
 
 			var resultText string
+			var toolIsError bool
 			toolCtx, toolSpan := feotel.ToolCallSpan(ctx, tu.Name)
 			if e.ToolClient != nil {
 				// Use ToolClient for permission-checked execution.
 				result, execErr := e.ToolClient.CallTool(toolCtx, agentID, tu.Name, tu.Input)
 				if execErr != nil {
 					resultText = fmt.Sprintf("Error: %v", execErr)
+					toolIsError = true
 					toolSpan.RecordError(execErr)
 					toolSpan.SetStatus(codes.Error, execErr.Error())
 					log.Printf("chat: tool %s failed: %v", tu.Name, execErr)
@@ -565,6 +567,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				result, execErr := e.MCPManager.ExecuteTool(toolCtx, tu.Name, tu.Input)
 				if execErr != nil {
 					resultText = fmt.Sprintf("Error: %v", execErr)
+					toolIsError = true
 					toolSpan.RecordError(execErr)
 					toolSpan.SetStatus(codes.Error, execErr.Error())
 					log.Printf("chat: tool %s failed: %v", tu.Name, execErr)
@@ -584,6 +587,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				}
 			} else {
 				resultText = "Error: no tool client or MCP manager configured"
+				toolIsError = true
 				toolSpan.SetStatus(codes.Error, "no tool client or MCP manager configured")
 			}
 			toolSpan.End()
@@ -643,6 +647,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				Type:      "tool_result",
 				ToolUseID: tu.ID,
 				Content:   tr.Content,
+				IsError:   toolIsError,
 			})
 		}
 

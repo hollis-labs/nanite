@@ -218,6 +218,9 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 					if b.Content != "" {
 						block["content"] = b.Content
 					}
+					if b.IsError {
+						block["is_error"] = true
+					}
 					if j == len(m.ContentBlocks)-1 {
 						block["cache_control"] = map[string]string{"type": "ephemeral"}
 					}

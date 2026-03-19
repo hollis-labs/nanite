@@ -47,6 +47,7 @@ type ContentBlock struct {
 	Input     *map[string]any `json:"input,omitempty"`         // tool_use input (always set for tool_use blocks)
 	ToolUseID string          `json:"tool_use_id,omitempty"`   // tool_result reference
 	Content   string          `json:"content,omitempty"`       // tool_result text
+	IsError   bool            `json:"is_error,omitempty"`      // tool_result error flag (Anthropic API)
 }
 
 // StreamEvent represents a single event from a streaming provider response.

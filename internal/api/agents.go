@@ -196,14 +196,17 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine mode: use role as mode if provided, otherwise "default".
-	mode := req.Role
-	if mode == "" {
-		mode = "default"
+	isPrimary := req.Role == "primary"
+	mode := "default"
+
+	// If setting a new primary, demote the current primary first.
+	if isPrimary {
+		if cur, err := a.Store.GetSessionPrimaryAgent(sessionID); err == nil {
+			_ = a.Store.EnsureSessionAgent(sessionID, cur.AgentID, cur.Mode, false)
+		}
 	}
 
-	// Add as non-primary (primary is already set on session creation).
-	if err := a.Store.EnsureSessionAgent(sessionID, req.AgentID, mode, false); err != nil {
+	if err := a.Store.EnsureSessionAgent(sessionID, req.AgentID, mode, isPrimary); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

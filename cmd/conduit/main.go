@@ -23,6 +23,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/filter"
 	"github.com/hollis-labs/conduit/internal/mcp"
 	"github.com/hollis-labs/conduit/internal/plugin"
+	"github.com/hollis-labs/conduit/plugins/support"
 	"github.com/hollis-labs/conduit/internal/provider"
 	"github.com/hollis-labs/conduit/internal/server"
 	"github.com/hollis-labs/conduit/internal/store"
@@ -266,8 +267,26 @@ func cmdServe(args []string) {
 	pluginHost.RegisterService("toolclient", tb)
 	log.Println("plugin host initialized")
 
-	// Start HTTP server.
+	// Start HTTP server — this sets the router on the plugin host.
 	srv := server.New(s, a, *port, *dev, pluginHost)
+
+	// Load plugins AFTER the server sets the router (plugins register HTTP routes).
+	supportPlugin := support.New()
+	if err := pluginHost.LoadPlugin(supportPlugin); err != nil {
+		log.Printf("WARNING: failed to load support plugin: %v", err)
+	} else {
+		log.Println("support plugin loaded")
+	}
+
+	// Re-discover tools after plugins — plugins may register new MCP servers
+	// (e.g., support-kb) that weren't present during initial auto-discovery.
+	postPluginDiff, err := mcpManager.AutoDiscover(context.Background(), s)
+	if err != nil {
+		log.Printf("WARNING: post-plugin MCP discovery failed: %v", err)
+	} else if len(postPluginDiff.Added) > 0 {
+		log.Printf("post-plugin MCP discovery: %d new tools added: %v", len(postPluginDiff.Added), postPluginDiff.Added)
+	}
+
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
 	}

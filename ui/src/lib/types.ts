@@ -246,6 +246,7 @@ export interface Envelope {
   questions?: Question[]
   approval?: ApprovalRequest
   status?: { phase: string; progress: number }
+  data?: Record<string, unknown>
 }
 
 export interface Proposal {

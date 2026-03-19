@@ -52,6 +52,17 @@ func (m *Manager) AddServer(name string, transport MCPTransport) {
 	log.Printf("mcp: added server %q", name)
 }
 
+// DiscoverServerTools returns tools from a specific named server without affecting the global tool list.
+func (m *Manager) DiscoverServerTools(ctx context.Context, serverName string) ([]Tool, error) {
+	m.mu.RLock()
+	transport, ok := m.servers[serverName]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("server %q not found", serverName)
+	}
+	return transport.ListTools(ctx)
+}
+
 // RemoveServer unregisters an MCP server, closing its transport if possible.
 func (m *Manager) RemoveServer(name string) {
 	m.mu.Lock()

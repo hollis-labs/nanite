@@ -91,6 +91,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
         if (env.questions) merged.questions = [...(merged.questions ?? []), ...env.questions]
         if (env.approval && !merged.approval) merged.approval = env.approval
         if (env.status && !merged.status) merged.status = env.status
+        if (env.data && !merged.data) { merged.data = env.data; merged.type = env.type }
       }
       return merged
     }

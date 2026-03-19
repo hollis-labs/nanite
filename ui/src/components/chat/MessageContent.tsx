@@ -210,14 +210,18 @@ export function MessageContent({ content, role }: { content: string; role: 'user
   // Strip envelope blocks from content so they don't render as raw JSON
   // (during streaming, envelopes haven't been extracted yet).
   const displayContent = useMemo(() =>
-    content.replace(/```(?:volon-envelope|conduit-envelope)\s*\n[\s\S]*?```/g, '').trim(),
+    content
+      .replace(/```(?:volon-envelope|conduit-envelope)\s*\n[\s\S]*?```/g, '')
+      .replace(/<!--TICKET_DATA:[\s\S]*?:TICKET_DATA-->/g, '')
+      .replace(/<!--ENVELOPE_DATA:[\s\S]*?:ENVELOPE_DATA-->/g, '')
+      .trim(),
     [content]
   )
 
   if (role === 'user') {
     return (
       <div className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap">
-        {content}
+        {displayContent}
       </div>
     )
   }

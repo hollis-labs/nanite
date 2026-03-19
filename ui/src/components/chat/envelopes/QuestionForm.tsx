@@ -2,6 +2,16 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import type { Question } from '@/lib/types'
 
+// Options can be strings or {value, label} objects — normalize to {value, label}.
+function normalizeOption(opt: unknown): { value: string; label: string } {
+  if (typeof opt === 'string') return { value: opt, label: opt }
+  if (opt && typeof opt === 'object' && 'value' in opt) {
+    const o = opt as { value: string; label?: string }
+    return { value: o.value, label: o.label || o.value }
+  }
+  return { value: String(opt), label: String(opt) }
+}
+
 interface QuestionFormProps {
   questions: Question[]
   onSubmit?: (formatted: string) => void
@@ -75,53 +85,58 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
               className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500"
             >
               <option value="">Select...</option>
-              {q.options.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
+              {q.options.map((raw) => {
+                const opt = normalizeOption(raw)
+                return <option key={opt.value} value={opt.value}>{opt.label}</option>
+              })}
             </select>
           )}
 
           {q.type === 'radio' && q.options && (
             <div className="space-y-1.5">
-              {q.options.map((opt) => (
-                <label key={opt} className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-                  <input
-                    type="radio"
-                    name={`question-${i}`}
-                    value={opt}
-                    checked={answers[i] === opt}
-                    onChange={() => setAnswers((a) => ({ ...a, [i]: opt }))}
-                    className="accent-indigo-500"
-                  />
-                  {opt}
-                </label>
-              ))}
+              {q.options.map((raw) => {
+                const opt = normalizeOption(raw)
+                return (
+                  <label key={opt.value} className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+                    <input
+                      type="radio"
+                      name={`question-${i}`}
+                      value={opt.value}
+                      checked={answers[i] === opt.value}
+                      onChange={() => setAnswers((a) => ({ ...a, [i]: opt.value }))}
+                      className="accent-indigo-500"
+                    />
+                    {opt.label}
+                  </label>
+                )
+              })}
             </div>
           )}
 
           {q.type === 'checkbox' && q.options && (
             <div className="space-y-1.5">
-              {q.options.map((opt) => {
+              {q.options.map((raw) => {
+                const opt = normalizeOption(raw)
                 const selected = Array.isArray(answers[i]) ? answers[i] as string[] : []
                 return (
-                  <label key={opt} className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+                  <label key={opt.value} className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
                     <input
                       type="checkbox"
-                      value={opt}
-                      checked={selected.includes(opt)}
+                      value={opt.value}
+                      checked={selected.includes(opt.value)}
                       onChange={(e) => {
                         setAnswers((a) => {
                           const current = Array.isArray(a[i]) ? [...(a[i] as string[])] : []
                           if (e.target.checked) {
-                            return { ...a, [i]: [...current, opt] }
+                            return { ...a, [i]: [...current, opt.value] }
                           } else {
-                            return { ...a, [i]: current.filter((v) => v !== opt) }
+                            return { ...a, [i]: current.filter((v) => v !== opt.value) }
                           }
                         })
                       }}
                       className="accent-indigo-500"
                     />
-                    {opt}
+                    {opt.label}
                   </label>
                 )
               })}

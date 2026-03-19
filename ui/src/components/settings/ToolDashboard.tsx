@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   RefreshCw,
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
+import { useAppStore } from '@/stores/useAppStore'
 import type { ToolDefinition, DiscoveryDiff, ToolSelection, ServerInfo, MCPServerConfig } from '@/lib/types'
 
 // --- Server Form Types ---
@@ -105,6 +106,10 @@ export function ToolDashboard({}: ToolDashboardProps) {
   // Delete confirmation state
   const [deletingServer, setDeletingServer] = useState<string | null>(null)
 
+  // Session tracking for auto-refresh
+  const { activeSessionId } = useAppStore()
+  const previousSessionId = useRef<string | null>(null)
+
   const queryClient = useQueryClient()
 
   // Data queries
@@ -177,6 +182,24 @@ export function ToolDashboard({}: ToolDashboardProps) {
   const intentTestMutation = useMutation<ToolSelection[], Error, string>({
     mutationFn: api.selectTools,
   })
+
+  // Auto-refresh tools when session changes
+  useEffect(() => {
+    // Skip refresh on initial mount or if no session is active
+    if (previousSessionId.current === null) {
+      previousSessionId.current = activeSessionId
+      return
+    }
+
+    // Only refresh if the session actually changed
+    if (previousSessionId.current !== activeSessionId && activeSessionId !== null) {
+      refreshMutation.mutate()
+      previousSessionId.current = activeSessionId
+    } else {
+      // Update the ref even if no refresh needed
+      previousSessionId.current = activeSessionId
+    }
+  }, [activeSessionId, refreshMutation])
 
   // Event handlers
   const toggleServer = (serverName: string) => {

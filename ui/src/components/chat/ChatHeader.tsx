@@ -1,13 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
-import { AGENT_MODES, type AgentMode } from '@/lib/types'
+import type { AgentMode } from '@/lib/types'
 import { AgentRoster } from './AgentRoster'
 import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 
@@ -25,14 +25,14 @@ export function ChatHeader() {
   const rightOpen = useLayoutStore((s) => s.rightRailOpen)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeMode = useChatStore((s) => s.activeMode)
-  const setActiveMode = useChatStore((s) => s.setActiveMode)
+  const queryClient = useQueryClient()
 
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
-  const [modeDropdownOpen, setModeDropdownOpen] = useState(false)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
   const [rosterOpen, setRosterOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const modeDropdownRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   const { data: session } = useQuery({
     queryKey: ['session', activeSessionId],
@@ -46,9 +46,37 @@ export function ChatHeader() {
     enabled: !!activeSessionId,
   })
 
+  const { data: allAgents = [] } = useQuery({
+    queryKey: ['agents'],
+    queryFn: api.listAgents,
+  })
+
+  // Find the primary agent for this session
+  const primaryAgent = sessionAgents.find((a) => (a as any).is_primary === true || (a as any).is_primary === 1 || a.role === 'primary')
+  const primaryAgentProfile = allAgents.find((a) => a.id === primaryAgent?.agent_id)
+  const activeAgentName = primaryAgentProfile?.name || 'Conduit'
+
   const agentCount = sessionAgents.length
   const title = session?.custom_name || session?.title || 'New Chat'
   const shortCode = session?.short_code
+
+  // Switch primary agent for this session
+  const switchAgentMutation = useMutation({
+    mutationFn: async (agentId: string) => {
+      if (!activeSessionId) return
+      // Remove current primary if exists
+      if (primaryAgent) {
+        try {
+          await api.removeSessionAgent(activeSessionId, primaryAgent.agent_id)
+        } catch { /* ignore if not found */ }
+      }
+      // Add new agent as primary
+      return api.addSessionAgent(activeSessionId, agentId, 'primary')
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['session-agents', activeSessionId] })
+    },
+  })
 
   const handleDoubleClick = useCallback(() => {
     setEditValue(title)
@@ -62,18 +90,17 @@ export function ChatHeader() {
     }
   }, [isEditing])
 
-  // Close mode dropdown on outside click
+  // Close dropdown on outside click
   useEffect(() => {
+    if (!dropdownOpen) return
     function handleClickOutside(e: MouseEvent) {
-      if (modeDropdownRef.current && !modeDropdownRef.current.contains(e.target as Node)) {
-        setModeDropdownOpen(false)
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false)
       }
     }
-    if (modeDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [modeDropdownOpen])
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [dropdownOpen])
 
   const handleSave = useCallback(async () => {
     if (!activeSessionId) return
@@ -97,17 +124,26 @@ export function ChatHeader() {
     }
   }, [handleSave])
 
-  const handleModeSelect = useCallback(async (mode: AgentMode) => {
-    setActiveMode(mode)
-    setModeDropdownOpen(false)
-    if (activeSessionId) {
-      try {
-        await api.switchMode(activeSessionId, mode)
-      } catch (err) {
-        console.error('Failed to switch mode:', err)
-      }
-    }
-  }, [activeSessionId, setActiveMode])
+  const handleAgentSelect = useCallback((agentId: string) => {
+    switchAgentMutation.mutate(agentId)
+    setDropdownOpen(false)
+    // Persist preference so new sessions use this agent
+    try { localStorage.setItem('conduit-preferred-agent', agentId) } catch { /* ignore */ }
+  }, [switchAgentMutation])
+
+  // Auto-apply preferred agent to new sessions that still have the default
+  useEffect(() => {
+    if (!activeSessionId || !allAgents.length || switchAgentMutation.isPending) return
+    const preferred = localStorage.getItem('conduit-preferred-agent')
+    if (!preferred) return
+    // Only auto-switch if the current primary is the default (mentat) and the user has a preference
+    const current = primaryAgent?.agent_id
+    if (current && current !== 'mentat-001') return // user already has a non-default agent
+    if (current === preferred) return // already set
+    // Verify the preferred agent still exists
+    if (!allAgents.some((a) => a.id === preferred)) return
+    switchAgentMutation.mutate(preferred)
+  }, [activeSessionId, primaryAgent?.agent_id, allAgents, switchAgentMutation])
 
   const modeStyle = MODE_BADGE_STYLES[activeMode]
 
@@ -143,41 +179,41 @@ export function ChatHeader() {
             </div>
           )}
 
-          {/* Mode badge + dropdown */}
-          <div className="relative" ref={modeDropdownRef}>
+          {/* Agent + Mode badge + dropdown */}
+          <div className="relative" ref={dropdownRef}>
             <button
-              onClick={() => setModeDropdownOpen((o) => !o)}
+              onClick={() => setDropdownOpen((o) => !o)}
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${modeStyle.bg} border ${modeStyle.border} transition-colors hover:brightness-125`}
             >
               <Bot className={`w-3 h-3 ${modeStyle.text}`} />
               <span className={`text-xs ${modeStyle.text}`}>
-                Conduit{activeMode !== 'default' ? ` \u00B7 ${activeMode}` : ''}
+                {activeAgentName}
               </span>
               <ChevronDown className={`w-3 h-3 ${modeStyle.text}`} />
             </button>
 
-            {modeDropdownOpen && (
-              <div className="absolute top-full left-0 mt-1 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+            {dropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-52 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+                {/* Agent section */}
                 <div className="px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                  Agent Mode
+                  Agent
                 </div>
-                {AGENT_MODES.map((mode) => {
-                  const style = MODE_BADGE_STYLES[mode]
-                  return (
-                    <button
-                      key={mode}
-                      onClick={() => void handleModeSelect(mode)}
-                      className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
-                        mode === activeMode
-                          ? 'bg-zinc-800 text-zinc-100'
-                          : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full ${style.bg.replace('/15', '')}`} />
-                      <span className="capitalize">{mode}</span>
-                    </button>
-                  )
-                })}
+                {allAgents.map((agent) => (
+                  <button
+                    key={agent.id}
+                    onClick={() => handleAgentSelect(agent.id)}
+                    disabled={switchAgentMutation.isPending}
+                    className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
+                      primaryAgent?.agent_id === agent.id
+                        ? 'bg-zinc-800 text-zinc-100'
+                        : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                    }`}
+                  >
+                    <Bot className="w-3 h-3 shrink-0" />
+                    <span className="truncate">{agent.name}</span>
+                  </button>
+                ))}
+
               </div>
             )}
           </div>

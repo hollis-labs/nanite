@@ -49,16 +49,13 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
     const { scrollTop, scrollHeight, clientHeight } = scrollElement
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight
 
-    // Use thresholds: >100px = pause auto-scroll, <50px = resume auto-scroll
+    // Use threshold: >100px = pause auto-scroll, <50px = resume auto-scroll
     if (distanceFromBottom > 100) {
       setIsAtBottom(false)
       setUserHasScrolled(true)
     } else if (distanceFromBottom < 50) {
       setIsAtBottom(true)
-      // Don't clear userHasScrolled immediately - let them get very close to bottom
-      if (distanceFromBottom < 10) {
-        setUserHasScrolled(false)
-      }
+      setUserHasScrolled(false)
     }
   }, [])
 

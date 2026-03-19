@@ -126,11 +126,14 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		defs = make([]provider.ToolDefinition, 0, len(tools))
 	}
 
-	// Append broker-selected MCP tools.
+	// Append broker-selected MCP tools, filtered by agent permissions.
 	for _, t := range tools {
 		name := t.Name
 		if t.Server != "" {
 			name = fmt.Sprintf("mcp__%s__%s", t.Server, t.Name)
+		}
+		if !tb.CheckPermission(agentID, name) {
+			continue
 		}
 		defs = append(defs, provider.ToolDefinition{
 			Name:        name,

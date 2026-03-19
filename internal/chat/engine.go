@@ -276,6 +276,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// blockedTools tracks tools that have been hard-blocked due to repeated identical results.
 	// Checked BEFORE execution to prevent the tool from running at all.
 	blockedTools := make(map[string]bool)
+	// pendingEnvelopes collects envelope JSON from KB tools to inject after the agent's response.
+	var pendingEnvelopes []string
 
 	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
@@ -283,7 +285,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	for iteration := 0; iteration < maxToolIterations; iteration++ {
 		// Enforce unified token budget before every provider call.
-		chatMessages, tools, breakdown, budgetErr := EnforceTokenBudget(systemPrompt, chatMessages, tools, 0)
+		var breakdown *TokenBreakdown
+		var budgetErr error
+		chatMessages, tools, breakdown, budgetErr = EnforceTokenBudget(systemPrompt, chatMessages, tools, 0)
 		if budgetErr != nil {
 			log.Printf("chat: token budget enforcement refused to send: %v", budgetErr)
 			if e.Activity != nil {
@@ -543,6 +547,18 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					if e.Activity != nil {
 						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, true, len(result))
 					}
+					// Capture KB search results for deterministic envelope injection.
+					// Full data (with body) is embedded in <!--ENVELOPE_DATA:...:ENVELOPE_DATA-->
+					if strings.HasSuffix(tu.Name, "__search_kb") {
+						if eStart := strings.Index(result, "<!--ENVELOPE_DATA:"); eStart >= 0 {
+							tail := result[eStart+len("<!--ENVELOPE_DATA:"):]
+							if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
+								if env := buildKBEnvelope(tail[:eEnd]); env != "" {
+									pendingEnvelopes = append(pendingEnvelopes, env)
+								}
+							}
+						}
+					}
 				}
 			} else if e.MCPManager != nil {
 				// Fallback to direct MCP Manager (no permission checks).
@@ -661,6 +677,28 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	responseContent := fullContent.String()
 	if e.OutputFilters != nil && e.OutputFilters.Len() > 0 {
 		responseContent = e.OutputFilters.Apply(responseContent)
+	}
+
+	// Inject pending KB envelopes — deterministic injection from tool results.
+	for _, env := range pendingEnvelopes {
+		envelopeBlock := "\n\n```conduit-envelope\n" + env + "\n```"
+		responseContent += envelopeBlock
+		ch <- StreamEvent{Type: "delta", Content: envelopeBlock}
+	}
+
+	// Inject ticket confirmation envelope if the user message contains ticket data.
+	// The frontend's TicketInitFlow embeds <!--TICKET_DATA:{...}:TICKET_DATA--> in the message.
+	if tStart := strings.Index(userContent, "<!--TICKET_DATA:"); tStart >= 0 {
+		tail := userContent[tStart+len("<!--TICKET_DATA:"):]
+		if tEnd := strings.Index(tail, ":TICKET_DATA-->"); tEnd >= 0 {
+			ticketJSON := tail[:tEnd]
+			env := buildTicketConfirmationEnvelope(ticketJSON)
+			if env != "" {
+				envelopeBlock := "\n\n```conduit-envelope\n" + env + "\n```"
+				responseContent += envelopeBlock
+				ch <- StreamEvent{Type: "delta", Content: envelopeBlock}
+			}
+		}
 	}
 
 	// Parse envelopes from the response content.
@@ -941,6 +979,40 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 			allTools = selected
 		}
 	}
+	// If no MCP tools were selected but the agent has configured MCP servers,
+	// fall back to direct discovery from those servers. This handles plugin-registered
+	// servers that the broker's intent matching doesn't know about.
+	mcpCount := 0
+	for _, t := range allTools {
+		if strings.HasPrefix(t.Name, "mcp__") {
+			mcpCount++
+		}
+	}
+	if mcpCount == 0 && e.MCPManager != nil && e.Store != nil {
+		agent, agentErr := e.Store.GetAgent(agentID)
+		if agentErr == nil {
+			var servers []string
+			json.Unmarshal([]byte(agent.MCPServers), &servers)
+			for _, srv := range servers {
+				srvTools, err := e.MCPManager.DiscoverServerTools(ctx, srv)
+				if err != nil {
+					continue
+				}
+				for _, t := range srvTools {
+					name := fmt.Sprintf("mcp__%s__%s", srv, t.Name)
+					allTools = append(allTools, provider.ToolDefinition{
+						Name:        name,
+						Description: t.Description,
+						InputSchema: t.InputSchema,
+					})
+				}
+			}
+			if len(allTools) > mcpCount {
+				log.Printf("chat: direct MCP discovery added %d tools for agent %s from configured servers", len(allTools)-mcpCount, agentID)
+			}
+		}
+	}
+
 	if len(allTools) == 0 {
 		log.Printf("chat: WARNING broker returned 0 tools for agent %s — proceeding without tools (LLM can still respond)", agentID)
 	} else {
@@ -948,10 +1020,18 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 	}
 
 	// Check if progressive discovery should be used.
-	if len(allTools) > ProgressiveDiscoveryThreshold && e.ToolClient != nil {
+	// Count only non-builtin (MCP) tools — builtins are always present and shouldn't
+	// trigger progressive discovery on their own.
+	mcpToolCount := 0
+	for _, t := range allTools {
+		if strings.HasPrefix(t.Name, "mcp__") {
+			mcpToolCount++
+		}
+	}
+	if mcpToolCount > ProgressiveDiscoveryThreshold && e.ToolClient != nil {
 		summaries := e.ToolClient.ListToolSummaries()
 		catalog := buildToolCatalog(summaries)
-		log.Printf("chat: progressive discovery active — %d tools in catalog, sending request_tools meta-tool", len(summaries))
+		log.Printf("chat: progressive discovery active — %d MCP tools (threshold %d), %d tools in catalog", mcpToolCount, ProgressiveDiscoveryThreshold, len(summaries))
 		return toolSelection{
 			Tools:       []provider.ToolDefinition{requestToolsDef},
 			Catalog:     catalog,

@@ -18,7 +18,7 @@ function makeChatError(
     id: `err-${Date.now()}-${errorCounter}`,
     code,
     message,
-    details,
+    details: details as Record<string, unknown>,
     timestamp: timestamp || new Date().toISOString(),
   }
 }
@@ -121,7 +121,7 @@ export function useChat(sessionId: string | null) {
         if (toolId) {
           updateToolCall(toolId, {
             status: data.error ? 'error' : 'done',
-            summary: data.summary || data.error,
+            summary: (data.summary ?? data.error ?? '') as string,
           })
         }
       })

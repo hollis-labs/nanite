@@ -54,7 +54,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
         ? Math.min(idx + 1, sessions.length - 1)
         : Math.max(idx - 1, 0)
       if (newIdx !== idx) {
-        setActiveSession(sessions[newIdx].id)
+        setActiveSession(sessions[newIdx]!.id)
       }
     },
     [activeSessionId, sessions, setActiveSession]

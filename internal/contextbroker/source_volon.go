@@ -8,26 +8,26 @@ import (
 	"strings"
 )
 
-// VolonSource retrieves context from Volon via MCP tools.
+// VolonSource retrieves context from Engine via MCP tools.
 // It fetches current task/sprint/epic state for the active project.
 type VolonSource struct {
 	MCP        MCPCaller
-	ServerName string // MCP server name (default: "volon")
+	ServerName string // MCP server name (default: "engine")
 }
 
 // NewVolonSource creates a VolonSource with the given MCP caller.
 func NewVolonSource(mcp MCPCaller) *VolonSource {
 	return &VolonSource{
 		MCP:        mcp,
-		ServerName: "volon",
+		ServerName: "engine",
 	}
 }
 
-func (s *VolonSource) Name() string { return "volon" }
+func (s *VolonSource) Name() string { return "engine" }
 
 func (s *VolonSource) Fetch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error) {
 	if s.MCP == nil {
-		return nil, fmt.Errorf("volon source: no MCP caller configured")
+		return nil, fmt.Errorf("engine source: no MCP caller configured")
 	}
 
 	var items []ContextItem
@@ -37,7 +37,7 @@ func (s *VolonSource) Fetch(ctx context.Context, intent Intent, budget int) ([]C
 	if intent.Scope != "" {
 		taskItems, err := s.fetchTasks(ctx, intent.Scope, budget-usedTokens)
 		if err != nil {
-			log.Printf("contextbroker/volon: tasks fetch failed: %v", err)
+			log.Printf("contextbroker/engine: tasks fetch failed: %v", err)
 		} else {
 			for _, item := range taskItems {
 				if usedTokens+item.TokenEstimate > budget {
@@ -53,7 +53,7 @@ func (s *VolonSource) Fetch(ctx context.Context, intent Intent, budget int) ([]C
 	if intent.Scope != "" && usedTokens < budget {
 		sprintItems, err := s.fetchSprints(ctx, intent.Scope, budget-usedTokens)
 		if err != nil {
-			log.Printf("contextbroker/volon: sprints fetch failed: %v", err)
+			log.Printf("contextbroker/engine: sprints fetch failed: %v", err)
 		} else {
 			for _, item := range sprintItems {
 				if usedTokens+item.TokenEstimate > budget {
@@ -68,9 +68,9 @@ func (s *VolonSource) Fetch(ctx context.Context, intent Intent, budget int) ([]C
 	return items, nil
 }
 
-// fetchTasks retrieves tasks from Volon for a project.
+// fetchTasks retrieves tasks from Engine for a project.
 func (s *VolonSource) fetchTasks(ctx context.Context, projectID string, budget int) ([]ContextItem, error) {
-	toolName := fmt.Sprintf("mcp__%s__volon_tasks_list", s.ServerName)
+	toolName := fmt.Sprintf("mcp__%s__engine_tasks_list", s.ServerName)
 	input := map[string]any{
 		"project_id": projectID,
 		"status":     "doing",
@@ -78,28 +78,28 @@ func (s *VolonSource) fetchTasks(ctx context.Context, projectID string, budget i
 
 	result, err := s.MCP.ExecuteTool(ctx, toolName, input)
 	if err != nil {
-		return nil, fmt.Errorf("volon_tasks_list: %w", err)
+		return nil, fmt.Errorf("engine_tasks_list: %w", err)
 	}
 
 	return s.parseTasks(result, budget, 0.8)
 }
 
-// fetchSprints retrieves active sprints from Volon.
+// fetchSprints retrieves active sprints from Engine.
 func (s *VolonSource) fetchSprints(ctx context.Context, projectID string, budget int) ([]ContextItem, error) {
-	toolName := fmt.Sprintf("mcp__%s__volon_sprints_list", s.ServerName)
+	toolName := fmt.Sprintf("mcp__%s__engine_sprints_list", s.ServerName)
 	input := map[string]any{
 		"project_id": projectID,
 	}
 
 	result, err := s.MCP.ExecuteTool(ctx, toolName, input)
 	if err != nil {
-		return nil, fmt.Errorf("volon_sprints_list: %w", err)
+		return nil, fmt.Errorf("engine_sprints_list: %w", err)
 	}
 
 	return s.parseSprints(result, budget)
 }
 
-// parseTasks converts Volon task list response into ContextItems.
+// parseTasks converts Engine task list response into ContextItems.
 func (s *VolonSource) parseTasks(raw string, budget int, baseRelevance float64) ([]ContextItem, error) {
 	var response struct {
 		Tasks []struct {
@@ -119,7 +119,7 @@ func (s *VolonSource) parseTasks(raw string, budget int, baseRelevance float64) 
 			return nil, nil
 		}
 		return []ContextItem{{
-			Source:        "volon",
+			Source:        "engine",
 			Key:           "tasks-raw",
 			Content:       raw,
 			TokenEstimate: tokens,
@@ -152,7 +152,7 @@ func (s *VolonSource) parseTasks(raw string, budget int, baseRelevance float64) 
 		}
 
 		items = append(items, ContextItem{
-			Source:        "volon",
+			Source:        "engine",
 			Key:           t.ID,
 			Content:       content,
 			TokenEstimate: tokens,
@@ -168,7 +168,7 @@ func (s *VolonSource) parseTasks(raw string, budget int, baseRelevance float64) 
 	return items, nil
 }
 
-// parseSprints converts Volon sprint list response into ContextItems.
+// parseSprints converts Engine sprint list response into ContextItems.
 func (s *VolonSource) parseSprints(raw string, budget int) ([]ContextItem, error) {
 	var response struct {
 		Sprints []struct {
@@ -204,7 +204,7 @@ func (s *VolonSource) parseSprints(raw string, budget int) ([]ContextItem, error
 		}
 
 		items = append(items, ContextItem{
-			Source:        "volon",
+			Source:        "engine",
 			Key:           sp.ID,
 			Content:       content,
 			TokenEstimate: tokens,

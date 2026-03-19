@@ -168,8 +168,8 @@ func TestBudgetForIntent(t *testing.T) {
 		t.Errorf("expected MaxTokens=10000, got %d", budget.MaxTokens)
 	}
 	// write_code should prioritize PCC.
-	if budget.SourceWeights["pcc"] < budget.SourceWeights["volon"] {
-		t.Error("write_code intent should prioritize pcc over volon")
+	if budget.SourceWeights["pcc"] < budget.SourceWeights["engine"] {
+		t.Error("write_code intent should prioritize pcc over engine")
 	}
 }
 

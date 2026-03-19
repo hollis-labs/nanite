@@ -147,6 +147,140 @@ func selfToolDefinitions() []Tool {
 				},
 			},
 		},
+		// Cross-app navigation tools — control Engine GUI via SSE
+		{
+			Name:        "conduit_navigate_engine",
+			Description: "Navigate the Engine GUI to a specific page with optional filters. Use when the user asks to see tasks, sprints, kanban, or any Engine view. The Engine GUI will navigate in real-time via SSE. You can apply filters like project, status, priority, and sort order.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"page": map[string]any{
+						"type":        "string",
+						"description": "Page to navigate to: ops-dashboard, tasks, task-detail, sprints, sprint-detail, kanban, epics, projects, activity, inspector",
+					},
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Entity ID for detail pages (e.g. TASK-123 for task-detail, SPR-456 for sprint-detail). Optional.",
+					},
+					"project_id": map[string]any{
+						"type":        "string",
+						"description": "Filter by project ID (e.g. 'conduit', 'engine', 'cortex'). Optional.",
+					},
+					"status": map[string]any{
+						"type":        "string",
+						"description": "Filter by status. Comma-separated for multiple (e.g. 'todo,doing' or 'blocked'). Optional.",
+					},
+					"priority": map[string]any{
+						"type":        "string",
+						"description": "Filter by priority: 1, 2, or 3 (maps to P1/P2/P3). Comma-separated for multiple. Optional.",
+					},
+					"sort": map[string]any{
+						"type":        "string",
+						"description": "Sort order: 'priority', 'status', 'created', 'updated', 'title'. Prefix with '-' for descending (e.g. '-priority'). Optional.",
+					},
+				},
+				"required": []string{"page"},
+			},
+		},
+		{
+			Name:        "conduit_refresh_engine",
+			Description: "Trigger a data refresh in the Engine GUI. Use after making changes (task transitions, sprint updates) so the GUI reflects the latest state.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "conduit_show_giphy",
+			Description: "Search Giphy for an animated GIF and display it in chat as a rich card. Use for fun, celebration, or to lighten the mood.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string", "description": "Search term (e.g. 'celebration', 'thumbs up', 'mind blown')"},
+				},
+				"required": []string{"query"},
+			},
+		},
+		{
+			Name:        "conduit_run_report",
+			Description: "Run a background report and notify the user when it's done. The report generates asynchronously; the user will see a notification card when complete and can click to view the full output.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"report_type": map[string]any{
+						"type":        "string",
+						"description": "Type of report: executive-summary, sprint-progress, portfolio-health",
+					},
+					"description": map[string]any{
+						"type":        "string",
+						"description": "Brief description shown while report generates",
+					},
+					"content": map[string]any{
+						"type":        "string",
+						"description": "Pre-baked report content (HTML or markdown). If provided, used directly instead of calling Hadron. Enables demo mode.",
+					},
+				},
+				"required": []string{"report_type"},
+			},
+		},
+		{
+			Name:        "conduit_show_document",
+			Description: "Display a document in chat as a rich scrollable viewer. Use for executive summaries, reports, meeting notes, or any long-form content the user should read.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":             map[string]any{"type": "string", "description": "Document title"},
+					"content":           map[string]any{"type": "string", "description": "Document body (HTML or markdown)"},
+					"format":            map[string]any{"type": "string", "description": "Content format: html or markdown (default: markdown)"},
+					"sections":          map[string]any{"type": "string", "description": "Comma-separated section names for jump-nav (optional)"},
+					"download_filename": map[string]any{"type": "string", "description": "Filename for download button (optional, e.g. report.html)"},
+				},
+				"required": []string{"title", "content"},
+			},
+		},
+		{
+			Name:        "conduit_show_report",
+			Description: "Display a metrics report card in chat with labeled values, progress bars, and action buttons. Use for sprint progress, portfolio health, or status summaries.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":   map[string]any{"type": "string", "description": "Report title"},
+					"metrics": map[string]any{"type": "string", "description": "JSON array of metric objects: [{label, value, percent?, color?}]. Colors: emerald, green, amber, red, blue, violet."},
+					"summary": map[string]any{"type": "string", "description": "Summary text (markdown). Optional."},
+					"actions": map[string]any{"type": "string", "description": "JSON array of action objects: [{label, action, id?}]. Optional."},
+				},
+				"required": []string{"title", "metrics"},
+			},
+		},
+		{
+			Name:        "conduit_show_task_disposition",
+			Description: "Display an interactive task triage card in chat. Users can set a disposition (Approve, Archive, Pause, Done, Skip) for each task via dropdowns. On submit, a structured message is sent back for you to process.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":       map[string]any{"type": "string", "description": "Card title (e.g. 'Sprint Triage — SPR-DEMO')"},
+					"description": map[string]any{"type": "string", "description": "Description text shown above tasks. Optional."},
+					"tasks":       map[string]any{"type": "string", "description": "JSON array of task objects: [{id, title, status, priority}]"},
+					"actions":     map[string]any{"type": "string", "description": "JSON array of action strings. Default: [\"Approve\", \"Archive\", \"Pause\", \"Done\", \"Skip\"]"},
+				},
+				"required": []string{"title", "tasks"},
+			},
+		},
+		{
+			Name:        "conduit_show_sprint_planning_review",
+			Description: "Display an interactive sprint planning review card. Shows tasks with suggested sprint assignments. Users can accept or move tasks to different sprints. Each action is reactive — updates Engine in real-time. Use after creating demo sprints and tasks, when the user wants to review and assign them.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":       map[string]any{"type": "string", "description": "Card title (e.g. 'Sprint Planning Review')"},
+					"description": map[string]any{"type": "string", "description": "Description text. Optional."},
+					"sprints":     map[string]any{"type": "string", "description": "JSON array of sprint objects: [{id, name}]"},
+					"tasks":       map[string]any{"type": "string", "description": "JSON array of task objects: [{id, title, summary, suggested_sprint, priority, status}]. The suggested_sprint should be a sprint ID from the sprints array."},
+					"page_size":   map[string]any{"type": "number", "description": "Tasks per page (default: 10)"},
+				},
+				"required": []string{"title", "sprints", "tasks"},
+			},
+		},
 		// Builder tools — interactive step-by-step creation flows
 		{
 			Name:        "conduit_start_builder",

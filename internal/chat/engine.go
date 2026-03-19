@@ -549,15 +549,20 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					if e.Activity != nil {
 						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, true, len(result))
 					}
-					// Capture KB search results for deterministic envelope injection.
-					// Full data (with body) is embedded in <!--ENVELOPE_DATA:...:ENVELOPE_DATA-->
-					if strings.HasSuffix(tu.Name, "__search_kb") {
-						if eStart := strings.Index(result, "<!--ENVELOPE_DATA:"); eStart >= 0 {
-							tail := result[eStart+len("<!--ENVELOPE_DATA:"):]
-							if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
-								if env := buildKBEnvelope(tail[:eEnd]); env != "" {
+					// Capture envelope data from any tool result.
+					// Tools embed envelopes via <!--ENVELOPE_DATA:...:ENVELOPE_DATA--> markers.
+					// KB search results get wrapped via buildKBEnvelope; others pass through as-is.
+					if eStart := strings.Index(result, "<!--ENVELOPE_DATA:"); eStart >= 0 {
+						tail := result[eStart+len("<!--ENVELOPE_DATA:"):]
+						if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
+							envelopePayload := tail[:eEnd]
+							if strings.HasSuffix(tu.Name, "__search_kb") {
+								if env := buildKBEnvelope(envelopePayload); env != "" {
 									pendingEnvelopes = append(pendingEnvelopes, env)
 								}
+							} else {
+								// Non-KB tools: payload is already a complete envelope JSON.
+								pendingEnvelopes = append(pendingEnvelopes, envelopePayload)
 							}
 						}
 					}
@@ -1036,9 +1041,18 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 	if mcpToolCount > ProgressiveDiscoveryThreshold && e.ToolClient != nil {
 		summaries := e.ToolClient.ListToolSummaries()
 		catalog := buildToolCatalog(summaries)
-		log.Printf("chat: progressive discovery active — %d MCP tools (threshold %d), %d tools in catalog", mcpToolCount, ProgressiveDiscoveryThreshold, len(summaries))
+		// Keep builtin (non-MCP) tools alongside request_tools — they're small
+		// and should always be available without progressive discovery lookup.
+		builtinTools := []provider.ToolDefinition{requestToolsDef}
+		for _, t := range allTools {
+			if !strings.HasPrefix(t.Name, "mcp__") {
+				builtinTools = append(builtinTools, t)
+			}
+		}
+		log.Printf("chat: progressive discovery active — %d MCP tools (threshold %d), %d builtins kept, %d tools in catalog",
+			mcpToolCount, ProgressiveDiscoveryThreshold, len(builtinTools)-1, len(summaries))
 		return toolSelection{
-			Tools:       []provider.ToolDefinition{requestToolsDef},
+			Tools:       builtinTools,
 			Catalog:     catalog,
 			Progressive: true,
 		}

@@ -17,7 +17,7 @@ system_prompt: |
   to you. You follow best practices, write clean code, and explain your
   reasoning when asked. You report results back to the lead agent when done.
 
-default_model: claude-sonnet-4-6-20250514
+default_model: claude-sonnet-4-20250514
 default_mode: default
 
 modes:
@@ -29,7 +29,7 @@ modes:
       and implementation. Be action-oriented and efficient.
 
 mcp_servers:
-  - volon
+  - engine
   - cortex
 
 tool_permissions:

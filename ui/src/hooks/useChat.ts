@@ -80,6 +80,7 @@ export function useChat(sessionId: string | null) {
     setStreaming(true)
     setStreamingSessionId(sessionId)
     clearToolCalls()
+    console.log('[useChat] streaming=true, sending message...')
 
     try {
       const { message_id } = await api.sendMessage({ session_id: sessionId, content })

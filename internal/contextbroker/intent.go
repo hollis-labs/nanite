@@ -4,11 +4,11 @@ package contextbroker
 // These drive which sources are queried and how results are ranked.
 const (
 	// IntentResumeTask fetches context for resuming a previously started task.
-	// Sources: Volon (task state), Cortex (related records), Session (recent messages).
+	// Sources: Engine (task state), Cortex (related records), Session (recent messages).
 	IntentResumeTask = "resume_task"
 
 	// IntentBootProject fetches context for starting work on a project.
-	// Sources: PCC (project context), Cortex (project records), Volon (active tasks).
+	// Sources: PCC (project context), Cortex (project records), Engine (active tasks).
 	IntentBootProject = "boot_project"
 
 	// IntentReviewSession fetches context for reviewing a past session.
@@ -24,7 +24,7 @@ const (
 	IntentDebugIssue = "debug_issue"
 
 	// IntentPlanFeature fetches context for planning a new feature.
-	// Sources: Volon (roadmap, epics), Cortex (ADRs), PCC (architecture).
+	// Sources: Engine (roadmap, epics), Cortex (ADRs), PCC (architecture).
 	IntentPlanFeature = "plan_feature"
 
 	// IntentRecallDecision fetches context for recalling why a decision was made.
@@ -38,14 +38,14 @@ const (
 // IntentSourcePriority maps intent types to source priority orderings.
 // Sources listed first get a larger share of the budget.
 var IntentSourcePriority = map[string][]string{
-	IntentResumeTask:     {"volon", "cortex", "session", "pcc"},
-	IntentBootProject:    {"pcc", "cortex", "volon", "session"},
-	IntentReviewSession:  {"session", "cortex", "pcc", "volon"},
-	IntentWriteCode:      {"pcc", "cortex", "session", "volon"},
-	IntentDebugIssue:     {"cortex", "pcc", "session", "volon"},
-	IntentPlanFeature:    {"volon", "cortex", "pcc", "session"},
-	IntentRecallDecision: {"cortex", "pcc", "session", "volon"},
-	IntentCustom:         {"cortex", "pcc", "volon", "session"},
+	IntentResumeTask:     {"engine", "cortex", "session", "pcc"},
+	IntentBootProject:    {"pcc", "cortex", "engine", "session"},
+	IntentReviewSession:  {"session", "cortex", "pcc", "engine"},
+	IntentWriteCode:      {"pcc", "cortex", "session", "engine"},
+	IntentDebugIssue:     {"cortex", "pcc", "session", "engine"},
+	IntentPlanFeature:    {"engine", "cortex", "pcc", "session"},
+	IntentRecallDecision: {"cortex", "pcc", "session", "engine"},
+	IntentCustom:         {"cortex", "pcc", "engine", "session"},
 }
 
 // BudgetForIntent returns a BudgetConfig with source weights tuned

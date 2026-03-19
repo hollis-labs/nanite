@@ -242,7 +242,7 @@ func (e *Engine) executeStoreArtifact(params map[string]string) (string, error) 
 	return fmt.Sprintf("artifact:%s", artifact.ID), nil
 }
 
-// executeCreateTask creates a task via Volon MCP if available, otherwise logs a placeholder.
+// executeCreateTask creates a task via Engine MCP if available, otherwise logs a placeholder.
 func (e *Engine) executeCreateTask(ctx context.Context, params map[string]string) (string, error) {
 	title := params["title"]
 	if title == "" {
@@ -252,9 +252,9 @@ func (e *Engine) executeCreateTask(ctx context.Context, params map[string]string
 	description := params["description"]
 	project := params["project"]
 
-	// Try to create via Volon MCP.
+	// Try to create via Engine MCP.
 	if e.MCPManager != nil {
-		toolName := "mcp__volon__volon_task_create"
+		toolName := "mcp__engine__engine_task_create"
 		args := map[string]any{
 			"title":       title,
 			"description": description,
@@ -265,9 +265,9 @@ func (e *Engine) executeCreateTask(ctx context.Context, params map[string]string
 
 		result, err := e.MCPManager.ExecuteTool(ctx, toolName, args)
 		if err != nil {
-			log.Printf("workflow: create_task via Volon failed: %v — using placeholder", err)
+			log.Printf("workflow: create_task via Engine failed: %v — using placeholder", err)
 		} else {
-			log.Printf("workflow: created task via Volon MCP: %s", title)
+			log.Printf("workflow: created task via Engine MCP: %s", title)
 			return result, nil
 		}
 	}

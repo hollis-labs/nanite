@@ -5,6 +5,7 @@ import { ScrollArea } from '@/components/ui/ScrollArea'
 import { ChatMessage } from './ChatMessage'
 import { MessageContent } from './MessageContent'
 import { ToolCallIndicator } from './ToolCallIndicator'
+import { ThinkingIndicator } from './ThinkingIndicator'
 import { ErrorBanner } from './ErrorBanner'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
@@ -38,6 +39,30 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   // Track if user is scrolled to bottom - auto-scroll only when at bottom
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [userHasScrolled, setUserHasScrolled] = useState(false)
+
+  // Detect stalled stream — content stopped flowing but still streaming (tool calls, LLM thinking)
+  const [streamStalled, setStreamStalled] = useState(false)
+  const lastContentRef = useRef(streamingContent)
+  const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (!isStreaming) {
+      setStreamStalled(false)
+      if (stallTimerRef.current) { clearTimeout(stallTimerRef.current); stallTimerRef.current = null }
+      lastContentRef.current = ''
+      return
+    }
+    // Content changed — reset stall detection
+    if (streamingContent !== lastContentRef.current) {
+      lastContentRef.current = streamingContent
+      setStreamStalled(false)
+      if (stallTimerRef.current) clearTimeout(stallTimerRef.current)
+      // Start new stall timer — if no new content for 2s, show indicator
+      if (streamingContent) {
+        stallTimerRef.current = setTimeout(() => setStreamStalled(true), 2000)
+      }
+    }
+  }, [isStreaming, streamingContent])
 
   const avatarStyle = MODE_AVATAR_STYLES[activeMode]
 
@@ -165,23 +190,20 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium text-zinc-500 mb-1">Conduit</div>
               <MessageContent content={streamingContent} role="assistant" />
+              {streamStalled && <ThinkingIndicator />}
             </div>
           </div>
         )}
 
-        {/* Streaming indicator (before any content arrives) */}
-        {isStreaming && !streamingContent && toolCalls.length === 0 && (
+        {/* Thinking indicator — shown while streaming, before content arrives */}
+        {isStreaming && !streamingContent && (
           <div className="flex gap-3">
             <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}>
               <Bot className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium text-zinc-500 mb-1">Conduit</div>
-              <div className="flex items-center gap-1 py-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" />
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse [animation-delay:150ms]" />
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse [animation-delay:300ms]" />
-              </div>
+              <ThinkingIndicator />
             </div>
           </div>
         )}

@@ -149,7 +149,7 @@ Your strengths: strategic thinking, context management, task decomposition, cros
 	}
 
 	// --- Agent profile: Orchestrator ---
-	orchPrompt := `You are Orchestrator, a project management and automation agent. You manage tasks, sprints, and workflows using Volon and Hadron. You create plans, track progress, and coordinate between agents. You do NOT write code or access files directly.`
+	orchPrompt := `You are Orchestrator, a project management and automation agent. You manage tasks, sprints, and workflows using Engine and Hadron. You create plans, track progress, and coordinate between agents. You do NOT write code or access files directly.`
 
 	if _, err := tx.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute,
@@ -157,7 +157,7 @@ Your strengths: strategic thinking, context management, task decomposition, cros
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		"orchestrator-001", "Orchestrator", "orchestrator", orchPrompt,
 		"Project management and automation agent", false,
-		`["volon","hadron"]`, `{"allow_list":["mcp__volon__*","mcp__hadron__*"]}`,
+		`["engine","hadron"]`, `{"allow_list":["mcp__engine__*","mcp__hadron__*"]}`,
 	); err != nil {
 		return fmt.Errorf("insert orchestrator profile: %w", err)
 	}
@@ -264,7 +264,7 @@ func (s *Store) SeedAgentSkillBindings() error {
 		}
 	}
 
-	// Orchestrator: no builtin tool skills (uses volon/hadron MCP directly)
+	// Orchestrator: no builtin tool skills (uses engine/hadron MCP directly)
 	// Skills will be auto-discovered from MCP servers.
 
 	// Assign prompt templates to all agents.

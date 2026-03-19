@@ -3,9 +3,10 @@ import { AgentProfileManager } from './AgentProfileManager'
 import { PromptTemplateEditor } from './PromptTemplateEditor'
 import { SkillsBrowser } from './SkillsBrowser'
 import { ToolDashboard } from './ToolDashboard'
+import { PluginManager } from './PluginManager'
 import { Button } from '@/components/ui/Button'
 
-type SettingsSection = 'agents' | 'skills' | 'prompts' | 'tools'
+type SettingsSection = 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins'
 
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<SettingsSection>('agents')
@@ -15,6 +16,7 @@ export default function SettingsPage() {
     { id: 'skills' as SettingsSection, label: 'Skills' },
     { id: 'prompts' as SettingsSection, label: 'Prompts' },
     { id: 'tools' as SettingsSection, label: 'Tools' },
+    { id: 'plugins' as SettingsSection, label: 'Plugins' },
   ]
 
   const renderActiveSection = () => {
@@ -27,6 +29,8 @@ export default function SettingsPage() {
         return <PromptTemplateEditor />
       case 'tools':
         return <ToolDashboard />
+      case 'plugins':
+        return <PluginManager />
       default:
         return <AgentProfileManager />
     }

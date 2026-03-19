@@ -1,7 +1,9 @@
 name: session-stats
 version: 1.0.0
-description: Session statistics tracking and display plugin
-author: hollis-labs
+description: Session statistics tracking and display
+author: Hollis Labs
+url: https://github.com/hollis-labs/session-stats
+short_desc: "Session statistics tracking and display"
 
 requires:
   # No MCP servers required for this basic plugin

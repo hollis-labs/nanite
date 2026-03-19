@@ -13,6 +13,9 @@ type PluginManifest struct {
 	Name         string                   `yaml:"name"`
 	Version      string                   `yaml:"version"`
 	Description  string                   `yaml:"description"`
+	Author       string                   `yaml:"author"`
+	URL          string                   `yaml:"url"`
+	ShortDesc    string                   `yaml:"short_desc"`
 	Config       map[string]ConfigEntry   `yaml:"config"`
 	Dependencies []string                 `yaml:"dependencies"`
 	Requires     map[string]interface{}   `yaml:"requires"`

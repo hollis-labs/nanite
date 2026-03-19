@@ -46,8 +46,10 @@ export function ChatHeader() {
     enabled: !!activeSessionId,
   })
 
+  const configVersion = useAppStore((s) => s.configVersion)
+
   const { data: allAgents = [] } = useQuery({
-    queryKey: ['agents'],
+    queryKey: ['agents', configVersion],
     queryFn: api.listAgents,
   })
 

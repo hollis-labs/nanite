@@ -36,13 +36,15 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: conduit <command>")
-		fmt.Fprintln(os.Stderr, "commands: serve")
+		fmt.Fprintln(os.Stderr, "commands: serve, plugin")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "serve":
 		cmdServe(os.Args[2:])
+	case "plugin":
+		cmdPlugin(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -270,6 +272,7 @@ func cmdServe(args []string) {
 	// Start HTTP server — this sets the router on the plugin host.
 	srv := server.New(s, a, *port, *dev, pluginHost)
 
+	// Resolve plugins directory for discovery and management API.
 	// Auto-discover and load plugins from the plugins/ directory.
 	// Plugins self-register via init() in the allplugins import above.
 	pluginsDir := filepath.Join(filepath.Dir(*dbPath), "plugins")
@@ -295,6 +298,9 @@ func cmdServe(args []string) {
 	} else if len(postPluginDiff.Added) > 0 {
 		log.Printf("post-plugin MCP discovery: %d new tools added: %v", len(postPluginDiff.Added), postPluginDiff.Added)
 	}
+
+	// Register plugin management API routes (install/uninstall/disable/enable).
+	srv.SetPluginsDir(pluginsDir)
 
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)

@@ -1,0 +1,9 @@
+plugins:
+  - name: support-ticket
+    repo: hollis-labs/support-ticket
+    description: "IT employee self-service support — KB search + ticket creation"
+    type: user
+  - name: session-stats
+    repo: hollis-labs/session-stats
+    description: "Session statistics tracking and display"
+    type: core

@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo } from './types'
 
 const API_BASE = '/api'
 
@@ -534,5 +534,48 @@ export const api = {
     })
     if (!res.ok) throw new Error(`Failed to delete task: ${res.status}`)
     return res.json()
+  },
+
+  // Plugins
+  listPlugins: async (): Promise<PluginInfo[]> => {
+    const res = await fetch(`${API_BASE}/plugins/managed`)
+    if (!res.ok) throw new Error(`Failed to list plugins: ${res.status}`)
+    return res.json()
+  },
+
+  installPlugin: async (name: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plugins/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!res.ok) throw new Error(`Failed to install plugin: ${res.status}`)
+  },
+
+  uninstallPlugin: async (name: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plugins/uninstall`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!res.ok) throw new Error(`Failed to uninstall plugin: ${res.status}`)
+  },
+
+  disablePlugin: async (name: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plugins/disable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!res.ok) throw new Error(`Failed to disable plugin: ${res.status}`)
+  },
+
+  enablePlugin: async (name: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plugins/enable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!res.ok) throw new Error(`Failed to enable plugin: ${res.status}`)
   },
 }

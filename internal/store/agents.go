@@ -129,6 +129,46 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 	return nil
 }
 
+// DeleteAgent removes an agent profile by slug, including related records
+// (modes, skills, session associations). Returns nil if the agent doesn't exist.
+func (s *Store) DeleteAgent(slug string) error {
+	// Look up the agent ID first
+	agent, err := s.GetAgentBySlug(slug)
+	if err != nil {
+		return nil // agent doesn't exist — nothing to delete
+	}
+
+	// Disable FK checks temporarily — agent_profiles is referenced by
+	// session_agents, messages, agent_modes, agent_skills, agent_prompt_templates,
+	// and agent_mode_assignments. We want to remove the profile without
+	// cascading deletes to messages (user data should be preserved).
+	s.DB.Exec("PRAGMA foreign_keys=OFF")
+	defer s.DB.Exec("PRAGMA foreign_keys=ON")
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Clean up direct references (except messages — preserve user data)
+	refs := []string{"session_agents", "agent_modes", "agent_skills",
+		"agent_prompt_templates", "agent_mode_assignments"}
+	for _, table := range refs {
+		_, _ = tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE agent_id = ?", table), agent.ID)
+	}
+
+	// Nullify agent_id on messages (preserve messages, just unlink the agent)
+	_, _ = tx.Exec("UPDATE messages SET agent_id = NULL WHERE agent_id = ?", agent.ID)
+
+	// Remove the agent profile
+	if _, err := tx.Exec("DELETE FROM agent_profiles WHERE id = ?", agent.ID); err != nil {
+		return fmt.Errorf("delete agent %s: %w", slug, err)
+	}
+
+	return tx.Commit()
+}
+
 // UpdateAgent updates mutable fields on an agent profile.
 func (s *Store) UpdateAgent(a *AgentProfile) error {
 	now := time.Now().UTC().Format(time.RFC3339)

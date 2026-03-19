@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Search, Loader2, User, Plus } from 'lucide-react'
 import { api } from '@/lib/api'
+import { useAppStore } from '@/stores/useAppStore'
 
 interface AgentPickerProps {
   sessionId: string
@@ -12,9 +13,10 @@ interface AgentPickerProps {
 export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPickerProps) {
   const [search, setSearch] = useState('')
   const queryClient = useQueryClient()
+  const configVersion = useAppStore((s) => s.configVersion)
 
   const { data: agents = [], isLoading } = useQuery({
-    queryKey: ['agents'],
+    queryKey: ['agents', configVersion],
     queryFn: api.listAgents,
   })
 

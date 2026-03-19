@@ -44,6 +44,27 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 	}
 }
 
+// NewHostWithStore creates a minimal plugin host with just a store service.
+// Used by CLI commands (e.g. conduit plugin uninstall) that need to run
+// plugin lifecycle methods without a full server.
+func NewHostWithStore(store interface{}) *Host {
+	ctx, cancel := context.WithCancel(context.Background())
+	h := &Host{
+		plugins:      make(map[string]plugin.Plugin),
+		eventHooks:   make(map[string][]plugin.EventHook),
+		crudHandlers: make(map[string]plugin.CRUDHandler),
+		uiComponents: []plugin.UIComponent{},
+		services:     make(map[string]interface{}),
+		configs:      make(map[string]*PluginConfig),
+		router:       http.NewServeMux(),
+		logger:       NewLogger("plugin-cli"),
+		ctx:          ctx,
+		ctxCancel:    cancel,
+	}
+	h.services["store"] = store
+	return h
+}
+
 // SetRouter sets the HTTP router for the plugin host.
 func (h *Host) SetRouter(router *http.ServeMux) {
 	h.mu.Lock()
@@ -65,38 +86,56 @@ func (h *Host) RegisterCRUDHandler(resourceType string, handler plugin.CRUDHandl
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if _, exists := h.crudHandlers[resourceType]; exists {
-		return fmt.Errorf("CRUD handler for resource type %q already registered", resourceType)
-	}
-
+	_, alreadyRegistered := h.crudHandlers[resourceType]
 	h.crudHandlers[resourceType] = handler
+
+	// Only wire HTTP routes the first time — ServeMux doesn't support re-registration,
+	// but the handler closures read from h.crudHandlers so they'll pick up the new handler.
+	if alreadyRegistered {
+		return nil
+	}
 
 	// Wire HTTP routes for this resource type
 	basePath := fmt.Sprintf("/api/plugins/%s", resourceType)
 
 	// List resources: GET /api/plugins/{resourceType}
 	h.router.HandleFunc(fmt.Sprintf("GET %s", basePath), func(w http.ResponseWriter, r *http.Request) {
-		h.handleCRUDList(w, r, handler)
+		h.mu.RLock()
+		h2 := h.crudHandlers[resourceType]
+		h.mu.RUnlock()
+		h.handleCRUDList(w, r, h2)
 	})
 
 	// Create resource: POST /api/plugins/{resourceType}
 	h.router.HandleFunc(fmt.Sprintf("POST %s", basePath), func(w http.ResponseWriter, r *http.Request) {
-		h.handleCRUDCreate(w, r, handler)
+		h.mu.RLock()
+		h2 := h.crudHandlers[resourceType]
+		h.mu.RUnlock()
+		h.handleCRUDCreate(w, r, h2)
 	})
 
 	// Get resource: GET /api/plugins/{resourceType}/{id}
 	h.router.HandleFunc(fmt.Sprintf("GET %s/{id}", basePath), func(w http.ResponseWriter, r *http.Request) {
-		h.handleCRUDRead(w, r, handler)
+		h.mu.RLock()
+		h2 := h.crudHandlers[resourceType]
+		h.mu.RUnlock()
+		h.handleCRUDRead(w, r, h2)
 	})
 
 	// Update resource: PUT /api/plugins/{resourceType}/{id}
 	h.router.HandleFunc(fmt.Sprintf("PUT %s/{id}", basePath), func(w http.ResponseWriter, r *http.Request) {
-		h.handleCRUDUpdate(w, r, handler)
+		h.mu.RLock()
+		h2 := h.crudHandlers[resourceType]
+		h.mu.RUnlock()
+		h.handleCRUDUpdate(w, r, h2)
 	})
 
 	// Delete resource: DELETE /api/plugins/{resourceType}/{id}
 	h.router.HandleFunc(fmt.Sprintf("DELETE %s/{id}", basePath), func(w http.ResponseWriter, r *http.Request) {
-		h.handleCRUDDelete(w, r, handler)
+		h.mu.RLock()
+		h2 := h.crudHandlers[resourceType]
+		h.mu.RUnlock()
+		h.handleCRUDDelete(w, r, h2)
 	})
 
 	h.logger.Info("registered CRUD handler", "resourceType", resourceType, "basePath", basePath)
@@ -121,17 +160,21 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Check for duplicate IDs
-	for _, existing := range h.uiComponents {
+	// Replace existing component with same ID, or append.
+	alreadyRegistered := false
+	for i, existing := range h.uiComponents {
 		if existing.ID == component.ID {
-			return fmt.Errorf("UI component with ID %q already registered", component.ID)
+			h.uiComponents[i] = component
+			alreadyRegistered = true
+			break
 		}
 	}
+	if !alreadyRegistered {
+		h.uiComponents = append(h.uiComponents, component)
+	}
 
-	h.uiComponents = append(h.uiComponents, component)
-
-	// If the component has a server-side handler, register it
-	if component.Handler != nil {
+	// If the component has a server-side handler, register the route (only once).
+	if component.Handler != nil && !alreadyRegistered {
 		path := fmt.Sprintf("/api/plugins/ui/%s", component.ID)
 		h.router.Handle(path, component.Handler)
 		h.logger.Info("registered UI component handler", "id", component.ID, "path", path)

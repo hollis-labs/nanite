@@ -20,6 +20,7 @@ type Server struct {
 	mux        *http.ServeMux
 	api        *api.API
 	pluginHost *conduitplugin.Host
+	pluginsDir string
 }
 
 // New creates a new Server wired to the given store and API.
@@ -41,6 +42,14 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *conduitplug
 
 	srv.routes()
 	return srv
+}
+
+// SetPluginsDir sets the plugins directory path for the management API routes.
+// Must be called before ListenAndServe if plugin management is desired.
+func (s *Server) SetPluginsDir(dir string) {
+	s.pluginsDir = dir
+	// Register plugin management API routes now that we have the directory.
+	api.RegisterPluginManagementRoutes(s.mux, dir, s.store, s.pluginHost)
 }
 
 // ListenAndServe starts the HTTP server.

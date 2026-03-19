@@ -8,6 +8,6 @@
 package allplugins
 
 import (
-	_ "github.com/hollis-labs/conduit/plugins/session-stats"
-	_ "github.com/hollis-labs/conduit/plugins/support-ticket"
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/sessionstats"
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/supportticket"
 )

@@ -383,6 +383,20 @@ export interface VolonBacklogItem {
   created_at: string
 }
 
+// --- Plugins ---
+
+export interface PluginInfo {
+  name: string
+  version: string
+  description: string
+  short_desc: string
+  author: string
+  url: string
+  status: 'active' | 'disabled' | 'available' | 'no-binary'
+  type: 'core' | 'user'
+  installed: boolean
+}
+
 // --- Skills ---
 
 export interface ToolBinding {

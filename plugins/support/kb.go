@@ -16,10 +16,11 @@ type KBTransport struct {
 	db *sql.DB
 }
 
-// NewKBTransport opens a connection to the kb_demo database and returns
-// a transport that exposes search_kb and get_kb_article tools.
-func NewKBTransport() (*KBTransport, error) {
-	db, err := sql.Open("postgres", "host=localhost port=5432 dbname=kb_demo sslmode=disable")
+// NewKBTransport opens a connection to the KB database using the given
+// connection string and returns a transport that exposes search_kb and
+// get_kb_article tools.
+func NewKBTransport(connStr string) (*KBTransport, error) {
+	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("open kb_demo: %w", err)
 	}

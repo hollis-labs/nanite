@@ -1,11 +1,9 @@
+import { Suspense } from 'react'
 import type { Envelope } from '@/lib/types'
+import { PLUGIN_ENVELOPE_REGISTRY } from '@/generated/plugin-envelopes'
 import { ProposalCard } from './ProposalCard'
 import { QuestionForm } from './QuestionForm'
 import { ApprovalCard } from './ApprovalCard'
-import { KBResultCard } from './KBResultCard'
-import { TicketFormCard } from './TicketFormCard'
-import { TicketConfirmationCard } from './TicketConfirmationCard'
-import { ResolutionCaptureCard } from './ResolutionCaptureCard'
 
 interface EnvelopeRendererProps {
   envelope: Envelope
@@ -13,21 +11,14 @@ interface EnvelopeRendererProps {
 }
 
 export function EnvelopeRenderer({ envelope, onSendMessage }: EnvelopeRendererProps) {
-  // Custom plugin envelope types — render only the custom component
-  if (envelope.type === 'kb-result' && envelope.data) {
-    return <KBResultCard data={envelope.data as { results?: Array<{ id: string; title: string; category: string; severity: string; body?: string; source?: string; tags?: string[]; related?: string[]; rank?: number; confidence?: string }>; query: string }} {...(onSendMessage ? { onSendMessage } : {})} />
-  }
-
-  if (envelope.type === 'ticket-form' && envelope.data) {
-    return <TicketFormCard data={envelope.data as { prefilled?: { title?: string; description?: string; category?: string; priority?: string; steps_tried?: string }; categories: string[] }} {...(onSendMessage ? { onSendMessage } : {})} />
-  }
-
-  if (envelope.type === 'ticket-confirmation' && envelope.data) {
-    return <TicketConfirmationCard data={envelope.data as { ticket: { id: string; title: string; description: string; category: string; priority: string; status: string; requester: string; routing: string; created_at: string } }} />
-  }
-
-  if (envelope.type === 'resolution-capture' && envelope.data) {
-    return <ResolutionCaptureCard data={envelope.data as { ticket_id?: string; issue_summary?: string; categories: string[] }} {...(onSendMessage ? { onSendMessage } : {})} />
+  // Plugin envelope types — resolved from the generated registry
+  const PluginComponent = PLUGIN_ENVELOPE_REGISTRY[envelope.type]
+  if (PluginComponent && envelope.data) {
+    return (
+      <Suspense fallback={<div className="animate-pulse p-4 text-sm text-zinc-400">Loading...</div>}>
+        <PluginComponent data={envelope.data} {...(onSendMessage ? { onSendMessage } : {})} />
+      </Suspense>
+    )
   }
 
   // Default envelope rendering — proposals, questions, approval

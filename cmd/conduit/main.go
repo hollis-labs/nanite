@@ -23,7 +23,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/filter"
 	"github.com/hollis-labs/conduit/internal/mcp"
 	"github.com/hollis-labs/conduit/internal/plugin"
-	"github.com/hollis-labs/conduit/plugins/support"
+	_ "github.com/hollis-labs/conduit/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/conduit/internal/provider"
 	"github.com/hollis-labs/conduit/internal/server"
 	"github.com/hollis-labs/conduit/internal/store"
@@ -270,12 +270,21 @@ func cmdServe(args []string) {
 	// Start HTTP server — this sets the router on the plugin host.
 	srv := server.New(s, a, *port, *dev, pluginHost)
 
-	// Load plugins AFTER the server sets the router (plugins register HTTP routes).
-	supportPlugin := support.New()
-	if err := pluginHost.LoadPlugin(supportPlugin); err != nil {
-		log.Printf("WARNING: failed to load support plugin: %v", err)
+	// Auto-discover and load plugins from the plugins/ directory.
+	// Plugins self-register via init() in the allplugins import above.
+	pluginsDir := filepath.Join(filepath.Dir(*dbPath), "plugins")
+	if envDir := os.Getenv("CONDUIT_PLUGINS_DIR"); envDir != "" {
+		pluginsDir = envDir
+	}
+	discovered, discErr := plugin.DiscoverPlugins(pluginsDir)
+	if discErr != nil {
+		log.Printf("WARNING: plugin discovery failed: %v", discErr)
 	} else {
-		log.Println("support plugin loaded")
+		loaded, loadErrs := plugin.LoadDiscovered(pluginHost, discovered)
+		for _, e := range loadErrs {
+			log.Printf("WARNING: %v", e)
+		}
+		log.Printf("plugins: discovered %d, loaded %d", len(discovered), len(loaded))
 	}
 
 	// Re-discover tools after plugins — plugins may register new MCP servers

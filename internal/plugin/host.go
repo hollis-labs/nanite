@@ -13,16 +13,18 @@ import (
 // Host implements the plugin.Host interface for Conduit.
 // It provides the runtime environment and services for plugins.
 type Host struct {
-	mu          sync.RWMutex
-	plugins     map[string]plugin.Plugin
-	eventHooks  map[string][]plugin.EventHook
+	mu           sync.RWMutex
+	plugins      map[string]plugin.Plugin
+	eventHooks   map[string][]plugin.EventHook
 	crudHandlers map[string]plugin.CRUDHandler
 	uiComponents []plugin.UIComponent
-	services    map[string]interface{}
-	router      *http.ServeMux
-	logger      plugin.Logger
-	ctx         context.Context
-	ctxCancel   context.CancelFunc
+	services     map[string]interface{}
+	configs      map[string]*PluginConfig // per-plugin config, keyed by plugin ID
+	activePlugin string                   // ID of the plugin currently being loaded
+	router       *http.ServeMux
+	logger       plugin.Logger
+	ctx          context.Context
+	ctxCancel    context.CancelFunc
 }
 
 // NewHost creates a new plugin host for Conduit.
@@ -34,6 +36,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		crudHandlers: make(map[string]plugin.CRUDHandler),
 		uiComponents: []plugin.UIComponent{},
 		services:     make(map[string]interface{}),
+		configs:      make(map[string]*PluginConfig),
 		router:       router,
 		logger:       logger,
 		ctx:          ctx,
@@ -169,6 +172,28 @@ func (h *Host) Context() context.Context {
 	return h.ctx
 }
 
+// SetPluginConfig stores configuration for a plugin, typically called before
+// loading the plugin so that GetConfig works during Load().
+func (h *Host) SetPluginConfig(pluginID string, cfg *PluginConfig) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.configs[pluginID] = cfg
+}
+
+// GetConfig returns a configuration value for the currently-loading plugin.
+// Resolution order: env var -> config file override -> default from schema.
+func (h *Host) GetConfig(key string) (string, error) {
+	h.mu.RLock()
+	id := h.activePlugin
+	cfg := h.configs[id]
+	h.mu.RUnlock()
+
+	if cfg == nil {
+		return "", fmt.Errorf("no config loaded for plugin %q", id)
+	}
+	return cfg.Get(key)
+}
+
 // LoadPlugin loads a plugin into the host.
 func (h *Host) LoadPlugin(p plugin.Plugin) error {
 	id := p.ID()
@@ -185,6 +210,11 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 			return fmt.Errorf("plugin %q depends on %q which is not loaded", id, dep)
 		}
 	}
+	h.mu.Unlock()
+
+	// Set active plugin so GetConfig knows which plugin is calling.
+	h.mu.Lock()
+	h.activePlugin = id
 	h.mu.Unlock()
 
 	// Load the plugin WITHOUT holding the lock — Load calls back into

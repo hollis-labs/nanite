@@ -7,9 +7,14 @@ import (
 	"time"
 
 	"github.com/hollis-labs/conduit/internal/mcp"
+	hostplugin "github.com/hollis-labs/conduit/internal/plugin"
 	conduitstore "github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/fragments-engine/plugin"
 )
+
+func init() {
+	hostplugin.RegisterPlugin("support", func() plugin.Plugin { return New() })
+}
 
 // SupportPlugin implements the IT self-service support plugin for Conduit.
 // It provides an in-memory ticket store with CRUD endpoints and a ticket
@@ -83,8 +88,16 @@ func (p *SupportPlugin) Load(host plugin.Host) error {
 		// Non-fatal — the plugin still works, just no dedicated agent profile
 	}
 
+	// Resolve KB database URL from config (env var → config file → default).
+	dbURL, cfgErr := host.GetConfig("database_url")
+	if cfgErr != nil {
+		// Fallback for backward compatibility when config is not loaded.
+		dbURL = "host=localhost port=5432 dbname=kb_demo sslmode=disable"
+		logger.Warn("config unavailable, using default database_url", "error", fmt.Sprintf("%v", cfgErr))
+	}
+
 	// Initialize KB search transport and register with MCP manager.
-	kbTransport, err := NewKBTransport()
+	kbTransport, err := NewKBTransport(dbURL)
 	if err != nil {
 		logger.Warn("KB search unavailable — database not connected", "error", fmt.Sprintf("%v", err))
 	} else {

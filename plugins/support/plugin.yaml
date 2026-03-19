@@ -2,19 +2,31 @@ name: support
 version: 0.1.0
 description: IT employee self-service support — KB search + ticket creation
 
+config:
+  database_url:
+    type: string
+    required: true
+    env_var: SUPPORT_DATABASE_URL
+    default: "host=localhost port=5432 dbname=kb_demo sslmode=disable"
+    description: "PostgreSQL connection string for KB database"
+
 requires:
   mcp_servers: []
 
 registers:
   envelopes:
     - type: kb-result
-      renderer: KBResultCard
+      component: components/chat/envelopes/KBResultCard
+      export: KBResultCard
     - type: ticket-form
-      renderer: TicketFormCard
+      component: components/chat/envelopes/TicketFormCard
+      export: TicketFormCard
     - type: ticket-confirmation
-      renderer: TicketConfirmationCard
+      component: components/chat/envelopes/TicketConfirmationCard
+      export: TicketConfirmationCard
     - type: resolution-capture
-      renderer: ResolutionCaptureCard
+      component: components/chat/envelopes/ResolutionCaptureCard
+      export: ResolutionCaptureCard
 
   quick_actions:
     - id: create-ticket

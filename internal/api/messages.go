@@ -175,10 +175,26 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	// Register this SSE connection for session-level deduplication.
+	// If another tab already has an active SSE connection for this session,
+	// it will receive a session_takeover event and be closed.
+	var sseDone <-chan struct{}
+	if sessionID, found := a.Engine.GetSessionForMessage(messageID); found {
+		sseDone = a.Engine.RegisterSSEConnection(sessionID)
+		defer a.Engine.UnregisterSSEConnection(sessionID, sseDone)
+	}
+
 	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-sseDone:
+			// Another tab opened an SSE connection for this session — send takeover event and close.
+			evt := chat.StreamEvent{Type: "session_takeover", Content: "This session is now active in another tab"}
+			data, _ := json.Marshal(evt)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+			flusher.Flush()
 			return
 		case evt, ok := <-ch:
 			if !ok {

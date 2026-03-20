@@ -1,4 +1,4 @@
-import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Workflow } from 'lucide-react'
+import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Workflow, Inbox } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -26,6 +26,8 @@ export function NavRail() {
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const toggleWorkflowPanel = useLayoutStore((s) => s.toggleWorkflowPanel)
   const workflowPanelOpen = useLayoutStore((s) => s.workflowPanelOpen)
+  const toggleInboxPanel = useLayoutStore((s) => s.toggleInboxPanel)
+  const inboxPanelOpen = useLayoutStore((s) => s.inboxPanelOpen)
   const setLeftSidebar = useLayoutStore((s) => s.setLeftSidebar)
   const currentPage = useLayoutStore((s) => s.currentPage)
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
@@ -44,6 +46,21 @@ export function NavRail() {
     queryFn: api.listWorkspaces,
   })
 
+  // Fetch first agent for inbox unread count
+  const { data: agents = [] } = useQuery({
+    queryKey: ['agents'],
+    queryFn: api.listAgents,
+  })
+  const firstAgentId = agents.length > 0 ? agents[0].id : null
+
+  const { data: unreadData } = useQuery({
+    queryKey: ['a2a-unread', firstAgentId],
+    queryFn: () => api.getA2AUnreadCount(firstAgentId!),
+    enabled: !!firstAgentId,
+    refetchInterval: 30000,
+  })
+  const unreadCount = unreadData?.count ?? 0
+
   // Set default workspace on load
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length > 0) {
@@ -58,10 +75,9 @@ export function NavRail() {
         setWorkspaceDropdownOpen(false)
       }
     }
-    if (workspaceDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
+    if (!workspaceDropdownOpen) return
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [workspaceDropdownOpen])
 
   const activeWorkspace = workspaces.find((w: Workspace) => w.id === activeWorkspaceId)
@@ -161,7 +177,26 @@ export function NavRail() {
           )
         })}
       </div>
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center gap-1">
+        <Tooltip content="Agent Inbox" side="right">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`w-10 h-10 rounded-lg relative ${
+              inboxPanelOpen
+                ? 'bg-zinc-800 text-indigo-400'
+                : 'text-zinc-400 hover:text-zinc-100'
+            }`}
+            onClick={toggleInboxPanel}
+          >
+            <Inbox className="w-5 h-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </Button>
+        </Tooltip>
         <Tooltip content="Account" side="right">
           <Button
             variant="ghost"

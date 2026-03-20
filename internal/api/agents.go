@@ -220,6 +220,17 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusCreated, agents)
 }
 
+func (a *API) handleRemoveSessionAgent(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	agentID := r.PathValue("agentId")
+
+	if err := a.Store.DeleteSessionAgent(sessionID, agentID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "session agent not found")
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
 func (a *API) handleCreateAgentMode(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 

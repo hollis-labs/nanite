@@ -307,6 +307,26 @@ func (s *Store) ListSessionAgents(sessionID string) ([]SessionAgent, error) {
 	return out, rows.Err()
 }
 
+// DeleteSessionAgent removes an agent from a session.
+// Returns an error if the row does not exist.
+func (s *Store) DeleteSessionAgent(sessionID, agentID string) error {
+	res, err := s.DB.Exec(
+		`DELETE FROM session_agents WHERE session_id = ? AND agent_id = ?`,
+		sessionID, agentID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete session agent: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete session agent rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("session agent not found")
+	}
+	return nil
+}
+
 // ListAgents returns all agent profiles.
 func (s *Store) ListAgents() ([]AgentProfile, error) {
 	rows, err := s.DB.Query(

@@ -1,12 +1,16 @@
-import { useState, useMemo } from 'react'
-import { Plus, Hash, Pin, PinOff, Loader2 } from 'lucide-react'
+import { useState, useMemo, useEffect, type ReactNode } from 'react'
+import { Plus, Hash, Pin, PinOff, Loader2, ChevronRight } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
+import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
 import type { Session } from '@/lib/types'
+
+const TASK_CONTEXT_TYPES = new Set(['task', 'sprint', 'review', 'workflow'])
+const TASKS_COLLAPSED_KEY = 'sidebar-tasks-collapsed'
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
@@ -23,12 +27,42 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+function sortByActivity(a: Session, b: Session): number {
+  return new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime()
+}
+
+function isTaskSession(s: Session): boolean {
+  return !!s.context_type && TASK_CONTEXT_TYPES.has(s.context_type)
+}
+
+function isConversationSession(s: Session): boolean {
+  return !s.context_type || s.context_type === 'chat' || s.context_type === ''
+}
+
 export function LeftSidebar() {
   const open = useLayoutStore((s) => s.leftSidebarOpen)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const queryClient = useQueryClient()
+  const activeStreams = useChatStore((s) => s.activeStreams)
+  const pendingTools = useChatStore((s) => s.pendingTools)
+
+  const [tasksCollapsed, setTasksCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(TASKS_COLLAPSED_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TASKS_COLLAPSED_KEY, String(tasksCollapsed))
+    } catch {
+      // ignore
+    }
+  }, [tasksCollapsed])
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['sessions', activeWorkspaceId],
@@ -57,14 +91,36 @@ export function LeftSidebar() {
     },
   })
 
-  // Group sessions: pinned first, then by last_activity desc
-  const pinned = sessions
-    .filter((s: Session) => s.is_pinned)
-    .sort((a: Session, b: Session) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime())
+  // Check if ANY session has a non-null, non-empty, non-chat context_type.
+  // If all are null/empty/chat, we degrade to flat list (no zone headers).
+  const hasAnyContextType = useMemo(
+    () => sessions.some((s: Session) => s.context_type && s.context_type !== '' && s.context_type !== 'chat'),
+    [sessions],
+  )
 
-  const recent = sessions
-    .filter((s: Session) => !s.is_pinned)
-    .sort((a: Session, b: Session) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime())
+  // Zone grouping — pinned sessions are excluded from Conversations/Tasks
+  const pinned = useMemo(
+    () => sessions.filter((s: Session) => s.is_pinned).sort(sortByActivity),
+    [sessions],
+  )
+
+  const unpinned = useMemo(
+    () => sessions.filter((s: Session) => !s.is_pinned),
+    [sessions],
+  )
+
+  const conversations = useMemo(
+    () => unpinned.filter(isConversationSession).sort(sortByActivity),
+    [unpinned],
+  )
+
+  const tasks = useMemo(
+    () => unpinned.filter(isTaskSession).sort(sortByActivity),
+    [unpinned],
+  )
+
+  // Flat mode: no context_type diversity — show pinned + recent like before
+  const useFlatMode = !hasAnyContextType
 
   return (
     <aside
@@ -107,13 +163,10 @@ export function LeftSidebar() {
               </div>
             )}
 
-            {/* Pinned */}
+            {/* Zone 1: Pinned */}
             {pinned.length > 0 && (
               <>
-                <div className="px-2 pt-1 pb-1 text-xs font-medium text-zinc-500 uppercase tracking-wider flex items-center gap-1">
-                  <Pin className="w-3 h-3" />
-                  Pinned
-                </div>
+                <ZoneHeader icon={<Pin className="w-3 h-3" />} label="Pinned" />
                 {pinned.map((session: Session) => (
                   <SessionItem
                     key={session.id}
@@ -121,28 +174,78 @@ export function LeftSidebar() {
                     isActive={session.id === activeSessionId}
                     onClick={() => setActiveSession(session.id)}
                     onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
+                    statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools)}
                   />
                 ))}
               </>
             )}
 
-            {/* Recent */}
-            {recent.length > 0 && (
+            {useFlatMode ? (
+              /* Flat mode — no zone headers for unpinned, same as legacy */
               <>
-                {pinned.length > 0 && (
-                  <div className="px-2 pt-3 pb-1 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                    Recent
-                  </div>
+                {unpinned.length > 0 && (
+                  <>
+                    {pinned.length > 0 && <ZoneHeader label="Recent" />}
+                    {unpinned.sort(sortByActivity).map((session: Session) => (
+                      <SessionItem
+                        key={session.id}
+                        session={session}
+                        isActive={session.id === activeSessionId}
+                        onClick={() => setActiveSession(session.id)}
+                        onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
+                      />
+                    ))}
+                  </>
                 )}
-                {recent.map((session: Session) => (
-                  <SessionItem
-                    key={session.id}
-                    session={session}
-                    isActive={session.id === activeSessionId}
-                    onClick={() => setActiveSession(session.id)}
-                    onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
-                  />
-                ))}
+              </>
+            ) : (
+              /* Zoned mode */
+              <>
+                {/* Zone 2: Conversations */}
+                {conversations.length > 0 && (
+                  <>
+                    <ZoneHeader label="Conversations" />
+                    {conversations.map((session: Session) => (
+                      <SessionItem
+                        key={session.id}
+                        session={session}
+                        isActive={session.id === activeSessionId}
+                        onClick={() => setActiveSession(session.id)}
+                        onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
+                      />
+                    ))}
+                  </>
+                )}
+
+                {/* Zone 3: Tasks (collapsible) */}
+                {tasks.length > 0 && (
+                  <>
+                    <button
+                      onClick={() => setTasksCollapsed((c) => !c)}
+                      className="w-full flex items-center gap-1 px-2 pt-3 pb-1 text-xs font-medium text-zinc-500 uppercase tracking-wider hover:text-zinc-400 transition-colors"
+                    >
+                      <ChevronRight
+                        className={`w-3 h-3 transition-transform duration-150 ${
+                          tasksCollapsed ? '' : 'rotate-90'
+                        }`}
+                      />
+                      <span>Tasks</span>
+                      <span className="ml-auto text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded-full tabular-nums leading-none">
+                        {tasks.length}
+                      </span>
+                    </button>
+                    {!tasksCollapsed &&
+                      tasks.map((session: Session) => (
+                        <SessionItem
+                          key={session.id}
+                          session={session}
+                          isActive={session.id === activeSessionId}
+                          onClick={() => setActiveSession(session.id)}
+                          onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
+                        />
+                      ))}
+                  </>
+                )}
               </>
             )}
           </div>
@@ -152,16 +255,58 @@ export function LeftSidebar() {
   )
 }
 
+function PresenceDot({ variant }: { variant: 'streaming' | 'tool-pending' }) {
+  if (variant === 'streaming') {
+    return (
+      <span
+        className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"
+        title="Streaming"
+      />
+    )
+  }
+  return (
+    <span
+      className="w-2 h-2 rounded-full bg-amber-500 shrink-0"
+      title="Tool approval pending"
+    />
+  )
+}
+
+function getPresenceIndicator(
+  sessionId: string,
+  activeStreams: Map<string, unknown>,
+  pendingTools: Map<string, unknown>,
+): ReactNode | undefined {
+  if (pendingTools.has(sessionId)) {
+    return <PresenceDot variant="tool-pending" />
+  }
+  if (activeStreams.has(sessionId)) {
+    return <PresenceDot variant="streaming" />
+  }
+  return undefined
+}
+
+function ZoneHeader({ label, icon }: { label: string; icon?: ReactNode }) {
+  return (
+    <div className="px-2 pt-3 pb-1 text-xs font-medium text-zinc-500 uppercase tracking-wider flex items-center gap-1">
+      {icon}
+      {label}
+    </div>
+  )
+}
+
 function SessionItem({
   session,
   isActive,
   onClick,
   onTogglePin,
+  statusIndicator,
 }: {
   session: Session
   isActive: boolean
   onClick: () => void
   onTogglePin: () => void
+  statusIndicator?: ReactNode
 }) {
   const [hovered, setHovered] = useState(false)
   const displayTitle = session.custom_name || session.title || `#${session.short_code}`
@@ -188,6 +333,7 @@ function SessionItem({
       }`}
     >
       <div className="flex items-center gap-2 w-full">
+        {statusIndicator}
         <Hash className="w-3.5 h-3.5 shrink-0 opacity-50" />
         <span className="truncate flex-1">{displayTitle}</span>
         <div className="flex items-center gap-2 shrink-0">

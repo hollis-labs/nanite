@@ -13,20 +13,38 @@ import { api } from '@/lib/api'
 import SettingsPage from './settings/SettingsPage'
 import { SprintPlanningModal } from './modals/SprintPlanningModal'
 import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
+import { useToolRefresh } from '@/hooks/useToolRefresh'
+import { usePresence } from '@/hooks/usePresence'
+import { InboxPanel } from './a2a/InboxPanel'
 
 export function AppShell() {
   const focusRef = useRef<(() => void) | null>(null)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const currentPage = useLayoutStore((s) => s.currentPage)
+  const inboxPanelOpen = useLayoutStore((s) => s.inboxPanelOpen)
+  const setInboxPanel = useLayoutStore((s) => s.setInboxPanel)
   const sprintOpen = useSprintPlanningStore((s) => s.isOpen)
   const sprintProjectId = useSprintPlanningStore((s) => s.projectId)
   const closeSprintPlanning = useSprintPlanningStore((s) => s.closeSprintPlanning)
+
+  // Global tool refresh on session switch — runs even when ToolDashboard isn't mounted
+  useToolRefresh()
+
+  // Global presence SSE — one connection per browser tab
+  usePresence()
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeWorkspaceId],
     queryFn: () => api.listSessions(activeWorkspaceId ?? undefined),
     enabled: !!activeWorkspaceId,
   })
+
+  // Get first agent for inbox panel
+  const { data: agents = [] } = useQuery({
+    queryKey: ['agents'],
+    queryFn: api.listAgents,
+  })
+  const firstAgentId = agents.length > 0 ? agents[0].id : ''
 
   const focusComposer = useCallback(() => {
     focusRef.current?.()
@@ -53,6 +71,11 @@ export function AppShell() {
       {currentPage === 'chat' && <RightRail />}
       <ArtifactsDrawer />
       <WorkflowPanel />
+      <InboxPanel
+        agentId={firstAgentId}
+        open={inboxPanelOpen}
+        onClose={() => setInboxPanel(false)}
+      />
       {sprintOpen && (
         <SprintPlanningModal
           projectId={sprintProjectId}

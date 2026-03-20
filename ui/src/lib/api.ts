@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage } from './types'
 
 const API_BASE = '/api'
 
@@ -577,5 +577,60 @@ export const api = {
       body: JSON.stringify({ name }),
     })
     if (!res.ok) throw new Error(`Failed to enable plugin: ${res.status}`)
+  },
+
+  // --- A2A Messaging ---
+
+  getA2AInbox: async (agentId: string, status?: string): Promise<A2AMessage[]> => {
+    const params = new URLSearchParams({ agent_id: agentId })
+    if (status) params.set('status', status)
+    const res = await fetch(`${API_BASE}/a2a/inbox?${params}`)
+    if (!res.ok) throw new Error(`Failed to get A2A inbox: ${res.status}`)
+    return res.json()
+  },
+
+  getA2AThread: async (threadId: string): Promise<A2AMessage[]> => {
+    const res = await fetch(`${API_BASE}/a2a/threads/${encodeURIComponent(threadId)}`)
+    if (!res.ok) throw new Error(`Failed to get A2A thread: ${res.status}`)
+    return res.json()
+  },
+
+  sendA2AMessage: async (data: {
+    from_agent: string
+    to_agent: string
+    subject?: string
+    body: string
+    type?: string
+    thread_id?: string
+    reply_to?: string
+    priority?: number
+  }): Promise<A2AMessage> => {
+    const res = await fetch(`${API_BASE}/a2a/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to send A2A message: ${res.status}`)
+    return res.json()
+  },
+
+  ackA2AMessage: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/a2a/messages/${encodeURIComponent(id)}/ack`, {
+      method: 'PUT',
+    })
+    if (!res.ok) throw new Error(`Failed to acknowledge A2A message: ${res.status}`)
+  },
+
+  resolveA2AMessage: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/a2a/messages/${encodeURIComponent(id)}/resolve`, {
+      method: 'PUT',
+    })
+    if (!res.ok) throw new Error(`Failed to resolve A2A message: ${res.status}`)
+  },
+
+  getA2AUnreadCount: async (agentId: string): Promise<{ count: number }> => {
+    const res = await fetch(`${API_BASE}/a2a/unread?agent_id=${encodeURIComponent(agentId)}`)
+    if (!res.ok) throw new Error(`Failed to get A2A unread count: ${res.status}`)
+    return res.json()
   },
 }

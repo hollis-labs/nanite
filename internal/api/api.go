@@ -51,6 +51,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// SSE stream
 	mux.HandleFunc("GET /api/stream/{messageID}", a.handleStream)
 
+	// Presence SSE stream (one per browser tab)
+	mux.HandleFunc("GET /api/presence", a.handlePresenceStream)
+
 	// Retry (circuit breaker reset + re-generate)
 	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)
 
@@ -101,6 +104,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Multi-agent group sessions
 	mux.HandleFunc("GET /api/sessions/{id}/agents", a.handleListSessionAgents)
 	mux.HandleFunc("POST /api/sessions/{id}/agents", a.handleAddSessionAgent)
+	mux.HandleFunc("DELETE /api/sessions/{id}/agents/{agentId}", a.handleRemoveSessionAgent)
 
 	// Token usage
 	mux.HandleFunc("GET /api/sessions/{id}/usage", a.handleGetSessionUsage)
@@ -160,6 +164,14 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mcp-servers", a.handleCreateMCPServer)
 	mux.HandleFunc("PUT /api/mcp-servers/{name}", a.handleUpdateMCPServer)
 	mux.HandleFunc("DELETE /api/mcp-servers/{name}", a.handleDeleteMCPServer)
+
+	// A2A Messaging
+	mux.HandleFunc("GET /api/a2a/inbox", a.handleA2AInbox)
+	mux.HandleFunc("GET /api/a2a/threads/{threadId}", a.handleA2AThread)
+	mux.HandleFunc("POST /api/a2a/messages", a.handleA2ASendMessage)
+	mux.HandleFunc("PUT /api/a2a/messages/{id}/ack", a.handleA2AAck)
+	mux.HandleFunc("PUT /api/a2a/messages/{id}/resolve", a.handleA2AResolve)
+	mux.HandleFunc("GET /api/a2a/unread", a.handleA2AUnreadCount)
 
 	// Output Templates
 	mux.HandleFunc("GET /api/templates", a.handleListTemplates)

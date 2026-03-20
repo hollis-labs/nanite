@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hollis-labs/conduit/internal/agentvalidation"
 	hostplugin "github.com/hollis-labs/conduit/internal/plugin"
 	conduitstore "github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/fragments-engine/plugin"
@@ -128,6 +129,15 @@ func seedAgent(host plugin.Host) error {
 		Modes:        `[]`,
 		Settings:     `{}`,
 		SystemPrompt: demoPresenterSystemPrompt,
+	}
+
+	// Validate agent config before seeding.
+	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
+		return fmt.Errorf("Demo Presenter agent config invalid: %s", vr.Error())
+	} else if len(vr.Warnings) > 0 {
+		for _, w := range vr.Warnings {
+			host.Logger().Warn("Demo Presenter agent config warning", "warning", w)
+		}
 	}
 
 	if err := db.CreateAgent(agent); err != nil {

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"log"
 	"net/http"
 
+	"github.com/hollis-labs/conduit/internal/agentvalidation"
 	"github.com/hollis-labs/conduit/internal/store"
 )
 
@@ -55,6 +57,20 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		CanExecute:      req.CanExecute,
 		Settings:        req.Settings,
 	}
+	// Validate agent config before persisting.
+	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
+		a.jsonResp(w, http.StatusBadRequest, map[string]any{
+			"error":    "validation_failed",
+			"details":  vr.Errors,
+			"warnings": vr.Warnings,
+		})
+		return
+	} else if len(vr.Warnings) > 0 {
+		for _, w := range vr.Warnings {
+			log.Printf("agent %q config warning: %s", agent.Slug, w)
+		}
+	}
+
 	if err := a.Store.CreateAgent(agent); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -145,6 +161,20 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Settings != nil {
 		existing.Settings = *req.Settings
+	}
+
+	// Validate agent config before persisting.
+	if vr := agentvalidation.ValidateAgentConfig(existing); !vr.OK() {
+		a.jsonResp(w, http.StatusBadRequest, map[string]any{
+			"error":    "validation_failed",
+			"details":  vr.Errors,
+			"warnings": vr.Warnings,
+		})
+		return
+	} else if len(vr.Warnings) > 0 {
+		for _, w := range vr.Warnings {
+			log.Printf("agent %q config warning: %s", existing.Slug, w)
+		}
 	}
 
 	if err := a.Store.UpdateAgent(existing); err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hollis-labs/conduit/internal/agentvalidation"
 	"github.com/hollis-labs/conduit/internal/mcp"
 	hostplugin "github.com/hollis-labs/conduit/internal/plugin"
 	"github.com/hollis-labs/conduit/internal/store"
@@ -181,6 +182,15 @@ func seedEmailAgent(host plugin.Host) error {
 		Modes:        `[]`,
 		Settings:     `{}`,
 		SystemPrompt: emailAssistantSystemPrompt,
+	}
+
+	// Validate agent config before seeding.
+	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
+		return fmt.Errorf("Email Assistant agent config invalid: %s", vr.Error())
+	} else if len(vr.Warnings) > 0 {
+		for _, w := range vr.Warnings {
+			host.Logger().Warn("Email Assistant agent config warning", "warning", w)
+		}
 	}
 
 	if err := db.CreateAgent(agent); err != nil {

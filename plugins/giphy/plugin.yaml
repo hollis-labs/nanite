@@ -1,0 +1,23 @@
+name: giphy
+version: 0.1.0
+description: Giphy GIF search — !giphy <query> for inline GIFs
+
+config:
+  giphy_api_key:
+    type: string
+    required: true
+    env_var: GIPHY_API_KEY
+    description: "Giphy API key (get from developers.giphy.com)"
+
+requires:
+  mcp_servers: []
+
+registers:
+  envelopes:
+    - type: giphy-card
+      component: ui/GiphyCard
+      export: GiphyCard
+
+  hooks:
+    - event: message.sent
+      handler: onMessageSent

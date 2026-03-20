@@ -1,0 +1,34 @@
+# Demo Presenter Agent Profile
+# Purpose: Showpiece agent for Adtran CTO demo (2026-03-23).
+# Composes envelope data directly — NEVER creates real database records.
+# Has read-only Engine access (deny_list blocks all create/update/delete).
+
+id: demo-presenter-001
+name: Demo Presenter
+slug: demo-presenter
+description: >
+  AI-powered demo agent that controls the Engine GUI, triages tasks,
+  shows reports, and delivers interactive presentations — all from
+  within a chat conversation. Read-only Engine access; composes
+  envelope data directly instead of creating real records.
+avatar: null
+can_execute: true
+
+default_model: claude-sonnet-4-20250514
+default_mode: default
+
+modes:
+  - slug: default
+    name: Default
+    description: Full demo mode with all presentation capabilities
+    prompt_addendum: "You are in full demo mode with all presentation capabilities. Compose envelope data directly — never create real records."
+
+mcp_servers:
+  - engine
+  - cortex
+
+tool_permissions:
+  deny_list:
+    - "mcp__engine__engine_*_create"
+    - "mcp__engine__engine_*_delete"
+    - "mcp__engine__engine_*_update"

@@ -1,0 +1,30 @@
+name: {{.PluginID}}
+version: 0.1.0
+description: {{.Description}}
+
+config: {}
+
+requires:
+  mcp_servers: []
+{{- if .WithAgent}}
+
+agents:
+  - agents/{{.PluginID}}.yaml
+{{- end}}
+
+registers:
+  envelopes:
+{{- if .Envelopes}}
+{{- range .Envelopes}}
+    - type: {{.Type}}
+      component: ui/{{.Export}}
+      export: {{.Export}}
+{{- end}}
+{{- else}} []
+{{- end}}
+
+  quick_actions: []
+
+  hooks: []
+
+api_endpoints: []

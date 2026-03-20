@@ -8,6 +8,8 @@
 package allplugins
 
 import (
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/demopresenter"
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/giphy"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/sessionstats"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/supportticket"
 )

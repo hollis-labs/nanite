@@ -11,6 +11,7 @@ import (
 	fplugin "github.com/hollis-labs/fragments-engine/plugin"
 
 	"github.com/hollis-labs/conduit/internal/plugin"
+	"github.com/hollis-labs/conduit/internal/plugin/scaffold"
 	"github.com/hollis-labs/conduit/internal/store"
 )
 
@@ -23,7 +24,7 @@ var noRestart bool
 func cmdPlugin(args []string) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: conduit plugin <command> [--no-restart]")
-		fmt.Fprintln(os.Stderr, "commands: install, uninstall, list, disable, enable")
+		fmt.Fprintln(os.Stderr, "commands: new, install, uninstall, list, disable, enable")
 		os.Exit(1)
 	}
 
@@ -39,6 +40,9 @@ func cmdPlugin(args []string) {
 	args = filtered
 
 	switch args[0] {
+	case "new":
+		pluginNew(args[1:])
+		return
 	case "install":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: conduit plugin install <name>")
@@ -275,4 +279,127 @@ func buildMinimalHost() (*plugin.Host, error) {
 		return nil, fmt.Errorf("open database %s: %w", dbPath, err)
 	}
 	return plugin.NewHostWithStore(s), nil
+}
+
+// pluginNew scaffolds a new plugin using embedded templates.
+func pluginNew(args []string) {
+	// Parse flags
+	var (
+		withAgent    bool
+		envelopeType string
+		crudResource string
+		description  string
+	)
+
+	var positional []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--with-agent":
+			withAgent = true
+		case "--with-envelope":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --with-envelope requires a value")
+				os.Exit(1)
+			}
+			envelopeType = args[i]
+		case "--with-crud":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --with-crud requires a value")
+				os.Exit(1)
+			}
+			crudResource = args[i]
+		case "--description":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --description requires a value")
+				os.Exit(1)
+			}
+			description = args[i]
+		case "--help", "-h":
+			pluginNewHelp()
+			return
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				fmt.Fprintf(os.Stderr, "unknown flag: %s\n", args[i])
+				pluginNewHelp()
+				os.Exit(1)
+			}
+			positional = append(positional, args[i])
+		}
+	}
+
+	if len(positional) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: conduit plugin new <name> [flags]")
+		fmt.Fprintln(os.Stderr, "Run 'conduit plugin new --help' for details.")
+		os.Exit(1)
+	}
+
+	name := positional[0]
+
+	opts := scaffold.Options{
+		Name:        name,
+		Description: description,
+		WithAgent:   withAgent,
+		OutputDir:   filepath.Join(resolvePluginsDir(), name),
+	}
+
+	if envelopeType != "" {
+		opts.Envelopes = []scaffold.EnvelopeDef{scaffold.ToEnvelopeDef(envelopeType)}
+	}
+
+	if crudResource != "" {
+		opts.CRUDResources = []string{crudResource}
+	}
+
+	fmt.Printf("Scaffolding plugin %q in %s...\n", name, opts.OutputDir)
+
+	if err := scaffold.Run(opts); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print summary
+	fmt.Println()
+	fmt.Printf("Plugin %q created successfully!\n", name)
+	fmt.Println()
+	fmt.Println("Generated files:")
+	fmt.Printf("  %s/plugin.yaml\n", opts.OutputDir)
+	fmt.Printf("  %s/plugin.go\n", opts.OutputDir)
+	fmt.Printf("  %s/README.md\n", opts.OutputDir)
+	if withAgent {
+		fmt.Printf("  %s/agents/%s.yaml\n", opts.OutputDir, name)
+	}
+	if envelopeType != "" {
+		env := scaffold.ToEnvelopeDef(envelopeType)
+		fmt.Printf("  %s/ui/%s.tsx\n", opts.OutputDir, env.Export)
+	}
+
+	fmt.Println()
+	fmt.Println("Next steps:")
+	pkgName := strings.ReplaceAll(strings.ReplaceAll(name, "-", ""), "_", "")
+	fmt.Printf("  1. Copy Go source to internal/plugin/builtin/%s/\n", pkgName)
+	fmt.Printf("  2. Add import to internal/plugin/allplugins/allplugins.go:\n")
+	fmt.Printf("     _ \"github.com/hollis-labs/conduit/internal/plugin/builtin/%s\"\n", pkgName)
+	fmt.Printf("  3. Rebuild: go install ./cmd/conduit/\n")
+	fmt.Printf("  4. Restart: cerberus restart conduit-api\n")
+}
+
+func pluginNewHelp() {
+	fmt.Println("Usage: conduit plugin new <name> [flags]")
+	fmt.Println()
+	fmt.Println("Scaffold a new Conduit plugin with boilerplate files.")
+	fmt.Println()
+	fmt.Println("Flags:")
+	fmt.Println("  --description <desc>      Plugin description (default: \"A Conduit plugin\")")
+	fmt.Println("  --with-agent              Generate an agent profile in agents/<name>.yaml")
+	fmt.Println("  --with-envelope <type>    Generate a React envelope component (e.g. card, form)")
+	fmt.Println("  --with-crud <resource>    Generate CRUD handler boilerplate in plugin.go")
+	fmt.Println("  -h, --help                Show this help message")
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  conduit plugin new my-plugin")
+	fmt.Println("  conduit plugin new my-plugin --with-agent --description \"My awesome plugin\"")
+	fmt.Println("  conduit plugin new my-plugin --with-envelope card --with-crud items")
 }

@@ -1,0 +1,11 @@
+name: demo-presenter
+version: 0.1.0
+description: Demo presenter agent for interactive Fragments Engine presentations — read-only Engine access, composes envelope data directly
+
+requires:
+  mcp_servers:
+    - engine
+    - cortex
+
+agents:
+  - agents/demo-presenter.yaml

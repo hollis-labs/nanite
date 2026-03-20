@@ -1,0 +1,98 @@
+package {{.PackageName}}
+
+import (
+{{- if .CRUDResources}}
+	"context"
+{{- end}}
+	"fmt"
+	"time"
+
+	hostplugin "github.com/hollis-labs/conduit/internal/plugin"
+	"github.com/hollis-labs/fragments-engine/plugin"
+)
+
+func init() {
+	hostplugin.RegisterPlugin("{{.PluginID}}", func() plugin.Plugin { return New() })
+}
+
+// {{.StructName}} implements the {{.PluginName}} plugin for Conduit.
+type {{.StructName}} struct {
+	host   plugin.Host
+	status plugin.PluginStatus
+}
+
+// New creates a new {{.StructName}} instance.
+func New() *{{.StructName}} {
+	return &{{.StructName}}{}
+}
+
+func (p *{{.StructName}}) ID() string          { return "{{.PluginID}}" }
+func (p *{{.StructName}}) Name() string        { return "{{.PluginName}}" }
+func (p *{{.StructName}}) Version() string     { return "0.1.0" }
+func (p *{{.StructName}}) Description() string { return "{{.Description}}" }
+func (p *{{.StructName}}) Dependencies() []string { return nil }
+
+func (p *{{.StructName}}) Load(host plugin.Host) error {
+	p.host = host
+	logger := host.Logger()
+{{- range .CRUDResources}}
+
+	// Register CRUD handler for {{.}} — auto-wires /api/plugins/{{.}}/*
+	{{.}}Handler := &{{title .}}Handler{}
+	if err := host.RegisterCRUDHandler("{{.}}", {{.}}Handler); err != nil {
+		return fmt.Errorf("failed to register {{.}} CRUD handler: %%w", err)
+	}
+{{- end}}
+
+	p.status = plugin.PluginStatus{
+		Loaded:   true,
+		Enabled:  true,
+		LoadedAt: time.Now(),
+	}
+
+	logger.Info("{{.PluginID}} plugin loaded", "version", p.Version())
+	return nil
+}
+
+func (p *{{.StructName}}) Unload() error {
+	p.status.Loaded = false
+	p.status.Enabled = false
+	if p.host != nil {
+		p.host.Logger().Info("{{.PluginID}} plugin unloaded")
+	}
+	return nil
+}
+
+func (p *{{.StructName}}) Status() plugin.PluginStatus {
+	return p.status
+}
+{{- range .CRUDResources}}
+
+// {{title .}}Handler implements plugin.CRUDHandler for the {{.}} resource.
+type {{title .}}Handler struct{}
+
+func (h *{{title .}}Handler) Create(ctx context.Context, resource interface{}) (interface{}, error) {
+	// TODO: implement Create
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (h *{{title .}}Handler) Read(ctx context.Context, id string) (interface{}, error) {
+	// TODO: implement Read
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (h *{{title .}}Handler) Update(ctx context.Context, id string, resource interface{}) (interface{}, error) {
+	// TODO: implement Update
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (h *{{title .}}Handler) Delete(ctx context.Context, id string) error {
+	// TODO: implement Delete
+	return fmt.Errorf("not implemented")
+}
+
+func (h *{{title .}}Handler) List(ctx context.Context, filters map[string]interface{}) ([]interface{}, error) {
+	// TODO: implement List
+	return nil, fmt.Errorf("not implemented")
+}
+{{- end}}

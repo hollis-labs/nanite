@@ -1,0 +1,38 @@
+# {{.PluginName}} Plugin
+
+{{.Description}}
+
+## Installation
+
+### As a built-in plugin
+
+1. Copy this directory into `plugins/{{.PluginID}}/`
+2. Copy the Go source into `internal/plugin/builtin/{{.PackageName}}/`
+3. Add an import to `internal/plugin/allplugins/allplugins.go`:
+   ```go
+   _ "github.com/hollis-labs/conduit/internal/plugin/builtin/{{.PackageName}}"
+   ```
+4. Rebuild: `go install ./cmd/conduit/`
+
+### From Git
+
+```bash
+conduit plugin install {{.PluginID}}
+```
+
+## Development
+
+- `plugin.yaml` — plugin manifest (name, version, config, registered components)
+- `plugin.go` — Go implementation of the Plugin interface
+{{- if .WithAgent}}
+- `agents/{{.PluginID}}.yaml` — agent profile
+{{- end}}
+{{- if .Envelopes}}
+- `ui/` — React envelope components
+{{- end}}
+
+## Plugin Lifecycle
+
+1. `init()` registers the constructor in the plugin registry
+2. `Load()` is called when the host discovers and loads the plugin
+3. `Unload()` is called on shutdown or when the plugin is disabled

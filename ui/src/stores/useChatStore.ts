@@ -26,6 +26,10 @@ interface ChatState {
   addToolWarning: (warning: ToolWarning) => void
   clearToolWarnings: () => void
 
+  // Text-only mode (agent has 0 MCP tools)
+  textOnlyMode: boolean
+  setTextOnlyMode: (enabled: boolean) => void
+
   // Chat errors
   chatErrors: ChatError[]
   addChatError: (error: ChatError) => void
@@ -86,6 +90,10 @@ export const useChatStore = create<ChatState>((set) => ({
   addToolWarning: (warning: ToolWarning) =>
     set((state: ChatState) => ({ toolWarnings: [...state.toolWarnings, warning] })),
   clearToolWarnings: () => set({ toolWarnings: [] }),
+
+  // Text-only mode
+  textOnlyMode: false,
+  setTextOnlyMode: (enabled: boolean) => set({ textOnlyMode: enabled }),
 
   // Chat errors
   chatErrors: [],

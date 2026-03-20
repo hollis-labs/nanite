@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo, useCallback, useState, useLayoutEffect } from 'react'
-import { Bot, ArrowDown } from 'lucide-react'
+import { Bot, ArrowDown, Info } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import { ChatMessage } from './ChatMessage'
@@ -33,6 +33,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   const activeMode = useChatStore((s) => s.activeMode)
   const toolCalls = useChatStore((s) => s.toolCalls)
   const toolWarnings = useChatStore((s) => s.toolWarnings)
+  const textOnlyMode = useChatStore((s) => s.textOnlyMode)
   const chatErrors = useChatStore((s) => s.chatErrors)
   const dismissChatError = useChatStore((s) => s.dismissChatError)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
@@ -159,6 +160,14 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   return (
     <ScrollArea className="flex-1 px-4 py-6 relative" ref={scrollRef}>
       <div className="max-w-3xl mx-auto space-y-6">
+        {/* Persistent text-only mode banner (agent has 0 MCP tools) */}
+        {textOnlyMode && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-400">
+            <Info className="w-3.5 h-3.5 shrink-0" />
+            <span>This agent has no tools configured — responses are text-only</span>
+          </div>
+        )}
+
         {messages.map((msg) => (
           <ChatMessage
             key={msg.id}

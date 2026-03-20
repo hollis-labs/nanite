@@ -44,10 +44,11 @@ func (s *Store) Seed() error {
 Your strengths: strategic thinking, context management, task decomposition, cross-domain synthesis, and clear communication. You ask clarifying questions when needed and always think before acting.`
 
 	if _, err := tx.Exec(
-		`INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute, mcp_servers)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"mentat-001", "Mentat", "mentat", mentatPrompt,
 		"Cognitive AI partner for planning and context management", false,
+		`["engine","cortex","hadron"]`,
 	); err != nil {
 		return fmt.Errorf("insert mentat profile: %w", err)
 	}

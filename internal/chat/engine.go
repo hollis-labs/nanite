@@ -422,6 +422,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 		warningJSON, _ := json.Marshal(warningPayload)
 		ch <- StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
+
+		// Inject guidance so the LLM doesn't waste iterations guessing tool names.
+		systemPrompt += "\n\nIMPORTANT: You have no tools available in this session. Do NOT attempt to call any tools — all tool calls will fail. Respond with text only. If the user's request requires tools (data lookup, task management, code execution, etc.), clearly explain that this agent is not configured with the necessary tools and suggest they switch to an agent that has tools configured."
 	}
 
 	// If progressive discovery is active, inject the tool catalog into the system prompt.

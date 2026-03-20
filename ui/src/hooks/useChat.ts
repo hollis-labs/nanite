@@ -45,6 +45,7 @@ export function useChat(sessionId: string | null) {
   const setCircuitOpen = useChatStore((s) => s.setCircuitOpen)
   const addToolWarning = useChatStore((s) => s.addToolWarning)
   const clearToolWarnings = useChatStore((s) => s.clearToolWarnings)
+  const setTextOnlyMode = useChatStore((s) => s.setTextOnlyMode)
   const sessionTakeover = useChatStore((s) => s.sessionTakeover)
   const setSessionTakeover = useChatStore((s) => s.setSessionTakeover)
 
@@ -64,7 +65,10 @@ export function useChat(sessionId: string | null) {
   // Load messages when sessionId changes
   useEffect(() => {
     void loadMessages()
-  }, [loadMessages])
+    // Clear text-only mode on session switch — it will be re-set if the new
+    // session's agent also has 0 MCP tools.
+    setTextOnlyMode(false)
+  }, [loadMessages, setTextOnlyMode])
 
   const sendMessage = useCallback(async (content: string) => {
     if (!sessionId || !content.trim()) return
@@ -141,6 +145,10 @@ export function useChat(sessionId: string | null) {
           try {
             const warning = JSON.parse(data.data) as ToolWarning
             addToolWarning(warning)
+            // Set persistent text-only mode when agent has no MCP tools
+            if (warning.level === 'critical' && warning.error.includes('no MCP tools')) {
+              setTextOnlyMode(true)
+            }
           } catch {
             console.warn('[useChat] Failed to parse tool_warning data:', data.data)
           }
@@ -279,7 +287,7 @@ export function useChat(sessionId: string | null) {
       console.error('Send failed:', err)
       clearStream()
     }
-  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addToolWarning, clearToolWarnings, addChatError, setStatusMessage, setCircuitOpen, setSessionTakeover])
+  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addToolWarning, clearToolWarnings, setTextOnlyMode, addChatError, setStatusMessage, setCircuitOpen, setSessionTakeover])
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {

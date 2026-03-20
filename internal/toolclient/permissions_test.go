@@ -1,6 +1,9 @@
 package toolclient
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestParsePermissions_Empty(t *testing.T) {
 	p := ParsePermissions("")
@@ -101,5 +104,129 @@ func TestCheckPermission_ExactMatch(t *testing.T) {
 	}
 	if p.CheckPermission("mcp__engine__volon_task_delete") {
 		t.Error("expected deny for non-matching exact pattern")
+	}
+}
+
+// --- Unmarshal alias tests (TASK-20260320-106) ---
+
+func TestUnmarshalJSON_AllowShorthand(t *testing.T) {
+	raw := `{"allow":["mcp__email__*"]}`
+	var p ToolPermissions
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__email__*" {
+		t.Fatalf("expected AllowList=[mcp__email__*], got %v", p.AllowList)
+	}
+}
+
+func TestUnmarshalJSON_AllowListCanonical(t *testing.T) {
+	raw := `{"allow_list":["mcp__email__*"]}`
+	var p ToolPermissions
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__email__*" {
+		t.Fatalf("expected AllowList=[mcp__email__*], got %v", p.AllowList)
+	}
+}
+
+func TestUnmarshalJSON_AllowBothMerged(t *testing.T) {
+	raw := `{"allow":["a"],"allow_list":["b"]}`
+	var p ToolPermissions
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.AllowList) != 2 {
+		t.Fatalf("expected 2 entries, got %v", p.AllowList)
+	}
+	has := map[string]bool{}
+	for _, v := range p.AllowList {
+		has[v] = true
+	}
+	if !has["a"] || !has["b"] {
+		t.Fatalf("expected both a and b, got %v", p.AllowList)
+	}
+}
+
+func TestUnmarshalJSON_DenyShorthand(t *testing.T) {
+	raw := `{"deny":["x"]}`
+	var p ToolPermissions
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.DenyList) != 1 || p.DenyList[0] != "x" {
+		t.Fatalf("expected DenyList=[x], got %v", p.DenyList)
+	}
+}
+
+func TestUnmarshalJSON_EmptyObject(t *testing.T) {
+	raw := `{}`
+	var p ToolPermissions
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.AllowList) != 0 || len(p.DenyList) != 0 {
+		t.Fatalf("expected empty lists, got allow=%v deny=%v", p.AllowList, p.DenyList)
+	}
+}
+
+func TestUnmarshalJSON_MaxCallsPerTurn(t *testing.T) {
+	raw := `{"allow_list":["a"],"max_calls_per_turn":10}`
+	var p ToolPermissions
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.MaxCallsPerTurn != 10 {
+		t.Fatalf("expected MaxCallsPerTurn=10, got %d", p.MaxCallsPerTurn)
+	}
+}
+
+func TestParsePermissions_ShorthandAllow(t *testing.T) {
+	p := ParsePermissions(`{"allow":["mcp__email__*"]}`)
+	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__email__*" {
+		t.Fatalf("ParsePermissions did not handle shorthand allow: %v", p.AllowList)
+	}
+	if p.MaxCallsPerTurn != DefaultMaxCallsPerTurn {
+		t.Fatalf("expected default max calls, got %d", p.MaxCallsPerTurn)
+	}
+}
+
+func TestCheckPermission_WithMergedAllowList(t *testing.T) {
+	raw := `{"allow":["mcp__email__*"],"allow_list":["mcp__teams__*"]}`
+	p := ParsePermissions(raw)
+
+	tests := []struct {
+		tool string
+		want bool
+	}{
+		{"mcp__email__send", true},
+		{"mcp__teams__notify", true},
+		{"mcp__dev__bash", false},
+	}
+	for _, tt := range tests {
+		got := p.CheckPermission(tt.tool)
+		if got != tt.want {
+			t.Errorf("CheckPermission(%q) = %v, want %v", tt.tool, got, tt.want)
+		}
+	}
+}
+
+func TestCheckPermission_DenyShorthandTakesPrecedence(t *testing.T) {
+	raw := `{"allow_list":["mcp__email__*"],"deny":["mcp__email__send"]}`
+	p := ParsePermissions(raw)
+
+	if p.CheckPermission("mcp__email__send") {
+		t.Error("expected deny to take precedence for mcp__email__send")
+	}
+	if !p.CheckPermission("mcp__email__read") {
+		t.Error("expected mcp__email__read to be allowed")
+	}
+}
+
+func TestCheckPermission_EmptyPermissive(t *testing.T) {
+	p := ParsePermissions(`{}`)
+	if !p.CheckPermission("anything") {
+		t.Error("empty permissions should be permissive")
 	}
 }

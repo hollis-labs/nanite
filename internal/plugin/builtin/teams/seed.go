@@ -40,7 +40,7 @@ func seedAgent(host plugin.Host) error {
 		DefaultMode:  "default",
 		CanExecute:   false,
 		MCPServers:   `["teams"]`,
-		ToolPermissions: `{"allow":["mcp__teams__*"]}`,
+		ToolPermissions: `{"allow_list":["mcp__teams__*"]}`,
 		Modes:        `[]`,
 		Settings:     `{}`,
 		SystemPrompt: teamsConnectorSystemPrompt,

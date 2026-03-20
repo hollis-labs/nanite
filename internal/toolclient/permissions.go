@@ -2,6 +2,7 @@ package toolclient
 
 import (
 	"encoding/json"
+	"log"
 	"path"
 	"strings"
 )
@@ -14,6 +15,72 @@ type ToolPermissions struct {
 	AllowList       []string `json:"allow_list,omitempty"`
 	DenyList        []string `json:"deny_list,omitempty"`
 	MaxCallsPerTurn int      `json:"max_calls_per_turn,omitempty"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshalling for ToolPermissions.
+// It accepts both canonical field names ("allow_list", "deny_list") and the
+// shorthand variants ("allow", "deny"), merging values from both if present.
+func (p *ToolPermissions) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Helper to decode a string slice from a raw JSON field.
+	decodeList := func(key string) ([]string, error) {
+		v, ok := raw[key]
+		if !ok {
+			return nil, nil
+		}
+		var list []string
+		if err := json.Unmarshal(v, &list); err != nil {
+			return nil, err
+		}
+		return list, nil
+	}
+
+	// allow_list (canonical)
+	canonical, err := decodeList("allow_list")
+	if err != nil {
+		return err
+	}
+	p.AllowList = append(p.AllowList, canonical...)
+
+	// allow (shorthand — warn)
+	shorthand, err := decodeList("allow")
+	if err != nil {
+		return err
+	}
+	if len(shorthand) > 0 {
+		log.Printf("toolclient: deprecated field \"allow\" in tool_permissions — use \"allow_list\" instead")
+		p.AllowList = append(p.AllowList, shorthand...)
+	}
+
+	// deny_list (canonical)
+	canonical, err = decodeList("deny_list")
+	if err != nil {
+		return err
+	}
+	p.DenyList = append(p.DenyList, canonical...)
+
+	// deny (shorthand — warn)
+	shorthand, err = decodeList("deny")
+	if err != nil {
+		return err
+	}
+	if len(shorthand) > 0 {
+		log.Printf("toolclient: deprecated field \"deny\" in tool_permissions — use \"deny_list\" instead")
+		p.DenyList = append(p.DenyList, shorthand...)
+	}
+
+	// max_calls_per_turn
+	if v, ok := raw["max_calls_per_turn"]; ok {
+		if err := json.Unmarshal(v, &p.MaxCallsPerTurn); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // ParsePermissions parses a ToolPermissions from a JSON string.

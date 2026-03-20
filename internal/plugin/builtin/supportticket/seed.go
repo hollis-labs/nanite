@@ -41,7 +41,7 @@ func seedAgent(host plugin.Host) error {
 		DefaultMode:  "default",
 		CanExecute:   false,
 		MCPServers:   `["cortex","support-kb"]`,
-		ToolPermissions: `{"allow":["mcp__cortex__*","mcp__support-kb__*"]}`,
+		ToolPermissions: `{"allow_list":["mcp__cortex__*","mcp__support-kb__*"]}`,
 		Modes:        `[]`,
 		Settings:     `{}`,
 		SystemPrompt: itSupportSystemPrompt,

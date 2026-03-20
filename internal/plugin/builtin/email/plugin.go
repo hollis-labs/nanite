@@ -177,7 +177,7 @@ func seedEmailAgent(host plugin.Host) error {
 		DefaultMode:  "default",
 		CanExecute:   false,
 		MCPServers:   `["email"]`,
-		ToolPermissions: `{"allow":["mcp__email__*"]}`,
+		ToolPermissions: `{"allow_list":["mcp__email__*"]}`,
 		Modes:        `[]`,
 		Settings:     `{}`,
 		SystemPrompt: emailAssistantSystemPrompt,

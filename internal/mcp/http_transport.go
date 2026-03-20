@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sync/atomic"
+	"time"
 )
 
 // JSONRPCRequest represents a JSON-RPC 2.0 request.
@@ -64,7 +65,9 @@ type HTTPTransport struct {
 func NewHTTPTransport(serverURL string) *HTTPTransport {
 	return &HTTPTransport{
 		serverURL: serverURL,
-		client:    &http.Client{},
+		client: &http.Client{
+			Timeout: 60 * time.Second, // longer than stdio's 30s to account for network latency
+		},
 	}
 }
 

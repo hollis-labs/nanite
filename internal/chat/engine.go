@@ -432,6 +432,20 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	iteration := 0
 	for ; iteration < maxToolIterations; iteration++ {
+		// Check if the overall deadline has been exceeded.
+		if ctx.Err() != nil {
+			log.Printf("[WARN] generateResponse context cancelled: %v (session=%s)", ctx.Err(), sessionID)
+			ch <- errorEnvelopeDelta(ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
+				"timeout": generateResponseTimeout.String(),
+				"session": sessionID,
+			})
+			ch <- errorEvent(ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
+				"timeout": generateResponseTimeout.String(),
+				"session": sessionID,
+			})
+			return
+		}
+
 		// Enforce unified token budget before every provider call.
 		var breakdown *TokenBreakdown
 		var budgetErr error

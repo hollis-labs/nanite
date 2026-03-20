@@ -193,6 +193,7 @@ export function LeftSidebar() {
                         isActive={session.id === activeSessionId}
                         onClick={() => setActiveSession(session.id)}
                         onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
+                        statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools)}
                       />
                     ))}
                   </>
@@ -212,6 +213,7 @@ export function LeftSidebar() {
                         isActive={session.id === activeSessionId}
                         onClick={() => setActiveSession(session.id)}
                         onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
+                        statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools)}
                       />
                     ))}
                   </>
@@ -242,6 +244,7 @@ export function LeftSidebar() {
                           isActive={session.id === activeSessionId}
                           onClick={() => setActiveSession(session.id)}
                           onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
+                          statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools)}
                         />
                       ))}
                   </>

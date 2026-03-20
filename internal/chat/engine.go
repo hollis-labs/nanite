@@ -409,22 +409,27 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	tools := selection.Tools
 
 	// Warn user if no MCP tools are available — responses will be text-only.
-	mcpToolCount := 0
-	for _, t := range tools {
-		if strings.HasPrefix(t.Name, "mcp__") {
-			mcpToolCount++
+	// Skip this check when progressive discovery is active: the agent HAS tools,
+	// they just need to be discovered via request_tools (no mcp__ prefixed tools
+	// in the initial set is expected in that case).
+	if !selection.Progressive {
+		mcpToolCount := 0
+		for _, t := range tools {
+			if strings.HasPrefix(t.Name, "mcp__") {
+				mcpToolCount++
+			}
 		}
-	}
-	if mcpToolCount == 0 {
-		warningPayload := ToolWarningPayload{
-			Error: "This agent has no MCP tools configured. Responses will be text-only.",
-			Level: "critical",
-		}
-		warningJSON, _ := json.Marshal(warningPayload)
-		ch <- StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
+		if mcpToolCount == 0 {
+			warningPayload := ToolWarningPayload{
+				Error: "This agent has no MCP tools configured. Responses will be text-only.",
+				Level: "critical",
+			}
+			warningJSON, _ := json.Marshal(warningPayload)
+			ch <- StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 
-		// Inject guidance so the LLM doesn't waste iterations guessing tool names.
-		systemPrompt += "\n\nIMPORTANT: You have no tools available in this session. Do NOT attempt to call any tools — all tool calls will fail. Respond with text only. If the user's request requires tools (data lookup, task management, code execution, etc.), clearly explain that this agent is not configured with the necessary tools and suggest they switch to an agent that has tools configured."
+			// Inject guidance so the LLM doesn't waste iterations guessing tool names.
+			systemPrompt += "\n\nIMPORTANT: You have no tools available in this session. Do NOT attempt to call any tools — all tool calls will fail. Respond with text only. If the user's request requires tools (data lookup, task management, code execution, etc.), clearly explain that this agent is not configured with the necessary tools and suggest they switch to an agent that has tools configured."
+		}
 	}
 
 	// If progressive discovery is active, inject the tool catalog into the system prompt.

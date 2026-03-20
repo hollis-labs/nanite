@@ -4,7 +4,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import { ChatMessage } from './ChatMessage'
 import { MessageContent } from './MessageContent'
-import { ToolCallIndicator } from './ToolCallIndicator'
 import { ToolCallDisplay } from './ToolCallDisplay'
 import { ToolWarningBanner } from './ToolWarningBanner'
 import { ThinkingIndicator } from './ThinkingIndicator'
@@ -12,7 +11,7 @@ import { ErrorBanner } from './ErrorBanner'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
-import type { Message, AgentMode, ToolCallDisplayMode } from '@/lib/types'
+import type { Message, AgentMode } from '@/lib/types'
 
 const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
   default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
@@ -71,9 +70,10 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   }, [isStreaming, streamingContent])
 
   const cycleToolCallDisplayMode = useCallback(() => {
-    const modes: ToolCallDisplayMode[] = ['indicator', 'minimal', 'compact', 'full']
+    const modes = ['indicator', 'minimal', 'compact', 'full'] as const
     const idx = modes.indexOf(toolCallDisplayMode)
-    setToolCallDisplayMode(modes[(idx + 1) % modes.length])
+    const nextIdx = idx === -1 ? 1 : (idx + 1) % modes.length
+    setToolCallDisplayMode(modes[nextIdx])
   }, [toolCallDisplayMode, setToolCallDisplayMode])
 
   const avatarStyle = MODE_AVATAR_STYLES[activeMode]

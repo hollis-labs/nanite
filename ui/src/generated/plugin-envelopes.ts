@@ -29,15 +29,7 @@ const CORE_ENVELOPE_REGISTRY: Record<string, LazyEnvelopeComponent> = {
 // --- PLUGIN ENTRIES (auto-generated, safe to overwrite below this line) ---
 // @PLUGIN_ENTRIES_START
 const PLUGIN_ENVELOPE_ENTRIES: Record<string, LazyEnvelopeComponent> = {
-  'teams-message': lazy(() => import('@/components/chat/envelopes/TeamsMessageCard').then(m => ({ default: m.TeamsMessageCard }))),
-  'marvel-character': lazy(() => import('@/components/chat/envelopes/MarvelCharacterCard').then(m => ({ default: m.MarvelCharacterCard }))),
-  'marvel-movie': lazy(() => import('@/components/chat/envelopes/MarvelMovieCard').then(m => ({ default: m.MarvelMovieCard }))),
-  'trivia-question': lazy(() => import('@/components/chat/envelopes/TriviaQuestionCard').then(m => ({ default: m.TriviaQuestionCard }))),
-  'trivia-leaderboard': lazy(() => import('@/components/chat/envelopes/TriviaLeaderboardCard').then(m => ({ default: m.TriviaLeaderboardCard }))),
-  'oembed-card': lazy(() => import('@/components/chat/envelopes/OEmbedCard').then(m => ({ default: m.OEmbedCard }))),
-  'email-compose': lazy(() => import('@/components/chat/envelopes/EmailComposeCard').then(m => ({ default: m.EmailComposeCard }))),
-  'email-preview': lazy(() => import('@/components/chat/envelopes/EmailPreviewCard').then(m => ({ default: m.EmailPreviewCard }))),
-  'email-inbox': lazy(() => import('@/components/chat/envelopes/EmailInboxCard').then(m => ({ default: m.EmailInboxCard }))),
+
 };
 // @PLUGIN_ENTRIES_END
 

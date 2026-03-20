@@ -374,13 +374,14 @@ func (st *SelfToolsTransport) callNavigateEngine(args map[string]any) (*ToolResu
 	defer cancel()
 
 	if err := crossapp.NavigateEngine(ctx, page, params); err != nil {
-		return textResult(fmt.Sprintf("Navigation command sent for page %q (Engine may be offline: %v). I'll continue.", page, err)), nil
+		return textResult(fmt.Sprintf("Navigation sent for %q (Engine may be offline: %v). Tell the user briefly and stop.", page, err)), nil
 	}
 
-	msg := fmt.Sprintf("Navigated Engine GUI to %s", page)
+	msg := fmt.Sprintf("Done. Engine GUI navigated to %s", page)
 	if len(params) > 0 {
 		msg += fmt.Sprintf(" with filters %v", params)
 	}
+	msg += ". Tell the user what you navigated to in one sentence. Do NOT call any more tools."
 	return textResult(msg), nil
 }
 
@@ -389,9 +390,9 @@ func (st *SelfToolsTransport) callRefreshEngine(args map[string]any) (*ToolResul
 	defer cancel()
 
 	if err := crossapp.RefreshEngine(ctx); err != nil {
-		return textResult(fmt.Sprintf("Refresh command sent (Engine may be offline: %v).", err)), nil
+		return textResult(fmt.Sprintf("Refresh sent (Engine may be offline: %v). Do NOT call any more tools.", err)), nil
 	}
-	return textResult("Engine GUI data refreshed."), nil
+	return textResult("Engine GUI data refreshed. Do NOT call any more tools."), nil
 }
 
 func (st *SelfToolsTransport) callShowGiphy(args map[string]any) (*ToolResult, error) {

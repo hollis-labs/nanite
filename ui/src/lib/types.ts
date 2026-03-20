@@ -90,7 +90,7 @@ export interface ChatError {
 }
 
 export interface StreamEvent {
-  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result' | 'status' | 'circuit_open' | 'session_takeover'
+  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result' | 'tool_warning' | 'status' | 'circuit_open' | 'session_takeover'
   content?: string
   message_id?: string
   agent_id?: string
@@ -105,6 +105,7 @@ export interface StreamEvent {
   tool?: string
   summary?: string
   envelope?: string
+  data?: string
 }
 
 // --- Context Breakdown ---
@@ -349,6 +350,14 @@ export interface ToolCall {
   tool: string
   status: 'running' | 'done' | 'error'
   summary?: string
+}
+
+export interface ToolWarning {
+  tool_name: string
+  error: string
+  iteration: number
+  consecutive_errors: number
+  level: 'warning' | 'critical'
 }
 
 // --- Tool Management ---

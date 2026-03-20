@@ -5,6 +5,7 @@ import { ScrollArea } from '@/components/ui/ScrollArea'
 import { ChatMessage } from './ChatMessage'
 import { MessageContent } from './MessageContent'
 import { ToolCallIndicator } from './ToolCallIndicator'
+import { ToolWarningBanner } from './ToolWarningBanner'
 import { ThinkingIndicator } from './ThinkingIndicator'
 import { ErrorBanner } from './ErrorBanner'
 import { useChatStore } from '@/stores/useChatStore'
@@ -31,6 +32,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   const bottomRef = useRef<HTMLDivElement>(null)
   const activeMode = useChatStore((s) => s.activeMode)
   const toolCalls = useChatStore((s) => s.toolCalls)
+  const toolWarnings = useChatStore((s) => s.toolWarnings)
   const chatErrors = useChatStore((s) => s.chatErrors)
   const dismissChatError = useChatStore((s) => s.dismissChatError)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
@@ -98,7 +100,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   // Also check scroll position when content changes (not just user scroll)
   useLayoutEffect(() => {
     checkScrollPosition()
-  }, [messages.length, streamingContent, toolCalls.length, chatErrors.length, checkScrollPosition])
+  }, [messages.length, streamingContent, toolCalls.length, toolWarnings.length, chatErrors.length, checkScrollPosition])
 
   // Fetch bookmarks for the active session
   const { data: bookmarks = [] } = useQuery({
@@ -140,7 +142,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
     if (isAtBottom && !userHasScrolled) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [messages.length, streamingContent, toolCalls.length, chatErrors.length, isAtBottom, userHasScrolled])
+  }, [messages.length, streamingContent, toolCalls.length, toolWarnings.length, chatErrors.length, isAtBottom, userHasScrolled])
 
   if (messages.length === 0 && !isStreaming) {
     return (
@@ -179,6 +181,11 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
               ))}
             </div>
           </div>
+        )}
+
+        {/* Tool warning banner during streaming */}
+        {isStreaming && toolWarnings.length > 0 && (
+          <ToolWarningBanner warnings={toolWarnings} />
         )}
 
         {/* Streaming message */}

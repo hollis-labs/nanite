@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useChatStore } from '@/stores/useChatStore'
 import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
-import type { Message, StreamEvent, ChatError, ChatErrorCode } from '@/lib/types'
+import type { Message, StreamEvent, ChatError, ChatErrorCode, ToolWarning } from '@/lib/types'
 
 let errorCounter = 0
 
@@ -43,6 +43,8 @@ export function useChat(sessionId: string | null) {
   const setStatusMessage = useChatStore((s) => s.setStatusMessage)
   const circuitOpen = useChatStore((s) => s.circuitOpen)
   const setCircuitOpen = useChatStore((s) => s.setCircuitOpen)
+  const addToolWarning = useChatStore((s) => s.addToolWarning)
+  const clearToolWarnings = useChatStore((s) => s.clearToolWarnings)
   const sessionTakeover = useChatStore((s) => s.sessionTakeover)
   const setSessionTakeover = useChatStore((s) => s.setSessionTakeover)
 
@@ -85,6 +87,7 @@ export function useChat(sessionId: string | null) {
     setStreaming(true)
     setStreamingSessionId(sessionId)
     clearToolCalls()
+    clearToolWarnings()
     console.log('[useChat] streaming=true, sending message...')
 
     try {
@@ -129,6 +132,18 @@ export function useChat(sessionId: string | null) {
             status: data.error ? 'error' : 'done',
             summary: (data.summary ?? data.error ?? '') as string,
           })
+        }
+      })
+
+      es.addEventListener('tool_warning', (e: MessageEvent) => {
+        const data: StreamEvent = JSON.parse(e.data as string)
+        if (data.data) {
+          try {
+            const warning = JSON.parse(data.data) as ToolWarning
+            addToolWarning(warning)
+          } catch {
+            console.warn('[useChat] Failed to parse tool_warning data:', data.data)
+          }
         }
       })
 
@@ -264,7 +279,7 @@ export function useChat(sessionId: string | null) {
       console.error('Send failed:', err)
       clearStream()
     }
-  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addChatError, setStatusMessage, setCircuitOpen, setSessionTakeover])
+  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addToolWarning, clearToolWarnings, addChatError, setStatusMessage, setCircuitOpen, setSessionTakeover])
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {

@@ -58,9 +58,19 @@ func buildToolCatalog(summaries []toolclient.ToolSummary) string {
 	return sb.String()
 }
 
+// ToolWarningPayload is the JSON payload for tool_warning SSE events.
+// These events provide user-visible feedback when tool calls fail.
+type ToolWarningPayload struct {
+	ToolName          string `json:"tool_name"`
+	Error             string `json:"error"`
+	Iteration         int    `json:"iteration"`
+	ConsecutiveErrors int    `json:"consecutive_errors"`
+	Level             string `json:"level"` // "warning" or "critical"
+}
+
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
-	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status, circuit_open, session_takeover
+	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status, circuit_open, session_takeover, tool_warning
 	Content         string     `json:"content,omitempty"`
 	MessageID       string     `json:"message_id,omitempty"`
 	AgentID         string     `json:"agent_id,omitempty"`
@@ -71,6 +81,7 @@ type StreamEvent struct {
 	ToolID          string     `json:"tool_id,omitempty"`           // tool_use_id
 	Summary         string     `json:"summary,omitempty"`           // tool result summary
 	Envelope        string     `json:"envelope,omitempty"`          // JSON envelope data for stream_end
+	Data            string     `json:"data,omitempty"`              // JSON payload for tool_warning events
 }
 
 // Usage contains token usage for a completed response.
@@ -397,6 +408,22 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	selection := e.getToolsForAgent(ctx, agentID, userContent, session.WorkspaceID)
 	tools := selection.Tools
 
+	// Warn user if no MCP tools are available — responses will be text-only.
+	mcpToolCount := 0
+	for _, t := range tools {
+		if strings.HasPrefix(t.Name, "mcp__") {
+			mcpToolCount++
+		}
+	}
+	if mcpToolCount == 0 {
+		warningPayload := ToolWarningPayload{
+			Error: "This agent has no MCP tools configured. Responses will be text-only.",
+			Level: "critical",
+		}
+		warningJSON, _ := json.Marshal(warningPayload)
+		ch <- StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
+	}
+
 	// If progressive discovery is active, inject the tool catalog into the system prompt.
 	if selection.Progressive && selection.Catalog != "" {
 		systemPrompt = systemPrompt + "\n\n" + selection.Catalog
@@ -419,6 +446,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// blockedTools tracks tools that have been hard-blocked due to repeated identical results.
 	// Checked BEFORE execution to prevent the tool from running at all.
 	blockedTools := make(map[string]bool)
+	// consecutiveToolErrors tracks sequential tool failures to escalate user-visible warnings.
+	consecutiveToolErrors := 0
 	// pendingEnvelopes collects envelope JSON from KB tools to inject after the agent's response.
 	var pendingEnvelopes []string
 	// toolCallRefs accumulates structured tool call references for the structured message.
@@ -802,6 +831,30 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				toolSpan.SetStatus(codes.Error, "no tool client or MCP manager configured")
 			}
 			toolSpan.End()
+
+			// Emit tool_warning SSE event on errors so the user sees feedback.
+			if toolIsError {
+				consecutiveToolErrors++
+				level := "warning"
+				if consecutiveToolErrors >= 3 {
+					level = "critical"
+				}
+				warningError := resultText
+				if len(warningError) > 300 {
+					warningError = warningError[:300] + "..."
+				}
+				warningPayload := ToolWarningPayload{
+					ToolName:          tu.Name,
+					Error:             warningError,
+					Iteration:         iteration,
+					ConsecutiveErrors: consecutiveToolErrors,
+					Level:             level,
+				}
+				warningJSON, _ := json.Marshal(warningPayload)
+				ch <- StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
+			} else {
+				consecutiveToolErrors = 0
+			}
 
 			// Detect stuck loops: if the same tool returns the exact same result, escalate.
 			if prev, ok := lastToolResults[tu.Name]; ok && prev == resultText {

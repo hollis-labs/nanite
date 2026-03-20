@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ToolCall, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo } from '@/lib/types'
+import type { ToolCall, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo } from '@/lib/types'
 
 interface ChatState {
   // Streaming
@@ -20,6 +20,11 @@ interface ChatState {
   addToolCall: (tc: ToolCall) => void
   updateToolCall: (id: string, update: Partial<ToolCall>) => void
   clearToolCalls: () => void
+
+  // Tool warnings
+  toolWarnings: ToolWarning[]
+  addToolWarning: (warning: ToolWarning) => void
+  clearToolWarnings: () => void
 
   // Chat errors
   chatErrors: ChatError[]
@@ -75,6 +80,12 @@ export const useChatStore = create<ChatState>((set) => ({
       toolCalls: state.toolCalls.map((tc) => (tc.id === id ? { ...tc, ...update } : tc)),
     })),
   clearToolCalls: () => set({ toolCalls: [] }),
+
+  // Tool warnings
+  toolWarnings: [],
+  addToolWarning: (warning: ToolWarning) =>
+    set((state: ChatState) => ({ toolWarnings: [...state.toolWarnings, warning] })),
+  clearToolWarnings: () => set({ toolWarnings: [] }),
 
   // Chat errors
   chatErrors: [],

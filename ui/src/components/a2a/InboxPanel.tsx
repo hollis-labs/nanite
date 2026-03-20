@@ -29,6 +29,17 @@ const STATUS_ICONS = {
   resolved: CheckCheck,
 }
 
+// --- Toast notification ---
+
+interface Toast {
+  id: number
+  message: string
+}
+
+let toastId = 0
+
+type InboxTab = 'user' | 'agent'
+
 interface InboxPanelProps {
   agentId: string
   open: boolean
@@ -36,12 +47,25 @@ interface InboxPanelProps {
 }
 
 export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
+  const [activeTab, setActiveTab] = useState<InboxTab>('user')
   const [filter, setFilter] = useState<string>('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [threadView, setThreadView] = useState<string | null>(null)
   const [replyTo, setReplyTo] = useState<string | null>(null)
   const [replyBody, setReplyBody] = useState('')
+  const [toasts, setToasts] = useState<Toast[]>([])
   const queryClient = useQueryClient()
+
+  const addToast = useCallback((message: string) => {
+    const id = ++toastId
+    setToasts((prev) => [...prev, { id, message }])
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 3000)
+  }, [])
+
+  // The effective agent ID depends on which tab is active
+  const effectiveAgentId = activeTab === 'user' ? 'user' : agentId
 
   // Fetch agents for name lookup
   const { data: agents = [] } = useQuery({
@@ -56,16 +80,19 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
   })
 
   const getAgentName = useCallback(
-    (id: string) => agentNameMap.get(id) || id,
+    (id: string) => {
+      if (id === 'user') return 'You'
+      return agentNameMap.get(id) || id
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [agents],
   )
 
   // Inbox query
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['a2a-inbox', agentId, filter],
-    queryFn: () => api.getA2AInbox(agentId, filter || undefined),
-    enabled: open && !!agentId,
+    queryKey: ['a2a-inbox', effectiveAgentId, filter],
+    queryFn: () => api.getA2AInbox(effectiveAgentId, filter || undefined),
+    enabled: open && !!effectiveAgentId,
     refetchInterval: 30000,
   })
 
@@ -80,6 +107,7 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
   const ackMutation = useMutation({
     mutationFn: api.ackA2AMessage,
     onSuccess: () => {
+      addToast('Marked as read')
       void queryClient.invalidateQueries({ queryKey: ['a2a-inbox'] })
       void queryClient.invalidateQueries({ queryKey: ['a2a-unread'] })
     },
@@ -89,6 +117,7 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
   const resolveMutation = useMutation({
     mutationFn: api.resolveA2AMessage,
     onSuccess: () => {
+      addToast('Message resolved')
       void queryClient.invalidateQueries({ queryKey: ['a2a-inbox'] })
       void queryClient.invalidateQueries({ queryKey: ['a2a-unread'] })
     },
@@ -100,6 +129,7 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
     onSuccess: () => {
       setReplyBody('')
       setReplyTo(null)
+      addToast('Message sent')
       void queryClient.invalidateQueries({ queryKey: ['a2a-inbox'] })
       void queryClient.invalidateQueries({ queryKey: ['a2a-thread'] })
     },
@@ -114,6 +144,14 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
     }
   }, [open])
 
+  const handleTabSwitch = (tab: InboxTab) => {
+    setActiveTab(tab)
+    setFilter('')
+    setExpandedId(null)
+    setThreadView(null)
+    setReplyTo(null)
+  }
+
   const handleReply = (msg: A2AMessage) => {
     setReplyTo(msg.id)
     setReplyBody('')
@@ -121,8 +159,9 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
 
   const submitReply = (msg: A2AMessage) => {
     if (!replyBody.trim()) return
+    const fromAgent = activeTab === 'user' ? 'user' : agentId
     sendMutation.mutate({
-      from_agent: agentId,
+      from_agent: fromAgent,
       to_agent: msg.from_agent,
       body: replyBody.trim(),
       subject: msg.subject ? `Re: ${msg.subject}` : undefined,
@@ -165,6 +204,32 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
           </Button>
         </div>
       </div>
+
+      {/* Tab bar */}
+      {!threadView && (
+        <div className="flex border-b border-zinc-800">
+          <button
+            onClick={() => handleTabSwitch('user')}
+            className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
+              activeTab === 'user'
+                ? 'text-blue-400 border-b-2 border-blue-500'
+                : 'text-zinc-500 hover:text-zinc-300 border-b-2 border-transparent'
+            }`}
+          >
+            My Inbox
+          </button>
+          <button
+            onClick={() => handleTabSwitch('agent')}
+            className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
+              activeTab === 'agent'
+                ? 'text-blue-400 border-b-2 border-blue-500'
+                : 'text-zinc-500 hover:text-zinc-300 border-b-2 border-transparent'
+            }`}
+          >
+            Agent Inbox
+          </button>
+        </div>
+      )}
 
       {/* Filter bar (inbox only) */}
       {!threadView && (
@@ -357,6 +422,20 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
           </div>
         )}
       </ScrollArea>
+
+      {/* Toast container */}
+      {toasts.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className="px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl text-sm text-zinc-200 max-w-sm animate-in fade-in slide-in-from-bottom-2"
+            >
+              {toast.message}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

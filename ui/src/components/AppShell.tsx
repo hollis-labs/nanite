@@ -39,12 +39,19 @@ export function AppShell() {
     enabled: !!activeWorkspaceId,
   })
 
-  // Get first agent for inbox panel
-  const { data: agents = [] } = useQuery({
-    queryKey: ['agents'],
-    queryFn: api.listAgents,
+  // Get the active session's primary agent for inbox panel
+  const activeSessionId = useAppStore((s) => s.activeSessionId)
+
+  const { data: sessionAgents = [] } = useQuery({
+    queryKey: ['session-agents', activeSessionId],
+    queryFn: () => api.listSessionAgents(activeSessionId!),
+    enabled: !!activeSessionId,
   })
-  const firstAgentId = agents.length > 0 ? agents[0].id : ''
+
+  const primarySessionAgent = sessionAgents.find(
+    (a) => (a as any).is_primary === true || (a as any).is_primary === 1 || a.role === 'primary',
+  )
+  const inboxAgentId = primarySessionAgent?.agent_id || 'mentat-001'
 
   const focusComposer = useCallback(() => {
     focusRef.current?.()
@@ -72,7 +79,7 @@ export function AppShell() {
       <ArtifactsDrawer />
       <WorkflowPanel />
       <InboxPanel
-        agentId={firstAgentId}
+        agentId={inboxAgentId}
         open={inboxPanelOpen}
         onClose={() => setInboxPanel(false)}
       />

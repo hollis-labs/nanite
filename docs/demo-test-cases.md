@@ -14,17 +14,40 @@
 - Agent confirms with a brief message
 - Conduit Link indicator in Engine NavRail is green
 
-### 1b. Navigation with filters (params sent, Engine reads from URL)
+### 1b. Navigation with project filter
+**Prompt:** "Show me the tasks for the engine project"
+**Expected:**
+- Engine GUI navigates to Tasks page
+- Header project dropdown updates to "engine"
+- Page-level project label updates
+- Tasks reload for the engine project
+
+### 1c. Navigation with priority filter
 **Prompt:** "Show me the P1 tasks"
 **Expected:**
-- Engine GUI navigates to Tasks page with `priority=1` in URL hash
-- Note: Project filter is controlled by Engine's project selector (top of page),
-  not overridden by URL params. For demo, switch project manually if needed.
+- Engine GUI navigates to Tasks with priority pill "P1" activated
+- Only P1 tasks visible
 
-### 1c. Different pages
+### 1d. Combined filters
+**Prompt:** "Show me the P2 tasks for fragments-engine"
+**Expected:**
+- Project dropdown switches to fragments-engine
+- Priority pill shows P2
+- Tasks filtered to P2 for that project
+
+### 1e. Status filter
+**Prompt:** "Show me the blocked tasks"
+**Expected:**
+- Status pills update to show only "blocked"
+
+### 1f. Different pages
 **Prompt:** "Show me the sprints"
 **Expected:**
 - Engine GUI navigates to Sprints page
+
+**Note:** If filters don't apply on first try, navigate to a different page
+first (e.g. sprints) then back to tasks. This clears any cached state
+from the previous view.
 
 ### 1e. Page variety
 **Prompt:** "Take me to the kanban board"

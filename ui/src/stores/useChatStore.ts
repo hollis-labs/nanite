@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ToolCall, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo } from '@/lib/types'
+import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo } from '@/lib/types'
 
 interface ChatState {
   // Streaming
@@ -43,6 +43,10 @@ interface ChatState {
   // Session takeover (another tab took this session's SSE connection)
   sessionTakeover: boolean
   setSessionTakeover: (taken: boolean) => void
+
+  // Tool call display mode
+  toolCallDisplayMode: ToolCallDisplayMode
+  setToolCallDisplayMode: (mode: ToolCallDisplayMode) => void
 
   // Mode
   activeMode: AgentMode
@@ -114,6 +118,15 @@ export const useChatStore = create<ChatState>((set) => ({
   // Session takeover
   sessionTakeover: false,
   setSessionTakeover: (taken: boolean) => set({ sessionTakeover: taken }),
+
+  // Tool call display mode
+  toolCallDisplayMode: (typeof window !== 'undefined'
+    ? localStorage.getItem('conduit:toolCallDisplayMode') as ToolCallDisplayMode
+    : null) || 'minimal',
+  setToolCallDisplayMode: (mode: ToolCallDisplayMode) => {
+    localStorage.setItem('conduit:toolCallDisplayMode', mode)
+    set({ toolCallDisplayMode: mode })
+  },
 
   // Mode
   activeMode: 'default' as AgentMode,

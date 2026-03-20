@@ -5,13 +5,14 @@ import { ScrollArea } from '@/components/ui/ScrollArea'
 import { ChatMessage } from './ChatMessage'
 import { MessageContent } from './MessageContent'
 import { ToolCallIndicator } from './ToolCallIndicator'
+import { ToolCallDisplay } from './ToolCallDisplay'
 import { ToolWarningBanner } from './ToolWarningBanner'
 import { ThinkingIndicator } from './ThinkingIndicator'
 import { ErrorBanner } from './ErrorBanner'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
-import type { Message, AgentMode } from '@/lib/types'
+import type { Message, AgentMode, ToolCallDisplayMode } from '@/lib/types'
 
 const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
   default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
@@ -34,6 +35,8 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   const toolCalls = useChatStore((s) => s.toolCalls)
   const toolWarnings = useChatStore((s) => s.toolWarnings)
   const textOnlyMode = useChatStore((s) => s.textOnlyMode)
+  const toolCallDisplayMode = useChatStore((s) => s.toolCallDisplayMode)
+  const setToolCallDisplayMode = useChatStore((s) => s.setToolCallDisplayMode)
   const chatErrors = useChatStore((s) => s.chatErrors)
   const dismissChatError = useChatStore((s) => s.dismissChatError)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
@@ -66,6 +69,12 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
       }
     }
   }, [isStreaming, streamingContent])
+
+  const cycleToolCallDisplayMode = useCallback(() => {
+    const modes: ToolCallDisplayMode[] = ['indicator', 'minimal', 'compact', 'full']
+    const idx = modes.indexOf(toolCallDisplayMode)
+    setToolCallDisplayMode(modes[(idx + 1) % modes.length])
+  }, [toolCallDisplayMode, setToolCallDisplayMode])
 
   const avatarStyle = MODE_AVATAR_STYLES[activeMode]
 
@@ -184,10 +193,12 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
             <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}>
               <Bot className="w-4 h-4" />
             </div>
-            <div className="flex-1 min-w-0 space-y-1">
-              {toolCalls.map((tc) => (
-                <ToolCallIndicator key={tc.id} toolCall={tc} />
-              ))}
+            <div className="flex-1 min-w-0">
+              <ToolCallDisplay
+                toolCalls={toolCalls}
+                displayMode={toolCallDisplayMode}
+                onCycleMode={cycleToolCallDisplayMode}
+              />
             </div>
           </div>
         )}

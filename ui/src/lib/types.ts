@@ -343,6 +343,10 @@ export interface Artifact {
   created_at: string
 }
 
+// --- Tool Call Display ---
+
+export type ToolCallDisplayMode = 'indicator' | 'minimal' | 'compact' | 'full'
+
 // --- Tool Calls ---
 
 export interface ToolCall {

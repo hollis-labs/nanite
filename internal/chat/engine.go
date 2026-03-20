@@ -23,8 +23,13 @@ import (
 	"github.com/hollis-labs/conduit/internal/workflow"
 )
 
-// maxToolIterations prevents infinite tool-use loops.
-const maxToolIterations = 6
+// maxToolIterations is the maximum number of tool-use loop iterations.
+// 10 allows complex multi-tool tasks while still preventing runaway loops.
+const maxToolIterations = 10
+
+// generateResponseTimeout is the maximum wall-clock time a single
+// generateResponse goroutine is allowed to run before being cancelled.
+const generateResponseTimeout = 5 * time.Minute
 
 // ProgressiveDiscoveryThreshold is the tool count above which progressive
 // discovery is used instead of sending all tool schemas to the LLM.
@@ -252,6 +257,10 @@ func (e *Engine) ActivePresenceState() []PresenceEvent {
 
 // generateResponse loads context, calls the provider, streams events, and saves the result.
 func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan StreamEvent) {
+	// Wrap the context with an overall deadline so this goroutine cannot run forever.
+	ctx, cancel := context.WithTimeout(ctx, generateResponseTimeout)
+	defer cancel()
+
 	ctx, span := feotel.StartSpan(ctx, "conduit.generateResponse")
 	span.SetAttributes(
 		attribute.String("conduit.session.id", sessionID),
@@ -421,7 +430,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	var fullContent strings.Builder
 	var finalUsage *Usage
 
-	for iteration := 0; iteration < maxToolIterations; iteration++ {
+	iteration := 0
+	for ; iteration < maxToolIterations; iteration++ {
 		// Enforce unified token budget before every provider call.
 		var breakdown *TokenBreakdown
 		var budgetErr error
@@ -883,6 +893,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 
 		// Loop back for the next provider call.
+	}
+
+	if iteration >= maxToolIterations {
+		log.Printf("[WARN] Tool loop exhausted after %d iterations for session=%s agent=%s", iteration, sessionID, agent.ID)
+		ch <- errorEnvelopeDelta(ErrorCodeInternal, fmt.Sprintf("Response may be incomplete — tool step limit (%d) reached. The assistant was still working when the limit was hit.", maxToolIterations), nil)
 	}
 
 	// Apply output filters (e.g. strip emoji) before parsing envelopes.

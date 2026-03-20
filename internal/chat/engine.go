@@ -55,7 +55,7 @@ func buildToolCatalog(summaries []toolclient.ToolSummary) string {
 
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
-	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status, circuit_open
+	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status, circuit_open, session_takeover
 	Content         string     `json:"content,omitempty"`
 	MessageID       string     `json:"message_id,omitempty"`
 	AgentID         string     `json:"agent_id,omitempty"`
@@ -65,6 +65,7 @@ type StreamEvent struct {
 	Tool            string     `json:"tool,omitempty"`              // tool name for tool_call/tool_result
 	ToolID          string     `json:"tool_id,omitempty"`           // tool_use_id
 	Summary         string     `json:"summary,omitempty"`           // tool result summary
+	Envelope        string     `json:"envelope,omitempty"`          // JSON envelope data for stream_end
 }
 
 // Usage contains token usage for a completed response.
@@ -74,6 +75,20 @@ type Usage struct {
 	CacheCreationTokens int    `json:"cache_creation_tokens"`
 	CacheReadTokens     int    `json:"cache_read_tokens"`
 	StopReason          string `json:"stop_reason"`
+}
+
+// PresenceEvent is broadcast to all connected presence clients.
+type PresenceEvent struct {
+	Type      string `json:"type"`                 // stream_start, stream_end, tool_pending, tool_resolved
+	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id,omitempty"`
+	ToolName  string `json:"tool_name,omitempty"`
+	Timestamp string `json:"timestamp"`
+}
+
+// sseConn tracks an active SSE connection for session-level deduplication.
+type sseConn struct {
+	done chan struct{} // closed to signal takeover to the old connection
 }
 
 // Engine orchestrates chat sessions, provider calls, and streaming.
@@ -88,7 +103,11 @@ type Engine struct {
 	OutputFilters  *filter.Chain // post-LLM output filters (nil = no filtering)
 	WorkflowEngine *workflow.Engine
 	WorkflowLoader *workflow.Loader
-	streams        sync.Map // map[string]chan StreamEvent
+	streams         sync.Map // map[string]chan StreamEvent
+	msgToSession    sync.Map // map[messageID]sessionID — tracks which session a stream belongs to
+	sessionSSE      sync.Map // map[sessionID]*sseConn — one active SSE connection per session
+	presenceClients sync.Map // map[clientID]chan PresenceEvent — presence SSE listeners
+	activePresence  sync.Map // map[sessionID]PresenceEvent — currently-streaming sessions (for initial state on connect)
 }
 
 // NewEngine creates a new chat engine.
@@ -123,6 +142,7 @@ func (e *Engine) HandleMessage(sessionID, content string) (string, error) {
 	assistantMsgID := uuid.New().String()
 	ch := make(chan StreamEvent, 128)
 	e.streams.Store(assistantMsgID, ch)
+	e.msgToSession.Store(assistantMsgID, sessionID)
 
 	// Start async generation.
 	go e.generateResponse(context.Background(), sessionID, assistantMsgID, content, ch)
@@ -139,6 +159,97 @@ func (e *Engine) GetStream(messageID string) (<-chan StreamEvent, bool) {
 	return val.(chan StreamEvent), true
 }
 
+// GetSessionForMessage returns the session ID associated with a message stream.
+func (e *Engine) GetSessionForMessage(messageID string) (string, bool) {
+	val, ok := e.msgToSession.Load(messageID)
+	if !ok {
+		return "", false
+	}
+	return val.(string), true
+}
+
+// RegisterSSEConnection registers a new SSE connection for a session.
+// If another connection already exists for this session, its done channel is
+// closed (signaling session_takeover) before being replaced. Returns the new
+// connection's done channel that the caller should select on.
+func (e *Engine) RegisterSSEConnection(sessionID string) <-chan struct{} {
+	conn := &sseConn{done: make(chan struct{})}
+
+	// Swap in the new connection; if an old one exists, signal takeover.
+	if prev, loaded := e.sessionSSE.Swap(sessionID, conn); loaded {
+		old := prev.(*sseConn)
+		close(old.done)
+		log.Printf("chat: SSE session takeover for session %s — old connection evicted", sessionID)
+	}
+
+	return conn.done
+}
+
+// UnregisterSSEConnection removes the SSE connection for a session, but only
+// if the done channel matches (i.e., this is still the active connection).
+func (e *Engine) UnregisterSSEConnection(sessionID string, done <-chan struct{}) {
+	val, ok := e.sessionSSE.Load(sessionID)
+	if !ok {
+		return
+	}
+	current := val.(*sseConn)
+	// Only delete if we are still the active connection (compare done channels).
+	// Use a select to check if the done channel is the same object conceptually.
+	// Since we can't compare channels directly to the read-only version, we check
+	// if the current connection's done channel is closed (meaning it was taken over).
+	select {
+	case <-current.done:
+		// Already taken over and closed — another connection replaced us.
+		// Don't delete; the replacement owns this slot.
+	default:
+		// Still active — check if our done matches by attempting to delete.
+		// We stored *sseConn, so the pointer comparison works.
+		e.sessionSSE.CompareAndDelete(sessionID, val)
+	}
+}
+
+// RegisterPresenceClient registers a new presence listener and returns a client ID
+// and a read-only channel for receiving presence events.
+func (e *Engine) RegisterPresenceClient() (string, <-chan PresenceEvent) {
+	clientID := uuid.New().String()
+	ch := make(chan PresenceEvent, 32)
+	e.presenceClients.Store(clientID, ch)
+	log.Printf("presence: client %s registered", clientID)
+	return clientID, ch
+}
+
+// UnregisterPresenceClient removes a presence listener.
+func (e *Engine) UnregisterPresenceClient(clientID string) {
+	if val, ok := e.presenceClients.LoadAndDelete(clientID); ok {
+		close(val.(chan PresenceEvent))
+		log.Printf("presence: client %s unregistered", clientID)
+	}
+}
+
+// broadcastPresence sends a presence event to all connected presence clients.
+func (e *Engine) broadcastPresence(event PresenceEvent) {
+	e.presenceClients.Range(func(key, val any) bool {
+		ch := val.(chan PresenceEvent)
+		select {
+		case ch <- event:
+		default:
+			// Client is slow — drop the event rather than blocking.
+			log.Printf("presence: dropped event for slow client %s", key.(string))
+		}
+		return true
+	})
+}
+
+// ActivePresenceState returns a snapshot of all currently-streaming sessions.
+func (e *Engine) ActivePresenceState() []PresenceEvent {
+	var events []PresenceEvent
+	e.activePresence.Range(func(_, val any) bool {
+		events = append(events, val.(PresenceEvent))
+		return true
+	})
+	return events
+}
+
 // generateResponse loads context, calls the provider, streams events, and saves the result.
 func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan StreamEvent) {
 	ctx, span := feotel.StartSpan(ctx, "conduit.generateResponse")
@@ -151,6 +262,15 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	defer func() {
 		close(ch)
 		e.streams.Delete(assistantMsgID)
+		e.msgToSession.Delete(assistantMsgID)
+
+		// Broadcast presence: stream ended.
+		e.activePresence.Delete(sessionID)
+		e.broadcastPresence(PresenceEvent{
+			Type:      "stream_end",
+			SessionID: sessionID,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		})
 	}()
 
 	// Load session.
@@ -249,6 +369,16 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Emit stream_start.
 	ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID, AgentID: agent.ID}
 
+	// Broadcast presence: stream started.
+	presenceStart := PresenceEvent{
+		Type:      "stream_start",
+		SessionID: sessionID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	e.activePresence.Store(sessionID, presenceStart)
+	e.broadcastPresence(presenceStart)
+
 	// Notify Volon that this chat session is active.
 	if e.Activity != nil {
 		go e.Activity.EmitSessionStart(ctx, sessionID, agent.ID, model)
@@ -264,7 +394,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 
 	// Track loaded tools for progressive discovery (tools loaded via request_tools).
-	loadedTools := make(map[string]bool)
+	// Seed with initial tools so progressive discovery won't re-add them.
+	loadedTools := make(map[string]bool, len(tools))
+	for _, t := range tools {
+		loadedTools[t.Name] = true
+	}
 	// Consecutive request_tools calls that returned zero new tools.
 	consecutiveEmptyRequests := 0
 	// Total request_tools calls across all iterations — hard cap to prevent loops.
@@ -278,6 +412,10 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	blockedTools := make(map[string]bool)
 	// pendingEnvelopes collects envelope JSON from KB tools to inject after the agent's response.
 	var pendingEnvelopes []string
+	// toolCallRefs accumulates structured tool call references for the structured message.
+	var toolCallRefs []ToolCallRef
+	// wasTruncated tracks whether the response hit max_tokens.
+	var wasTruncated bool
 
 	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
@@ -336,11 +474,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					go e.Activity.EmitRateLimitHit(ctx, sessionID, "anthropic", 0)
 				}
 			}
-			ch <- errorEvent(classifyError(err), "Provider streaming failed", map[string]interface{}{
+			errDetails := map[string]interface{}{
 				"raw":   err.Error(),
 				"model": model,
 				"tools": len(tools),
-			})
+			}
+			ch <- errorEnvelopeDelta(classifyError(err), "Provider streaming failed", errDetails)
+			ch <- errorEvent(classifyError(err), "Provider streaming failed", errDetails)
 			return
 		}
 
@@ -382,10 +522,12 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				}
 			case "error":
-				ch <- errorEvent(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", map[string]interface{}{
+				streamErrDetails := map[string]interface{}{
 					"raw":   evt.Error,
 					"model": model,
-				})
+				}
+				ch <- errorEnvelopeDelta(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
+				ch <- errorEvent(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
 				return
 			case "done":
 				// Will handle below.
@@ -396,6 +538,20 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 		// If no tool use, we are done.
 		if stopReason != "tool_use" || len(toolUseBlocks) == 0 {
+			if stopReason == "max_tokens" {
+				wasTruncated = true
+				log.Printf("chat: response truncated by max_tokens on iteration %d", iteration)
+				ch <- StreamEvent{Type: "status", Content: "Response was cut short due to length limits. Some content may be missing."}
+				e.Store.LogEvent(sessionID, "max_tokens_truncation", "warning",
+					fmt.Sprintf("iteration %d: response truncated by max_tokens", iteration),
+					fmt.Sprintf(`{"model":%q,"iteration":%d}`, model, iteration))
+				// Emit error envelope so the user sees a visible card.
+				ch <- errorEnvelopeDelta(ErrorCodeInternal, "Response truncated — hit output token limit", map[string]interface{}{
+					"stop_reason": "max_tokens",
+					"iteration":   iteration,
+					"model":       model,
+				})
+			}
 			break
 		}
 
@@ -454,6 +610,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 						ToolUseID: tu.ID,
 						Content:   rtResult,
 					})
+					toolCallRefs = append(toolCallRefs, ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
 					continue
 				}
 
@@ -495,6 +652,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					ToolUseID: tu.ID,
 					Content:   rtResult,
 				})
+				toolCallRefs = append(toolCallRefs, ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
 				continue
 			}
 
@@ -504,6 +662,15 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				Tool:   tu.Name,
 				ToolID: tu.ID,
 			}
+
+			// Broadcast presence: tool pending.
+			e.broadcastPresence(PresenceEvent{
+				Type:      "tool_pending",
+				SessionID: sessionID,
+				AgentID:   agent.ID,
+				ToolName:  tu.Name,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
 
 			// Pre-execution check: skip tools that have been blocked due to repeated identical results.
 			if blockedTools[tu.Name] {
@@ -521,6 +688,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					ToolUseID: tu.ID,
 					Content:   blockedResult,
 				})
+				toolCallRefs = append(toolCallRefs, ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked"})
 				continue
 			}
 
@@ -589,6 +757,20 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					if e.Activity != nil {
 						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, true, len(result))
 					}
+					// Capture envelope data (parity with ToolClient path).
+					if eStart := strings.Index(result, "<!--ENVELOPE_DATA:"); eStart >= 0 {
+						tail := result[eStart+len("<!--ENVELOPE_DATA:"):]
+						if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
+							envelopePayload := tail[:eEnd]
+							if strings.HasSuffix(tu.Name, "__search_kb") {
+								if env := buildKBEnvelope(envelopePayload); env != "" {
+									pendingEnvelopes = append(pendingEnvelopes, env)
+								}
+							} else {
+								pendingEnvelopes = append(pendingEnvelopes, envelopePayload)
+							}
+						}
+					}
 				}
 			} else {
 				resultText = "Error: no tool client or MCP manager configured"
@@ -640,6 +822,15 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				Summary: summary,
 			}
 
+			// Broadcast presence: tool resolved.
+			e.broadcastPresence(PresenceEvent{
+				Type:      "tool_resolved",
+				SessionID: sessionID,
+				AgentID:   agent.ID,
+				ToolName:  tu.Name,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
+
 			if tr.Truncated {
 				log.Printf("chat: tool %s result truncated: %d → %d chars (saved to %s)",
 					tu.Name, tr.OriginalLen, len(tr.Content), tr.OutputPath)
@@ -654,6 +845,17 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				Content:   tr.Content,
 				IsError:   toolIsError,
 			})
+
+			// Accumulate tool call ref for structured message.
+			tcStatus := "success"
+			if toolIsError {
+				tcStatus = "error"
+			}
+			tcRef := ToolCallRef{ID: tu.ID, Name: tu.Name, Status: tcStatus}
+			if strings.Contains(resultText, "<!--ENVELOPE_DATA:") {
+				tcRef.HasEnvelope = true
+			}
+			toolCallRefs = append(toolCallRefs, tcRef)
 		}
 
 		// Append tool results as a user message.
@@ -721,13 +923,41 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 	}
 
+	// Build envelope refs from parsed envelopes.
+	// Use env.Data (inner payload) — not the whole Envelope struct — to avoid double-wrapping.
+	var envRefs []EnvelopeRef
+	for _, env := range envelopes {
+		innerData, _ := json.Marshal(env.Data)
+		envRefs = append(envRefs, EnvelopeRef{Type: env.Type, Data: json.RawMessage(innerData)})
+	}
+
+	// Determine tier.
+	tier := "default"
+	if len(toolCallRefs) > 0 {
+		tier = "tool"
+	}
+
+	// Check for error envelopes.
+	hasError := false
+	for _, e := range envRefs {
+		if e.Type == "error-report" {
+			hasError = true
+			break
+		}
+	}
+
+	// Wrap in structured format.
+	structured := WrapResponse(cleanContent, tier, toolCallRefs, envRefs, wasTruncated, hasError)
+	logStructuredWarnings(structured)
+	structuredJSON := structured.MarshalContent()
+
 	// Save assistant message to DB.
 	assistantMsg := &store.Message{
 		ID:        assistantMsgID,
 		SessionID: sessionID,
 		AgentID:   agent.ID,
 		Role:      "assistant",
-		Content:   cleanContent,
+		Content:   structuredJSON,
 		Envelope:  envelopeJSON,
 	}
 	if err := e.Store.CreateMessage(assistantMsg); err != nil {
@@ -748,8 +978,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 	}
 
-	// Emit stream_end.
-	ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: finalUsage}
+	// Emit stream_end with envelope data so the frontend can render immediately.
+	ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: finalUsage, AgentID: agent.ID, Envelope: envelopeJSON}
 
 	// Notify Volon that the response is complete.
 	if e.Activity != nil && finalUsage != nil {
@@ -795,6 +1025,7 @@ func (e *Engine) SendAgentMessage(fromSessionID, toSessionID, content string) (s
 	assistantMsgID := uuid.New().String()
 	ch := make(chan StreamEvent, 128)
 	e.streams.Store(assistantMsgID, ch)
+	e.msgToSession.Store(assistantMsgID, toSessionID)
 	go e.generateResponse(context.Background(), toSessionID, assistantMsgID, content, ch)
 
 	return assistantMsgID, nil
@@ -981,12 +1212,18 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 
 	// Get all broker-selected tools.
 	var allTools []provider.ToolDefinition
+	seen := map[string]bool{} // dedup: Anthropic API rejects duplicate tool names
 	if e.ToolClient != nil {
 		selected, err := e.ToolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
 		if err != nil {
 			log.Printf("chat: tool client selection failed: %v — falling back to MCP manager", err)
 		} else {
-			allTools = selected
+			for _, t := range selected {
+				if !seen[t.Name] {
+					seen[t.Name] = true
+					allTools = append(allTools, t)
+				}
+			}
 		}
 	}
 	// If no MCP tools were selected but the agent has configured MCP servers,
@@ -1010,6 +1247,10 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 				}
 				for _, t := range srvTools {
 					name := fmt.Sprintf("mcp__%s__%s", srv, t.Name)
+					if seen[name] {
+						continue
+					}
+					seen[name] = true
 					allTools = append(allTools, provider.ToolDefinition{
 						Name:        name,
 						Description: t.Description,
@@ -1096,11 +1337,13 @@ func (e *Engine) handleWorkflowTrigger(sessionID, content, userMsgID string) (st
 	assistantMsgID := uuid.New().String()
 	ch := make(chan StreamEvent, 128)
 	e.streams.Store(assistantMsgID, ch)
+	e.msgToSession.Store(assistantMsgID, sessionID)
 
 	go func() {
 		defer func() {
 			close(ch)
 			e.streams.Delete(assistantMsgID)
+			e.msgToSession.Delete(assistantMsgID)
 		}()
 
 		ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID}
@@ -1168,6 +1411,7 @@ func (e *Engine) RetryLastMessage(sessionID string) (string, error) {
 	assistantMsgID := uuid.New().String()
 	ch := make(chan StreamEvent, 128)
 	e.streams.Store(assistantMsgID, ch)
+	e.msgToSession.Store(assistantMsgID, sessionID)
 
 	go e.generateResponse(context.Background(), sessionID, assistantMsgID, userContent, ch)
 

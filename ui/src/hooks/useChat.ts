@@ -43,6 +43,8 @@ export function useChat(sessionId: string | null) {
   const setStatusMessage = useChatStore((s) => s.setStatusMessage)
   const circuitOpen = useChatStore((s) => s.circuitOpen)
   const setCircuitOpen = useChatStore((s) => s.setCircuitOpen)
+  const sessionTakeover = useChatStore((s) => s.sessionTakeover)
+  const setSessionTakeover = useChatStore((s) => s.setSessionTakeover)
 
   const loadMessages = useCallback(async () => {
     if (!sessionId) {
@@ -64,6 +66,9 @@ export function useChat(sessionId: string | null) {
 
   const sendMessage = useCallback(async (content: string) => {
     if (!sessionId || !content.trim()) return
+
+    // Reset takeover state — user is actively using this tab now.
+    setSessionTakeover(false)
 
     // Optimistically add user message
     const tempUserMsg: Message = {
@@ -139,16 +144,45 @@ export function useChat(sessionId: string | null) {
         // Do NOT close the EventSource — keep it open for potential retry.
       })
 
+      es.addEventListener('session_takeover', () => {
+        // Another tab opened this session — stop streaming and show banner.
+        console.warn('[useChat] Session takeover — another tab is now active')
+        setSessionTakeover(true)
+        // Save partial content if any.
+        if (accumulated) {
+          const partialMsg: Message = {
+            id: message_id,
+            session_id: sessionId,
+            agent_id: '',
+            role: 'assistant',
+            content: accumulated,
+            envelope: null,
+            metadata: '{}',
+            created_at: new Date().toISOString(),
+          }
+          setMessages(prev => [...prev, partialMsg])
+        }
+        clearStream()
+        es.close()
+        eventSourceRef.current = null
+        // Do NOT reconnect — that would cause a takeover loop.
+      })
+
       es.addEventListener('stream_end', (e: MessageEvent) => {
         const data: StreamEvent = JSON.parse(e.data as string)
         // Add the complete assistant message
+        // Parse envelope from stream_end event if present.
+        let envelope: string | null = null
+        if (data.envelope) {
+          envelope = typeof data.envelope === 'string' ? data.envelope : JSON.stringify(data.envelope)
+        }
         const assistantMsg: Message = {
           id: message_id,
           session_id: sessionId,
           agent_id: data.agent_id || '',
           role: 'assistant',
           content: accumulated,
-          envelope: null,
+          envelope,
           metadata: JSON.stringify(data.usage || {}),
           created_at: new Date().toISOString(),
         }
@@ -172,17 +206,13 @@ export function useChat(sessionId: string | null) {
             if (data.structured_error) {
               const se = data.structured_error
               addChatError(makeChatError(se.code, se.message, se.details, se.timestamp))
-              // Append a brief user-friendly message to the chat
-              const brief = `\n\n_Error: ${se.message}_`
-              accumulated += brief
-              appendStreamContent(brief)
+              // Error envelope is sent as a delta by the backend — no need to
+              // append italic text here. The envelope card handles display.
             } else {
-              // Fallback for unstructured errors
+              // Fallback for unstructured errors (no envelope from backend)
               const errMsg = data.error || 'Unknown streaming error'
               console.error('Stream error from backend:', errMsg)
               addChatError(makeChatError('internal_error', errMsg))
-              accumulated += `\n\n_Error: ${errMsg}_`
-              appendStreamContent(`\n\n_Error: ${errMsg}_`)
             }
           } catch {
             console.error('Stream error (unparseable):', e.data)
@@ -234,7 +264,7 @@ export function useChat(sessionId: string | null) {
       console.error('Send failed:', err)
       clearStream()
     }
-  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addChatError, setStatusMessage, setCircuitOpen])
+  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addChatError, setStatusMessage, setCircuitOpen, setSessionTakeover])
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {
@@ -291,6 +321,14 @@ export function useChat(sessionId: string | null) {
         setCircuitOpen(true)
       })
 
+      es.addEventListener('session_takeover', () => {
+        console.warn('[useChat] Session takeover during retry — another tab is now active')
+        setSessionTakeover(true)
+        clearStream()
+        es.close()
+        eventSourceRef.current = null
+      })
+
       es.addEventListener('error', () => {
         clearStream()
         es.close()
@@ -308,7 +346,7 @@ export function useChat(sessionId: string | null) {
       console.error('Retry failed:', err)
       clearStream()
     }
-  }, [sessionId, setCircuitOpen, setStreaming, appendStreamContent, setStatusMessage, clearStream])
+  }, [sessionId, setCircuitOpen, setStreaming, appendStreamContent, setStatusMessage, clearStream, setSessionTakeover])
 
   const dismissCircuit = useCallback(() => {
     setCircuitOpen(false)
@@ -334,5 +372,5 @@ export function useChat(sessionId: string | null) {
     clearStream()
   }, [sessionId, setCircuitOpen, clearStream])
 
-  return { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sendMessage, loadMessages, stopStreaming, retryStream, dismissCircuit }
+  return { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sessionTakeover, sendMessage, loadMessages, stopStreaming, retryStream, dismissCircuit }
 }

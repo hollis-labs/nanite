@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ToolCall, AgentMode, ChatError } from '@/lib/types'
+import type { ToolCall, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo } from '@/lib/types'
 
 interface ChatState {
   // Streaming
@@ -31,6 +31,10 @@ interface ChatState {
   circuitOpen: boolean
   setCircuitOpen: (open: boolean) => void
 
+  // Session takeover (another tab took this session's SSE connection)
+  sessionTakeover: boolean
+  setSessionTakeover: (taken: boolean) => void
+
   // Mode
   activeMode: AgentMode
   setActiveMode: (mode: AgentMode) => void
@@ -38,6 +42,14 @@ interface ChatState {
   // Model
   activeModel: string
   setActiveModel: (model: string) => void
+
+  // Presence
+  activeStreams: Map<string, ActiveStreamInfo>
+  pendingTools: Map<string, PendingToolInfo>
+  setActiveStream: (sessionId: string, info: ActiveStreamInfo) => void
+  removeActiveStream: (sessionId: string) => void
+  setPendingTool: (sessionId: string, info: PendingToolInfo) => void
+  removePendingTool: (sessionId: string) => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -80,6 +92,10 @@ export const useChatStore = create<ChatState>((set) => ({
   circuitOpen: false,
   setCircuitOpen: (open: boolean) => set({ circuitOpen: open }),
 
+  // Session takeover
+  sessionTakeover: false,
+  setSessionTakeover: (taken: boolean) => set({ sessionTakeover: taken }),
+
   // Mode
   activeMode: 'default' as AgentMode,
   setActiveMode: (mode: AgentMode) => set({ activeMode: mode }),
@@ -87,4 +103,32 @@ export const useChatStore = create<ChatState>((set) => ({
   // Model
   activeModel: 'claude-sonnet-4-20250514',
   setActiveModel: (model: string) => set({ activeModel: model }),
+
+  // Presence
+  activeStreams: new Map(),
+  pendingTools: new Map(),
+  setActiveStream: (sessionId, info) =>
+    set((state) => {
+      const next = new Map(state.activeStreams)
+      next.set(sessionId, info)
+      return { activeStreams: next }
+    }),
+  removeActiveStream: (sessionId) =>
+    set((state) => {
+      const next = new Map(state.activeStreams)
+      next.delete(sessionId)
+      return { activeStreams: next }
+    }),
+  setPendingTool: (sessionId, info) =>
+    set((state) => {
+      const next = new Map(state.pendingTools)
+      next.set(sessionId, info)
+      return { pendingTools: next }
+    }),
+  removePendingTool: (sessionId) =>
+    set((state) => {
+      const next = new Map(state.pendingTools)
+      next.delete(sessionId)
+      return { pendingTools: next }
+    }),
 }))

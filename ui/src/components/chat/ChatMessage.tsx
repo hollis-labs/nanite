@@ -5,6 +5,32 @@ import { MessageContent } from './MessageContent'
 import { EnvelopeRenderer } from './envelopes/EnvelopeRenderer'
 import { useChatStore } from '@/stores/useChatStore'
 
+interface StructuredMessage {
+  v: number
+  text: string
+  tier: string
+  hash?: string
+  envelopes?: Array<{ type: string; data: unknown }>
+  tool_calls?: Array<{ id: string; name: string; status: string; has_envelope?: boolean }>
+  flags: {
+    truncated?: boolean
+    has_error?: boolean
+    provisional?: boolean
+  }
+}
+
+function parseStructuredContent(content: string): { text: string; structured?: StructuredMessage } {
+  try {
+    const parsed = JSON.parse(content)
+    if (parsed && typeof parsed === 'object' && parsed.v === 1) {
+      return { text: parsed.text, structured: parsed as StructuredMessage }
+    }
+  } catch {
+    // Not JSON — legacy raw text
+  }
+  return { text: content }
+}
+
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
   const now = new Date()
@@ -66,11 +92,17 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
   const [hovered, setHovered] = useState(false)
   const activeMode = useChatStore((s) => s.activeMode)
 
+  // Parse structured message format (v=1) or fall through to legacy raw text.
+  const { text: displayText, structured } = useMemo(
+    () => parseStructuredContent(message.content),
+    [message.content]
+  )
+
   const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(message.content)
+    void navigator.clipboard.writeText(displayText)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
-  }, [message.content])
+  }, [displayText])
 
   const handleBookmark = useCallback(() => {
     onToggleBookmark?.(message.id)
@@ -174,8 +206,15 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
               : 'max-w-full'
           }`}
         >
-          <MessageContent content={message.content} role={message.role} />
+          <MessageContent content={displayText} role={message.role} />
         </div>
+
+        {/* Truncation banner for structured messages */}
+        {structured?.flags?.truncated && (
+          <div className="mt-2 px-3 py-1.5 text-xs text-amber-400 border border-amber-700/50 rounded bg-amber-900/20">
+            Response was cut short due to length limits
+          </div>
+        )}
 
         {/* Envelope rendering */}
         {envelope && !isUser && (

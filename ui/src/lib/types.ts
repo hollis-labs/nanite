@@ -13,6 +13,8 @@ export interface Session {
   custom_name: string
   workspace_id: string
   project_id: string
+  context_type: string | null
+  context_id: string | null
   status: string
   is_pinned: boolean
   sort_order: number
@@ -88,7 +90,7 @@ export interface ChatError {
 }
 
 export interface StreamEvent {
-  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result' | 'status' | 'circuit_open'
+  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result' | 'status' | 'circuit_open' | 'session_takeover'
   content?: string
   message_id?: string
   agent_id?: string
@@ -102,6 +104,7 @@ export interface StreamEvent {
   }
   tool?: string
   summary?: string
+  envelope?: string
 }
 
 // --- Context Breakdown ---
@@ -276,6 +279,47 @@ export interface ApprovalRequest {
   details?: string
 }
 
+// --- A2A Messages ---
+
+export type A2AMessageType = 'message' | 'help_request' | 'directive' | 'status_update' | 'handoff'
+export type A2AMessageStatus = 'unread' | 'read' | 'acknowledged' | 'resolved'
+
+export interface A2AMessage {
+  id: string
+  from_agent: string
+  to_agent: string
+  thread_id: string | null
+  reply_to: string | null
+  type: A2AMessageType
+  subject: string | null
+  body: string
+  metadata: string
+  priority: number
+  status: A2AMessageStatus
+  created_at: string
+  read_at: string | null
+  resolved_at: string | null
+}
+
+// --- Presence ---
+
+export interface PresenceEvent {
+  type: 'stream_start' | 'stream_end' | 'tool_pending' | 'tool_resolved'
+  session_id: string
+  agent_id?: string
+  tool_name?: string
+  timestamp: string
+}
+
+export interface ActiveStreamInfo {
+  agentId: string
+  startedAt: string
+}
+
+export interface PendingToolInfo {
+  toolName: string
+}
+
 // --- Bookmarks ---
 
 export interface Bookmark {
@@ -441,3 +485,4 @@ export interface PromptTemplate {
   created_at: string
   updated_at: string
 }
+

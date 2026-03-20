@@ -20,9 +20,9 @@ func TestParsePermissions_EmptyObject(t *testing.T) {
 }
 
 func TestParsePermissions_WithLists(t *testing.T) {
-	raw := `{"allow_list":["mcp__volon__*"],"deny_list":["mcp__hadron__hadron_bp_*"],"max_calls_per_turn":5}`
+	raw := `{"allow_list":["mcp__engine__*"],"deny_list":["mcp__hadron__hadron_bp_*"],"max_calls_per_turn":5}`
 	p := ParsePermissions(raw)
-	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__volon__*" {
+	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__engine__*" {
 		t.Errorf("unexpected allow_list: %v", p.AllowList)
 	}
 	if len(p.DenyList) != 1 || p.DenyList[0] != "mcp__hadron__hadron_bp_*" {
@@ -42,18 +42,18 @@ func TestParsePermissions_InvalidJSON(t *testing.T) {
 
 func TestCheckPermission_NoRestrictions(t *testing.T) {
 	p := ToolPermissions{MaxCallsPerTurn: 25}
-	if !p.CheckPermission("mcp__volon__task_create") {
+	if !p.CheckPermission("mcp__engine__task_create") {
 		t.Error("expected allow with no restrictions")
 	}
 }
 
 func TestCheckPermission_AllowList(t *testing.T) {
 	p := ToolPermissions{
-		AllowList:       []string{"mcp__volon__*"},
+		AllowList:       []string{"mcp__engine__*"},
 		MaxCallsPerTurn: 25,
 	}
 
-	if !p.CheckPermission("mcp__volon__task_create") {
+	if !p.CheckPermission("mcp__engine__task_create") {
 		t.Error("expected allow for matching pattern")
 	}
 	if p.CheckPermission("mcp__hadron__hadron_health") {
@@ -92,14 +92,14 @@ func TestCheckPermission_DenyTakesPrecedence(t *testing.T) {
 
 func TestCheckPermission_ExactMatch(t *testing.T) {
 	p := ToolPermissions{
-		AllowList:       []string{"mcp__volon__volon_task_create"},
+		AllowList:       []string{"mcp__engine__volon_task_create"},
 		MaxCallsPerTurn: 25,
 	}
 
-	if !p.CheckPermission("mcp__volon__volon_task_create") {
+	if !p.CheckPermission("mcp__engine__volon_task_create") {
 		t.Error("expected allow for exact match")
 	}
-	if p.CheckPermission("mcp__volon__volon_task_delete") {
+	if p.CheckPermission("mcp__engine__volon_task_delete") {
 		t.Error("expected deny for non-matching exact pattern")
 	}
 }

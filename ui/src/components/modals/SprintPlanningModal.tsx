@@ -294,12 +294,12 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
-              <span className="ml-2 text-sm text-zinc-500">Loading from Volon...</span>
+              <span className="ml-2 text-sm text-zinc-500">Loading from Engine...</span>
             </div>
           ) : error && sprints.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <AlertCircle className="w-8 h-8 text-red-400 mb-2" />
-              <p className="text-sm text-red-400 mb-1">Could not connect to Volon</p>
+              <p className="text-sm text-red-400 mb-1">Could not connect to Engine</p>
               <p className="text-xs text-zinc-500">{error}</p>
             </div>
           ) : (

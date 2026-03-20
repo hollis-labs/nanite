@@ -86,7 +86,7 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
 
         {/* Requester & Date */}
         <div className="flex items-center gap-4 text-xs text-zinc-500">
-          <span>Requester: {ticket.requester}</span>
+          <span>Requester: {ticket.requester || 'You'}</span>
           <span>Created: {new Date(ticket.created_at).toLocaleString()}</span>
         </div>
 

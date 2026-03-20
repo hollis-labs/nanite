@@ -17,4 +17,8 @@ export const PLUGIN_ENVELOPE_REGISTRY: Record<string, LazyEnvelopeComponent> = {
   'report-card': lazy(() => import('@/components/chat/envelopes/ReportCard').then(m => ({ default: m.ReportCard }))),
   'task-complete-notification': lazy(() => import('@/components/chat/envelopes/TaskCompleteNotificationCard').then(m => ({ default: m.TaskCompleteNotificationCard }))),
   'sprint-planning-review': lazy(() => import('@/components/chat/envelopes/SprintPlanningReviewCard').then(m => ({ default: m.SprintPlanningReviewCard }))),
+  'kb-result': lazy(() => import('@/components/chat/envelopes/KBResultCard').then(m => ({ default: m.KBResultCard }))),
+  'ticket-confirmation': lazy(() => import('@/components/chat/envelopes/TicketConfirmationCard').then(m => ({ default: m.TicketConfirmationCard }))),
+  'ticket-form': lazy(() => import('@/components/chat/envelopes/TicketFormCard').then(m => ({ default: m.TicketFormCard }))),
+  'resolution-capture': lazy(() => import('@/components/chat/envelopes/ResolutionCaptureCard').then(m => ({ default: m.ResolutionCaptureCard }))),
 };

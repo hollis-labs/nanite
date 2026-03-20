@@ -312,15 +312,17 @@ func cmdServe(args []string) {
 func setupMCPServers(m *mcp.Manager) {
 	home, _ := os.UserHomeDir()
 
-	// Volon — task/sprint/project management
-	volonBin := home + "/Projects-apps/volon/volon"
-	if _, err := os.Stat(volonBin); err == nil {
-		m.AddStdioServer("volon", volonBin, []string{
-			"--repo", home + "/Projects-apps/volon",
+	// Engine — task/sprint/project management (formerly Volon)
+	engineBin := home + "/go/bin/engine"
+	if _, err := os.Stat(engineBin); err == nil {
+		m.AddStdioServer("engine", engineBin, []string{
 			"mcp",
-		}, nil)
+		}, []string{
+			"ENGINE_REPO=" + home + "/Projects-apps/fragments-engine/engine",
+			"VOLON_POSTGRES_DSN=postgres://localhost/engine?sslmode=disable",
+		})
 	} else {
-		log.Printf("mcp: volon binary not found at %s, skipping", volonBin)
+		log.Printf("mcp: engine binary not found at %s, skipping", engineBin)
 	}
 
 	// Hadron — blueprint/automation engine

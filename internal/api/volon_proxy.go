@@ -51,7 +51,7 @@ func (a *API) handleCreateVolonBacklog(w http.ResponseWriter, r *http.Request) {
 		args["tags"] = string(tagsJSON)
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__volon__volon_backlog_capture", args)
+	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_capture", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon backlog capture failed: %v", err))
 		return
@@ -84,7 +84,7 @@ func (a *API) handleVolonListSprints(w http.ResponseWriter, r *http.Request) {
 		args["project_id"] = pid
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__volon__volon_sprints_list", args)
+	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_sprints_list", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon sprints_list: %v", err))
 		return
@@ -112,7 +112,7 @@ func (a *API) handleVolonListTasks(w http.ResponseWriter, r *http.Request) {
 		args["project_id"] = pid
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__volon__volon_tasks_list", args)
+	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_tasks_list", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon tasks_list: %v", err))
 		return
@@ -134,7 +134,7 @@ func (a *API) handleVolonListBacklog(w http.ResponseWriter, r *http.Request) {
 		args["project_id"] = pid
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__volon__volon_backlog_list", args)
+	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_list", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon backlog_list: %v", err))
 		return
@@ -174,7 +174,7 @@ func (a *API) handleVolonTransitionTask(w http.ResponseWriter, r *http.Request) 
 		"status": req.Status,
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__volon__volon_task_transition", args)
+	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_task_transition", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon task_transition: %v", err))
 		return
@@ -214,7 +214,7 @@ func (a *API) handleVolonPromoteBacklog(w http.ResponseWriter, r *http.Request) 
 		"sprint_id": req.SprintID,
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__volon__volon_backlog_promote", args)
+	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_promote", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon backlog_promote: %v", err))
 		return
@@ -241,7 +241,7 @@ func (a *API) handleVolonDeleteTask(w http.ResponseWriter, r *http.Request) {
 		"id": taskID,
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__volon__volon_task_delete", args)
+	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_task_delete", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon task_delete: %v", err))
 		return

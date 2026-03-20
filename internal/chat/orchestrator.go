@@ -64,7 +64,7 @@ func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *Decompositi
 	plan := &OrchestrationPlan{
 		SubTasks:    decomposition.SubTasks,
 		Aggregation: decomposition.Aggregation,
-		HasVolon:    o.hasToolPrefix("volon"),
+		HasVolon:    o.hasToolPrefix("engine"),
 		HasCortex:   o.hasToolPrefix("cortex"),
 	}
 
@@ -166,7 +166,7 @@ func (o *Orchestrator) createVolonSprint(ctx context.Context, projectID string, 
 	}
 
 	// Create sprint via MCP tool call.
-	sprintResult, err := o.MCPManager.ExecuteTool(ctx, "mcp__volon__volon_sprint_create", map[string]any{
+	sprintResult, err := o.MCPManager.ExecuteTool(ctx, "mcp__engine__engine_sprint_create", map[string]any{
 		"project_id":  projectID,
 		"title":       "Auto-decomposed task sprint",
 		"description": fmt.Sprintf("Sprint with %d sub-tasks from task decomposition", len(decomposition.SubTasks)),
@@ -187,7 +187,7 @@ func (o *Orchestrator) createVolonSprint(ctx context.Context, projectID string, 
 	// Create a task for each sub-task.
 	var taskIDs []string
 	for _, st := range decomposition.SubTasks {
-		taskResult, err := o.MCPManager.ExecuteTool(ctx, "mcp__volon__volon_task_create", map[string]any{
+		taskResult, err := o.MCPManager.ExecuteTool(ctx, "mcp__engine__engine_task_create", map[string]any{
 			"project_id":  projectID,
 			"sprint_id":   sprintResp.ID,
 			"title":       st.Title,

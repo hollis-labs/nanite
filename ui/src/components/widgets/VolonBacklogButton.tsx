@@ -94,7 +94,7 @@ export function VolonBacklogButton({ contextBody, projectId, className }: VolonB
     <div className={cn('rounded-lg border border-zinc-700 bg-zinc-900 p-3 space-y-3', className)}>
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-medium text-zinc-300 uppercase tracking-wider">
-          New Volon Backlog Item
+          New Backlog Item
         </h4>
         <button
           onClick={handleClose}

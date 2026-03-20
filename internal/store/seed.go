@@ -85,7 +85,7 @@ Your strengths: strategic thinking, context management, task decomposition, cros
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		"developer-001", "Developer", "developer", devPrompt,
 		"Hands-on software engineering agent with dev tools", true,
-		`["dev"]`, `{"allow_list":["mcp__dev__*"]}`,
+		`["engine","cortex","hadron"]`, `{}`,
 	); err != nil {
 		return fmt.Errorf("insert developer profile: %w", err)
 	}
@@ -123,7 +123,7 @@ Your strengths: strategic thinking, context management, task decomposition, cros
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		"researcher-001", "Researcher", "researcher", researchPrompt,
 		"Information gathering and analysis agent (read-only)", false,
-		`["dev","general"]`, `{"allow_list":["mcp__dev__dev_read","mcp__dev__dev_grep","mcp__dev__dev_glob","mcp__general__*"],"deny_list":["mcp__dev__dev_write","mcp__dev__dev_edit","mcp__dev__dev_bash"]}`,
+		`["engine","cortex"]`, `{}`,
 	); err != nil {
 		return fmt.Errorf("insert researcher profile: %w", err)
 	}

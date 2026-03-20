@@ -13,6 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"database/sql"
+
+	_ "github.com/lib/pq" // Postgres driver for Nexus messaging
+
 	feotel "github.com/hollis-labs/otel"
 	"github.com/joho/godotenv"
 
@@ -30,6 +34,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/truncate"
 	"github.com/hollis-labs/conduit/internal/workflow"
+	"github.com/hollis-labs/nexus/messaging"
 	"github.com/hollis-labs/tool-broker/broker"
 )
 
@@ -257,6 +262,33 @@ func cmdServe(args []string) {
 	a.ToolClient = tb
 	a.WorkflowLoader = wfLoader
 	a.WorkflowEngine = wfEngine
+
+	// Connect to Engine Postgres for Nexus A2A messaging.
+	// Uses ENGINE_POSTGRES_DSN env var, falling back to VOLON_POSTGRES_DSN,
+	// then a default local DSN. When unavailable, A2A falls back to SQLite.
+	nexusDSN := os.Getenv("ENGINE_POSTGRES_DSN")
+	if nexusDSN == "" {
+		nexusDSN = os.Getenv("VOLON_POSTGRES_DSN")
+	}
+	if nexusDSN == "" {
+		nexusDSN = "postgres://localhost/engine?sslmode=disable"
+	}
+	engineDB, pgErr := sql.Open("postgres", nexusDSN)
+	if pgErr != nil {
+		log.Printf("WARNING: cannot open Engine Postgres (%s): %v — A2A will use SQLite fallback", nexusDSN, pgErr)
+	} else if pgErr := engineDB.Ping(); pgErr != nil {
+		log.Printf("WARNING: cannot reach Engine Postgres (%s): %v — A2A will use SQLite fallback", nexusDSN, pgErr)
+		engineDB.Close()
+		engineDB = nil
+	}
+	if engineDB != nil {
+		engineDB.SetMaxOpenConns(5)
+		engineDB.SetMaxIdleConns(2)
+		engineDB.SetConnMaxLifetime(5 * time.Minute)
+		a.NexusMsg = messaging.NewPostgresStore(engineDB)
+		defer engineDB.Close()
+		log.Printf("nexus messaging: connected to Engine Postgres (%s)", nexusDSN)
+	}
 
 	// Create plugin host.
 	logger := plugin.NewLogger("conduit-plugin")

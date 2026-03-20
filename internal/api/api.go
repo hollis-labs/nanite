@@ -9,6 +9,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/workflow"
+	"github.com/hollis-labs/nexus/messaging"
 )
 
 // API holds dependencies for HTTP handlers.
@@ -19,6 +20,7 @@ type API struct {
 	MCPManager     *mcp.Manager
 	WorkflowLoader *workflow.Loader
 	WorkflowEngine *workflow.Engine
+	NexusMsg       messaging.Store // Nexus Postgres-backed A2A messaging (nil = fallback to SQLite)
 }
 
 // New creates a new API instance.

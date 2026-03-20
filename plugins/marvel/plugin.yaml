@@ -1,0 +1,39 @@
+name: marvel
+version: 0.1.0
+description: Marvel character + TMDB movie search — !marvel and !movie commands
+
+config:
+  marvel_public_key:
+    type: string
+    required: false
+    env_var: MARVEL_PUBLIC_KEY
+    default: ""
+    description: "Marvel API public key (get from developer.marvel.com)"
+  marvel_private_key:
+    type: string
+    required: false
+    env_var: MARVEL_PRIVATE_KEY
+    default: ""
+    description: "Marvel API private key"
+  tmdb_api_key:
+    type: string
+    required: false
+    env_var: TMDB_API_KEY
+    default: ""
+    description: "TMDB API key (get from themoviedb.org)"
+
+requires:
+  mcp_servers: []
+
+registers:
+  envelopes:
+    - type: marvel-character
+      component: ui/MarvelCharacterCard
+      export: MarvelCharacterCard
+    - type: marvel-movie
+      component: ui/MarvelMovieCard
+      export: MarvelMovieCard
+
+  hooks:
+    - event: message.sent
+      handler: onMessageSent

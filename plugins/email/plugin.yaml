@@ -1,0 +1,39 @@
+name: email
+version: 0.1.0
+description: Email integration — send and read email via Gmail
+
+config:
+  gmail_credentials_file:
+    type: string
+    required: true
+    env_var: GMAIL_CREDENTIALS_FILE
+    default: "credentials.json"
+    description: "Path to Google OAuth2 credentials JSON"
+  gmail_token_file:
+    type: string
+    required: false
+    env_var: GMAIL_TOKEN_FILE
+    default: "gmail_token.json"
+    description: "Path to stored OAuth2 token"
+
+requires:
+  mcp_servers: []
+
+agents:
+  - agents/email-assistant.yaml
+
+registers:
+  envelopes:
+    - type: email-compose
+      component: ui/EmailComposeCard
+      export: EmailComposeCard
+    - type: email-preview
+      component: ui/EmailPreviewCard
+      export: EmailPreviewCard
+    - type: email-inbox
+      component: ui/EmailInboxCard
+      export: EmailInboxCard
+
+  hooks:
+    - event: message.sent
+      handler: onMessageSent

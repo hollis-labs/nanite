@@ -1,0 +1,18 @@
+name: oembed
+version: 0.1.0
+description: Automatic rich previews for YouTube, Spotify, and other oEmbed links
+
+config: {}
+
+requires:
+  mcp_servers: []
+
+registers:
+  envelopes:
+    - type: oembed-card
+      component: ui/OEmbedCard
+      export: OEmbedCard
+
+  hooks:
+    - event: message.sent
+      handler: onMessageSent

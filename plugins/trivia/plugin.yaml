@@ -1,0 +1,27 @@
+name: trivia
+version: 0.1.0
+description: Interactive trivia game — !trivia, !answer, !scores
+
+config:
+  trivia_demo_mode:
+    type: string
+    required: false
+    env_var: TRIVIA_DEMO_MODE
+    default: ""
+    description: "Set to '1' or 'true' to force demo mode (no API calls)"
+
+requires:
+  mcp_servers: []
+
+registers:
+  envelopes:
+    - type: trivia-question
+      component: ui/TriviaQuestionCard
+      export: TriviaQuestionCard
+    - type: trivia-leaderboard
+      component: ui/TriviaLeaderboardCard
+      export: TriviaLeaderboardCard
+
+  hooks:
+    - event: message.sent
+      handler: onMessageSent

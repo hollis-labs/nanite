@@ -1,0 +1,9 @@
+slug: teams-connector
+name: Teams Connector
+description: Sends notifications and status updates to Microsoft Teams channels via Adaptive Cards
+default_model: claude-sonnet-4-20250514
+mcp_servers:
+  - teams
+tool_permissions:
+  allow:
+    - "mcp__teams__*"

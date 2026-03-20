@@ -1,0 +1,11 @@
+name: Email Assistant
+slug: email-assistant
+description: Email assistant — send, read, and search email via Gmail
+default_model: claude-sonnet-4-20250514
+default_mode: default
+can_execute: false
+mcp_servers:
+  - email
+tool_permissions:
+  allow:
+    - mcp__email__*

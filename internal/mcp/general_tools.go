@@ -32,11 +32,11 @@ func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	return []Tool{
 		{
 			Name:        "web_fetch",
-			Description: "Fetch a URL via HTTP GET. Returns status code and response body (text only, truncated at 8000 chars).",
+			Description: "Fetch a URL via HTTP GET and return the response body as text. Returns status code and body truncated at 8000 chars. Note: many news/social sites block automated requests (403/Cloudflare). Works best with APIs, documentation sites, and raw content URLs. Example: web_fetch(url=\"https://api.github.com/repos/hollis-labs/conduit\")",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"url": map[string]any{"type": "string", "description": "URL to fetch"},
+					"url": map[string]any{"type": "string", "description": "Full URL including https://. Example: https://docs.anthropic.com/en/docs"},
 				},
 				"required": []string{"url"},
 			},

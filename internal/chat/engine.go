@@ -40,6 +40,23 @@ const ProgressiveDiscoveryThreshold = 5
 // toolclient.RequestToolsMetaTool() for the canonical definition.
 var requestToolsDef = toolclient.RequestToolsMetaTool()
 
+// nativeToolGuide is injected into every system prompt to help the LLM
+// correctly use native dev/general tools. These tools require specific
+// argument formats (absolute paths, separate pattern/directory params)
+// that the LLM frequently gets wrong without guidance.
+const nativeToolGuide = `
+
+## Native Tool Usage
+
+When using file and search tools, follow these rules:
+
+- **All paths must be absolute** (start with /Users/). Never use ~ or relative paths.
+- **dev_glob requires TWO separate params**: pattern (relative glob like **/*.md) and directory (absolute path like /Users/chrispian/Projects-apps/mentat). Do NOT put the full path in the pattern.
+- **dev_grep requires TWO separate params**: pattern (regex) and directory (absolute path). Same rule — keep them separate.
+- **dev_read/dev_write/dev_edit**: path must be absolute.
+- **web_fetch**: many news/social sites block automated requests. Works best with APIs, docs sites, and raw content URLs.
+- **Allowed directories**: /Users/chrispian/Projects-apps, /Users/chrispian/Projects. Files outside these paths will be rejected.`
+
 // buildToolCatalog formats tool summaries as a compact catalog string for
 // injection into the system prompt during progressive discovery.
 func buildToolCatalog(summaries []toolclient.ToolSummary) string {
@@ -436,6 +453,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	if selection.Progressive && selection.Catalog != "" {
 		systemPrompt = systemPrompt + "\n\n" + selection.Catalog
 	}
+
+	// Inject native tool usage guide so the LLM understands how to call dev/general tools correctly.
+	systemPrompt += nativeToolGuide
 
 	// Track loaded tools for progressive discovery (tools loaded via request_tools).
 	// Seed with initial tools so progressive discovery won't re-add them.

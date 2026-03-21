@@ -57,11 +57,11 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	return []Tool{
 		{
 			Name:        "dev_read",
-			Description: "Read file contents with optional line range. Returns contents with line numbers.",
+			Description: "Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Allowed directories: ~/Projects-apps, ~/Projects. Example: dev_read(path=\"/Users/chris/Projects-apps/mentat/docs/README.md\")",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": "Absolute file path to read"},
+					"path":   map[string]any{"type": "string", "description": "Absolute file path (must start with /). Example: /Users/chris/Projects-apps/mentat/README.md"},
 					"offset": map[string]any{"type": "integer", "description": "Start line (1-based, default 1)"},
 					"limit":  map[string]any{"type": "integer", "description": "Number of lines to return (default 200)"},
 				},
@@ -70,12 +70,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_grep",
-			Description: "Search files matching a regex pattern within a directory. Returns matches with surrounding context.",
+			Description: "Search file contents matching a regex pattern within a directory. Returns matches with surrounding context lines. Both pattern and directory are required. Directory must be an absolute path. Example: dev_grep(pattern=\"func main\", directory=\"/Users/chris/Projects-apps/mentat\")",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"pattern":   map[string]any{"type": "string", "description": "Regex pattern to search for"},
-					"directory": map[string]any{"type": "string", "description": "Directory to search in"},
+					"pattern":   map[string]any{"type": "string", "description": "Regex pattern to search for. Example: TODO|FIXME"},
+					"directory": map[string]any{"type": "string", "description": "Absolute directory path to search in. Example: /Users/chris/Projects-apps/mentat"},
 					"glob":      map[string]any{"type": "string", "description": "File glob filter (e.g. *.go, *.ts). Default: all files"},
 					"context":   map[string]any{"type": "integer", "description": "Lines of context around matches (default 2)"},
 				},
@@ -84,11 +84,11 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_write",
-			Description: "Write content to a file. Creates parent directories if needed. Overwrites existing content.",
+			Description: "Write content to a file. Creates parent directories if needed. Overwrites existing content. Path must be absolute. Example: dev_write(path=\"/Users/chris/Projects-apps/mentat/notes.md\", content=\"# Notes\\nContent here\")",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":    map[string]any{"type": "string", "description": "Absolute file path to write"},
+					"path":    map[string]any{"type": "string", "description": "Absolute file path to write (must start with /)"},
 					"content": map[string]any{"type": "string", "description": "File content to write"},
 				},
 				"required": []string{"path", "content"},
@@ -96,12 +96,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_glob",
-			Description: "Find files matching a glob pattern. Supports ** for recursive matching. Results sorted by modification time (newest first).",
+			Description: "Find files matching a glob pattern within a directory. The 'pattern' and 'directory' are SEPARATE parameters — do NOT combine them. Pattern is relative to directory. Supports ** for recursive matching. Results sorted by modification time (newest first). Example: dev_glob(pattern=\"**/*.md\", directory=\"/Users/chris/Projects-apps/mentat/docs\")",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"pattern":     map[string]any{"type": "string", "description": "Glob pattern (e.g. **/*.go, src/**/*.ts)"},
-					"directory":   map[string]any{"type": "string", "description": "Directory to search in (must be in allowed paths)"},
+					"pattern":     map[string]any{"type": "string", "description": "Glob pattern RELATIVE to directory. Examples: **/*.md, *.go, src/**/*.ts. Do NOT include the directory path in the pattern."},
+					"directory":   map[string]any{"type": "string", "description": "Absolute directory path to search in. Must start with /. Example: /Users/chris/Projects-apps/mentat"},
 					"max_results": map[string]any{"type": "integer", "description": "Maximum results to return (default 50)"},
 				},
 				"required": []string{"pattern", "directory"},
@@ -109,26 +109,26 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_edit",
-			Description: "Edit a file by replacing a string. If replace_all is false, old_string must appear exactly once in the file.",
+			Description: "Edit a file by finding and replacing a string. The old_string must appear in the file. If replace_all is false (default), old_string must appear exactly once. Path must be absolute. Example: dev_edit(path=\"/Users/chris/Projects-apps/mentat/config.yaml\", old_string=\"port: 8080\", new_string=\"port: 9090\")",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":        map[string]any{"type": "string", "description": "Absolute file path to edit"},
-					"old_string":  map[string]any{"type": "string", "description": "Text to find and replace"},
+					"path":        map[string]any{"type": "string", "description": "Absolute file path to edit (must start with /)"},
+					"old_string":  map[string]any{"type": "string", "description": "Exact text to find and replace (must exist in the file)"},
 					"new_string":  map[string]any{"type": "string", "description": "Replacement text"},
-					"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences (default false)"},
+					"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences (default false — requires old_string to be unique)"},
 				},
 				"required": []string{"path", "old_string", "new_string"},
 			},
 		},
 		{
 			Name:        "dev_bash",
-			Description: "Execute a shell command. Captures stdout and stderr. Process is killed on timeout.",
+			Description: "Execute a shell command and return stdout + stderr. Use for git, ls, find, build commands, etc. Working directory must be absolute and in allowed paths. Example: dev_bash(command=\"git log --oneline -5\", working_dir=\"/Users/chris/Projects-apps/mentat\")",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"command":     map[string]any{"type": "string", "description": "Shell command to execute"},
-					"working_dir": map[string]any{"type": "string", "description": "Working directory (must be in allowed paths, defaults to first allowed path)"},
+					"command":     map[string]any{"type": "string", "description": "Shell command to execute. Example: ls -la, git status, go build ./..."},
+					"working_dir": map[string]any{"type": "string", "description": "Absolute working directory (must be in allowed paths). Defaults to first allowed path if omitted."},
 					"timeout":     map[string]any{"type": "integer", "description": "Timeout in seconds (default 30, max 120)"},
 				},
 				"required": []string{"command"},

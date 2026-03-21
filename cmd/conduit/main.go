@@ -203,7 +203,14 @@ func cmdServe(args []string) {
 	engine.MCPManager = mcpManager
 
 	// Create tool broker for permission-checked tool access.
+	// Share the MCPManager's broker so the ToolClient has all discovered tools.
+	// Without this, the ToolClient creates its own empty broker and tool selection
+	// falls back to direct MCP discovery, bypassing intent scoring.
 	tb := toolclient.New(mcpManager, s, nil)
+	if mcpManager.Broker != nil {
+		tb.LocalBroker = mcpManager.Broker
+		log.Printf("toolclient: sharing MCPManager broker (%d tool summaries)", len(mcpManager.Broker.AllTools()))
+	}
 
 	// Register self-service tools as built-in (always available).
 	selfToolDefs := mcp.SelfToolProviderDefinitions()

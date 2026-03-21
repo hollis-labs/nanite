@@ -145,7 +145,8 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 }
 
 // CallTool executes a tool call after checking permissions. Routes through the MCP Manager.
-// Built-in tools (no mcp__ prefix) are routed to the "self" MCP server automatically.
+// Tools with the mcp__ prefix are routed directly. Unprefixed tools (builtins, native tools)
+// are resolved to their owning server via the Manager's tool registry.
 func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
 	// Check permissions.
 	if !tb.CheckPermission(agentID, toolName) {
@@ -156,16 +157,14 @@ func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, ar
 		return "", fmt.Errorf("no MCP manager configured")
 	}
 
-	// Built-in tools don't have the mcp__ prefix. Route them to the "self" server.
+	// Tools with mcp__ prefix already have routing info — pass through.
+	// Unprefixed tools (native/builtin) need server resolution.
 	execName := toolName
 	if !strings.HasPrefix(toolName, "mcp__") {
-		if tb.Builtins != nil {
-			for _, b := range tb.Builtins.GetBuiltins() {
-				if b.Name == toolName {
-					execName = fmt.Sprintf("mcp__self__%s", toolName)
-					break
-				}
-			}
+		if server, prefixed := tb.MCPManager.ResolveToolServer(toolName); server != "" {
+			execName = prefixed
+		} else {
+			return "", fmt.Errorf("tool %q not found in any registered server", toolName)
 		}
 	}
 

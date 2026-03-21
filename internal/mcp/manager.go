@@ -271,6 +271,19 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 	return sb.String(), nil
 }
 
+// ResolveToolServer finds which server owns a bare (unprefixed) tool name.
+// Returns the server name and prefixed tool name, or empty strings if not found.
+func (m *Manager) ResolveToolServer(toolName string) (serverName, prefixedName string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, entry := range m.tools {
+		if entry.tool.Name == toolName {
+			return entry.serverName, fmt.Sprintf("mcp__%s__%s", entry.serverName, toolName)
+		}
+	}
+	return "", ""
+}
+
 // HasTools reports whether any tools are available.
 func (m *Manager) HasTools() bool {
 	m.mu.RLock()

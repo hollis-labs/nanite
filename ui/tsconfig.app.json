@@ -24,6 +24,11 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
+    /* Overrides from @tsconfig/strictest — codebase predates these */
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": false,
+    "noPropertyAccessFromIndexSignature": false,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

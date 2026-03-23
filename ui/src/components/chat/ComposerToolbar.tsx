@@ -80,6 +80,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
       document.addEventListener('mousedown', handleClickOutside)
       return () => document.removeEventListener('mousedown', handleClickOutside)
     }
+    return undefined
   }, [modelOpen, modeOpen])
 
   const handleModelSelect = useCallback(async (modelId: string) => {

@@ -132,7 +132,7 @@ export function ErrorCard({ data }: ErrorCardProps) {
             </p>
 
             {/* Details preview (if present) */}
-            {data.details && data.details.raw && (
+            {data.details && data.details.raw != null && (
               <p className="text-xs text-zinc-500 font-mono truncate" title={String(data.details.raw)}>
                 {String(data.details.raw).slice(0, 120)}
               </p>

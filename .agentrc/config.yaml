@@ -1,0 +1,16 @@
+# Project agentrc config — conduit
+agentrc_version: 2.2.0
+
+agents:
+  conduit-backend:
+    name: Conduit Backend Engineer
+    description: Go service development for the Conduit chat interface and conversation management
+    roles: [backend, go]
+    skills: [go-build, go-lint, go-test]
+    context: agents/backend.md
+
+  conduit-reviewer:
+    name: Conduit Code Reviewer
+    description: Code review for Conduit PRs
+    roles: [code-review, go]
+    skills: [go-lint, go-test]

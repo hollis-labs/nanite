@@ -147,8 +147,16 @@ func cmdServe(args []string) {
 	registry.Register("ollama", provider.NewOllama())
 	log.Println("ollama provider registered (default host: http://localhost:11434)")
 
-	// Create chat engine.
-	engine := chat.NewEngine(s, registry)
+	// Register PTY bridge if Claude CLI is available.
+	if ptyBridge := provider.NewPTYBridge(); ptyBridge != nil {
+		registry.Register("pty", ptyBridge)
+		log.Println("pty provider registered (Claude CLI bridge)")
+	}
+
+	// Create chat engine. UtilityProvider controls which provider handles
+	// lightweight calls like autoTitle/autoTags (default: "anthropic").
+	utilityProvider := os.Getenv("CONDUIT_UTILITY_PROVIDER")
+	engine := chat.NewEngine(s, registry, utilityProvider)
 
 	// Configure output filters. Default: strip emoji from LLM responses.
 	// Additional filters can be added to the chain here or via MENTAT_OUTPUT_FILTERS env var.

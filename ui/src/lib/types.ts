@@ -194,6 +194,7 @@ export const AVAILABLE_MODELS: ModelOption[] = [
   { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', provider: 'anthropic' },
   { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', provider: 'anthropic' },
   { id: 'claude-haiku-35-20241022', label: 'Claude Haiku', provider: 'anthropic' },
+  { id: 'claude-cli', label: 'Claude CLI', provider: 'pty' },
 ]
 
 // --- Workflows ---

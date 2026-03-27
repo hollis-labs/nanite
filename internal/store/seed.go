@@ -284,6 +284,26 @@ When user says "let us plan" or "create demo sprints":
 		return fmt.Errorf("insert model: %w", err)
 	}
 
+	// --- Provider: PTY (Claude CLI) ---
+	ptyProviderID := "pty-001"
+	if _, err := tx.Exec(
+		`INSERT INTO providers (id, name, provider_type, api_key)
+		 VALUES (?, ?, ?, ?)`,
+		ptyProviderID, "Claude CLI (PTY)", "pty", "",
+	); err != nil {
+		return fmt.Errorf("insert pty provider: %w", err)
+	}
+
+	// --- Model: Claude CLI ---
+	if _, err := tx.Exec(
+		`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"claude-cli", ptyProviderID, "claude-cli", "Claude CLI",
+		0, 0, true,
+	); err != nil {
+		return fmt.Errorf("insert claude-cli model: %w", err)
+	}
+
 	return tx.Commit()
 }
 

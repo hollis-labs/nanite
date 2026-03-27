@@ -44,6 +44,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
     anthropic: 'A',
     openai: 'O',
     ollama: 'L',
+    pty: 'C',
   }
 
   const groupedModels: Provider[] = useMemo(() => {
@@ -88,12 +89,15 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
     setModelOpen(false)
     if (activeSessionId) {
       try {
-        await api.updateSession(activeSessionId, { model: modelId } as never)
+        // Resolve the provider for this model so the backend routes to the right provider.
+        const selected = allModels.find((m) => m.id === modelId)
+        const providerType = selected?.provider || 'anthropic'
+        await api.updateSession(activeSessionId, { model: modelId, provider: providerType } as never)
       } catch (err) {
         console.error('Failed to update model:', err)
       }
     }
-  }, [activeSessionId, setActiveModel])
+  }, [activeSessionId, setActiveModel, allModels])
 
   const handleModeSelect = useCallback(async (mode: AgentMode) => {
     setActiveMode(mode)

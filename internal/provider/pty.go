@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -20,22 +19,24 @@ import (
 // It spawns the CLI as a child process, reads its structured output,
 // and maps events to Conduit's StreamEvent types.
 type PTYBridge struct {
+	adapter CLIAdapter
 	cliPath string // resolved path to the CLI binary
 }
 
-// NewPTYBridge creates a PTY bridge provider. Returns nil if the claude
-// CLI binary is not found in PATH.
+// NewPTYBridge creates a PTY bridge for Claude CLI. Returns nil if the
+// claude binary is not found in PATH. Preserved for backwards compatibility.
 func NewPTYBridge() *PTYBridge {
-	// Allow override via env var.
-	cliPath := os.Getenv("CLAUDE_CLI_PATH")
-	if cliPath == "" {
-		var err error
-		cliPath, err = exec.LookPath("claude")
-		if err != nil {
-			return nil
-		}
+	adapter := NewClaudeAdapter()
+	path, ok := adapter.Detect()
+	if !ok {
+		return nil
 	}
-	return &PTYBridge{cliPath: cliPath}
+	return &PTYBridge{adapter: adapter, cliPath: path}
+}
+
+// NewPTYBridgeWithAdapter creates a PTY bridge for any CLI adapter.
+func NewPTYBridgeWithAdapter(adapter CLIAdapter, cliPath string) *PTYBridge {
+	return &PTYBridge{adapter: adapter, cliPath: cliPath}
 }
 
 func (p *PTYBridge) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
@@ -94,23 +95,11 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		return nil, fmt.Errorf("no user message found")
 	}
 
-	// Build command args.
-	args := []string{
-		"-p", prompt,
-		"--output-format", "stream-json",
-		"--verbose",
-	}
+	// Delegate arg construction to the adapter.
+	cliSessionID, _ := CLISessionIDFromContext(ctx)
+	args := p.adapter.BuildArgs(prompt, systemPrompt, cliSessionID)
 
-	// If we have a CLI session ID from a previous turn, resume it.
-	// The CLI already has the system prompt from the first turn.
-	if cliSessionID, ok := CLISessionIDFromContext(ctx); ok {
-		args = append([]string{"--resume", cliSessionID}, args...)
-	} else if systemPrompt != "" {
-		// Only pass system prompt on the first message (fresh session).
-		args = append(args, "--system-prompt", systemPrompt)
-	}
-
-	log.Printf("pty: args=%v", args)
+	log.Printf("pty[%s]: args=%v", p.adapter.Name(), args)
 
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
 
@@ -149,9 +138,9 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 				continue
 			}
 
-			events, err := parseClaudeStreamLine(line)
+			events, err := p.adapter.ParseLine(line)
 			if err != nil {
-				log.Printf("pty: parse error: %v (line: %s)", err, string(line))
+				log.Printf("pty[%s]: parse error: %v (line: %s)", p.adapter.Name(), err, string(line))
 				continue
 			}
 

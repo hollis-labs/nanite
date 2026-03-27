@@ -26,7 +26,7 @@ func TestNewPTYBridge_NilWhenMissing(t *testing.T) {
 }
 
 func TestPTYBridge_Capabilities(t *testing.T) {
-	bridge := &PTYBridge{cliPath: "/usr/bin/echo"}
+	bridge := &PTYBridge{adapter: NewClaudeAdapter(), cliPath: "/usr/bin/echo"}
 	caps := bridge.Capabilities()
 
 	if !caps.SupportsStreamJSON {
@@ -44,7 +44,7 @@ func TestPTYBridge_Capabilities(t *testing.T) {
 }
 
 func TestPTYBridge_StreamChat_NoUserMessage(t *testing.T) {
-	bridge := &PTYBridge{cliPath: "/usr/bin/echo"}
+	bridge := &PTYBridge{adapter: NewClaudeAdapter(), cliPath: "/usr/bin/echo"}
 	_, err := bridge.StreamChat(context.Background(), "", nil, "")
 	if err == nil {
 		t.Fatal("expected error for empty messages")
@@ -58,7 +58,7 @@ func TestPTYBridge_StreamChat_WithMockCLI(t *testing.T) {
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello from mock CLI!"}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"Hello from mock CLI!","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`
 
-	bridge := &PTYBridge{cliPath: "/bin/sh"}
+	bridge := &PTYBridge{adapter: NewClaudeAdapter(), cliPath: "/bin/sh"}
 
 	// Override streamCLI by calling StreamChat with messages — but we need
 	// to construct the command ourselves. Instead, test the parser integration

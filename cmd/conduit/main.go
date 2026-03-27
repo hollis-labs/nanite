@@ -150,10 +150,21 @@ func cmdServe(args []string) {
 	registry.Register("ollama", provider.NewOllama())
 	log.Println("ollama provider registered (default host: http://localhost:11434)")
 
-	// Register PTY bridge if Claude CLI is available.
+	// Register PTY adapters — one per detected CLI binary.
+	for _, adapter := range []provider.CLIAdapter{
+		provider.NewClaudeAdapter(),
+		provider.NewCodexAdapter(),
+		provider.NewGeminiAdapter(),
+	} {
+		if path, ok := adapter.Detect(); ok {
+			name := "pty-" + adapter.Name()
+			registry.Register(name, provider.NewPTYBridgeWithAdapter(adapter, path))
+			log.Printf("pty provider registered: %s (%s)", name, path)
+		}
+	}
+	// Backwards-compat alias: "pty" → Claude adapter (if available).
 	if ptyBridge := provider.NewPTYBridge(); ptyBridge != nil {
 		registry.Register("pty", ptyBridge)
-		log.Println("pty provider registered (Claude CLI bridge)")
 	}
 
 	// Create chat engine. UtilityProvider controls which provider handles

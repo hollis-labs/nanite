@@ -554,7 +554,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
 		)
 		// PTY sessions: set up sandbox directory and resume context.
-		if providerName == "pty" {
+		if isPTYProvider(providerName) {
 			// Create/resolve sandbox directory and populate reference files.
 			if sbDir, sbErr := sandbox.Dir(sessionID); sbErr != nil {
 				log.Printf("chat: sandbox dir error: %v", sbErr)
@@ -1086,7 +1086,30 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 
 	// Parse envelopes from the response content.
-	envelopes, cleanContent := ParseEnvelopes(responseContent)
+	envelopes, cleanContent, envErrors := ParseEnvelopes(responseContent)
+
+	// Log envelope validation errors.
+	for _, envErr := range envErrors {
+		log.Printf("chat: envelope error (%s): %s", envErr.Reason, truncateStr(envErr.Raw, 200))
+		e.Store.LogEvent(sessionID, "envelope_error", "warning",
+			envErr.Reason, fmt.Sprintf(`{"raw":%q}`, truncateStr(envErr.Raw, 500)))
+	}
+
+	// PTY envelope retry: if there were fatal envelope errors (invalid_json)
+	// and this is a PTY session with --resume, send one correction prompt.
+	if len(envErrors) > 0 && isPTYProvider(providerName) {
+		hasFatal := false
+		for _, envErr := range envErrors {
+			if envErr.Reason == "invalid_json" {
+				hasFatal = true
+				break
+			}
+		}
+		if hasFatal {
+			retryEnvelopes := e.retryEnvelopeCorrection(ctx, sessionID, session, prov, model, envErrors, ch)
+			envelopes = append(envelopes, retryEnvelopes...)
+		}
+	}
 
 	var envelopeJSON string
 	if len(envelopes) > 0 {
@@ -1203,13 +1226,108 @@ func (e *Engine) SendAgentMessage(fromSessionID, toSessionID, content string) (s
 	return assistantMsgID, nil
 }
 
+// retryEnvelopeCorrection sends a single correction prompt to the PTY session
+// when envelope parsing produced fatal errors (invalid_json). Uses --resume
+// to continue the same CLI session. Returns any valid envelopes from the retry.
+func (e *Engine) retryEnvelopeCorrection(
+	ctx context.Context,
+	sessionID string,
+	session *store.Session,
+	prov provider.Provider,
+	model string,
+	envErrors []EnvelopeError,
+	ch chan StreamEvent,
+) []Envelope {
+	// Build correction prompt with the first fatal error.
+	var errDetail EnvelopeError
+	for _, ee := range envErrors {
+		if ee.Reason == "invalid_json" {
+			errDetail = ee
+			break
+		}
+	}
+
+	correction := fmt.Sprintf(
+		"Your previous response contained a malformed envelope block that could not be parsed.\n\n"+
+			"Raw content:\n```\n%s\n```\n\n"+
+			"Error: %s\n\n"+
+			"Please re-emit the envelope as a valid JSON object inside a ```conduit-envelope fenced block "+
+			"with kind, version (1), and type fields.",
+		truncateStr(errDetail.Raw, 1000), errDetail.Reason,
+	)
+
+	log.Printf("chat: envelope retry for session %s — sending correction prompt", sessionID)
+	e.Store.LogEvent(sessionID, "envelope_retry", "info",
+		"sending correction prompt", fmt.Sprintf(`{"reason":%q}`, errDetail.Reason))
+
+	// Build context with CLI session ID for --resume.
+	retryCtx := ctx
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(session.Metadata), &meta); err == nil {
+		if cliSID, ok := meta["cli_session_id"].(string); ok && cliSID != "" {
+			retryCtx = provider.WithCLISessionID(retryCtx, cliSID)
+		}
+	}
+	// Also set sandbox dir if available.
+	if sbDir, err := sandbox.Dir(sessionID); err == nil {
+		retryCtx = provider.WithSandboxDir(retryCtx, sbDir)
+	}
+
+	// Send correction as a streaming call — collect the full response.
+	correctionMsgs := []provider.ChatMessage{{Role: "user", Content: correction}}
+	retryCh, err := prov.StreamChat(retryCtx, "", correctionMsgs, model)
+	if err != nil {
+		log.Printf("chat: envelope retry stream error: %v", err)
+		return nil
+	}
+
+	var retryContent strings.Builder
+	for evt := range retryCh {
+		switch evt.Type {
+		case "delta":
+			retryContent.WriteString(evt.Content)
+			ch <- StreamEvent{Type: "delta", Content: evt.Content}
+		case "error":
+			log.Printf("chat: envelope retry error: %s", evt.Error)
+			return nil
+		}
+	}
+
+	// Parse the retry response for envelopes — but don't recurse.
+	retryEnvelopes, _, retryErrors := ParseEnvelopes(retryContent.String())
+	if len(retryErrors) > 0 {
+		log.Printf("chat: envelope retry still had %d errors — giving up", len(retryErrors))
+	}
+	if len(retryEnvelopes) > 0 {
+		log.Printf("chat: envelope retry recovered %d envelope(s)", len(retryEnvelopes))
+	}
+	return retryEnvelopes
+}
+
+// truncateStr truncates a string to maxLen, appending "..." if truncated.
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
 // inferProvider maps a model name to a provider when the session has no
 // explicit provider set. This handles legacy sessions and prevents sending
 // unknown model names to the wrong provider API.
+// isPTYProvider returns true if the provider name is any PTY adapter variant.
+func isPTYProvider(name string) bool {
+	return name == "pty" || strings.HasPrefix(name, "pty-")
+}
+
 func inferProvider(model string) string {
 	switch {
 	case model == "claude-cli":
 		return "pty"
+	case model == "codex-cli":
+		return "pty-codex"
+	case model == "gemini-cli":
+		return "pty-gemini"
 	case strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "o1-") || strings.HasPrefix(model, "o3-"):
 		return "openai"
 	case strings.HasPrefix(model, "llama") || strings.HasPrefix(model, "mistral") || strings.HasPrefix(model, "gemma"):

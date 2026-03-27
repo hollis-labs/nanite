@@ -304,6 +304,44 @@ When user says "let us plan" or "create demo sprints":
 		return fmt.Errorf("insert claude-cli model: %w", err)
 	}
 
+	// --- Provider: PTY (Codex CLI) ---
+	codexProviderID := "pty-codex-001"
+	if _, err := tx.Exec(
+		`INSERT INTO providers (id, name, provider_type, api_key)
+		 VALUES (?, ?, ?, ?)`,
+		codexProviderID, "Codex CLI (PTY)", "pty-codex", "",
+	); err != nil {
+		return fmt.Errorf("insert codex provider: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"codex-cli", codexProviderID, "codex-cli", "Codex CLI",
+		0, 0, true,
+	); err != nil {
+		return fmt.Errorf("insert codex-cli model: %w", err)
+	}
+
+	// --- Provider: PTY (Gemini CLI) ---
+	geminiProviderID := "pty-gemini-001"
+	if _, err := tx.Exec(
+		`INSERT INTO providers (id, name, provider_type, api_key)
+		 VALUES (?, ?, ?, ?)`,
+		geminiProviderID, "Gemini CLI (PTY)", "pty-gemini", "",
+	); err != nil {
+		return fmt.Errorf("insert gemini provider: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"gemini-cli", geminiProviderID, "gemini-cli", "Gemini CLI",
+		0, 0, true,
+	); err != nil {
+		return fmt.Errorf("insert gemini-cli model: %w", err)
+	}
+
 	return tx.Commit()
 }
 

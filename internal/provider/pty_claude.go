@@ -3,7 +3,45 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 )
+
+// ClaudeAdapter implements CLIAdapter for the Claude Code CLI.
+type ClaudeAdapter struct{}
+
+func NewClaudeAdapter() *ClaudeAdapter { return &ClaudeAdapter{} }
+
+func (a *ClaudeAdapter) Name() string { return "claude" }
+
+func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	args := []string{
+		"-p", prompt,
+		"--output-format", "stream-json",
+		"--verbose",
+	}
+	if cliSessionID != "" {
+		args = append([]string{"--resume", cliSessionID}, args...)
+	} else if systemPrompt != "" {
+		args = append(args, "--system-prompt", systemPrompt)
+	}
+	return args
+}
+
+func (a *ClaudeAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
+	return parseClaudeStreamLine(line)
+}
+
+func (a *ClaudeAdapter) Detect() (string, bool) {
+	if p := os.Getenv("CLAUDE_CLI_PATH"); p != "" {
+		return p, true
+	}
+	p, err := exec.LookPath("claude")
+	if err != nil {
+		return "", false
+	}
+	return p, true
+}
 
 // Claude Code stream-json event types.
 // See: claude -p "..." --output-format stream-json --verbose

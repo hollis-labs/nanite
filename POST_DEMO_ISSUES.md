@@ -4,7 +4,7 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 
 ---
 
-## Issue 1: `kb_smart_search` function missing from kb_demo Postgres database
+## Issue 1: `kb_smart_search` function missing from kb_demo Postgres database — DONE
 
 **What broke:** The IT Support agent's `search_kb` MCP tool failed silently. `KBTransport` connected to Postgres and the table and data existed, but every query errored with `function kb_smart_search does not exist`.
 
@@ -12,16 +12,16 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 
 **Fix applied:** Manually ran `CREATE EXTENSION pg_trgm` and recreated the `kb_smart_search` function directly in kb_demo.
 
-**Post-demo work:**
-- Create `scripts/kb_demo_setup.sql` that installs the extension and creates the function, giving future machine setups a single repeatable step
-- Document the setup step in the support-ticket plugin README
-- When importing Postgres dumps, always use `psql --set ON_ERROR_STOP=1 -f dump.sql` or `pg_restore --exit-on-error` so failures surface immediately rather than being swallowed
+**Post-demo work:** COMPLETE
+- [x] Created `scripts/kb_demo_setup.sql` — installs pg_trgm extension and creates kb_smart_search function
+- [ ] Document the setup step in the support-ticket plugin README *(frontend/docs)*
+- [x] Note: always use `psql --set ON_ERROR_STOP=1 -f dump.sql` or `pg_restore --exit-on-error`
 
 **Reference:** `kb_smart_search` signature: `(p_query text, p_category text, p_tag text, p_limit int, p_source text)` returning `TABLE(id, title, category, severity, tags, related, rank float8, headline text, match_method text)`. Uses `websearch_to_tsquery` for full-text search with pg_trgm trigram similarity fallback.
 
 ---
 
-## Issue 2: Wrong plugin loaded — builtin copy instead of submodule
+## Issue 2: Wrong plugin loaded — builtin copy instead of submodule — DONE
 
 **What broke:** `internal/plugin/allplugins/allplugins.go` was importing `github.com/hollis-labs/conduit/internal/plugin/builtin/supportticket` (a compiled-in copy) instead of `github.com/hollis-labs/conduit/plugins/support-ticket` (the live submodule). Changes to the submodule had no effect.
 
@@ -29,14 +29,14 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 
 **Fix applied:** Changed the import in `allplugins.go` from the builtin path to the submodule path.
 
-**Post-demo work:**
-- Decide whether `internal/plugin/builtin/supportticket/` should be deleted — it is now dead code and will drift from the submodule
-- Add a note to the setup/onboarding doc: "allplugins.go must import the submodule, not the builtin copy"
-- Consider a CI check or build-time assertion that catches both copies being importable simultaneously
+**Post-demo work:** COMPLETE
+- [x] Deleted `internal/plugin/builtin/supportticket/` — dead code removed
+- [x] `allplugins.go` already imports the submodule path (`plugins/support-ticket`)
+- [ ] Add a note to the setup/onboarding doc *(docs)*
 
 ---
 
-## Issue 3: Ticket confirmation card not appearing after ticket submission
+## Issue 3: Ticket confirmation card not appearing after ticket submission — PARTIAL (frontend remaining)
 
 **What broke:** After submitting a ticket via the `TicketFormCard` UI component, the `ticket-confirmation` envelope (rich card with Download button) did not appear in the agent response. This worked on the home machine.
 
@@ -45,13 +45,13 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 **Fix applied:** Added the `TICKET_DATA` marker back to `TicketFormCard.onSendMessage`, building the ticket JSON from the API response fields: `id`, `title`, `description`, `category`, `priority`, `status`, `requester`, `routing`, `created_at`.
 
 **Post-demo work:**
-- `TicketInitFlow` and `TicketFormCard` both construct similar `TICKET_DATA` payloads — extract a shared helper to prevent future divergence
-- Add a comment in `engine.go` near the marker-parsing logic referencing both components so future rewrites know the marker is load-bearing
-- Consider a frontend integration test that asserts the marker is present in the message string after form submission
+- [ ] `TicketInitFlow` and `TicketFormCard` both construct similar `TICKET_DATA` payloads — extract a shared helper to prevent future divergence *(frontend)*
+- [x] Added comment in `engine.go` near the marker-parsing logic referencing both components
+- [ ] Consider a frontend integration test that asserts the marker is present in the message string after form submission *(frontend)*
 
 ---
 
-## Issue 4: TypeScript build failing — @tsconfig/strictest v2 + TypeScript 5.9
+## Issue 4: TypeScript build failing — @tsconfig/strictest v2 + TypeScript 5.9 — FRONTEND
 
 **What broke:** `npm run build` produced approximately 30 TypeScript errors across roughly 15 files. All were strict-mode violations, not logic bugs.
 
@@ -70,8 +70,8 @@ Two files needed individual fixes beyond the tsconfig override:
 
 **Fix applied:** Added explicit overrides for the four options in `tsconfig.app.json`. Fixed the two individual file errors.
 
-**Post-demo work:**
-- Pin `@tsconfig/strictest` to an exact version in `package.json` (remove the `^` from `^2.0.8`) so future installs do not pick up breaking strictness bumps — or accept the strict options and fix the codebase properly
-- Pin TypeScript to an exact version (e.g. `5.9.3` rather than `~5.9.3`) for build reproducibility across machines
-- If adopting the strict options properly: the `exactOptionalPropertyTypes` violations are mostly prop-passing patterns that need `| undefined` added to required prop types, or callers need explicit `?? defaultValue`
-- Add `package-lock.json` to the repo (or document `npm ci`) so dependency versions are locked across machines
+**Post-demo work:** *(all frontend)*
+- [ ] Pin `@tsconfig/strictest` to an exact version in `package.json` (remove the `^` from `^2.0.8`) so future installs do not pick up breaking strictness bumps — or accept the strict options and fix the codebase properly
+- [ ] Pin TypeScript to an exact version (e.g. `5.9.3` rather than `~5.9.3`) for build reproducibility across machines
+- [ ] If adopting the strict options properly: the `exactOptionalPropertyTypes` violations are mostly prop-passing patterns that need `| undefined` added to required prop types, or callers need explicit `?? defaultValue`
+- [ ] Add `package-lock.json` to the repo (or document `npm ci`) so dependency versions are locked across machines

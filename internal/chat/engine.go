@@ -1009,7 +1009,10 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 
 	// Inject ticket confirmation envelope if the user message contains ticket data.
-	// The frontend's TicketInitFlow embeds <!--TICKET_DATA:{...}:TICKET_DATA--> in the message.
+	// The frontend embeds <!--TICKET_DATA:{...}:TICKET_DATA--> in the user message.
+	// This marker is produced by TWO components — both must include it:
+	//   - ui/src/components/chat/envelopes/TicketInitFlow.tsx  (quick-action path)
+	//   - ui/src/components/chat/envelopes/TicketFormCard.tsx   (agent-emitted ticket-form envelope path)
 	if tStart := strings.Index(userContent, "<!--TICKET_DATA:"); tStart >= 0 {
 		tail := userContent[tStart+len("<!--TICKET_DATA:"):]
 		if tEnd := strings.Index(tail, ":TICKET_DATA-->"); tEnd >= 0 {

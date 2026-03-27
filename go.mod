@@ -4,8 +4,6 @@ go 1.26.1
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/hollis-labs/fragments-engine/connectors/gmail v0.0.0
-	github.com/hollis-labs/fragments-engine/connectors/webhook v0.0.0
 	github.com/hollis-labs/fragments-engine/plugin v0.0.0
 	github.com/hollis-labs/nexus v0.0.0
 	github.com/hollis-labs/otel v0.0.0
@@ -23,10 +21,6 @@ replace github.com/hollis-labs/otel => ../libs/otel
 replace github.com/hollis-labs/tool-broker => ../libs/toolbroker
 
 replace github.com/hollis-labs/fragments-engine/plugin => ../libs/plugin
-
-replace github.com/hollis-labs/fragments-engine/connectors/gmail => ../libs/connectors/gmail
-
-replace github.com/hollis-labs/fragments-engine/connectors/webhook => ../libs/connectors/webhook
 
 replace github.com/hollis-labs/nexus => ../../nexus
 

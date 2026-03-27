@@ -79,3 +79,52 @@ func TestPTYBridge_StreamChat_WithMockCLI(t *testing.T) {
 		t.Errorf("expected cliPath=/bin/sh, got %s", bridge.cliPath)
 	}
 }
+
+func TestSandboxDirContext(t *testing.T) {
+	ctx := context.Background()
+	_, ok := SandboxDirFromContext(ctx)
+	if ok {
+		t.Error("expected no sandbox dir in empty context")
+	}
+
+	ctx = WithSandboxDir(ctx, "/tmp/sandbox/sess-1")
+	dir, ok := SandboxDirFromContext(ctx)
+	if !ok {
+		t.Fatal("expected sandbox dir in context")
+	}
+	if dir != "/tmp/sandbox/sess-1" {
+		t.Errorf("expected /tmp/sandbox/sess-1, got %s", dir)
+	}
+
+	// Empty string should return false.
+	ctx = WithSandboxDir(context.Background(), "")
+	_, ok = SandboxDirFromContext(ctx)
+	if ok {
+		t.Error("expected empty string to return ok=false")
+	}
+}
+
+func TestCLISessionIDContext(t *testing.T) {
+	// Round-trip: set and retrieve CLI session ID from context.
+	ctx := context.Background()
+	_, ok := CLISessionIDFromContext(ctx)
+	if ok {
+		t.Error("expected no CLI session ID in empty context")
+	}
+
+	ctx = WithCLISessionID(ctx, "sess-123")
+	id, ok := CLISessionIDFromContext(ctx)
+	if !ok {
+		t.Fatal("expected CLI session ID in context")
+	}
+	if id != "sess-123" {
+		t.Errorf("expected sess-123, got %s", id)
+	}
+
+	// Empty string should return false.
+	ctx = WithCLISessionID(context.Background(), "")
+	_, ok = CLISessionIDFromContext(ctx)
+	if ok {
+		t.Error("expected empty string to return ok=false")
+	}
+}

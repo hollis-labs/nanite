@@ -52,6 +52,14 @@ type claudeResultEvent struct {
 	// ModelUsage contains per-model breakdowns; we extract aggregate usage instead.
 }
 
+// claudeSystemEvent is a "system" event emitted at CLI startup.
+// The "init" subtype includes the CLI session ID needed for --resume.
+type claudeSystemEvent struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype"`
+	SessionID string `json:"session_id"`
+}
+
 // claudeErrorEvent is a top-level "error" event.
 type claudeErrorEvent struct {
 	Type  string `json:"type"`
@@ -80,7 +88,9 @@ func parseClaudeStreamLine(line []byte) ([]StreamEvent, error) {
 		return parseClaudeResult(line)
 	case "error":
 		return parseClaudeError(line)
-	case "system", "rate_limit_event":
+	case "system":
+		return parseClaudeSystem(line)
+	case "rate_limit_event":
 		// Informational — skip silently.
 		return nil, nil
 	default:
@@ -159,6 +169,19 @@ func parseClaudeResult(line []byte) ([]StreamEvent, error) {
 
 	events = append(events, StreamEvent{Type: "done"})
 	return events, nil
+}
+
+func parseClaudeSystem(line []byte) ([]StreamEvent, error) {
+	var ev claudeSystemEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return nil, fmt.Errorf("parse system event: %w", err)
+	}
+	if ev.Subtype == "init" && ev.SessionID != "" {
+		return []StreamEvent{
+			{Type: "session_id", SessionID: ev.SessionID},
+		}, nil
+	}
+	return nil, nil
 }
 
 func parseClaudeError(line []byte) ([]StreamEvent, error) {

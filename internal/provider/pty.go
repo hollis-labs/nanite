@@ -48,6 +48,8 @@ func (p *PTYBridge) StreamChatWithTools(ctx context.Context, systemPrompt string
 }
 
 func (p *PTYBridge) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+	// Complete is always single-turn — strip any resume session ID.
+	ctx = context.WithValue(ctx, ptySessionKeyType{}, "")
 	ch, err := p.streamCLI(ctx, systemPrompt, messages)
 	if err != nil {
 		return "", err
@@ -99,12 +101,23 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		"--verbose",
 	}
 
-	// Prepend system prompt if provided.
-	if systemPrompt != "" {
+	// If we have a CLI session ID from a previous turn, resume it.
+	// The CLI already has the system prompt from the first turn.
+	if cliSessionID, ok := CLISessionIDFromContext(ctx); ok {
+		args = append([]string{"--resume", cliSessionID}, args...)
+	} else if systemPrompt != "" {
+		// Only pass system prompt on the first message (fresh session).
 		args = append(args, "--system-prompt", systemPrompt)
 	}
 
+	log.Printf("pty: args=%v", args)
+
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
+
+	// Run in the sandbox directory if one was provided.
+	if dir, ok := SandboxDirFromContext(ctx); ok {
+		cmd.Dir = dir
+	}
 
 	// Start in a PTY.
 	ptmx, err := pty.Start(cmd)

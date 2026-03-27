@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/filter"
 	"github.com/hollis-labs/conduit/internal/mcp"
 	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/sandbox"
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/truncate"
@@ -552,6 +553,30 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			attribute.Int("conduit.tokens.total", breakdown.Total),
 			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
 		)
+		// PTY sessions: set up sandbox directory and resume context.
+		if providerName == "pty" {
+			// Create/resolve sandbox directory and populate reference files.
+			if sbDir, sbErr := sandbox.Dir(sessionID); sbErr != nil {
+				log.Printf("chat: sandbox dir error: %v", sbErr)
+			} else {
+				if sbErr := sandbox.Populate(sbDir, agent, mode, sandbox.PopulateOpts{
+					SessionID: sessionID,
+					DBPath:    e.Store.DBPath(),
+				}); sbErr != nil {
+					log.Printf("chat: sandbox populate error: %v", sbErr)
+				}
+				provCtx = provider.WithSandboxDir(provCtx, sbDir)
+			}
+
+			// Inject CLI session ID for --resume if one exists.
+			var meta map[string]any
+			if err := json.Unmarshal([]byte(session.Metadata), &meta); err == nil {
+				if cliSID, ok := meta["cli_session_id"].(string); ok && cliSID != "" {
+					provCtx = provider.WithCLISessionID(provCtx, cliSID)
+				}
+			}
+		}
+
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
 			log.Printf("chat: tool-use iteration %d — %d tools, %d messages, ~%d tokens (ceiling=%d)", iteration, len(tools), len(chatMessages), breakdown.Total, breakdown.Ceiling)
@@ -629,6 +654,21 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				ch <- errorEnvelopeDelta(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
 				ch <- errorEvent(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
 				return
+			case "session_id":
+				// PTY bridge emits the CLI session ID from the system init event.
+				// Persist it in session metadata so future turns use --resume.
+				if evt.SessionID != "" {
+					var meta map[string]any
+					if err := json.Unmarshal([]byte(session.Metadata), &meta); err != nil || meta == nil {
+						meta = make(map[string]any)
+					}
+					meta["cli_session_id"] = evt.SessionID
+					metaJSON, _ := json.Marshal(meta)
+					session.Metadata = string(metaJSON)
+					if err := e.Store.UpdateSessionMetadata(sessionID, session.Metadata); err != nil {
+						log.Printf("chat: failed to persist CLI session ID: %v", err)
+					}
+				}
 			case "done":
 				// Will handle below.
 			}

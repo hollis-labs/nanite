@@ -20,8 +20,36 @@ func TestParseClaudeStreamLine_SystemEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event for system init, got %d", len(events))
+	}
+	if events[0].Type != "session_id" {
+		t.Errorf("expected type=session_id, got %s", events[0].Type)
+	}
+	if events[0].SessionID != "abc" {
+		t.Errorf("expected SessionID=abc, got %s", events[0].SessionID)
+	}
+}
+
+func TestParseClaudeStreamLine_SystemEventNonInit(t *testing.T) {
+	line := []byte(`{"type":"system","subtype":"api_retry","session_id":"abc"}`)
+	events, err := parseClaudeStreamLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(events) != 0 {
-		t.Errorf("expected 0 events for system init, got %d", len(events))
+		t.Errorf("expected 0 events for non-init system event, got %d", len(events))
+	}
+}
+
+func TestParseClaudeStreamLine_SystemEventNoSessionID(t *testing.T) {
+	line := []byte(`{"type":"system","subtype":"init","cwd":"/tmp"}`)
+	events, err := parseClaudeStreamLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected 0 events for init without session_id, got %d", len(events))
 	}
 }
 

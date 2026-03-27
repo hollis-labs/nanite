@@ -14,7 +14,13 @@ var migrationsFS embed.FS
 
 // Store wraps the SQLite database connection.
 type Store struct {
-	DB *sql.DB
+	DB     *sql.DB
+	dbPath string
+}
+
+// DBPath returns the path to the SQLite database file.
+func (s *Store) DBPath() string {
+	return s.dbPath
 }
 
 // New opens a SQLite database at dbPath and runs all embedded migrations.
@@ -36,7 +42,7 @@ func New(dbPath string) (*Store, error) {
 		}
 	}
 
-	s := &Store{DB: db}
+	s := &Store{DB: db, dbPath: dbPath}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)

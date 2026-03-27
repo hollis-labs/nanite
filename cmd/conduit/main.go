@@ -26,6 +26,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/chat"
 	"github.com/hollis-labs/conduit/internal/filter"
 	"github.com/hollis-labs/conduit/internal/mcp"
+	"github.com/hollis-labs/conduit/internal/mcpserver"
 	"github.com/hollis-labs/conduit/internal/plugin"
 	_ "github.com/hollis-labs/conduit/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/conduit/internal/provider"
@@ -50,6 +51,8 @@ func main() {
 		cmdServe(os.Args[2:])
 	case "plugin":
 		cmdPlugin(os.Args[2:])
+	case "mcp":
+		cmdMCP(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -438,6 +441,31 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 
 	if len(servers) > 0 {
 		log.Printf("mcp: loaded %d user-configured server(s) from database", len(servers))
+	}
+}
+
+// cmdMCP runs the Conduit MCP server on stdio. Claude CLI (or any MCP client)
+// spawns this as a subprocess and communicates via JSON-RPC on stdin/stdout.
+func cmdMCP(args []string) {
+	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
+	dbPath := fs.String("db", "./conduit.db", "SQLite database path")
+	sessionID := fs.String("session", "", "Conduit session ID")
+	fs.Parse(args)
+
+	s, err := store.New(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "conduit mcp: open db: %v\n", err)
+		os.Exit(1)
+	}
+	defer s.Close()
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	srv := mcpserver.New(s, *sessionID)
+	if err := srv.Run(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "conduit mcp: %v\n", err)
+		os.Exit(1)
 	}
 }
 

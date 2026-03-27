@@ -1,6 +1,8 @@
 package provider
 
-import "context"
+import (
+	"context"
+)
 
 // ProviderCapabilities describes the capabilities supported by a provider.
 type ProviderCapabilities struct {
@@ -52,11 +54,12 @@ type ContentBlock struct {
 
 // StreamEvent represents a single event from a streaming provider response.
 type StreamEvent struct {
-	Type    string        // "delta", "tool_use", "usage", "error", "done"
-	Content string        // text delta
-	Usage   *Usage        // only on "usage" or "done" events
-	Error   string        // only on "error" events
-	ToolUse *ToolUseBlock // only on "tool_use" events
+	Type      string        // "delta", "tool_use", "usage", "error", "done", "session_id"
+	Content   string        // text delta
+	Usage     *Usage        // only on "usage" or "done" events
+	Error     string        // only on "error" events
+	ToolUse   *ToolUseBlock // only on "tool_use" events
+	SessionID string        // only on "session_id" events (PTY bridge: CLI session ID for --resume)
 }
 
 // Usage contains token usage information.
@@ -85,4 +88,36 @@ type Provider interface {
 	Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error)
 	// Capabilities returns the capabilities supported by this provider.
 	Capabilities() ProviderCapabilities
+}
+
+// ptySessionKeyType is the context key for passing a CLI session ID
+// into the PTY bridge for --resume support.
+type ptySessionKeyType struct{}
+
+// WithCLISessionID returns a context carrying the given CLI session ID.
+// The PTY bridge reads this to decide whether to use --resume.
+func WithCLISessionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, ptySessionKeyType{}, id)
+}
+
+// CLISessionIDFromContext extracts the CLI session ID from the context, if set.
+func CLISessionIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(ptySessionKeyType{}).(string)
+	return id, ok && id != ""
+}
+
+// sandboxDirKeyType is the context key for passing a sandbox directory
+// path into the PTY bridge.
+type sandboxDirKeyType struct{}
+
+// WithSandboxDir returns a context carrying the given sandbox directory path.
+// The PTY bridge reads this to set cmd.Dir.
+func WithSandboxDir(ctx context.Context, dir string) context.Context {
+	return context.WithValue(ctx, sandboxDirKeyType{}, dir)
+}
+
+// SandboxDirFromContext extracts the sandbox directory from the context, if set.
+func SandboxDirFromContext(ctx context.Context) (string, bool) {
+	dir, ok := ctx.Value(sandboxDirKeyType{}).(string)
+	return dir, ok && dir != ""
 }

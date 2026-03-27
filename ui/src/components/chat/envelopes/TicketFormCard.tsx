@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Ticket, Loader2, CheckCircle, AlertCircle, Download, Info } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { buildTicketDataMarker, buildTicketMessage } from './ticket-utils'
 
 interface TicketFormData {
   prefilled?: {
@@ -63,9 +64,13 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
 
       if (onSendMessage) {
         const tid = (result['ticket_id'] || result['id'] || 'unknown') as string
-        onSendMessage(
-          `Ticket created: ${tid} — ${title.trim()} [Category: ${category}, Priority: ${priority}, Routing: ${(result['routing'] || 'auto') as string}]`
-        )
+        const rt = (result['routing'] || 'auto') as string
+        const msg = buildTicketMessage(tid, title.trim(), category, priority, rt)
+        const marker = buildTicketDataMarker({
+          id: tid, title: title.trim(), description: description.trim(),
+          category, priority, routing: rt,
+        })
+        onSendMessage(msg + marker)
       }
     } catch (err) {
       setFormState('error')

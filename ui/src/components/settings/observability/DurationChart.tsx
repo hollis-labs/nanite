@@ -62,12 +62,7 @@ export function DurationChart({ data }: DurationChartProps) {
     }),
     datasets: [
       {
-        data: sorted.map((m) => ({
-          x: 0,
-          y: m.duration_ms,
-          provider: m.provider,
-          model: m.model,
-        })),
+        data: sorted.map((m) => m.duration_ms),
         borderColor: '#6366f1',
         backgroundColor: 'rgba(99, 102, 241, 0.1)',
         borderWidth: 1.5,

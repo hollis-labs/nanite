@@ -57,6 +57,20 @@ func (a *API) handleExecuteCommand(w http.ResponseWriter, r *http.Request) {
 						a.errorResp(w, http.StatusInternalServerError, herr.Error())
 						return
 					}
+					// Persist plugin command output as a system message if action=message.
+					if action, _ := out["action"].(string); action == "message" {
+						if content, _ := out["content"].(string); content != "" && req.SessionID != "" {
+							msg := &store.Message{
+								ID:        uuid.New().String(),
+								SessionID: req.SessionID,
+								Role:      "system",
+								Content:   content,
+							}
+							if err := a.Store.CreateMessage(msg); err == nil {
+								out["message_id"] = msg.ID
+							}
+						}
+					}
 					a.jsonResp(w, http.StatusOK, out)
 					return
 				}

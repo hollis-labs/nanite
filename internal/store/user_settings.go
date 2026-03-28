@@ -63,7 +63,11 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 
 // UpdateUserSettings updates the singleton user settings row.
 func (s *Store) UpdateUserSettings(us *UserSettings) error {
-	chainJSON, err := json.Marshal(us.ProviderFallbackChain)
+	chain := us.ProviderFallbackChain
+	if chain == nil {
+		chain = []string{}
+	}
+	chainJSON, err := json.Marshal(chain)
 	if err != nil {
 		return fmt.Errorf("marshal fallback chain: %w", err)
 	}

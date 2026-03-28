@@ -129,6 +129,9 @@ export const useChatStore = create<ChatState>((set) => ({
     ? localStorage.getItem('conduit:toolCallDisplayMode') as ToolCallDisplayMode
     : null) || 'minimal',
   setToolCallDisplayMode: (mode: ToolCallDisplayMode) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('conduit:toolCallDisplayMode', mode)
+    }
     set({ toolCallDisplayMode: mode })
   },
   loadToolCallDisplayMode: (sessionId: string | null) => {
@@ -138,8 +141,11 @@ export const useChatStore = create<ChatState>((set) => ({
     set({ toolCallDisplayMode: sessionMode || globalMode || 'minimal' })
   },
   saveToolCallDisplayMode: (sessionId: string | null, mode: ToolCallDisplayMode) => {
-    if (sessionId && typeof window !== 'undefined') {
-      localStorage.setItem(`conduit:tcMode:${sessionId}`, mode)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('conduit:toolCallDisplayMode', mode)
+      if (sessionId) {
+        localStorage.setItem(`conduit:tcMode:${sessionId}`, mode)
+      }
     }
     set({ toolCallDisplayMode: mode })
   },

@@ -417,10 +417,15 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 }
 
 // CopyMessages copies all messages from one session to another, assigning new IDs.
+// Returns an error if the source session exceeds the 10,000 message limit.
 func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
-	msgs, err := s.ListMessages(sourceSessionID, 10000)
+	const maxMessages = 10000
+	msgs, err := s.ListMessages(sourceSessionID, maxMessages)
 	if err != nil {
 		return fmt.Errorf("list source messages: %w", err)
+	}
+	if len(msgs) >= maxMessages {
+		return fmt.Errorf("source session has too many messages (>=%d); fork/clone is not supported for sessions this large", maxMessages)
 	}
 
 	for _, m := range msgs {

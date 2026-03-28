@@ -180,6 +180,19 @@ func (s *Store) UpdateSessionTags(id, tagsJSON string) error {
 	return nil
 }
 
+// UpdateSessionMetadata sets the metadata JSON on a session.
+func (s *Store) UpdateSessionMetadata(id, metadataJSON string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(
+		`UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?`,
+		metadataJSON, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update session metadata %s: %w", id, err)
+	}
+	return nil
+}
+
 // ArchiveSession sets a session's status to "archived".
 func (s *Store) ArchiveSession(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)

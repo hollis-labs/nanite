@@ -98,6 +98,7 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		CustomName *string `json:"custom_name"`
 		IsPinned   *bool   `json:"is_pinned"`
 		Model      *string `json:"model"`
+		Provider   *string `json:"provider"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -115,6 +116,9 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Model != nil {
 		existing.Model = *req.Model
+	}
+	if req.Provider != nil {
+		existing.Provider = *req.Provider
 	}
 
 	if err := a.Store.UpdateSession(existing); err != nil {

@@ -14,7 +14,7 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 
 **Post-demo work:** COMPLETE
 - [x] Created `scripts/kb_demo_setup.sql` — installs pg_trgm extension and creates kb_smart_search function
-- [ ] Document the setup step in the support-ticket plugin README *(frontend/docs)*
+- [x] Document the setup step in the support-ticket plugin README *(frontend/docs)*
 - [x] Note: always use `psql --set ON_ERROR_STOP=1 -f dump.sql` or `pg_restore --exit-on-error`
 
 **Reference:** `kb_smart_search` signature: `(p_query text, p_category text, p_tag text, p_limit int, p_source text)` returning `TABLE(id, title, category, severity, tags, related, rank float8, headline text, match_method text)`. Uses `websearch_to_tsquery` for full-text search with pg_trgm trigram similarity fallback.
@@ -32,7 +32,7 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 **Post-demo work:** COMPLETE
 - [x] Deleted `internal/plugin/builtin/supportticket/` — dead code removed
 - [x] `allplugins.go` already imports the submodule path (`plugins/support-ticket`)
-- [ ] Add a note to the setup/onboarding doc *(docs)*
+- [x] Add a note to the setup/onboarding doc *(docs)*
 
 ---
 
@@ -45,7 +45,7 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 **Fix applied:** Added the `TICKET_DATA` marker back to `TicketFormCard.onSendMessage`, building the ticket JSON from the API response fields: `id`, `title`, `description`, `category`, `priority`, `status`, `requester`, `routing`, `created_at`.
 
 **Post-demo work:**
-- [ ] `TicketInitFlow` and `TicketFormCard` both construct similar `TICKET_DATA` payloads — extract a shared helper to prevent future divergence *(frontend)*
+- [x] `TicketInitFlow` and `TicketFormCard` both construct similar `TICKET_DATA` payloads — extract a shared helper to prevent future divergence *(frontend)*
 - [x] Added comment in `engine.go` near the marker-parsing logic referencing both components
 - [ ] Consider a frontend integration test that asserts the marker is present in the message string after form submission *(frontend)*
 
@@ -71,7 +71,7 @@ Two files needed individual fixes beyond the tsconfig override:
 **Fix applied:** Added explicit overrides for the four options in `tsconfig.app.json`. Fixed the two individual file errors.
 
 **Post-demo work:** *(all frontend)*
-- [ ] Pin `@tsconfig/strictest` to an exact version in `package.json` (remove the `^` from `^2.0.8`) so future installs do not pick up breaking strictness bumps — or accept the strict options and fix the codebase properly
-- [ ] Pin TypeScript to an exact version (e.g. `5.9.3` rather than `~5.9.3`) for build reproducibility across machines
+- [x] Pin `@tsconfig/strictest` to an exact version in `package.json` (remove the `^` from `^2.0.8`) so future installs do not pick up breaking strictness bumps — or accept the strict options and fix the codebase properly
+- [x] Pin TypeScript to an exact version (e.g. `5.9.3` rather than `~5.9.3`) for build reproducibility across machines
 - [ ] If adopting the strict options properly: the `exactOptionalPropertyTypes` violations are mostly prop-passing patterns that need `| undefined` added to required prop types, or callers need explicit `?? defaultValue`
-- [ ] Add `package-lock.json` to the repo (or document `npm ci`) so dependency versions are locked across machines
+- [x] Add `package-lock.json` to the repo (or document `npm ci`) so dependency versions are locked across machines

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { MessageSquare, ArrowRight, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { buildTicketDataMarker, buildTicketMessage } from './ticket-utils'
 
 interface TicketInitFlowProps {
   onSendMessage?: (content: string) => void
@@ -111,13 +112,13 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
       setTicketId(tid)
       setStep('done')
 
-      // Send message with ticket data — the agent will respond and the system
-      // will inject the confirmation envelope (like KB results)
       if (onSendMessage) {
-        onSendMessage(
-          `Ticket created: ${tid} — ${title.trim()} [Category: ${category}, Priority: ${priority}, Routing: ${rt}]` +
-          `\n\n<!--TICKET_DATA:${JSON.stringify({ id: tid, title: title.trim(), description: fullDescription.trim(), category, priority, status: 'open', routing: rt, created_at: new Date().toISOString() })}:TICKET_DATA-->`
-        )
+        const msg = buildTicketMessage(tid, title.trim(), category, priority, rt)
+        const marker = buildTicketDataMarker({
+          id: tid, title: title.trim(), description: fullDescription.trim(),
+          category, priority, routing: rt,
+        })
+        onSendMessage(msg + marker)
       }
     } catch (err) {
       setStep('error')

@@ -9,6 +9,13 @@ agents:
     skills: [go-build, go-lint, go-test]
     context: agents/backend.md
 
+  conduit-frontend:
+    name: Conduit Frontend Developer
+    description: React/TypeScript UI development for the Conduit chat interface
+    roles: [frontend, react]
+    skills: []
+    context: agents/frontend.md
+
   conduit-reviewer:
     name: Conduit Code Reviewer
     description: Code review for Conduit PRs

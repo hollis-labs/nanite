@@ -6,6 +6,43 @@ import (
 	"strings"
 )
 
+// EnvelopeError describes a validation failure for an envelope block.
+type EnvelopeError struct {
+	Raw    string `json:"raw"`    // the raw text from the fenced block
+	Reason string `json:"reason"` // "invalid_json", "missing_kind", "missing_version", "unregistered_type"
+}
+
+// registeredTypes is the set of envelope types the frontend can render.
+// Unregistered types are silently dropped by the UI.
+var registeredTypes = map[string]bool{
+	"task-disposition":          true,
+	"giphy-modal":              true,
+	"document-viewer":          true,
+	"report-card":              true,
+	"task-complete-notification": true,
+	"sprint-planning-review":   true,
+	"kb-result":                true,
+	"ticket-confirmation":      true,
+	"ticket-form":              true,
+	"resolution-capture":       true,
+	"error-report":             true,
+}
+
+// ValidateEnvelope checks required fields on a parsed envelope.
+// Returns nil if valid, or an EnvelopeError describing the issue.
+func ValidateEnvelope(env Envelope, raw string) *EnvelopeError {
+	if env.Kind == "" {
+		return &EnvelopeError{Raw: raw, Reason: "missing_kind"}
+	}
+	if env.Version < 1 {
+		return &EnvelopeError{Raw: raw, Reason: "missing_version"}
+	}
+	if env.Type != "" && !registeredTypes[env.Type] {
+		return &EnvelopeError{Raw: raw, Reason: "unregistered_type"}
+	}
+	return nil
+}
+
 // Envelope represents a structured envelope block embedded in assistant messages.
 type Envelope struct {
 	Kind      string         `json:"kind"`
@@ -106,14 +143,16 @@ func buildTicketConfirmationEnvelope(ticketJSON string) string {
 var envelopePattern = regexp.MustCompile("(?s)```(?:volon-envelope|conduit-envelope)\\s*\n(.*?)```")
 
 // ParseEnvelopes extracts envelope blocks from assistant message content.
-// Returns the parsed envelopes and the remaining text with envelope blocks removed.
-func ParseEnvelopes(content string) ([]Envelope, string) {
+// Returns the parsed envelopes, the remaining text with envelope blocks removed,
+// and any validation errors for malformed or invalid blocks.
+func ParseEnvelopes(content string) ([]Envelope, string, []EnvelopeError) {
 	matches := envelopePattern.FindAllStringSubmatchIndex(content, -1)
 	if len(matches) == 0 {
-		return nil, content
+		return nil, content, nil
 	}
 
 	var envelopes []Envelope
+	var errors []EnvelopeError
 	var cleaned strings.Builder
 	lastEnd := 0
 
@@ -124,14 +163,24 @@ func ParseEnvelopes(content string) ([]Envelope, string) {
 
 		jsonContent := strings.TrimSpace(content[match[2]:match[3]])
 		var env Envelope
-		if err := json.Unmarshal([]byte(jsonContent), &env); err == nil {
-			envelopes = append(envelopes, env)
+		if err := json.Unmarshal([]byte(jsonContent), &env); err != nil {
+			errors = append(errors, EnvelopeError{Raw: jsonContent, Reason: "invalid_json"})
+			continue
 		}
+		if verr := ValidateEnvelope(env, jsonContent); verr != nil {
+			errors = append(errors, *verr)
+			// Still include the envelope if it parsed — only invalid_json is fatal.
+			if verr.Reason != "invalid_json" {
+				envelopes = append(envelopes, env)
+			}
+			continue
+		}
+		envelopes = append(envelopes, env)
 	}
 	cleaned.WriteString(content[lastEnd:])
 
 	// Trim any extra whitespace left by removal.
 	cleanedStr := strings.TrimSpace(cleaned.String())
 
-	return envelopes, cleanedStr
+	return envelopes, cleanedStr, errors
 }

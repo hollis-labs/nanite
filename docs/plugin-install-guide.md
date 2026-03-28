@@ -105,6 +105,10 @@ plugins:
 7. Add to `plugins/repos.yaml`
 8. `plugin.yaml` fields: `name`, `version`, `description`, `short_desc`, `author`, `url`, `config`, `registers`
 
+## Setup Notes
+
+**Import path for compiled plugins:** `allplugins.go` must import from `plugins/<name>` (the submodule path), not from `internal/plugin/builtin/<name>`. Both paths register the same plugin name in `init()`, so importing both will panic. When setting up a new machine, verify the import in `internal/plugin/allplugins/allplugins.go` points to the submodule.
+
 ## Troubleshooting
 
 **Plugin not appearing after install?**

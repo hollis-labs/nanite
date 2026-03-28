@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/filter"
 	"github.com/hollis-labs/conduit/internal/mcp"
 	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/sandbox"
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/truncate"
@@ -126,16 +128,18 @@ type sseConn struct {
 
 // Engine orchestrates chat sessions, provider calls, and streaming.
 type Engine struct {
-	Store          *store.Store
-	Providers      *provider.Registry
-	Broker         *ContextClient
-	MCPManager     *mcp.Manager
-	ToolClient     *toolclient.ToolClient
-	Orchestrator   *Orchestrator
-	Activity       *ActivityEmitter
-	OutputFilters  *filter.Chain // post-LLM output filters (nil = no filtering)
-	WorkflowEngine *workflow.Engine
-	WorkflowLoader *workflow.Loader
+	Store           *store.Store
+	Providers       *provider.Registry
+	UtilityProvider string // provider name for lightweight utility calls (autoTitle, autoTags); defaults to "anthropic"
+	UtilityModel    string // model name for utility calls; defaults to "claude-sonnet-4-20250514"
+	Broker          *ContextClient
+	MCPManager      *mcp.Manager
+	ToolClient      *toolclient.ToolClient
+	Orchestrator    *Orchestrator
+	Activity        *ActivityEmitter
+	OutputFilters   *filter.Chain // post-LLM output filters (nil = no filtering)
+	WorkflowEngine  *workflow.Engine
+	WorkflowLoader  *workflow.Loader
 	streams         sync.Map // map[string]chan StreamEvent
 	msgToSession    sync.Map // map[messageID]sessionID — tracks which session a stream belongs to
 	sessionSSE      sync.Map // map[sessionID]*sseConn — one active SSE connection per session
@@ -143,12 +147,22 @@ type Engine struct {
 	activePresence  sync.Map // map[sessionID]PresenceEvent — currently-streaming sessions (for initial state on connect)
 }
 
-// NewEngine creates a new chat engine.
-func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
+// NewEngine creates a new chat engine. utilityProvider names the provider used
+// for lightweight utility calls (autoTitle, autoTags). Pass "" to default to "anthropic".
+func NewEngine(s *store.Store, providers *provider.Registry, utilityProvider string) *Engine {
+	if utilityProvider == "" {
+		utilityProvider = "anthropic"
+	}
+	utilityModel := os.Getenv("CONDUIT_UTILITY_MODEL")
+	if utilityModel == "" {
+		utilityModel = "claude-sonnet-4-20250514"
+	}
 	return &Engine{
-		Store:     s,
-		Providers: providers,
-		Broker:    NewContextClient(s),
+		Store:           s,
+		Providers:       providers,
+		UtilityProvider: utilityProvider,
+		UtilityModel:    utilityModel,
+		Broker:          NewContextClient(s),
 	}
 }
 
@@ -378,10 +392,16 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		model = "claude-sonnet-4-20250514"
 	}
 
-	// Get provider.
-	prov, ok := e.Providers.Get("anthropic")
+	// Get provider — use session's provider field, fall back to "anthropic".
+	// Infer provider from model if the session has a model but no provider set
+	// (handles sessions created before provider routing was added).
+	providerName := session.Provider
+	if providerName == "" {
+		providerName = inferProvider(model)
+	}
+	prov, ok := e.Providers.Get(providerName)
 	if !ok {
-		ch <- errorEvent(ErrorCodeProviderError, "Anthropic provider not available — ANTHROPIC_API_KEY is not set. Add it to your .env file and restart the server.", map[string]interface{}{"raw": "anthropic provider not registered — missing API key"})
+		ch <- errorEvent(ErrorCodeProviderError, fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName), map[string]interface{}{"raw": fmt.Sprintf("provider %q not registered", providerName)})
 		return
 	}
 
@@ -533,6 +553,30 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			attribute.Int("conduit.tokens.total", breakdown.Total),
 			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
 		)
+		// PTY sessions: set up sandbox directory and resume context.
+		if isPTYProvider(providerName) {
+			// Create/resolve sandbox directory and populate reference files.
+			if sbDir, sbErr := sandbox.Dir(sessionID); sbErr != nil {
+				log.Printf("chat: sandbox dir error: %v", sbErr)
+			} else {
+				if sbErr := sandbox.Populate(sbDir, agent, mode, sandbox.PopulateOpts{
+					SessionID: sessionID,
+					DBPath:    e.Store.DBPath(),
+				}); sbErr != nil {
+					log.Printf("chat: sandbox populate error: %v", sbErr)
+				}
+				provCtx = provider.WithSandboxDir(provCtx, sbDir)
+			}
+
+			// Inject CLI session ID for --resume if one exists.
+			var meta map[string]any
+			if err := json.Unmarshal([]byte(session.Metadata), &meta); err == nil {
+				if cliSID, ok := meta["cli_session_id"].(string); ok && cliSID != "" {
+					provCtx = provider.WithCLISessionID(provCtx, cliSID)
+				}
+			}
+		}
+
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
 			log.Printf("chat: tool-use iteration %d — %d tools, %d messages, ~%d tokens (ceiling=%d)", iteration, len(tools), len(chatMessages), breakdown.Total, breakdown.Ceiling)
@@ -610,6 +654,21 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				ch <- errorEnvelopeDelta(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
 				ch <- errorEvent(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
 				return
+			case "session_id":
+				// PTY bridge emits the CLI session ID from the system init event.
+				// Persist it in session metadata so future turns use --resume.
+				if evt.SessionID != "" {
+					var meta map[string]any
+					if err := json.Unmarshal([]byte(session.Metadata), &meta); err != nil || meta == nil {
+						meta = make(map[string]any)
+					}
+					meta["cli_session_id"] = evt.SessionID
+					metaJSON, _ := json.Marshal(meta)
+					session.Metadata = string(metaJSON)
+					if err := e.Store.UpdateSessionMetadata(sessionID, session.Metadata); err != nil {
+						log.Printf("chat: failed to persist CLI session ID: %v", err)
+					}
+				}
 			case "done":
 				// Will handle below.
 			}
@@ -1027,7 +1086,30 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 
 	// Parse envelopes from the response content.
-	envelopes, cleanContent := ParseEnvelopes(responseContent)
+	envelopes, cleanContent, envErrors := ParseEnvelopes(responseContent)
+
+	// Log envelope validation errors.
+	for _, envErr := range envErrors {
+		log.Printf("chat: envelope error (%s): %s", envErr.Reason, truncateStr(envErr.Raw, 200))
+		e.Store.LogEvent(sessionID, "envelope_error", "warning",
+			envErr.Reason, fmt.Sprintf(`{"raw":%q}`, truncateStr(envErr.Raw, 500)))
+	}
+
+	// PTY envelope retry: if there were fatal envelope errors (invalid_json)
+	// and this is a PTY session with --resume, send one correction prompt.
+	if len(envErrors) > 0 && isPTYProvider(providerName) {
+		hasFatal := false
+		for _, envErr := range envErrors {
+			if envErr.Reason == "invalid_json" {
+				hasFatal = true
+				break
+			}
+		}
+		if hasFatal {
+			retryEnvelopes := e.retryEnvelopeCorrection(ctx, sessionID, session, prov, model, envErrors, ch)
+			envelopes = append(envelopes, retryEnvelopes...)
+		}
+	}
 
 	var envelopeJSON string
 	if len(envelopes) > 0 {
@@ -1101,11 +1183,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Auto-title: if session has no title, generate one asynchronously.
 	if session.Title == "" {
-		go e.autoTitle(sessionID, userContent, model)
+		go e.autoTitle(sessionID, userContent)
 	}
 
 	// Auto-tags: generate tags after every response (overwrites previous).
-	go e.autoTags(sessionID, model)
+	go e.autoTags(sessionID)
 }
 
 // SendAgentMessage allows one agent session to send a message to another session.
@@ -1144,14 +1226,125 @@ func (e *Engine) SendAgentMessage(fromSessionID, toSessionID, content string) (s
 	return assistantMsgID, nil
 }
 
+// retryEnvelopeCorrection sends a single correction prompt to the PTY session
+// when envelope parsing produced fatal errors (invalid_json). Uses --resume
+// to continue the same CLI session. Returns any valid envelopes from the retry.
+func (e *Engine) retryEnvelopeCorrection(
+	ctx context.Context,
+	sessionID string,
+	session *store.Session,
+	prov provider.Provider,
+	model string,
+	envErrors []EnvelopeError,
+	ch chan StreamEvent,
+) []Envelope {
+	// Build correction prompt with the first fatal error.
+	var errDetail EnvelopeError
+	for _, ee := range envErrors {
+		if ee.Reason == "invalid_json" {
+			errDetail = ee
+			break
+		}
+	}
+
+	correction := fmt.Sprintf(
+		"Your previous response contained a malformed envelope block that could not be parsed.\n\n"+
+			"Raw content:\n```\n%s\n```\n\n"+
+			"Error: %s\n\n"+
+			"Please re-emit the envelope as a valid JSON object inside a ```conduit-envelope fenced block "+
+			"with kind, version (1), and type fields.",
+		truncateStr(errDetail.Raw, 1000), errDetail.Reason,
+	)
+
+	log.Printf("chat: envelope retry for session %s — sending correction prompt", sessionID)
+	e.Store.LogEvent(sessionID, "envelope_retry", "info",
+		"sending correction prompt", fmt.Sprintf(`{"reason":%q}`, errDetail.Reason))
+
+	// Build context with CLI session ID for --resume.
+	retryCtx := ctx
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(session.Metadata), &meta); err == nil {
+		if cliSID, ok := meta["cli_session_id"].(string); ok && cliSID != "" {
+			retryCtx = provider.WithCLISessionID(retryCtx, cliSID)
+		}
+	}
+	// Also set sandbox dir if available.
+	if sbDir, err := sandbox.Dir(sessionID); err == nil {
+		retryCtx = provider.WithSandboxDir(retryCtx, sbDir)
+	}
+
+	// Send correction as a streaming call — collect the full response.
+	correctionMsgs := []provider.ChatMessage{{Role: "user", Content: correction}}
+	retryCh, err := prov.StreamChat(retryCtx, "", correctionMsgs, model)
+	if err != nil {
+		log.Printf("chat: envelope retry stream error: %v", err)
+		return nil
+	}
+
+	var retryContent strings.Builder
+	for evt := range retryCh {
+		switch evt.Type {
+		case "delta":
+			retryContent.WriteString(evt.Content)
+			ch <- StreamEvent{Type: "delta", Content: evt.Content}
+		case "error":
+			log.Printf("chat: envelope retry error: %s", evt.Error)
+			return nil
+		}
+	}
+
+	// Parse the retry response for envelopes — but don't recurse.
+	retryEnvelopes, _, retryErrors := ParseEnvelopes(retryContent.String())
+	if len(retryErrors) > 0 {
+		log.Printf("chat: envelope retry still had %d errors — giving up", len(retryErrors))
+	}
+	if len(retryEnvelopes) > 0 {
+		log.Printf("chat: envelope retry recovered %d envelope(s)", len(retryEnvelopes))
+	}
+	return retryEnvelopes
+}
+
+// truncateStr truncates a string to maxLen, appending "..." if truncated.
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// inferProvider maps a model name to a provider when the session has no
+// explicit provider set. This handles legacy sessions and prevents sending
+// unknown model names to the wrong provider API.
+// isPTYProvider returns true if the provider name is any PTY adapter variant.
+func isPTYProvider(name string) bool {
+	return name == "pty" || strings.HasPrefix(name, "pty-")
+}
+
+func inferProvider(model string) string {
+	switch {
+	case model == "claude-cli":
+		return "pty"
+	case model == "codex-cli":
+		return "pty-codex"
+	case model == "gemini-cli":
+		return "pty-gemini"
+	case strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "o1-") || strings.HasPrefix(model, "o3-"):
+		return "openai"
+	case strings.HasPrefix(model, "llama") || strings.HasPrefix(model, "mistral") || strings.HasPrefix(model, "gemma"):
+		return "ollama"
+	default:
+		return "anthropic"
+	}
+}
+
 // autoTitle generates a title for a session from the first user message.
-func (e *Engine) autoTitle(sessionID, userContent, model string) {
+func (e *Engine) autoTitle(sessionID, userContent string) {
 	ctx, span := feotel.StartSpan(context.Background(), "conduit.autoTitle")
 	span.SetAttributes(attribute.String("conduit.session.id", sessionID))
 	defer span.End()
 	_ = ctx
 
-	prov, ok := e.Providers.Get("anthropic")
+	prov, ok := e.Providers.Get(e.UtilityProvider)
 	if !ok {
 		return
 	}
@@ -1161,7 +1354,7 @@ func (e *Engine) autoTitle(sessionID, userContent, model string) {
 		{Role: "user", Content: fmt.Sprintf("First message: %s", userContent)},
 	}
 
-	title, err := prov.Complete(context.Background(), prompt, msgs, model)
+	title, err := prov.Complete(context.Background(), prompt, msgs, e.UtilityModel)
 	if err != nil {
 		log.Printf("chat: auto-title failed: %v", err)
 		return
@@ -1184,8 +1377,8 @@ func (e *Engine) autoTitle(sessionID, userContent, model string) {
 }
 
 // autoTags generates 2-5 tags for a session based on recent messages.
-func (e *Engine) autoTags(sessionID, model string) {
-	prov, ok := e.Providers.Get("anthropic")
+func (e *Engine) autoTags(sessionID string) {
+	prov, ok := e.Providers.Get(e.UtilityProvider)
 	if !ok {
 		return
 	}
@@ -1217,7 +1410,7 @@ func (e *Engine) autoTags(sessionID, model string) {
 		{Role: "user", Content: sb.String()},
 	}
 
-	raw, err := prov.Complete(context.Background(), prompt, tagMsgs, model)
+	raw, err := prov.Complete(context.Background(), prompt, tagMsgs, e.UtilityModel)
 	if err != nil {
 		log.Printf("chat: auto-tags generation failed: %v", err)
 		return
@@ -1494,12 +1687,18 @@ func (e *Engine) handleWorkflowTrigger(sessionID, content, userMsgID string) (st
 // RetryLastMessage resets the circuit breaker and re-triggers generation for a session.
 // It finds the last user message and re-generates a response.
 func (e *Engine) RetryLastMessage(sessionID string) (string, error) {
-	// Reset the circuit breaker on the anthropic provider.
-	prov, ok := e.Providers.Get("anthropic")
-	if ok {
-		if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil {
-			ap.CircuitBreaker.Reset()
-			log.Printf("chat: circuit breaker reset for retry on session %s", sessionID)
+	// Reset the circuit breaker on the session's provider (if applicable).
+	session, err := e.Store.GetSession(sessionID)
+	if err == nil {
+		provName := session.Provider
+		if provName == "" {
+			provName = "anthropic"
+		}
+		if prov, ok := e.Providers.Get(provName); ok {
+			if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil {
+				ap.CircuitBreaker.Reset()
+				log.Printf("chat: circuit breaker reset for retry on session %s", sessionID)
+			}
 		}
 	}
 

@@ -206,6 +206,22 @@ export interface UtilityCallSummary {
   total_cost_usd: number
 }
 
+// --- Process Health ---
+
+export interface ProcessHealthEntry {
+  session_id: string
+  pid: number
+  uptime: number
+  idle_duration: number
+  is_stale: boolean
+}
+
+export interface ProcessHealthResponse {
+  processes: ProcessHealthEntry[]
+  total: number
+  stale_threshold: string
+}
+
 // --- Agent Modes ---
 
 export const AGENT_MODES = ['default', 'architect', 'planner', 'writer'] as const
@@ -545,6 +561,23 @@ export interface PluginInfo {
   status: 'active' | 'disabled' | 'available' | 'no-binary'
   type: 'core' | 'user'
   installed: boolean
+}
+
+export interface ConfigField {
+  key: string
+  type: 'string' | 'bool' | 'int' | 'select' | 'secret'
+  label: string
+  description?: string
+  default?: unknown
+  required?: boolean
+  options?: string[]
+}
+
+export interface PluginConfig {
+  plugin_id: string
+  settings: Record<string, unknown>
+  schema: ConfigField[]
+  updated_at?: string
 }
 
 // --- Skills ---

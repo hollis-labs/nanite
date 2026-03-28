@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary, ProcessHealthResponse, PluginConfig } from './types'
 
 const API_BASE = '/api'
 
@@ -196,6 +196,18 @@ export const api = {
     return res.json()
   },
 
+  uploadArtifact: async (sessionId: string, file: File): Promise<Artifact> => {
+    const form = new FormData()
+    form.append('session_id', sessionId)
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/artifacts/upload`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) throw new Error(`Failed to upload artifact: ${res.status}`)
+    return res.json()
+  },
+
   // Compact
   compactSession: async (sessionId: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/compact`, {
@@ -351,6 +363,19 @@ export const api = {
   getUtilityCallLog: async (limit = 50): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/metrics/utility/log?limit=${limit}`)
     if (!res.ok) throw new Error(`Failed to get utility call log: ${res.status}`)
+    return res.json()
+  },
+
+  // Process Health
+  getProcessHealth: async (): Promise<ProcessHealthResponse> => {
+    const res = await fetch(`${API_BASE}/processes/health`)
+    if (!res.ok) throw new Error(`Failed to get process health: ${res.status}`)
+    return res.json()
+  },
+
+  killStaleProcesses: async (): Promise<{ killed: number }> => {
+    const res = await fetch(`${API_BASE}/processes/kill-stale`, { method: 'POST' })
+    if (!res.ok) throw new Error(`Failed to kill stale processes: ${res.status}`)
     return res.json()
   },
 
@@ -664,6 +689,22 @@ export const api = {
       body: JSON.stringify({ name }),
     })
     if (!res.ok) throw new Error(`Failed to enable plugin: ${res.status}`)
+  },
+
+  getPluginConfig: async (pluginId: string): Promise<PluginConfig> => {
+    const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`)
+    if (!res.ok) throw new Error(`Failed to get plugin config: ${res.status}`)
+    return res.json()
+  },
+
+  updatePluginConfig: async (pluginId: string, settings: Record<string, unknown>): Promise<PluginConfig> => {
+    const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    })
+    if (!res.ok) throw new Error(`Failed to update plugin config: ${res.status}`)
+    return res.json()
   },
 
   // --- A2A Messaging ---

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useModels, useProviders } from '@/hooks/useSettings'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { AGENT_MODES, type AgentMode } from '@/lib/types'
 
@@ -42,11 +43,14 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
   const activeMode = useChatStore((s) => s.activeMode)
   const setActiveMode = useChatStore((s) => s.setActiveMode)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const queryClient = useQueryClient()
 
   const [modelOpen, setModelOpen] = useState(false)
   const [modeOpen, setModeOpen] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const modelRef = useRef<HTMLDivElement>(null)
   const modeRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: models } = useModels()
   const { data: providers } = useProviders()
@@ -127,15 +131,44 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
     }
   }, [activeSessionId, setActiveMode])
 
+  const handleFileUpload = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0 || !activeSessionId) return
+    setUploading(true)
+    try {
+      for (const file of Array.from(files)) {
+        await api.uploadArtifact(activeSessionId, file)
+      }
+      queryClient.invalidateQueries({ queryKey: ['artifacts', activeSessionId] })
+    } catch (err) {
+      console.error('Failed to upload artifact:', err)
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }, [activeSessionId, queryClient])
+
   return (
     <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800/50 rounded-b-xl border-t border-zinc-700/50">
       {/* Left: Attach + Model picker */}
       <div className="flex items-center gap-1">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => void handleFileUpload(e.target.files)}
+        />
         <Button
           variant="ghost"
           size="icon"
-          className="w-7 h-7 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors"
-          title="Attach file"
+          className={`w-7 h-7 transition-colors ${
+            uploading
+              ? 'text-indigo-400 animate-pulse'
+              : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50'
+          }`}
+          title={uploading ? 'Uploading...' : 'Attach file'}
+          disabled={!activeSessionId || uploading}
+          onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip className="w-3.5 h-3.5" />
         </Button>

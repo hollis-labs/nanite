@@ -1,10 +1,13 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useState, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
+import { useQueryClient } from '@tanstack/react-query'
 import { ComposerToolbar } from './ComposerToolbar'
 import { SlashCommandExtension } from './extensions/SlashCommandExtension'
 import { slashCommandSuggestion } from './extensions/slashCommandSuggestion'
+import { useAppStore } from '@/stores/useAppStore'
+import { api } from '@/lib/api'
 
 interface ChatComposerProps {
   onSend: (content: string) => void
@@ -14,6 +17,21 @@ interface ChatComposerProps {
 }
 
 export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorReady }: ChatComposerProps) {
+  const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const queryClient = useQueryClient()
+  const [dragOver, setDragOver] = useState(false)
+  const dropRef = useRef<HTMLDivElement>(null)
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (!activeSessionId || !e.dataTransfer.files.length) return
+    for (const file of Array.from(e.dataTransfer.files)) {
+      await api.uploadArtifact(activeSessionId, file)
+    }
+    queryClient.invalidateQueries({ queryKey: ['artifacts', activeSessionId] })
+  }, [activeSessionId, queryClient])
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -76,7 +94,20 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
 
   return (
     <div className="px-4 pb-4 pt-2 shrink-0">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl focus-within:border-zinc-700 transition-colors shadow-lg shadow-black/20">
+      <div
+        ref={dropRef}
+        className={`bg-zinc-900 border rounded-xl focus-within:border-zinc-700 transition-colors shadow-lg shadow-black/20 ${
+          dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'border-zinc-800'
+        }`}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => void handleDrop(e)}
+      >
+        {dragOver && (
+          <div className="px-3 py-1.5 text-xs text-indigo-400 text-center border-b border-indigo-500/30">
+            Drop files to attach
+          </div>
+        )}
         {/* Editor area */}
         <div className="px-3 py-1">
           <EditorContent

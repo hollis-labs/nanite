@@ -6,10 +6,12 @@ import {
   AlertCircle,
   ExternalLink,
   RefreshCw,
+  Settings2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/useAppStore'
+import { PluginConfigPanel } from './PluginConfigPanel'
 import type { PluginInfo } from '@/lib/types'
 
 // --- Status / Type badge helpers ---
@@ -74,6 +76,7 @@ export function PluginManager() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<string | null>(null) // plugin name with action in progress
+  const [configuringPlugin, setConfiguringPlugin] = useState<PluginInfo | null>(null)
   const queryClient = useQueryClient()
   const bumpConfigVersion = useAppStore((s) => s.bumpConfigVersion)
   const configVersion = useAppStore((s) => s.configVersion)
@@ -171,6 +174,17 @@ export function PluginManager() {
     if (a.type !== 'core' && b.type === 'core') return 1
     return a.name.localeCompare(b.name)
   })
+
+  // Show config panel when a plugin is selected for configuration
+  if (configuringPlugin) {
+    return (
+      <PluginConfigPanel
+        pluginId={configuringPlugin.name}
+        pluginName={configuringPlugin.name}
+        onBack={() => setConfiguringPlugin(null)}
+      />
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -276,6 +290,15 @@ export function PluginManager() {
                   ) : plugin.status === 'active' ? (
                     <>
                       <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 text-zinc-500 hover:text-zinc-300"
+                        title="Configure"
+                        onClick={() => setConfiguringPlugin(plugin)}
+                      >
+                        <Settings2 className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
                         variant="outline"
                         size="sm"
                         disabled={isActionPending(plugin.name)}
@@ -298,6 +321,15 @@ export function PluginManager() {
                     </>
                   ) : plugin.status === 'disabled' ? (
                     <>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 text-zinc-500 hover:text-zinc-300"
+                        title="Configure"
+                        onClick={() => setConfiguringPlugin(plugin)}
+                      >
+                        <Settings2 className="w-3.5 h-3.5" />
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"

@@ -50,8 +50,9 @@ ui/src/
 │   │   ├── SkillsBrowser.tsx
 │   │   ├── PromptTemplateEditor.tsx
 │   │   ├── ToolDashboard.tsx   # MCP server management + tool discovery
-│   │   ├── PluginManager.tsx
-│   │   └── observability/      # Execution stats, utility call comparison
+│   │   ├── PluginManager.tsx   # Plugin lifecycle + config gear icon
+│   │   ├── PluginConfigPanel.tsx # Dynamic config form (string/bool/int/select/secret)
+│   │   └── observability/      # Execution stats, utility call comparison, process health
 │   ├── workflows/              # Workflow list, run modal, result cards
 │   ├── a2a/                    # A2A inbox panel, task thread panel
 │   ├── widgets/                # Right rail widgets (tokens, context, bookmarks, tools, agent)
@@ -94,6 +95,10 @@ ui/src/
 | `RightRail` | `components/RightRail.tsx` | Collapsible widgets panel (6 widgets) |
 | `SettingsPage` | `settings/SettingsPage.tsx` | Tab-based settings (agents, skills, prompts, tools, plugins) |
 | `ToolDashboard` | `settings/ToolDashboard.tsx` | MCP server management and tool discovery UI |
+| `PluginConfigPanel` | `settings/PluginConfigPanel.tsx` | Dynamic plugin config form (5 field types) |
+| `ProcessHealthPanel` | `settings/observability/ProcessHealthPanel.tsx` | Active CLI processes with kill-stale |
+| `UtilityLogTable` | `settings/observability/UtilityLogTable.tsx` | Individual utility call log |
+| `ArtifactChip` | `chat/ArtifactChip.tsx` | Inline artifact link chip in messages |
 | `InboxPanel` | `a2a/InboxPanel.tsx` | A2A message inbox with user/agent tabs |
 | `TaskThreadPanel` | `a2a/TaskThreadPanel.tsx` | Task-scoped A2A thread sidebar |
 | `WorkflowPanel` | `workflows/WorkflowPanel.tsx` | Workflow list and run modal |
@@ -250,7 +255,7 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 ## Beta Release TODO (Frontend)
 
 ### 1. Plugin Config UI
-- [ ] **Plugin settings panel** — Render plugin config schemas from `GET /api/plugins/{id}/config`. Use standard field types (string, bool, int, select, secret) with auto-generated form components.
+- [x] **Plugin settings panel** — Render plugin config schemas from `GET /api/plugin-config/{id}`. Dynamic form renderer for all 5 field types (string, bool, int, select, secret). Gear icon on active/disabled plugins opens config panel.
 - [ ] **Config override components** — Allow plugins to register custom React components for config fields. Gate behind `developer_mode` setting.
 - [ ] **Recover mode** — When `recover_mode` is enabled in settings, disable all plugin UI overrides and render default primitives only.
 - [ ] **Plugin widget mount points** — Verify that `UIComponentTypeWidget` components from plugins actually render. Add mount points in sidebar, session header, or a dedicated widgets area.
@@ -260,15 +265,15 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 - [ ] Ensure TipTap slash command extension picks up plugin-registered commands (backend: `Host.RegisterCommand`).
 
 ### 3. Artifacts Drawer
-- [ ] **Artifacts panel** — List session artifacts from `GET /api/sessions/{id}/artifacts`. Show name, type icon, size, timestamp. Click to preview (images, code, markdown) or download.
-- [ ] **Inline artifact links** — When a message references a created file, render a clickable artifact chip that opens the preview.
-- [ ] Wire artifact upload into the composer (drag-and-drop or attach button).
+- [x] **Artifacts panel** — List session artifacts with preview (images, code, markdown), download, and back navigation. Eye icon for previewable types.
+- [x] **Inline artifact links** — `[name](artifact:name)` markdown links render as clickable ArtifactChip components that open the drawer.
+- [x] Wire artifact upload into the composer (Paperclip button + drag-and-drop with visual feedback).
 
 ### 4. Observability Dashboard
 - [x] **Execution stats widget** — `GET /api/metrics/executions` → table/chart of recent calls (Chart.js + shadcn).
 - [x] **Utility call comparison** — `GET /api/metrics/utility` → side-by-side provider comparison.
 - [x] **Observability right-rail widget** — at-a-glance stats.
-- [ ] **Process health panel** — `GET /api/processes/health` → show active CLI processes, uptime, idle time. "Kill stale" button.
+- [x] **Process health panel** — `GET /api/processes/health` → active CLI processes with uptime, idle time, stale badges. "Kill Stale" button via `POST /api/processes/kill-stale`. Also wired `useUtilityCallLog` into new UtilityLogTable.
 
 ### 5. Session Creation UX
 - [x] Creation-time overrides (adapter, provider, model, agent) — inline form in sidebar.

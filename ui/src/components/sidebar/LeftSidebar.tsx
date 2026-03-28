@@ -48,7 +48,9 @@ function NewSessionForm({
   }, [models, provider])
 
   const agentOptions = useMemo(() =>
-    agents.map((a) => ({ value: a.id, label: a.name })),
+    agents
+      .filter((a) => a.status !== 'disabled')
+      .map((a) => ({ value: a.id, label: a.source ? `${a.name} \u00b7 ${a.source}` : a.name })),
     [agents],
   )
 

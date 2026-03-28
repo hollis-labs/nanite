@@ -104,7 +104,7 @@ export const api = {
     return res.json()
   },
 
-  createAgentProfile: async (data: Omit<AgentProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AgentProfile> => {
+  createAgentProfile: async (data: Omit<AgentProfile, 'id' | 'created_at' | 'updated_at' | 'agent_hash' | 'version'>): Promise<AgentProfile> => {
     const res = await fetch(`${API_BASE}/agents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

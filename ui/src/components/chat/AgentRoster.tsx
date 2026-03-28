@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { UserPlus, X, Crown, User } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { SourceBadge } from '@/components/agents/SourceBadge'
+import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import type { SessionAgent } from '@/lib/types'
 import { AgentPicker } from './AgentPicker'
@@ -25,10 +27,16 @@ const ROLE_BORDER_COLORS: Record<SessionAgent['role'], string> = {
 export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
   const [showPicker, setShowPicker] = useState(false)
   const queryClient = useQueryClient()
+  const configVersion = useAppStore((s) => s.configVersion)
 
   const { data: agents = [] } = useQuery({
     queryKey: ['session-agents', sessionId],
     queryFn: () => api.listSessionAgents(sessionId),
+  })
+
+  const { data: allProfiles = [] } = useQuery({
+    queryKey: ['agents', configVersion],
+    queryFn: api.listAgentProfiles,
   })
 
   const removeMutation = useMutation({
@@ -87,8 +95,20 @@ export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
                       {agent.role === 'primary' && (
                         <Crown className="w-3 h-3 text-amber-400 shrink-0" />
                       )}
+                      {(() => {
+                        const profile = allProfiles.find((p) => p.id === agent.agent_id)
+                        return profile?.source ? <SourceBadge source={profile.source} /> : null
+                      })()}
                     </div>
-                    <span className="text-xs text-zinc-500 capitalize">{agent.role}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-zinc-500 capitalize">{agent.role}</span>
+                      {(() => {
+                        const profile = allProfiles.find((p) => p.id === agent.agent_id)
+                        return profile?.version ? (
+                          <span className="text-[10px] text-zinc-600">v{profile.version}</span>
+                        ) : null
+                      })()}
+                    </div>
                   </div>
 
                   {/* Remove button (only for participants) */}

@@ -55,7 +55,8 @@ export function NavRail() {
     queryKey: ['agents'],
     queryFn: api.listAgents,
   })
-  const firstAgentId = agents.length > 0 ? agents[0].id : null
+  const activeAgents = agents.filter((a) => a.status !== 'disabled')
+  const firstAgentId = activeAgents.length > 0 ? activeAgents[0].id : null
 
   const { data: unreadData } = useQuery({
     queryKey: ['a2a-unread', firstAgentId],

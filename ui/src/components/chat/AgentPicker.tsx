@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Search, Loader2, User, Plus } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/useAppStore'
+import { SourceBadge } from '@/components/agents/SourceBadge'
+import { TagPills } from '@/components/agents/TagPills'
 
 interface AgentPickerProps {
   sessionId: string
@@ -33,10 +35,17 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
   }, [addMutation])
 
   const filteredAgents = agents.filter((a) => {
+    if (a.status === 'disabled') return false
     if (existingAgentIds.includes(a.id)) return false
     if (!search) return true
     const q = search.toLowerCase()
-    return a.name.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q)
+    if (a.name.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q)) return true
+    try {
+      const tags: string[] = JSON.parse(a.tags || '[]')
+      return tags.some((t) => t.toLowerCase().includes(q))
+    } catch {
+      return false
+    }
   })
 
   return (
@@ -95,10 +104,14 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-zinc-200 truncate block">{agent.name}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium text-zinc-200 truncate">{agent.name}</span>
+                    <SourceBadge source={agent.source} />
+                  </div>
                   {agent.description && (
                     <span className="text-xs text-zinc-500 truncate block">{agent.description}</span>
                   )}
+                  <TagPills tags={agent.tags} className="mt-0.5" />
                 </div>
                 <Plus className="w-4 h-4 text-zinc-600 group-hover:text-indigo-400 shrink-0 transition-colors" />
               </button>

@@ -48,6 +48,9 @@ export interface Agent {
   avatar: string
   description: string
   can_execute: boolean
+  status: string
+  source: string
+  tags: string
 }
 
 export interface AgentProfile {
@@ -66,6 +69,15 @@ export interface AgentProfile {
   settings: string
   created_at: string
   updated_at: string
+  agent_hash: string
+  version: number
+  tools: string
+  directories: string
+  constraints: string
+  tags: string
+  status: string
+  source: string
+  source_ref: string
 }
 
 export interface AgentModeProfile {
@@ -268,7 +280,6 @@ export interface ModelRecord {
 export interface UserSettings {
   default_provider: string
   default_model: string
-  default_adapter: string
   default_agent: string
   utility_provider: string
   utility_model: string

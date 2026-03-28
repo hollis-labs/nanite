@@ -5,11 +5,6 @@ import { useSettings, useSettingsMutation, useModels, useProviders } from '@/hoo
 import { api } from '@/lib/api'
 import type { ToolCallDisplayMode } from '@/lib/types'
 
-const ADAPTER_OPTIONS = [
-  { value: 'http', label: 'HTTP (API)' },
-  { value: 'pty', label: 'PTY (CLI)' },
-  { value: 'subprocess', label: 'Subprocess (Pipe)' },
-]
 
 const TOOL_DISPLAY_OPTIONS: { value: ToolCallDisplayMode; label: string }[] = [
   { value: 'indicator', label: 'Indicator' },
@@ -221,7 +216,9 @@ export function PreferencesPanel() {
 
   const agentOptions = useMemo(() => {
     if (!agents) return []
-    return agents.map((a) => ({ value: a.id, label: a.name }))
+    return agents
+      .filter((a) => a.status !== 'disabled')
+      .map((a) => ({ value: a.id, label: a.source ? `${a.name} \u00b7 ${a.source}` : a.name }))
   }, [agents])
 
   const handleChange = (key: string, value: string) => {
@@ -234,13 +231,6 @@ export function PreferencesPanel() {
       <div>
         <SectionHeader title="Session Defaults" />
         <div className="divide-y divide-zinc-800/50">
-          <SettingsSelect
-            label="Default Adapter"
-            description="How Conduit connects to AI providers"
-            value={settings?.default_adapter ?? ''}
-            options={ADAPTER_OPTIONS}
-            onChange={(v) => handleChange('default_adapter', v)}
-          />
           <SettingsSelect
             label="Default Provider"
             description="Provider for new sessions"

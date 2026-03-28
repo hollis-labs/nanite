@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus,
@@ -13,8 +13,13 @@ import {
   X,
   FileText,
   Eye,
+  Copy,
+  Hash,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { StatusDot } from '@/components/agents/StatusDot'
+import { SourceBadge } from '@/components/agents/SourceBadge'
+import { TagPills } from '@/components/agents/TagPills'
 import { api } from '@/lib/api'
 import type { AgentProfile, AgentModeProfile } from '@/lib/types'
 import { useModels } from '@/hooks/useSettings'
@@ -27,6 +32,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
   const [editingAgent, setEditingAgent] = useState<AgentProfile | null>(null)
   // const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null) // DELETE not implemented in backend
   const [showModeForm, setShowModeForm] = useState(false)
+  const [showDisabled, setShowDisabled] = useState(false)
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [showSkillPicker, setShowSkillPicker] = useState(false)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const queryClient = useQueryClient()
@@ -148,6 +155,24 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
   // })
 
   const handleCreateAgent = useCallback((formData: FormData) => {
+    // Parse tools from multi-line to JSON array
+    const toolsRaw = (formData.get('tools') as string || '').trim()
+    const toolsArr = toolsRaw ? toolsRaw.split('\n').map((l) => l.trim()).filter(Boolean) : []
+    // Parse directories from multi-line to JSON array
+    const dirsRaw = (formData.get('directories') as string || '').trim()
+    const dirsArr = dirsRaw ? dirsRaw.split('\n').map((l) => l.trim()).filter(Boolean) : []
+    // Parse tags from comma-separated to JSON array
+    const tagsRaw = (formData.get('tags') as string || '').trim()
+    const tagsArr = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : []
+    // Parse constraints from individual fields
+    const constraints: Record<string, number> = {}
+    const maxIter = formData.get('max_iterations') as string
+    const maxTime = formData.get('max_time_seconds') as string
+    const retryBudget = formData.get('retry_budget') as string
+    if (maxIter) constraints.max_iterations = Number(maxIter)
+    if (maxTime) constraints.max_time_seconds = Number(maxTime)
+    if (retryBudget) constraints.retry_budget = Number(retryBudget)
+
     const data = {
       name: formData.get('name') as string,
       slug: formData.get('slug') as string,
@@ -161,12 +186,37 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
       modes: '',
       default_mode: 'default',
       settings: '{}',
+      tools: JSON.stringify(toolsArr),
+      directories: JSON.stringify(dirsArr),
+      constraints: JSON.stringify(constraints),
+      tags: JSON.stringify(tagsArr),
+      status: 'active',
+      source: 'api',
+      source_ref: '',
     }
     createMutation.mutate(data)
   }, [createMutation])
 
   const handleUpdateAgent = useCallback((formData: FormData) => {
     if (!editingAgent) return
+    // Parse tools from multi-line to JSON array
+    const toolsRaw = (formData.get('tools') as string || '').trim()
+    const toolsArr = toolsRaw ? toolsRaw.split('\n').map((l) => l.trim()).filter(Boolean) : []
+    // Parse directories from multi-line to JSON array
+    const dirsRaw = (formData.get('directories') as string || '').trim()
+    const dirsArr = dirsRaw ? dirsRaw.split('\n').map((l) => l.trim()).filter(Boolean) : []
+    // Parse tags from comma-separated to JSON array
+    const tagsRaw = (formData.get('tags') as string || '').trim()
+    const tagsArr = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : []
+    // Parse constraints from individual fields
+    const constraints: Record<string, number> = {}
+    const maxIter = formData.get('max_iterations') as string
+    const maxTime = formData.get('max_time_seconds') as string
+    const retryBudget = formData.get('retry_budget') as string
+    if (maxIter) constraints.max_iterations = Number(maxIter)
+    if (maxTime) constraints.max_time_seconds = Number(maxTime)
+    if (retryBudget) constraints.retry_budget = Number(retryBudget)
+
     const data = {
       name: formData.get('name') as string,
       slug: formData.get('slug') as string,
@@ -177,6 +227,11 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
       can_execute: formData.get('can_execute') === 'on',
       mcp_servers: formData.get('mcp_servers') as string,
       tool_permissions: formData.get('tool_permissions') as string,
+      status: formData.get('status') as string || 'active',
+      tools: JSON.stringify(toolsArr),
+      directories: JSON.stringify(dirsArr),
+      tags: JSON.stringify(tagsArr),
+      constraints: JSON.stringify(constraints),
     }
     updateMutation.mutate({ id: editingAgent.id, data })
   }, [editingAgent, updateMutation])
@@ -234,6 +289,23 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     }
   }
 
+  const filteredAgents = useMemo(() => {
+    return agents.filter((a) => {
+      if (!showDisabled && a.status === 'disabled') return false
+      if (sourceFilter !== 'all' && a.source !== sourceFilter) return false
+      return true
+    })
+  }, [agents, showDisabled, sourceFilter])
+
+  const sourceCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const a of agents) {
+      const s = a.source || 'unknown'
+      counts[s] = (counts[s] || 0) + 1
+    }
+    return counts
+  }, [agents])
+
   // List View
   if (!selectedAgent && !showCreateForm) {
     return (
@@ -249,41 +321,85 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
           </Button>
         </div>
 
+        {/* Filters */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            {['all', ...Object.keys(sourceCounts)].map((s) => (
+              <button
+                key={s}
+                onClick={() => setSourceFilter(s)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  sourceFilter === s
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+                }`}
+              >
+                {s === 'all' ? 'All' : s}
+                {s !== 'all' && (
+                  <span className="ml-1 text-[10px] opacity-70">{sourceCounts[s]}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-zinc-400 ml-auto cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showDisabled}
+              onChange={(e) => setShowDisabled(e.target.checked)}
+              className="rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-zinc-900"
+            />
+            Show disabled
+          </label>
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
           </div>
-        ) : agents.length === 0 ? (
+        ) : filteredAgents.length === 0 ? (
           <div className="text-center py-8 text-zinc-500">
-            No agent profiles found. Create your first agent to get started.
+            {agents.length === 0
+              ? 'No agent profiles found. Create your first agent to get started.'
+              : 'No agents match the current filters.'}
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {agents.map((agent) => (
+            {filteredAgents.map((agent) => (
               <div
                 key={agent.id}
-                className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
+                className={`bg-zinc-800 rounded-lg p-4 border transition-colors cursor-pointer ${
+                  agent.status === 'disabled'
+                    ? 'border-zinc-700/50 opacity-60 hover:opacity-80'
+                    : 'border-zinc-700 hover:border-zinc-600'
+                }`}
                 onClick={() => setSelectedAgent(agent.id)}
               >
                 <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-full bg-zinc-700 flex items-center justify-center shrink-0">
+                  <div className="relative w-10 h-10 rounded-full bg-zinc-700 flex items-center justify-center shrink-0">
                     {agent.avatar ? (
                       <span className="text-lg">{agent.avatar}</span>
                     ) : (
                       <User className="w-5 h-5 text-zinc-400" />
                     )}
+                    <span className="absolute -bottom-0.5 -right-0.5 border-2 border-zinc-800 rounded-full">
+                      <StatusDot status={agent.status || 'active'} size="md" />
+                    </span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-medium text-zinc-100 truncate">{agent.name}</h3>
-                      {agent.can_execute && (
-                        <span className="w-3 h-3 rounded-full bg-green-500 inline-block" title="Can execute tools" />
+                      <SourceBadge source={agent.source} className="bg-zinc-700" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-zinc-400 truncate">{agent.slug}</p>
+                      {agent.version > 0 && (
+                        <span className="text-[10px] text-zinc-600">v{agent.version}</span>
                       )}
                     </div>
-                    <p className="text-sm text-zinc-400 truncate">{agent.slug}</p>
                     {agent.description && (
                       <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{agent.description}</p>
                     )}
+                    <TagPills tags={agent.tags} max={4} className="mt-1.5" />
                   </div>
                 </div>
               </div>
@@ -416,6 +532,55 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               />
               <span className="text-sm font-medium text-zinc-300">Can Execute Tools</span>
             </label>
+          </div>
+
+          {/* v2 fields */}
+          <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-2">Tags</label>
+            <input
+              name="tags"
+              type="text"
+              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm"
+              placeholder="backend, go, infra (comma-separated)"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-2">Tools Allowlist</label>
+            <textarea
+              name="tools"
+              rows={3}
+              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              placeholder={"mcp__engine__*\nmcp__cortex__*\n(one glob pattern per line, empty = all tools)"}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-2">Directories</label>
+            <textarea
+              name="directories"
+              rows={2}
+              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              placeholder={"internal/api/\nui/src/\n(one path per line)"}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-2">Constraints</label>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Max Iterations</label>
+                <input name="max_iterations" type="number" min="0" className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="10" />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Max Time (seconds)</label>
+                <input name="max_time_seconds" type="number" min="0" className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="300" />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Retry Budget</label>
+                <input name="retry_budget" type="number" min="0" className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="3" />
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-2">
@@ -572,6 +737,117 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               </label>
             </div>
 
+            {/* v2 fields */}
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">Status</label>
+              <select
+                name="status"
+                defaultValue={agent.status || 'active'}
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm"
+              >
+                <option value="active">Active</option>
+                <option value="disabled">Disabled</option>
+              </select>
+              {agent.source === 'agentrc' && (
+                <p className="text-xs text-amber-500 mt-1">This agent is managed by agentrc sync. Status may be overwritten on next sync.</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">Tags</label>
+              <input
+                name="tags"
+                type="text"
+                defaultValue={(() => { try { return JSON.parse(agent.tags || '[]').join(', ') } catch { return '' } })()}
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm"
+                placeholder="backend, go, infra (comma-separated)"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">Tools Allowlist</label>
+              <textarea
+                name="tools"
+                rows={3}
+                defaultValue={(() => { try { return JSON.parse(agent.tools || '[]').join('\n') } catch { return '' } })()}
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                placeholder={"mcp__engine__*\nmcp__cortex__*\n(one glob pattern per line, empty = all tools)"}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">Directories</label>
+              <textarea
+                name="directories"
+                rows={2}
+                defaultValue={(() => { try { return JSON.parse(agent.directories || '[]').join('\n') } catch { return '' } })()}
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                placeholder={"internal/api/\nui/src/\n(one path per line)"}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">Constraints</label>
+              {(() => {
+                let c: Record<string, number> = {}
+                try { c = JSON.parse(agent.constraints || '{}') } catch { /* ignore */ }
+                return (
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <label className="block text-xs text-zinc-500 mb-1">Max Iterations</label>
+                      <input name="max_iterations" type="number" min="0" defaultValue={c.max_iterations || ''} className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="10" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-zinc-500 mb-1">Max Time (seconds)</label>
+                      <input name="max_time_seconds" type="number" min="0" defaultValue={c.max_time_seconds || ''} className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="300" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-zinc-500 mb-1">Retry Budget</label>
+                      <input name="retry_budget" type="number" min="0" defaultValue={c.retry_budget || ''} className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="3" />
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+
+            {/* Read-only metadata */}
+            <div className="border-t border-zinc-700 pt-4">
+              <label className="block text-sm font-medium text-zinc-400 mb-2">Metadata</label>
+              <div className="grid gap-3 md:grid-cols-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-500">Source:</span>
+                  <span className="text-zinc-300">{agent.source || 'unknown'}</span>
+                </div>
+                {agent.source_ref && (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-zinc-500 shrink-0">Source Ref:</span>
+                    <span className="text-zinc-300 truncate font-mono text-xs">{agent.source_ref}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-500">Version:</span>
+                  <span className="text-zinc-300">v{agent.version || 0}</span>
+                </div>
+                {agent.agent_hash && (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-zinc-500 shrink-0">Hash:</span>
+                    <span className="text-zinc-300 font-mono text-xs">{agent.agent_hash.slice(0, 12)}</span>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard.writeText(agent.agent_hash)}
+                      className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-700 transition-colors"
+                      title="Copy full hash"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+              {agent.source === 'agentrc' && (
+                <p className="text-xs text-zinc-500 mt-2">This agent is managed by agentrc sync ({agent.source_ref}). Source and source_ref cannot be changed.</p>
+              )}
+            </div>
+
             <div className="flex gap-2">
               <Button
                 type="submit"
@@ -650,6 +926,39 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
             </h3>
 
             <div className="space-y-3 bg-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  agent.status === 'disabled' ? 'bg-zinc-700 text-zinc-400' : 'bg-emerald-500/15 text-emerald-400'
+                }`}>
+                  <StatusDot status={agent.status || 'active'} />
+                  {agent.status || 'active'}
+                </span>
+                <SourceBadge source={agent.source} className="bg-zinc-700" />
+                {agent.version > 0 && (
+                  <span className="text-xs text-zinc-500">v{agent.version}</span>
+                )}
+                {agent.agent_hash && (
+                  <span className="flex items-center gap-1 text-xs text-zinc-600 font-mono">
+                    <Hash className="w-3 h-3" />
+                    {agent.agent_hash.slice(0, 12)}
+                    <button
+                      onClick={() => navigator.clipboard.writeText(agent.agent_hash)}
+                      className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-700 transition-colors"
+                      title="Copy full hash"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+              </div>
+
+              {agent.source_ref && (
+                <div>
+                  <label className="text-sm font-medium text-zinc-400">Source Ref</label>
+                  <p className="text-xs text-zinc-300 font-mono">{agent.source_ref}</p>
+                </div>
+              )}
+
               <div>
                 <label className="text-sm font-medium text-zinc-400">Description</label>
                 <p className="text-zinc-200">{agent.description || 'No description'}</p>
@@ -664,6 +973,69 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 <label className="text-sm font-medium text-zinc-400">Can Execute</label>
                 <p className="text-zinc-200">{agent.can_execute ? 'Yes' : 'No'}</p>
               </div>
+
+              {(() => {
+                try {
+                  const tags: string[] = JSON.parse(agent.tags || '[]')
+                  return tags.length > 0 ? (
+                    <div>
+                      <label className="text-sm font-medium text-zinc-400">Tags</label>
+                      <TagPills tags={agent.tags} max={10} className="mt-1" />
+                    </div>
+                  ) : null
+                } catch { return null }
+              })()}
+
+              {(() => {
+                try {
+                  const tools: string[] = JSON.parse(agent.tools || '[]')
+                  return tools.length > 0 ? (
+                    <div>
+                      <label className="text-sm font-medium text-zinc-400">Tools Allowlist</label>
+                      <div className="flex gap-1 flex-wrap mt-1">
+                        {tools.map((t) => (
+                          <span key={t} className="text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-300 font-mono">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null
+                } catch { return null }
+              })()}
+
+              {(() => {
+                try {
+                  const dirs: string[] = JSON.parse(agent.directories || '[]')
+                  return dirs.length > 0 ? (
+                    <div>
+                      <label className="text-sm font-medium text-zinc-400">Directories</label>
+                      <div className="flex gap-1 flex-wrap mt-1">
+                        {dirs.map((d) => (
+                          <span key={d} className="text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-300 font-mono">{d}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null
+                } catch { return null }
+              })()}
+
+              {(() => {
+                try {
+                  const c = JSON.parse(agent.constraints || '{}')
+                  const entries = Object.entries(c).filter(([, v]) => v !== null && v !== undefined)
+                  return entries.length > 0 ? (
+                    <div>
+                      <label className="text-sm font-medium text-zinc-400">Constraints</label>
+                      <div className="flex gap-3 mt-1">
+                        {entries.map(([k, v]) => (
+                          <span key={k} className="text-xs text-zinc-300">
+                            <span className="text-zinc-500">{k.replace(/_/g, ' ')}:</span> {String(v)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null
+                } catch { return null }
+              })()}
 
               <div>
                 <label className="text-sm font-medium text-zinc-400">System Prompt</label>

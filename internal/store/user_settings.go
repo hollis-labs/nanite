@@ -11,8 +11,7 @@ type UserSettings struct {
 	ProviderFallbackChain []string       `json:"provider_fallback_chain"`
 	DefaultProvider       string         `json:"default_provider"`
 	DefaultModel          string         `json:"default_model"`
-	DefaultAdapter        string         `json:"default_adapter"`
-	DefaultAgent          string         `json:"default_agent"`
+	DefaultAgent string `json:"default_agent"`
 	UtilityProvider       string         `json:"utility_provider"`
 	UtilityModel          string         `json:"utility_model"`
 	ToolCallDisplayMode   string         `json:"tool_call_display_mode"`
@@ -23,15 +22,15 @@ type UserSettings struct {
 
 // GetUserSettings returns the singleton user settings row.
 func (s *Store) GetUserSettings() (*UserSettings, error) {
-	var chainJSON, provider, model, adapter, agent string
+	var chainJSON, provider, model, agent string
 	var utilProvider, utilModel, toolMode, settingsJSON string
 	var devMode, recoverMode bool
 	err := s.DB.QueryRow(
-		`SELECT provider_fallback_chain, default_provider, default_model, default_adapter,
+		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
 		        developer_mode, recover_mode
 		 FROM user_settings WHERE id = 1`,
-	).Scan(&chainJSON, &provider, &model, &adapter,
+	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
 		&devMode, &recoverMode)
 	if err != nil {
@@ -39,10 +38,9 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	}
 
 	us := &UserSettings{
-		DefaultProvider:     provider,
-		DefaultModel:        model,
-		DefaultAdapter:      adapter,
-		DefaultAgent:        agent,
+		DefaultProvider: provider,
+		DefaultModel:   model,
+		DefaultAgent:   agent,
 		UtilityProvider:     utilProvider,
 		UtilityModel:        utilModel,
 		ToolCallDisplayMode: toolMode,
@@ -82,7 +80,6 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			provider_fallback_chain = ?,
 			default_provider = ?,
 			default_model = ?,
-			default_adapter = ?,
 			default_agent = ?,
 			utility_provider = ?,
 			utility_model = ?,
@@ -92,7 +89,7 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			recover_mode = ?,
 			updated_at = ?
 		 WHERE id = 1`,
-		string(chainJSON), us.DefaultProvider, us.DefaultModel, us.DefaultAdapter,
+		string(chainJSON), us.DefaultProvider, us.DefaultModel,
 		us.DefaultAgent, us.UtilityProvider, us.UtilityModel, us.ToolCallDisplayMode,
 		string(extJSON), us.DeveloperMode, us.RecoverMode, now,
 	)

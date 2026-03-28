@@ -25,9 +25,6 @@ func TestGetUserSettings_Default(t *testing.T) {
 	if us.DefaultModel != "" {
 		t.Errorf("expected empty default model, got %q", us.DefaultModel)
 	}
-	if us.DefaultAdapter != "" {
-		t.Errorf("expected empty default adapter, got %q", us.DefaultAdapter)
-	}
 }
 
 func TestUpdateUserSettings(t *testing.T) {
@@ -41,7 +38,6 @@ func TestUpdateUserSettings(t *testing.T) {
 		ProviderFallbackChain: []string{"anthropic", "ollama", "pty-claude"},
 		DefaultProvider:       "anthropic",
 		DefaultModel:          "claude-sonnet-4-20250514",
-		DefaultAdapter:        "http",
 	}
 	if err := s.UpdateUserSettings(us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
@@ -65,9 +61,6 @@ func TestUpdateUserSettings(t *testing.T) {
 	}
 	if got.DefaultModel != "claude-sonnet-4-20250514" {
 		t.Errorf("expected default model claude-sonnet-4-20250514, got %q", got.DefaultModel)
-	}
-	if got.DefaultAdapter != "http" {
-		t.Errorf("expected default adapter http, got %q", got.DefaultAdapter)
 	}
 }
 

@@ -36,9 +36,6 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if v, ok := raw["default_model"]; ok {
 		json.Unmarshal(v, &existing.DefaultModel)
 	}
-	if v, ok := raw["default_adapter"]; ok {
-		json.Unmarshal(v, &existing.DefaultAdapter)
-	}
 	if v, ok := raw["default_agent"]; ok {
 		json.Unmarshal(v, &existing.DefaultAgent)
 	}

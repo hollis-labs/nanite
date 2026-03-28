@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar, Copy, GitFork, Wrench } from 'lucide-react'
+import { SourceBadge } from '@/components/agents/SourceBadge'
 import { AdapterBadge } from './AdapterBadge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -276,6 +277,9 @@ export function ChatHeader() {
               <span className="text-xs text-zinc-300">
                 {activeAgentName}
               </span>
+              {primaryAgentProfile?.source && (
+                <SourceBadge source={primaryAgentProfile.source} className="bg-zinc-700" />
+              )}
               <ChevronDown className="w-3 h-3 text-zinc-500" />
             </button>
 
@@ -285,7 +289,7 @@ export function ChatHeader() {
                 <div className="px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Agent
                 </div>
-                {allAgents.map((agent) => (
+                {allAgents.filter((a) => a.status !== 'disabled').map((agent) => (
                   <button
                     key={agent.id}
                     onClick={() => handleAgentSelect(agent.id)}

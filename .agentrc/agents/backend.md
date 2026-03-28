@@ -301,9 +301,10 @@ Currently 11 commands in `internal/chat/commands.go`. Categories: agent, session
 - [x] **Auto-detect artifacts from responses** — `attemptAutoArtifact()` in `engine.go` detects file writes via tool calls and creates artifact records with `ArtifactOriginAuto`.
 - [x] **Artifact metadata** — Tracks origin (tool call ID, message ID, agent that created it).
 
-#### 5b. Frontend
-- [ ] **Artifacts drawer** — Show session artifacts in a drawer/panel. List with name, type, size, created time. Click to preview (images, code, text) or download.
-- [ ] **Inline artifact references** — When a message mentions a created file, link it to the artifact for one-click access.
+#### 5b. Frontend — DONE
+- [x] **Artifacts drawer** — `ArtifactsDrawer.tsx` in `drawers/`. Lists artifacts with preview (images, code, markdown), download, back navigation. Eye icon for previewable types.
+- [x] **Inline artifact references** — `ArtifactChip.tsx`. `[name](artifact:name)` markdown links render as clickable chips that open the drawer.
+- [x] **Artifact upload** — Paperclip button + drag-and-drop in ChatComposer. Keyboard shortcut Cmd+.
 
 ### 6. Agent Model — agentrc Compatibility
 

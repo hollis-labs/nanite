@@ -150,16 +150,23 @@ func cmdServe(args []string) {
 	registry.Register("ollama", provider.NewOllama())
 	log.Println("ollama provider registered (default host: http://localhost:11434)")
 
-	// Register PTY adapters — one per detected CLI binary.
-	for _, adapter := range []provider.CLIAdapter{
+	// Register CLI adapters — PTY (unix) and subprocess (all platforms).
+	cliAdapters := []provider.CLIAdapter{
 		provider.NewClaudeAdapter(),
 		provider.NewCodexAdapter(),
 		provider.NewGeminiAdapter(),
-	} {
+	}
+	for _, adapter := range cliAdapters {
 		if path, ok := adapter.Detect(); ok {
-			name := "pty-" + adapter.Name()
-			registry.Register(name, provider.NewPTYBridgeWithAdapter(adapter, path))
-			log.Printf("pty provider registered: %s (%s)", name, path)
+			// PTY bridge (unix only, higher fidelity).
+			ptyName := "pty-" + adapter.Name()
+			registry.Register(ptyName, provider.NewPTYBridgeWithAdapter(adapter, path))
+			log.Printf("pty provider registered: %s (%s)", ptyName, path)
+
+			// Subprocess bridge (all platforms, pipe-based fallback).
+			subName := "sub-" + adapter.Name()
+			registry.Register(subName, provider.NewSubprocessBridge(adapter, path))
+			log.Printf("subprocess provider registered: %s (%s)", subName, path)
 		}
 	}
 	// Backwards-compat alias: "pty" → Claude adapter (if available).
@@ -250,12 +257,13 @@ func cmdServe(args []string) {
 	// Configured via VOLON_URL or VOLON_GUI_URL env var; disabled when unset.
 	engine.Activity = chat.NewActivityEmitter("")
 
-	// Clean up MCP subprocesses on shutdown.
+	// Clean up MCP subprocesses and CLI processes on shutdown.
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		log.Println("shutting down MCP transports...")
+		log.Println("shutting down...")
+		engine.Shutdown()
 		mcpManager.Close()
 		os.Exit(0)
 	}()
@@ -267,6 +275,17 @@ func cmdServe(args []string) {
 		defer ticker.Stop()
 		for range ticker.C {
 			truncate.Cleanup()
+		}
+	}()
+
+	// Periodic stale process reaper — kills CLI processes idle for over 5 minutes.
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if killed := engine.ProcessTracker.KillStale(5 * time.Minute); killed > 0 {
+				log.Printf("stale process reaper: killed %d hung CLI processes", killed)
+			}
 		}
 	}()
 

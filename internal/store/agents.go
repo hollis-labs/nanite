@@ -18,6 +18,7 @@ type AgentProfile struct {
 	Modes           string `json:"modes"`
 	DefaultMode     string `json:"default_mode"`
 	DefaultModel    string `json:"default_model"`
+	DefaultProvider string `json:"default_provider"`
 	MCPServers      string `json:"mcp_servers"`
 	ToolPermissions string `json:"tool_permissions"`
 	CanExecute      bool   `json:"can_execute"`
@@ -42,12 +43,12 @@ func (s *Store) GetAgentBySlug(slug string) (*AgentProfile, error) {
 	var a AgentProfile
 	err := s.DB.QueryRow(
 		`SELECT id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
-		        modes, default_mode, COALESCE(default_model,''),
+		        modes, default_mode, COALESCE(default_model,''), COALESCE(default_provider,''),
 		        mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at
 		 FROM agent_profiles WHERE slug = ?`, slug,
 	).Scan(
 		&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.SystemPrompt, &a.Description,
-		&a.Modes, &a.DefaultMode, &a.DefaultModel,
+		&a.Modes, &a.DefaultMode, &a.DefaultModel, &a.DefaultProvider,
 		&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
@@ -74,12 +75,12 @@ func (s *Store) GetAgent(id string) (*AgentProfile, error) {
 	var a AgentProfile
 	err := s.DB.QueryRow(
 		`SELECT id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
-		        modes, default_mode, COALESCE(default_model,''),
+		        modes, default_mode, COALESCE(default_model,''), COALESCE(default_provider,''),
 		        mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at
 		 FROM agent_profiles WHERE id = ?`, id,
 	).Scan(
 		&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.SystemPrompt, &a.Description,
-		&a.Modes, &a.DefaultMode, &a.DefaultModel,
+		&a.Modes, &a.DefaultMode, &a.DefaultModel, &a.DefaultProvider,
 		&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
@@ -112,12 +113,12 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 
 	_, err := s.DB.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
-		                              modes, default_mode, default_model,
+		                              modes, default_mode, default_model, default_provider,
 		                              mcp_servers, tool_permissions, can_execute, settings,
 		                              created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
-		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel),
+		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now, now,
 	)
@@ -174,12 +175,12 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.DB.Exec(
 		`UPDATE agent_profiles SET name = ?, slug = ?, avatar = ?, system_prompt = ?, description = ?,
-		        modes = ?, default_mode = ?, default_model = ?,
+		        modes = ?, default_mode = ?, default_model = ?, default_provider = ?,
 		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
 		        updated_at = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
-		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel),
+		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now, a.ID,
 	)
@@ -331,7 +332,7 @@ func (s *Store) DeleteSessionAgent(sessionID, agentID string) error {
 func (s *Store) ListAgents() ([]AgentProfile, error) {
 	rows, err := s.DB.Query(
 		`SELECT id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
-		        modes, default_mode, COALESCE(default_model,''),
+		        modes, default_mode, COALESCE(default_model,''), COALESCE(default_provider,''),
 		        mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at
 		 FROM agent_profiles ORDER BY name`,
 	)
@@ -345,7 +346,7 @@ func (s *Store) ListAgents() ([]AgentProfile, error) {
 		var a AgentProfile
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.SystemPrompt, &a.Description,
-			&a.Modes, &a.DefaultMode, &a.DefaultModel,
+			&a.Modes, &a.DefaultMode, &a.DefaultModel, &a.DefaultProvider,
 			&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent: %w", err)

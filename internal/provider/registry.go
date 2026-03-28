@@ -22,3 +22,18 @@ func (r *Registry) Get(name string) (Provider, bool) {
 	p, ok := r.providers[name]
 	return p, ok
 }
+
+// Has returns true if a provider is registered under the given name.
+func (r *Registry) Has(name string) bool {
+	_, ok := r.providers[name]
+	return ok
+}
+
+// Names returns all registered provider names.
+func (r *Registry) Names() []string {
+	names := make([]string, 0, len(r.providers))
+	for name := range r.providers {
+		names = append(names, name)
+	}
+	return names
+}

@@ -135,6 +135,11 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Kill any orphaned CLI processes for this session.
+	if a.Engine != nil {
+		a.Engine.KillSessionProcesses(id)
+	}
+
 	// Emit session ended event to Volon (fire-and-forget).
 	if a.Engine != nil && a.Engine.Activity != nil {
 		go a.Engine.Activity.EmitSessionEnded(r.Context(), id)

@@ -140,6 +140,7 @@ type Engine struct {
 	OutputFilters   *filter.Chain // post-LLM output filters (nil = no filtering)
 	WorkflowEngine  *workflow.Engine
 	WorkflowLoader  *workflow.Loader
+	ProcessTracker  *ProcessTracker
 	streams         sync.Map // map[string]chan StreamEvent
 	msgToSession    sync.Map // map[messageID]sessionID — tracks which session a stream belongs to
 	sessionSSE      sync.Map // map[sessionID]*sseConn — one active SSE connection per session
@@ -163,7 +164,23 @@ func NewEngine(s *store.Store, providers *provider.Registry, utilityProvider str
 		UtilityProvider: utilityProvider,
 		UtilityModel:    utilityModel,
 		Broker:          NewContextClient(s),
+		ProcessTracker:  NewProcessTracker(),
 	}
+}
+
+// Shutdown kills all tracked CLI processes. Call during server shutdown.
+func (e *Engine) Shutdown() {
+	if e.ProcessTracker != nil {
+		e.ProcessTracker.KillAll()
+	}
+}
+
+// KillSessionProcesses kills any CLI processes tracked for the given session.
+func (e *Engine) KillSessionProcesses(sessionID string) int {
+	if e.ProcessTracker == nil {
+		return 0
+	}
+	return e.ProcessTracker.KillSession(sessionID)
 }
 
 // HandleMessage processes an incoming user message: persists it, starts async generation, and
@@ -392,15 +409,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		model = "claude-sonnet-4-20250514"
 	}
 
-	// Get provider — use session's provider field, fall back to "anthropic".
-	// Infer provider from model if the session has a model but no provider set
-	// (handles sessions created before provider routing was added).
-	providerName := session.Provider
-	if providerName == "" {
-		providerName = inferProvider(model)
-	}
-	prov, ok := e.Providers.Get(providerName)
-	if !ok {
+	// Resolve provider via fallback chain:
+	// 1. Session's explicit provider
+	// 2. Agent's default provider
+	// 3. User's fallback chain (first available)
+	// 4. Infer from model name
+	// 5. System default ("anthropic")
+	providerName, prov := e.resolveProvider(session.Provider, agent.DefaultProvider, model)
+	if prov == nil {
 		ch <- errorEvent(ErrorCodeProviderError, fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName), map[string]interface{}{"raw": fmt.Sprintf("provider %q not registered", providerName)})
 		return
 	}
@@ -553,8 +569,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			attribute.Int("conduit.tokens.total", breakdown.Total),
 			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
 		)
-		// PTY sessions: set up sandbox directory and resume context.
-		if isPTYProvider(providerName) {
+		// CLI sessions (PTY or subprocess): set up sandbox directory and resume context.
+		if isCLIProvider(providerName) {
 			// Create/resolve sandbox directory and populate reference files.
 			if sbDir, sbErr := sandbox.Dir(sessionID); sbErr != nil {
 				log.Printf("chat: sandbox dir error: %v", sbErr)
@@ -574,6 +590,21 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				if cliSID, ok := meta["cli_session_id"].(string); ok && cliSID != "" {
 					provCtx = provider.WithCLISessionID(provCtx, cliSID)
 				}
+			}
+
+			// Wire process tracker so spawned CLI processes are tracked.
+			if e.ProcessTracker != nil {
+				sid := sessionID
+				provCtx = provider.WithProcessCallback(provCtx, func(proc *os.Process, started bool) {
+					if started {
+						e.ProcessTracker.Track(sid, proc)
+					} else {
+						e.ProcessTracker.Untrack(sid, proc)
+					}
+				})
+				provCtx = provider.WithActivityCallback(provCtx, func(pid int) {
+					e.ProcessTracker.Touch(sid, pid)
+				})
 			}
 		}
 
@@ -1095,9 +1126,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			envErr.Reason, fmt.Sprintf(`{"raw":%q}`, truncateStr(envErr.Raw, 500)))
 	}
 
-	// PTY envelope retry: if there were fatal envelope errors (invalid_json)
-	// and this is a PTY session with --resume, send one correction prompt.
-	if len(envErrors) > 0 && isPTYProvider(providerName) {
+	// CLI envelope retry: if there were fatal envelope errors (invalid_json)
+	// and this is a CLI session with --resume, send one correction prompt.
+	if len(envErrors) > 0 && isCLIProvider(providerName) {
 		hasFatal := false
 		for _, envErr := range envErrors {
 			if envErr.Reason == "invalid_json" {
@@ -1315,9 +1346,65 @@ func truncateStr(s string, maxLen int) string {
 // inferProvider maps a model name to a provider when the session has no
 // explicit provider set. This handles legacy sessions and prevents sending
 // unknown model names to the wrong provider API.
+// isCLIProvider returns true if the provider name is any CLI adapter variant
+// (PTY bridge or subprocess bridge).
+func isCLIProvider(name string) bool {
+	return name == "pty" || strings.HasPrefix(name, "pty-") || strings.HasPrefix(name, "sub-")
+}
+
 // isPTYProvider returns true if the provider name is any PTY adapter variant.
 func isPTYProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-")
+}
+
+// resolveProvider walks the provider fallback chain and returns the first
+// available provider. Resolution order:
+//  1. sessionProvider (explicit per-session)
+//  2. agentProvider (agent profile default)
+//  3. User's fallback chain (from user_settings, first registered wins)
+//  4. inferProvider(model) — map model name to provider
+//  5. System default ("anthropic")
+//
+// Returns the provider name and the Provider, or ("name", nil) if none available.
+func (e *Engine) resolveProvider(sessionProvider, agentProvider, model string) (string, provider.Provider) {
+	// 1. Session-level override — highest priority.
+	if sessionProvider != "" {
+		if p, ok := e.Providers.Get(sessionProvider); ok {
+			return sessionProvider, p
+		}
+		log.Printf("chat: session provider %q not registered, falling through", sessionProvider)
+	}
+
+	// 2. Agent's preferred provider.
+	if agentProvider != "" {
+		if p, ok := e.Providers.Get(agentProvider); ok {
+			return agentProvider, p
+		}
+		log.Printf("chat: agent provider %q not registered, falling through", agentProvider)
+	}
+
+	// 3. User's fallback chain.
+	if us, err := e.Store.GetUserSettings(); err == nil && len(us.ProviderFallbackChain) > 0 {
+		for _, name := range us.ProviderFallbackChain {
+			if p, ok := e.Providers.Get(name); ok {
+				return name, p
+			}
+		}
+		log.Printf("chat: no provider in user fallback chain is registered, falling through")
+	}
+
+	// 4. Infer from model name.
+	inferred := inferProvider(model)
+	if p, ok := e.Providers.Get(inferred); ok {
+		return inferred, p
+	}
+
+	// 5. System default.
+	if p, ok := e.Providers.Get("anthropic"); ok {
+		return "anthropic", p
+	}
+
+	return inferred, nil
 }
 
 func inferProvider(model string) string {

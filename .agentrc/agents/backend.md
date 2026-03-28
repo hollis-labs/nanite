@@ -210,6 +210,10 @@ ui/                          # React SPA (see frontend.md)
 | Provider interface + adapter | `internal/provider/provider.go` + `internal/provider/anthropic.go` | Clean interface definition with streaming channels. Anthropic adapter shows full streaming implementation with content blocks, tool use, and usage tracking. |
 | Context broker + sources | `internal/contextbroker/broker.go` + `source_pcc.go` | Well-structured plugin architecture: `ContextSource` interface, budget allocation, relevance ranking, timeout handling. Good example of how to add new context sources. |
 
+## Pre-Existing Issues (logged for follow-up)
+
+- **Broken connector imports in `plugin.go`:** `github.com/hollis-labs/fragments-engine/connectors/gmail` and `connectors/webhook` — modules don't exist. Compiles today because the file is likely behind a build tag or not reached, but will fail if those paths are resolved. Spotted 2026-03-27.
+
 ## Build & Run
 
 - **Build:** `make build` (builds UI first, then Go binary) or `go build -o conduit ./cmd/conduit`

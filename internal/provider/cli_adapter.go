@@ -1,9 +1,7 @@
-//go:build !windows
-
 package provider
 
 // CLIAdapter abstracts the differences between CLI tools (Claude, Codex, Gemini)
-// so the PTY bridge can spawn and parse any of them generically.
+// so the PTY bridge and subprocess bridge can spawn and parse any of them generically.
 type CLIAdapter interface {
 	// Name returns the adapter identifier (e.g. "claude", "codex", "gemini").
 	Name() string

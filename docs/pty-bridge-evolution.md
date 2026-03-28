@@ -391,7 +391,9 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 | File | Purpose |
 |------|---------|
 | `internal/provider/pty.go` | Generic PTY bridge provider (unix only), delegates to CLIAdapter |
-| `internal/provider/pty_adapter.go` | CLIAdapter interface + CLIConfig struct |
+| `internal/provider/cli_adapter.go` | CLIAdapter interface + CLIConfig struct (all platforms) |
+| `internal/provider/subprocess.go` | Subprocess bridge provider (all platforms, pipe-based fallback) |
+| `internal/provider/subprocess_test.go` | Subprocess bridge tests (mock CLI, sandbox dir, cancellation) |
 | `internal/provider/pty_claude.go` | ClaudeAdapter + Claude stream-json parser |
 | `internal/provider/pty_codex.go` | CodexAdapter + Codex JSONL parser |
 | `internal/provider/pty_gemini.go` | GeminiAdapter + Gemini stream-json parser |
@@ -414,6 +416,9 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 | `internal/store/seed.go` | Seeds for Claude, Codex, Gemini providers/models |
 | `internal/store/migrations/010_add_pty_provider.sql` | Migration: Claude PTY provider |
 | `internal/store/migrations/011_add_codex_gemini_providers.sql` | Migration: Codex + Gemini providers |
+| `internal/store/migrations/012_add_user_settings.sql` | Migration: user_settings table + agent default_provider |
+| `internal/store/user_settings.go` | UserSettings CRUD (fallback chain, defaults) |
+| `internal/api/settings.go` | GET/PUT /api/settings endpoints |
 | `cmd/conduit/main.go` | Multi-adapter registration, `conduit mcp` subcommand |
 | `ui/src/components/chat/ComposerToolbar.tsx` | Provider icons, model picker sets provider+model |
 | `ui/src/lib/types.ts` | AVAILABLE_MODELS includes CLI models |
@@ -430,11 +435,11 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 - [x] Phase 5: CLI adapter abstraction for non-Claude tools (Codex, Gemini CLI)
 
 ### Backend — Remaining
-- [ ] Subprocess adapter (pipe-based fallback for Windows)
-- [ ] Provider fallback chain: session → agent preference → user priority list → system default
+- [x] Subprocess adapter (pipe-based fallback for Windows)
+- [x] Provider fallback chain: session → agent preference → user priority list → system default
 - [ ] Move utility provider/model config from env vars to database settings
-- [ ] Orphan process tracking and cleanup
-- [ ] Process health checks (detect hung CLI processes)
+- [x] Orphan process tracking and cleanup
+- [x] Process health checks (detect hung CLI processes)
 - [ ] Concurrency limits (max simultaneous PTY processes per user/workspace)
 - [ ] Execution observability: extend RecordUsage to capture full execution snapshot (duration, context size, memory, adapter, cost)
 - [ ] Utility call comparison log (provider, latency, quality per background call)

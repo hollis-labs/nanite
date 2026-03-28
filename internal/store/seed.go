@@ -285,9 +285,10 @@ When user says "let us plan" or "create demo sprints":
 	}
 
 	// --- Provider: PTY (Claude CLI) ---
+	// Use INSERT OR IGNORE — migrations 010/011 may have already created these rows.
 	ptyProviderID := "pty-001"
 	if _, err := tx.Exec(
-		`INSERT INTO providers (id, name, provider_type, api_key)
+		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
 		 VALUES (?, ?, ?, ?)`,
 		ptyProviderID, "Claude CLI (PTY)", "pty", "",
 	); err != nil {
@@ -296,7 +297,7 @@ When user says "let us plan" or "create demo sprints":
 
 	// --- Model: Claude CLI ---
 	if _, err := tx.Exec(
-		`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"claude-cli", ptyProviderID, "claude-cli", "Claude CLI",
 		0, 0, true,
@@ -307,7 +308,7 @@ When user says "let us plan" or "create demo sprints":
 	// --- Provider: PTY (Codex CLI) ---
 	codexProviderID := "pty-codex-001"
 	if _, err := tx.Exec(
-		`INSERT INTO providers (id, name, provider_type, api_key)
+		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
 		 VALUES (?, ?, ?, ?)`,
 		codexProviderID, "Codex CLI (PTY)", "pty-codex", "",
 	); err != nil {
@@ -315,7 +316,7 @@ When user says "let us plan" or "create demo sprints":
 	}
 
 	if _, err := tx.Exec(
-		`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"codex-cli", codexProviderID, "codex-cli", "Codex CLI",
 		0, 0, true,
@@ -326,7 +327,7 @@ When user says "let us plan" or "create demo sprints":
 	// --- Provider: PTY (Gemini CLI) ---
 	geminiProviderID := "pty-gemini-001"
 	if _, err := tx.Exec(
-		`INSERT INTO providers (id, name, provider_type, api_key)
+		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
 		 VALUES (?, ?, ?, ?)`,
 		geminiProviderID, "Gemini CLI (PTY)", "pty-gemini", "",
 	); err != nil {
@@ -334,7 +335,7 @@ When user says "let us plan" or "create demo sprints":
 	}
 
 	if _, err := tx.Exec(
-		`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"gemini-cli", geminiProviderID, "gemini-cli", "Gemini CLI",
 		0, 0, true,

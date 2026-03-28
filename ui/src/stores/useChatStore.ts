@@ -44,9 +44,11 @@ interface ChatState {
   sessionTakeover: boolean
   setSessionTakeover: (taken: boolean) => void
 
-  // Tool call display mode
+  // Tool call display mode (per-session override)
   toolCallDisplayMode: ToolCallDisplayMode
   setToolCallDisplayMode: (mode: ToolCallDisplayMode) => void
+  loadToolCallDisplayMode: (sessionId: string | null) => void
+  saveToolCallDisplayMode: (sessionId: string | null, mode: ToolCallDisplayMode) => void
 
   // Mode
   activeMode: AgentMode
@@ -119,12 +121,23 @@ export const useChatStore = create<ChatState>((set) => ({
   sessionTakeover: false,
   setSessionTakeover: (taken: boolean) => set({ sessionTakeover: taken }),
 
-  // Tool call display mode
+  // Tool call display mode — per-session override stored in localStorage
   toolCallDisplayMode: (typeof window !== 'undefined'
     ? localStorage.getItem('conduit:toolCallDisplayMode') as ToolCallDisplayMode
     : null) || 'minimal',
   setToolCallDisplayMode: (mode: ToolCallDisplayMode) => {
-    localStorage.setItem('conduit:toolCallDisplayMode', mode)
+    set({ toolCallDisplayMode: mode })
+  },
+  loadToolCallDisplayMode: (sessionId: string | null) => {
+    if (!sessionId || typeof window === 'undefined') return
+    const sessionMode = localStorage.getItem(`conduit:tcMode:${sessionId}`) as ToolCallDisplayMode | null
+    const globalMode = localStorage.getItem('conduit:toolCallDisplayMode') as ToolCallDisplayMode | null
+    set({ toolCallDisplayMode: sessionMode || globalMode || 'minimal' })
+  },
+  saveToolCallDisplayMode: (sessionId: string | null, mode: ToolCallDisplayMode) => {
+    if (sessionId && typeof window !== 'undefined') {
+      localStorage.setItem(`conduit:tcMode:${sessionId}`, mode)
+    }
     set({ toolCallDisplayMode: mode })
   },
 

@@ -1,5 +1,5 @@
-import { useMemo, useEffect } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useMemo, useEffect, useState, useCallback, useRef } from 'react'
+import { Loader2, GripVertical, X } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useSettings, useSettingsMutation, useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
@@ -62,6 +62,116 @@ function SectionHeader({ title }: { title: string }) {
   return (
     <div className="border-b border-zinc-800 pb-2 mb-1">
       <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{title}</h3>
+    </div>
+  )
+}
+
+function FallbackChain({
+  chain,
+  providers,
+  onChange,
+}: {
+  chain: string[]
+  providers: { value: string; label: string }[]
+  onChange: (chain: string[]) => void
+}) {
+  const [items, setItems] = useState(chain)
+  const dragItem = useRef<number | null>(null)
+  const dragOverItem = useRef<number | null>(null)
+
+  // Sync when external chain changes.
+  useEffect(() => {
+    setItems(chain)
+  }, [chain])
+
+  const providerLabel = useCallback(
+    (id: string) => providers.find((p) => p.value === id)?.label || id,
+    [providers],
+  )
+
+  const handleDragStart = useCallback((idx: number) => {
+    dragItem.current = idx
+  }, [])
+
+  const handleDragEnter = useCallback((idx: number) => {
+    dragOverItem.current = idx
+  }, [])
+
+  const handleDragEnd = useCallback(() => {
+    if (dragItem.current === null || dragOverItem.current === null) return
+    const updated = [...items]
+    const [removed] = updated.splice(dragItem.current, 1)
+    updated.splice(dragOverItem.current, 0, removed)
+    dragItem.current = null
+    dragOverItem.current = null
+    setItems(updated)
+    onChange(updated)
+  }, [items, onChange])
+
+  const handleRemove = useCallback(
+    (idx: number) => {
+      const updated = items.filter((_, i) => i !== idx)
+      setItems(updated)
+      onChange(updated)
+    },
+    [items, onChange],
+  )
+
+  const handleAdd = useCallback(
+    (providerId: string) => {
+      if (!providerId || items.includes(providerId)) return
+      const updated = [...items, providerId]
+      setItems(updated)
+      onChange(updated)
+    },
+    [items, onChange],
+  )
+
+  const available = providers.filter((p) => !items.includes(p.value))
+
+  return (
+    <div className="space-y-2">
+      {items.length === 0 && (
+        <div className="text-xs text-zinc-600 py-2">No providers in fallback chain. Add one below.</div>
+      )}
+      {items.map((id, idx) => (
+        <div
+          key={id}
+          draggable
+          onDragStart={() => handleDragStart(idx)}
+          onDragEnter={() => handleDragEnter(idx)}
+          onDragEnd={handleDragEnd}
+          onDragOver={(e) => e.preventDefault()}
+          className="flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md text-sm text-zinc-200 cursor-grab active:cursor-grabbing hover:border-zinc-600 transition-colors"
+        >
+          <GripVertical className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+          <span className="text-xs text-zinc-500 tabular-nums w-5">{idx + 1}.</span>
+          <span className="flex-1">{providerLabel(id)}</span>
+          <button
+            onClick={() => handleRemove(idx)}
+            className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      ))}
+      {available.length > 0 && (
+        <div className="flex items-center gap-2 pt-1">
+          <select
+            onChange={(e) => {
+              handleAdd(e.target.value)
+              e.target.value = ''
+            }}
+            defaultValue=""
+            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="" disabled>Add provider...</option>
+            {available.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
     </div>
   )
 }
@@ -208,6 +318,19 @@ export function PreferencesPanel() {
             onChange={(v) => handleChange('tool_call_display_mode', v)}
           />
         </div>
+      </div>
+
+      {/* Fallback Chain */}
+      <div>
+        <SectionHeader title="Provider Fallback Chain" />
+        <p className="text-xs text-zinc-500 mb-3">
+          When a provider is unavailable, Conduit tries the next one in order. Drag to reorder.
+        </p>
+        <FallbackChain
+          chain={settings?.provider_fallback_chain ?? []}
+          providers={providerOptions}
+          onChange={(chain) => mutation.mutate({ provider_fallback_chain: chain })}
+        />
       </div>
     </div>
   )

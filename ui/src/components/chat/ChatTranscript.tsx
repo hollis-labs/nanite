@@ -35,11 +35,17 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
   const toolWarnings = useChatStore((s) => s.toolWarnings)
   const textOnlyMode = useChatStore((s) => s.textOnlyMode)
   const toolCallDisplayMode = useChatStore((s) => s.toolCallDisplayMode)
-  const setToolCallDisplayMode = useChatStore((s) => s.setToolCallDisplayMode)
+  const saveToolCallDisplayMode = useChatStore((s) => s.saveToolCallDisplayMode)
+  const loadToolCallDisplayMode = useChatStore((s) => s.loadToolCallDisplayMode)
   const chatErrors = useChatStore((s) => s.chatErrors)
   const dismissChatError = useChatStore((s) => s.dismissChatError)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const queryClient = useQueryClient()
+
+  // Load per-session tool call display mode when session changes.
+  useEffect(() => {
+    loadToolCallDisplayMode(activeSessionId ?? null)
+  }, [activeSessionId, loadToolCallDisplayMode])
 
   // Track if user is scrolled to bottom - auto-scroll only when at bottom
   const [isAtBottom, setIsAtBottom] = useState(true)
@@ -73,8 +79,8 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
     const modes = ['indicator', 'minimal', 'compact', 'full'] as const
     const idx = modes.indexOf(toolCallDisplayMode)
     const nextIdx = idx === -1 ? 1 : (idx + 1) % modes.length
-    setToolCallDisplayMode(modes[nextIdx])
-  }, [toolCallDisplayMode, setToolCallDisplayMode])
+    saveToolCallDisplayMode(activeSessionId ?? null, modes[nextIdx])
+  }, [toolCallDisplayMode, saveToolCallDisplayMode, activeSessionId])
 
   const avatarStyle = MODE_AVATAR_STYLES[activeMode]
 

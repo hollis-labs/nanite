@@ -8,7 +8,6 @@ require (
 	github.com/hollis-labs/nexus v0.0.0
 	github.com/hollis-labs/otel v0.0.0
 	github.com/hollis-labs/tool-broker v0.0.0
-	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.12.0
 	go.opentelemetry.io/otel v1.41.0
 	go.opentelemetry.io/otel/trace v1.41.0

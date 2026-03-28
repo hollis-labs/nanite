@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -23,7 +22,7 @@ type Gemini struct {
 // NewGemini creates a new Gemini provider. It reads GOOGLE_API_KEY from the environment.
 func NewGemini() *Gemini {
 	return &Gemini{
-		apiKey: os.Getenv("GOOGLE_API_KEY"),
+		apiKey: "",
 		client: &http.Client{},
 	}
 }

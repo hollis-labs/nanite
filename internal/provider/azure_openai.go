@@ -34,7 +34,7 @@ func NewAzureOpenAI() *AzureOpenAI {
 		apiVersion = "2024-06-01"
 	}
 	return &AzureOpenAI{
-		apiKey:     os.Getenv("AZURE_OPENAI_API_KEY"),
+		apiKey:     "",
 		endpoint:   strings.TrimRight(os.Getenv("AZURE_OPENAI_ENDPOINT"), "/"),
 		deployment: os.Getenv("AZURE_OPENAI_DEPLOYMENT"),
 		apiVersion: apiVersion,

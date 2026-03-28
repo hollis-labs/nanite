@@ -158,18 +158,10 @@ func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
 	utilityProvider := ""
 	utilityModel := ""
 
-	// Prefer DB user_settings (written by the frontend settings UI).
+	// Read from DB user_settings (written by the frontend settings UI).
 	if settings, err := s.GetUserSettings(); err == nil {
 		utilityProvider = settings.UtilityProvider
 		utilityModel = settings.UtilityModel
-	}
-
-	// Fall back to env vars for backwards compatibility.
-	if utilityProvider == "" {
-		utilityProvider = os.Getenv("CONDUIT_UTILITY_PROVIDER")
-	}
-	if utilityModel == "" {
-		utilityModel = os.Getenv("CONDUIT_UTILITY_MODEL")
 	}
 
 	// Final defaults.

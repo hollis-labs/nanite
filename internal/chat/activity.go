@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Activity event type constants for the Volon activity feed.
+// Activity event type constants for the Engine activity feed.
 const (
 	EventSessionCreated        = "chat_session_created"
 	EventSessionEnded          = "chat_session_ended"
@@ -25,8 +25,8 @@ const (
 	EventError                 = "chat_error"
 )
 
-// ActivityEmitter sends activity events to Volon's GUI server so chat sessions
-// appear in the unified activity feed. When the Volon URL is empty (disabled),
+// ActivityEmitter sends activity events to Engine's activity feed so chat sessions
+// appear in the unified activity feed. When the Engine URL is empty (disabled),
 // all Emit calls are no-ops.
 type ActivityEmitter struct {
 	baseURL   string
@@ -46,29 +46,26 @@ type activityEvent struct {
 	Payload     string `json:"payload,omitempty"`
 }
 
-// NewActivityEmitter creates an emitter that posts to the given Volon GUI server URL.
-// Resolution order: explicit url arg > VOLON_URL env > VOLON_GUI_URL env > disabled.
+// NewActivityEmitter creates an emitter that posts to the given Engine activity server URL.
+// Resolution order: explicit url arg > ENGINE_ACTIVITY_URL env > disabled.
 // If no URL is resolved the emitter is created in disabled mode (all emits are no-ops).
 func NewActivityEmitter(url string) *ActivityEmitter {
 	if url == "" {
-		url = os.Getenv("VOLON_URL")
-	}
-	if url == "" {
-		url = os.Getenv("VOLON_GUI_URL")
+		url = os.Getenv("ENGINE_ACTIVITY_URL")
 	}
 	disabled := url == ""
 	if disabled {
-		log.Println("activity: no VOLON_URL set — activity emitter disabled")
+		log.Println("activity: no ENGINE_ACTIVITY_URL set — activity emitter disabled")
 	}
 	return &ActivityEmitter{
 		baseURL:   url,
 		client:    &http.Client{Timeout: 5 * time.Second},
-		projectID: "mentat",
+		projectID: "conduit",
 		disabled:  disabled,
 	}
 }
 
-// Emit sends an activity event to Volon. It never returns an error — failures
+// Emit sends an activity event to Engine. It never returns an error — failures
 // are logged and silently dropped so chat flow is never blocked.
 func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 	if e.disabled {
@@ -78,7 +75,7 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 		ev.ProjectID = e.projectID
 	}
 	if ev.Actor == "" {
-		ev.Actor = "mentat"
+		ev.Actor = "conduit"
 	}
 
 	body, err := json.Marshal(ev)
@@ -96,12 +93,12 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		log.Printf("activity: send error (volon unreachable): %v", err)
+		log.Printf("activity: send error (engine unreachable): %v", err)
 		return
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		log.Printf("activity: volon returned %d", resp.StatusCode)
+		log.Printf("activity: engine returned %d", resp.StatusCode)
 	}
 }
 

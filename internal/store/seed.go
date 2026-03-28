@@ -483,6 +483,8 @@ func (s *Store) SeedProviders() error {
 		{"pty-gemini-001", "Gemini CLI (PTY)", "pty-gemini"},
 		{"pty-copilot-001", "GitHub Copilot CLI (PTY)", "pty-copilot"},
 		{"pty-aider-001", "Aider CLI (PTY)", "pty-aider"},
+		{"openrouter-001", "OpenRouter", "openrouter"},
+		{"openzen-001", "OpenZen", "openzen"},
 	}
 
 	models := []model{
@@ -514,6 +516,18 @@ func (s *Store) SeedProviders() error {
 		{"gemini-cli", "pty-gemini-001", "gemini-cli", "Gemini CLI", 0, 0, true},
 		{"copilot-cli", "pty-copilot-001", "copilot-cli", "Copilot CLI", 0, 0, false},
 		{"aider-cli", "pty-aider-001", "aider-cli", "Aider CLI", 0, 0, false},
+		// OpenRouter (model gateway — uses provider-prefixed model IDs)
+		{"or-claude-sonnet", "openrouter-001", "anthropic/claude-sonnet-4", "Claude Sonnet 4 (OR)", 200000, 16000, true},
+		{"or-claude-opus", "openrouter-001", "anthropic/claude-opus-4", "Claude Opus 4 (OR)", 200000, 32000, true},
+		{"or-gpt-4o", "openrouter-001", "openai/gpt-4o", "GPT-4o (OR)", 128000, 16384, true},
+		{"or-gemini-2.5-flash", "openrouter-001", "google/gemini-2.5-flash", "Gemini 2.5 Flash (OR)", 1048576, 8192, true},
+		{"or-llama-3.1-405b", "openrouter-001", "meta-llama/llama-3.1-405b-instruct", "Llama 3.1 405B (OR)", 131072, 4096, true},
+		{"or-deepseek-r1", "openrouter-001", "deepseek/deepseek-r1", "DeepSeek R1 (OR)", 131072, 8192, true},
+		// OpenZen (uses standard model IDs)
+		{"oz-claude-sonnet", "openzen-001", "claude-sonnet-4-20250514", "Claude Sonnet 4 (OZ)", 200000, 16000, true},
+		{"oz-claude-opus", "openzen-001", "claude-opus-4-20250514", "Claude Opus 4 (OZ)", 200000, 32000, true},
+		{"oz-gpt-4o", "openzen-001", "gpt-4o", "GPT-4o (OZ)", 128000, 16384, true},
+		{"oz-o3", "openzen-001", "o3", "o3 (OZ)", 200000, 100000, true},
 	}
 
 	tx, err := s.DB.Begin()

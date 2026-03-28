@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -19,7 +18,6 @@ import (
 	_ "github.com/lib/pq" // Postgres driver for Nexus messaging
 
 	feotel "github.com/hollis-labs/otel"
-	"github.com/joho/godotenv"
 
 	"github.com/hollis-labs/conduit/internal/config"
 
@@ -74,10 +72,7 @@ func cmdServe(args []string) {
 		log.Printf("config loaded — project: %s, role: %s, root: %s", name, cfg.Role, cfg.ProjectRoot())
 	}
 
-	// Load .env file if present (never overrides existing env vars).
-	if err := godotenv.Load(); err == nil {
-		log.Println("loaded .env file")
-	}
+
 
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
@@ -129,47 +124,46 @@ func cmdServe(args []string) {
 	// Key resolution: OS keychain → environment variable → skip.
 	registry := provider.NewRegistry()
 
-	// resolveKey checks keychain first, then env var.
-	resolveKey := func(providerID, envVar string) string {
-		if key := secrets.Get(secrets.ProviderKeyName(providerID)); key != "" {
-			return key
-		}
-		return os.Getenv(envVar)
+	// resolveKey reads the API key from the OS keychain only.
+	resolveKey := func(providerID string) string {
+		return secrets.Get(secrets.ProviderKeyName(providerID))
 	}
 
 	// API providers: register if a key is available from keychain or env.
 	type apiProvSpec struct {
-		name, provID, envVar string
-		create               func() provider.Provider
-		setKey               func(provider.Provider, string)
+		name, provID string
+		create       func() provider.Provider
+		setKey       func(provider.Provider, string)
 	}
 	apiProviders := []apiProvSpec{
-		{"anthropic", "anthropic-001", "ANTHROPIC_API_KEY",
+		{"anthropic", "anthropic-001",
 			func() provider.Provider { return provider.NewAnthropic() },
 			func(p provider.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
-		{"openai", "openai-001", "OPENAI_API_KEY",
+		{"openai", "openai-001",
 			func() provider.Provider { return provider.NewOpenAI() },
 			func(p provider.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
-		{"gemini", "gemini-api-001", "GOOGLE_API_KEY",
+		{"gemini", "gemini-api-001",
 			func() provider.Provider { return provider.NewGemini() },
 			func(p provider.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
-		{"mistral", "mistral-001", "MISTRAL_API_KEY",
+		{"mistral", "mistral-001",
 			func() provider.Provider { return provider.NewMistral() },
 			func(p provider.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
+		{"openrouter", "openrouter-001",
+			func() provider.Provider { return provider.NewOpenRouter() },
+			func(p provider.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
+		{"openzen", "openzen-001",
+			func() provider.Provider { return provider.NewOpenZen() },
+			func(p provider.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
 	}
 
 	var registeredAPI, missingAPI []string
 	for _, spec := range apiProviders {
-		key := resolveKey(spec.provID, spec.envVar)
+		key := resolveKey(spec.provID)
 		if key != "" {
 			p := spec.create()
 			spec.setKey(p, key)
 			registry.Register(spec.name, p)
-			source := "keychain"
-			if os.Getenv(spec.envVar) == key {
-				source = "env"
-			}
-			log.Printf("%s provider registered (key from %s)", spec.name, source)
+			log.Printf("%s provider registered (key from keychain)", spec.name)
 			registeredAPI = append(registeredAPI, spec.name)
 		} else {
 			missingAPI = append(missingAPI, spec.name)
@@ -177,7 +171,7 @@ func cmdServe(args []string) {
 	}
 
 	// Azure OpenAI — needs both key and endpoint.
-	azureKey := resolveKey("azure-openai-001", "AZURE_OPENAI_API_KEY")
+	azureKey := resolveKey("azure-openai-001")
 	if azureKey != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
 		p := provider.NewAzureOpenAI()
 		p.SetAPIKey(azureKey)
@@ -238,18 +232,9 @@ func cmdServe(args []string) {
 	engine.AppConfig = appCfg
 
 	// Configure output filters. Default: strip emoji from LLM responses.
-	// Additional filters can be added to the chain here or via MENTAT_OUTPUT_FILTERS env var.
 	outputFilters := filter.NewChain()
-	if envFilters := os.Getenv("MENTAT_OUTPUT_FILTERS"); envFilters != "" {
-		// Comma-separated list of filter names, e.g. "no_emoji,trim"
-		names := splitFilterNames(envFilters)
-		outputFilters = filter.FromNames(names)
-		log.Printf("output filters from MENTAT_OUTPUT_FILTERS: %v", outputFilters.Names())
-	} else {
-		// Default: enable no_emoji filter
-		outputFilters.Add("no_emoji", filter.NoEmoji)
-		log.Printf("output filters (default): %v", outputFilters.Names())
-	}
+	outputFilters.Add("no_emoji", filter.NoEmoji)
+	log.Printf("output filters: %v", outputFilters.Names())
 	engine.OutputFilters = outputFilters
 
 	// Configure CLI process concurrency limit. Default: 10. Set to 0 for unlimited.
@@ -321,8 +306,8 @@ func cmdServe(args []string) {
 	engine.Orchestrator = orchestrator
 	log.Println("orchestrator initialized (decomposition + delegation enabled)")
 
-	// Set up activity emitter to push events to Volon's GUI server.
-	// Configured via VOLON_URL or VOLON_GUI_URL env var; disabled when unset.
+	// Set up activity emitter to push events to Engine's activity feed.
+	// Configured via ENGINE_ACTIVITY_URL env var; disabled when unset.
 	engine.Activity = chat.NewActivityEmitter("")
 
 	// Clean up MCP subprocesses and CLI processes on shutdown.
@@ -380,12 +365,9 @@ func cmdServe(args []string) {
 	a.WorkflowEngine = wfEngine
 
 	// Connect to Engine Postgres for Nexus A2A messaging.
-	// Uses ENGINE_POSTGRES_DSN env var, falling back to VOLON_POSTGRES_DSN,
-	// then a default local DSN. When unavailable, A2A falls back to SQLite.
+	// Uses ENGINE_POSTGRES_DSN env var, then a default local DSN.
+	// When unavailable, A2A falls back to SQLite.
 	nexusDSN := os.Getenv("ENGINE_POSTGRES_DSN")
-	if nexusDSN == "" {
-		nexusDSN = os.Getenv("VOLON_POSTGRES_DSN")
-	}
 	if nexusDSN == "" {
 		nexusDSN = "postgres://localhost/engine?sslmode=disable"
 	}
@@ -470,7 +452,7 @@ func setupMCPServers(m *mcp.Manager) {
 			"mcp",
 		}, []string{
 			"ENGINE_REPO=" + home + "/Projects-apps/fragments-engine/engine",
-			"VOLON_POSTGRES_DSN=postgres://localhost/engine?sslmode=disable",
+			"ENGINE_POSTGRES_DSN=postgres://localhost/engine?sslmode=disable",
 		})
 	} else {
 		log.Printf("mcp: engine binary not found at %s, skipping", engineBin)
@@ -570,14 +552,3 @@ func cmdMCP(args []string) {
 	}
 }
 
-// splitFilterNames splits a comma-separated filter list into trimmed names.
-func splitFilterNames(s string) []string {
-	var names []string
-	for _, part := range strings.Split(s, ",") {
-		name := strings.TrimSpace(part)
-		if name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}

@@ -19,3 +19,9 @@ func (m *Mistral) SetAPIKey(key string) { m.apiKey = key }
 
 // SetAPIKey on AzureOpenAI provider.
 func (az *AzureOpenAI) SetAPIKey(key string) { az.apiKey = key }
+
+// SetAPIKey on OpenRouter provider.
+func (o *OpenRouter) SetAPIKey(key string) { o.apiKey = key }
+
+// SetAPIKey on OpenZen provider.
+func (oz *OpenZen) SetAPIKey(key string) { oz.apiKey = key }

@@ -8,34 +8,42 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
-const mistralAPI = "https://api.mistral.ai/v1/chat/completions"
+const openzenAPI = "https://api.open-zen.com/v1/chat/completions"
 
-// Mistral implements the Provider interface for the Mistral API.
-// Uses the OpenAI-compatible chat completions format.
-type Mistral struct {
-	apiKey string
-	client *http.Client
+// OpenZen implements the Provider interface for the OpenZen API.
+// OpenZen is an OpenAI-compatible inference gateway.
+type OpenZen struct {
+	apiKey  string
+	baseURL string
+	client  *http.Client
 }
 
-// NewMistral creates a new Mistral provider. It reads MISTRAL_API_KEY from the environment.
-func NewMistral() *Mistral {
-	return &Mistral{
-		apiKey: "",
-		client: &http.Client{},
+// NewOpenZen creates a new OpenZen provider. It reads OPENZEN_API_KEY from the environment.
+// Optionally reads OPENZEN_BASE_URL to override the default endpoint.
+func NewOpenZen() *OpenZen {
+	base := os.Getenv("OPENZEN_BASE_URL")
+	if base == "" {
+		base = openzenAPI
+	}
+	return &OpenZen{
+		apiKey:  "",
+		baseURL: strings.TrimRight(base, "/"),
+		client:  &http.Client{},
 	}
 }
 
-// StreamChat implements Provider.StreamChat using Mistral's OpenAI-compatible streaming API.
-func (m *Mistral) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
-	if m.apiKey == "" {
-		return nil, fmt.Errorf("MISTRAL_API_KEY not set")
+// StreamChat implements Provider.StreamChat using OpenZen's OpenAI-compatible streaming API.
+func (oz *OpenZen) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+	if oz.apiKey == "" {
+		return nil, fmt.Errorf("OPENZEN_API_KEY not set")
 	}
 
 	if model == "" {
-		model = "mistral-large-latest"
+		model = "claude-sonnet-4-20250514"
 	}
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
@@ -57,14 +65,14 @@ func (m *Mistral) StreamChat(ctx context.Context, systemPrompt string, messages 
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", mistralAPI, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", oz.baseURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+m.apiKey)
+	req.Header.Set("Authorization", "Bearer "+oz.apiKey)
 
-	resp, err := m.client.Do(req)
+	resp, err := oz.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
@@ -72,16 +80,16 @@ func (m *Mistral) StreamChat(ctx context.Context, systemPrompt string, messages 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("mistral API error %d: %s", resp.StatusCode, string(errBody))
+		return nil, fmt.Errorf("openzen API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	ch := make(chan StreamEvent, 64)
-	go m.readSSE(ctx, resp.Body, ch)
+	go oz.readSSE(ctx, resp.Body, ch)
 	return ch, nil
 }
 
-// readSSE parses the OpenAI-compatible SSE stream from Mistral.
-func (m *Mistral) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
+// readSSE parses the OpenAI-compatible SSE stream from OpenZen.
+func (oz *OpenZen) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
 	defer close(ch)
 	defer body.Close()
 
@@ -152,19 +160,19 @@ func (m *Mistral) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Str
 	}
 }
 
-// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for Mistral).
-func (m *Mistral) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return m.StreamChat(ctx, systemPrompt, messages, model)
+// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for OpenZen).
+func (oz *OpenZen) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+	return oz.StreamChat(ctx, systemPrompt, messages, model)
 }
 
-// Complete makes a non-streaming completion call to Mistral.
-func (m *Mistral) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
-	if m.apiKey == "" {
-		return "", fmt.Errorf("MISTRAL_API_KEY not set")
+// Complete makes a non-streaming completion call to OpenZen.
+func (oz *OpenZen) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+	if oz.apiKey == "" {
+		return "", fmt.Errorf("OPENZEN_API_KEY not set")
 	}
 
 	if model == "" {
-		model = "mistral-large-latest"
+		model = "claude-sonnet-4-20250514"
 	}
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
@@ -186,14 +194,14 @@ func (m *Mistral) Complete(ctx context.Context, systemPrompt string, messages []
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", mistralAPI, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", oz.baseURL, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+m.apiKey)
+	req.Header.Set("Authorization", "Bearer "+oz.apiKey)
 
-	resp, err := m.client.Do(req)
+	resp, err := oz.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("send request: %w", err)
 	}
@@ -201,7 +209,7 @@ func (m *Mistral) Complete(ctx context.Context, systemPrompt string, messages []
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("mistral API error %d: %s", resp.StatusCode, string(errBody))
+		return "", fmt.Errorf("openzen API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var result struct {
@@ -221,12 +229,12 @@ func (m *Mistral) Complete(ctx context.Context, systemPrompt string, messages []
 	return "", nil
 }
 
-// Capabilities returns the capabilities supported by the Mistral provider.
-func (m *Mistral) Capabilities() ProviderCapabilities {
+// Capabilities returns the capabilities supported by the OpenZen provider.
+func (oz *OpenZen) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{
 		SupportsStreamJSON:  true,
-		SupportsToolCalling: false, // Not yet implemented
-		SupportsImageInput:  true,  // Pixtral models support vision
-		MaxTokens:           131072,
+		SupportsToolCalling: false,
+		SupportsImageInput:  true,
+		MaxTokens:           200000,
 	}
 }

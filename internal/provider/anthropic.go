@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -37,7 +36,7 @@ type Anthropic struct {
 // NewAnthropic creates a new Anthropic provider. It reads ANTHROPIC_API_KEY from the environment.
 func NewAnthropic() *Anthropic {
 	return &Anthropic{
-		apiKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		apiKey:         "",
 		client:         &http.Client{},
 		Retry:          DefaultRetryConfig(),
 		CircuitBreaker: NewCircuitBreaker(3),

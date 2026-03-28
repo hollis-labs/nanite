@@ -11,51 +11,40 @@ import (
 	"strings"
 )
 
-const openaiAPI = "https://api.openai.com/v1/chat/completions"
+const openrouterAPI = "https://openrouter.ai/api/v1/chat/completions"
 
-// OpenAI implements the Provider interface for the OpenAI Chat Completions API.
-type OpenAI struct {
+// OpenRouter implements the Provider interface for the OpenRouter API.
+// OpenRouter is an OpenAI-compatible gateway that routes to 200+ models
+// from Anthropic, Google, Meta, Mistral, and others.
+type OpenRouter struct {
 	apiKey string
 	client *http.Client
 }
 
-// NewOpenAI creates a new OpenAI provider. It reads OPENAI_API_KEY from the environment.
-func NewOpenAI() *OpenAI {
-	return &OpenAI{
+// NewOpenRouter creates a new OpenRouter provider. It reads OPENROUTER_API_KEY from the environment.
+func NewOpenRouter() *OpenRouter {
+	return &OpenRouter{
 		apiKey: "",
 		client: &http.Client{},
 	}
 }
 
-// openaiRequest is the request body for the OpenAI Chat Completions API.
-type openaiRequest struct {
-	Model    string          `json:"model"`
-	Messages []openaiMessage `json:"messages"`
-	Stream   bool            `json:"stream"`
-}
-
-type openaiMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// StreamChat implements Provider.StreamChat using OpenAI's streaming SSE API.
-func (o *OpenAI) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+// StreamChat implements Provider.StreamChat using OpenRouter's OpenAI-compatible streaming API.
+func (o *OpenRouter) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
 	if o.apiKey == "" {
-		return nil, fmt.Errorf("OPENAI_API_KEY not set")
+		return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
 	}
 
 	if model == "" {
-		model = "gpt-4o"
+		model = "anthropic/claude-sonnet-4"
 	}
 
-	// Build messages array with system prompt first.
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
 		msgs = append(msgs, openaiMessage{Role: "system", Content: systemPrompt})
 	}
-	for _, m := range messages {
-		msgs = append(msgs, openaiMessage{Role: m.Role, Content: m.Content})
+	for _, msg := range messages {
+		msgs = append(msgs, openaiMessage{Role: msg.Role, Content: msg.Content})
 	}
 
 	body := openaiRequest{
@@ -69,7 +58,7 @@ func (o *OpenAI) StreamChat(ctx context.Context, systemPrompt string, messages [
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", openaiAPI, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", openrouterAPI, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -84,7 +73,7 @@ func (o *OpenAI) StreamChat(ctx context.Context, systemPrompt string, messages [
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai API error %d: %s", resp.StatusCode, string(errBody))
+		return nil, fmt.Errorf("openrouter API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	ch := make(chan StreamEvent, 64)
@@ -92,8 +81,8 @@ func (o *OpenAI) StreamChat(ctx context.Context, systemPrompt string, messages [
 	return ch, nil
 }
 
-// readSSE parses the SSE stream from OpenAI and emits StreamEvents.
-func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
+// readSSE parses the OpenAI-compatible SSE stream from OpenRouter.
+func (o *OpenRouter) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
 	defer close(ch)
 	defer body.Close()
 
@@ -108,13 +97,11 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 		}
 
 		line := scanner.Text()
-
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
 
 		data := strings.TrimPrefix(line, "data: ")
-
 		if data == "[DONE]" {
 			ch <- StreamEvent{Type: "done"}
 			return
@@ -142,14 +129,10 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 			if delta != "" {
 				ch <- StreamEvent{Type: "delta", Content: delta}
 			}
-
 			if chunk.Choices[0].FinishReason != nil {
-				reason := *chunk.Choices[0].FinishReason
 				ch <- StreamEvent{
-					Type: "usage",
-					Usage: &Usage{
-						StopReason: reason,
-					},
+					Type:  "usage",
+					Usage: &Usage{StopReason: *chunk.Choices[0].FinishReason},
 				}
 			}
 		}
@@ -170,27 +153,27 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 	}
 }
 
-// StreamChatWithTools delegates to StreamChat, ignoring tools (not yet supported for OpenAI).
-func (o *OpenAI) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for OpenRouter).
+func (o *OpenRouter) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
 	return o.StreamChat(ctx, systemPrompt, messages, model)
 }
 
-// Complete makes a non-streaming completion call to OpenAI.
-func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+// Complete makes a non-streaming completion call to OpenRouter.
+func (o *OpenRouter) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
 	if o.apiKey == "" {
-		return "", fmt.Errorf("OPENAI_API_KEY not set")
+		return "", fmt.Errorf("OPENROUTER_API_KEY not set")
 	}
 
 	if model == "" {
-		model = "gpt-4o"
+		model = "anthropic/claude-sonnet-4"
 	}
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
 		msgs = append(msgs, openaiMessage{Role: "system", Content: systemPrompt})
 	}
-	for _, m := range messages {
-		msgs = append(msgs, openaiMessage{Role: m.Role, Content: m.Content})
+	for _, msg := range messages {
+		msgs = append(msgs, openaiMessage{Role: msg.Role, Content: msg.Content})
 	}
 
 	body := openaiRequest{
@@ -204,7 +187,7 @@ func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []C
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", openaiAPI, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", openrouterAPI, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -219,7 +202,7 @@ func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []C
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("openai API error %d: %s", resp.StatusCode, string(errBody))
+		return "", fmt.Errorf("openrouter API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var result struct {
@@ -239,16 +222,12 @@ func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []C
 	return "", nil
 }
 
-// Capabilities returns the capabilities supported by the OpenAI provider.
-func (o *OpenAI) Capabilities() ProviderCapabilities {
+// Capabilities returns the capabilities supported by the OpenRouter provider.
+func (o *OpenRouter) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{
-		SupportsStreamJSON:          true,  // OpenAI supports streaming responses
-		SupportsPreToolHooks:        false, // No direct pre-tool hook support
-		SupportsPostToolHooks:       false, // No direct post-tool hook support
-		SupportsSystemPromptCaching: false, // No prompt caching support in current implementation
-		SupportsToolCalling:         false, // Tool calling not implemented (StreamChatWithTools ignores tools)
-		SupportsBatch:               false, // No batch API support in current implementation
-		SupportsImageInput:          true,  // GPT-4o and GPT-4 Turbo support image inputs
-		MaxTokens:                   128000, // GPT-4o supports up to 128k tokens
+		SupportsStreamJSON:  true,
+		SupportsToolCalling: false,
+		SupportsImageInput:  true, // Depends on underlying model, but most top models support it
+		MaxTokens:           200000,
 	}
 }

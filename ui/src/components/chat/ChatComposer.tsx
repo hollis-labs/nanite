@@ -4,8 +4,10 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useQueryClient } from '@tanstack/react-query'
 import { ComposerToolbar } from './ComposerToolbar'
-import { SlashCommandExtension } from './extensions/SlashCommandExtension'
+import { SlashCommandExtension, type SlashCommand } from './extensions/SlashCommandExtension'
 import { slashCommandSuggestion } from './extensions/slashCommandSuggestion'
+import { FileMentionExtension, type FileResult } from './extensions/FileMentionExtension'
+import { fileMentionSuggestion } from './extensions/fileMentionSuggestion'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 
@@ -14,10 +16,18 @@ interface ChatComposerProps {
   isStreaming?: boolean
   onStop?: () => void
   onEditorReady?: (focus: () => void) => void
+  reloadMessages?: () => void
 }
 
-export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorReady }: ChatComposerProps) {
+// Module-level flags so the editor's stale handleKeyDown closure can check them.
+// Set by the suggestion lifecycle callbacks (onStart/onExit).
+let slashMenuOpen = false
+let fileMentionMenuOpen = false
+
+export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorReady, reloadMessages }: ChatComposerProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const setActiveSession = useAppStore((s) => s.setActiveSession)
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const queryClient = useQueryClient()
   const [dragOver, setDragOver] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
@@ -32,6 +42,68 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     queryClient.invalidateQueries({ queryKey: ['artifacts', activeSessionId] })
   }, [activeSessionId, queryClient])
 
+  // Handle slash command execution
+  const handleCommand = useCallback(async (cmd: SlashCommand) => {
+    switch (cmd.name) {
+      case 'new': {
+        const session = await api.createSession({ workspace_id: activeWorkspaceId || '' })
+        setActiveSession(session.id)
+        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+        return
+      }
+      case 'fork': {
+        if (!activeSessionId) return
+        const forked = await api.forkSession(activeSessionId, { include_messages: true })
+        setActiveSession(forked.id)
+        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+        return
+      }
+      case 'clone': {
+        if (!activeSessionId) return
+        const cloned = await api.forkSession(activeSessionId, { include_messages: false })
+        setActiveSession(cloned.id)
+        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+        return
+      }
+      case 'bookmark': {
+        if (!activeSessionId) return
+        const session = await api.getSession(activeSessionId)
+        const messages = session.messages || []
+        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+        if (lastAssistant) {
+          await api.toggleBookmark(lastAssistant.id, activeSessionId)
+          void queryClient.invalidateQueries({ queryKey: ['bookmarks', activeSessionId] })
+        }
+        return
+      }
+      case 'compact': {
+        if (!activeSessionId) return
+        await api.compactSession(activeSessionId)
+        void queryClient.invalidateQueries({ queryKey: ['session', activeSessionId] })
+        return
+      }
+      case 'agent':
+      case 'model':
+        return
+      default: {
+        if (!activeSessionId) return
+        try {
+          const result = await api.executeCommand(cmd.name, activeSessionId, '')
+          if (result.action === 'message') {
+            reloadMessages?.()
+          }
+        } catch (err) {
+          console.error('Command execution failed:', err)
+        }
+      }
+    }
+  }, [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages])
+
+  const handleCommandRef = useRef(handleCommand)
+  handleCommandRef.current = handleCommand
+
+  const handleSendRef = useRef<() => void>(() => {})
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -44,10 +116,25 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         listItem: false,
       }),
       Placeholder.configure({
-        placeholder: 'Message Conduit... (Enter to send, / for commands)',
+        placeholder: 'Message Conduit... (Enter to send, / for commands, @ for files)',
       }),
       SlashCommandExtension.configure({
-        suggestion: slashCommandSuggestion,
+        suggestion: {
+          ...slashCommandSuggestion,
+          command: ({ editor: ed, range, props }: { editor: any; range: { from: number; to: number }; props: SlashCommand }) => {
+            ed?.chain().focus().deleteRange(range).run()
+            void handleCommandRef.current(props)
+          },
+        },
+      }),
+      FileMentionExtension.configure({
+        suggestion: {
+          ...fileMentionSuggestion,
+          command: ({ editor: ed, range, props }: { editor: any; range: { from: number; to: number }; props: FileResult }) => {
+            // Delete the @query text and insert @path as plain text
+            ed?.chain().focus().deleteRange(range).insertContent(`@${props.path} `).run()
+          },
+        },
       }),
     ],
     editorProps: {
@@ -57,15 +144,17 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       },
       handleKeyDown(_view, event) {
         if (event.key === 'Enter') {
-          // Cmd+Enter or Shift+Enter inserts newline
-          if (event.metaKey || event.ctrlKey || event.shiftKey) {
-            return false // let TipTap handle newline
+          // If any suggestion menu is open, let the plugin handle Enter
+          if (slashMenuOpen || fileMentionMenuOpen) {
+            return false
           }
-          // Plain Enter sends
+          if (event.metaKey || event.ctrlKey || event.shiftKey) {
+            return false
+          }
           const text = editor?.getText().trim() ?? ''
           if (!text) return false
           event.preventDefault()
-          handleSend()
+          handleSendRef.current()
           return true
         }
         return false
@@ -90,6 +179,8 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     editor.commands.clearContent()
   }, [editor, onSend])
 
+  handleSendRef.current = handleSend
+
   const hasContent = editor ? editor.getText().trim().length > 0 : false
 
   return (
@@ -108,14 +199,12 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             Drop files to attach
           </div>
         )}
-        {/* Editor area */}
         <div className="px-3 py-1">
           <EditorContent
             editor={editor}
             className="min-w-0 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-zinc-600 [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
           />
         </div>
-        {/* Toolbar with send button */}
         <ComposerToolbar
           hasContent={hasContent}
           isStreaming={isStreaming}
@@ -128,4 +217,13 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       </p>
     </div>
   )
+}
+
+// Exported setters for suggestion lifecycle callbacks
+export function setSlashMenuOpen(open: boolean) {
+  slashMenuOpen = open
+}
+
+export function setFileMentionMenuOpen(open: boolean) {
+  fileMentionMenuOpen = open
 }

@@ -1,19 +1,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { ChevronDown, Paperclip, SendHorizonal, Square } from 'lucide-react'
+import { Bot, ChevronDown, Paperclip, SendHorizonal, Square } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useModels, useProviders } from '@/hooks/useSettings'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { AGENT_MODES, type AgentMode } from '@/lib/types'
-
-const MODE_DOT_COLORS: Record<AgentMode, string> = {
-  default: 'bg-blue-400',
-  architect: 'bg-purple-400',
-  planner: 'bg-green-400',
-  writer: 'bg-amber-400',
-}
 
 const PROVIDER_ICONS: Record<string, string> = {
   anthropic: 'A',
@@ -40,16 +32,12 @@ interface ComposerToolbarProps {
 export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: ComposerToolbarProps) {
   const activeModel = useChatStore((s) => s.activeModel)
   const setActiveModel = useChatStore((s) => s.setActiveModel)
-  const activeMode = useChatStore((s) => s.activeMode)
-  const setActiveMode = useChatStore((s) => s.setActiveMode)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const queryClient = useQueryClient()
 
   const [modelOpen, setModelOpen] = useState(false)
-  const [modeOpen, setModeOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
   const modelRef = useRef<HTMLDivElement>(null)
-  const modeRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: models } = useModels()
@@ -88,22 +76,17 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
   const allModels = useMemo(() => groupedModels.flatMap((g) => g.models), [groupedModels])
   const currentModel = allModels.find((m) => m.id === activeModel)
 
-  // Close dropdowns on outside click
+  // Close dropdown on outside click
   useEffect(() => {
+    if (!modelOpen) return
     function handleClickOutside(e: MouseEvent) {
       if (modelRef.current && !modelRef.current.contains(e.target as Node)) {
         setModelOpen(false)
       }
-      if (modeRef.current && !modeRef.current.contains(e.target as Node)) {
-        setModeOpen(false)
-      }
     }
-    if (modelOpen || modeOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-    return undefined
-  }, [modelOpen, modeOpen])
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [modelOpen])
 
   const handleModelSelect = useCallback(async (modelId: string) => {
     setActiveModel(modelId)
@@ -118,18 +101,6 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
       }
     }
   }, [activeSessionId, setActiveModel, allModels])
-
-  const handleModeSelect = useCallback(async (mode: AgentMode) => {
-    setActiveMode(mode)
-    setModeOpen(false)
-    if (activeSessionId) {
-      try {
-        await api.switchMode(activeSessionId, mode)
-      } catch (err) {
-        console.error('Failed to switch mode:', err)
-      }
-    }
-  }, [activeSessionId, setActiveMode])
 
   const handleFileUpload = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0 || !activeSessionId) return
@@ -177,7 +148,8 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
           onClick={() => setModelOpen((o) => !o)}
           className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors py-0.5 px-1 rounded hover:bg-zinc-700/50"
         >
-          <span>{currentModel?.label || activeModel || 'Select model'}</span>
+          <Bot className="w-3 h-3" />
+          <span className="max-w-[200px] truncate">{currentModel?.label || activeModel || 'Select model'}</span>
           <ChevronDown className="w-3 h-3" />
         </button>
 
@@ -215,41 +187,8 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
       </div>
       </div>
 
-      {/* Right: Mode quick-switch + Send */}
+      {/* Right: Send/Stop */}
       <div className="flex items-center gap-1">
-        <div className="relative" ref={modeRef}>
-          <button
-            onClick={() => setModeOpen((o) => !o)}
-            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors py-0.5 px-1 rounded hover:bg-zinc-700/50"
-          >
-            <span className={`w-2 h-2 rounded-full ${MODE_DOT_COLORS[activeMode]}`} />
-            <span className="capitalize">{activeMode}</span>
-            <ChevronDown className="w-3 h-3" />
-          </button>
-
-          {modeOpen && (
-            <div className="absolute bottom-full right-0 mb-1 w-36 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
-              <div className="px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                Mode
-              </div>
-              {AGENT_MODES.map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => void handleModeSelect(mode)}
-                  className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
-                    mode === activeMode
-                      ? 'bg-zinc-800 text-zinc-100'
-                      : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
-                  }`}
-                >
-                  <span className={`w-2 h-2 rounded-full ${MODE_DOT_COLORS[mode]}`} />
-                  <span className="capitalize">{mode}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
         {isStreaming ? (
           <Button
             variant="ghost"

@@ -6,9 +6,9 @@ import (
 
 	"github.com/hollis-labs/conduit/internal/chat"
 	"github.com/hollis-labs/conduit/internal/mcp"
+	conduitplugin "github.com/hollis-labs/conduit/internal/plugin"
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
-	"github.com/hollis-labs/conduit/internal/workflow"
 	"github.com/hollis-labs/nexus/messaging"
 )
 
@@ -18,8 +18,7 @@ type API struct {
 	Engine         *chat.Engine
 	ToolClient     *toolclient.ToolClient
 	MCPManager     *mcp.Manager
-	WorkflowLoader *workflow.Loader
-	WorkflowEngine *workflow.Engine
+	PluginHost *conduitplugin.Host
 	NexusMsg       messaging.Store // Nexus Postgres-backed A2A messaging (nil = fallback to SQLite)
 }
 
@@ -88,6 +87,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
+	mux.HandleFunc("POST /api/commands/execute", a.handleExecuteCommand)
+
+	// Autocomplete
+	mux.HandleFunc("GET /api/autocomplete/files", a.handleAutocompleteFiles)
 
 	// Providers & Models
 	mux.HandleFunc("GET /api/providers", a.handleListProviders)
@@ -97,11 +100,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/providers/{id}/api-key", a.handleSetProviderAPIKey)
 	mux.HandleFunc("GET /api/providers/{id}/status", a.handleGetProviderStatus)
 	mux.HandleFunc("GET /api/models", a.handleListModels)
-
-	// Workflows
-	mux.HandleFunc("GET /api/workflows", a.handleListWorkflows)
-	mux.HandleFunc("GET /api/workflows/{name}", a.handleGetWorkflow)
-	mux.HandleFunc("POST /api/workflows/{name}/run", a.handleRunWorkflow)
 
 	// Agent-to-agent messaging
 	mux.HandleFunc("POST /api/sessions/{id}/agent-message", a.handleAgentMessage)

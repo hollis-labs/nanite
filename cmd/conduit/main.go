@@ -34,7 +34,6 @@ import (
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/truncate"
-	"github.com/hollis-labs/conduit/internal/workflow"
 	"github.com/hollis-labs/nexus/messaging"
 	"github.com/hollis-labs/tool-broker/broker"
 )
@@ -78,7 +77,6 @@ func cmdServe(args []string) {
 	port := fs.Int("port", 8090, "HTTP listen port")
 	dbPath := fs.String("db", "./conduit.db", "SQLite database path")
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
-	workflowDir := fs.String("workflows", "./workflows", "Directory containing workflow YAML files")
 	fs.Parse(args)
 
 	// Initialise OpenTelemetry tracing (otel).
@@ -345,27 +343,10 @@ func cmdServe(args []string) {
 		}
 	}()
 
-	// Load workflow definitions from files and database.
-	wfLoader := workflow.NewLoader(*workflowDir)
-	wfLoader.SetDB(s.DB)
-	if err := wfLoader.LoadAll(); err != nil {
-		log.Printf("WARNING: failed to load workflows: %v", err)
-	} else {
-		log.Printf("loaded %d workflow(s)", len(wfLoader.List()))
-	}
-	wfEngine := workflow.NewEngine(registry, s)
-	wfEngine.MCPManager = mcpManager
-
-	// Wire workflow engine into chat engine for /workflow triggers.
-	engine.WorkflowEngine = wfEngine
-	engine.WorkflowLoader = wfLoader
-
 	// Create API layer.
 	a := api.New(s, engine)
 	a.MCPManager = mcpManager
 	a.ToolClient = tb
-	a.WorkflowLoader = wfLoader
-	a.WorkflowEngine = wfEngine
 
 	// Connect to Engine Postgres for Nexus A2A messaging.
 	// Uses ENGINE_POSTGRES_DSN env var, then a default local DSN.
@@ -405,6 +386,9 @@ func cmdServe(args []string) {
 	pluginHost.RegisterService("toolclient", tb)
 	log.Println("plugin host initialized")
 
+	// Wire plugin host into the API for command registration.
+	a.PluginHost = pluginHost
+
 	// Start HTTP server — this sets the router on the plugin host.
 	srv := server.New(s, a, *port, *dev, pluginHost)
 
@@ -424,6 +408,15 @@ func cmdServe(args []string) {
 			log.Printf("WARNING: %v", e)
 		}
 		log.Printf("plugins: discovered %d, loaded %d", len(discovered), len(loaded))
+	}
+
+	// Load any registered builtins not found via filesystem discovery.
+	builtins, builtinErrs := plugin.LoadRegisteredBuiltins(pluginHost)
+	for _, e := range builtinErrs {
+		log.Printf("WARNING: %v", e)
+	}
+	if len(builtins) > 0 {
+		log.Printf("plugins: loaded %d builtin(s)", len(builtins))
 	}
 
 	// Re-discover tools after plugins — plugins may register new MCP servers

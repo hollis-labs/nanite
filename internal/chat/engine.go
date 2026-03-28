@@ -23,7 +23,6 @@ import (
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/truncate"
-	"github.com/hollis-labs/conduit/internal/workflow"
 )
 
 // maxToolIterations is the maximum number of tool-use loop iterations.
@@ -37,6 +36,24 @@ const generateResponseTimeout = 5 * time.Minute
 // ProgressiveDiscoveryThreshold is the tool count above which progressive
 // discovery is used instead of sending all tool schemas to the LLM.
 const ProgressiveDiscoveryThreshold = 5
+
+// AgentConstraints holds parsed runtime constraints from AgentProfile.Constraints.
+type AgentConstraints struct {
+	MaxIterations  int `json:"max_iterations"`
+	MaxTimeSeconds int `json:"max_time_seconds"`
+	RetryBudget    int `json:"retry_budget"`
+}
+
+// parseAgentConstraints parses the constraints JSON from an agent profile.
+// Returns zero-value struct on empty/invalid input (no constraints enforced).
+func parseAgentConstraints(raw string) AgentConstraints {
+	var c AgentConstraints
+	if raw == "" || raw == "{}" {
+		return c
+	}
+	json.Unmarshal([]byte(raw), &c)
+	return c
+}
 
 // requestToolsDef is a meta-tool the LLM can call to request full schemas
 // for specific tools by name or by describing intent. Delegates to
@@ -140,9 +157,8 @@ type Engine struct {
 	Activity        *ActivityEmitter
 	AppConfig       *config.AppConfig // app-level tunables (presence throttle, artifact detection)
 	OutputFilters   *filter.Chain     // post-LLM output filters (nil = no filtering)
-	WorkflowEngine  *workflow.Engine
-	WorkflowLoader  *workflow.Loader
 	ProcessTracker      *ProcessTracker
+	Commands            *CommandRegistry
 	cliActiveLastEmit   sync.Map // map[sessionID]time.Time — throttle cli_active presence
 	streams             sync.Map // map[string]chan StreamEvent
 	msgToSession    sync.Map // map[messageID]sessionID — tracks which session a stream belongs to
@@ -179,6 +195,7 @@ func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
 		UtilityModel:    utilityModel,
 		Broker:          NewContextClient(s),
 		ProcessTracker:  NewProcessTracker(),
+		Commands:        NewCommandRegistry(),
 	}
 }
 
@@ -220,11 +237,6 @@ func (e *Engine) HandleMessage(sessionID, content string) (string, error) {
 	}
 	if err := e.Store.CreateMessage(userMsg); err != nil {
 		return "", fmt.Errorf("create user message: %w", err)
-	}
-
-	// Check for /workflow trigger.
-	if strings.HasPrefix(content, "/workflow ") {
-		return e.handleWorkflowTrigger(sessionID, content, userMsg.ID)
 	}
 
 	// Create assistant message ID and stream channel.
@@ -440,6 +452,22 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 	}
 
+	// Block disabled agents from responding.
+	if agent.Status == "disabled" {
+		ch <- errorEvent(ErrorCodeInternal, fmt.Sprintf("Agent %q is disabled", agent.Name), nil)
+		return
+	}
+
+	// Parse agent constraints (schema v2).
+	constraints := parseAgentConstraints(agent.Constraints)
+
+	// Override context timeout if the agent has a max_time_seconds constraint.
+	if constraints.MaxTimeSeconds > 0 {
+		agentTimeout := time.Duration(constraints.MaxTimeSeconds) * time.Second
+		ctx, cancel = context.WithTimeout(ctx, agentTimeout)
+		defer cancel()
+	}
+
 	// Load agent mode.
 	mode, err := e.Store.GetAgentMode(agent.ID, modeName)
 	if err != nil {
@@ -573,6 +601,12 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// blockedTools tracks tools that have been hard-blocked due to repeated identical results.
 	// Checked BEFORE execution to prevent the tool from running at all.
 	blockedTools := make(map[string]bool)
+	// retryBudget tracks remaining retries for recoverable errors (agent constraint).
+	// -1 means unlimited (no constraint set).
+	retryBudget := -1
+	if constraints.RetryBudget > 0 {
+		retryBudget = constraints.RetryBudget
+	}
 	// consecutiveToolErrors tracks sequential tool failures to escalate user-visible warnings.
 	consecutiveToolErrors := 0
 	// pendingEnvelopes collects envelope JSON from KB tools to inject after the agent's response.
@@ -587,8 +621,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	var finalUsage *Usage
 	var breakdown *TokenBreakdown
 
+	// Determine effective iteration cap (agent constraint may lower it).
+	iterationCap := maxToolIterations
+	if constraints.MaxIterations > 0 && constraints.MaxIterations < iterationCap {
+		iterationCap = constraints.MaxIterations
+	}
+
 	iteration := 0
-	for ; iteration < maxToolIterations; iteration++ {
+	for ; iteration < iterationCap; iteration++ {
 		// Check if the overall deadline has been exceeded.
 		if ctx.Err() != nil {
 			log.Printf("[WARN] generateResponse context cancelled: %v (session=%s)", ctx.Err(), sessionID)
@@ -699,6 +739,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				go e.Activity.EmitError(ctx, sessionID, "provider_error", err.Error())
 				if errCode == ErrorCodeRateLimit {
 					go e.Activity.EmitRateLimitHit(ctx, sessionID, "anthropic", 0)
+				}
+			}
+			// Decrement retry budget on provider errors.
+			if retryBudget > 0 {
+				retryBudget--
+				if retryBudget == 0 {
+					log.Printf("chat: retry budget exhausted for session %s", sessionID)
 				}
 			}
 			errDetails := map[string]interface{}{
@@ -1074,6 +1121,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			// Emit tool_warning SSE event on errors so the user sees feedback.
 			if toolIsError {
 				consecutiveToolErrors++
+				if retryBudget > 0 {
+					retryBudget--
+				}
 				level := "warning"
 				if consecutiveToolErrors >= 3 {
 					level = "critical"
@@ -1190,6 +1240,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			time.Sleep(1 * time.Second)
 		}
 
+		// Check retry budget before next iteration.
+		if retryBudget == 0 {
+			log.Printf("chat: retry budget exhausted, stopping tool loop for session %s", sessionID)
+			ch <- StreamEvent{Type: "status", Content: "Retry budget exhausted — stopping."}
+			break
+		}
+
 		// Check circuit breaker before next iteration — stop if tripped.
 		if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil && ap.CircuitBreaker.IsOpen() {
 			log.Printf("chat: circuit breaker open, stopping tool-use loop at iteration %d", iteration)
@@ -1206,9 +1263,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Loop back for the next provider call.
 	}
 
-	if iteration >= maxToolIterations {
+	if iteration >= iterationCap {
 		log.Printf("[WARN] Tool loop exhausted after %d iterations for session=%s agent=%s", iteration, sessionID, agent.ID)
-		ch <- errorEnvelopeDelta(ErrorCodeInternal, fmt.Sprintf("Response may be incomplete — tool step limit (%d) reached. The assistant was still working when the limit was hit.", maxToolIterations), nil)
+		ch <- errorEnvelopeDelta(ErrorCodeInternal, fmt.Sprintf("Response may be incomplete — tool step limit (%d) reached. The assistant was still working when the limit was hit.", iterationCap), nil)
 	}
 
 	// Apply output filters (e.g. strip emoji) before parsing envelopes.
@@ -1907,6 +1964,12 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 		}
 	}
 
+	// Filter tools by agent.Tools allowlist (schema v2).
+	// Empty list ("[]") means no filtering — all tools available.
+	if agent, agErr := e.Store.GetAgent(agentID); agErr == nil {
+		allTools = filterToolsByAgentAllowlist(allTools, agent.Tools)
+	}
+
 	if len(allTools) == 0 {
 		log.Printf("chat: WARNING broker returned 0 tools for agent %s — proceeding without tools (LLM can still respond)", agentID)
 	} else {
@@ -1947,78 +2010,27 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 	}
 }
 
-// handleWorkflowTrigger detects "/workflow <name>" messages and routes to the workflow engine.
-func (e *Engine) handleWorkflowTrigger(sessionID, content, userMsgID string) (string, error) {
-	if e.WorkflowEngine == nil || e.WorkflowLoader == nil {
-		return "", fmt.Errorf("workflow engine not configured")
+// filterToolsByAgentAllowlist removes tools not matching the agent's tools allowlist.
+// An empty or "[]" allowlist means no filtering (all tools pass).
+func filterToolsByAgentAllowlist(tools []provider.ToolDefinition, allowlistJSON string) []provider.ToolDefinition {
+	if allowlistJSON == "" || allowlistJSON == "[]" {
+		return tools
 	}
-
-	// Parse: /workflow <name> [key=value ...]
-	parts := strings.Fields(content)
-	if len(parts) < 2 {
-		return "", fmt.Errorf("usage: /workflow <name> [key=value ...]")
+	var allowlist []string
+	if err := json.Unmarshal([]byte(allowlistJSON), &allowlist); err != nil || len(allowlist) == 0 {
+		return tools
 	}
-	wfName := parts[1]
-
-	def, ok := e.WorkflowLoader.Get(wfName)
-	if !ok {
-		return "", fmt.Errorf("workflow %q not found", wfName)
-	}
-
-	// Parse inputs from remaining args.
-	inputs := map[string]string{
-		"session_id": sessionID,
-	}
-	for _, arg := range parts[2:] {
-		kv := strings.SplitN(arg, "=", 2)
-		if len(kv) == 2 {
-			inputs[kv[0]] = kv[1]
+	filtered := make([]provider.ToolDefinition, 0, len(tools))
+	for _, t := range tools {
+		for _, pattern := range allowlist {
+			if toolclient.MatchPattern(pattern, t.Name) {
+				filtered = append(filtered, t)
+				break
+			}
 		}
 	}
-
-	// Create assistant message for workflow output.
-	assistantMsgID := uuid.New().String()
-	ch := make(chan StreamEvent, 128)
-	e.streams.Store(assistantMsgID, ch)
-	e.msgToSession.Store(assistantMsgID, sessionID)
-
-	go func() {
-		defer func() {
-			close(ch)
-			e.streams.Delete(assistantMsgID)
-			e.msgToSession.Delete(assistantMsgID)
-		}()
-
-		ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID}
-
-		result, err := e.WorkflowEngine.Execute(context.Background(), def, inputs)
-		if err != nil {
-			ch <- errorEvent(ErrorCodeInternal, "Workflow execution failed", map[string]interface{}{
-				"raw":      err.Error(),
-				"workflow": wfName,
-			})
-			return
-		}
-
-		output := fmt.Sprintf("**Workflow: %s**\n\n%s", wfName, result.FinalOutput)
-		ch <- StreamEvent{Type: "delta", Content: output}
-
-		// Save assistant message.
-		msg := &store.Message{
-			ID:        assistantMsgID,
-			SessionID: sessionID,
-			Role:      "assistant",
-			Content:   output,
-			Metadata:  fmt.Sprintf(`{"source":"workflow","workflow":"%s"}`, wfName),
-		}
-		if err := e.Store.CreateMessage(msg); err != nil {
-			log.Printf("chat: failed to save workflow result: %v", err)
-		}
-
-		ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID}
-	}()
-
-	return assistantMsgID, nil
+	log.Printf("chat: agent tools allowlist filtered %d → %d tools", len(tools), len(filtered))
+	return filtered
 }
 
 // RetryLastMessage resets the circuit breaker and re-triggers generation for a session.

@@ -8,15 +8,38 @@ import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
-import type { AgentMode } from '@/lib/types'
 import { AgentRoster } from './AgentRoster'
 import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 
-const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; border: string; text: string }> = {
-  default: { bg: 'bg-blue-500/15', border: 'border-blue-500/25', text: 'text-blue-400' },
-  architect: { bg: 'bg-purple-500/15', border: 'border-purple-500/25', text: 'text-purple-400' },
-  planner: { bg: 'bg-green-500/15', border: 'border-green-500/25', text: 'text-green-400' },
-  writer: { bg: 'bg-amber-500/15', border: 'border-amber-500/25', text: 'text-amber-400' },
+// Capability pills — detected, not user-set
+interface Capability {
+  label: string
+  color: string // tailwind text color class
+  bg: string    // tailwind bg class
+}
+
+function detectCapabilities(provider?: string, mode?: string, toolCount?: number): Capability[] {
+  const caps: Capability[] = []
+
+  // Agent mode — always present
+  caps.push({ label: 'Agent', color: 'text-blue-400', bg: 'bg-blue-500/15' })
+
+  // Plan mode — detected when mode is planner or architect
+  if (mode === 'planner' || mode === 'architect') {
+    caps.push({ label: 'Plan', color: 'text-green-400', bg: 'bg-green-500/15' })
+  }
+
+  // PTY — detected when using a PTY/subprocess adapter
+  if (provider?.startsWith('pty')) {
+    caps.push({ label: 'PTY', color: 'text-cyan-400', bg: 'bg-cyan-500/15' })
+  }
+
+  // Tools — detected when MCP tools are available
+  if (toolCount && toolCount > 0) {
+    caps.push({ label: 'Tools', color: 'text-amber-400', bg: 'bg-amber-500/15' })
+  }
+
+  return caps
 }
 
 export function ChatHeader() {
@@ -28,6 +51,7 @@ export function ChatHeader() {
   const setToolDrawerState = useLayoutStore((s) => s.setToolDrawerState)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeMode = useChatStore((s) => s.activeMode)
+  const toolCalls = useChatStore((s) => s.toolCalls)
   const queryClient = useQueryClient()
 
   const [isEditing, setIsEditing] = useState(false)
@@ -49,6 +73,13 @@ export function ChatHeader() {
     enabled: !!activeSessionId,
   })
 
+  // Tool count from the tools API for capability detection
+  const { data: tools = [] } = useQuery({
+    queryKey: ['tools'],
+    queryFn: api.fetchTools,
+    staleTime: 60_000,
+  })
+
   const configVersion = useAppStore((s) => s.configVersion)
 
   const { data: allAgents = [] } = useQuery({
@@ -64,6 +95,13 @@ export function ChatHeader() {
   const agentCount = sessionAgents.length
   const title = session?.custom_name || session?.title || 'New Chat'
   const shortCode = session?.short_code
+
+  // Detect capabilities
+  const capabilities = detectCapabilities(
+    session?.provider,
+    activeMode,
+    tools.length + (toolCalls?.length || 0),
+  )
 
   // Switch primary agent for this session
   const switchAgentMutation = useMutation({
@@ -162,8 +200,6 @@ export function ChatHeader() {
     },
   })
 
-  const modeStyle = MODE_BADGE_STYLES[activeMode]
-
   return (
     <header className="flex items-center justify-between px-4 h-12 border-b border-zinc-800 shrink-0">
       <div className="flex items-center gap-3">
@@ -230,17 +266,17 @@ export function ChatHeader() {
             </div>
           )}
 
-          {/* Agent + Mode badge + dropdown */}
+          {/* Agent badge + dropdown */}
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((o) => !o)}
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${modeStyle.bg} border ${modeStyle.border} transition-colors hover:brightness-125`}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 transition-colors hover:border-zinc-600"
             >
-              <Bot className={`w-3 h-3 ${modeStyle.text}`} />
-              <span className={`text-xs ${modeStyle.text}`}>
+              <Bot className="w-3 h-3 text-zinc-400" />
+              <span className="text-xs text-zinc-300">
                 {activeAgentName}
               </span>
-              <ChevronDown className={`w-3 h-3 ${modeStyle.text}`} />
+              <ChevronDown className="w-3 h-3 text-zinc-500" />
             </button>
 
             {dropdownOpen && (
@@ -267,6 +303,18 @@ export function ChatHeader() {
 
               </div>
             )}
+          </div>
+
+          {/* Capability indicator pills */}
+          <div className="flex items-center gap-1">
+            {capabilities.map((cap) => (
+              <span
+                key={cap.label}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${cap.color} ${cap.bg}`}
+              >
+                {cap.label}
+              </span>
+            ))}
           </div>
         </div>
       </div>

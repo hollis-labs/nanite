@@ -1,18 +1,44 @@
 import { createRoot, type Root } from 'react-dom/client'
 import type { SuggestionOptions, SuggestionProps } from '@tiptap/suggestion'
 import { SlashCommandMenu, type SlashCommandMenuRef } from './SlashCommandMenu'
-import { COMMANDS, type SlashCommand } from './SlashCommandExtension'
+import type { SlashCommand } from './SlashCommandExtension'
+import { setSlashMenuOpen } from '../ChatComposer'
+
+// Cache fetched commands with a short TTL
+let commandsCache: SlashCommand[] = []
+let cacheTimestamp = 0
+const CACHE_TTL_MS = 30_000
+
+async function fetchCommands(): Promise<SlashCommand[]> {
+  const now = Date.now()
+  if (commandsCache.length > 0 && now - cacheTimestamp < CACHE_TTL_MS) {
+    return commandsCache
+  }
+  try {
+    const res = await fetch('/api/commands')
+    if (!res.ok) return commandsCache
+    const data = await res.json()
+    commandsCache = data
+    cacheTimestamp = now
+    return data
+  } catch {
+    return commandsCache
+  }
+}
 
 export const slashCommandSuggestion: Omit<SuggestionOptions<SlashCommand>, 'editor'> = {
   char: '/',
   startOfLine: false,
 
-  items: ({ query }) => {
-    return COMMANDS.filter(
+  items: async ({ query }) => {
+    const commands = await fetchCommands()
+    const q = query.toLowerCase()
+    return commands.filter(
       (cmd) =>
-        cmd.name.toLowerCase().includes(query.toLowerCase()) ||
-        cmd.description.toLowerCase().includes(query.toLowerCase())
-    ).slice(0, 8)
+        cmd.name.toLowerCase().includes(q) ||
+        cmd.description.toLowerCase().includes(q) ||
+        cmd.category.toLowerCase().includes(q)
+    ).slice(0, 10)
   },
 
   render: () => {
@@ -22,6 +48,8 @@ export const slashCommandSuggestion: Omit<SuggestionOptions<SlashCommand>, 'edit
 
     return {
       onStart: (props: SuggestionProps<SlashCommand>) => {
+        setSlashMenuOpen(true)
+
         popup = document.createElement('div')
         popup.style.position = 'absolute'
         popup.style.zIndex = '50'
@@ -73,6 +101,7 @@ export const slashCommandSuggestion: Omit<SuggestionOptions<SlashCommand>, 'edit
     }
 
     function cleanup() {
+      setSlashMenuOpen(false)
       if (root) {
         root.unmount()
         root = null

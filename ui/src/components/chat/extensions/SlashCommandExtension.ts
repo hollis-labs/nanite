@@ -6,19 +6,8 @@ export interface SlashCommand {
   name: string
   description: string
   category: string
+  source: string
 }
-
-export const COMMANDS: SlashCommand[] = [
-  { name: 'mode', description: 'Switch agent mode', category: 'agent' },
-  { name: 'architect', description: 'Switch to architect mode', category: 'agent' },
-  { name: 'planner', description: 'Switch to planner mode', category: 'agent' },
-  { name: 'writer', description: 'Switch to writer mode', category: 'agent' },
-  { name: 'compact', description: 'Compact session context', category: 'session' },
-  { name: 'new', description: 'Create new chat session', category: 'session' },
-  { name: 'bookmark', description: 'Bookmark last message', category: 'tools' },
-  { name: 'template', description: 'Apply a template to format the last response', category: 'tools' },
-  { name: 'help', description: 'Show available commands', category: 'help' },
-]
 
 export type SlashCommandSuggestionOptions = Omit<SuggestionOptions<SlashCommand>, 'editor'>
 
@@ -34,16 +23,11 @@ export const SlashCommandExtension = Extension.create<SlashCommandOptions>({
       suggestion: {
         char: '/',
         startOfLine: false,
-        command: ({ editor, range, props }: { editor: Editor; range: { from: number; to: number }; props: SlashCommand }) => {
+        command: ({ editor, range }: { editor: Editor; range: { from: number; to: number }; props: SlashCommand }) => {
+          // Delete the /query text — execution is handled by the composer via onCommand callback
           editor.chain().focus().deleteRange(range).run()
-          editor.chain().focus().insertContent(`/${props.name} `).run()
         },
-        items: ({ query }: { query: string }) => {
-          return COMMANDS.filter((cmd) =>
-            cmd.name.toLowerCase().includes(query.toLowerCase()) ||
-            cmd.description.toLowerCase().includes(query.toLowerCase())
-          ).slice(0, 8)
-        },
+        items: () => [],
       } as SlashCommandSuggestionOptions,
     }
   },

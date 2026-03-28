@@ -17,7 +17,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const taskThreadOpen = useLayoutStore((s) => s.taskThreadOpen)
   const toggleTaskThread = useLayoutStore((s) => s.toggleTaskThread)
-  const { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sessionTakeover, sendMessage, stopStreaming, retryStream, dismissCircuit } =
+  const { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sessionTakeover, sendMessage, loadMessages, stopStreaming, retryStream, dismissCircuit } =
     useChat(activeSessionId)
   const { isTaskSession, taskId } = useTaskContext()
 
@@ -107,6 +107,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           isStreaming={isStreaming}
           onStop={stopStreaming}
           onEditorReady={onEditorReady}
+          reloadMessages={loadMessages}
         />
       </main>
       {isTaskSession && taskId && (

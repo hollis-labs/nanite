@@ -4,12 +4,26 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/conduit/internal/secrets"
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/fragments-engine/plugin"
 )
+
+// validComponentID matches alphanumeric + hyphens, 2-64 chars, no leading/trailing hyphens.
+var validComponentID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`)
+
+// validComponentTypes is the set of allowed UIComponentType values.
+var validComponentTypes = map[plugin.UIComponentType]bool{
+	plugin.UIComponentTypeWidget:   true,
+	plugin.UIComponentTypeEnvelope: true,
+	plugin.UIComponentTypeAction:   true,
+	plugin.UIComponentTypeWorkflow: true,
+	plugin.UIComponentTypeView:     true,
+}
 
 // Host implements the plugin.Host interface for Conduit.
 // It provides the runtime environment and services for plugins.
@@ -18,8 +32,10 @@ type Host struct {
 	plugins      map[string]plugin.Plugin
 	eventHooks   map[string][]plugin.EventHook
 	crudHandlers map[string]plugin.CRUDHandler
-	uiComponents []plugin.UIComponent
-	connectors   map[string]plugin.Connector
+	uiComponents  []plugin.UIComponent
+	uiOwners      map[string]string // component ID → plugin ID that registered it
+	connectors    map[string]plugin.Connector
+	slashCmds    map[string]plugin.SlashCommandDef
 	services     map[string]interface{}
 	configs      map[string]*PluginConfig // per-plugin config, keyed by plugin ID
 	activePlugin string                   // ID of the plugin currently being loaded
@@ -38,7 +54,9 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		eventHooks:   make(map[string][]plugin.EventHook),
 		crudHandlers: make(map[string]plugin.CRUDHandler),
 		uiComponents: []plugin.UIComponent{},
+		uiOwners:     make(map[string]string),
 		connectors:   make(map[string]plugin.Connector),
+		slashCmds:    make(map[string]plugin.SlashCommandDef),
 		services:     make(map[string]interface{}),
 		configs:      make(map[string]*PluginConfig),
 		router:       router,
@@ -58,7 +76,9 @@ func NewHostWithStore(store interface{}) *Host {
 		eventHooks:   make(map[string][]plugin.EventHook),
 		crudHandlers: make(map[string]plugin.CRUDHandler),
 		uiComponents: []plugin.UIComponent{},
+		uiOwners:     make(map[string]string),
 		connectors:   make(map[string]plugin.Connector),
+		slashCmds:    make(map[string]plugin.SlashCommandDef),
 		services:     make(map[string]interface{}),
 		configs:      make(map[string]*PluginConfig),
 		router:       http.NewServeMux(),
@@ -162,10 +182,35 @@ func (h *Host) RegisterEventHook(eventTypes []string, hook plugin.EventHook) err
 
 // RegisterUIComponent registers UI components for the frontend.
 func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
+	// Validate ID format: lowercase alphanumeric + hyphens, 2-64 chars.
+	if !validComponentID.MatchString(component.ID) {
+		return fmt.Errorf("invalid UI component ID %q: must be 2-64 chars, lowercase alphanumeric and hyphens, no leading/trailing hyphens", component.ID)
+	}
+
+	// Validate type is a known UIComponentType.
+	if !validComponentTypes[component.Type] {
+		return fmt.Errorf("invalid UI component type %q for %q: must be widget, envelope, action, workflow, or view", component.Type, component.ID)
+	}
+
+	// Validate name length.
+	if len(component.Name) == 0 || len(component.Name) > 128 {
+		return fmt.Errorf("UI component %q name must be 1-128 characters", component.ID)
+	}
+	if len(component.Description) > 512 {
+		return fmt.Errorf("UI component %q description must be <= 512 characters", component.ID)
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Replace existing component with same ID, or append.
+	callerPlugin := h.activePlugin
+
+	// Check for cross-plugin ID collision: reject if a different plugin already owns this ID.
+	if owner, exists := h.uiOwners[component.ID]; exists && owner != callerPlugin {
+		return fmt.Errorf("UI component ID %q already registered by plugin %q (caller: %q)", component.ID, owner, callerPlugin)
+	}
+
+	// Replace existing component with same ID (same plugin re-registering), or append.
 	alreadyRegistered := false
 	for i, existing := range h.uiComponents {
 		if existing.ID == component.ID {
@@ -178,6 +223,11 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 		h.uiComponents = append(h.uiComponents, component)
 	}
 
+	// Track ownership.
+	if callerPlugin != "" {
+		h.uiOwners[component.ID] = callerPlugin
+	}
+
 	// If the component has a server-side handler, register the route (only once).
 	if component.Handler != nil && !alreadyRegistered {
 		path := fmt.Sprintf("/api/plugins/ui/%s", component.ID)
@@ -185,7 +235,12 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 		h.logger.Info("registered UI component handler", "id", component.ID, "path", path)
 	}
 
-	h.logger.Info("registered UI component", "id", component.ID, "type", component.Type)
+	// Warn if widget type registered without a handler (data endpoint).
+	if component.Type == plugin.UIComponentTypeWidget && component.Handler == nil {
+		h.logger.Info("widget registered without data handler", "id", component.ID, "plugin", callerPlugin)
+	}
+
+	h.logger.Info("registered UI component", "id", component.ID, "type", component.Type, "plugin", callerPlugin)
 	return nil
 }
 
@@ -236,7 +291,7 @@ func (h *Host) SetStore(s *store.Store) {
 }
 
 // GetConfig returns a configuration value for the currently-loading plugin.
-// Resolution order: env var -> DB setting -> config file override -> default from schema.
+// Resolution order: keychain (for secret fields) -> env var -> DB setting -> config file override -> default from schema.
 func (h *Host) GetConfig(key string) (string, error) {
 	h.mu.RLock()
 	id := h.activePlugin
@@ -244,7 +299,13 @@ func (h *Host) GetConfig(key string) (string, error) {
 	s := h.store
 	h.mu.RUnlock()
 
-	// Try DB first (if store is available).
+	// Check keychain first (secret fields are stored there, not in DB).
+	keychainKey := "plugin:" + id + ":" + key
+	if val := secrets.Get(keychainKey); val != "" {
+		return val, nil
+	}
+
+	// Try DB (if store is available).
 	if s != nil && id != "" {
 		if val, err := s.GetPluginSettingValue(id, key); err == nil && val != "" {
 			return val, nil
@@ -381,6 +442,26 @@ func (h *Host) RegisterCLIAdapter(name string, adapter interface{}) error {
 	return nil
 }
 
+// RegisterCommand registers a slash command from a plugin.
+func (h *Host) RegisterCommand(cmd plugin.SlashCommandDef) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.slashCmds[cmd.Name] = cmd
+	h.logger.Info("registered slash command", "name", cmd.Name, "category", cmd.Category)
+	return nil
+}
+
+// GetSlashCommands returns all plugin-registered slash commands.
+func (h *Host) GetSlashCommands() []plugin.SlashCommandDef {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make([]plugin.SlashCommandDef, 0, len(h.slashCmds))
+	for _, cmd := range h.slashCmds {
+		out = append(out, cmd)
+	}
+	return out
+}
+
 // PlaceArtifact creates an artifact with origin="placed" for the calling plugin.
 // This is used when a plugin wants to deliberately surface a file to the user
 // (reports, exports, generated content).
@@ -502,6 +583,12 @@ func (h *Host) EmitEvent(event plugin.Event) {
 	wg.Wait()
 }
 
+// UIComponentWithOwner wraps a UIComponent with its owning plugin ID.
+type UIComponentWithOwner struct {
+	plugin.UIComponent
+	PluginID string `json:"plugin_id,omitempty"`
+}
+
 // GetUIComponents returns all registered UI components.
 func (h *Host) GetUIComponents() []plugin.UIComponent {
 	h.mu.RLock()
@@ -511,6 +598,21 @@ func (h *Host) GetUIComponents() []plugin.UIComponent {
 	components := make([]plugin.UIComponent, len(h.uiComponents))
 	copy(components, h.uiComponents)
 	return components
+}
+
+// GetUIComponentsWithOwners returns all registered UI components with plugin ownership info.
+func (h *Host) GetUIComponentsWithOwners() []UIComponentWithOwner {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	out := make([]UIComponentWithOwner, len(h.uiComponents))
+	for i, c := range h.uiComponents {
+		out[i] = UIComponentWithOwner{
+			UIComponent: c,
+			PluginID:    h.uiOwners[c.ID],
+		}
+	}
+	return out
 }
 
 // GetCRUDHandlers returns all registered CRUD handlers.

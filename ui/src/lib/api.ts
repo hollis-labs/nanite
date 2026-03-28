@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary, ProcessHealthResponse, PluginConfig, PluginUIComponent } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary, ProcessHealthResponse, PluginConfig, PluginUIComponent } from './types'
 
 const API_BASE = '/api'
 
@@ -163,6 +163,23 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to switch mode: ${res.status}`)
   },
 
+  // Slash Commands
+  listCommands: async (): Promise<{ name: string; description: string; category: string; source: string }[]> => {
+    const res = await fetch(`${API_BASE}/commands`)
+    if (!res.ok) throw new Error(`Failed to list commands: ${res.status}`)
+    return res.json()
+  },
+
+  executeCommand: async (name: string, sessionId: string, args: string): Promise<{ action: string; content?: string }> => {
+    const res = await fetch(`${API_BASE}/commands/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, session_id: sessionId, args }),
+    })
+    if (!res.ok) throw new Error(`Failed to execute command: ${res.status}`)
+    return res.json()
+  },
+
   // Pin/Unpin
   pinSession: async (id: string, pinned: boolean): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions/${id}`, {
@@ -214,29 +231,6 @@ export const api = {
       method: 'POST',
     })
     if (!res.ok) throw new Error(`Failed to compact session: ${res.status}`)
-  },
-
-  // Workflows
-  listWorkflows: async (): Promise<Workflow[]> => {
-    const res = await fetch(`${API_BASE}/workflows`)
-    if (!res.ok) throw new Error(`Failed to list workflows: ${res.status}`)
-    return res.json()
-  },
-
-  getWorkflow: async (name: string): Promise<Workflow> => {
-    const res = await fetch(`${API_BASE}/workflows/${name}`)
-    if (!res.ok) throw new Error(`Failed to get workflow: ${res.status}`)
-    return res.json()
-  },
-
-  runWorkflow: async (name: string, inputs: Record<string, unknown>): Promise<WorkflowResult> => {
-    const res = await fetch(`${API_BASE}/workflows/${name}/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(inputs),
-    })
-    if (!res.ok) throw new Error(`Failed to run workflow: ${res.status}`)
-    return res.json()
   },
 
   // Providers

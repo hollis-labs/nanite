@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -24,7 +25,14 @@ func (s *Store) DBPath() string {
 }
 
 // New opens a SQLite database at dbPath and runs all embedded migrations.
+// The dbPath is resolved to an absolute path so that DBPath() is safe
+// to use from subprocesses running in different working directories.
 func New(dbPath string) (*Store, error) {
+	absPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve db path: %w", err)
+	}
+
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -42,7 +50,7 @@ func New(dbPath string) (*Store, error) {
 		}
 	}
 
-	s := &Store{DB: db, dbPath: dbPath}
+	s := &Store{DB: db, dbPath: absPath}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)

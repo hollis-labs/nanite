@@ -130,7 +130,7 @@ ALWAYS set "version": 1. NEVER invent envelope types — only use registered typ
 
 Registered types: task-disposition, giphy-modal, document-viewer, report-card,
 task-complete-notification, sprint-planning-review, kb-result,
-ticket-confirmation, ticket-form, resolution-capture
+ticket-confirmation, ticket-form, resolution-capture, error-report
 
 Unregistered types are silently dropped by the UI — no error, no warning.
 
@@ -156,8 +156,11 @@ const envelopeSchemaContent = `# Conduit Envelope Schema
 
 ## Format
 
-Wrap envelopes in a fenced code block with the ` + "`conduit-envelope`" + ` language tag:
+Wrap envelopes in a fenced code block with the ` + "`conduit-envelope`" + ` language tag.
 
+There are two envelope patterns:
+
+### Interactive envelopes (user input)
 ` + "```" + `conduit-envelope
 {
   "kind": "question|action|approval",
@@ -170,14 +173,27 @@ Wrap envelopes in a fenced code block with the ` + "`conduit-envelope`" + ` lang
 }
 ` + "```" + `
 
+### Plugin/display envelopes (rich UI cards)
+` + "```" + `conduit-envelope
+{
+  "kind": "envelope",
+  "version": 1,
+  "type": "<registered-type>",
+  "data": { ... }
+}
+` + "```" + `
+
+Use kind="envelope" with a registered type for display cards (kb-result, giphy-modal, report-card, etc.). Use kind="question"/"action"/"approval" for interactive forms and proposals.
+
 ## Field Reference
 
 ### Root Fields
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| kind | string | yes | "question", "action", or "approval" |
+| kind | string | yes | "question", "action", "approval", or "envelope" |
 | version | number | yes | Always 1 |
-| type | string | yes | "conduit" for standard envelopes |
+| type | string | yes | "conduit" for interactive envelopes; a registered type name for display envelopes |
+| data | object | conditional | Required when kind="envelope" — card-specific payload |
 | questions | array | conditional | Required when kind="question" |
 | proposals | array | conditional | Required when kind="action" |
 | approval | object | conditional | Required when kind="approval" |

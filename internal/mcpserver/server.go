@@ -32,7 +32,7 @@ func New(s *store.Store, sessionID string) *Server {
 func (s *Server) Run(ctx context.Context) error {
 	srv := server.NewMCPServer(
 		"conduit",
-		"0.1.0",
+		"0.2.0",
 		server.WithToolCapabilities(true),
 	)
 	s.registerTools(srv)

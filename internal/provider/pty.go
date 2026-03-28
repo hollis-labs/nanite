@@ -99,7 +99,8 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 	cliSessionID, _ := CLISessionIDFromContext(ctx)
 	args := p.adapter.BuildArgs(prompt, systemPrompt, cliSessionID)
 
-	log.Printf("pty[%s]: args=%v", p.adapter.Name(), args)
+	// Avoid logging full CLI arguments to prevent leaking user prompts or other sensitive data.
+	log.Printf("pty[%s]: launching CLI with %d args", p.adapter.Name(), len(args))
 
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
 

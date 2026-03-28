@@ -147,6 +147,21 @@ func cmdServe(args []string) {
 		log.Println("╚══════════════════════════════════════════════════════════════╝")
 	}
 
+	if os.Getenv("GOOGLE_API_KEY") != "" {
+		registry.Register("gemini", provider.NewGemini())
+		log.Println("gemini provider registered")
+	}
+
+	if os.Getenv("MISTRAL_API_KEY") != "" {
+		registry.Register("mistral", provider.NewMistral())
+		log.Println("mistral provider registered")
+	}
+
+	if os.Getenv("AZURE_OPENAI_API_KEY") != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
+		registry.Register("azure-openai", provider.NewAzureOpenAI())
+		log.Println("azure-openai provider registered")
+	}
+
 	// Always register Ollama — it requires no API key (local service).
 	registry.Register("ollama", provider.NewOllama())
 	log.Println("ollama provider registered (default host: http://localhost:11434)")
@@ -156,6 +171,8 @@ func cmdServe(args []string) {
 		provider.NewClaudeAdapter(),
 		provider.NewCodexAdapter(),
 		provider.NewGeminiAdapter(),
+		provider.NewCopilotAdapter(),
+		provider.NewAiderAdapter(),
 	}
 	for _, adapter := range cliAdapters {
 		if path, ok := adapter.Detect(); ok {
@@ -175,10 +192,19 @@ func cmdServe(args []string) {
 		registry.Register("pty", ptyBridge)
 	}
 
-	// Create chat engine. UtilityProvider controls which provider handles
-	// lightweight calls like autoTitle/autoTags (default: "anthropic").
-	utilityProvider := os.Getenv("CONDUIT_UTILITY_PROVIDER")
-	engine := chat.NewEngine(s, registry, utilityProvider)
+	// Load app-level config (tunables like presence throttle, artifact detection).
+	appCfg, err := config.LoadAppConfig("config/conduit.yaml")
+	if err != nil {
+		log.Printf("warning: failed to load app config: %v (using defaults)", err)
+		appCfg = config.DefaultAppConfig()
+	}
+	log.Printf("app config loaded (cli_active_throttle=%ds, auto_detect_tools=%d)",
+		appCfg.Presence.CLIActiveThrottleSeconds, len(appCfg.Artifacts.AutoDetectTools))
+
+	// Create chat engine. Utility provider/model read from DB settings first,
+	// then env vars, then defaults. See Engine.NewEngine for cascade.
+	engine := chat.NewEngine(s, registry)
+	engine.AppConfig = appCfg
 
 	// Configure output filters. Default: strip emoji from LLM responses.
 	// Additional filters can be added to the chain here or via MENTAT_OUTPUT_FILTERS env var.
@@ -353,7 +379,10 @@ func cmdServe(args []string) {
 	logger := plugin.NewLogger("conduit-plugin")
 	pluginHost := plugin.NewHost(nil, logger)
 
-	// Register core services for plugin access
+	// Wire DB store for plugin config persistence.
+	pluginHost.SetStore(s)
+
+	// Register core services for plugin access.
 	pluginHost.RegisterService("store", s)
 	pluginHost.RegisterService("engine", engine)
 	pluginHost.RegisterService("mcp", mcpManager)

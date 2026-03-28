@@ -78,6 +78,8 @@ func (s *Store) migrate() error {
 		"migrations/011_add_codex_gemini_providers.sql",
 		"migrations/012_add_user_settings.sql",
 		"migrations/013_add_execution_metrics.sql",
+		"migrations/014_add_plugin_settings.sql",
+		"migrations/015_extend_artifacts.sql",
 	}
 
 	for _, f := range files {

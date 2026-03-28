@@ -343,6 +343,119 @@ When user says "let us plan" or "create demo sprints":
 		return fmt.Errorf("insert gemini-cli model: %w", err)
 	}
 
+	// --- Provider: PTY (Copilot CLI) ---
+	copilotProviderID := "pty-copilot-001"
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
+		 VALUES (?, ?, ?, ?)`,
+		copilotProviderID, "GitHub Copilot CLI (PTY)", "pty-copilot", "",
+	); err != nil {
+		return fmt.Errorf("insert copilot provider: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"copilot-cli", copilotProviderID, "copilot-cli", "Copilot CLI",
+		0, 0, false,
+	); err != nil {
+		return fmt.Errorf("insert copilot-cli model: %w", err)
+	}
+
+	// --- Provider: PTY (Aider CLI) ---
+	aiderProviderID := "pty-aider-001"
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
+		 VALUES (?, ?, ?, ?)`,
+		aiderProviderID, "Aider CLI (PTY)", "pty-aider", "",
+	); err != nil {
+		return fmt.Errorf("insert aider provider: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"aider-cli", aiderProviderID, "aider-cli", "Aider CLI",
+		0, 0, false,
+	); err != nil {
+		return fmt.Errorf("insert aider-cli model: %w", err)
+	}
+
+	// --- Provider: Google Gemini API ---
+	geminiAPIProviderID := "gemini-api-001"
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
+		 VALUES (?, ?, ?, ?)`,
+		geminiAPIProviderID, "Google Gemini", "gemini", "",
+	); err != nil {
+		return fmt.Errorf("insert gemini api provider: %w", err)
+	}
+
+	for _, m := range []struct {
+		id, modelID, display string
+		ctx, maxOut          int
+	}{
+		{"gemini-2.5-flash", "gemini-2.5-flash", "Gemini 2.5 Flash", 1048576, 8192},
+		{"gemini-2.5-pro", "gemini-2.5-pro", "Gemini 2.5 Pro", 1048576, 8192},
+		{"gemini-2.0-flash", "gemini-2.0-flash", "Gemini 2.0 Flash", 1048576, 8192},
+	} {
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			m.id, geminiAPIProviderID, m.modelID, m.display, m.ctx, m.maxOut, true,
+		); err != nil {
+			return fmt.Errorf("insert gemini model %s: %w", m.id, err)
+		}
+	}
+
+	// --- Provider: Mistral ---
+	mistralProviderID := "mistral-001"
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
+		 VALUES (?, ?, ?, ?)`,
+		mistralProviderID, "Mistral", "mistral", "",
+	); err != nil {
+		return fmt.Errorf("insert mistral provider: %w", err)
+	}
+
+	for _, m := range []struct {
+		id, modelID, display string
+		ctx, maxOut          int
+	}{
+		{"mistral-large", "mistral-large-latest", "Mistral Large", 131072, 8192},
+		{"mistral-medium", "mistral-medium-latest", "Mistral Medium", 131072, 8192},
+		{"mistral-small", "mistral-small-latest", "Mistral Small", 131072, 8192},
+		{"codestral", "codestral-latest", "Codestral", 262144, 8192},
+	} {
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			m.id, mistralProviderID, m.modelID, m.display, m.ctx, m.maxOut, true,
+		); err != nil {
+			return fmt.Errorf("insert mistral model %s: %w", m.id, err)
+		}
+	}
+
+	// --- Provider: Azure OpenAI ---
+	azureProviderID := "azure-openai-001"
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
+		 VALUES (?, ?, ?, ?)`,
+		azureProviderID, "Azure OpenAI", "azure-openai", "",
+	); err != nil {
+		return fmt.Errorf("insert azure-openai provider: %w", err)
+	}
+
+	// Azure models are deployment-specific; seed a placeholder.
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"azure-gpt4o", azureProviderID, "gpt-4o", "Azure GPT-4o",
+		128000, 16384, true,
+	); err != nil {
+		return fmt.Errorf("insert azure gpt-4o model: %w", err)
+	}
+
 	return tx.Commit()
 }
 

@@ -17,6 +17,15 @@ var modelPricing = map[string][2]float64{
 	"gpt-4o":      {2.5, 10.0},
 	"gpt-4o-mini": {0.15, 0.60},
 	"gpt-4-turbo": {10.0, 30.0},
+	// Google Gemini
+	"gemini-2.5-flash": {0.15, 0.60},
+	"gemini-2.5-pro":   {1.25, 10.0},
+	"gemini-2.0-flash": {0.10, 0.40},
+	// Mistral
+	"mistral-large-latest":  {2.0, 6.0},
+	"mistral-medium-latest": {0.40, 2.0},
+	"mistral-small-latest":  {0.10, 0.30},
+	"codestral-latest":      {0.30, 0.90},
 }
 
 // estimateCost returns the estimated cost in USD for the given model and token counts.

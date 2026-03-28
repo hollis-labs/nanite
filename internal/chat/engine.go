@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
+	"github.com/hollis-labs/conduit/internal/config"
 	"github.com/hollis-labs/conduit/internal/filter"
 	"github.com/hollis-labs/conduit/internal/mcp"
 	"github.com/hollis-labs/conduit/internal/provider"
@@ -137,27 +138,48 @@ type Engine struct {
 	ToolClient      *toolclient.ToolClient
 	Orchestrator    *Orchestrator
 	Activity        *ActivityEmitter
-	OutputFilters   *filter.Chain // post-LLM output filters (nil = no filtering)
+	AppConfig       *config.AppConfig // app-level tunables (presence throttle, artifact detection)
+	OutputFilters   *filter.Chain     // post-LLM output filters (nil = no filtering)
 	WorkflowEngine  *workflow.Engine
 	WorkflowLoader  *workflow.Loader
-	ProcessTracker  *ProcessTracker
-	streams         sync.Map // map[string]chan StreamEvent
+	ProcessTracker      *ProcessTracker
+	cliActiveLastEmit   sync.Map // map[sessionID]time.Time — throttle cli_active presence
+	streams             sync.Map // map[string]chan StreamEvent
 	msgToSession    sync.Map // map[messageID]sessionID — tracks which session a stream belongs to
 	sessionSSE      sync.Map // map[sessionID]*sseConn — one active SSE connection per session
 	presenceClients sync.Map // map[clientID]chan PresenceEvent — presence SSE listeners
 	activePresence  sync.Map // map[sessionID]PresenceEvent — currently-streaming sessions (for initial state on connect)
 }
 
-// NewEngine creates a new chat engine. utilityProvider names the provider used
-// for lightweight utility calls (autoTitle, autoTags). Pass "" to default to "anthropic".
-func NewEngine(s *store.Store, providers *provider.Registry, utilityProvider string) *Engine {
+// NewEngine creates a new chat engine. It reads utility provider/model from
+// database user_settings first, then falls back to environment variables, then
+// to hardcoded defaults (anthropic / claude-sonnet-4-20250514).
+func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
+	utilityProvider := ""
+	utilityModel := ""
+
+	// Prefer DB user_settings (written by the frontend settings UI).
+	if settings, err := s.GetUserSettings(); err == nil {
+		utilityProvider = settings.UtilityProvider
+		utilityModel = settings.UtilityModel
+	}
+
+	// Fall back to env vars for backwards compatibility.
+	if utilityProvider == "" {
+		utilityProvider = os.Getenv("CONDUIT_UTILITY_PROVIDER")
+	}
+	if utilityModel == "" {
+		utilityModel = os.Getenv("CONDUIT_UTILITY_MODEL")
+	}
+
+	// Final defaults.
 	if utilityProvider == "" {
 		utilityProvider = "anthropic"
 	}
-	utilityModel := os.Getenv("CONDUIT_UTILITY_MODEL")
 	if utilityModel == "" {
 		utilityModel = "claude-sonnet-4-20250514"
 	}
+
 	return &Engine{
 		Store:           s,
 		Providers:       providers,
@@ -165,6 +187,17 @@ func NewEngine(s *store.Store, providers *provider.Registry, utilityProvider str
 		UtilityModel:    utilityModel,
 		Broker:          NewContextClient(s),
 		ProcessTracker:  NewProcessTracker(),
+	}
+}
+
+// RefreshUtilitySettings updates the utility provider and model on the running
+// engine. Called by the settings API after a user changes preferences.
+func (e *Engine) RefreshUtilitySettings(provider, model string) {
+	if provider != "" {
+		e.UtilityProvider = provider
+	}
+	if model != "" {
+		e.UtilityModel = model
 	}
 }
 
@@ -301,6 +334,42 @@ func (e *Engine) broadcastPresence(event PresenceEvent) {
 			log.Printf("presence: dropped event for slow client %s", key.(string))
 		}
 		return true
+	})
+}
+
+// throttledCLIActivePresence emits a cli_active presence event at most once per
+// the configured throttle interval per session. This signals that a PTY process
+// is producing output between formal message boundaries.
+func (e *Engine) throttledCLIActivePresence(sessionID string) {
+	throttle := 5 * time.Second
+	if e.AppConfig != nil && e.AppConfig.Presence.CLIActiveThrottleSeconds > 0 {
+		throttle = time.Duration(e.AppConfig.Presence.CLIActiveThrottleSeconds) * time.Second
+	}
+
+	now := time.Now()
+	if last, ok := e.cliActiveLastEmit.Load(sessionID); ok {
+		if now.Sub(last.(time.Time)) < throttle {
+			return
+		}
+	}
+	e.cliActiveLastEmit.Store(sessionID, now)
+
+	e.broadcastPresence(PresenceEvent{
+		Type:      "cli_active",
+		SessionID: sessionID,
+		Timestamp: now.UTC().Format(time.RFC3339),
+	})
+}
+
+// BroadcastSessionArchived sends a session_archived presence event to all clients.
+func (e *Engine) BroadcastSessionArchived(sessionID string) {
+	// Clear any active presence for this session.
+	e.activePresence.Delete(sessionID)
+
+	e.broadcastPresence(PresenceEvent{
+		Type:      "session_archived",
+		SessionID: sessionID,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -613,6 +682,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				})
 				provCtx = provider.WithActivityCallback(provCtx, func(pid int) {
 					e.ProcessTracker.Touch(sid, pid)
+					e.throttledCLIActivePresence(sid)
 				})
 			}
 		}
@@ -653,16 +723,55 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		var turnContent strings.Builder
 		var toolUseBlocks []provider.ToolUseBlock
 		var stopReason string
+		var lastPTYToolPending string // tracks unresolved PTY tool for presence
 
 		for evt := range provCh {
 			switch evt.Type {
 			case "delta":
+				// Resolve any pending PTY tool (CLI returned text after a tool call).
+				if lastPTYToolPending != "" && isCLIProvider(providerName) {
+					e.broadcastPresence(PresenceEvent{
+						Type:      "tool_resolved",
+						SessionID: sessionID,
+						AgentID:   agent.ID,
+						ToolName:  lastPTYToolPending,
+						Timestamp: time.Now().UTC().Format(time.RFC3339),
+					})
+					lastPTYToolPending = ""
+				}
 				turnContent.WriteString(evt.Content)
 				fullContent.WriteString(evt.Content)
 				ch <- StreamEvent{Type: "delta", Content: evt.Content}
 			case "tool_use":
 				if evt.ToolUse != nil {
 					toolUseBlocks = append(toolUseBlocks, *evt.ToolUse)
+
+					// PTY/subprocess sessions: CLI manages tools internally,
+					// so emit tool_pending presence here (API sessions emit
+					// this later in the tool execution loop).
+					if isCLIProvider(providerName) {
+						// Resolve the previous tool before starting a new one.
+						if lastPTYToolPending != "" {
+							e.broadcastPresence(PresenceEvent{
+								Type:      "tool_resolved",
+								SessionID: sessionID,
+								AgentID:   agent.ID,
+								ToolName:  lastPTYToolPending,
+								Timestamp: time.Now().UTC().Format(time.RFC3339),
+							})
+						}
+						lastPTYToolPending = evt.ToolUse.Name
+						e.broadcastPresence(PresenceEvent{
+							Type:      "tool_pending",
+							SessionID: sessionID,
+							AgentID:   agent.ID,
+							ToolName:  evt.ToolUse.Name,
+							Timestamp: time.Now().UTC().Format(time.RFC3339),
+						})
+
+						// Auto-detect artifacts from PTY tool calls too.
+						e.maybeCreateAutoArtifact(sessionID, assistantMsgID, agent.ID, *evt.ToolUse)
+					}
 				}
 			case "usage":
 				if evt.Usage != nil {
@@ -712,6 +821,17 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			case "done":
 				// Will handle below.
 			}
+		}
+
+		// Resolve any remaining PTY tool presence after stream ends.
+		if lastPTYToolPending != "" && isCLIProvider(providerName) {
+			e.broadcastPresence(PresenceEvent{
+				Type:      "tool_resolved",
+				SessionID: sessionID,
+				AgentID:   agent.ID,
+				ToolName:  lastPTYToolPending,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
 		}
 
 		provSpan.End()
@@ -1034,6 +1154,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				ToolName:  tu.Name,
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
 			})
+
+			// Auto-detect artifacts from file-writing tool calls.
+			if !toolIsError {
+				e.maybeCreateAutoArtifact(sessionID, assistantMsgID, agent.ID, tu)
+			}
 
 			if tr.Truncated {
 				log.Printf("chat: tool %s result truncated: %d → %d chars (saved to %s)",
@@ -1395,6 +1520,63 @@ func truncateStr(s string, maxLen int) string {
 // (PTY bridge or subprocess bridge).
 func isCLIProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-") || strings.HasPrefix(name, "sub-")
+}
+
+// maybeCreateAutoArtifact checks if a tool call wrote a file and auto-creates
+// an artifact record with origin="auto". Uses AppConfig.Artifacts for tool
+// matching and path key extraction.
+func (e *Engine) maybeCreateAutoArtifact(sessionID, messageID, agentID string, tu provider.ToolUseBlock) {
+	if e.AppConfig == nil {
+		return
+	}
+	artCfg := &e.AppConfig.Artifacts
+	if !artCfg.IsAutoDetectTool(tu.Name) {
+		return
+	}
+	filePath := artCfg.ExtractFilePath(tu.Input)
+	if filePath == "" {
+		return
+	}
+
+	// Extract the filename from the path.
+	name := filePath
+	if idx := strings.LastIndex(filePath, "/"); idx >= 0 {
+		name = filePath[idx+1:]
+	}
+
+	artifact := &store.Artifact{
+		SessionID:        sessionID,
+		MessageID:        messageID,
+		Name:             name,
+		MimeType:         "application/octet-stream", // could be refined later
+		StoragePath:      filePath,
+		Origin:           store.ArtifactOriginAuto,
+		SourceToolCallID: tu.ID,
+		SourceAgentID:    agentID,
+	}
+	if err := e.Store.CreateArtifact(artifact); err != nil {
+		log.Printf("chat: auto-artifact creation failed for %s: %v", filePath, err)
+	} else {
+		log.Printf("chat: auto-artifact created: %s (tool=%s, session=%s)", name, tu.Name, sessionID)
+	}
+}
+
+// PlaceArtifact creates an artifact with origin="placed" for tools/plugins
+// that want to deliberately surface a file to the user.
+func (e *Engine) PlaceArtifact(sessionID, messageID, agentID, name, mimeType, storagePath string) (*store.Artifact, error) {
+	artifact := &store.Artifact{
+		SessionID:     sessionID,
+		MessageID:     messageID,
+		Name:          name,
+		MimeType:      mimeType,
+		StoragePath:   storagePath,
+		Origin:        store.ArtifactOriginPlaced,
+		SourceAgentID: agentID,
+	}
+	if err := e.Store.CreateArtifact(artifact); err != nil {
+		return nil, fmt.Errorf("place artifact: %w", err)
+	}
+	return artifact, nil
 }
 
 // isPTYProvider returns true if the provider name is any PTY adapter variant.

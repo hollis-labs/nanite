@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/fragments-engine/plugin"
 )
 
@@ -18,9 +19,11 @@ type Host struct {
 	eventHooks   map[string][]plugin.EventHook
 	crudHandlers map[string]plugin.CRUDHandler
 	uiComponents []plugin.UIComponent
+	connectors   map[string]plugin.Connector
 	services     map[string]interface{}
 	configs      map[string]*PluginConfig // per-plugin config, keyed by plugin ID
 	activePlugin string                   // ID of the plugin currently being loaded
+	store        *store.Store             // DB-backed plugin settings (nil if unavailable)
 	router       *http.ServeMux
 	logger       plugin.Logger
 	ctx          context.Context
@@ -35,6 +38,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		eventHooks:   make(map[string][]plugin.EventHook),
 		crudHandlers: make(map[string]plugin.CRUDHandler),
 		uiComponents: []plugin.UIComponent{},
+		connectors:   make(map[string]plugin.Connector),
 		services:     make(map[string]interface{}),
 		configs:      make(map[string]*PluginConfig),
 		router:       router,
@@ -54,6 +58,7 @@ func NewHostWithStore(store interface{}) *Host {
 		eventHooks:   make(map[string][]plugin.EventHook),
 		crudHandlers: make(map[string]plugin.CRUDHandler),
 		uiComponents: []plugin.UIComponent{},
+		connectors:   make(map[string]plugin.Connector),
 		services:     make(map[string]interface{}),
 		configs:      make(map[string]*PluginConfig),
 		router:       http.NewServeMux(),
@@ -223,18 +228,181 @@ func (h *Host) SetPluginConfig(pluginID string, cfg *PluginConfig) {
 	h.configs[pluginID] = cfg
 }
 
+// SetStore sets the database store for DB-backed plugin settings.
+func (h *Host) SetStore(s *store.Store) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.store = s
+}
+
 // GetConfig returns a configuration value for the currently-loading plugin.
-// Resolution order: env var -> config file override -> default from schema.
+// Resolution order: env var -> DB setting -> config file override -> default from schema.
 func (h *Host) GetConfig(key string) (string, error) {
 	h.mu.RLock()
 	id := h.activePlugin
 	cfg := h.configs[id]
+	s := h.store
 	h.mu.RUnlock()
 
+	// Try DB first (if store is available).
+	if s != nil && id != "" {
+		if val, err := s.GetPluginSettingValue(id, key); err == nil && val != "" {
+			return val, nil
+		}
+	}
+
+	// Fall back to file-based config.
 	if cfg == nil {
 		return "", fmt.Errorf("no config loaded for plugin %q", id)
 	}
 	return cfg.Get(key)
+}
+
+// SetConfig persists a configuration value for the currently-loading plugin.
+func (h *Host) SetConfig(key string, value string) error {
+	h.mu.RLock()
+	id := h.activePlugin
+	s := h.store
+	h.mu.RUnlock()
+
+	if id == "" {
+		return fmt.Errorf("no active plugin context for SetConfig")
+	}
+	if s == nil {
+		return fmt.Errorf("no store available for plugin config persistence")
+	}
+
+	// Read existing settings, merge, write back.
+	existing, err := s.GetPluginSettings(id)
+	settings := make(map[string]any)
+	if err == nil && existing != nil {
+		settings = existing.Settings
+	}
+	if settings == nil {
+		settings = make(map[string]any)
+	}
+	settings[key] = value
+	return s.UpsertPluginSettings(id, settings)
+}
+
+// RegisterConfigSchema registers config field definitions for the currently-loading plugin.
+func (h *Host) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
+	h.mu.RLock()
+	id := h.activePlugin
+	s := h.store
+	h.mu.RUnlock()
+
+	if id == "" {
+		return fmt.Errorf("no active plugin context for RegisterConfigSchema")
+	}
+	if s == nil {
+		return fmt.Errorf("no store available for plugin schema persistence")
+	}
+
+	// Convert SDK type to store type.
+	storeFields := make([]store.ConfigField, len(fields))
+	for i, f := range fields {
+		storeFields[i] = store.ConfigField{
+			Key:         f.Key,
+			Type:        f.Type,
+			Label:       f.Label,
+			Description: f.Description,
+			Default:     f.Default,
+			Required:    f.Required,
+			Options:     f.Options,
+		}
+	}
+	return s.UpsertPluginSchema(id, storeFields)
+}
+
+// RegisterConnector registers a named connector for outbound integrations.
+func (h *Host) RegisterConnector(name string, connector plugin.Connector) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.connectors[name] = connector
+	h.logger.Info("registered connector", "name", name)
+	return nil
+}
+
+// GetConnector retrieves a registered connector by name.
+func (h *Host) GetConnector(name string) (plugin.Connector, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.connectors[name]
+	return c, ok
+}
+
+// ListConnectors returns all registered connector names.
+func (h *Host) ListConnectors() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	names := make([]string, 0, len(h.connectors))
+	for name := range h.connectors {
+		names = append(names, name)
+	}
+	return names
+}
+
+// RegisterProvider registers a runtime LLM provider from a plugin.
+// The provider must implement the provider.Provider interface; the host
+// registers it with the provider registry via the "provider-registry" service.
+func (h *Host) RegisterProvider(name string, prov interface{}) error {
+	h.mu.RLock()
+	regSvc, exists := h.services["provider-registry"]
+	h.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("provider registry service not available")
+	}
+
+	// The provider registry exposes a Register(name, provider) method.
+	type registerer interface {
+		Register(name string, p interface{})
+	}
+	reg, ok := regSvc.(registerer)
+	if !ok {
+		return fmt.Errorf("provider registry does not support Register")
+	}
+	reg.Register(name, prov)
+	h.logger.Info("registered plugin provider", "name", name)
+	return nil
+}
+
+// RegisterCLIAdapter registers a runtime CLI adapter from a plugin.
+// The adapter must implement the CLIAdapter interface; the host stores it
+// for the bridge layer to discover.
+func (h *Host) RegisterCLIAdapter(name string, adapter interface{}) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	// Store as a service so the bridge layer can discover plugin-registered adapters.
+	h.services["cli-adapter:"+name] = adapter
+	h.logger.Info("registered plugin CLI adapter", "name", name)
+	return nil
+}
+
+// PlaceArtifact creates an artifact with origin="placed" for the calling plugin.
+// This is used when a plugin wants to deliberately surface a file to the user
+// (reports, exports, generated content).
+func (h *Host) PlaceArtifact(sessionID, messageID, name, mimeType, storagePath string) error {
+	h.mu.RLock()
+	pluginID := h.activePlugin
+	s := h.store
+	h.mu.RUnlock()
+
+	if s == nil {
+		return fmt.Errorf("no store available for artifact creation")
+	}
+
+	artifact := &store.Artifact{
+		SessionID:      sessionID,
+		MessageID:      messageID,
+		Name:           name,
+		MimeType:       mimeType,
+		StoragePath:    storagePath,
+		Origin:         store.ArtifactOriginPlaced,
+		SourcePluginID: pluginID,
+	}
+	return s.CreateArtifact(artifact)
 }
 
 // LoadPlugin loads a plugin into the host.

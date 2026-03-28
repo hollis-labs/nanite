@@ -1,0 +1,60 @@
+name: example
+version: 0.1.0
+description: Reference plugin demonstrating all Conduit plugin features
+
+config:
+  greeting:
+    type: string
+    required: false
+    env_var: EXAMPLE_GREETING
+    default: "Hello from Example Plugin!"
+    description: "Message shown when a session starts"
+
+  verbose:
+    type: bool
+    required: false
+    default: "false"
+    description: "Enable verbose debug logging"
+
+  webhook_url:
+    type: string
+    required: false
+    env_var: EXAMPLE_WEBHOOK_URL
+    description: "URL to POST event notifications to (secret)"
+
+  log_level:
+    type: string
+    required: false
+    default: "info"
+    description: "Log level: debug, info, warn, error"
+
+registers:
+  envelopes:
+    - type: example-card
+      component: ui/ExampleCard
+      export: ExampleCard
+
+  hooks:
+    - event: message.sent
+      handler: onMessageSent
+    - event: session.start
+      handler: onSessionStart
+    - event: config.changed
+      handler: onConfigChanged
+
+api_endpoints:
+  - path: /api/plugins/notes
+    method: GET
+    handler: listNotes
+  - path: /api/plugins/notes
+    method: POST
+    handler: createNote
+  - path: /api/plugins/notes/{id}
+    method: GET
+    handler: getNote
+  - path: /api/plugins/notes/{id}
+    method: PUT
+    handler: updateNote
+  - path: /api/plugins/notes/{id}
+    method: DELETE
+    handler: deleteNote

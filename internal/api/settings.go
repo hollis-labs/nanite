@@ -71,5 +71,12 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, "failed to update settings")
 		return
 	}
+
+	// Sync utility provider/model to the running engine so changes take effect
+	// immediately without a restart.
+	if a.Engine != nil {
+		a.Engine.RefreshUtilitySettings(existing.UtilityProvider, existing.UtilityModel)
+	}
+
 	a.jsonResp(w, http.StatusOK, existing)
 }

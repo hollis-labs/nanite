@@ -45,6 +45,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}", a.handleGetSession)
 	mux.HandleFunc("PUT /api/sessions/{id}", a.handleUpdateSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", a.handleDeleteSession)
+	mux.HandleFunc("POST /api/sessions/{id}/fork", a.handleForkSession)
 	mux.HandleFunc("GET /api/sessions/{id}/messages", a.handleListSessionMessages)
 
 	// Messages
@@ -80,9 +81,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/messages/{id}/bookmark", a.handleToggleBookmark)
 
 	// Artifacts
-	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifacts)
+	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter
 	mux.HandleFunc("GET /api/artifacts/{id}/download", a.handleDownloadArtifact)
 	mux.HandleFunc("POST /api/artifacts/upload", a.handleUploadArtifact)
+	mux.HandleFunc("POST /api/artifacts/place", a.handlePlaceArtifact)
 
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
@@ -186,6 +188,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// User Settings
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
+
+	// Plugin Config
+	mux.HandleFunc("GET /api/plugins/{id}/config", a.handleGetPluginConfig)
+	mux.HandleFunc("PUT /api/plugins/{id}/config", a.handleUpdatePluginConfig)
+	mux.HandleFunc("GET /api/plugin-settings", a.handleListPluginSettings)
 
 	// Process Health
 	mux.HandleFunc("GET /api/processes/health", a.handleProcessHealth)

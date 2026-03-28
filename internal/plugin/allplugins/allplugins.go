@@ -9,6 +9,7 @@ package allplugins
 
 import (
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/demopresenter"
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/example"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/giphy"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/marvel"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/oembed"

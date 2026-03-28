@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"time"
 
 	"github.com/hollis-labs/fragments-engine/plugin"
@@ -40,6 +41,24 @@ const (
 	EventWorkflowStarted  = "workflow.started"
 	EventWorkflowComplete = "workflow.complete"
 	EventWorkflowFailed   = "workflow.failed"
+
+	// Config Events
+	EventConfigChanged = "config.changed"
+
+	// Plugin Lifecycle Events
+	EventPluginInstalled   = "plugin.installed"
+	EventPluginUninstalled = "plugin.uninstalled"
+
+	// Session Lifecycle Events
+	EventSessionArchived = "session.archived"
+
+	// Provider Events
+	EventProviderError    = "provider.error"
+	EventProviderFallback = "provider.fallback"
+
+	// Pre-hook Events (can signal cancellation via "cancel" key in event data)
+	EventMessageSending = "message.sending" // before message is sent to LLM
+	EventToolExecuting  = "tool.executing"  // before tool is executed
 )
 
 // EventData provides structured data for common event types
@@ -294,4 +313,98 @@ func (h *Host) EmitActionTriggered(sessionID, actionID string, actionData interf
 		ActionData: actionData,
 	})
 	h.EmitEvent(event)
+}
+
+// EmitConfigChanged emits a config.changed event when plugin or user settings change.
+func (h *Host) EmitConfigChanged(pluginID, key, value string) {
+	event := NewEvent(EventConfigChanged, "conduit", EventData{})
+	event.Data["plugin_id"] = pluginID
+	event.Data["key"] = key
+	event.Data["value"] = value
+	h.EmitEvent(event)
+}
+
+// EmitPluginInstalled emits a plugin.installed event.
+func (h *Host) EmitPluginInstalled(pluginID, pluginName, version string) {
+	event := NewEvent(EventPluginInstalled, "conduit", EventData{})
+	event.Data["plugin_id"] = pluginID
+	event.Data["plugin_name"] = pluginName
+	event.Data["version"] = version
+	h.EmitEvent(event)
+}
+
+// EmitPluginUninstalled emits a plugin.uninstalled event.
+func (h *Host) EmitPluginUninstalled(pluginID string) {
+	event := NewEvent(EventPluginUninstalled, "conduit", EventData{})
+	event.Data["plugin_id"] = pluginID
+	h.EmitEvent(event)
+}
+
+// EmitSessionArchived emits a session.archived event.
+func (h *Host) EmitSessionArchived(sessionID string) {
+	event := NewEvent(EventSessionArchived, "conduit", EventData{
+		SessionID: sessionID,
+	})
+	h.EmitEvent(event)
+}
+
+// EmitProviderError emits a provider.error event when an LLM call fails.
+func (h *Host) EmitProviderError(sessionID, providerName, model, errMsg string) {
+	event := NewEvent(EventProviderError, "conduit", EventData{
+		SessionID: sessionID,
+		Error:     errMsg,
+	})
+	event.Data["provider"] = providerName
+	event.Data["model"] = model
+	h.EmitEvent(event)
+}
+
+// EmitProviderFallback emits a provider.fallback event when the engine falls through the chain.
+func (h *Host) EmitProviderFallback(sessionID, fromProvider, toProvider string) {
+	event := NewEvent(EventProviderFallback, "conduit", EventData{
+		SessionID: sessionID,
+	})
+	event.Data["from_provider"] = fromProvider
+	event.Data["to_provider"] = toProvider
+	h.EmitEvent(event)
+}
+
+// EmitPreHook emits a pre-hook event and returns true if any hook signaled cancellation.
+// Pre-hooks can set event.Data["cancel"] = true to prevent the action from proceeding.
+func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interface{}) bool {
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+	data["session_id"] = sessionID
+
+	event := plugin.Event{
+		Type:      eventType,
+		Source:    "conduit",
+		Timestamp: time.Now(),
+		Data:      data,
+		SessionID: sessionID,
+	}
+
+	h.mu.RLock()
+	hooks, exists := h.eventHooks[eventType]
+	h.mu.RUnlock()
+
+	if !exists {
+		return false
+	}
+
+	for _, hook := range hooks {
+		ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+		err := hook.Handle(ctx, event)
+		cancel()
+		if err != nil {
+			h.logger.Error("pre-hook failed", "eventType", eventType, "error", err)
+		}
+	}
+
+	// Check if any hook set the cancel flag.
+	if cancelled, ok := event.Data["cancel"].(bool); ok && cancelled {
+		return true
+	}
+	return false
 }

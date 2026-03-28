@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
+import { useSettings } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
 
@@ -32,9 +33,15 @@ export function NavRail() {
   const currentPage = useLayoutStore((s) => s.currentPage)
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
   const queryClient = useQueryClient()
+  const { data: userSettings } = useSettings()
 
   const createSessionMutation = useMutation({
-    mutationFn: () => api.createSession({ workspace_id: activeWorkspaceId! }),
+    mutationFn: () => api.createSession({
+      workspace_id: activeWorkspaceId!,
+      provider: userSettings?.default_provider || undefined,
+      model: userSettings?.default_model || undefined,
+      agent_id: userSettings?.default_agent || undefined,
+    }),
     onSuccess: (newSession) => {
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
       setActiveSession(newSession.id)

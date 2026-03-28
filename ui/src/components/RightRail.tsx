@@ -6,6 +6,7 @@ import { ContextBudgetWidget } from './widgets/ContextBudgetWidget'
 import { AgentStatusWidget } from './widgets/AgentStatusWidget'
 import { TokenUsageWidget } from './widgets/TokenUsageWidget'
 import { ToolsWidget } from './widgets/ToolsWidget'
+import { ObservabilityWidget } from './widgets/ObservabilityWidget'
 
 export function RightRail() {
   const open = useLayoutStore((s) => s.rightRailOpen)
@@ -29,6 +30,7 @@ export function RightRail() {
             <BookmarksWidget />
             <ContextBudgetWidget />
             <TokenUsageWidget />
+            <ObservabilityWidget />
             <ToolsWidget />
             <AgentStatusWidget />
           </div>

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar, Copy, Wrench } from 'lucide-react'
+import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar, Copy, GitFork, Wrench } from 'lucide-react'
 import { AdapterBadge } from './AdapterBadge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -132,47 +132,33 @@ export function ChatHeader() {
   const handleAgentSelect = useCallback((agentId: string) => {
     switchAgentMutation.mutate(agentId)
     setDropdownOpen(false)
-    // Persist preference so new sessions use this agent
-    try { localStorage.setItem('conduit-preferred-agent', agentId) } catch { /* ignore */ }
   }, [switchAgentMutation])
-
-  // Auto-apply preferred agent to new sessions that still have the default
-  useEffect(() => {
-    if (!activeSessionId || !allAgents.length || switchAgentMutation.isPending) return
-    const preferred = localStorage.getItem('conduit-preferred-agent')
-    if (!preferred) return
-    // Only auto-switch if the current primary is the default (mentat) and the user has a preference
-    const current = primaryAgent?.agent_id
-    if (current && current !== 'mentat-001') return // user already has a non-default agent
-    if (current === preferred) return // already set
-    // Verify the preferred agent still exists
-    if (!allAgents.some((a) => a.id === preferred)) return
-    switchAgentMutation.mutate(preferred)
-  }, [activeSessionId, primaryAgent?.agent_id, allAgents, switchAgentMutation])
 
   const setActiveSession = useAppStore((s) => s.setActiveSession)
 
-  // Clone session with a different adapter (toggle PTY <-> API).
-  const cloneSessionMutation = useMutation({
-    mutationFn: async () => {
-      if (!activeSessionId || !session) return
-      const currentProvider = session.provider || 'anthropic'
-      const isPTY = currentProvider.startsWith('pty')
-      // Toggle: if PTY, switch to anthropic API; if API, switch to pty-claude.
-      const newProvider = isPTY ? 'anthropic' : 'pty-claude'
-      const newModel = isPTY ? 'claude-sonnet-4-20250514' : 'claude-cli'
-      return api.createSession({
-        workspace_id: session.workspace_id,
-        project_id: session.project_id || undefined,
-        provider: newProvider,
-        model: newModel,
-      })
+  const [forkMenuOpen, setForkMenuOpen] = useState(false)
+  const forkMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!forkMenuOpen) return
+    function handleClick(e: MouseEvent) {
+      if (forkMenuRef.current && !forkMenuRef.current.contains(e.target as Node)) {
+        setForkMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [forkMenuOpen])
+
+  const forkMutation = useMutation({
+    mutationFn: (includeMessages: boolean) => {
+      if (!activeSessionId) throw new Error('No active session')
+      return api.forkSession(activeSessionId, { include_messages: includeMessages })
     },
     onSuccess: (newSession) => {
-      if (newSession) {
-        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
-        setActiveSession(newSession.id)
-      }
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      setActiveSession(newSession.id)
+      setForkMenuOpen(false)
     },
   })
 
@@ -210,15 +196,35 @@ export function ChatHeader() {
               {session?.provider && (
                 <span className="flex items-center gap-1">
                   <AdapterBadge provider={session.provider} size="md" />
-                  <Tooltip content={`Clone as ${session.provider.startsWith('pty') ? 'API' : 'PTY'} session`} side="bottom">
-                    <button
-                      onClick={() => cloneSessionMutation.mutate()}
-                      disabled={cloneSessionMutation.isPending}
-                      className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                    >
-                      <Copy className="w-3 h-3" />
-                    </button>
-                  </Tooltip>
+                  <div className="relative" ref={forkMenuRef}>
+                    <Tooltip content="Clone or fork session" side="bottom">
+                      <button
+                        onClick={() => setForkMenuOpen((o) => !o)}
+                        disabled={forkMutation.isPending}
+                        className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    </Tooltip>
+                    {forkMenuOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-44 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+                        <button
+                          onClick={() => forkMutation.mutate(false)}
+                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-zinc-300 hover:bg-zinc-800 transition-colors"
+                        >
+                          <Copy className="w-3 h-3 text-zinc-500" />
+                          Clone (empty)
+                        </button>
+                        <button
+                          onClick={() => forkMutation.mutate(true)}
+                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-zinc-300 hover:bg-zinc-800 transition-colors"
+                        >
+                          <GitFork className="w-3 h-3 text-zinc-500" />
+                          Fork (with history)
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </span>
               )}
             </div>

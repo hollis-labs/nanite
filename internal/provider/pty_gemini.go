@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 )
 
 // GeminiAdapter implements CLIAdapter for the Google Gemini CLI.
@@ -36,7 +35,7 @@ func (a *GeminiAdapter) Detect() (string, bool) {
 	if p := os.Getenv("GEMINI_CLI_PATH"); p != "" {
 		return p, true
 	}
-	p, err := exec.LookPath("gemini")
+	p, err := lookPathExpanded("gemini")
 	if err != nil {
 		return "", false
 	}

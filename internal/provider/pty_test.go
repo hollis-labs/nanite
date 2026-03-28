@@ -15,9 +15,11 @@ func TestNewPTYBridge_NilWhenMissing(t *testing.T) {
 	// So we test the LookPath fallback by unsetting and relying on a
 	// missing binary.
 	t.Setenv("CLAUDE_CLI_PATH", "")
-	// Save and restore PATH to ensure claude isn't found.
-	origPath := t.TempDir() // empty dir
-	t.Setenv("PATH", origPath)
+	// Override PATH and HOME to ensure claude isn't found via LookPath or
+	// lookPathExpanded's fallback directories.
+	emptyDir := t.TempDir()
+	t.Setenv("PATH", emptyDir)
+	t.Setenv("HOME", emptyDir)
 
 	bridge := NewPTYBridge()
 	if bridge != nil {

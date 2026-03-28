@@ -3,22 +3,27 @@ package provider
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
-// CopilotAdapter implements CLIAdapter for GitHub Copilot CLI (gh copilot).
-// Uses `gh copilot explain` for plain-text responses. No structured JSON output
-// is available, so ParseLine treats each line as a text delta.
-type CopilotAdapter struct{}
+// CopilotAdapter implements CLIAdapter for GitHub Copilot CLI.
+// Supports both standalone `copilot` binary and `gh copilot` extension.
+// No structured JSON output is available, so ParseLine treats each line as a text delta.
+type CopilotAdapter struct {
+	// ghMode is true when the detected binary is `gh` (needs "copilot" subcommand prefix).
+	ghMode bool
+}
 
 func NewCopilotAdapter() *CopilotAdapter { return &CopilotAdapter{} }
 
 func (a *CopilotAdapter) Name() string { return "copilot" }
 
 func (a *CopilotAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
-	// gh copilot explain "prompt"
-	// No resume support, no system prompt flag, no structured output.
-	return []string{"copilot", "explain", prompt}
+	if a.ghMode {
+		return []string{"copilot", "explain", prompt}
+	}
+	return []string{"explain", prompt}
 }
 
 func (a *CopilotAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
@@ -28,7 +33,7 @@ func (a *CopilotAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
 
 	text := string(line)
 
-	// gh copilot produces some ANSI formatting and progress indicators;
+	// Copilot produces some ANSI formatting and progress indicators;
 	// skip lines that are purely decorative.
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || trimmed == "---" || strings.HasPrefix(trimmed, "Synthesizing") {
@@ -39,18 +44,24 @@ func (a *CopilotAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
 }
 
 func (a *CopilotAdapter) Detect() (string, bool) {
-	if p := os.Getenv("GH_COPILOT_PATH"); p != "" {
+	if p := os.Getenv("COPILOT_CLI_PATH"); p != "" {
+		a.ghMode = filepath.Base(p) == "gh"
 		return p, true
 	}
-	// Copilot is a `gh` extension. Check that `gh` exists and `copilot` is installed.
+	// Check for standalone copilot binary first (e.g. /opt/homebrew/bin/copilot).
+	if p, err := lookPathExpanded("copilot"); err == nil {
+		a.ghMode = false
+		return p, true
+	}
+	// Fall back to gh copilot extension.
 	ghPath, err := exec.LookPath("gh")
 	if err != nil {
 		return "", false
 	}
-	// Verify the copilot extension is available.
 	out, err := exec.Command(ghPath, "copilot", "--help").CombinedOutput()
 	if err != nil || len(out) == 0 {
 		return "", false
 	}
+	a.ghMode = true
 	return ghPath, true
 }

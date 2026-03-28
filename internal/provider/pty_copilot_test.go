@@ -9,11 +9,24 @@ func TestCopilotAdapter_Name(t *testing.T) {
 	}
 }
 
-func TestCopilotAdapter_BuildArgs(t *testing.T) {
+func TestCopilotAdapter_BuildArgs_Standalone(t *testing.T) {
 	a := NewCopilotAdapter()
+	// Default (standalone mode): no "copilot" prefix
+	args := a.BuildArgs("explain pointers", "", "")
+	if len(args) != 2 {
+		t.Fatalf("expected 2 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "explain" || args[1] != "explain pointers" {
+		t.Errorf("unexpected args: %v", args)
+	}
+}
+
+func TestCopilotAdapter_BuildArgs_GhMode(t *testing.T) {
+	a := NewCopilotAdapter()
+	a.ghMode = true
 	args := a.BuildArgs("explain pointers", "", "")
 	if len(args) != 3 {
-		t.Fatalf("expected 3 args, got %d", len(args))
+		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
 	}
 	if args[0] != "copilot" || args[1] != "explain" || args[2] != "explain pointers" {
 		t.Errorf("unexpected args: %v", args)

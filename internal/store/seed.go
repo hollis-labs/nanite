@@ -485,6 +485,9 @@ func (s *Store) SeedProviders() error {
 		{"pty-aider-001", "Aider CLI (PTY)", "pty-aider"},
 		{"openrouter-001", "OpenRouter", "openrouter"},
 		{"openzen-001", "OpenZen", "openzen"},
+		{"pty-junie-001", "Junie CLI (PTY)", "pty-junie"},
+		{"pty-kiro-001", "Kiro CLI (PTY)", "pty-kiro"},
+		{"pty-qwen-001", "Qwen CLI (PTY)", "pty-qwen"},
 	}
 
 	models := []model{
@@ -516,6 +519,10 @@ func (s *Store) SeedProviders() error {
 		{"gemini-cli", "pty-gemini-001", "gemini-cli", "Gemini CLI", 0, 0, true},
 		{"copilot-cli", "pty-copilot-001", "copilot-cli", "Copilot CLI", 0, 0, false},
 		{"aider-cli", "pty-aider-001", "aider-cli", "Aider CLI", 0, 0, false},
+		// CLI adapters (new)
+		{"junie-cli", "pty-junie-001", "junie-cli", "Junie CLI", 0, 0, true},
+		{"kiro-cli", "pty-kiro-001", "kiro-cli", "Kiro CLI", 0, 0, false},
+		{"qwen-cli", "pty-qwen-001", "qwen-cli", "Qwen CLI", 0, 0, true},
 		// OpenRouter (model gateway — uses provider-prefixed model IDs)
 		{"or-claude-sonnet", "openrouter-001", "anthropic/claude-sonnet-4", "Claude Sonnet 4 (OR)", 200000, 16000, true},
 		{"or-claude-opus", "openrouter-001", "anthropic/claude-opus-4", "Claude Opus 4 (OR)", 200000, 32000, true},

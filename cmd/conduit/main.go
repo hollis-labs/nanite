@@ -198,6 +198,9 @@ func cmdServe(args []string) {
 		provider.NewGeminiAdapter(),
 		provider.NewCopilotAdapter(),
 		provider.NewAiderAdapter(),
+		provider.NewJunieAdapter(),
+		provider.NewKiroAdapter(),
+		provider.NewQwenAdapter(),
 	}
 	for _, adapter := range cliAdapters {
 		if path, ok := adapter.Detect(); ok {

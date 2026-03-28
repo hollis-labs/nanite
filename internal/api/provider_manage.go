@@ -104,8 +104,11 @@ func (a *API) handleDetectCLI(w http.ResponseWriter, r *http.Request) {
 		{provider.NewClaudeAdapter(), "pty", "pty-001", "CLAUDE_CLI_PATH"},
 		{provider.NewCodexAdapter(), "pty-codex", "pty-codex-001", "CODEX_CLI_PATH"},
 		{provider.NewGeminiAdapter(), "pty-gemini", "pty-gemini-001", "GEMINI_CLI_PATH"},
-		{provider.NewCopilotAdapter(), "pty-copilot", "pty-copilot-001", "GH_COPILOT_PATH"},
+		{provider.NewCopilotAdapter(), "pty-copilot", "pty-copilot-001", "COPILOT_CLI_PATH"},
 		{provider.NewAiderAdapter(), "pty-aider", "pty-aider-001", "AIDER_CLI_PATH"},
+		{provider.NewJunieAdapter(), "pty-junie", "pty-junie-001", "JUNIE_CLI_PATH"},
+		{provider.NewKiroAdapter(), "pty-kiro", "pty-kiro-001", "KIRO_CLI_PATH"},
+		{provider.NewQwenAdapter(), "pty-qwen", "pty-qwen-001", "QWEN_CLI_PATH"},
 	}
 
 	results := make([]CLIDetectionResult, 0, len(specs))

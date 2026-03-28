@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -38,7 +37,7 @@ func (a *AiderAdapter) Detect() (string, bool) {
 	if p := os.Getenv("AIDER_CLI_PATH"); p != "" {
 		return p, true
 	}
-	p, err := exec.LookPath("aider")
+	p, err := lookPathExpanded("aider")
 	if err != nil {
 		return "", false
 	}

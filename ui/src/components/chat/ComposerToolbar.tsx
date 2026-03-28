@@ -17,11 +17,16 @@ const MODE_DOT_COLORS: Record<AgentMode, string> = {
 const PROVIDER_ICONS: Record<string, string> = {
   anthropic: 'A',
   openai: 'O',
-  ollama: 'L',
+  ollama: 'Ol',
+  gemini: 'G',
+  mistral: 'M',
+  'azure-openai': 'Az',
   pty: 'C',
   'pty-claude': 'C',
-  'pty-codex': 'O',
+  'pty-codex': 'Cx',
   'pty-gemini': 'G',
+  'pty-copilot': 'Cp',
+  'pty-aider': 'Ai',
 }
 
 interface ComposerToolbarProps {
@@ -56,6 +61,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
     for (const m of models) {
       if (!m.is_enabled) continue
       const providerInfo = providerMap.get(m.provider_id)
+      if (providerInfo && !providerInfo.is_enabled) continue
       const providerType = m.provider_type || 'anthropic'
       if (!groups.has(m.provider_id)) {
         groups.set(m.provider_id, {

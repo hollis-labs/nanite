@@ -459,6 +459,92 @@ When user says "let us plan" or "create demo sprints":
 	return tx.Commit()
 }
 
+// SeedProviders upserts all known providers and models. Safe to call on every boot —
+// uses INSERT OR IGNORE so existing rows are untouched.
+func (s *Store) SeedProviders() error {
+	type prov struct {
+		id, name, provType string
+	}
+	type model struct {
+		id, providerID, modelID, display string
+		ctx, maxOut                       int
+		tools                             bool
+	}
+
+	providers := []prov{
+		{"anthropic-001", "Anthropic", "anthropic"},
+		{"openai-001", "OpenAI", "openai"},
+		{"ollama-001", "Ollama", "ollama"},
+		{"gemini-api-001", "Google Gemini", "gemini"},
+		{"mistral-001", "Mistral", "mistral"},
+		{"azure-openai-001", "Azure OpenAI", "azure-openai"},
+		{"pty-001", "Claude CLI (PTY)", "pty"},
+		{"pty-codex-001", "Codex CLI (PTY)", "pty-codex"},
+		{"pty-gemini-001", "Gemini CLI (PTY)", "pty-gemini"},
+		{"pty-copilot-001", "GitHub Copilot CLI (PTY)", "pty-copilot"},
+		{"pty-aider-001", "Aider CLI (PTY)", "pty-aider"},
+	}
+
+	models := []model{
+		// Anthropic
+		{"claude-sonnet", "anthropic-001", "claude-sonnet-4-20250514", "Claude Sonnet 4", 200000, 16000, true},
+		{"claude-opus", "anthropic-001", "claude-opus-4-20250514", "Claude Opus 4", 200000, 32000, true},
+		{"claude-haiku", "anthropic-001", "claude-haiku-4-5-20251001", "Claude Haiku 4.5", 200000, 8192, true},
+		// OpenAI
+		{"gpt-4o", "openai-001", "gpt-4o", "GPT-4o", 128000, 16384, true},
+		{"gpt-4o-mini", "openai-001", "gpt-4o-mini", "GPT-4o Mini", 128000, 16384, true},
+		{"o3", "openai-001", "o3", "o3", 200000, 100000, true},
+		{"o4-mini", "openai-001", "o4-mini", "o4-mini", 200000, 100000, true},
+		// Ollama (placeholder — user configures local models)
+		{"ollama-llama3", "ollama-001", "llama3.1", "Llama 3.1", 131072, 4096, false},
+		// Gemini API
+		{"gemini-2.5-flash", "gemini-api-001", "gemini-2.5-flash", "Gemini 2.5 Flash", 1048576, 8192, true},
+		{"gemini-2.5-pro", "gemini-api-001", "gemini-2.5-pro", "Gemini 2.5 Pro", 1048576, 8192, true},
+		{"gemini-2.0-flash", "gemini-api-001", "gemini-2.0-flash", "Gemini 2.0 Flash", 1048576, 8192, true},
+		// Mistral
+		{"mistral-large", "mistral-001", "mistral-large-latest", "Mistral Large", 131072, 8192, true},
+		{"mistral-medium", "mistral-001", "mistral-medium-latest", "Mistral Medium", 131072, 8192, true},
+		{"mistral-small", "mistral-001", "mistral-small-latest", "Mistral Small", 131072, 8192, true},
+		{"codestral", "mistral-001", "codestral-latest", "Codestral", 262144, 8192, true},
+		// Azure OpenAI
+		{"azure-gpt4o", "azure-openai-001", "gpt-4o", "Azure GPT-4o", 128000, 16384, true},
+		// PTY CLIs
+		{"claude-cli", "pty-001", "claude-cli", "Claude CLI", 0, 0, true},
+		{"codex-cli", "pty-codex-001", "codex-cli", "Codex CLI", 0, 0, true},
+		{"gemini-cli", "pty-gemini-001", "gemini-cli", "Gemini CLI", 0, 0, true},
+		{"copilot-cli", "pty-copilot-001", "copilot-cli", "Copilot CLI", 0, 0, false},
+		{"aider-cli", "pty-aider-001", "aider-cli", "Aider CLI", 0, 0, false},
+	}
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, p := range providers {
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key) VALUES (?, ?, ?, ?)`,
+			p.id, p.name, p.provType, "",
+		); err != nil {
+			return fmt.Errorf("upsert provider %s: %w", p.id, err)
+		}
+	}
+
+	for _, m := range models {
+		if _, err := tx.Exec(
+			`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			m.id, m.providerID, m.modelID, m.display, m.ctx, m.maxOut, m.tools,
+		); err != nil {
+			return fmt.Errorf("upsert model %s: %w", m.id, err)
+		}
+	}
+
+	log.Printf("seed: upserted %d providers and %d models", len(providers), len(models))
+	return tx.Commit()
+}
+
 // SeedAgentSkillBindings assigns builtin skills and prompt templates to agent profiles.
 // Must be called after SeedBuiltinSkills and SeedBuiltinPromptTemplates.
 func (s *Store) SeedAgentSkillBindings() error {

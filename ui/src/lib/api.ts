@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary } from './types'
 
 const API_BASE = '/api'
 
@@ -17,7 +17,7 @@ export const api = {
     return res.json()
   },
 
-  createSession: async (data: { workspace_id: string; project_id?: string; provider?: string; model?: string }): Promise<Session> => {
+  createSession: async (data: { workspace_id: string; project_id?: string; provider?: string; model?: string; agent_id?: string }): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -34,6 +34,16 @@ export const api = {
       body: JSON.stringify(data),
     })
     if (!res.ok) throw new Error(`Failed to update session: ${res.status}`)
+    return res.json()
+  },
+
+  forkSession: async (id: string, data: { include_messages: boolean; provider?: string; model?: string }): Promise<Session> => {
+    const res = await fetch(`${API_BASE}/sessions/${id}/fork`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to fork session: ${res.status}`)
     return res.json()
   },
 
@@ -223,6 +233,34 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to list providers: ${res.status}`)
     return res.json()
   },
+  listProviderStatuses: async (): Promise<ProviderStatus[]> => {
+    const res = await fetch(`${API_BASE}/providers/status`)
+    if (!res.ok) throw new Error(`Failed to list provider statuses: ${res.status}`)
+    return res.json()
+  },
+  updateProvider: async (id: string, data: { is_enabled?: boolean; base_url?: string; settings?: string }): Promise<ProviderConfig> => {
+    const res = await fetch(`${API_BASE}/providers/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to update provider: ${res.status}`)
+    return res.json()
+  },
+  setProviderAPIKey: async (id: string, apiKey: string): Promise<{ provider_id: string; has_key: boolean }> => {
+    const res = await fetch(`${API_BASE}/providers/${id}/api-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    })
+    if (!res.ok) throw new Error(`Failed to set API key: ${res.status}`)
+    return res.json()
+  },
+  detectCLI: async (): Promise<CLIDetectionResult[]> => {
+    const res = await fetch(`${API_BASE}/providers/detect-cli`)
+    if (!res.ok) throw new Error(`Failed to detect CLI: ${res.status}`)
+    return res.json()
+  },
 
   // Models
   listModels: async (): Promise<ModelRecord[]> => {
@@ -288,6 +326,31 @@ export const api = {
   getContextBreakdown: async (sessionId: string): Promise<ContextBreakdown> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-breakdown`)
     if (!res.ok) throw new Error(`Failed to get context breakdown: ${res.status}`)
+    return res.json()
+  },
+
+  // Execution Metrics
+  getSessionMetrics: async (sessionId: string): Promise<ExecutionMetrics[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/metrics`)
+    if (!res.ok) throw new Error(`Failed to get session metrics: ${res.status}`)
+    return res.json()
+  },
+
+  getRecentExecutions: async (limit = 50): Promise<ExecutionMetrics[]> => {
+    const res = await fetch(`${API_BASE}/metrics/executions?limit=${limit}`)
+    if (!res.ok) throw new Error(`Failed to get recent executions: ${res.status}`)
+    return res.json()
+  },
+
+  getUtilityCallSummary: async (): Promise<UtilityCallSummary[]> => {
+    const res = await fetch(`${API_BASE}/metrics/utility`)
+    if (!res.ok) throw new Error(`Failed to get utility call summary: ${res.status}`)
+    return res.json()
+  },
+
+  getUtilityCallLog: async (limit = 50): Promise<ExecutionMetrics[]> => {
+    const res = await fetch(`${API_BASE}/metrics/utility/log?limit=${limit}`)
+    if (!res.ok) throw new Error(`Failed to get utility call log: ${res.status}`)
     return res.json()
   },
 

@@ -31,6 +31,7 @@ import (
 	"github.com/hollis-labs/conduit/internal/plugin"
 	_ "github.com/hollis-labs/conduit/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/secrets"
 	"github.com/hollis-labs/conduit/internal/server"
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
@@ -105,6 +106,9 @@ func cmdServe(args []string) {
 	if err := s.Seed(); err != nil {
 		log.Fatalf("failed to seed database: %v", err)
 	}
+	if err := s.SeedProviders(); err != nil {
+		log.Fatalf("failed to seed providers: %v", err)
+	}
 	if err := s.SeedBuiltinTemplates(); err != nil {
 		log.Fatalf("failed to seed templates: %v", err)
 	}
@@ -122,44 +126,71 @@ func cmdServe(args []string) {
 	}
 
 	// Set up provider registry.
+	// Key resolution: OS keychain → environment variable → skip.
 	registry := provider.NewRegistry()
-	var missingProviders []string
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		registry.Register("anthropic", provider.NewAnthropic())
-		log.Println("anthropic provider registered")
-	} else {
-		missingProviders = append(missingProviders, "ANTHROPIC_API_KEY")
-	}
 
-	if os.Getenv("OPENAI_API_KEY") != "" {
-		registry.Register("openai", provider.NewOpenAI())
-		log.Println("openai provider registered")
-	}
-
-	if len(missingProviders) > 0 {
-		log.Println("╔══════════════════════════════════════════════════════════════╗")
-		log.Println("║  WARNING: Missing API keys — chat will not work!            ║")
-		for _, k := range missingProviders {
-			log.Printf("║  • %s not set                                  ║", k)
+	// resolveKey checks keychain first, then env var.
+	resolveKey := func(providerID, envVar string) string {
+		if key := secrets.Get(secrets.ProviderKeyName(providerID)); key != "" {
+			return key
 		}
-		log.Println("║                                                              ║")
-		log.Println("║  Create a .env file or export the variable before starting.  ║")
-		log.Println("╚══════════════════════════════════════════════════════════════╝")
+		return os.Getenv(envVar)
 	}
 
-	if os.Getenv("GOOGLE_API_KEY") != "" {
-		registry.Register("gemini", provider.NewGemini())
-		log.Println("gemini provider registered")
+	// API providers: register if a key is available from keychain or env.
+	type apiProvSpec struct {
+		name, provID, envVar string
+		create               func() provider.Provider
+		setKey               func(provider.Provider, string)
+	}
+	apiProviders := []apiProvSpec{
+		{"anthropic", "anthropic-001", "ANTHROPIC_API_KEY",
+			func() provider.Provider { return provider.NewAnthropic() },
+			func(p provider.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
+		{"openai", "openai-001", "OPENAI_API_KEY",
+			func() provider.Provider { return provider.NewOpenAI() },
+			func(p provider.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
+		{"gemini", "gemini-api-001", "GOOGLE_API_KEY",
+			func() provider.Provider { return provider.NewGemini() },
+			func(p provider.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
+		{"mistral", "mistral-001", "MISTRAL_API_KEY",
+			func() provider.Provider { return provider.NewMistral() },
+			func(p provider.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
 	}
 
-	if os.Getenv("MISTRAL_API_KEY") != "" {
-		registry.Register("mistral", provider.NewMistral())
-		log.Println("mistral provider registered")
+	var registeredAPI, missingAPI []string
+	for _, spec := range apiProviders {
+		key := resolveKey(spec.provID, spec.envVar)
+		if key != "" {
+			p := spec.create()
+			spec.setKey(p, key)
+			registry.Register(spec.name, p)
+			source := "keychain"
+			if os.Getenv(spec.envVar) == key {
+				source = "env"
+			}
+			log.Printf("%s provider registered (key from %s)", spec.name, source)
+			registeredAPI = append(registeredAPI, spec.name)
+		} else {
+			missingAPI = append(missingAPI, spec.name)
+		}
 	}
 
-	if os.Getenv("AZURE_OPENAI_API_KEY") != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
-		registry.Register("azure-openai", provider.NewAzureOpenAI())
+	// Azure OpenAI — needs both key and endpoint.
+	azureKey := resolveKey("azure-openai-001", "AZURE_OPENAI_API_KEY")
+	if azureKey != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
+		p := provider.NewAzureOpenAI()
+		p.SetAPIKey(azureKey)
+		registry.Register("azure-openai", p)
 		log.Println("azure-openai provider registered")
+		registeredAPI = append(registeredAPI, "azure-openai")
+	}
+
+	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
+		log.Println("╔══════════════════════════════════════════════════════════════╗")
+		log.Println("║  WARNING: No API providers configured — chat will not work! ║")
+		log.Println("║  Set API keys in Settings → Providers or via environment.   ║")
+		log.Println("╚══════════════════════════════════════════════════════════════╝")
 	}
 
 	// Always register Ollama — it requires no API key (local service).

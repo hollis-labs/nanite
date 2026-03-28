@@ -1,6 +1,6 @@
 import { useMemo, useEffect, useState, useCallback, useRef } from 'react'
-import { Loader2, GripVertical, X } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { GripVertical, X } from 'lucide-react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useSettings, useSettingsMutation, useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
 import type { ToolCallDisplayMode } from '@/lib/types'
@@ -177,7 +177,7 @@ function FallbackChain({
 }
 
 export function PreferencesPanel() {
-  const { data: settings, isLoading: settingsLoading } = useSettings()
+  const { data: settings } = useSettings()
   const mutation = useSettingsMutation()
   const { data: providers } = useProviders()
   const { data: models } = useModels()
@@ -185,6 +185,7 @@ export function PreferencesPanel() {
     queryKey: ['agents'],
     queryFn: api.listAgents,
     staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
   })
 
   // Migrate toolCallDisplayMode from localStorage on first load.
@@ -199,7 +200,9 @@ export function PreferencesPanel() {
 
   const providerOptions = useMemo(() => {
     if (!providers) return []
-    return providers.map((p) => ({ value: p.provider_type, label: p.name }))
+    return providers
+      .filter((p) => p.is_enabled)
+      .map((p) => ({ value: p.provider_type, label: p.name }))
   }, [providers])
 
   const modelOptionsForProvider = useMemo(() => {
@@ -225,15 +228,6 @@ export function PreferencesPanel() {
     mutation.mutate({ [key]: value })
   }
 
-  if (settingsLoading) {
-    return (
-      <div className="flex items-center justify-center py-12 text-zinc-500">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" />
-        Loading preferences...
-      </div>
-    )
-  }
-
   return (
     <div className="max-w-2xl space-y-8">
       {/* Defaults */}
@@ -253,11 +247,10 @@ export function PreferencesPanel() {
             value={settings?.default_provider ?? ''}
             options={providerOptions}
             onChange={(v) => {
-              handleChange('default_provider', v)
-              // Clear model when provider changes (it may not be valid).
-              if (settings?.default_model) {
-                handleChange('default_model', '')
-              }
+              // Batch provider + model clear into a single mutation to avoid race.
+              mutation.mutate(settings?.default_model
+                ? { default_provider: v, default_model: '' }
+                : { default_provider: v })
             }}
           />
           <SettingsSelect
@@ -290,10 +283,9 @@ export function PreferencesPanel() {
             value={settings?.utility_provider ?? ''}
             options={providerOptions}
             onChange={(v) => {
-              handleChange('utility_provider', v)
-              if (settings?.utility_model) {
-                handleChange('utility_model', '')
-              }
+              mutation.mutate(settings?.utility_model
+                ? { utility_provider: v, utility_model: '' }
+                : { utility_provider: v })
             }}
           />
           <SettingsSelect

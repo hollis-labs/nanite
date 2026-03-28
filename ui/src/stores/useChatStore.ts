@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo } from '@/lib/types'
+import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo, CLIActiveInfo } from '@/lib/types'
 
 interface ChatState {
   // Streaming
@@ -61,10 +61,13 @@ interface ChatState {
   // Presence
   activeStreams: Map<string, ActiveStreamInfo>
   pendingTools: Map<string, PendingToolInfo>
+  cliActiveSessions: Map<string, CLIActiveInfo>
   setActiveStream: (sessionId: string, info: ActiveStreamInfo) => void
   removeActiveStream: (sessionId: string) => void
   setPendingTool: (sessionId: string, info: PendingToolInfo) => void
   removePendingTool: (sessionId: string) => void
+  setCLIActive: (sessionId: string, info: CLIActiveInfo) => void
+  removeCLIActive: (sessionId: string) => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -152,6 +155,7 @@ export const useChatStore = create<ChatState>((set) => ({
   // Presence
   activeStreams: new Map(),
   pendingTools: new Map(),
+  cliActiveSessions: new Map(),
   setActiveStream: (sessionId, info) =>
     set((state) => {
       const next = new Map(state.activeStreams)
@@ -175,5 +179,17 @@ export const useChatStore = create<ChatState>((set) => ({
       const next = new Map(state.pendingTools)
       next.delete(sessionId)
       return { pendingTools: next }
+    }),
+  setCLIActive: (sessionId, info) =>
+    set((state) => {
+      const next = new Map(state.cliActiveSessions)
+      next.set(sessionId, info)
+      return { cliActiveSessions: next }
+    }),
+  removeCLIActive: (sessionId) =>
+    set((state) => {
+      const next = new Map(state.cliActiveSessions)
+      next.delete(sessionId)
+      return { cliActiveSessions: next }
     }),
 }))

@@ -1,0 +1,46 @@
+// Package secrets provides OS keychain-backed credential storage.
+// Uses macOS Keychain, Windows Credential Manager, or Linux Secret Service.
+package secrets
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/zalando/go-keyring"
+)
+
+const serviceName = "conduit"
+
+// Set stores a secret in the OS keychain under the given key.
+func Set(key, value string) error {
+	if err := keyring.Set(serviceName, key, value); err != nil {
+		return fmt.Errorf("keyring set %q: %w", key, err)
+	}
+	return nil
+}
+
+// Get retrieves a secret from the OS keychain. Returns empty string if not found.
+func Get(key string) string {
+	val, err := keyring.Get(serviceName, key)
+	if err != nil {
+		return ""
+	}
+	return val
+}
+
+// Delete removes a secret from the OS keychain. No error if not found.
+func Delete(key string) {
+	if err := keyring.Delete(serviceName, key); err != nil {
+		log.Printf("secrets: delete %q: %v", key, err)
+	}
+}
+
+// Has returns true if a secret exists in the OS keychain for the given key.
+func Has(key string) bool {
+	return Get(key) != ""
+}
+
+// ProviderKeyName returns the keychain key for a provider's API key.
+func ProviderKeyName(providerID string) string {
+	return "provider-api-key:" + providerID
+}

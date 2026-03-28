@@ -91,6 +91,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Providers & Models
 	mux.HandleFunc("GET /api/providers", a.handleListProviders)
+	mux.HandleFunc("GET /api/providers/status", a.handleGetAllProviderStatuses)
+	mux.HandleFunc("GET /api/providers/detect-cli", a.handleDetectCLI)
+	mux.HandleFunc("PUT /api/providers/{id}", a.handleUpdateProvider)
+	mux.HandleFunc("POST /api/providers/{id}/api-key", a.handleSetProviderAPIKey)
+	mux.HandleFunc("GET /api/providers/{id}/status", a.handleGetProviderStatus)
 	mux.HandleFunc("GET /api/models", a.handleListModels)
 
 	// Workflows
@@ -189,10 +194,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
 
-	// Plugin Config
-	mux.HandleFunc("GET /api/plugins/{id}/config", a.handleGetPluginConfig)
-	mux.HandleFunc("PUT /api/plugins/{id}/config", a.handleUpdatePluginConfig)
-	mux.HandleFunc("GET /api/plugin-settings", a.handleListPluginSettings)
+	// Plugin Config (prefixed to avoid collision with plugin CRUD routes)
+	mux.HandleFunc("GET /api/plugin-config/{id}", a.handleGetPluginConfig)
+	mux.HandleFunc("PUT /api/plugin-config/{id}", a.handleUpdatePluginConfig)
+	mux.HandleFunc("GET /api/plugin-config", a.handleListPluginSettings)
 
 	// Process Health
 	mux.HandleFunc("GET /api/processes/health", a.handleProcessHealth)

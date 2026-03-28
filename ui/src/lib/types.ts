@@ -166,6 +166,46 @@ export interface GlobalUsageSummary {
   by_model: ModelUsage[]
 }
 
+// --- Execution Metrics ---
+
+export interface ExecutionMetrics {
+  id: number
+  session_id: string
+  message_id: string
+  provider: string
+  adapter: string
+  model: string
+  agent_id: string
+  agent_slug: string
+  mode: string
+  duration_ms: number
+  context_messages: number
+  context_tokens: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  estimated_cost_usd: number
+  tool_iterations: number
+  tool_calls: number
+  is_utility: boolean
+  stop_reason: string
+  error: string
+  created_at: string
+}
+
+export interface UtilityCallSummary {
+  provider: string
+  model: string
+  call_type: string
+  call_count: number
+  avg_duration_ms: number
+  min_duration_ms: number
+  max_duration_ms: number
+  error_count: number
+  total_cost_usd: number
+}
+
 // --- Agent Modes ---
 
 export const AGENT_MODES = ['default', 'architect', 'planner', 'writer'] as const
@@ -230,6 +270,19 @@ export interface ProviderConfig {
   settings: string
   created_at: string
   updated_at: string
+}
+
+export interface ProviderStatus extends ProviderConfig {
+  has_api_key: boolean
+  registered: boolean
+}
+
+export interface CLIDetectionResult {
+  name: string
+  provider_type: string
+  detected: boolean
+  path: string
+  env_var: string
 }
 
 // --- Workflows ---
@@ -341,7 +394,7 @@ export interface A2AMessage {
 // --- Presence ---
 
 export interface PresenceEvent {
-  type: 'stream_start' | 'stream_end' | 'tool_pending' | 'tool_resolved'
+  type: 'stream_start' | 'stream_end' | 'tool_pending' | 'tool_resolved' | 'cli_active' | 'session_archived'
   session_id: string
   agent_id?: string
   tool_name?: string
@@ -355,6 +408,10 @@ export interface ActiveStreamInfo {
 
 export interface PendingToolInfo {
   toolName: string
+}
+
+export interface CLIActiveInfo {
+  lastSeen: string
 }
 
 // --- Bookmarks ---

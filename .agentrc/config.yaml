@@ -13,7 +13,8 @@ agents:
     name: Conduit Frontend Developer
     description: React/TypeScript UI development for the Conduit chat interface
     roles: [frontend, react]
-    skills: []
+    skills: [frontend-design]
+    plugins: [vercel]
     context: agents/frontend.md
 
   conduit-plugin-dev:

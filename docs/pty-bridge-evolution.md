@@ -434,29 +434,39 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 - [x] Phase 4: Envelope validation + retry logic
 - [x] Phase 5: CLI adapter abstraction for non-Claude tools (Codex, Gemini CLI)
 
-### Backend — Remaining
+### Backend — Completed (this session)
 - [x] Subprocess adapter (pipe-based fallback for Windows)
 - [x] Provider fallback chain: session → agent preference → user priority list → system default
-- [ ] Move utility provider/model config from env vars to database settings
 - [x] Orphan process tracking and cleanup
 - [x] Process health checks (detect hung CLI processes)
 - [x] Concurrency limits (max simultaneous PTY processes per user/workspace)
-- [x] Execution observability: extend RecordUsage to capture full execution snapshot (duration, context size, memory, adapter, cost)
+- [x] Execution observability: full execution snapshot (duration, context size, adapter, cost)
 - [x] Utility call comparison log (provider, latency, quality per background call)
 
-### Frontend
-- [ ] Settings UI: default adapter (http/pty/subprocess), provider, model, agent
-- [ ] Settings UI: utility provider + model (for autoTitle, autoTags — support Ollama, etc.)
-- [ ] Settings UI: provider fallback chain (ordered list, drag to reorder)
-- [ ] Settings UI: tool call display mode (inline | drawer | drawer-auto) — global default
-- [ ] Per-session override for tool call display mode
-- [ ] Adapter badge on session (read-only after creation)
-- [ ] "Clone session with different adapter" action
-- [ ] Tool call drawer: compact (10 rows), expandable (full chat area), closeable
-- [ ] Tool call drawer: real-time updates, bookmarks, click-to-copy
-- [ ] Tool call drawer: drag-to-resize between compact and expanded
-- [ ] Observability dashboard: execution stats, utility call log (power user opt-in)
-- [ ] Review agent/model/PTY selection UX — how session creation flows with all new options
+### Backend — Remaining
+- [ ] Wire utility provider/model from database settings (currently reads env vars; frontend UI already writes to DB)
+- [ ] Accept agent_id in session creation API (currently hardcodes mentat-001)
+
+### Frontend — Completed
+- [x] Settings UI: default adapter (http/pty/subprocess), provider, model, agent
+- [x] Settings UI: utility provider + model (for autoTitle, autoTags — support Ollama, etc.)
+- [x] Settings UI: provider fallback chain (ordered list, drag to reorder)
+- [x] Settings UI: tool call display mode — global default
+- [x] Settings UI: keyboard shortcuts (view + edit bindings, wired into useKeyboardShortcuts)
+- [x] Per-session override for tool call display mode
+- [x] Adapter badge on session (read-only after creation)
+- [x] "Clone session with different adapter" action
+- [x] Tool call drawer: compact, expandable (full chat area), closeable
+- [x] Tool call drawer: real-time updates, click-to-copy
+- [x] Tool call drawer: drag-to-resize between compact and expanded
+- [x] Unified event stream: shared ContentActions + ToolCallItem across inline + drawer
+- [x] Dynamic model picker (removed hardcoded AVAILABLE_MODELS)
+
+### Frontend — Remaining
+- [ ] Observability dashboard: execution stats widget + utility call comparison (backend APIs ready)
+- [ ] Session creation UX: creation-time overrides (adapter, provider, model, agent)
+- [ ] Session creation UX: wire default_agent to backend (remove localStorage hack)
+- [ ] Session creation UX: improve clone to carry title + agent
 
 ### Testing
 - [ ] Integration test: full PTY event flow with real CLI

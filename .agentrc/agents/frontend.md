@@ -240,3 +240,41 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 - Plugin system: plugins provide envelope components registered at build time
 - A2A messaging: agent-to-agent collaboration via inbox + task threads
 - Total UI code: ~80 files across components, stores, hooks, and lib
+
+---
+
+## Beta Release TODO (Frontend)
+
+### 1. Plugin Config UI
+- [ ] **Plugin settings panel** — Render plugin config schemas from `GET /api/plugins/{id}/config`. Use standard field types (string, bool, int, select, secret) with auto-generated form components.
+- [ ] **Config override components** — Allow plugins to register custom React components for config fields. Gate behind `developer_mode` setting.
+- [ ] **Recover mode** — When `recover_mode` is enabled in settings, disable all plugin UI overrides and render default primitives only.
+- [ ] **Plugin widget mount points** — Verify that `UIComponentTypeWidget` components from plugins actually render. Add mount points in sidebar, session header, or a dedicated widgets area.
+
+### 2. Slash Commands & Fragments v1 UX
+- [ ] Port relevant UI patterns from Fragments v1 (user will specify which).
+- [ ] Ensure TipTap slash command extension picks up plugin-registered commands (backend: `Host.RegisterCommand`).
+
+### 3. Artifacts Drawer
+- [ ] **Artifacts panel** — List session artifacts from `GET /api/sessions/{id}/artifacts`. Show name, type icon, size, timestamp. Click to preview (images, code, markdown) or download.
+- [ ] **Inline artifact links** — When a message references a created file, render a clickable artifact chip that opens the preview.
+- [ ] Wire artifact upload into the composer (drag-and-drop or attach button).
+
+### 4. Observability Dashboard
+- [ ] **Execution stats widget** — `GET /api/metrics/executions` → table/chart of recent calls. Show duration, provider, model, tokens, cost. Filter by session.
+- [ ] **Utility call comparison** — `GET /api/metrics/utility` → side-by-side comparison of providers for autoTitle/autoTags (avg latency, error rate, cost). Useful when user experiments with Ollama vs Anthropic for utility calls.
+- [ ] **Process health panel** — `GET /api/processes/health` → show active CLI processes, uptime, idle time. "Kill stale" button.
+
+### 5. Session Creation UX
+- [ ] Creation-time overrides (adapter, provider, model, agent) in an expandable "Advanced" section.
+- [ ] Wire `default_agent` from database settings (replace localStorage hack).
+- [ ] Improve clone to carry title + agent from source session.
+
+### 6. Multi-Session Presence
+- [ ] Verify presence indicators work with 3+ concurrent streaming sessions.
+- [ ] Show PTY activity indicator when CLI process is producing output between messages (backend will add `cli_active` presence event).
+- [ ] Handle `session.archived` presence event to update sidebar immediately.
+
+### 7. Provider/Model Management
+- [ ] Dynamic model list already uses `/api/models`. Ensure new providers (Gemini API, Mistral, etc.) appear correctly with icons.
+- [ ] Provider status indicators — show which providers are registered and healthy vs unavailable.

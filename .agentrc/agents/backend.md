@@ -213,6 +213,126 @@ ui/                          # React SPA (see frontend.md)
 ## Pre-Existing Issues (logged for follow-up)
 
 - **Broken connector imports in `plugin.go`:** `github.com/hollis-labs/fragments-engine/connectors/gmail` and `connectors/webhook` — modules don't exist. Compiles today because the file is likely behind a build tag or not reached, but will fail if those paths are resolved. Spotted 2026-03-27.
+- **mcp.TestSelfToolsTransport_ListTools:** expects 12 tools, gets 20. Test count is stale after tools were added. Spotted 2026-03-27.
+- **server.TestAuthMiddlewareEnabled:** auth middleware not enforcing in test. Returns 200 instead of 401. Spotted 2026-03-27.
+- **Seed/migration overlap:** migrations 010/011 and Seed() both insert PTY provider rows. Fixed with INSERT OR IGNORE in seed.go but the duplication pattern is fragile.
+
+---
+
+## Beta Release TODO
+
+### 1. Provider Expansion
+
+#### 1a. More HTTP API providers (backend)
+Currently: Anthropic, OpenAI, Ollama. Each implements the `Provider` interface in `internal/provider/`.
+
+- [ ] **Google Gemini API** — HTTP provider (not CLI). Follow `anthropic.go` pattern. Gemini has streaming SSE similar to Anthropic. Register with `GOOGLE_API_KEY` env var.
+- [ ] **Mistral API** — OpenAI-compatible API. Could subclass `openai.go` with a different base URL and model mapping, or create a thin `mistral.go`.
+- [ ] **Cohere API** — Different streaming format (NDJSON). Needs its own adapter.
+- [ ] **Azure OpenAI** — Same protocol as OpenAI but different auth (API key + deployment). Could be a config variant of `openai.go` with `base_url` + `api_version` params.
+- [ ] **AWS Bedrock** — SDK-based, not HTTP. Would need the AWS Go SDK. Consider whether this is beta scope.
+- [ ] Seed new provider/model rows in `seed.go` and add pricing to `usage.go:modelPricing`.
+- [ ] Add models to the dynamic model picker (frontend reads from `/api/models`).
+
+**Reference:** `internal/provider/anthropic.go` (771 lines) is the gold standard. `openai.go` is simpler. New providers should follow the same `StreamChat`/`Complete`/`Capabilities` pattern.
+
+#### 1b. More CLI adapters (backend)
+Currently: Claude, Codex, Gemini via PTY + subprocess bridges.
+
+- [ ] **GitHub Copilot CLI** — If it supports a prompt mode with structured output, add a `pty_copilot.go` adapter. Check if `gh copilot` has a non-interactive mode.
+- [ ] **Aider** — Popular coding CLI. Has `--message` mode. Would need a parser for its output format.
+- [ ] Register new adapters in the `cliAdapters` slice in `main.go:153-158`.
+
+**Reference:** `pty_claude.go` (ClaudeAdapter) is the most complete. `pty_codex.go` and `pty_gemini.go` are simpler. Each adapter implements `CLIAdapter` (defined in `cli_adapter.go`): `Name()`, `BuildArgs()`, `ParseLine()`, `Detect()`.
+
+### 2. Plugin System — Beta Readiness
+
+The plugin SDK (`libs/plugin/`) defines Plugin, Host, EventHook, CRUDHandler, UIComponent interfaces. 14 event types exist. 9 built-in plugins exist. Key gaps for beta:
+
+#### 2a. Plugin config & settings (backend + frontend)
+- [ ] **Plugin config registration API** — Plugins should register their config schema via `Host.RegisterConfig(schema)`. Store plugin configs in a `plugin_settings` table (plugin_id → JSON). Provide `Host.GetConfig(key)` / `Host.SetConfig(key, value)` backed by the DB.
+- [ ] **Config primitives** — Define a set of config field types (string, bool, int, select, secret) that the frontend renders automatically. Plugins provide field definitions + data; frontend provides the UI.
+- [ ] **Config override** — Allow plugins to override primitive rendering with custom components. Gate behind a `developer_mode` flag on user_settings. Add a `recover_mode` flag that disables all plugin overrides and uses default primitives.
+- [ ] **API endpoints** — `GET/PUT /api/plugins/{id}/config` for per-plugin settings.
+
+#### 2b. Connector & adapter registration (backend)
+- [ ] **Plugin-registered connectors** — Extend the Host interface: `Host.RegisterConnector(name, connector)`. Connectors should implement a standard interface (e.g., `Send(ctx, payload) error`). Currently only webhook and gmail connectors exist in `libs/connectors/`.
+- [ ] **Plugin-registered providers** — Allow plugins to register LLM providers at runtime via `Host.RegisterProvider(name, provider)`. This is the preferred way for third-party providers to be added without modifying core code.
+- [ ] **Plugin-registered adapters** — Similarly, `Host.RegisterCLIAdapter(name, adapter)` for CLI tool integrations.
+
+#### 2c. Hooks & events completeness (backend)
+- [ ] Audit the 14 event types against real plugin needs. Missing candidates: `config.changed`, `plugin.installed`, `plugin.uninstalled`, `session.archived`, `provider.error`, `provider.fallback`.
+- [ ] **Pre-hooks** — Some events need pre-hooks (before the action) not just post-hooks. E.g., `message.sending` (can modify/block) vs `message.sent` (notification only). Check if `EventHook.Handle` return value can signal cancellation.
+- [ ] **Widget registration** — `UIComponentTypeWidget` exists but verify the frontend actually renders plugin-registered widgets. Check `ui/src/` for widget mount points.
+
+#### 2d. Plugin docs, example, generator (backend + frontend)
+- [ ] **Plugin example** — Create a well-documented example plugin that demonstrates: config registration, event hooks, UI component (envelope + widget), connector usage, CRUD handler. The `support-ticket` plugin is closest but needs cleanup.
+- [ ] **Plugin generator** — CLI command or script: `conduit plugin init <name>` → scaffolds a plugin directory with boilerplate (plugin.go, config schema, test file, README).
+- [ ] **Plugin guide** — Document the full lifecycle: discovery → loading → config → events → UI → uninstall. Cover the Host API, event types, component types, connector pattern.
+
+### 3. Slash Commands & UI/UX from Fragments v1
+
+Currently 11 commands in `internal/chat/commands.go`. Categories: agent, session, tools, help.
+
+#### 3a. Backend slash commands
+- [ ] Review Fragments v1 slash commands and port missing ones. Likely candidates: `/agent <name>` (switch agent), `/model <name>` (switch model), `/export` (export session), `/import`, `/search` (search messages).
+- [ ] `/status` — Show session info (agent, model, provider, adapter, message count, token usage).
+- [ ] `/providers` — List registered providers and their status (available/unavailable).
+- [ ] Ensure the command registry pattern in `commands.go` is extensible — plugins should be able to register custom slash commands via `Host.RegisterCommand(name, handler)`.
+
+#### 3b. Frontend UI/UX (frontend)
+- [ ] Port relevant UI patterns from Fragments v1 (the user will specify which ones).
+
+### 4. Multi-Session Presence
+
+Presence broadcasts exist (`stream_start`, `stream_end`, `tool_pending`, `tool_resolved`) via SSE at `/api/presence`. Issues:
+
+#### 4a. Multi-live-session presence (backend)
+- [ ] Verify that multiple simultaneous streaming sessions broadcast correctly. The `activePresence` sync.Map should handle this, but test with 3+ concurrent sessions.
+- [ ] Add presence event for session archive/close so the UI can update immediately.
+
+#### 4b. PTY session presence (backend)
+- [ ] PTY sessions DO emit presence via the same engine path — `stream_start` fires when `generateResponse` begins and `stream_end` when it completes. **But**: long-running PTY processes that are active (producing output) between messages don't emit presence. Consider adding a `cli_active` presence event driven by the `ActivityCallback` (Touch) — would show the PTY process is alive and producing output even between formal message boundaries.
+- [ ] Tool-level presence for PTY: CLIs manage their own tools internally, so `tool_pending`/`tool_resolved` won't fire for PTY tool calls. Document this as a known limitation or parse tool events from CLI output and forward them as presence events.
+
+### 5. Artifacts
+
+Storage exists (`internal/store/artifacts.go`, `internal/api/artifacts.go`). Upload/download works. Gaps:
+
+#### 5a. Backend
+- [ ] **Auto-detect artifacts from responses** — When an assistant response creates/writes a file (detected via tool calls), automatically create an artifact record. Currently artifacts are only created via explicit upload.
+- [ ] **Artifact metadata** — Extend metadata to track origin (tool call ID, message ID, agent that created it).
+
+#### 5b. Frontend
+- [ ] **Artifacts drawer** — Show session artifacts in a drawer/panel. List with name, type, size, created time. Click to preview (images, code, text) or download.
+- [ ] **Inline artifact references** — When a message mentions a created file, link it to the artifact for one-click access.
+
+### 6. Agent Model — agentrc Compatibility
+
+Currently agents are DB records (AgentProfile in `internal/store/agents.go`). The agentrc system (`~/.agentrc/`) uses YAML composition (roles + skills + context). Key alignment:
+
+#### 6a. Agent schema (backend)
+- [ ] **Extend AgentProfile** to support the agentrc-style fields:
+  - `unique_id` — stable identifier across versions (currently just `id` which is a UUID)
+  - `version` — agent definition version
+  - `hash` — content hash, constant through versions (for identity tracking)
+  - `tools` — JSON array of allowed/configured tools (currently in `tool_permissions` but as permission rules, not tool lists)
+  - `skills` — JSON array of skill IDs (currently managed via `agent_skills` join table)
+  - `permissions` — structured permission object (currently `tool_permissions` JSON blob)
+  - `directories` — JSON array of directories this agent can access (for sandbox scoping)
+- [ ] **Per-project/session overrides** — tools, skills, permissions, and directories should be overridable at the project level (`projects.settings` JSON) and session level (`sessions.metadata` JSON). Define merge semantics: session overrides project overrides agent defaults.
+
+#### 6b. agentrc integration (backend — needs decision)
+- [ ] **Decision needed:** How standalone should Conduit be? Options:
+  1. **Import agentrc configs** — Read `~/.agentrc/config.yaml` and `.agentrc/config.yaml` at startup, create/update AgentProfile records from them. Conduit owns the runtime, agentrc provides definitions.
+  2. **Full integration** — Conduit's config loader (`internal/config/`) already merges user+project agentrc YAML. Extend this to populate agent profiles from the merged config.
+  3. **Adapter layer** — Define an `AgentSource` interface. One implementation reads from DB, another reads from agentrc YAML. Engine queries the source at runtime. Allows switching or layering.
+- [ ] **Agent framework adapters (future)** — Consider adapters for other agent definition formats (e.g., CrewAI, AutoGen, LangGraph agent configs). These would implement the same `AgentSource` interface.
+
+### 7. Small Backend Items (from evolution doc)
+
+- [ ] Wire utility provider/model from database settings (currently reads env vars; frontend UI already writes to DB via user_settings table)
+- [ ] Accept `agent_id` in session creation API (currently hardcodes `mentat-001`)
 
 ## Build & Run
 

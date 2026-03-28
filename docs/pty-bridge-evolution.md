@@ -6,43 +6,46 @@
 
 ## Current State (2026-03-27)
 
-The PTY bridge is a new provider (`internal/provider/pty.go`) that spawns Claude CLI in a pseudo-terminal, reads `--output-format stream-json` output, and maps events to Conduit's `StreamEvent` types. It sits alongside the Anthropic, OpenAI, and Ollama providers.
+The PTY bridge is a multi-CLI provider system (`internal/provider/pty.go`) that spawns CLI tools (Claude, Codex, Gemini) in pseudo-terminals, reads structured output, and maps events to Conduit's `StreamEvent` types. It supports multi-turn sessions, per-session sandboxing, MCP tool access, and envelope validation with retry.
 
 ### Implemented
 - **Provider interface:** `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`
-- **Claude stream-json parser** (`pty_claude.go`): maps `assistant`, `result`, `error` events to `delta`, `tool_use`, `usage`, `done` StreamEvents
-- **Dynamic provider routing:** `session.Provider` field routes to correct provider; `inferProvider()` fallback for legacy sessions
-- **Utility provider/model:** `UtilityProvider` + `UtilityModel` on Engine, configurable via `CONDUIT_UTILITY_PROVIDER` / `CONDUIT_UTILITY_MODEL` env vars. Decouples autoTitle/autoTags from session provider.
-- **Registration:** Conditional in `main.go` — only registers if `claude` binary found in PATH
-- **Database:** Provider and model seeded; migration `010_add_pty_provider.sql` for existing DBs
-- **Frontend:** PTY in provider icons, Claude CLI in model list, model picker sets both `model` + `provider` on session
-- **Unit tests:** 11 parser tests, 4 provider tests
+- **CLIAdapter abstraction** (`pty_adapter.go`): pluggable interface for CLI-specific args, parsing, detection
+- **Three adapters:** Claude (`pty_claude.go`), Codex (`pty_codex.go`), Gemini (`pty_gemini.go`)
+- **Dynamic provider routing:** `session.Provider` routes to correct provider; `inferProvider()` handles `claude-cli`, `codex-cli`, `gemini-cli`; `isPTYProvider()` matches all PTY variants
+- **Multi-turn sessions** (Phase 3): CLI session ID captured from system init event, persisted in session metadata, `--resume` used on subsequent messages
+- **Per-session sandbox** (Phase 1): `~/.conduit/sandboxes/<session-id>/` with CLAUDE.md (compact rules + pointers) and `.sandbox/` subdir (envelope-schema.md, agent-context.md)
+- **Conduit MCP server** (Phase 2): `conduit mcp` subcommand via `mark3labs/mcp-go`, exposes all self-service tools (skills, agents, workflows, envelope helpers) over stdio JSON-RPC. Sandbox `.mcp.json` points CLI to this server.
+- **Envelope validation + retry** (Phase 4): `ParseEnvelopes()` returns validation errors; PTY sessions get one correction prompt via `--resume` for fatal errors
+- **Utility provider/model:** `UtilityProvider` + `UtilityModel` on Engine, configurable via env vars
+- **Registration:** Auto-detection of all available CLIs at startup; backwards-compat `"pty"` alias for Claude
+- **Database:** Providers and models seeded for Claude, Codex, Gemini; migrations 010 + 011
+- **Frontend:** PTY in provider icons, model picker sets both `model` + `provider` on session
+- **Unit tests:** 30+ parser tests (Claude, Codex, Gemini), adapter tests, envelope validation tests, sandbox tests, MCP server tests
 
 ### How it works today
-1. User selects "Claude CLI" model in UI → session gets `provider: "pty"`, `model: "claude-cli"`
+1. User selects a CLI model in UI → session gets `provider: "pty-claude"`, `model: "claude-cli"` (or codex/gemini variants)
 2. User sends message → engine loads session, resolves provider to PTY bridge
-3. PTY bridge extracts last user message, spawns: `claude -p "<message>" --output-format stream-json --verbose --system-prompt "<agent prompt>"`
-4. Goroutine reads PTY output line by line, parses JSON, emits StreamEvents on channel
-5. Engine forwards events to frontend via SSE (same pipeline as API providers)
-6. Process exits after response; no state persists between turns
+3. Engine creates sandbox dir, writes CLAUDE.md + .sandbox/ + .mcp.json
+4. PTY bridge delegates to adapter: `adapter.BuildArgs(prompt, systemPrompt, cliSessionID)` → spawns CLI in sandbox dir
+5. CLI discovers Conduit MCP server via `.mcp.json`, can call skills/envelope tools
+6. Goroutine reads PTY output, delegates to `adapter.ParseLine()`, emits StreamEvents
+7. Engine captures CLI session ID from system init event, persists for `--resume` on next turn
+8. Engine parses envelopes from response; on validation errors, sends correction prompt (max 1 retry)
+9. Engine forwards events to frontend via SSE (same pipeline as API providers)
 
 ### Current limitations
-- **Single-turn only** — each message spawns a fresh CLI process (`-p` flag)
-- **Last message only** — conversation history is not sent; CLI has no context of prior turns
-- **Conduit's working directory** — CLI runs in Conduit's project dir, not a per-session sandbox
-- **CLI's own MCP servers** — not Conduit's MCP connections
-- **No agent profile injection** — CLI is unaware of Conduit agents, skills, tool broker rules
-- **No envelope format validation** — malformed envelopes are silently dropped
 - **Unix only** — `creack/pty` requires darwin/linux (`//go:build !windows`)
+- **Codex resume** — Codex CLI resume is interactive-only; PTY adapter uses single-turn `exec`
+- **No subprocess fallback** — Windows requires pipe-based adapter (future)
 
-### What was explicitly deferred (first pass)
-- Multi-turn session persistence
+### What was explicitly deferred
 - Naked PTY passthrough mode (raw terminal in browser)
-- Non-Claude CLI adapters (Codex, Gemini CLI, etc.)
 - Output backpressure / ACK
 - Orphan process tracking
 - Process stats (CPU/memory polling)
 - Agent state detection (planning/idle/active)
+- Subprocess adapter (pipe-based fallback for Windows)
 
 ---
 
@@ -365,6 +368,14 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 
 - [x] Unit test: mock PTY output → verify StreamEvent mapping
 - [x] Unit test: parser handles all Claude stream-json event types
+- [x] Unit test: Codex JSONL parser (message, turn.completed, error, thread.started)
+- [x] Unit test: Gemini stream-json parser (init, message, tool_use, result)
+- [x] Unit test: CLI session ID context round-trip
+- [x] Unit test: sandbox dir context round-trip
+- [x] Unit test: sandbox Dir creates directory + .sandbox/ subdir
+- [x] Unit test: sandbox Populate writes CLAUDE.md, .sandbox/, .mcp.json
+- [x] Unit test: MCP server envelope marker conversion
+- [x] Unit test: envelope validation (invalid_json, missing_kind, missing_version, unregistered_type)
 - [x] Manual test: create PTY session, send message, verify response streams
 - [ ] Integration test: spawn real `claude` with a simple prompt, verify full event flow
 - [ ] Envelope test: verify agent-generated envelopes render correctly via PTY path
@@ -379,27 +390,46 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 
 | File | Purpose |
 |------|---------|
-| `internal/provider/pty.go` | PTY bridge provider (unix only) |
-| `internal/provider/pty_claude.go` | Claude stream-json parser |
-| `internal/provider/pty_claude_test.go` | Parser unit tests |
-| `internal/provider/pty_test.go` | Provider unit tests |
-| `internal/provider/provider.go` | Provider interface (StreamChat, StreamChatWithTools, Complete, Capabilities) |
-| `internal/chat/engine.go` | Dynamic provider routing, UtilityProvider/UtilityModel, inferProvider() |
+| `internal/provider/pty.go` | Generic PTY bridge provider (unix only), delegates to CLIAdapter |
+| `internal/provider/pty_adapter.go` | CLIAdapter interface + CLIConfig struct |
+| `internal/provider/pty_claude.go` | ClaudeAdapter + Claude stream-json parser |
+| `internal/provider/pty_codex.go` | CodexAdapter + Codex JSONL parser |
+| `internal/provider/pty_gemini.go` | GeminiAdapter + Gemini stream-json parser |
+| `internal/provider/pty_claude_test.go` | Claude parser + system event tests |
+| `internal/provider/pty_codex_test.go` | Codex parser + adapter tests |
+| `internal/provider/pty_gemini_test.go` | Gemini parser + adapter tests |
+| `internal/provider/pty_test.go` | Provider tests, context helpers |
+| `internal/provider/provider.go` | Provider interface, StreamEvent (with SessionID), context keys |
+| `internal/sandbox/sandbox.go` | Per-session sandbox dirs, CLAUDE.md, .sandbox/, .mcp.json |
+| `internal/sandbox/sandbox_test.go` | Sandbox unit tests |
+| `internal/mcpserver/server.go` | Conduit MCP server (mark3labs/mcp-go, stdio) |
+| `internal/mcpserver/handlers.go` | Tool handlers, envelope marker conversion |
+| `internal/mcpserver/server_test.go` | MCP server unit tests |
+| `internal/chat/engine.go` | Provider routing, sandbox setup, session ID capture, envelope retry |
+| `internal/chat/envelope.go` | Envelope types, ParseEnvelopes (with validation), ValidateEnvelope |
+| `internal/chat/envelope_test.go` | Envelope validation tests |
 | `internal/api/sessions.go` | Session update API (accepts provider field) |
-| `internal/store/migrations/010_add_pty_provider.sql` | Migration for existing databases |
-| `internal/store/seed.go` | PTY provider + claude-cli model seed |
-| `cmd/conduit/main.go` | PTY registration, UtilityProvider env var |
+| `internal/store/store.go` | Store with DBPath() |
+| `internal/store/sessions.go` | UpdateSessionMetadata() |
+| `internal/store/seed.go` | Seeds for Claude, Codex, Gemini providers/models |
+| `internal/store/migrations/010_add_pty_provider.sql` | Migration: Claude PTY provider |
+| `internal/store/migrations/011_add_codex_gemini_providers.sql` | Migration: Codex + Gemini providers |
+| `cmd/conduit/main.go` | Multi-adapter registration, `conduit mcp` subcommand |
 | `ui/src/components/chat/ComposerToolbar.tsx` | Provider icons, model picker sets provider+model |
-| `ui/src/lib/types.ts` | AVAILABLE_MODELS includes claude-cli |
+| `ui/src/lib/types.ts` | AVAILABLE_MODELS includes CLI models |
 
 ---
 
 ## TODO
 
-### Backend
-- [ ] Phase 1: Per-session sandbox directories with CLAUDE.md + .mcp.json generation
-- [ ] Phase 3: Multi-turn sessions via `--resume`
-- [ ] Phase 5: CLI adapter abstraction for non-Claude tools (Codex, Gemini CLI)
+### Backend — Completed
+- [x] Phase 1: Per-session sandbox directories with CLAUDE.md + .sandbox/ + .mcp.json generation
+- [x] Phase 2: Conduit as MCP server (`conduit mcp` subcommand, mark3labs/mcp-go)
+- [x] Phase 3: Multi-turn sessions via `--resume`
+- [x] Phase 4: Envelope validation + retry logic
+- [x] Phase 5: CLI adapter abstraction for non-Claude tools (Codex, Gemini CLI)
+
+### Backend — Remaining
 - [ ] Subprocess adapter (pipe-based fallback for Windows)
 - [ ] Provider fallback chain: session → agent preference → user priority list → system default
 - [ ] Move utility provider/model config from env vars to database settings
@@ -422,12 +452,6 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 - [ ] Tool call drawer: drag-to-resize between compact and expanded
 - [ ] Observability dashboard: execution stats, utility call log (power user opt-in)
 - [ ] Review agent/model/PTY selection UX — how session creation flows with all new options
-
-### Phase 2 (Conduit as MCP Server)
-- [ ] Design MCP server interface (which tools/skills to expose)
-- [ ] Implement Conduit MCP server endpoint
-- [ ] Generate .mcp.json for sandbox directories
-- [ ] Phase 4: Envelope validation + retry logic
 
 ### Testing
 - [ ] Integration test: full PTY event flow with real CLI

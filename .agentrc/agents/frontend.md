@@ -42,12 +42,16 @@ ui/src/
 │   ├── sidebar/
 │   │   └── LeftSidebar.tsx     # Sessions list (pinned, conversations, tasks)
 │   ├── settings/
-│   │   ├── SettingsPage.tsx    # Tab router (agents, skills, prompts, tools, plugins)
+│   │   ├── SettingsPage.tsx    # Tab router (preferences, providers, shortcuts, agents, etc.)
+│   │   ├── PreferencesPanel.tsx # Session defaults, utility model, fallback chain
+│   │   ├── ProviderManager.tsx # Provider cards: enable/disable, API keys, CLI paths
+│   │   ├── ShortcutsPanel.tsx  # Keyboard shortcut editor
 │   │   ├── AgentProfileManager.tsx
 │   │   ├── SkillsBrowser.tsx
 │   │   ├── PromptTemplateEditor.tsx
 │   │   ├── ToolDashboard.tsx   # MCP server management + tool discovery
-│   │   └── PluginManager.tsx
+│   │   ├── PluginManager.tsx
+│   │   └── observability/      # Execution stats, utility call comparison
 │   ├── workflows/              # Workflow list, run modal, result cards
 │   ├── a2a/                    # A2A inbox panel, task thread panel
 │   ├── widgets/                # Right rail widgets (tokens, context, bookmarks, tools, agent)
@@ -261,20 +265,29 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 - [ ] Wire artifact upload into the composer (drag-and-drop or attach button).
 
 ### 4. Observability Dashboard
-- [ ] **Execution stats widget** — `GET /api/metrics/executions` → table/chart of recent calls. Show duration, provider, model, tokens, cost. Filter by session.
-- [ ] **Utility call comparison** — `GET /api/metrics/utility` → side-by-side comparison of providers for autoTitle/autoTags (avg latency, error rate, cost). Useful when user experiments with Ollama vs Anthropic for utility calls.
+- [x] **Execution stats widget** — `GET /api/metrics/executions` → table/chart of recent calls (Chart.js + shadcn).
+- [x] **Utility call comparison** — `GET /api/metrics/utility` → side-by-side provider comparison.
+- [x] **Observability right-rail widget** — at-a-glance stats.
 - [ ] **Process health panel** — `GET /api/processes/health` → show active CLI processes, uptime, idle time. "Kill stale" button.
 
 ### 5. Session Creation UX
-- [ ] Creation-time overrides (adapter, provider, model, agent) in an expandable "Advanced" section.
-- [ ] Wire `default_agent` from database settings (replace localStorage hack).
-- [ ] Improve clone to carry title + agent from source session.
+- [x] Creation-time overrides (adapter, provider, model, agent) — inline form in sidebar.
+- [x] Wire `default_agent` from database settings (removed localStorage hack).
+- [x] Improve clone to carry title + agent from source session.
+- [x] Fork session: clone with full message history (`POST /api/sessions/{id}/fork`).
+- [x] NavRail "New Chat" passes defaults from userSettings.
 
 ### 6. Multi-Session Presence
-- [ ] Verify presence indicators work with 3+ concurrent streaming sessions.
-- [ ] Show PTY activity indicator when CLI process is producing output between messages (backend will add `cli_active` presence event).
-- [ ] Handle `session.archived` presence event to update sidebar immediately.
+- [x] Presence indicators work with 3+ concurrent streaming sessions (Map-based, no single-session assumptions).
+- [x] `cli_active` presence event → cyan pulsing dot in sidebar for PTY activity between messages.
+- [x] `session_archived` presence event → immediate sidebar update via query invalidation.
+- [x] Priority order: tool-pending (amber) > streaming (green) > cli-active (cyan).
 
 ### 7. Provider/Model Management
-- [ ] Dynamic model list already uses `/api/models`. Ensure new providers (Gemini API, Mistral, etc.) appear correctly with icons.
-- [ ] Provider status indicators — show which providers are registered and healthy vs unavailable.
+- [x] All 11 providers seeded on every boot (Anthropic, OpenAI, Ollama, Gemini, Mistral, Azure, 5 CLIs).
+- [x] Provider icons for all providers in model picker and provider manager.
+- [x] ProviderManager UI: compact flex-wrap cards with enable/disable, API keys (OS keychain), CLI paths, base URLs.
+- [x] CLI auto-detection via adapter.Detect() with manual path override.
+- [x] Toggle locked until requirements met (API key or CLI detected).
+- [x] Model picker filters out disabled providers.
+- [x] Provider startup: keychain → env var → skip.

@@ -444,8 +444,8 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 - [x] Utility call comparison log (provider, latency, quality per background call)
 
 ### Backend — Remaining
-- [ ] Wire utility provider/model from database settings (currently reads env vars; frontend UI already writes to DB)
-- [ ] Accept agent_id in session creation API (currently hardcodes mentat-001)
+- [x] Wire utility provider/model from database settings (DB → env var → default fallback chain + live refresh)
+- [x] Accept agent_id in session creation API (request → settings.DefaultAgent → mentat-001 fallback)
 
 ### Frontend — Completed
 - [x] Settings UI: default adapter (http/pty/subprocess), provider, model, agent
@@ -462,11 +462,29 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 - [x] Unified event stream: shared ContentActions + ToolCallItem across inline + drawer
 - [x] Dynamic model picker (removed hardcoded AVAILABLE_MODELS)
 
+### Frontend — Completed (prior session)
+- [x] Observability dashboard: execution stats widget + utility call comparison (Chart.js + shadcn)
+- [x] Observability right-rail widget with at-a-glance stats
+- [x] Session creation UX: creation-time overrides (adapter, provider, model, agent) — inline form in sidebar
+- [x] Session creation UX: wire default_agent to backend (removed localStorage hack)
+- [x] Session creation UX: improve clone to carry title + agent
+- [x] Fork session: clone with full message history (`POST /api/sessions/{id}/fork`)
+- [x] Error persistence: tool errors + chat errors survive page refresh (localStorage)
+- [x] NavRail "New Chat" now passes defaults from userSettings
+
+### Frontend — Completed (2026-03-27 session)
+- [x] Preferences panel performance: removed loading gate, optimistic updates, keepPreviousData
+- [x] Route conflict fix: `/api/plugins/{id}/config` → `/api/plugin-config/{id}`
+- [x] Multi-session presence: `cli_active` (cyan dot), `session_archived` (sidebar invalidation)
+- [x] Provider management UI: compact flex-wrap cards, enable/disable, API keys, CLI paths, base URLs
+- [x] OS keychain storage for API keys (macOS Keychain / Windows Credential Manager / Linux Secret Service)
+- [x] Provider startup: keychain → env var → skip (removes .env dependency)
+- [x] All 11 providers seeded on every boot via SeedProviders()
+- [x] CLI auto-detection via adapter.Detect() with manual path override
+- [x] Model picker filters disabled providers, icons for all providers
+- [x] Themed horizontal scrollbars for compact provider card fields
+
 ### Frontend — Remaining
-- [ ] Observability dashboard: execution stats widget + utility call comparison (backend APIs ready)
-- [ ] Session creation UX: creation-time overrides (adapter, provider, model, agent)
-- [ ] Session creation UX: wire default_agent to backend (remove localStorage hack)
-- [ ] Session creation UX: improve clone to carry title + agent
 
 ### Testing
 - [ ] Integration test: full PTY event flow with real CLI

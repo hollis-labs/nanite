@@ -7,7 +7,6 @@ interface LayoutState {
   leftSidebarOpen: boolean
   rightRailOpen: boolean
   artifactsDrawerOpen: boolean
-  workflowPanelOpen: boolean
   taskThreadOpen: boolean
   inboxPanelOpen: boolean
   toolDrawerState: ToolDrawerState
@@ -16,13 +15,11 @@ interface LayoutState {
   toggleLeftSidebar: () => void
   toggleRightRail: () => void
   toggleArtifactsDrawer: () => void
-  toggleWorkflowPanel: () => void
   toggleTaskThread: () => void
   toggleInboxPanel: () => void
   setLeftSidebar: (open: boolean) => void
   setRightRail: (open: boolean) => void
   setArtifactsDrawer: (open: boolean) => void
-  setWorkflowPanel: (open: boolean) => void
   setTaskThread: (open: boolean) => void
   setInboxPanel: (open: boolean) => void
   setToolDrawerState: (state: ToolDrawerState) => void
@@ -36,7 +33,6 @@ export const useLayoutStore = create<LayoutState>()(
       leftSidebarOpen: true,
       rightRailOpen: true,
       artifactsDrawerOpen: false,
-      workflowPanelOpen: false,
       taskThreadOpen: true,
       inboxPanelOpen: false,
       toolDrawerState: 'closed' as ToolDrawerState,
@@ -48,8 +44,6 @@ export const useLayoutStore = create<LayoutState>()(
         set((state) => ({ rightRailOpen: !state.rightRailOpen })),
       toggleArtifactsDrawer: () =>
         set((state) => ({ artifactsDrawerOpen: !state.artifactsDrawerOpen })),
-      toggleWorkflowPanel: () =>
-        set((state) => ({ workflowPanelOpen: !state.workflowPanelOpen })),
       toggleTaskThread: () =>
         set((state) => ({ taskThreadOpen: !state.taskThreadOpen })),
       toggleInboxPanel: () =>
@@ -57,7 +51,6 @@ export const useLayoutStore = create<LayoutState>()(
       setLeftSidebar: (open) => set({ leftSidebarOpen: open }),
       setRightRail: (open) => set({ rightRailOpen: open }),
       setArtifactsDrawer: (open) => set({ artifactsDrawerOpen: open }),
-      setWorkflowPanel: (open) => set({ workflowPanelOpen: open }),
       setTaskThread: (open) => set({ taskThreadOpen: open }),
       setInboxPanel: (open) => set({ inboxPanelOpen: open }),
       setToolDrawerState: (state) => set({ toolDrawerState: state }),

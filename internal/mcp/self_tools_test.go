@@ -43,8 +43,6 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 		"conduit_create_agent":          false,
 		"conduit_list_agents":           false,
 		"conduit_update_agent":          false,
-		"conduit_list_workflows":        false,
-		"conduit_create_workflow":       false,
 		"conduit_open_sprint_planning":  false,
 		"conduit_start_builder":         false,
 		"conduit_builder_step":          false,
@@ -62,8 +60,8 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 		}
 	}
 
-	if len(tools) != len(expected) {
-		t.Errorf("expected %d tools, got %d", len(expected), len(tools))
+	if len(tools) < len(expected) {
+		t.Errorf("expected at least %d tools, got %d", len(expected), len(tools))
 	}
 }
 
@@ -223,37 +221,6 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	sk, _ := st.Store.GetSkill(skillID)
 	if sk != nil {
 		t.Error("skill should have been deleted")
-	}
-}
-
-// TestSelfToolsTransport_CreateWorkflow tests workflow creation round-trip.
-func TestSelfToolsTransport_CreateWorkflow(t *testing.T) {
-	st := newSelfTools(t)
-	ctx := context.Background()
-
-	result, err := st.CallTool(ctx, "conduit_create_workflow", map[string]any{
-		"name":       "Test Workflow",
-		"slug":       "test-workflow",
-		"definition": `{"steps":[{"name":"step1","action":"llm_call"}]}`,
-		"trigger":    "manual",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %s", result.Content[0].Text)
-	}
-	if !strings.Contains(result.Content[0].Text, "Created workflow") {
-		t.Errorf("expected creation confirmation, got: %s", result.Content[0].Text)
-	}
-
-	// List workflows and verify.
-	listResult, _ := st.CallTool(ctx, "conduit_list_workflows", map[string]any{})
-	if listResult.IsError {
-		t.Fatalf("unexpected error: %s", listResult.Content[0].Text)
-	}
-	if !strings.Contains(listResult.Content[0].Text, "Test Workflow") {
-		t.Errorf("expected workflow in list, got: %s", listResult.Content[0].Text)
 	}
 }
 

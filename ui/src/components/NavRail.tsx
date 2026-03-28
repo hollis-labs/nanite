@@ -1,4 +1,4 @@
-import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Workflow, Inbox } from 'lucide-react'
+import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Inbox } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -12,7 +12,6 @@ import type { Workspace } from '@/lib/types'
 const navItems = [
   { icon: MessageSquare, label: 'Chat', id: 'chat' },
   { icon: Search, label: 'Search', id: 'search' },
-  { icon: Workflow, label: 'Workflows', id: 'workflows' },
   { icon: Plus, label: 'New Chat', id: 'new' },
   { icon: Settings, label: 'Settings', id: 'settings' },
 ] as const
@@ -25,8 +24,6 @@ export function NavRail() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
-  const toggleWorkflowPanel = useLayoutStore((s) => s.toggleWorkflowPanel)
-  const workflowPanelOpen = useLayoutStore((s) => s.workflowPanelOpen)
   const toggleInboxPanel = useLayoutStore((s) => s.toggleInboxPanel)
   const inboxPanelOpen = useLayoutStore((s) => s.inboxPanelOpen)
   const setLeftSidebar = useLayoutStore((s) => s.setLeftSidebar)
@@ -146,8 +143,7 @@ export function NavRail() {
 
       <div className="flex flex-col items-center gap-1 flex-1">
         {navItems.map(({ icon: Icon, label, id }) => {
-          const isActive = id === 'workflows' ? workflowPanelOpen :
-                          id === 'settings' ? currentPage === 'settings' :
+          const isActive = id === 'settings' ? currentPage === 'settings' :
                           id === 'chat' ? currentPage === 'chat' :
                           activeItem === id
           return (
@@ -161,9 +157,7 @@ export function NavRail() {
                     : 'text-zinc-400 hover:text-zinc-100'
                 }`}
                 onClick={() => {
-                  if (id === 'workflows') {
-                    toggleWorkflowPanel()
-                  } else if (id === 'new') {
+                  if (id === 'new') {
                     if (activeWorkspaceId) createSessionMutation.mutate()
                   } else if (id === 'search') {
                     setLeftSidebar(true)

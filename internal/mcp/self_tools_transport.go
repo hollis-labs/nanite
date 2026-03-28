@@ -57,10 +57,6 @@ func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[
 		return st.callListAgents(args)
 	case "conduit_update_agent":
 		return st.callUpdateAgent(args)
-	case "conduit_list_workflows":
-		return st.callListWorkflows(args)
-	case "conduit_create_workflow":
-		return st.callCreateWorkflow(args)
 	case "conduit_open_sprint_planning":
 		return textResult("Sprint planning modal opened in the UI."), nil
 	case "conduit_navigate_engine":
@@ -278,59 +274,6 @@ func (st *SelfToolsTransport) callUpdateAgent(args map[string]any) (*ToolResult,
 	return textResult(fmt.Sprintf("Updated agent %q (id=%s)", a.Name, a.ID)), nil
 }
 
-// --- workflow handlers ---
-
-func (st *SelfToolsTransport) callListWorkflows(args map[string]any) (*ToolResult, error) {
-	workflows, err := st.Store.ListWorkflows()
-	if err != nil {
-		return errorResult(fmt.Sprintf("list workflows: %v", err)), nil
-	}
-
-	if len(workflows) == 0 {
-		return textResult("No workflows found."), nil
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Found %d workflow(s):\n\n", len(workflows))
-	for _, w := range workflows {
-		enabled := "enabled"
-		if !w.IsEnabled {
-			enabled = "disabled"
-		}
-		fmt.Fprintf(&sb, "- %s (id=%s, slug=%s, trigger=%s, %s)\n",
-			w.Name, w.ID, w.Slug, w.Trigger, enabled)
-	}
-	return textResult(sb.String()), nil
-}
-
-func (st *SelfToolsTransport) callCreateWorkflow(args map[string]any) (*ToolResult, error) {
-	name, _ := args["name"].(string)
-	slug, _ := args["slug"].(string)
-	definition, _ := args["definition"].(string)
-	if name == "" || slug == "" || definition == "" {
-		return errorResult("name, slug, and definition are required"), nil
-	}
-
-	isEnabled := true
-	if v, ok := args["is_enabled"].(bool); ok {
-		isEnabled = v
-	}
-
-	w := &store.Workflow{
-		Name:       name,
-		Slug:       slug,
-		Trigger:    strArg(args, "trigger", "manual"),
-		Definition: definition,
-		IsEnabled:  isEnabled,
-	}
-
-	if err := st.Store.CreateWorkflow(w); err != nil {
-		return errorResult(fmt.Sprintf("create workflow: %v", err)), nil
-	}
-
-	out, _ := json.Marshal(w)
-	return textResult(fmt.Sprintf("Created workflow %q (id=%s)\n%s", w.Name, w.ID, string(out))), nil
-}
 
 // --- builder handlers ---
 

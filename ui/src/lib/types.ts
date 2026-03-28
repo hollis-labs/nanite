@@ -276,7 +276,10 @@ export interface UserSettings {
   provider_fallback_chain: string[]
   developer_mode: boolean
   recover_mode: boolean
-  ext_settings: Record<string, unknown>
+  ext_settings: Record<string, unknown> & {
+    widget_visibility?: Record<string, boolean>
+    widget_order?: string[]
+  }
 }
 
 export interface ProviderConfig {
@@ -301,37 +304,6 @@ export interface CLIDetectionResult {
   detected: boolean
   path: string
   env_var: string
-}
-
-// --- Workflows ---
-
-export interface WorkflowInput {
-  name: string
-  type: 'text' | 'textarea' | 'select' | 'number' | 'boolean'
-  label: string
-  required: boolean
-  default?: string | number | boolean
-  options?: string[]
-}
-
-export interface Workflow {
-  name: string
-  description: string
-  inputs: WorkflowInput[]
-}
-
-export interface StepResult {
-  name: string
-  status: 'pending' | 'running' | 'done' | 'error'
-  output?: string
-  error?: string
-}
-
-export interface WorkflowResult {
-  workflow: string
-  status: 'pending' | 'running' | 'done' | 'error'
-  steps: StepResult[]
-  output?: string
 }
 
 // --- Session Agents ---
@@ -589,6 +561,7 @@ export interface PluginUIComponent {
   name: string
   description: string
   props?: Record<string, unknown>
+  plugin_id?: string
 }
 
 // --- Skills ---

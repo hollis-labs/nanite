@@ -1,5 +1,8 @@
 import { Extension } from '@tiptap/react'
 import Suggestion, { type SuggestionOptions } from '@tiptap/suggestion'
+import { PluginKey } from '@tiptap/pm/state'
+
+const fileMentionPluginKey = new PluginKey('fileMention')
 
 export interface FileResult {
   path: string
@@ -37,6 +40,7 @@ export const FileMentionExtension = Extension.create<FileMentionOptions>({
     return [
       Suggestion({
         editor: this.editor,
+        pluginKey: fileMentionPluginKey,
         ...this.options.suggestion,
       }),
     ]

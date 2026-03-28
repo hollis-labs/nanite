@@ -8,6 +8,8 @@
 //   1. Create the component in ui/src/components/settings/config-overrides/
 //   2. Add a lazy import entry below keyed by the component name
 //   3. The component receives: { field, value, onChange } (same as ConfigFieldInput)
+// @ts-expect-error lazy is used when entries are added to the registry below
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { lazy } from 'react'
 import type { ComponentType } from 'react'
 import type { ConfigField } from '@/lib/types'

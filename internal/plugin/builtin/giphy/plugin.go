@@ -40,10 +40,29 @@ func (p *GiphyPlugin) Load(host plugin.Host) error {
 	p.host = host
 	logger := host.Logger()
 
-	// Resolve API key from config (env var → config file → empty for demo mode).
+	// Register config schema so the API key and rating are configurable via the UI.
+	if err := host.RegisterConfigSchema([]plugin.ConfigFieldDef{
+		{
+			Key:         "giphy_api_key",
+			Type:        "secret",
+			Label:       "Giphy API Key",
+			Description: "Get a free key from developers.giphy.com. Leave blank for demo mode.",
+		},
+		{
+			Key:         "giphy_rating",
+			Type:        "select",
+			Label:       "Content Rating",
+			Description: "Maximum content rating for search results",
+			Default:     "g",
+			Options:     []string{"g", "pg", "pg-13", "r"},
+		},
+	}); err != nil {
+		logger.Warn("failed to register config schema", "error", fmt.Sprintf("%v", err))
+	}
+
+	// Resolve API key: keychain (via GetConfig) → env var → demo mode.
 	apiKey, err := host.GetConfig("giphy_api_key")
-	if err != nil {
-		// Fall back to direct env var check.
+	if err != nil || apiKey == "" {
 		apiKey = os.Getenv("GIPHY_API_KEY")
 	}
 	p.apiKey = apiKey

@@ -5,7 +5,6 @@ import { LeftSidebar } from './sidebar/LeftSidebar'
 import { ChatMain } from './chat/ChatMain'
 import { RightRail } from './RightRail'
 import { ArtifactsDrawer } from './drawers/ArtifactsDrawer'
-import { WorkflowPanel } from './workflows/WorkflowPanel'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
@@ -77,7 +76,6 @@ export function AppShell() {
       ) : null}
       {currentPage === 'chat' && <RightRail />}
       <ArtifactsDrawer />
-      <WorkflowPanel />
       <InboxPanel
         agentId={inboxAgentId}
         open={inboxPanelOpen}

@@ -298,23 +298,23 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 - [x] Provider startup: keychain → env var → skip.
 
 ### 8. Widget Plugin Migration
-> **Needs discussion before implementation.** Current widgets are hardcoded React components. Plugin-registered widgets only render metadata cards (name/description/props). Before migrating, decide: how do plugin widgets render real UI? Options include a props-driven renderer, a sandboxed iframe approach, or a component registry similar to envelopes. Discuss trade-offs and pick an approach first.
+> **Complete 2026-03-28.** Chose component registry approach (same pattern as envelopes). Widgets are lazy-loaded via `plugin-widgets.ts` registry, rendered through `WidgetRenderer.tsx` with per-widget Suspense + error boundary. RightRail is fully API-driven.
 
-- [ ] **Design widget rendering system** — Decide how plugin-registered widgets render actual UI (not just metadata). Document the approach as an ADR.
-- [ ] **Migrate SessionInfoWidget** to plugin-provided widget.
-- [ ] **Migrate BookmarksWidget** to plugin-provided widget.
-- [ ] **Migrate ContextBudgetWidget** to plugin-provided widget.
-- [ ] **Migrate TokenUsageWidget** to plugin-provided widget.
-- [ ] **Migrate ObservabilityWidget** to plugin-provided widget.
-- [ ] **Migrate ToolsWidget** to plugin-provided widget.
-- [ ] **Migrate AgentStatusWidget** to plugin-provided widget.
-- [ ] **Update PluginWidgets renderer** — Replace metadata cards with the chosen rendering system so all widgets (built-in and third-party) display properly.
+- [x] **Design widget rendering system** — Component registry pattern (lazy imports, same as envelopes). No ADR needed — pattern is proven.
+- [x] **Migrate SessionInfoWidget** — registered by `context-widgets` plugin.
+- [x] **Migrate BookmarksWidget** — registered by `bookmarks-widget` plugin.
+- [x] **Migrate ContextBudgetWidget** — registered by `context-widgets` plugin.
+- [x] **Migrate TokenUsageWidget** — registered by `context-widgets` plugin.
+- [x] **Migrate ObservabilityWidget** — registered by `observability-widgets` plugin.
+- [x] **Migrate ToolsWidget** — registered by `agent-widgets` plugin.
+- [x] **Migrate AgentStatusWidget** — registered by `agent-widgets` plugin. Mode switcher removed, replaced with status indicator.
+- [x] **Update PluginWidgets renderer** — Replaced entirely with `WidgetRenderer.tsx`. `PluginWidgets.tsx` deleted. Dev-mode gate removed.
 
 ### 9. Widget Admin Panel
-> New Settings tab for managing widgets. Use the same compact flex-wrap card style as ProviderManager.
+> **Complete 2026-03-28.** New "Widgets" tab in Settings with drag-to-reorder and per-widget visibility toggles.
 
-- [ ] **Widget manager page** — New "Widgets" tab in SettingsPage. Fetch all registered widgets from `GET /api/plugins/ui-components` (type=widget). Display each as a card (same style as ProviderManager: name, description, source plugin, enable/disable toggle).
-- [ ] **Widget enable/disable** — Per-widget on/off toggle. Persist to user settings (new `widget_visibility` map in `UserSettings`). RightRail reads this to decide which widgets to render.
-- [ ] **Widget sort order (drag-drop)** — Drag-and-drop reordering in the admin panel (same pattern as FallbackChain in PreferencesPanel). Persist order to user settings (new `widget_order` array in `UserSettings`). RightRail renders widgets in this order.
-- [ ] **Plugin settings access from widget cards** — If the widget's source plugin has a config schema, show a gear icon on the card that opens PluginConfigPanel for that plugin (same as PluginManager does today).
-- [ ] **Backend: widget preferences** — Add `widget_visibility` (map[string]bool) and `widget_order` ([]string) fields to `UserSettings` in the backend store + migration. Wire into `GET/PUT /api/settings` partial merge.
+- [x] **Widget manager page** — `WidgetManager.tsx` in Settings. Fetches registered widgets from API, shows source plugin badge, gear icon for plugin config.
+- [x] **Widget enable/disable** — Per-widget eye toggle. Persists to `widget_visibility` in `ext_settings`.
+- [x] **Widget sort order (drag-drop)** — Drag-and-drop reordering. Persists to `widget_order` in `ext_settings`.
+- [x] **Plugin settings access from widget cards** — Gear icon opens `PluginConfigPanel` for the widget's source plugin.
+- [x] **Backend: widget preferences** — Stored in `ext_settings` JSON (no migration needed). `widget_visibility` (map) and `widget_order` (array) merged via existing partial update.

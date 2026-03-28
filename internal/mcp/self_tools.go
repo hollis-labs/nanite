@@ -113,29 +113,6 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"id"},
 			},
 		},
-		{
-			Name:        "conduit_list_workflows",
-			Description: "List all workflows. Returns name, slug, trigger, and enabled status.",
-			InputSchema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
-			Name:        "conduit_create_workflow",
-			Description: "Create a new workflow with a name, slug, trigger type, and JSON/YAML definition.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":       map[string]any{"type": "string", "description": "Workflow display name"},
-					"slug":       map[string]any{"type": "string", "description": "URL-safe slug (unique)"},
-					"trigger":    map[string]any{"type": "string", "description": "Trigger type: manual, on_message, scheduled (default: manual)"},
-					"definition": map[string]any{"type": "string", "description": "Workflow definition as JSON string"},
-					"is_enabled": map[string]any{"type": "boolean", "description": "Whether the workflow is enabled (default: true)"},
-				},
-				"required": []string{"name", "slug", "definition"},
-			},
-		},
 		// UI trigger tools — open frontend modals/panels
 		{
 			Name:        "conduit_open_sprint_planning",

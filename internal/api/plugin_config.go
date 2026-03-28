@@ -3,7 +3,26 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/hollis-labs/conduit/internal/secrets"
+	"github.com/hollis-labs/conduit/internal/store"
 )
+
+// pluginSecretKeyName returns the keychain key for a plugin's secret field.
+func pluginSecretKeyName(pluginID, fieldKey string) string {
+	return "plugin:" + pluginID + ":" + fieldKey
+}
+
+// secretFieldKeys returns the set of field keys with type "secret" in a plugin's schema.
+func secretFieldKeys(schema []store.ConfigField) map[string]bool {
+	keys := make(map[string]bool)
+	for _, f := range schema {
+		if f.Type == "secret" {
+			keys[f.Key] = true
+		}
+	}
+	return keys
+}
 
 func (a *API) handleGetPluginConfig(w http.ResponseWriter, r *http.Request) {
 	pluginID := r.PathValue("id")
@@ -18,28 +37,63 @@ func (a *API) handleGetPluginConfig(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// For secret fields, indicate presence without exposing the value.
+	secKeys := secretFieldKeys(settings.Schema)
+	for key := range secKeys {
+		keychainKey := pluginSecretKeyName(pluginID, key)
+		if secrets.Has(keychainKey) {
+			settings.Settings[key] = "********"
+		} else {
+			delete(settings.Settings, key)
+		}
+	}
+
 	a.jsonResp(w, http.StatusOK, settings)
 }
 
 func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 	pluginID := r.PathValue("id")
 
-	var settings map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+	var incoming map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 
-	// Merge with existing settings (partial update).
+	// Load existing settings + schema to identify secret fields.
 	existing, err := a.Store.GetPluginSettings(pluginID)
-	if err == nil && existing != nil && existing.Settings != nil {
-		for k, v := range settings {
+	var secKeys map[string]bool
+	if err == nil && existing != nil {
+		secKeys = secretFieldKeys(existing.Schema)
+		// Start from existing non-secret settings.
+		for k, v := range incoming {
 			existing.Settings[k] = v
 		}
-		settings = existing.Settings
+		incoming = existing.Settings
+	} else {
+		secKeys = make(map[string]bool)
 	}
 
-	if err := a.Store.UpsertPluginSettings(pluginID, settings); err != nil {
+	// Route secret fields to keychain, keep non-secrets in DB.
+	dbSettings := make(map[string]any)
+	for k, v := range incoming {
+		if secKeys[k] {
+			val, _ := v.(string)
+			if val != "" && val != "********" {
+				keychainKey := pluginSecretKeyName(pluginID, k)
+				if err := secrets.Set(keychainKey, val); err != nil {
+					a.errorResp(w, http.StatusInternalServerError, "failed to store secret in keychain")
+					return
+				}
+			}
+			// Don't store secret values in the DB.
+		} else {
+			dbSettings[k] = v
+		}
+	}
+
+	if err := a.Store.UpsertPluginSettings(pluginID, dbSettings); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to save plugin config")
 		return
 	}
@@ -47,9 +101,21 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 	// Return the full settings after merge.
 	updated, err := a.Store.GetPluginSettings(pluginID)
 	if err != nil {
-		a.jsonResp(w, http.StatusOK, map[string]any{"plugin_id": pluginID, "settings": settings})
+		a.jsonResp(w, http.StatusOK, map[string]any{"plugin_id": pluginID, "settings": dbSettings})
 		return
 	}
+
+	// Mask secrets in response.
+	updSecKeys := secretFieldKeys(updated.Schema)
+	for key := range updSecKeys {
+		keychainKey := pluginSecretKeyName(pluginID, key)
+		if secrets.Has(keychainKey) {
+			updated.Settings[key] = "********"
+		} else {
+			delete(updated.Settings, key)
+		}
+	}
+
 	a.jsonResp(w, http.StatusOK, updated)
 }
 

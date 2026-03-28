@@ -163,7 +163,7 @@ func (s *Server) handleGetUIComponents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	components := s.pluginHost.GetUIComponents()
+	components := s.pluginHost.GetUIComponentsWithOwners()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"components": components,

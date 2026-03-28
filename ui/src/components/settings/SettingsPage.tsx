@@ -7,10 +7,11 @@ import { SkillsBrowser } from './SkillsBrowser'
 import { ToolDashboard } from './ToolDashboard'
 import { PluginManager } from './PluginManager'
 import { ProviderManager } from './ProviderManager'
+import { WidgetManager } from './WidgetManager'
 import { ObservabilityDashboard } from './observability/ObservabilityDashboard'
 import { Button } from '@/components/ui/Button'
 
-type SettingsSection = 'preferences' | 'providers' | 'shortcuts' | 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins' | 'observability'
+type SettingsSection = 'preferences' | 'providers' | 'shortcuts' | 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins' | 'widgets' | 'observability'
 
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<SettingsSection>('preferences')
@@ -24,6 +25,7 @@ export default function SettingsPage() {
     { id: 'prompts' as SettingsSection, label: 'Prompts' },
     { id: 'tools' as SettingsSection, label: 'Tools' },
     { id: 'plugins' as SettingsSection, label: 'Plugins' },
+    { id: 'widgets' as SettingsSection, label: 'Widgets' },
     { id: 'observability' as SettingsSection, label: 'Observability' },
   ]
 
@@ -45,6 +47,8 @@ export default function SettingsPage() {
         return <ToolDashboard />
       case 'plugins':
         return <PluginManager />
+      case 'widgets':
+        return <WidgetManager />
       case 'observability':
         return <ObservabilityDashboard />
       default:

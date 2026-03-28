@@ -1,8 +1,9 @@
-import { Bot, User, Copy, Check, Bookmark, BookmarkCheck } from 'lucide-react'
-import { useState, useMemo, useCallback } from 'react'
+import { Bot, User, BookmarkCheck } from 'lucide-react'
+import { useState, useMemo } from 'react'
 import type { Message, AgentMode, Envelope } from '@/lib/types'
 import { MessageContent } from './MessageContent'
 import { EnvelopeRenderer } from './envelopes/EnvelopeRenderer'
+import { ContentActions } from './ContentActions'
 import { useChatStore } from '@/stores/useChatStore'
 
 interface StructuredMessage {
@@ -88,7 +89,6 @@ interface ChatMessageProps {
 }
 
 export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, onSendMessage, agentName, isMultiAgent = false }: ChatMessageProps) {
-  const [copied, setCopied] = useState(false)
   const [hovered, setHovered] = useState(false)
   const activeMode = useChatStore((s) => s.activeMode)
 
@@ -97,16 +97,6 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
     () => parseStructuredContent(message.content),
     [message.content]
   )
-
-  const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(displayText)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }, [displayText])
-
-  const handleBookmark = useCallback(() => {
-    onToggleBookmark?.(message.id)
-  }, [message.id, onToggleBookmark])
 
   const isUser = message.role === 'user'
   const avatarStyle = isUser
@@ -225,32 +215,14 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
 
         {/* Actions — always rendered to avoid layout shift, opacity toggles on hover */}
         {!isUser && (
-          <div className={`flex items-center gap-1 mt-1 transition-opacity duration-150 ${hovered ? 'opacity-100' : 'opacity-0'}`}>
-            <button
-              onClick={handleCopy}
-              className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-              aria-label="Copy message"
-              tabIndex={hovered ? 0 : -1}
-            >
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-            <button
-              onClick={handleBookmark}
-              className={`p-1 rounded transition-colors ${
-                isBookmarked
-                  ? 'text-amber-500 hover:text-amber-400 hover:bg-zinc-800'
-                  : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800'
-              }`}
-              aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'}
-              tabIndex={hovered ? 0 : -1}
-            >
-              {isBookmarked ? (
-                <BookmarkCheck className="w-3.5 h-3.5" />
-              ) : (
-                <Bookmark className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
+          <ContentActions
+            content={displayText}
+            messageId={message.id}
+            isBookmarked={isBookmarked}
+            onToggleBookmark={onToggleBookmark}
+            visible={hovered}
+            className="mt-1"
+          />
         )}
       </div>
     </div>

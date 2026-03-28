@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar, Copy } from 'lucide-react'
+import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar, Copy, Wrench } from 'lucide-react'
 import { AdapterBadge } from './AdapterBadge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -24,6 +24,8 @@ export function ChatHeader() {
   const toggleRightRail = useLayoutStore((s) => s.toggleRightRail)
   const leftOpen = useLayoutStore((s) => s.leftSidebarOpen)
   const rightOpen = useLayoutStore((s) => s.rightRailOpen)
+  const toolDrawerState = useLayoutStore((s) => s.toolDrawerState)
+  const setToolDrawerState = useLayoutStore((s) => s.setToolDrawerState)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeMode = useChatStore((s) => s.activeMode)
   const queryClient = useQueryClient()
@@ -263,6 +265,22 @@ export function ChatHeader() {
         </div>
       </div>
       <div className="flex items-center gap-1">
+        {/* Tool drawer toggle */}
+        <Tooltip content={toolDrawerState === 'closed' ? 'Show tool calls' : 'Hide tool calls'} side="bottom">
+          <button
+            onClick={() => {
+              const next = toolDrawerState === 'closed' ? 'compact' : toolDrawerState === 'compact' ? 'expanded' : 'closed'
+              setToolDrawerState(next)
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
+              toolDrawerState !== 'closed'
+                ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+            }`}
+          >
+            <Wrench className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
         {/* Sprint planning */}
         <Tooltip content="Sprint Planning" side="bottom">
           <button

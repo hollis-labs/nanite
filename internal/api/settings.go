@@ -54,6 +54,12 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if v, ok := raw["provider_fallback_chain"]; ok {
 		json.Unmarshal(v, &existing.ProviderFallbackChain)
 	}
+	if v, ok := raw["developer_mode"]; ok {
+		json.Unmarshal(v, &existing.DeveloperMode)
+	}
+	if v, ok := raw["recover_mode"]; ok {
+		json.Unmarshal(v, &existing.RecoverMode)
+	}
 	if v, ok := raw["ext_settings"]; ok {
 		var ext map[string]any
 		if err := json.Unmarshal(v, &ext); err == nil {

@@ -22,7 +22,8 @@ type ConfigField struct {
 	Description string   `json:"description,omitempty"`
 	Default     any      `json:"default,omitempty"`
 	Required    bool     `json:"required,omitempty"`
-	Options     []string `json:"options,omitempty"` // for "select" type
+	Options     []string `json:"options,omitempty"`   // for "select" type
+	Component   string   `json:"component,omitempty"` // custom React component name (requires developer_mode)
 }
 
 // GetPluginSettings returns settings for a specific plugin.

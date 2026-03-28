@@ -7,6 +7,7 @@ import { AgentStatusWidget } from './widgets/AgentStatusWidget'
 import { TokenUsageWidget } from './widgets/TokenUsageWidget'
 import { ToolsWidget } from './widgets/ToolsWidget'
 import { ObservabilityWidget } from './widgets/ObservabilityWidget'
+import { PluginWidgets } from './widgets/PluginWidgets'
 
 export function RightRail() {
   const open = useLayoutStore((s) => s.rightRailOpen)
@@ -33,6 +34,7 @@ export function RightRail() {
             <ObservabilityWidget />
             <ToolsWidget />
             <AgentStatusWidget />
+            <PluginWidgets />
           </div>
         </ScrollArea>
       </div>

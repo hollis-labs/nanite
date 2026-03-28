@@ -1,8 +1,10 @@
-import { useState, useCallback, useEffect } from 'react'
+import { Suspense, useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Save, Loader2, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
+import { useSettings } from '@/hooks/useSettings'
+import { getConfigComponentOverride } from '@/generated/plugin-config-components'
 import type { ConfigField } from '@/lib/types'
 
 interface PluginConfigPanelProps {
@@ -92,8 +94,31 @@ function ConfigFieldInput({
   }
 }
 
+function OverrideFieldRenderer({
+  field,
+  value,
+  onChange,
+}: {
+  field: ConfigField
+  value: unknown
+  onChange: (key: string, value: unknown) => void
+}) {
+  const Override = field.component ? getConfigComponentOverride(field.component) : undefined
+  if (!Override) {
+    return <ConfigFieldInput field={field} value={value} onChange={onChange} />
+  }
+  return (
+    <Suspense fallback={<div className="h-9 animate-pulse rounded-md bg-zinc-800" />}>
+      <Override field={field} value={value} onChange={onChange} />
+    </Suspense>
+  )
+}
+
 export function PluginConfigPanel({ pluginId, pluginName, onBack }: PluginConfigPanelProps) {
   const queryClient = useQueryClient()
+  const { data: userSettings } = useSettings()
+  const developerMode = userSettings?.developer_mode ?? false
+  const recoverMode = userSettings?.recover_mode ?? false
   const [localSettings, setLocalSettings] = useState<Record<string, unknown>>({})
   const [dirty, setDirty] = useState(false)
 
@@ -180,11 +205,19 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack }: PluginConfig
               {field.description && field.type !== 'bool' && (
                 <p className="text-xs text-zinc-500 mb-2">{field.description}</p>
               )}
-              <ConfigFieldInput
-                field={field}
-                value={localSettings[field.key]}
-                onChange={handleChange}
-              />
+              {developerMode && !recoverMode && field.component ? (
+                <OverrideFieldRenderer
+                  field={field}
+                  value={localSettings[field.key]}
+                  onChange={handleChange}
+                />
+              ) : (
+                <ConfigFieldInput
+                  field={field}
+                  value={localSettings[field.key]}
+                  onChange={handleChange}
+                />
+              )}
               {field.type === 'bool' && field.description && (
                 <p className="text-xs text-zinc-500 mt-1 ml-7">{field.description}</p>
               )}

@@ -324,6 +324,59 @@ export function PreferencesPanel() {
           onChange={(chain) => mutation.mutate({ provider_fallback_chain: chain })}
         />
       </div>
+
+      {/* Advanced */}
+      <div>
+        <SectionHeader title="Advanced" />
+        <div className="divide-y divide-zinc-800/50">
+          <div className="flex items-start justify-between gap-8 py-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-zinc-200">Developer Mode</div>
+              <div className="text-xs text-zinc-500 mt-0.5">
+                Allow plugins to register custom React components for config fields.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings?.developer_mode ?? false}
+              onClick={() => mutation.mutate({ developer_mode: !(settings?.developer_mode ?? false) })}
+              className={`relative shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                settings?.developer_mode ? 'bg-indigo-600' : 'bg-zinc-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
+                  settings?.developer_mode ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+          <div className="flex items-start justify-between gap-8 py-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-zinc-200">Recover Mode</div>
+              <div className="text-xs text-zinc-500 mt-0.5">
+                Disable all plugin UI overrides and render default primitives only.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings?.recover_mode ?? false}
+              onClick={() => mutation.mutate({ recover_mode: !(settings?.recover_mode ?? false) })}
+              className={`relative shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                settings?.recover_mode ? 'bg-amber-600' : 'bg-zinc-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
+                  settings?.recover_mode ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

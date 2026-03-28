@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary, ProcessHealthResponse, PluginConfig } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary, ProcessHealthResponse, PluginConfig, PluginUIComponent } from './types'
 
 const API_BASE = '/api'
 
@@ -695,6 +695,13 @@ export const api = {
     const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`)
     if (!res.ok) throw new Error(`Failed to get plugin config: ${res.status}`)
     return res.json()
+  },
+
+  listUIComponents: async (): Promise<PluginUIComponent[]> => {
+    const res = await fetch(`${API_BASE}/plugins/ui-components`)
+    if (!res.ok) throw new Error(`Failed to list UI components: ${res.status}`)
+    const data = await res.json()
+    return data.components ?? []
   },
 
   updatePluginConfig: async (pluginId: string, settings: Record<string, unknown>): Promise<PluginConfig> => {

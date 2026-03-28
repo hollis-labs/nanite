@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import type { Envelope } from '@/lib/types'
-import { PLUGIN_ENVELOPE_REGISTRY } from '@/generated/plugin-envelopes'
+import { PLUGIN_ENVELOPE_REGISTRY, CORE_ONLY_ENVELOPE_REGISTRY } from '@/generated/plugin-envelopes'
+import { useSettings } from '@/hooks/useSettings'
 import { ProposalCard } from './ProposalCard'
 import { QuestionForm } from './QuestionForm'
 import { ApprovalCard } from './ApprovalCard'
@@ -11,8 +12,12 @@ interface EnvelopeRendererProps {
 }
 
 export function EnvelopeRenderer({ envelope, onSendMessage }: EnvelopeRendererProps) {
-  // Plugin envelope types — resolved from the generated registry
-  const PluginComponent = PLUGIN_ENVELOPE_REGISTRY[envelope.type]
+  const { data: settings } = useSettings()
+  const recoverMode = settings?.recover_mode ?? false
+
+  // In recover mode, only use core envelopes; otherwise use full registry (core + plugin).
+  const registry = recoverMode ? CORE_ONLY_ENVELOPE_REGISTRY : PLUGIN_ENVELOPE_REGISTRY
+  const PluginComponent = registry[envelope.type]
   if (PluginComponent && envelope.data) {
     return (
       <Suspense fallback={<div className="animate-pulse p-4 text-sm text-zinc-400">Loading...</div>}>

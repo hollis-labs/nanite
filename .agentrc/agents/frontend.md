@@ -256,9 +256,9 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 ### 1. Plugin Config UI
 - [x] **Plugin settings panel** — Render plugin config schemas from `GET /api/plugin-config/{id}`. Dynamic form renderer for all 5 field types (string, bool, int, select, secret). Gear icon on active/disabled plugins opens config panel.
-- [ ] **Config override components** — Allow plugins to register custom React components for config fields. Gate behind `developer_mode` setting.
-- [ ] **Recover mode** — When `recover_mode` is enabled in settings, disable all plugin UI overrides and render default primitives only.
-- [ ] **Plugin widget mount points** — Verify that `UIComponentTypeWidget` components from plugins actually render. Add mount points in sidebar, session header, or a dedicated widgets area.
+- [x] **Config override components** — Plugins can set `component` on ConfigFieldDef to name a custom React component. Registry at `generated/plugin-config-components.ts`. Gated behind `developer_mode` toggle in Preferences > Advanced.
+- [x] **Recover mode** — Toggle in Preferences > Advanced. When on: PluginConfigPanel uses default primitives (skips component overrides), EnvelopeRenderer uses core-only registry (skips plugin envelopes), PluginWidgets hidden.
+- [x] **Plugin widget mount points** — `GET /api/plugins/ui-components` → `PluginWidgets` component in RightRail. Shows widget-type components with name, description, props. Gated behind developer_mode, hidden in recover_mode.
 
 ### 2. Slash Commands & Fragments v1 UX
 - [ ] Port relevant UI patterns from Fragments v1 (user will specify which).
@@ -296,3 +296,25 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 - [x] Toggle locked until requirements met (API key or CLI detected).
 - [x] Model picker filters out disabled providers.
 - [x] Provider startup: keychain → env var → skip.
+
+### 8. Widget Plugin Migration
+> **Needs discussion before implementation.** Current widgets are hardcoded React components. Plugin-registered widgets only render metadata cards (name/description/props). Before migrating, decide: how do plugin widgets render real UI? Options include a props-driven renderer, a sandboxed iframe approach, or a component registry similar to envelopes. Discuss trade-offs and pick an approach first.
+
+- [ ] **Design widget rendering system** — Decide how plugin-registered widgets render actual UI (not just metadata). Document the approach as an ADR.
+- [ ] **Migrate SessionInfoWidget** to plugin-provided widget.
+- [ ] **Migrate BookmarksWidget** to plugin-provided widget.
+- [ ] **Migrate ContextBudgetWidget** to plugin-provided widget.
+- [ ] **Migrate TokenUsageWidget** to plugin-provided widget.
+- [ ] **Migrate ObservabilityWidget** to plugin-provided widget.
+- [ ] **Migrate ToolsWidget** to plugin-provided widget.
+- [ ] **Migrate AgentStatusWidget** to plugin-provided widget.
+- [ ] **Update PluginWidgets renderer** — Replace metadata cards with the chosen rendering system so all widgets (built-in and third-party) display properly.
+
+### 9. Widget Admin Panel
+> New Settings tab for managing widgets. Use the same compact flex-wrap card style as ProviderManager.
+
+- [ ] **Widget manager page** — New "Widgets" tab in SettingsPage. Fetch all registered widgets from `GET /api/plugins/ui-components` (type=widget). Display each as a card (same style as ProviderManager: name, description, source plugin, enable/disable toggle).
+- [ ] **Widget enable/disable** — Per-widget on/off toggle. Persist to user settings (new `widget_visibility` map in `UserSettings`). RightRail reads this to decide which widgets to render.
+- [ ] **Widget sort order (drag-drop)** — Drag-and-drop reordering in the admin panel (same pattern as FallbackChain in PreferencesPanel). Persist order to user settings (new `widget_order` array in `UserSettings`). RightRail renders widgets in this order.
+- [ ] **Plugin settings access from widget cards** — If the widget's source plugin has a config schema, show a gear icon on the card that opens PluginConfigPanel for that plugin (same as PluginManager does today).
+- [ ] **Backend: widget preferences** — Add `widget_visibility` (map[string]bool) and `widget_order` ([]string) fields to `UserSettings` in the backend store + migration. Wire into `GET/PUT /api/settings` partial merge.

@@ -16,6 +16,8 @@ type UserSettings struct {
 	UtilityProvider       string         `json:"utility_provider"`
 	UtilityModel          string         `json:"utility_model"`
 	ToolCallDisplayMode   string         `json:"tool_call_display_mode"`
+	DeveloperMode         bool           `json:"developer_mode"`
+	RecoverMode           bool           `json:"recover_mode"`
 	ExtSettings           map[string]any `json:"ext_settings,omitempty"`
 }
 
@@ -23,12 +25,15 @@ type UserSettings struct {
 func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var chainJSON, provider, model, adapter, agent string
 	var utilProvider, utilModel, toolMode, settingsJSON string
+	var devMode, recoverMode bool
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model, default_adapter,
-		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings
+		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
+		        developer_mode, recover_mode
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model, &adapter,
-		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON)
+		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
+		&devMode, &recoverMode)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -41,6 +46,8 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		UtilityProvider:     utilProvider,
 		UtilityModel:        utilModel,
 		ToolCallDisplayMode: toolMode,
+		DeveloperMode:       devMode,
+		RecoverMode:         recoverMode,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -81,11 +88,13 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			utility_model = ?,
 			tool_call_display_mode = ?,
 			settings = ?,
+			developer_mode = ?,
+			recover_mode = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel, us.DefaultAdapter,
 		us.DefaultAgent, us.UtilityProvider, us.UtilityModel, us.ToolCallDisplayMode,
-		string(extJSON), now,
+		string(extJSON), us.DeveloperMode, us.RecoverMode, now,
 	)
 	if err != nil {
 		return fmt.Errorf("update user settings: %w", err)

@@ -310,6 +310,7 @@ func (h *Host) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
 			Default:     f.Default,
 			Required:    f.Required,
 			Options:     f.Options,
+			Component:   f.Component,
 		}
 	}
 	return s.UpsertPluginSchema(id, storeFields)

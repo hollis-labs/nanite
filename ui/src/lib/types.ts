@@ -274,6 +274,8 @@ export interface UserSettings {
   utility_model: string
   tool_call_display_mode: ToolCallDisplayMode
   provider_fallback_chain: string[]
+  developer_mode: boolean
+  recover_mode: boolean
   ext_settings: Record<string, unknown>
 }
 
@@ -571,6 +573,7 @@ export interface ConfigField {
   default?: unknown
   required?: boolean
   options?: string[]
+  component?: string
 }
 
 export interface PluginConfig {
@@ -578,6 +581,14 @@ export interface PluginConfig {
   settings: Record<string, unknown>
   schema: ConfigField[]
   updated_at?: string
+}
+
+export interface PluginUIComponent {
+  id: string
+  type: 'widget' | 'envelope' | 'action' | 'workflow' | 'view'
+  name: string
+  description: string
+  props?: Record<string, unknown>
 }
 
 // --- Skills ---

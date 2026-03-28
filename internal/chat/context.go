@@ -56,6 +56,14 @@ func assembleSystemPromptFromTemplates(s *store.Store, agent *store.AgentProfile
 		vars["skill_list"] = skillList
 	}
 
+	// Schema v2 template variables.
+	if agent.Tools != "" && agent.Tools != "[]" {
+		vars["tools_allowlist"] = agent.Tools
+	}
+	if agent.Tags != "" && agent.Tags != "[]" {
+		vars["agent_tags"] = agent.Tags
+	}
+
 	composed, err := s.ComposePromptForAgent(agent.ID, vars)
 	if err != nil {
 		log.Printf("chat: ComposePromptForAgent failed: %v — falling back to legacy", err)

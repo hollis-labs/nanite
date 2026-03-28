@@ -345,7 +345,42 @@ func buildAgentContext(agent *store.AgentProfile, mode *store.AgentMode) string 
 
 	// Tool permissions.
 	if agent.ToolPermissions != "" && agent.ToolPermissions != "{}" {
-		fmt.Fprintf(&b, "## Tool Permissions\n\n%s\n", agent.ToolPermissions)
+		fmt.Fprintf(&b, "## Tool Permissions\n\n%s\n\n", agent.ToolPermissions)
+	}
+
+	// Schema v2 fields.
+	if agent.Tools != "" && agent.Tools != "[]" {
+		var tools []string
+		if err := json.Unmarshal([]byte(agent.Tools), &tools); err == nil && len(tools) > 0 {
+			b.WriteString("## Allowed Tools\n\n")
+			for _, t := range tools {
+				fmt.Fprintf(&b, "- %s\n", t)
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	if agent.Directories != "" && agent.Directories != "[]" {
+		var dirs []string
+		if err := json.Unmarshal([]byte(agent.Directories), &dirs); err == nil && len(dirs) > 0 {
+			b.WriteString("## Accessible Directories\n\n")
+			for _, d := range dirs {
+				fmt.Fprintf(&b, "- %s\n", d)
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	if agent.Tags != "" && agent.Tags != "[]" {
+		var tags []string
+		if err := json.Unmarshal([]byte(agent.Tags), &tags); err == nil && len(tags) > 0 {
+			fmt.Fprintf(&b, "**Tags:** %s\n\n", strings.Join(tags, ", "))
+		}
+	}
+
+	if agent.Constraints != "" && agent.Constraints != "{}" {
+		b.WriteString("## Constraints\n\n")
+		fmt.Fprintf(&b, "```json\n%s\n```\n\n", agent.Constraints)
 	}
 
 	return b.String()

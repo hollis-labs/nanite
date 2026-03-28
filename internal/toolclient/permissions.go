@@ -12,9 +12,11 @@ const DefaultMaxCallsPerTurn = 25
 
 // ToolPermissions defines allow/deny rules for an agent's tool access.
 type ToolPermissions struct {
-	AllowList       []string `json:"allow_list,omitempty"`
-	DenyList        []string `json:"deny_list,omitempty"`
-	MaxCallsPerTurn int      `json:"max_calls_per_turn,omitempty"`
+	AllowList          []string `json:"allow_list,omitempty"`
+	DenyList           []string `json:"deny_list,omitempty"`
+	MaxCallsPerTurn    int      `json:"max_calls_per_turn,omitempty"`
+	AllowDelegation    bool     `json:"allow_delegation,omitempty"`
+	AllowCodeExecution bool     `json:"allow_code_execution,omitempty"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshalling for ToolPermissions.
@@ -80,6 +82,20 @@ func (p *ToolPermissions) UnmarshalJSON(data []byte) error {
 		}
 	}
 
+	// allow_delegation
+	if v, ok := raw["allow_delegation"]; ok {
+		if err := json.Unmarshal(v, &p.AllowDelegation); err != nil {
+			return err
+		}
+	}
+
+	// allow_code_execution
+	if v, ok := raw["allow_code_execution"]; ok {
+		if err := json.Unmarshal(v, &p.AllowCodeExecution); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -111,7 +127,7 @@ func ParsePermissions(raw string) ToolPermissions {
 func (p ToolPermissions) CheckPermission(toolName string) bool {
 	// Check deny list first — deny takes precedence.
 	for _, pattern := range p.DenyList {
-		if matchPattern(pattern, toolName) {
+		if MatchPattern(pattern, toolName) {
 			return false
 		}
 	}
@@ -119,7 +135,7 @@ func (p ToolPermissions) CheckPermission(toolName string) bool {
 	// If allow list is set, tool must match at least one pattern.
 	if len(p.AllowList) > 0 {
 		for _, pattern := range p.AllowList {
-			if matchPattern(pattern, toolName) {
+			if MatchPattern(pattern, toolName) {
 				return true
 			}
 		}
@@ -129,9 +145,9 @@ func (p ToolPermissions) CheckPermission(toolName string) bool {
 	return true
 }
 
-// matchPattern checks if a tool name matches a glob pattern.
+// MatchPattern checks if a tool name matches a glob pattern.
 // Supports path.Match syntax plus simple prefix matching with trailing *.
-func matchPattern(pattern, name string) bool {
+func MatchPattern(pattern, name string) bool {
 	// Handle prefix glob: "mcp__volon__*" matches "mcp__volon__task_create"
 	if strings.HasSuffix(pattern, "*") {
 		return strings.HasPrefix(name, strings.TrimSuffix(pattern, "*"))

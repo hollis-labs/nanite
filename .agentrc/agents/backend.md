@@ -221,54 +221,56 @@ ui/                          # React SPA (see frontend.md)
 
 ## Beta Release TODO
 
-### 1. Provider Expansion
+### 1. Provider Expansion ✅
 
-#### 1a. More HTTP API providers (backend)
-Currently: Anthropic, OpenAI, Ollama. Each implements the `Provider` interface in `internal/provider/`.
+#### 1a. More HTTP API providers — DONE
+Providers: Anthropic, OpenAI, Ollama, Gemini, Mistral, Azure OpenAI, OpenRouter, OpenZen.
+All seeded in `seed.go` with model rows and pricing in `usage.go`.
 
-- [ ] **Google Gemini API** — HTTP provider (not CLI). Follow `anthropic.go` pattern. Gemini has streaming SSE similar to Anthropic. Register with `GOOGLE_API_KEY` env var.
-- [ ] **Mistral API** — OpenAI-compatible API. Could subclass `openai.go` with a different base URL and model mapping, or create a thin `mistral.go`.
-- [ ] **Cohere API** — Different streaming format (NDJSON). Needs its own adapter.
-- [ ] **Azure OpenAI** — Same protocol as OpenAI but different auth (API key + deployment). Could be a config variant of `openai.go` with `base_url` + `api_version` params.
-- [ ] **AWS Bedrock** — SDK-based, not HTTP. Would need the AWS Go SDK. Consider whether this is beta scope.
-- [ ] Seed new provider/model rows in `seed.go` and add pricing to `usage.go:modelPricing`.
-- [ ] Add models to the dynamic model picker (frontend reads from `/api/models`).
+- [x] **Google Gemini API** — `internal/provider/gemini.go`
+- [x] **Mistral API** — `internal/provider/mistral.go`
+- [x] **Azure OpenAI** — `internal/provider/azure_openai.go`
+- [x] **OpenRouter** — `internal/provider/openrouter.go` (model gateway)
+- [x] **OpenZen** — `internal/provider/openzen.go`
+- [ ] **Cohere API** — Deferred (not beta scope)
+- [ ] **AWS Bedrock** — Deferred (not beta scope)
+- [x] Seed new provider/model rows in `seed.go` and add pricing to `usage.go:modelPricing`.
+- [x] Add models to the dynamic model picker (frontend reads from `/api/models`).
 
-**Reference:** `internal/provider/anthropic.go` (771 lines) is the gold standard. `openai.go` is simpler. New providers should follow the same `StreamChat`/`Complete`/`Capabilities` pattern.
+#### 1b. More CLI adapters — DONE
+8 adapters: Claude, Codex, Gemini, Copilot, Aider, Junie, Kiro, Qwen.
+All use `lookPathExpanded()` (`cli_detect.go`) for robust binary detection.
+All registered in `main.go` cliAdapters slice and `handleDetectCLI` API endpoint.
 
-#### 1b. More CLI adapters (backend)
-Currently: Claude, Codex, Gemini via PTY + subprocess bridges.
+- [x] **GitHub Copilot CLI** — `pty_copilot.go` (standalone + gh extension modes)
+- [x] **Aider** — `pty_aider.go`
+- [x] **Junie** — `pty_junie.go` (JetBrains, `--output-format json`, `--session-id` resume)
+- [x] **Kiro** — `pty_kiro.go` (AWS, `kiro-cli chat --no-interactive`)
+- [x] **Qwen** — `pty_qwen.go` (stream-json format, Claude-compatible parsing)
+- [x] Register new adapters in `main.go` and `provider_manage.go:handleDetectCLI`.
 
-- [ ] **GitHub Copilot CLI** — If it supports a prompt mode with structured output, add a `pty_copilot.go` adapter. Check if `gh copilot` has a non-interactive mode.
-- [ ] **Aider** — Popular coding CLI. Has `--message` mode. Would need a parser for its output format.
-- [ ] Register new adapters in the `cliAdapters` slice in `main.go:153-158`.
+### 2. Plugin System — Beta Readiness ✅
 
-**Reference:** `pty_claude.go` (ClaudeAdapter) is the most complete. `pty_codex.go` and `pty_gemini.go` are simpler. Each adapter implements `CLIAdapter` (defined in `cli_adapter.go`): `Name()`, `BuildArgs()`, `ParseLine()`, `Detect()`.
+#### 2a. Plugin config & settings — DONE
+- [x] **Plugin config registration API** — `Host.RegisterConfigSchema()`, `plugin_settings` table, `PluginConfig.Get()`/`Set()`
+- [x] **Config primitives** — Field types in plugin.yaml schema, frontend renders automatically
+- [x] **Config override** — `developer_mode` / `recover_mode` flags in `user_settings` (migration 016)
+- [x] **API endpoints** — `GET/PUT /api/plugins/{id}/config`
 
-### 2. Plugin System — Beta Readiness
+#### 2b. Connector & adapter registration — DONE
+- [x] **Plugin-registered connectors** — `Host.RegisterConnector(name, connector)`
+- [x] **Plugin-registered providers** — `Host.RegisterProvider(name, provider)`
+- [x] **Plugin-registered adapters** — `Host.RegisterCLIAdapter(name, adapter)`
 
-The plugin SDK (`libs/plugin/`) defines Plugin, Host, EventHook, CRUDHandler, UIComponent interfaces. 14 event types exist. 9 built-in plugins exist. Key gaps for beta:
+#### 2c. Hooks & events completeness — DONE
+- [x] Event audit — expanded event catalog in `internal/plugin/events.go` (session, agent, message, mode, tool, UI, workflow events + `session.archived`)
+- [x] **Pre-hooks** — `EventMessageSending`, `EventToolExecuting` with `EmitPreHook()` cancellation support
+- [x] **Widget registration** — `UIComponentTypeWidget` wired, mount points verified
 
-#### 2a. Plugin config & settings (backend + frontend)
-- [ ] **Plugin config registration API** — Plugins should register their config schema via `Host.RegisterConfig(schema)`. Store plugin configs in a `plugin_settings` table (plugin_id → JSON). Provide `Host.GetConfig(key)` / `Host.SetConfig(key, value)` backed by the DB.
-- [ ] **Config primitives** — Define a set of config field types (string, bool, int, select, secret) that the frontend renders automatically. Plugins provide field definitions + data; frontend provides the UI.
-- [ ] **Config override** — Allow plugins to override primitive rendering with custom components. Gate behind a `developer_mode` flag on user_settings. Add a `recover_mode` flag that disables all plugin overrides and uses default primitives.
-- [ ] **API endpoints** — `GET/PUT /api/plugins/{id}/config` for per-plugin settings.
-
-#### 2b. Connector & adapter registration (backend)
-- [ ] **Plugin-registered connectors** — Extend the Host interface: `Host.RegisterConnector(name, connector)`. Connectors should implement a standard interface (e.g., `Send(ctx, payload) error`). Currently only webhook and gmail connectors exist in `libs/connectors/`.
-- [ ] **Plugin-registered providers** — Allow plugins to register LLM providers at runtime via `Host.RegisterProvider(name, provider)`. This is the preferred way for third-party providers to be added without modifying core code.
-- [ ] **Plugin-registered adapters** — Similarly, `Host.RegisterCLIAdapter(name, adapter)` for CLI tool integrations.
-
-#### 2c. Hooks & events completeness (backend)
-- [ ] Audit the 14 event types against real plugin needs. Missing candidates: `config.changed`, `plugin.installed`, `plugin.uninstalled`, `session.archived`, `provider.error`, `provider.fallback`.
-- [ ] **Pre-hooks** — Some events need pre-hooks (before the action) not just post-hooks. E.g., `message.sending` (can modify/block) vs `message.sent` (notification only). Check if `EventHook.Handle` return value can signal cancellation.
-- [ ] **Widget registration** — `UIComponentTypeWidget` exists but verify the frontend actually renders plugin-registered widgets. Check `ui/src/` for widget mount points.
-
-#### 2d. Plugin docs, example, generator (backend + frontend)
-- [ ] **Plugin example** — Create a well-documented example plugin that demonstrates: config registration, event hooks, UI component (envelope + widget), connector usage, CRUD handler. The `support-ticket` plugin is closest but needs cleanup.
-- [ ] **Plugin generator** — CLI command or script: `conduit plugin init <name>` → scaffolds a plugin directory with boilerplate (plugin.go, config schema, test file, README).
-- [ ] **Plugin guide** — Document the full lifecycle: discovery → loading → config → events → UI → uninstall. Cover the Host API, event types, component types, connector pattern.
+#### 2d. Plugin docs, example, generator — DONE
+- [x] **Plugin example** — support-ticket plugin cleaned up
+- [x] **Plugin generator** — `conduit plugin new <name>` with `--with-agent`, `--with-envelope`, `--with-crud`
+- [x] **Plugin guide** — `docs/plugin-install-guide.md`
 
 ### 3. Slash Commands & UI/UX from Fragments v1
 
@@ -283,25 +285,21 @@ Currently 11 commands in `internal/chat/commands.go`. Categories: agent, session
 #### 3b. Frontend UI/UX (frontend)
 - [ ] Port relevant UI patterns from Fragments v1 (the user will specify which ones).
 
-### 4. Multi-Session Presence
+### 4. Multi-Session Presence ✅
 
-Presence broadcasts exist (`stream_start`, `stream_end`, `tool_pending`, `tool_resolved`) via SSE at `/api/presence`. Issues:
+#### 4a. Multi-live-session presence — DONE
+- [x] Multiple simultaneous streaming sessions broadcast correctly via `activePresence` sync.Map.
+- [x] `session_archived` presence event via `BroadcastSessionArchived()` + plugin event `session.archived`.
 
-#### 4a. Multi-live-session presence (backend)
-- [ ] Verify that multiple simultaneous streaming sessions broadcast correctly. The `activePresence` sync.Map should handle this, but test with 3+ concurrent sessions.
-- [ ] Add presence event for session archive/close so the UI can update immediately.
+#### 4b. PTY session presence — DONE
+- [x] `cli_active` presence event via `throttledCLIActivePresence()`, driven by ActivityCallback. Configurable throttle via `CLIActiveThrottleSeconds`.
+- [ ] Tool-level presence for PTY — documented as known limitation. CLIs manage their own tools internally; `tool_pending`/`tool_resolved` won't fire for PTY tool calls.
 
-#### 4b. PTY session presence (backend)
-- [ ] PTY sessions DO emit presence via the same engine path — `stream_start` fires when `generateResponse` begins and `stream_end` when it completes. **But**: long-running PTY processes that are active (producing output) between messages don't emit presence. Consider adding a `cli_active` presence event driven by the `ActivityCallback` (Touch) — would show the PTY process is alive and producing output even between formal message boundaries.
-- [ ] Tool-level presence for PTY: CLIs manage their own tools internally, so `tool_pending`/`tool_resolved` won't fire for PTY tool calls. Document this as a known limitation or parse tool events from CLI output and forward them as presence events.
+### 5. Artifacts ✅
 
-### 5. Artifacts
-
-Storage exists (`internal/store/artifacts.go`, `internal/api/artifacts.go`). Upload/download works. Gaps:
-
-#### 5a. Backend
-- [ ] **Auto-detect artifacts from responses** — When an assistant response creates/writes a file (detected via tool calls), automatically create an artifact record. Currently artifacts are only created via explicit upload.
-- [ ] **Artifact metadata** — Extend metadata to track origin (tool call ID, message ID, agent that created it).
+#### 5a. Backend — DONE
+- [x] **Auto-detect artifacts from responses** — `attemptAutoArtifact()` in `engine.go` detects file writes via tool calls and creates artifact records with `ArtifactOriginAuto`.
+- [x] **Artifact metadata** — Tracks origin (tool call ID, message ID, agent that created it).
 
 #### 5b. Frontend
 - [ ] **Artifacts drawer** — Show session artifacts in a drawer/panel. List with name, type, size, created time. Click to preview (images, code, text) or download.
@@ -329,10 +327,10 @@ Currently agents are DB records (AgentProfile in `internal/store/agents.go`). Th
   3. **Adapter layer** — Define an `AgentSource` interface. One implementation reads from DB, another reads from agentrc YAML. Engine queries the source at runtime. Allows switching or layering.
 - [ ] **Agent framework adapters (future)** — Consider adapters for other agent definition formats (e.g., CrewAI, AutoGen, LangGraph agent configs). These would implement the same `AgentSource` interface.
 
-### 7. Small Backend Items (from evolution doc)
+### 7. Small Backend Items ✅
 
-- [ ] Wire utility provider/model from database settings (currently reads env vars; frontend UI already writes to DB via user_settings table)
-- [ ] Accept `agent_id` in session creation API (currently hardcodes `mentat-001`)
+- [x] Wire utility provider/model from database settings — `UtilityModel` field in `user_settings` table
+- [x] Accept `agent_id` in session creation API — `handleCreateSession()` resolves agent from request → settings → fallback
 
 ## Build & Run
 

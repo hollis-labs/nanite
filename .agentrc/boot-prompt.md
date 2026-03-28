@@ -5,8 +5,8 @@
 ```
 Boot conduit-backend
 
-This is a beta release prep session. Primary TODO is in .agentrc/agents/backend.md
-under "Beta Release TODO".
+Agent Schema v2 implementation in progress. Phases 1-2 done, Phases 3-4 remain.
+Read the plan doc: ~/.claude/plans/starry-tickling-tower.md for full context.
 
 Context files to read:
 - .agentrc/agents/backend.md — full project context + beta TODO

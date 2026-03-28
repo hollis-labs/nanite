@@ -38,3 +38,6 @@ export const PLUGIN_ENVELOPE_REGISTRY: Record<string, LazyEnvelopeComponent> = {
   ...PLUGIN_ENVELOPE_ENTRIES,
   ...CORE_ENVELOPE_REGISTRY,
 };
+
+// Core-only registry for recover_mode (skips all plugin overrides).
+export const CORE_ONLY_ENVELOPE_REGISTRY: Record<string, LazyEnvelopeComponent> = CORE_ENVELOPE_REGISTRY;

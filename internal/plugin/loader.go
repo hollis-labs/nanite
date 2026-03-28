@@ -95,6 +95,32 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 	return loaded, errs
 }
 
+// LoadRegisteredBuiltins loads all registered plugin constructors that are not
+// already loaded in the host. This ensures compiled-in plugins without a
+// plugins/ directory (no plugin.yaml) are still loaded and visible.
+func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
+	registered := GetRegistered()
+
+	var loaded []fplugin.Plugin
+	var errs []error
+
+	for id, constructor := range registered {
+		// Skip if already loaded (e.g. via DiscoverPlugins).
+		if _, exists := host.GetPlugin(id); exists {
+			continue
+		}
+
+		p := constructor()
+		if err := host.LoadPlugin(p); err != nil {
+			errs = append(errs, fmt.Errorf("load builtin %s: %w", id, err))
+			continue
+		}
+		loaded = append(loaded, p)
+	}
+
+	return loaded, errs
+}
+
 // sortByDeps performs a simple topological sort: plugins with no dependencies
 // come first.  For this initial implementation we do a single-pass stable sort
 // by dependency count which is sufficient when dep chains are shallow.

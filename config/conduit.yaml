@@ -1,0 +1,29 @@
+# Conduit application configuration.
+# Loaded at startup from config/conduit.yaml. Tunables that don't belong in
+# user-facing settings or environment variables go here.
+
+presence:
+  # Minimum interval between cli_active presence events per session (seconds).
+  # PTY adapters produce output rapidly; this throttles how often the UI is
+  # notified that a CLI process is alive. Frontend should also debounce.
+  cli_active_throttle_seconds: 5
+
+artifacts:
+  # Tool names whose invocations trigger automatic artifact creation.
+  # Matched case-insensitively against tool_use events.
+  auto_detect_tools:
+    - Write
+    - write
+    - write_file
+    - create_file
+    - Edit
+    - edit
+
+  # Keys to look for in tool input to extract the file path.
+  path_keys:
+    - file_path
+    - path
+    - filename
+
+  # Storage root for auto-detected and placed artifacts.
+  storage_dir: data/artifacts

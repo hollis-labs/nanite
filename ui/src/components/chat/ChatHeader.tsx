@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar } from 'lucide-react'
+import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar, Copy, GitFork, Wrench } from 'lucide-react'
+import { SourceBadge } from '@/components/agents/SourceBadge'
+import { AdapterBadge } from './AdapterBadge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -7,15 +9,38 @@ import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
-import type { AgentMode } from '@/lib/types'
 import { AgentRoster } from './AgentRoster'
 import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 
-const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; border: string; text: string }> = {
-  default: { bg: 'bg-blue-500/15', border: 'border-blue-500/25', text: 'text-blue-400' },
-  architect: { bg: 'bg-purple-500/15', border: 'border-purple-500/25', text: 'text-purple-400' },
-  planner: { bg: 'bg-green-500/15', border: 'border-green-500/25', text: 'text-green-400' },
-  writer: { bg: 'bg-amber-500/15', border: 'border-amber-500/25', text: 'text-amber-400' },
+// Capability pills — detected, not user-set
+interface Capability {
+  label: string
+  color: string // tailwind text color class
+  bg: string    // tailwind bg class
+}
+
+function detectCapabilities(provider?: string, mode?: string, toolCount?: number): Capability[] {
+  const caps: Capability[] = []
+
+  // Agent mode — always present
+  caps.push({ label: 'Agent', color: 'text-blue-400', bg: 'bg-blue-500/15' })
+
+  // Plan mode — detected when mode is planner or architect
+  if (mode === 'planner' || mode === 'architect') {
+    caps.push({ label: 'Plan', color: 'text-green-400', bg: 'bg-green-500/15' })
+  }
+
+  // PTY — detected when using a PTY/subprocess adapter
+  if (provider?.startsWith('pty')) {
+    caps.push({ label: 'PTY', color: 'text-cyan-400', bg: 'bg-cyan-500/15' })
+  }
+
+  // Tools — detected when MCP tools are available
+  if (toolCount && toolCount > 0) {
+    caps.push({ label: 'Tools', color: 'text-amber-400', bg: 'bg-amber-500/15' })
+  }
+
+  return caps
 }
 
 export function ChatHeader() {
@@ -23,8 +48,11 @@ export function ChatHeader() {
   const toggleRightRail = useLayoutStore((s) => s.toggleRightRail)
   const leftOpen = useLayoutStore((s) => s.leftSidebarOpen)
   const rightOpen = useLayoutStore((s) => s.rightRailOpen)
+  const toolDrawerState = useLayoutStore((s) => s.toolDrawerState)
+  const setToolDrawerState = useLayoutStore((s) => s.setToolDrawerState)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeMode = useChatStore((s) => s.activeMode)
+  const toolCalls = useChatStore((s) => s.toolCalls)
   const queryClient = useQueryClient()
 
   const [isEditing, setIsEditing] = useState(false)
@@ -46,6 +74,13 @@ export function ChatHeader() {
     enabled: !!activeSessionId,
   })
 
+  // Tool count from the tools API for capability detection
+  const { data: tools = [] } = useQuery({
+    queryKey: ['tools'],
+    queryFn: api.fetchTools,
+    staleTime: 60_000,
+  })
+
   const configVersion = useAppStore((s) => s.configVersion)
 
   const { data: allAgents = [] } = useQuery({
@@ -61,6 +96,13 @@ export function ChatHeader() {
   const agentCount = sessionAgents.length
   const title = session?.custom_name || session?.title || 'New Chat'
   const shortCode = session?.short_code
+
+  // Detect capabilities
+  const capabilities = detectCapabilities(
+    session?.provider,
+    activeMode,
+    tools.length + (toolCalls?.length || 0),
+  )
 
   // Switch primary agent for this session
   const switchAgentMutation = useMutation({
@@ -129,25 +171,35 @@ export function ChatHeader() {
   const handleAgentSelect = useCallback((agentId: string) => {
     switchAgentMutation.mutate(agentId)
     setDropdownOpen(false)
-    // Persist preference so new sessions use this agent
-    try { localStorage.setItem('conduit-preferred-agent', agentId) } catch { /* ignore */ }
   }, [switchAgentMutation])
 
-  // Auto-apply preferred agent to new sessions that still have the default
-  useEffect(() => {
-    if (!activeSessionId || !allAgents.length || switchAgentMutation.isPending) return
-    const preferred = localStorage.getItem('conduit-preferred-agent')
-    if (!preferred) return
-    // Only auto-switch if the current primary is the default (mentat) and the user has a preference
-    const current = primaryAgent?.agent_id
-    if (current && current !== 'mentat-001') return // user already has a non-default agent
-    if (current === preferred) return // already set
-    // Verify the preferred agent still exists
-    if (!allAgents.some((a) => a.id === preferred)) return
-    switchAgentMutation.mutate(preferred)
-  }, [activeSessionId, primaryAgent?.agent_id, allAgents, switchAgentMutation])
+  const setActiveSession = useAppStore((s) => s.setActiveSession)
 
-  const modeStyle = MODE_BADGE_STYLES[activeMode]
+  const [forkMenuOpen, setForkMenuOpen] = useState(false)
+  const forkMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!forkMenuOpen) return
+    function handleClick(e: MouseEvent) {
+      if (forkMenuRef.current && !forkMenuRef.current.contains(e.target as Node)) {
+        setForkMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [forkMenuOpen])
+
+  const forkMutation = useMutation({
+    mutationFn: (includeMessages: boolean) => {
+      if (!activeSessionId) throw new Error('No active session')
+      return api.forkSession(activeSessionId, { include_messages: includeMessages })
+    },
+    onSuccess: (newSession) => {
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      setActiveSession(newSession.id)
+      setForkMenuOpen(false)
+    },
+  })
 
   return (
     <header className="flex items-center justify-between px-4 h-12 border-b border-zinc-800 shrink-0">
@@ -178,20 +230,57 @@ export function ChatHeader() {
               {shortCode && (
                 <span className="text-xs text-zinc-500">#{shortCode}</span>
               )}
+              {session?.provider && (
+                <span className="flex items-center gap-1">
+                  <AdapterBadge provider={session.provider} size="md" />
+                  <div className="relative" ref={forkMenuRef}>
+                    <Tooltip content="Clone or fork session" side="bottom">
+                      <button
+                        onClick={() => setForkMenuOpen((o) => !o)}
+                        disabled={forkMutation.isPending}
+                        className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    </Tooltip>
+                    {forkMenuOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-44 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+                        <button
+                          onClick={() => forkMutation.mutate(false)}
+                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-zinc-300 hover:bg-zinc-800 transition-colors"
+                        >
+                          <Copy className="w-3 h-3 text-zinc-500" />
+                          Clone (empty)
+                        </button>
+                        <button
+                          onClick={() => forkMutation.mutate(true)}
+                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-zinc-300 hover:bg-zinc-800 transition-colors"
+                        >
+                          <GitFork className="w-3 h-3 text-zinc-500" />
+                          Fork (with history)
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </span>
+              )}
             </div>
           )}
 
-          {/* Agent + Mode badge + dropdown */}
+          {/* Agent badge + dropdown */}
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((o) => !o)}
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${modeStyle.bg} border ${modeStyle.border} transition-colors hover:brightness-125`}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 transition-colors hover:border-zinc-600"
             >
-              <Bot className={`w-3 h-3 ${modeStyle.text}`} />
-              <span className={`text-xs ${modeStyle.text}`}>
+              <Bot className="w-3 h-3 text-zinc-400" />
+              <span className="text-xs text-zinc-300">
                 {activeAgentName}
               </span>
-              <ChevronDown className={`w-3 h-3 ${modeStyle.text}`} />
+              {primaryAgentProfile?.source && (
+                <SourceBadge source={primaryAgentProfile.source} className="bg-zinc-700" />
+              )}
+              <ChevronDown className="w-3 h-3 text-zinc-500" />
             </button>
 
             {dropdownOpen && (
@@ -200,7 +289,7 @@ export function ChatHeader() {
                 <div className="px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
                   Agent
                 </div>
-                {allAgents.map((agent) => (
+                {allAgents.filter((a) => a.status !== 'disabled').map((agent) => (
                   <button
                     key={agent.id}
                     onClick={() => handleAgentSelect(agent.id)}
@@ -219,9 +308,37 @@ export function ChatHeader() {
               </div>
             )}
           </div>
+
+          {/* Capability indicator pills */}
+          <div className="flex items-center gap-1">
+            {capabilities.map((cap) => (
+              <span
+                key={cap.label}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${cap.color} ${cap.bg}`}
+              >
+                {cap.label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-1">
+        {/* Tool drawer toggle */}
+        <Tooltip content={toolDrawerState === 'closed' ? 'Show tool calls' : 'Hide tool calls'} side="bottom">
+          <button
+            onClick={() => {
+              const next = toolDrawerState === 'closed' ? 'compact' : toolDrawerState === 'compact' ? 'expanded' : 'closed'
+              setToolDrawerState(next)
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
+              toolDrawerState !== 'closed'
+                ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+            }`}
+          >
+            <Wrench className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
         {/* Sprint planning */}
         <Tooltip content="Sprint Planning" side="bottom">
           <button

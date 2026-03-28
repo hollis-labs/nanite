@@ -19,7 +19,7 @@ func newTestEngine(t *testing.T) *Engine {
 	t.Cleanup(func() { s.Close() })
 
 	reg := provider.NewRegistry()
-	return NewEngine(s, reg, "")
+	return NewEngine(s, reg)
 }
 
 func TestNewEngine(t *testing.T) {

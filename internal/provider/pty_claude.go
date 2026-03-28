@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 )
 
 // ClaudeAdapter implements CLIAdapter for the Claude Code CLI.
@@ -36,7 +35,7 @@ func (a *ClaudeAdapter) Detect() (string, bool) {
 	if p := os.Getenv("CLAUDE_CLI_PATH"); p != "" {
 		return p, true
 	}
-	p, err := exec.LookPath("claude")
+	p, err := lookPathExpanded("claude")
 	if err != nil {
 		return "", false
 	}

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"os"
 )
 
 // ProviderCapabilities describes the capabilities supported by a provider.
@@ -120,4 +121,39 @@ func WithSandboxDir(ctx context.Context, dir string) context.Context {
 func SandboxDirFromContext(ctx context.Context) (string, bool) {
 	dir, ok := ctx.Value(sandboxDirKeyType{}).(string)
 	return dir, ok && dir != ""
+}
+
+// ProcessCallback is called by PTY/subprocess bridges after spawning a CLI process
+// and again when the process exits. This enables external process tracking without
+// the provider package importing the chat package.
+type ProcessCallback func(proc *os.Process, started bool)
+
+type processCallbackKeyType struct{}
+
+// WithProcessCallback returns a context carrying a process lifecycle callback.
+func WithProcessCallback(ctx context.Context, cb ProcessCallback) context.Context {
+	return context.WithValue(ctx, processCallbackKeyType{}, cb)
+}
+
+// ProcessCallbackFromContext extracts the process callback from the context, if set.
+func ProcessCallbackFromContext(ctx context.Context) (ProcessCallback, bool) {
+	cb, ok := ctx.Value(processCallbackKeyType{}).(ProcessCallback)
+	return cb, ok && cb != nil
+}
+
+// ActivityCallback is called by PTY/subprocess bridges when output is received
+// from a CLI process. Used by the process tracker to detect hung processes.
+type ActivityCallback func(pid int)
+
+type activityCallbackKeyType struct{}
+
+// WithActivityCallback returns a context carrying an activity callback.
+func WithActivityCallback(ctx context.Context, cb ActivityCallback) context.Context {
+	return context.WithValue(ctx, activityCallbackKeyType{}, cb)
+}
+
+// ActivityCallbackFromContext extracts the activity callback from the context, if set.
+func ActivityCallbackFromContext(ctx context.Context) (ActivityCallback, bool) {
+	cb, ok := ctx.Value(activityCallbackKeyType{}).(ActivityCallback)
+	return cb, ok && cb != nil
 }

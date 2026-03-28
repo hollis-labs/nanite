@@ -91,6 +91,75 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 			"agent has no MCP servers and permissive permissions - it will have no tools but unrestricted access")
 	}
 
+	// --- v2 field validation ---
+
+	// 5. Validate tools (JSON string array with name/glob entries)
+	if t := strings.TrimSpace(agent.Tools); t != "" && t != "[]" {
+		var tools []string
+		if err := json.Unmarshal([]byte(t), &tools); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("tools is malformed JSON array: %s", err.Error()))
+		} else {
+			for _, tool := range tools {
+				if err := validateGlobPattern(tool); err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("invalid tool pattern %q: %s", tool, err.Error()))
+				}
+			}
+		}
+	}
+
+	// 6. Validate directories (JSON string array)
+	if d := strings.TrimSpace(agent.Directories); d != "" && d != "[]" {
+		var dirs []string
+		if err := json.Unmarshal([]byte(d), &dirs); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("directories is malformed JSON array: %s", err.Error()))
+		}
+	}
+
+	// 7. Validate constraints (JSON object with positive numeric values)
+	if c := strings.TrimSpace(agent.Constraints); c != "" && c != "{}" {
+		var constraints map[string]any
+		if err := json.Unmarshal([]byte(c), &constraints); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("constraints is malformed JSON: %s", err.Error()))
+		} else {
+			allowedKeys := map[string]bool{"max_iterations": true, "max_time_seconds": true, "retry_budget": true}
+			for k, v := range constraints {
+				if !allowedKeys[k] {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("constraints: unknown key %q", k))
+				}
+				switch n := v.(type) {
+				case float64:
+					if n <= 0 {
+						result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a positive number, got %v", k, n))
+					}
+				default:
+					result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a number, got %T", k, v))
+				}
+			}
+		}
+	}
+
+	// 8. Validate tags (JSON string array)
+	if t := strings.TrimSpace(agent.Tags); t != "" && t != "[]" {
+		var tags []string
+		if err := json.Unmarshal([]byte(t), &tags); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("tags is malformed JSON array: %s", err.Error()))
+		}
+	}
+
+	// 9. Validate status enum
+	if s := agent.Status; s != "" && s != "active" && s != "disabled" {
+		result.Errors = append(result.Errors, fmt.Sprintf("status must be 'active' or 'disabled', got %q", s))
+	}
+
+	// 10. Validate source enum
+	validSources := map[string]bool{
+		"": true, "seed": true, "api": true, "agentrc": true,
+		"crewai": true, "autogen": true, "import": true,
+	}
+	if !validSources[agent.Source] {
+		result.Errors = append(result.Errors, fmt.Sprintf("source must be one of seed/api/agentrc/crewai/autogen/import, got %q", agent.Source))
+	}
+
 	return result
 }
 

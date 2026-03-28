@@ -108,7 +108,30 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 		seen[name] = true
 	}
 
-	// 2. Load repos.yaml to get type info and find uninstalled plugins.
+	// 2. Include compiled-in (builtin) plugins not found in pluginsDir.
+	if pms.pluginHost != nil {
+		for _, p := range pms.pluginHost.ListPlugins() {
+			if seen[p.ID()] {
+				continue
+			}
+			status := p.Status()
+			statusStr := "active"
+			if !status.Loaded {
+				statusStr = "disabled"
+			}
+			result = append(result, PluginInfo{
+				Name:        p.ID(),
+				Version:     p.Version(),
+				Description: p.Description(),
+				Status:      statusStr,
+				Type:        "core",
+				Installed:   true,
+			})
+			seen[p.ID()] = true
+		}
+	}
+
+	// 3. Load repos.yaml to get type info and find uninstalled plugins.
 	repos, err := conduitplugin.LoadRepos(pms.reposPath)
 	if err == nil {
 		// Update type for installed plugins that are in repos.

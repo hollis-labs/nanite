@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
+	"github.com/hollis-labs/conduit/internal/config"
 	"github.com/hollis-labs/conduit/internal/filter"
 	"github.com/hollis-labs/conduit/internal/mcp"
 	"github.com/hollis-labs/conduit/internal/provider"
@@ -22,7 +23,6 @@ import (
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/truncate"
-	"github.com/hollis-labs/conduit/internal/workflow"
 )
 
 // maxToolIterations is the maximum number of tool-use loop iterations.
@@ -36,6 +36,24 @@ const generateResponseTimeout = 5 * time.Minute
 // ProgressiveDiscoveryThreshold is the tool count above which progressive
 // discovery is used instead of sending all tool schemas to the LLM.
 const ProgressiveDiscoveryThreshold = 5
+
+// AgentConstraints holds parsed runtime constraints from AgentProfile.Constraints.
+type AgentConstraints struct {
+	MaxIterations  int `json:"max_iterations"`
+	MaxTimeSeconds int `json:"max_time_seconds"`
+	RetryBudget    int `json:"retry_budget"`
+}
+
+// parseAgentConstraints parses the constraints JSON from an agent profile.
+// Returns zero-value struct on empty/invalid input (no constraints enforced).
+func parseAgentConstraints(raw string) AgentConstraints {
+	var c AgentConstraints
+	if raw == "" || raw == "{}" {
+		return c
+	}
+	json.Unmarshal([]byte(raw), &c)
+	return c
+}
 
 // requestToolsDef is a meta-tool the LLM can call to request full schemas
 // for specific tools by name or by describing intent. Delegates to
@@ -137,33 +155,74 @@ type Engine struct {
 	ToolClient      *toolclient.ToolClient
 	Orchestrator    *Orchestrator
 	Activity        *ActivityEmitter
-	OutputFilters   *filter.Chain // post-LLM output filters (nil = no filtering)
-	WorkflowEngine  *workflow.Engine
-	WorkflowLoader  *workflow.Loader
-	streams         sync.Map // map[string]chan StreamEvent
+	AppConfig       *config.AppConfig // app-level tunables (presence throttle, artifact detection)
+	OutputFilters   *filter.Chain     // post-LLM output filters (nil = no filtering)
+	ProcessTracker      *ProcessTracker
+	Commands            *CommandRegistry
+	cliActiveLastEmit   sync.Map // map[sessionID]time.Time — throttle cli_active presence
+	streams             sync.Map // map[string]chan StreamEvent
 	msgToSession    sync.Map // map[messageID]sessionID — tracks which session a stream belongs to
 	sessionSSE      sync.Map // map[sessionID]*sseConn — one active SSE connection per session
 	presenceClients sync.Map // map[clientID]chan PresenceEvent — presence SSE listeners
 	activePresence  sync.Map // map[sessionID]PresenceEvent — currently-streaming sessions (for initial state on connect)
 }
 
-// NewEngine creates a new chat engine. utilityProvider names the provider used
-// for lightweight utility calls (autoTitle, autoTags). Pass "" to default to "anthropic".
-func NewEngine(s *store.Store, providers *provider.Registry, utilityProvider string) *Engine {
+// NewEngine creates a new chat engine. It reads utility provider/model from
+// database user_settings first, then falls back to environment variables, then
+// to hardcoded defaults (anthropic / claude-sonnet-4-20250514).
+func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
+	utilityProvider := ""
+	utilityModel := ""
+
+	// Read from DB user_settings (written by the frontend settings UI).
+	if settings, err := s.GetUserSettings(); err == nil {
+		utilityProvider = settings.UtilityProvider
+		utilityModel = settings.UtilityModel
+	}
+
+	// Final defaults.
 	if utilityProvider == "" {
 		utilityProvider = "anthropic"
 	}
-	utilityModel := os.Getenv("CONDUIT_UTILITY_MODEL")
 	if utilityModel == "" {
 		utilityModel = "claude-sonnet-4-20250514"
 	}
+
 	return &Engine{
 		Store:           s,
 		Providers:       providers,
 		UtilityProvider: utilityProvider,
 		UtilityModel:    utilityModel,
 		Broker:          NewContextClient(s),
+		ProcessTracker:  NewProcessTracker(),
+		Commands:        NewCommandRegistry(),
 	}
+}
+
+// RefreshUtilitySettings updates the utility provider and model on the running
+// engine. Called by the settings API after a user changes preferences.
+func (e *Engine) RefreshUtilitySettings(provider, model string) {
+	if provider != "" {
+		e.UtilityProvider = provider
+	}
+	if model != "" {
+		e.UtilityModel = model
+	}
+}
+
+// Shutdown kills all tracked CLI processes. Call during server shutdown.
+func (e *Engine) Shutdown() {
+	if e.ProcessTracker != nil {
+		e.ProcessTracker.KillAll()
+	}
+}
+
+// KillSessionProcesses kills any CLI processes tracked for the given session.
+func (e *Engine) KillSessionProcesses(sessionID string) int {
+	if e.ProcessTracker == nil {
+		return 0
+	}
+	return e.ProcessTracker.KillSession(sessionID)
 }
 
 // HandleMessage processes an incoming user message: persists it, starts async generation, and
@@ -178,11 +237,6 @@ func (e *Engine) HandleMessage(sessionID, content string) (string, error) {
 	}
 	if err := e.Store.CreateMessage(userMsg); err != nil {
 		return "", fmt.Errorf("create user message: %w", err)
-	}
-
-	// Check for /workflow trigger.
-	if strings.HasPrefix(content, "/workflow ") {
-		return e.handleWorkflowTrigger(sessionID, content, userMsg.ID)
 	}
 
 	// Create assistant message ID and stream channel.
@@ -287,6 +341,42 @@ func (e *Engine) broadcastPresence(event PresenceEvent) {
 	})
 }
 
+// throttledCLIActivePresence emits a cli_active presence event at most once per
+// the configured throttle interval per session. This signals that a PTY process
+// is producing output between formal message boundaries.
+func (e *Engine) throttledCLIActivePresence(sessionID string) {
+	throttle := 5 * time.Second
+	if e.AppConfig != nil && e.AppConfig.Presence.CLIActiveThrottleSeconds > 0 {
+		throttle = time.Duration(e.AppConfig.Presence.CLIActiveThrottleSeconds) * time.Second
+	}
+
+	now := time.Now()
+	if last, ok := e.cliActiveLastEmit.Load(sessionID); ok {
+		if now.Sub(last.(time.Time)) < throttle {
+			return
+		}
+	}
+	e.cliActiveLastEmit.Store(sessionID, now)
+
+	e.broadcastPresence(PresenceEvent{
+		Type:      "cli_active",
+		SessionID: sessionID,
+		Timestamp: now.UTC().Format(time.RFC3339),
+	})
+}
+
+// BroadcastSessionArchived sends a session_archived presence event to all clients.
+func (e *Engine) BroadcastSessionArchived(sessionID string) {
+	// Clear any active presence for this session.
+	e.activePresence.Delete(sessionID)
+
+	e.broadcastPresence(PresenceEvent{
+		Type:      "session_archived",
+		SessionID: sessionID,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 // ActivePresenceState returns a snapshot of all currently-streaming sessions.
 func (e *Engine) ActivePresenceState() []PresenceEvent {
 	var events []PresenceEvent
@@ -299,6 +389,8 @@ func (e *Engine) ActivePresenceState() []PresenceEvent {
 
 // generateResponse loads context, calls the provider, streams events, and saves the result.
 func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan StreamEvent) {
+	startTime := time.Now()
+
 	// Wrap the context with an overall deadline so this goroutine cannot run forever.
 	ctx, cancel := context.WithTimeout(ctx, generateResponseTimeout)
 	defer cancel()
@@ -360,6 +452,22 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 	}
 
+	// Block disabled agents from responding.
+	if agent.Status == "disabled" {
+		ch <- errorEvent(ErrorCodeInternal, fmt.Sprintf("Agent %q is disabled", agent.Name), nil)
+		return
+	}
+
+	// Parse agent constraints (schema v2).
+	constraints := parseAgentConstraints(agent.Constraints)
+
+	// Override context timeout if the agent has a max_time_seconds constraint.
+	if constraints.MaxTimeSeconds > 0 {
+		agentTimeout := time.Duration(constraints.MaxTimeSeconds) * time.Second
+		ctx, cancel = context.WithTimeout(ctx, agentTimeout)
+		defer cancel()
+	}
+
 	// Load agent mode.
 	mode, err := e.Store.GetAgentMode(agent.ID, modeName)
 	if err != nil {
@@ -392,15 +500,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		model = "claude-sonnet-4-20250514"
 	}
 
-	// Get provider — use session's provider field, fall back to "anthropic".
-	// Infer provider from model if the session has a model but no provider set
-	// (handles sessions created before provider routing was added).
-	providerName := session.Provider
-	if providerName == "" {
-		providerName = inferProvider(model)
-	}
-	prov, ok := e.Providers.Get(providerName)
-	if !ok {
+	// Resolve provider via fallback chain:
+	// 1. Session's explicit provider
+	// 2. Agent's default provider
+	// 3. User's fallback chain (first available)
+	// 4. Infer from model name
+	// 5. System default ("anthropic")
+	providerName, prov := e.resolveProvider(session.Provider, agent.DefaultProvider, model)
+	if prov == nil {
 		ch <- errorEvent(ErrorCodeProviderError, fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName), map[string]interface{}{"raw": fmt.Sprintf("provider %q not registered", providerName)})
 		return
 	}
@@ -494,6 +601,12 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// blockedTools tracks tools that have been hard-blocked due to repeated identical results.
 	// Checked BEFORE execution to prevent the tool from running at all.
 	blockedTools := make(map[string]bool)
+	// retryBudget tracks remaining retries for recoverable errors (agent constraint).
+	// -1 means unlimited (no constraint set).
+	retryBudget := -1
+	if constraints.RetryBudget > 0 {
+		retryBudget = constraints.RetryBudget
+	}
 	// consecutiveToolErrors tracks sequential tool failures to escalate user-visible warnings.
 	consecutiveToolErrors := 0
 	// pendingEnvelopes collects envelope JSON from KB tools to inject after the agent's response.
@@ -506,9 +619,16 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
 	var finalUsage *Usage
+	var breakdown *TokenBreakdown
+
+	// Determine effective iteration cap (agent constraint may lower it).
+	iterationCap := maxToolIterations
+	if constraints.MaxIterations > 0 && constraints.MaxIterations < iterationCap {
+		iterationCap = constraints.MaxIterations
+	}
 
 	iteration := 0
-	for ; iteration < maxToolIterations; iteration++ {
+	for ; iteration < iterationCap; iteration++ {
 		// Check if the overall deadline has been exceeded.
 		if ctx.Err() != nil {
 			log.Printf("[WARN] generateResponse context cancelled: %v (session=%s)", ctx.Err(), sessionID)
@@ -524,7 +644,6 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 
 		// Enforce unified token budget before every provider call.
-		var breakdown *TokenBreakdown
 		var budgetErr error
 		chatMessages, tools, breakdown, budgetErr = EnforceTokenBudget(systemPrompt, chatMessages, tools, 0)
 		if budgetErr != nil {
@@ -553,8 +672,15 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			attribute.Int("conduit.tokens.total", breakdown.Total),
 			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
 		)
-		// PTY sessions: set up sandbox directory and resume context.
-		if isPTYProvider(providerName) {
+		// CLI sessions (PTY or subprocess): set up sandbox directory and resume context.
+		if isCLIProvider(providerName) {
+			// Check concurrency limit before spawning a new CLI process.
+			if e.ProcessTracker != nil && e.ProcessTracker.AtCapacity() {
+				ch <- errorEvent(ErrorCodeProviderError,
+					fmt.Sprintf("CLI process limit reached (%d). Close other CLI sessions or wait for them to finish.", e.ProcessTracker.MaxProcesses),
+					map[string]interface{}{"raw": "max concurrent CLI processes exceeded"})
+				return
+			}
 			// Create/resolve sandbox directory and populate reference files.
 			if sbDir, sbErr := sandbox.Dir(sessionID); sbErr != nil {
 				log.Printf("chat: sandbox dir error: %v", sbErr)
@@ -574,6 +700,22 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				if cliSID, ok := meta["cli_session_id"].(string); ok && cliSID != "" {
 					provCtx = provider.WithCLISessionID(provCtx, cliSID)
 				}
+			}
+
+			// Wire process tracker so spawned CLI processes are tracked.
+			if e.ProcessTracker != nil {
+				sid := sessionID
+				provCtx = provider.WithProcessCallback(provCtx, func(proc *os.Process, started bool) {
+					if started {
+						e.ProcessTracker.Track(sid, proc)
+					} else {
+						e.ProcessTracker.Untrack(sid, proc)
+					}
+				})
+				provCtx = provider.WithActivityCallback(provCtx, func(pid int) {
+					e.ProcessTracker.Touch(sid, pid)
+					e.throttledCLIActivePresence(sid)
+				})
 			}
 		}
 
@@ -599,6 +741,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					go e.Activity.EmitRateLimitHit(ctx, sessionID, "anthropic", 0)
 				}
 			}
+			// Decrement retry budget on provider errors.
+			if retryBudget > 0 {
+				retryBudget--
+				if retryBudget == 0 {
+					log.Printf("chat: retry budget exhausted for session %s", sessionID)
+				}
+			}
 			errDetails := map[string]interface{}{
 				"raw":   err.Error(),
 				"model": model,
@@ -613,16 +762,55 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		var turnContent strings.Builder
 		var toolUseBlocks []provider.ToolUseBlock
 		var stopReason string
+		var lastPTYToolPending string // tracks unresolved PTY tool for presence
 
 		for evt := range provCh {
 			switch evt.Type {
 			case "delta":
+				// Resolve any pending PTY tool (CLI returned text after a tool call).
+				if lastPTYToolPending != "" && isCLIProvider(providerName) {
+					e.broadcastPresence(PresenceEvent{
+						Type:      "tool_resolved",
+						SessionID: sessionID,
+						AgentID:   agent.ID,
+						ToolName:  lastPTYToolPending,
+						Timestamp: time.Now().UTC().Format(time.RFC3339),
+					})
+					lastPTYToolPending = ""
+				}
 				turnContent.WriteString(evt.Content)
 				fullContent.WriteString(evt.Content)
 				ch <- StreamEvent{Type: "delta", Content: evt.Content}
 			case "tool_use":
 				if evt.ToolUse != nil {
 					toolUseBlocks = append(toolUseBlocks, *evt.ToolUse)
+
+					// PTY/subprocess sessions: CLI manages tools internally,
+					// so emit tool_pending presence here (API sessions emit
+					// this later in the tool execution loop).
+					if isCLIProvider(providerName) {
+						// Resolve the previous tool before starting a new one.
+						if lastPTYToolPending != "" {
+							e.broadcastPresence(PresenceEvent{
+								Type:      "tool_resolved",
+								SessionID: sessionID,
+								AgentID:   agent.ID,
+								ToolName:  lastPTYToolPending,
+								Timestamp: time.Now().UTC().Format(time.RFC3339),
+							})
+						}
+						lastPTYToolPending = evt.ToolUse.Name
+						e.broadcastPresence(PresenceEvent{
+							Type:      "tool_pending",
+							SessionID: sessionID,
+							AgentID:   agent.ID,
+							ToolName:  evt.ToolUse.Name,
+							Timestamp: time.Now().UTC().Format(time.RFC3339),
+						})
+
+						// Auto-detect artifacts from PTY tool calls too.
+						e.maybeCreateAutoArtifact(sessionID, assistantMsgID, agent.ID, *evt.ToolUse)
+					}
 				}
 			case "usage":
 				if evt.Usage != nil {
@@ -672,6 +860,17 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			case "done":
 				// Will handle below.
 			}
+		}
+
+		// Resolve any remaining PTY tool presence after stream ends.
+		if lastPTYToolPending != "" && isCLIProvider(providerName) {
+			e.broadcastPresence(PresenceEvent{
+				Type:      "tool_resolved",
+				SessionID: sessionID,
+				AgentID:   agent.ID,
+				ToolName:  lastPTYToolPending,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
 		}
 
 		provSpan.End()
@@ -922,6 +1121,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			// Emit tool_warning SSE event on errors so the user sees feedback.
 			if toolIsError {
 				consecutiveToolErrors++
+				if retryBudget > 0 {
+					retryBudget--
+				}
 				level := "warning"
 				if consecutiveToolErrors >= 3 {
 					level = "critical"
@@ -995,6 +1197,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
 			})
 
+			// Auto-detect artifacts from file-writing tool calls.
+			if !toolIsError {
+				e.maybeCreateAutoArtifact(sessionID, assistantMsgID, agent.ID, tu)
+			}
+
 			if tr.Truncated {
 				log.Printf("chat: tool %s result truncated: %d → %d chars (saved to %s)",
 					tu.Name, tr.OriginalLen, len(tr.Content), tr.OutputPath)
@@ -1033,6 +1240,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			time.Sleep(1 * time.Second)
 		}
 
+		// Check retry budget before next iteration.
+		if retryBudget == 0 {
+			log.Printf("chat: retry budget exhausted, stopping tool loop for session %s", sessionID)
+			ch <- StreamEvent{Type: "status", Content: "Retry budget exhausted — stopping."}
+			break
+		}
+
 		// Check circuit breaker before next iteration — stop if tripped.
 		if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil && ap.CircuitBreaker.IsOpen() {
 			log.Printf("chat: circuit breaker open, stopping tool-use loop at iteration %d", iteration)
@@ -1049,9 +1263,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Loop back for the next provider call.
 	}
 
-	if iteration >= maxToolIterations {
+	if iteration >= iterationCap {
 		log.Printf("[WARN] Tool loop exhausted after %d iterations for session=%s agent=%s", iteration, sessionID, agent.ID)
-		ch <- errorEnvelopeDelta(ErrorCodeInternal, fmt.Sprintf("Response may be incomplete — tool step limit (%d) reached. The assistant was still working when the limit was hit.", maxToolIterations), nil)
+		ch <- errorEnvelopeDelta(ErrorCodeInternal, fmt.Sprintf("Response may be incomplete — tool step limit (%d) reached. The assistant was still working when the limit was hit.", iterationCap), nil)
 	}
 
 	// Apply output filters (e.g. strip emoji) before parsing envelopes.
@@ -1095,9 +1309,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			envErr.Reason, fmt.Sprintf(`{"raw":%q}`, truncateStr(envErr.Raw, 500)))
 	}
 
-	// PTY envelope retry: if there were fatal envelope errors (invalid_json)
-	// and this is a PTY session with --resume, send one correction prompt.
-	if len(envErrors) > 0 && isPTYProvider(providerName) {
+	// CLI envelope retry: if there were fatal envelope errors (invalid_json)
+	// and this is a CLI session with --resume, send one correction prompt.
+	if len(envErrors) > 0 && isCLIProvider(providerName) {
 		hasFatal := false
 		for _, envErr := range envErrors {
 			if envErr.Reason == "invalid_json" {
@@ -1171,6 +1385,42 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		if err := e.Store.RecordUsage(sessionID, assistantMsgID, model, finalUsage.InputTokens, finalUsage.OutputTokens, finalUsage.CacheCreationTokens, finalUsage.CacheReadTokens); err != nil {
 			log.Printf("chat: failed to record token usage: %v", err)
 		}
+	}
+
+	// Record execution metrics snapshot.
+	adapterType := "http"
+	if isPTYProvider(providerName) {
+		adapterType = "pty"
+	} else if strings.HasPrefix(providerName, "sub-") {
+		adapterType = "sub"
+	}
+	metrics := &store.ExecutionMetrics{
+		SessionID:       sessionID,
+		MessageID:       assistantMsgID,
+		Provider:        providerName,
+		Adapter:         adapterType,
+		Model:           model,
+		AgentID:         agent.ID,
+		AgentSlug:       agent.Slug,
+		Mode:            mode.Slug,
+		DurationMs:      time.Since(startTime).Milliseconds(),
+		ContextMessages: len(chatMessages),
+		ToolIterations:  iteration,
+		ToolCalls:       len(toolCallRefs),
+		StopReason:      "",
+	}
+	if breakdown != nil {
+		metrics.ContextTokens = breakdown.Total
+	}
+	if finalUsage != nil {
+		metrics.InputTokens = finalUsage.InputTokens
+		metrics.OutputTokens = finalUsage.OutputTokens
+		metrics.CacheCreationTokens = finalUsage.CacheCreationTokens
+		metrics.CacheReadTokens = finalUsage.CacheReadTokens
+		metrics.StopReason = finalUsage.StopReason
+	}
+	if err := e.Store.RecordExecutionMetrics(metrics); err != nil {
+		log.Printf("chat: failed to record execution metrics: %v", err)
 	}
 
 	// Emit stream_end with envelope data so the frontend can render immediately.
@@ -1315,9 +1565,122 @@ func truncateStr(s string, maxLen int) string {
 // inferProvider maps a model name to a provider when the session has no
 // explicit provider set. This handles legacy sessions and prevents sending
 // unknown model names to the wrong provider API.
+// isCLIProvider returns true if the provider name is any CLI adapter variant
+// (PTY bridge or subprocess bridge).
+func isCLIProvider(name string) bool {
+	return name == "pty" || strings.HasPrefix(name, "pty-") || strings.HasPrefix(name, "sub-")
+}
+
+// maybeCreateAutoArtifact checks if a tool call wrote a file and auto-creates
+// an artifact record with origin="auto". Uses AppConfig.Artifacts for tool
+// matching and path key extraction.
+func (e *Engine) maybeCreateAutoArtifact(sessionID, messageID, agentID string, tu provider.ToolUseBlock) {
+	if e.AppConfig == nil {
+		return
+	}
+	artCfg := &e.AppConfig.Artifacts
+	if !artCfg.IsAutoDetectTool(tu.Name) {
+		return
+	}
+	filePath := artCfg.ExtractFilePath(tu.Input)
+	if filePath == "" {
+		return
+	}
+
+	// Extract the filename from the path.
+	name := filePath
+	if idx := strings.LastIndex(filePath, "/"); idx >= 0 {
+		name = filePath[idx+1:]
+	}
+
+	artifact := &store.Artifact{
+		SessionID:        sessionID,
+		MessageID:        messageID,
+		Name:             name,
+		MimeType:         "application/octet-stream", // could be refined later
+		StoragePath:      filePath,
+		Origin:           store.ArtifactOriginAuto,
+		SourceToolCallID: tu.ID,
+		SourceAgentID:    agentID,
+	}
+	if err := e.Store.CreateArtifact(artifact); err != nil {
+		log.Printf("chat: auto-artifact creation failed for %s: %v", filePath, err)
+	} else {
+		log.Printf("chat: auto-artifact created: %s (tool=%s, session=%s)", name, tu.Name, sessionID)
+	}
+}
+
+// PlaceArtifact creates an artifact with origin="placed" for tools/plugins
+// that want to deliberately surface a file to the user.
+func (e *Engine) PlaceArtifact(sessionID, messageID, agentID, name, mimeType, storagePath string) (*store.Artifact, error) {
+	artifact := &store.Artifact{
+		SessionID:     sessionID,
+		MessageID:     messageID,
+		Name:          name,
+		MimeType:      mimeType,
+		StoragePath:   storagePath,
+		Origin:        store.ArtifactOriginPlaced,
+		SourceAgentID: agentID,
+	}
+	if err := e.Store.CreateArtifact(artifact); err != nil {
+		return nil, fmt.Errorf("place artifact: %w", err)
+	}
+	return artifact, nil
+}
+
 // isPTYProvider returns true if the provider name is any PTY adapter variant.
 func isPTYProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-")
+}
+
+// resolveProvider walks the provider fallback chain and returns the first
+// available provider. Resolution order:
+//  1. sessionProvider (explicit per-session)
+//  2. agentProvider (agent profile default)
+//  3. User's fallback chain (from user_settings, first registered wins)
+//  4. inferProvider(model) — map model name to provider
+//  5. System default ("anthropic")
+//
+// Returns the provider name and the Provider, or ("name", nil) if none available.
+func (e *Engine) resolveProvider(sessionProvider, agentProvider, model string) (string, provider.Provider) {
+	// 1. Session-level override — highest priority.
+	if sessionProvider != "" {
+		if p, ok := e.Providers.Get(sessionProvider); ok {
+			return sessionProvider, p
+		}
+		log.Printf("chat: session provider %q not registered, falling through", sessionProvider)
+	}
+
+	// 2. Agent's preferred provider.
+	if agentProvider != "" {
+		if p, ok := e.Providers.Get(agentProvider); ok {
+			return agentProvider, p
+		}
+		log.Printf("chat: agent provider %q not registered, falling through", agentProvider)
+	}
+
+	// 3. User's fallback chain.
+	if us, err := e.Store.GetUserSettings(); err == nil && len(us.ProviderFallbackChain) > 0 {
+		for _, name := range us.ProviderFallbackChain {
+			if p, ok := e.Providers.Get(name); ok {
+				return name, p
+			}
+		}
+		log.Printf("chat: no provider in user fallback chain is registered, falling through")
+	}
+
+	// 4. Infer from model name.
+	inferred := inferProvider(model)
+	if p, ok := e.Providers.Get(inferred); ok {
+		return inferred, p
+	}
+
+	// 5. System default.
+	if p, ok := e.Providers.Get("anthropic"); ok {
+		return "anthropic", p
+	}
+
+	return inferred, nil
 }
 
 func inferProvider(model string) string {
@@ -1338,6 +1701,27 @@ func inferProvider(model string) string {
 }
 
 // autoTitle generates a title for a session from the first user message.
+// recordUtilityMetrics records an execution metric for a utility call (autoTitle, autoTags, etc.).
+func (e *Engine) recordUtilityMetrics(sessionID, callType string, duration time.Duration, callErr error) {
+	errMsg := ""
+	if callErr != nil {
+		errMsg = callErr.Error()
+	}
+	m := &store.ExecutionMetrics{
+		SessionID:  sessionID,
+		MessageID:  callType, // use call type as message ID for utility calls
+		Provider:   e.UtilityProvider,
+		Adapter:    "http",
+		Model:      e.UtilityModel,
+		DurationMs: duration.Milliseconds(),
+		IsUtility:  true,
+		Error:      errMsg,
+	}
+	if err := e.Store.RecordExecutionMetrics(m); err != nil {
+		log.Printf("chat: failed to record utility metrics for %s: %v", callType, err)
+	}
+}
+
 func (e *Engine) autoTitle(sessionID, userContent string) {
 	ctx, span := feotel.StartSpan(context.Background(), "conduit.autoTitle")
 	span.SetAttributes(attribute.String("conduit.session.id", sessionID))
@@ -1354,7 +1738,12 @@ func (e *Engine) autoTitle(sessionID, userContent string) {
 		{Role: "user", Content: fmt.Sprintf("First message: %s", userContent)},
 	}
 
+	start := time.Now()
 	title, err := prov.Complete(context.Background(), prompt, msgs, e.UtilityModel)
+	duration := time.Since(start)
+
+	e.recordUtilityMetrics(sessionID, "autoTitle", duration, err)
+
 	if err != nil {
 		log.Printf("chat: auto-title failed: %v", err)
 		return
@@ -1410,7 +1799,12 @@ func (e *Engine) autoTags(sessionID string) {
 		{Role: "user", Content: sb.String()},
 	}
 
+	start := time.Now()
 	raw, err := prov.Complete(context.Background(), prompt, tagMsgs, e.UtilityModel)
+	duration := time.Since(start)
+
+	e.recordUtilityMetrics(sessionID, "autoTags", duration, err)
+
 	if err != nil {
 		log.Printf("chat: auto-tags generation failed: %v", err)
 		return
@@ -1570,6 +1964,12 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 		}
 	}
 
+	// Filter tools by agent.Tools allowlist (schema v2).
+	// Empty list ("[]") means no filtering — all tools available.
+	if agent, agErr := e.Store.GetAgent(agentID); agErr == nil {
+		allTools = filterToolsByAgentAllowlist(allTools, agent.Tools)
+	}
+
 	if len(allTools) == 0 {
 		log.Printf("chat: WARNING broker returned 0 tools for agent %s — proceeding without tools (LLM can still respond)", agentID)
 	} else {
@@ -1610,78 +2010,27 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 	}
 }
 
-// handleWorkflowTrigger detects "/workflow <name>" messages and routes to the workflow engine.
-func (e *Engine) handleWorkflowTrigger(sessionID, content, userMsgID string) (string, error) {
-	if e.WorkflowEngine == nil || e.WorkflowLoader == nil {
-		return "", fmt.Errorf("workflow engine not configured")
+// filterToolsByAgentAllowlist removes tools not matching the agent's tools allowlist.
+// An empty or "[]" allowlist means no filtering (all tools pass).
+func filterToolsByAgentAllowlist(tools []provider.ToolDefinition, allowlistJSON string) []provider.ToolDefinition {
+	if allowlistJSON == "" || allowlistJSON == "[]" {
+		return tools
 	}
-
-	// Parse: /workflow <name> [key=value ...]
-	parts := strings.Fields(content)
-	if len(parts) < 2 {
-		return "", fmt.Errorf("usage: /workflow <name> [key=value ...]")
+	var allowlist []string
+	if err := json.Unmarshal([]byte(allowlistJSON), &allowlist); err != nil || len(allowlist) == 0 {
+		return tools
 	}
-	wfName := parts[1]
-
-	def, ok := e.WorkflowLoader.Get(wfName)
-	if !ok {
-		return "", fmt.Errorf("workflow %q not found", wfName)
-	}
-
-	// Parse inputs from remaining args.
-	inputs := map[string]string{
-		"session_id": sessionID,
-	}
-	for _, arg := range parts[2:] {
-		kv := strings.SplitN(arg, "=", 2)
-		if len(kv) == 2 {
-			inputs[kv[0]] = kv[1]
+	filtered := make([]provider.ToolDefinition, 0, len(tools))
+	for _, t := range tools {
+		for _, pattern := range allowlist {
+			if toolclient.MatchPattern(pattern, t.Name) {
+				filtered = append(filtered, t)
+				break
+			}
 		}
 	}
-
-	// Create assistant message for workflow output.
-	assistantMsgID := uuid.New().String()
-	ch := make(chan StreamEvent, 128)
-	e.streams.Store(assistantMsgID, ch)
-	e.msgToSession.Store(assistantMsgID, sessionID)
-
-	go func() {
-		defer func() {
-			close(ch)
-			e.streams.Delete(assistantMsgID)
-			e.msgToSession.Delete(assistantMsgID)
-		}()
-
-		ch <- StreamEvent{Type: "stream_start", MessageID: assistantMsgID}
-
-		result, err := e.WorkflowEngine.Execute(context.Background(), def, inputs)
-		if err != nil {
-			ch <- errorEvent(ErrorCodeInternal, "Workflow execution failed", map[string]interface{}{
-				"raw":      err.Error(),
-				"workflow": wfName,
-			})
-			return
-		}
-
-		output := fmt.Sprintf("**Workflow: %s**\n\n%s", wfName, result.FinalOutput)
-		ch <- StreamEvent{Type: "delta", Content: output}
-
-		// Save assistant message.
-		msg := &store.Message{
-			ID:        assistantMsgID,
-			SessionID: sessionID,
-			Role:      "assistant",
-			Content:   output,
-			Metadata:  fmt.Sprintf(`{"source":"workflow","workflow":"%s"}`, wfName),
-		}
-		if err := e.Store.CreateMessage(msg); err != nil {
-			log.Printf("chat: failed to save workflow result: %v", err)
-		}
-
-		ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID}
-	}()
-
-	return assistantMsgID, nil
+	log.Printf("chat: agent tools allowlist filtered %d → %d tools", len(tools), len(filtered))
+	return filtered
 }
 
 // RetryLastMessage resets the circuit breaker and re-triggers generation for a session.

@@ -115,7 +115,13 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		return nil, fmt.Errorf("start pty: %w", err)
 	}
 
+	// Notify process tracker if one is attached.
+	if cb, ok := ProcessCallbackFromContext(ctx); ok && cmd.Process != nil {
+		cb(cmd.Process, true)
+	}
+
 	ch := make(chan StreamEvent, 64)
+	activityCb, hasActivity := ActivityCallbackFromContext(ctx)
 
 	go func() {
 		defer close(ch)
@@ -145,6 +151,10 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 				continue
 			}
 
+			if len(events) > 0 && hasActivity && cmd.Process != nil {
+				activityCb(cmd.Process.Pid)
+			}
+
 			for _, ev := range events {
 				ch <- ev
 			}
@@ -164,6 +174,11 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 				// Only log if not a context cancellation.
 				log.Printf("pty: process exited: %v", err)
 			}
+		}
+
+		// Notify process tracker that process has exited.
+		if cb, ok := ProcessCallbackFromContext(ctx); ok && cmd.Process != nil {
+			cb(cmd.Process, false)
 		}
 	}()
 

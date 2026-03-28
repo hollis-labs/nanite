@@ -345,6 +345,106 @@ func (s *Store) UpdateSessionCompaction(id, summary string) error {
 	return nil
 }
 
+// ForkSession creates a new session based on a source session, copying agents and optionally messages.
+func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bool) (*Session, error) {
+	src, err := s.GetSession(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("load source session: %w", err)
+	}
+
+	// Build new session from source, applying overrides.
+	newSess := &Session{
+		WorkspaceID: src.WorkspaceID,
+		ProjectID:   src.ProjectID,
+		Provider:    src.Provider,
+		Model:       src.Model,
+		Tags:        src.Tags,
+		ContextType: src.ContextType,
+		ContextID:   src.ContextID,
+	}
+
+	// Apply overrides.
+	if overrides != nil {
+		if overrides.Provider != "" {
+			newSess.Provider = overrides.Provider
+		}
+		if overrides.Model != "" {
+			newSess.Model = overrides.Model
+		}
+	}
+
+	// Set title based on whether we're forking or cloning.
+	sourceTitle := src.CustomName
+	if sourceTitle == "" {
+		sourceTitle = src.Title
+	}
+	if sourceTitle != "" {
+		if copyMessages {
+			newSess.CustomName = "Fork: " + sourceTitle
+		} else {
+			newSess.CustomName = "Clone: " + sourceTitle
+		}
+	}
+
+	if err := s.CreateSession(newSess); err != nil {
+		return nil, fmt.Errorf("create forked session: %w", err)
+	}
+
+	// Copy session agents.
+	agents, err := s.ListSessionAgents(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list source agents: %w", err)
+	}
+	for _, sa := range agents {
+		if err := s.EnsureSessionAgent(newSess.ID, sa.AgentID, sa.Mode, sa.IsPrimary); err != nil {
+			return nil, fmt.Errorf("copy agent %s: %w", sa.AgentID, err)
+		}
+	}
+
+	// Copy messages if requested.
+	if copyMessages {
+		if err := s.CopyMessages(sourceID, newSess.ID); err != nil {
+			return nil, fmt.Errorf("copy messages: %w", err)
+		}
+		// Reload to get accurate message_count.
+		newSess, err = s.GetSession(newSess.ID)
+		if err != nil {
+			return nil, fmt.Errorf("reload forked session: %w", err)
+		}
+	}
+
+	return newSess, nil
+}
+
+// CopyMessages copies all messages from one session to another, assigning new IDs.
+// Returns an error if the source session exceeds the 10,000 message limit.
+func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
+	const maxMessages = 10000
+	msgs, err := s.ListMessages(sourceSessionID, maxMessages)
+	if err != nil {
+		return fmt.Errorf("list source messages: %w", err)
+	}
+	if len(msgs) >= maxMessages {
+		return fmt.Errorf("source session has too many messages (>=%d); fork/clone is not supported for sessions this large", maxMessages)
+	}
+
+	for _, m := range msgs {
+		newMsg := &Message{
+			ID:        uuid.New().String(),
+			SessionID: targetSessionID,
+			AgentID:   m.AgentID,
+			Role:      m.Role,
+			Content:   m.Content,
+			Envelope:  m.Envelope,
+			Metadata:  m.Metadata,
+		}
+		if err := s.CreateMessage(newMsg); err != nil {
+			return fmt.Errorf("copy message: %w", err)
+		}
+	}
+	return nil
+}
+
 // nullIfEmpty returns nil if s is empty, otherwise returns s. Used for nullable TEXT columns.
 func nullIfEmpty(val string) interface{} {
 	if val == "" {

@@ -32,6 +32,14 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		ToolPermissions string `json:"tool_permissions"`
 		CanExecute      bool   `json:"can_execute"`
 		Settings        string `json:"settings"`
+		// v2 fields
+		Tools       string `json:"tools"`
+		Directories string `json:"directories"`
+		Constraints string `json:"constraints"`
+		Tags        string `json:"tags"`
+		Status      string `json:"status"`
+		Source      string `json:"source"`
+		SourceRef   string `json:"source_ref"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -56,6 +64,13 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		ToolPermissions: req.ToolPermissions,
 		CanExecute:      req.CanExecute,
 		Settings:        req.Settings,
+		Tools:           req.Tools,
+		Directories:     req.Directories,
+		Constraints:     req.Constraints,
+		Tags:            req.Tags,
+		Status:          req.Status,
+		Source:          req.Source,
+		SourceRef:       req.SourceRef,
 	}
 	// Validate agent config before persisting.
 	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
@@ -120,6 +135,12 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		ToolPermissions *string `json:"tool_permissions"`
 		CanExecute      *bool   `json:"can_execute"`
 		Settings        *string `json:"settings"`
+		// v2 fields (source/source_ref immutable after creation)
+		Tools       *string `json:"tools"`
+		Directories *string `json:"directories"`
+		Constraints *string `json:"constraints"`
+		Tags        *string `json:"tags"`
+		Status      *string `json:"status"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -161,6 +182,21 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Settings != nil {
 		existing.Settings = *req.Settings
+	}
+	if req.Tools != nil {
+		existing.Tools = *req.Tools
+	}
+	if req.Directories != nil {
+		existing.Directories = *req.Directories
+	}
+	if req.Constraints != nil {
+		existing.Constraints = *req.Constraints
+	}
+	if req.Tags != nil {
+		existing.Tags = *req.Tags
+	}
+	if req.Status != nil {
+		existing.Status = *req.Status
 	}
 
 	// Validate agent config before persisting.

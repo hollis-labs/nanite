@@ -8,11 +8,15 @@
 package allplugins
 
 import (
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/agentrc"
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/agentwidgets"
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/bookmarkswidget"
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/contextwidgets"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/demopresenter"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/giphy"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/marvel"
+	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/observabilitywidgets"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/oembed"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/sessionstats"
 	_ "github.com/hollis-labs/conduit/plugins/support-ticket"
-	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/trivia"
 )

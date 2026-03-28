@@ -23,6 +23,40 @@ function makeChatError(
   }
 }
 
+// --- Error persistence helpers (survive page refresh) ---
+
+interface PersistedErrorState {
+  errors: ChatError[]
+  toolCalls: Array<{ id: string; tool: string; status: 'running' | 'done' | 'error'; summary?: string }>
+  errorMessage?: Message
+}
+
+function storageKey(sessionId: string) {
+  return `conduit:errorState:${sessionId}`
+}
+
+function persistErrorState(sessionId: string, state: PersistedErrorState) {
+  try {
+    localStorage.setItem(storageKey(sessionId), JSON.stringify(state))
+  } catch { /* quota exceeded — not critical */ }
+}
+
+function loadPersistedErrorState(sessionId: string): PersistedErrorState | null {
+  try {
+    const raw = localStorage.getItem(storageKey(sessionId))
+    if (!raw) return null
+    return JSON.parse(raw) as PersistedErrorState
+  } catch {
+    return null
+  }
+}
+
+function clearPersistedErrorState(sessionId: string) {
+  try {
+    localStorage.removeItem(storageKey(sessionId))
+  } catch { /* ignore */ }
+}
+
 export function useChat(sessionId: string | null) {
   const [messages, setMessages] = useState<Message[]>([])
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -56,11 +90,32 @@ export function useChat(sessionId: string | null) {
     }
     try {
       const msgs = await api.getMessages(sessionId)
-      setMessages(msgs ?? [])
+      const backendMessages = msgs ?? []
+
+      // Restore persisted error state (errors not saved by backend).
+      const persisted = loadPersistedErrorState(sessionId)
+      if (persisted) {
+        // Inject error message if not already in backend messages.
+        if (persisted.errorMessage) {
+          const exists = backendMessages.some((m) => m.id === persisted.errorMessage!.id)
+          if (!exists) {
+            backendMessages.push(persisted.errorMessage)
+          }
+        }
+        // Restore chat errors and tool calls to store.
+        for (const err of persisted.errors) {
+          addChatError(err)
+        }
+        for (const tc of persisted.toolCalls) {
+          addToolCall(tc)
+        }
+      }
+
+      setMessages(backendMessages)
     } catch (err) {
       console.error('Failed to load messages:', err)
     }
-  }, [sessionId])
+  }, [sessionId, addChatError, addToolCall])
 
   // Load messages when sessionId changes
   useEffect(() => {
@@ -92,6 +147,7 @@ export function useChat(sessionId: string | null) {
     setStreamingSessionId(sessionId)
     clearToolCalls()
     clearToolWarnings()
+    clearPersistedErrorState(sessionId)
     console.log('[useChat] streaming=true, sending message...')
 
     try {
@@ -211,6 +267,7 @@ export function useChat(sessionId: string | null) {
         }
         setMessages(prev => [...prev, assistantMsg])
         clearStream()
+        clearPersistedErrorState(sessionId)
         es.close()
         eventSourceRef.current = null
 
@@ -242,19 +299,29 @@ export function useChat(sessionId: string | null) {
           }
         }
         // Finalize the stream with whatever we have.
-        if (accumulated) {
-          const assistantMsg: Message = {
-            id: message_id,
-            session_id: sessionId,
-            agent_id: '',
-            role: 'assistant',
-            content: accumulated,
-            envelope: null,
-            metadata: '{}',
-            created_at: new Date().toISOString(),
-          }
-          setMessages(prev => [...prev, assistantMsg])
+        const errorMsg: Message | undefined = accumulated ? {
+          id: message_id,
+          session_id: sessionId,
+          agent_id: '',
+          role: 'assistant',
+          content: accumulated,
+          envelope: null,
+          metadata: JSON.stringify({ had_error: true }),
+          created_at: new Date().toISOString(),
+        } : undefined
+        if (errorMsg) {
+          setMessages(prev => [...prev, errorMsg])
         }
+
+        // Persist error state so it survives page refresh.
+        const currentErrors = useChatStore.getState().chatErrors
+        const currentToolCalls = useChatStore.getState().toolCalls
+        persistErrorState(sessionId, {
+          errors: currentErrors,
+          toolCalls: currentToolCalls,
+          errorMessage: errorMsg,
+        })
+
         clearStream()
         es.close()
         eventSourceRef.current = null

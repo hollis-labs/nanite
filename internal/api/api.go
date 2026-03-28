@@ -6,9 +6,9 @@ import (
 
 	"github.com/hollis-labs/conduit/internal/chat"
 	"github.com/hollis-labs/conduit/internal/mcp"
+	conduitplugin "github.com/hollis-labs/conduit/internal/plugin"
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
-	"github.com/hollis-labs/conduit/internal/workflow"
 	"github.com/hollis-labs/nexus/messaging"
 )
 
@@ -18,8 +18,7 @@ type API struct {
 	Engine         *chat.Engine
 	ToolClient     *toolclient.ToolClient
 	MCPManager     *mcp.Manager
-	WorkflowLoader *workflow.Loader
-	WorkflowEngine *workflow.Engine
+	PluginHost *conduitplugin.Host
 	NexusMsg       messaging.Store // Nexus Postgres-backed A2A messaging (nil = fallback to SQLite)
 }
 
@@ -45,6 +44,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}", a.handleGetSession)
 	mux.HandleFunc("PUT /api/sessions/{id}", a.handleUpdateSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", a.handleDeleteSession)
+	mux.HandleFunc("POST /api/sessions/{id}/fork", a.handleForkSession)
 	mux.HandleFunc("GET /api/sessions/{id}/messages", a.handleListSessionMessages)
 
 	// Messages
@@ -80,21 +80,26 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/messages/{id}/bookmark", a.handleToggleBookmark)
 
 	// Artifacts
-	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifacts)
+	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter
 	mux.HandleFunc("GET /api/artifacts/{id}/download", a.handleDownloadArtifact)
 	mux.HandleFunc("POST /api/artifacts/upload", a.handleUploadArtifact)
+	mux.HandleFunc("POST /api/artifacts/place", a.handlePlaceArtifact)
 
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
+	mux.HandleFunc("POST /api/commands/execute", a.handleExecuteCommand)
+
+	// Autocomplete
+	mux.HandleFunc("GET /api/autocomplete/files", a.handleAutocompleteFiles)
 
 	// Providers & Models
 	mux.HandleFunc("GET /api/providers", a.handleListProviders)
+	mux.HandleFunc("GET /api/providers/status", a.handleGetAllProviderStatuses)
+	mux.HandleFunc("GET /api/providers/detect-cli", a.handleDetectCLI)
+	mux.HandleFunc("PUT /api/providers/{id}", a.handleUpdateProvider)
+	mux.HandleFunc("POST /api/providers/{id}/api-key", a.handleSetProviderAPIKey)
+	mux.HandleFunc("GET /api/providers/{id}/status", a.handleGetProviderStatus)
 	mux.HandleFunc("GET /api/models", a.handleListModels)
-
-	// Workflows
-	mux.HandleFunc("GET /api/workflows", a.handleListWorkflows)
-	mux.HandleFunc("GET /api/workflows/{name}", a.handleGetWorkflow)
-	mux.HandleFunc("POST /api/workflows/{name}/run", a.handleRunWorkflow)
 
 	// Agent-to-agent messaging
 	mux.HandleFunc("POST /api/sessions/{id}/agent-message", a.handleAgentMessage)
@@ -182,6 +187,25 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/templates/{name}", a.handleUpdateTemplate)
 	mux.HandleFunc("DELETE /api/templates/{name}", a.handleDeleteTemplate)
 	mux.HandleFunc("POST /api/templates/{name}/apply", a.handleApplyTemplate)
+
+	// User Settings
+	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
+	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
+
+	// Plugin Config (prefixed to avoid collision with plugin CRUD routes)
+	mux.HandleFunc("GET /api/plugin-config/{id}", a.handleGetPluginConfig)
+	mux.HandleFunc("PUT /api/plugin-config/{id}", a.handleUpdatePluginConfig)
+	mux.HandleFunc("GET /api/plugin-config", a.handleListPluginSettings)
+
+	// Process Health
+	mux.HandleFunc("GET /api/processes/health", a.handleProcessHealth)
+	mux.HandleFunc("POST /api/processes/kill-stale", a.handleKillStaleProcesses)
+
+	// Execution Metrics
+	mux.HandleFunc("GET /api/sessions/{id}/metrics", a.handleGetSessionExecutionMetrics)
+	mux.HandleFunc("GET /api/metrics/executions", a.handleGetRecentExecutionMetrics)
+	mux.HandleFunc("GET /api/metrics/utility", a.handleGetUtilityCallSummary)
+	mux.HandleFunc("GET /api/metrics/utility/log", a.handleGetUtilityCallLog)
 }
 
 // jsonResp writes a JSON response with the given status code.

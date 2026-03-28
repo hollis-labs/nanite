@@ -1,5 +1,6 @@
 import { Bot, AlertTriangle, RefreshCw, X } from 'lucide-react'
 import { ChatHeader } from './ChatHeader'
+import { ToolCallDrawer } from './ToolCallDrawer'
 import { ChatTranscript } from './ChatTranscript'
 import { ChatComposer } from './ChatComposer'
 import { TaskThreadPanel } from '@/components/a2a/TaskThreadPanel'
@@ -16,7 +17,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const taskThreadOpen = useLayoutStore((s) => s.taskThreadOpen)
   const toggleTaskThread = useLayoutStore((s) => s.toggleTaskThread)
-  const { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sessionTakeover, sendMessage, stopStreaming, retryStream, dismissCircuit } =
+  const { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sessionTakeover, sendMessage, loadMessages, stopStreaming, retryStream, dismissCircuit } =
     useChat(activeSessionId)
   const { isTaskSession, taskId } = useTaskContext()
 
@@ -34,6 +35,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
     <div className="flex-1 flex min-w-0">
       <main className="flex-1 flex flex-col min-w-0 bg-zinc-950">
         <ChatHeader />
+        <ToolCallDrawer />
         <ChatTranscript
           messages={messages}
           isStreaming={isStreaming}
@@ -105,6 +107,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           isStreaming={isStreaming}
           onStop={stopStreaming}
           onEditorReady={onEditorReady}
+          reloadMessages={loadMessages}
         />
       </main>
       {isTaskSession && taskId && (

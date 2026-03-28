@@ -114,3 +114,79 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 
 	a.jsonResp(w, http.StatusCreated, artifact)
 }
+
+// handlePlaceArtifact creates an artifact with origin="placed" for tools/plugins
+// that want to deliberately surface a file to the user. The file must already
+// exist on disk at storage_path.
+func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SessionID   string `json:"session_id"`
+		MessageID   string `json:"message_id"`
+		Name        string `json:"name"`
+		MimeType    string `json:"mime_type"`
+		StoragePath string `json:"storage_path"`
+		AgentID     string `json:"agent_id"`
+		PluginID    string `json:"plugin_id"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.SessionID == "" || req.Name == "" || req.StoragePath == "" {
+		a.errorResp(w, http.StatusBadRequest, "session_id, name, and storage_path are required")
+		return
+	}
+	if req.MimeType == "" {
+		ext := filepath.Ext(req.Name)
+		req.MimeType = mime.TypeByExtension(ext)
+		if req.MimeType == "" {
+			req.MimeType = "application/octet-stream"
+		}
+	}
+
+	// Get file size if the file exists.
+	var sizeBytes int64
+	if info, err := os.Stat(req.StoragePath); err == nil {
+		sizeBytes = info.Size()
+	}
+
+	artifact := &store.Artifact{
+		SessionID:      req.SessionID,
+		MessageID:      req.MessageID,
+		Name:           req.Name,
+		MimeType:       req.MimeType,
+		SizeBytes:      sizeBytes,
+		StoragePath:    req.StoragePath,
+		Origin:         store.ArtifactOriginPlaced,
+		SourceAgentID:  req.AgentID,
+		SourcePluginID: req.PluginID,
+	}
+	if err := a.Store.CreateArtifact(artifact); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusCreated, artifact)
+}
+
+// handleListArtifactsByOrigin returns artifacts filtered by origin type.
+func (a *API) handleListArtifactsByOrigin(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	origin := r.URL.Query().Get("origin")
+
+	if origin == "" {
+		// Fall through to regular list.
+		a.handleListArtifacts(w, r)
+		return
+	}
+
+	artifacts, err := a.Store.ListArtifactsByOrigin(sessionID, origin)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if artifacts == nil {
+		artifacts = []store.Artifact{}
+	}
+	a.jsonResp(w, http.StatusOK, artifacts)
+}

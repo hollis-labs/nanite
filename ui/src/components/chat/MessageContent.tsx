@@ -1,6 +1,7 @@
 import { useMemo, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { ArtifactChip } from './ArtifactChip'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -115,6 +116,10 @@ export function MessageContent({ content, role }: { content: string; role: 'user
       return <>{children}</>
     },
     a({ href, children, ...props }) {
+      if (href?.startsWith('artifact:')) {
+        const name = href.slice('artifact:'.length)
+        return <ArtifactChip name={name} />
+      }
       return (
         <a
           href={href}

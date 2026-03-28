@@ -1,26 +1,42 @@
 import { useState } from 'react'
+import { PreferencesPanel } from './PreferencesPanel'
+import { ShortcutsPanel } from './ShortcutsPanel'
 import { AgentProfileManager } from './AgentProfileManager'
 import { PromptTemplateEditor } from './PromptTemplateEditor'
 import { SkillsBrowser } from './SkillsBrowser'
 import { ToolDashboard } from './ToolDashboard'
 import { PluginManager } from './PluginManager'
+import { ProviderManager } from './ProviderManager'
+import { WidgetManager } from './WidgetManager'
+import { ObservabilityDashboard } from './observability/ObservabilityDashboard'
 import { Button } from '@/components/ui/Button'
 
-type SettingsSection = 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins'
+type SettingsSection = 'preferences' | 'providers' | 'shortcuts' | 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins' | 'widgets' | 'observability'
 
 export default function SettingsPage() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('agents')
+  const [activeSection, setActiveSection] = useState<SettingsSection>('preferences')
 
   const sections = [
+    { id: 'preferences' as SettingsSection, label: 'Preferences' },
+    { id: 'providers' as SettingsSection, label: 'Providers' },
+    { id: 'shortcuts' as SettingsSection, label: 'Shortcuts' },
     { id: 'agents' as SettingsSection, label: 'Agents' },
     { id: 'skills' as SettingsSection, label: 'Skills' },
     { id: 'prompts' as SettingsSection, label: 'Prompts' },
     { id: 'tools' as SettingsSection, label: 'Tools' },
     { id: 'plugins' as SettingsSection, label: 'Plugins' },
+    { id: 'widgets' as SettingsSection, label: 'Widgets' },
+    { id: 'observability' as SettingsSection, label: 'Observability' },
   ]
 
   const renderActiveSection = () => {
     switch (activeSection) {
+      case 'preferences':
+        return <PreferencesPanel />
+      case 'providers':
+        return <ProviderManager />
+      case 'shortcuts':
+        return <ShortcutsPanel />
       case 'agents':
         return <AgentProfileManager />
       case 'skills':
@@ -31,8 +47,12 @@ export default function SettingsPage() {
         return <ToolDashboard />
       case 'plugins':
         return <PluginManager />
+      case 'widgets':
+        return <WidgetManager />
+      case 'observability':
+        return <ObservabilityDashboard />
       default:
-        return <AgentProfileManager />
+        return <PreferencesPanel />
     }
   }
 

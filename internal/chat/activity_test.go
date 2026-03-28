@@ -12,8 +12,7 @@ import (
 
 func TestActivityEmitter_DisabledWhenNoURL(t *testing.T) {
 	// When created with no URL and no env var, emitter should be disabled.
-	t.Setenv("VOLON_URL", "")
-	t.Setenv("VOLON_GUI_URL", "")
+	t.Setenv("ENGINE_ACTIVITY_URL", "")
 	em := NewActivityEmitter("")
 	if !em.disabled {
 		t.Fatal("expected emitter to be disabled when no URL is set")
@@ -27,7 +26,7 @@ func TestActivityEmitter_DisabledWhenNoURL(t *testing.T) {
 	})
 }
 
-func TestActivityEmitter_SendsToVolon(t *testing.T) {
+func TestActivityEmitter_SendsToEngine(t *testing.T) {
 	var mu sync.Mutex
 	var received []activityEvent
 
@@ -100,8 +99,8 @@ func TestActivityEmitter_SendsToVolon(t *testing.T) {
 		if ev.EventType != expectedTypes[i] {
 			t.Errorf("event %d: expected type %q, got %q", i, expectedTypes[i], ev.EventType)
 		}
-		if ev.ProjectID != "mentat" {
-			t.Errorf("event %d: expected project_id 'mentat', got %q", i, ev.ProjectID)
+		if ev.ProjectID != "conduit" {
+			t.Errorf("event %d: expected project_id 'conduit', got %q", i, ev.ProjectID)
 		}
 	}
 }
@@ -124,26 +123,13 @@ func TestActivityEmitter_GracefulOnUnreachable(t *testing.T) {
 }
 
 func TestActivityEmitter_ViaEnvVar(t *testing.T) {
-	t.Setenv("VOLON_URL", "http://example.com:9999")
-	t.Setenv("VOLON_GUI_URL", "")
+	t.Setenv("ENGINE_ACTIVITY_URL", "http://example.com:9999")
 	em := NewActivityEmitter("")
 	if em.disabled {
-		t.Fatal("emitter should not be disabled when VOLON_URL is set")
+		t.Fatal("emitter should not be disabled when ENGINE_ACTIVITY_URL is set")
 	}
 	if em.baseURL != "http://example.com:9999" {
-		t.Errorf("expected baseURL from VOLON_URL, got %q", em.baseURL)
-	}
-}
-
-func TestActivityEmitter_FallbackToGUIURL(t *testing.T) {
-	t.Setenv("VOLON_URL", "")
-	t.Setenv("VOLON_GUI_URL", "http://gui.example.com:8085")
-	em := NewActivityEmitter("")
-	if em.disabled {
-		t.Fatal("emitter should not be disabled when VOLON_GUI_URL is set")
-	}
-	if em.baseURL != "http://gui.example.com:8085" {
-		t.Errorf("expected baseURL from VOLON_GUI_URL, got %q", em.baseURL)
+		t.Errorf("expected baseURL from ENGINE_ACTIVITY_URL, got %q", em.baseURL)
 	}
 }
 

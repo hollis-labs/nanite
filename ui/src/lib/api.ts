@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary, ProcessHealthResponse, PluginConfig, PluginUIComponent } from './types'
 
 const API_BASE = '/api'
 
@@ -17,7 +17,7 @@ export const api = {
     return res.json()
   },
 
-  createSession: async (data: { workspace_id: string; project_id?: string }): Promise<Session> => {
+  createSession: async (data: { workspace_id: string; project_id?: string; provider?: string; model?: string; agent_id?: string }): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -34,6 +34,16 @@ export const api = {
       body: JSON.stringify(data),
     })
     if (!res.ok) throw new Error(`Failed to update session: ${res.status}`)
+    return res.json()
+  },
+
+  forkSession: async (id: string, data: { include_messages: boolean; provider?: string; model?: string }): Promise<Session> => {
+    const res = await fetch(`${API_BASE}/sessions/${id}/fork`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to fork session: ${res.status}`)
     return res.json()
   },
 
@@ -94,7 +104,7 @@ export const api = {
     return res.json()
   },
 
-  createAgentProfile: async (data: Omit<AgentProfile, 'id' | 'created_at' | 'updated_at'>): Promise<AgentProfile> => {
+  createAgentProfile: async (data: Omit<AgentProfile, 'id' | 'created_at' | 'updated_at' | 'agent_hash' | 'version'>): Promise<AgentProfile> => {
     const res = await fetch(`${API_BASE}/agents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -153,6 +163,23 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to switch mode: ${res.status}`)
   },
 
+  // Slash Commands
+  listCommands: async (): Promise<{ name: string; description: string; category: string; source: string }[]> => {
+    const res = await fetch(`${API_BASE}/commands`)
+    if (!res.ok) throw new Error(`Failed to list commands: ${res.status}`)
+    return res.json()
+  },
+
+  executeCommand: async (name: string, sessionId: string, args: string): Promise<{ action: string; content?: string }> => {
+    const res = await fetch(`${API_BASE}/commands/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, session_id: sessionId, args }),
+    })
+    if (!res.ok) throw new Error(`Failed to execute command: ${res.status}`)
+    return res.json()
+  },
+
   // Pin/Unpin
   pinSession: async (id: string, pinned: boolean): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions/${id}`, {
@@ -186,6 +213,18 @@ export const api = {
     return res.json()
   },
 
+  uploadArtifact: async (sessionId: string, file: File): Promise<Artifact> => {
+    const form = new FormData()
+    form.append('session_id', sessionId)
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/artifacts/upload`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) throw new Error(`Failed to upload artifact: ${res.status}`)
+    return res.json()
+  },
+
   // Compact
   compactSession: async (sessionId: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/compact`, {
@@ -194,33 +233,62 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to compact session: ${res.status}`)
   },
 
-  // Workflows
-  listWorkflows: async (): Promise<Workflow[]> => {
-    const res = await fetch(`${API_BASE}/workflows`)
-    if (!res.ok) throw new Error(`Failed to list workflows: ${res.status}`)
-    return res.json()
-  },
-
-  getWorkflow: async (name: string): Promise<Workflow> => {
-    const res = await fetch(`${API_BASE}/workflows/${name}`)
-    if (!res.ok) throw new Error(`Failed to get workflow: ${res.status}`)
-    return res.json()
-  },
-
-  runWorkflow: async (name: string, inputs: Record<string, unknown>): Promise<WorkflowResult> => {
-    const res = await fetch(`${API_BASE}/workflows/${name}/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(inputs),
-    })
-    if (!res.ok) throw new Error(`Failed to run workflow: ${res.status}`)
-    return res.json()
-  },
-
   // Providers
-  listProviders: async (): Promise<Provider[]> => {
+  listProviders: async (): Promise<ProviderConfig[]> => {
     const res = await fetch(`${API_BASE}/providers`)
     if (!res.ok) throw new Error(`Failed to list providers: ${res.status}`)
+    return res.json()
+  },
+  listProviderStatuses: async (): Promise<ProviderStatus[]> => {
+    const res = await fetch(`${API_BASE}/providers/status`)
+    if (!res.ok) throw new Error(`Failed to list provider statuses: ${res.status}`)
+    return res.json()
+  },
+  updateProvider: async (id: string, data: { is_enabled?: boolean; base_url?: string; settings?: string }): Promise<ProviderConfig> => {
+    const res = await fetch(`${API_BASE}/providers/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to update provider: ${res.status}`)
+    return res.json()
+  },
+  setProviderAPIKey: async (id: string, apiKey: string): Promise<{ provider_id: string; has_key: boolean }> => {
+    const res = await fetch(`${API_BASE}/providers/${id}/api-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    })
+    if (!res.ok) throw new Error(`Failed to set API key: ${res.status}`)
+    return res.json()
+  },
+  detectCLI: async (): Promise<CLIDetectionResult[]> => {
+    const res = await fetch(`${API_BASE}/providers/detect-cli`)
+    if (!res.ok) throw new Error(`Failed to detect CLI: ${res.status}`)
+    return res.json()
+  },
+
+  // Models
+  listModels: async (): Promise<ModelRecord[]> => {
+    const res = await fetch(`${API_BASE}/models`)
+    if (!res.ok) throw new Error(`Failed to list models: ${res.status}`)
+    return res.json()
+  },
+
+  // Settings
+  getSettings: async (): Promise<UserSettings> => {
+    const res = await fetch(`${API_BASE}/settings`)
+    if (!res.ok) throw new Error(`Failed to get settings: ${res.status}`)
+    return res.json()
+  },
+
+  updateSettings: async (data: Partial<UserSettings>): Promise<UserSettings> => {
+    const res = await fetch(`${API_BASE}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to update settings: ${res.status}`)
     return res.json()
   },
 
@@ -264,6 +332,44 @@ export const api = {
   getContextBreakdown: async (sessionId: string): Promise<ContextBreakdown> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-breakdown`)
     if (!res.ok) throw new Error(`Failed to get context breakdown: ${res.status}`)
+    return res.json()
+  },
+
+  // Execution Metrics
+  getSessionMetrics: async (sessionId: string): Promise<ExecutionMetrics[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/metrics`)
+    if (!res.ok) throw new Error(`Failed to get session metrics: ${res.status}`)
+    return res.json()
+  },
+
+  getRecentExecutions: async (limit = 50): Promise<ExecutionMetrics[]> => {
+    const res = await fetch(`${API_BASE}/metrics/executions?limit=${limit}`)
+    if (!res.ok) throw new Error(`Failed to get recent executions: ${res.status}`)
+    return res.json()
+  },
+
+  getUtilityCallSummary: async (): Promise<UtilityCallSummary[]> => {
+    const res = await fetch(`${API_BASE}/metrics/utility`)
+    if (!res.ok) throw new Error(`Failed to get utility call summary: ${res.status}`)
+    return res.json()
+  },
+
+  getUtilityCallLog: async (limit = 50): Promise<ExecutionMetrics[]> => {
+    const res = await fetch(`${API_BASE}/metrics/utility/log?limit=${limit}`)
+    if (!res.ok) throw new Error(`Failed to get utility call log: ${res.status}`)
+    return res.json()
+  },
+
+  // Process Health
+  getProcessHealth: async (): Promise<ProcessHealthResponse> => {
+    const res = await fetch(`${API_BASE}/processes/health`)
+    if (!res.ok) throw new Error(`Failed to get process health: ${res.status}`)
+    return res.json()
+  },
+
+  killStaleProcesses: async (): Promise<{ killed: number }> => {
+    const res = await fetch(`${API_BASE}/processes/kill-stale`, { method: 'POST' })
+    if (!res.ok) throw new Error(`Failed to kill stale processes: ${res.status}`)
     return res.json()
   },
 
@@ -577,6 +683,29 @@ export const api = {
       body: JSON.stringify({ name }),
     })
     if (!res.ok) throw new Error(`Failed to enable plugin: ${res.status}`)
+  },
+
+  getPluginConfig: async (pluginId: string): Promise<PluginConfig> => {
+    const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`)
+    if (!res.ok) throw new Error(`Failed to get plugin config: ${res.status}`)
+    return res.json()
+  },
+
+  listUIComponents: async (): Promise<PluginUIComponent[]> => {
+    const res = await fetch(`${API_BASE}/plugins/ui-components`)
+    if (!res.ok) throw new Error(`Failed to list UI components: ${res.status}`)
+    const data = await res.json()
+    return data.components ?? []
+  },
+
+  updatePluginConfig: async (pluginId: string, settings: Record<string, unknown>): Promise<PluginConfig> => {
+    const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    })
+    if (!res.ok) throw new Error(`Failed to update plugin config: ${res.status}`)
+    return res.json()
   },
 
   // --- A2A Messaging ---

@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -18,7 +18,6 @@ import (
 	_ "github.com/lib/pq" // Postgres driver for Nexus messaging
 
 	feotel "github.com/hollis-labs/otel"
-	"github.com/joho/godotenv"
 
 	"github.com/hollis-labs/conduit/internal/config"
 
@@ -30,11 +29,11 @@ import (
 	"github.com/hollis-labs/conduit/internal/plugin"
 	_ "github.com/hollis-labs/conduit/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/secrets"
 	"github.com/hollis-labs/conduit/internal/server"
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/truncate"
-	"github.com/hollis-labs/conduit/internal/workflow"
 	"github.com/hollis-labs/nexus/messaging"
 	"github.com/hollis-labs/tool-broker/broker"
 )
@@ -72,16 +71,12 @@ func cmdServe(args []string) {
 		log.Printf("config loaded — project: %s, role: %s, root: %s", name, cfg.Role, cfg.ProjectRoot())
 	}
 
-	// Load .env file if present (never overrides existing env vars).
-	if err := godotenv.Load(); err == nil {
-		log.Println("loaded .env file")
-	}
+
 
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
 	dbPath := fs.String("db", "./conduit.db", "SQLite database path")
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
-	workflowDir := fs.String("workflows", "./workflows", "Directory containing workflow YAML files")
 	fs.Parse(args)
 
 	// Initialise OpenTelemetry tracing (otel).
@@ -104,6 +99,9 @@ func cmdServe(args []string) {
 	if err := s.Seed(); err != nil {
 		log.Fatalf("failed to seed database: %v", err)
 	}
+	if err := s.SeedProviders(); err != nil {
+		log.Fatalf("failed to seed providers: %v", err)
+	}
 	if err := s.SeedBuiltinTemplates(); err != nil {
 		log.Fatalf("failed to seed templates: %v", err)
 	}
@@ -121,28 +119,69 @@ func cmdServe(args []string) {
 	}
 
 	// Set up provider registry.
+	// Key resolution: OS keychain → environment variable → skip.
 	registry := provider.NewRegistry()
-	var missingProviders []string
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		registry.Register("anthropic", provider.NewAnthropic())
-		log.Println("anthropic provider registered")
-	} else {
-		missingProviders = append(missingProviders, "ANTHROPIC_API_KEY")
+
+	// resolveKey reads the API key from the OS keychain only.
+	resolveKey := func(providerID string) string {
+		return secrets.Get(secrets.ProviderKeyName(providerID))
 	}
 
-	if os.Getenv("OPENAI_API_KEY") != "" {
-		registry.Register("openai", provider.NewOpenAI())
-		log.Println("openai provider registered")
+	// API providers: register if a key is available from keychain or env.
+	type apiProvSpec struct {
+		name, provID string
+		create       func() provider.Provider
+		setKey       func(provider.Provider, string)
+	}
+	apiProviders := []apiProvSpec{
+		{"anthropic", "anthropic-001",
+			func() provider.Provider { return provider.NewAnthropic() },
+			func(p provider.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
+		{"openai", "openai-001",
+			func() provider.Provider { return provider.NewOpenAI() },
+			func(p provider.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
+		{"gemini", "gemini-api-001",
+			func() provider.Provider { return provider.NewGemini() },
+			func(p provider.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
+		{"mistral", "mistral-001",
+			func() provider.Provider { return provider.NewMistral() },
+			func(p provider.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
+		{"openrouter", "openrouter-001",
+			func() provider.Provider { return provider.NewOpenRouter() },
+			func(p provider.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
+		{"openzen", "openzen-001",
+			func() provider.Provider { return provider.NewOpenZen() },
+			func(p provider.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
 	}
 
-	if len(missingProviders) > 0 {
-		log.Println("╔══════════════════════════════════════════════════════════════╗")
-		log.Println("║  WARNING: Missing API keys — chat will not work!            ║")
-		for _, k := range missingProviders {
-			log.Printf("║  • %s not set                                  ║", k)
+	var registeredAPI, missingAPI []string
+	for _, spec := range apiProviders {
+		key := resolveKey(spec.provID)
+		if key != "" {
+			p := spec.create()
+			spec.setKey(p, key)
+			registry.Register(spec.name, p)
+			log.Printf("%s provider registered (key from keychain)", spec.name)
+			registeredAPI = append(registeredAPI, spec.name)
+		} else {
+			missingAPI = append(missingAPI, spec.name)
 		}
-		log.Println("║                                                              ║")
-		log.Println("║  Create a .env file or export the variable before starting.  ║")
+	}
+
+	// Azure OpenAI — needs both key and endpoint.
+	azureKey := resolveKey("azure-openai-001")
+	if azureKey != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
+		p := provider.NewAzureOpenAI()
+		p.SetAPIKey(azureKey)
+		registry.Register("azure-openai", p)
+		log.Println("azure-openai provider registered")
+		registeredAPI = append(registeredAPI, "azure-openai")
+	}
+
+	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
+		log.Println("╔══════════════════════════════════════════════════════════════╗")
+		log.Println("║  WARNING: No API providers configured — chat will not work! ║")
+		log.Println("║  Set API keys in Settings → Providers or via environment.   ║")
 		log.Println("╚══════════════════════════════════════════════════════════════╝")
 	}
 
@@ -150,16 +189,28 @@ func cmdServe(args []string) {
 	registry.Register("ollama", provider.NewOllama())
 	log.Println("ollama provider registered (default host: http://localhost:11434)")
 
-	// Register PTY adapters — one per detected CLI binary.
-	for _, adapter := range []provider.CLIAdapter{
+	// Register CLI adapters — PTY (unix) and subprocess (all platforms).
+	cliAdapters := []provider.CLIAdapter{
 		provider.NewClaudeAdapter(),
 		provider.NewCodexAdapter(),
 		provider.NewGeminiAdapter(),
-	} {
+		provider.NewCopilotAdapter(),
+		provider.NewAiderAdapter(),
+		provider.NewJunieAdapter(),
+		provider.NewKiroAdapter(),
+		provider.NewQwenAdapter(),
+	}
+	for _, adapter := range cliAdapters {
 		if path, ok := adapter.Detect(); ok {
-			name := "pty-" + adapter.Name()
-			registry.Register(name, provider.NewPTYBridgeWithAdapter(adapter, path))
-			log.Printf("pty provider registered: %s (%s)", name, path)
+			// PTY bridge (unix only, higher fidelity).
+			ptyName := "pty-" + adapter.Name()
+			registry.Register(ptyName, provider.NewPTYBridgeWithAdapter(adapter, path))
+			log.Printf("pty provider registered: %s (%s)", ptyName, path)
+
+			// Subprocess bridge (all platforms, pipe-based fallback).
+			subName := "sub-" + adapter.Name()
+			registry.Register(subName, provider.NewSubprocessBridge(adapter, path))
+			log.Printf("subprocess provider registered: %s (%s)", subName, path)
 		}
 	}
 	// Backwards-compat alias: "pty" → Claude adapter (if available).
@@ -167,25 +218,35 @@ func cmdServe(args []string) {
 		registry.Register("pty", ptyBridge)
 	}
 
-	// Create chat engine. UtilityProvider controls which provider handles
-	// lightweight calls like autoTitle/autoTags (default: "anthropic").
-	utilityProvider := os.Getenv("CONDUIT_UTILITY_PROVIDER")
-	engine := chat.NewEngine(s, registry, utilityProvider)
+	// Load app-level config (tunables like presence throttle, artifact detection).
+	appCfg, err := config.LoadAppConfig("config/conduit.yaml")
+	if err != nil {
+		log.Printf("warning: failed to load app config: %v (using defaults)", err)
+		appCfg = config.DefaultAppConfig()
+	}
+	log.Printf("app config loaded (cli_active_throttle=%ds, auto_detect_tools=%d)",
+		appCfg.Presence.CLIActiveThrottleSeconds, len(appCfg.Artifacts.AutoDetectTools))
+
+	// Create chat engine. Utility provider/model read from DB settings first,
+	// then env vars, then defaults. See Engine.NewEngine for cascade.
+	engine := chat.NewEngine(s, registry)
+	engine.AppConfig = appCfg
 
 	// Configure output filters. Default: strip emoji from LLM responses.
-	// Additional filters can be added to the chain here or via MENTAT_OUTPUT_FILTERS env var.
 	outputFilters := filter.NewChain()
-	if envFilters := os.Getenv("MENTAT_OUTPUT_FILTERS"); envFilters != "" {
-		// Comma-separated list of filter names, e.g. "no_emoji,trim"
-		names := splitFilterNames(envFilters)
-		outputFilters = filter.FromNames(names)
-		log.Printf("output filters from MENTAT_OUTPUT_FILTERS: %v", outputFilters.Names())
-	} else {
-		// Default: enable no_emoji filter
-		outputFilters.Add("no_emoji", filter.NoEmoji)
-		log.Printf("output filters (default): %v", outputFilters.Names())
-	}
+	outputFilters.Add("no_emoji", filter.NoEmoji)
+	log.Printf("output filters: %v", outputFilters.Names())
 	engine.OutputFilters = outputFilters
+
+	// Configure CLI process concurrency limit. Default: 10. Set to 0 for unlimited.
+	if maxProcs := os.Getenv("CONDUIT_MAX_CLI_PROCESSES"); maxProcs != "" {
+		if n, err := strconv.Atoi(maxProcs); err == nil && n >= 0 {
+			engine.ProcessTracker.MaxProcesses = n
+			log.Printf("CLI process concurrency limit: %d", n)
+		}
+	} else {
+		engine.ProcessTracker.MaxProcesses = 10
+	}
 
 	// Set up MCP manager with stdio transports (matching ~/.claude.json config).
 	mcpManager := mcp.NewManager()
@@ -246,16 +307,17 @@ func cmdServe(args []string) {
 	engine.Orchestrator = orchestrator
 	log.Println("orchestrator initialized (decomposition + delegation enabled)")
 
-	// Set up activity emitter to push events to Volon's GUI server.
-	// Configured via VOLON_URL or VOLON_GUI_URL env var; disabled when unset.
+	// Set up activity emitter to push events to Engine's activity feed.
+	// Configured via ENGINE_ACTIVITY_URL env var; disabled when unset.
 	engine.Activity = chat.NewActivityEmitter("")
 
-	// Clean up MCP subprocesses on shutdown.
+	// Clean up MCP subprocesses and CLI processes on shutdown.
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		log.Println("shutting down MCP transports...")
+		log.Println("shutting down...")
+		engine.Shutdown()
 		mcpManager.Close()
 		os.Exit(0)
 	}()
@@ -270,35 +332,26 @@ func cmdServe(args []string) {
 		}
 	}()
 
-	// Load workflow definitions from files and database.
-	wfLoader := workflow.NewLoader(*workflowDir)
-	wfLoader.SetDB(s.DB)
-	if err := wfLoader.LoadAll(); err != nil {
-		log.Printf("WARNING: failed to load workflows: %v", err)
-	} else {
-		log.Printf("loaded %d workflow(s)", len(wfLoader.List()))
-	}
-	wfEngine := workflow.NewEngine(registry, s)
-	wfEngine.MCPManager = mcpManager
-
-	// Wire workflow engine into chat engine for /workflow triggers.
-	engine.WorkflowEngine = wfEngine
-	engine.WorkflowLoader = wfLoader
+	// Periodic stale process reaper — kills CLI processes idle for over 5 minutes.
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if killed := engine.ProcessTracker.KillStale(5 * time.Minute); killed > 0 {
+				log.Printf("stale process reaper: killed %d hung CLI processes", killed)
+			}
+		}
+	}()
 
 	// Create API layer.
 	a := api.New(s, engine)
 	a.MCPManager = mcpManager
 	a.ToolClient = tb
-	a.WorkflowLoader = wfLoader
-	a.WorkflowEngine = wfEngine
 
 	// Connect to Engine Postgres for Nexus A2A messaging.
-	// Uses ENGINE_POSTGRES_DSN env var, falling back to VOLON_POSTGRES_DSN,
-	// then a default local DSN. When unavailable, A2A falls back to SQLite.
+	// Uses ENGINE_POSTGRES_DSN env var, then a default local DSN.
+	// When unavailable, A2A falls back to SQLite.
 	nexusDSN := os.Getenv("ENGINE_POSTGRES_DSN")
-	if nexusDSN == "" {
-		nexusDSN = os.Getenv("VOLON_POSTGRES_DSN")
-	}
 	if nexusDSN == "" {
 		nexusDSN = "postgres://localhost/engine?sslmode=disable"
 	}
@@ -323,12 +376,18 @@ func cmdServe(args []string) {
 	logger := plugin.NewLogger("conduit-plugin")
 	pluginHost := plugin.NewHost(nil, logger)
 
-	// Register core services for plugin access
+	// Wire DB store for plugin config persistence.
+	pluginHost.SetStore(s)
+
+	// Register core services for plugin access.
 	pluginHost.RegisterService("store", s)
 	pluginHost.RegisterService("engine", engine)
 	pluginHost.RegisterService("mcp", mcpManager)
 	pluginHost.RegisterService("toolclient", tb)
 	log.Println("plugin host initialized")
+
+	// Wire plugin host into the API for command registration.
+	a.PluginHost = pluginHost
 
 	// Start HTTP server — this sets the router on the plugin host.
 	srv := server.New(s, a, *port, *dev, pluginHost)
@@ -349,6 +408,15 @@ func cmdServe(args []string) {
 			log.Printf("WARNING: %v", e)
 		}
 		log.Printf("plugins: discovered %d, loaded %d", len(discovered), len(loaded))
+	}
+
+	// Load any registered builtins not found via filesystem discovery.
+	builtins, builtinErrs := plugin.LoadRegisteredBuiltins(pluginHost)
+	for _, e := range builtinErrs {
+		log.Printf("WARNING: %v", e)
+	}
+	if len(builtins) > 0 {
+		log.Printf("plugins: loaded %d builtin(s)", len(builtins))
 	}
 
 	// Re-discover tools after plugins — plugins may register new MCP servers
@@ -380,7 +448,7 @@ func setupMCPServers(m *mcp.Manager) {
 			"mcp",
 		}, []string{
 			"ENGINE_REPO=" + home + "/Projects-apps/fragments-engine/engine",
-			"VOLON_POSTGRES_DSN=postgres://localhost/engine?sslmode=disable",
+			"ENGINE_POSTGRES_DSN=postgres://localhost/engine?sslmode=disable",
 		})
 	} else {
 		log.Printf("mcp: engine binary not found at %s, skipping", engineBin)
@@ -480,14 +548,3 @@ func cmdMCP(args []string) {
 	}
 }
 
-// splitFilterNames splits a comma-separated filter list into trimmed names.
-func splitFilterNames(s string) []string {
-	var names []string
-	for _, part := range strings.Split(s, ",") {
-		name := strings.TrimSpace(part)
-		if name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -23,7 +22,7 @@ type OpenAI struct {
 // NewOpenAI creates a new OpenAI provider. It reads OPENAI_API_KEY from the environment.
 func NewOpenAI() *OpenAI {
 	return &OpenAI{
-		apiKey: os.Getenv("OPENAI_API_KEY"),
+		apiKey: "",
 		client: &http.Client{},
 	}
 }

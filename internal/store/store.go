@@ -74,6 +74,14 @@ func (s *Store) migrate() error {
 		"migrations/007_add_mcp_servers.sql",
 		"migrations/008_add_cache_tokens.sql",
 		"migrations/009_add_a2a_messages.sql",
+		"migrations/010_add_pty_provider.sql",
+		"migrations/011_add_codex_gemini_providers.sql",
+		"migrations/012_add_user_settings.sql",
+		"migrations/013_add_execution_metrics.sql",
+		"migrations/014_add_plugin_settings.sql",
+		"migrations/015_extend_artifacts.sql",
+		"migrations/016_add_settings_mode_flags.sql",
+		"migrations/017_agent_schema_v2.sql",
 	}
 
 	for _, f := range files {

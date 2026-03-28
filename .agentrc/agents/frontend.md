@@ -42,12 +42,17 @@ ui/src/
 │   ├── sidebar/
 │   │   └── LeftSidebar.tsx     # Sessions list (pinned, conversations, tasks)
 │   ├── settings/
-│   │   ├── SettingsPage.tsx    # Tab router (agents, skills, prompts, tools, plugins)
+│   │   ├── SettingsPage.tsx    # Tab router (preferences, providers, shortcuts, agents, etc.)
+│   │   ├── PreferencesPanel.tsx # Session defaults, utility model, fallback chain
+│   │   ├── ProviderManager.tsx # Provider cards: enable/disable, API keys, CLI paths
+│   │   ├── ShortcutsPanel.tsx  # Keyboard shortcut editor
 │   │   ├── AgentProfileManager.tsx
 │   │   ├── SkillsBrowser.tsx
 │   │   ├── PromptTemplateEditor.tsx
 │   │   ├── ToolDashboard.tsx   # MCP server management + tool discovery
-│   │   └── PluginManager.tsx
+│   │   ├── PluginManager.tsx   # Plugin lifecycle + config gear icon
+│   │   ├── PluginConfigPanel.tsx # Dynamic config form (string/bool/int/select/secret)
+│   │   └── observability/      # Execution stats, utility call comparison, process health
 │   ├── workflows/              # Workflow list, run modal, result cards
 │   ├── a2a/                    # A2A inbox panel, task thread panel
 │   ├── widgets/                # Right rail widgets (tokens, context, bookmarks, tools, agent)
@@ -90,6 +95,10 @@ ui/src/
 | `RightRail` | `components/RightRail.tsx` | Collapsible widgets panel (6 widgets) |
 | `SettingsPage` | `settings/SettingsPage.tsx` | Tab-based settings (agents, skills, prompts, tools, plugins) |
 | `ToolDashboard` | `settings/ToolDashboard.tsx` | MCP server management and tool discovery UI |
+| `PluginConfigPanel` | `settings/PluginConfigPanel.tsx` | Dynamic plugin config form (5 field types) |
+| `ProcessHealthPanel` | `settings/observability/ProcessHealthPanel.tsx` | Active CLI processes with kill-stale |
+| `UtilityLogTable` | `settings/observability/UtilityLogTable.tsx` | Individual utility call log |
+| `ArtifactChip` | `chat/ArtifactChip.tsx` | Inline artifact link chip in messages |
 | `InboxPanel` | `a2a/InboxPanel.tsx` | A2A message inbox with user/agent tabs |
 | `TaskThreadPanel` | `a2a/TaskThreadPanel.tsx` | Task-scoped A2A thread sidebar |
 | `WorkflowPanel` | `workflows/WorkflowPanel.tsx` | Workflow list and run modal |
@@ -240,3 +249,72 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 - Plugin system: plugins provide envelope components registered at build time
 - A2A messaging: agent-to-agent collaboration via inbox + task threads
 - Total UI code: ~80 files across components, stores, hooks, and lib
+
+---
+
+## Beta Release TODO (Frontend)
+
+### 1. Plugin Config UI
+- [x] **Plugin settings panel** — Render plugin config schemas from `GET /api/plugin-config/{id}`. Dynamic form renderer for all 5 field types (string, bool, int, select, secret). Gear icon on active/disabled plugins opens config panel.
+- [x] **Config override components** — Plugins can set `component` on ConfigFieldDef to name a custom React component. Registry at `generated/plugin-config-components.ts`. Gated behind `developer_mode` toggle in Preferences > Advanced.
+- [x] **Recover mode** — Toggle in Preferences > Advanced. When on: PluginConfigPanel uses default primitives (skips component overrides), EnvelopeRenderer uses core-only registry (skips plugin envelopes), PluginWidgets hidden.
+- [x] **Plugin widget mount points** — `GET /api/plugins/ui-components` → `PluginWidgets` component in RightRail. Shows widget-type components with name, description, props. Gated behind developer_mode, hidden in recover_mode.
+
+### 2. Slash Commands & Fragments v1 UX
+- [ ] Port relevant UI patterns from Fragments v1 (user will specify which).
+- [ ] Ensure TipTap slash command extension picks up plugin-registered commands (backend: `Host.RegisterCommand`).
+
+### 3. Artifacts Drawer
+- [x] **Artifacts panel** — List session artifacts with preview (images, code, markdown), download, and back navigation. Eye icon for previewable types.
+- [x] **Inline artifact links** — `[name](artifact:name)` markdown links render as clickable ArtifactChip components that open the drawer.
+- [x] Wire artifact upload into the composer (Paperclip button + drag-and-drop with visual feedback).
+
+### 4. Observability Dashboard
+- [x] **Execution stats widget** — `GET /api/metrics/executions` → table/chart of recent calls (Chart.js + shadcn).
+- [x] **Utility call comparison** — `GET /api/metrics/utility` → side-by-side provider comparison.
+- [x] **Observability right-rail widget** — at-a-glance stats.
+- [x] **Process health panel** — `GET /api/processes/health` → active CLI processes with uptime, idle time, stale badges. "Kill Stale" button via `POST /api/processes/kill-stale`. Also wired `useUtilityCallLog` into new UtilityLogTable.
+
+### 5. Session Creation UX
+- [x] Creation-time overrides (adapter, provider, model, agent) — inline form in sidebar.
+- [x] Wire `default_agent` from database settings (removed localStorage hack).
+- [x] Improve clone to carry title + agent from source session.
+- [x] Fork session: clone with full message history (`POST /api/sessions/{id}/fork`).
+- [x] NavRail "New Chat" passes defaults from userSettings.
+
+### 6. Multi-Session Presence
+- [x] Presence indicators work with 3+ concurrent streaming sessions (Map-based, no single-session assumptions).
+- [x] `cli_active` presence event → cyan pulsing dot in sidebar for PTY activity between messages.
+- [x] `session_archived` presence event → immediate sidebar update via query invalidation.
+- [x] Priority order: tool-pending (amber) > streaming (green) > cli-active (cyan).
+
+### 7. Provider/Model Management
+- [x] All 11 providers seeded on every boot (Anthropic, OpenAI, Ollama, Gemini, Mistral, Azure, 5 CLIs).
+- [x] Provider icons for all providers in model picker and provider manager.
+- [x] ProviderManager UI: compact flex-wrap cards with enable/disable, API keys (OS keychain), CLI paths, base URLs.
+- [x] CLI auto-detection via adapter.Detect() with manual path override.
+- [x] Toggle locked until requirements met (API key or CLI detected).
+- [x] Model picker filters out disabled providers.
+- [x] Provider startup: keychain → env var → skip.
+
+### 8. Widget Plugin Migration
+> **Complete 2026-03-28.** Chose component registry approach (same pattern as envelopes). Widgets are lazy-loaded via `plugin-widgets.ts` registry, rendered through `WidgetRenderer.tsx` with per-widget Suspense + error boundary. RightRail is fully API-driven.
+
+- [x] **Design widget rendering system** — Component registry pattern (lazy imports, same as envelopes). No ADR needed — pattern is proven.
+- [x] **Migrate SessionInfoWidget** — registered by `context-widgets` plugin.
+- [x] **Migrate BookmarksWidget** — registered by `bookmarks-widget` plugin.
+- [x] **Migrate ContextBudgetWidget** — registered by `context-widgets` plugin.
+- [x] **Migrate TokenUsageWidget** — registered by `context-widgets` plugin.
+- [x] **Migrate ObservabilityWidget** — registered by `observability-widgets` plugin.
+- [x] **Migrate ToolsWidget** — registered by `agent-widgets` plugin.
+- [x] **Migrate AgentStatusWidget** — registered by `agent-widgets` plugin. Mode switcher removed, replaced with status indicator.
+- [x] **Update PluginWidgets renderer** — Replaced entirely with `WidgetRenderer.tsx`. `PluginWidgets.tsx` deleted. Dev-mode gate removed.
+
+### 9. Widget Admin Panel
+> **Complete 2026-03-28.** New "Widgets" tab in Settings with drag-to-reorder and per-widget visibility toggles.
+
+- [x] **Widget manager page** — `WidgetManager.tsx` in Settings. Fetches registered widgets from API, shows source plugin badge, gear icon for plugin config.
+- [x] **Widget enable/disable** — Per-widget eye toggle. Persists to `widget_visibility` in `ext_settings`.
+- [x] **Widget sort order (drag-drop)** — Drag-and-drop reordering. Persists to `widget_order` in `ext_settings`.
+- [x] **Plugin settings access from widget cards** — Gear icon opens `PluginConfigPanel` for the widget's source plugin.
+- [x] **Backend: widget preferences** — Stored in `ext_settings` JSON (no migration needed). `widget_visibility` (map) and `widget_order` (array) merged via existing partial update.

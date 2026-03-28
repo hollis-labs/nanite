@@ -28,6 +28,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		ProjectID   string `json:"project_id"`
 		Model       string `json:"model"`
 		Provider    string `json:"provider"`
+		AgentID     string `json:"agent_id"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -49,8 +50,19 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-assign the Mentat agent as primary.
-	if err := a.Store.EnsureSessionAgent(sess.ID, "mentat-001", "default", true); err != nil {
+	// Resolve agent: request param → user settings default → mentat-001.
+	agentID := req.AgentID
+	if agentID == "" {
+		if settings, err := a.Store.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
+			agentID = settings.DefaultAgent
+		}
+	}
+	if agentID == "" {
+		agentID = "mentat-001"
+	}
+
+	// Assign the resolved agent as primary.
+	if err := a.Store.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
 		// Log but don't fail — session was created successfully.
 		_ = err
 	}
@@ -61,6 +73,33 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusCreated, sess)
+}
+
+func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
+	sourceID := r.PathValue("id")
+
+	var req struct {
+		IncludeMessages bool   `json:"include_messages"`
+		Provider        string `json:"provider"`
+		Model           string `json:"model"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	overrides := &store.Session{
+		Provider: req.Provider,
+		Model:    req.Model,
+	}
+
+	newSess, err := a.Store.ForkSession(sourceID, overrides, req.IncludeMessages)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusCreated, newSess)
 }
 
 func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
@@ -133,6 +172,16 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.ArchiveSession(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Kill any orphaned CLI processes for this session.
+	if a.Engine != nil {
+		a.Engine.KillSessionProcesses(id)
+	}
+
+	// Broadcast session archived presence so UI updates immediately.
+	if a.Engine != nil {
+		a.Engine.BroadcastSessionArchived(id)
 	}
 
 	// Emit session ended event to Volon (fire-and-forget).

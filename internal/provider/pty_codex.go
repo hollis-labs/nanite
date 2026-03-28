@@ -1,12 +1,9 @@
-//go:build !windows
-
 package provider
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 )
 
 // CodexAdapter implements CLIAdapter for the OpenAI Codex CLI.
@@ -31,7 +28,7 @@ func (a *CodexAdapter) Detect() (string, bool) {
 	if p := os.Getenv("CODEX_CLI_PATH"); p != "" {
 		return p, true
 	}
-	p, err := exec.LookPath("codex")
+	p, err := lookPathExpanded("codex")
 	if err != nil {
 		return "", false
 	}

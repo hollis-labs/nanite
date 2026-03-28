@@ -391,7 +391,9 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 | File | Purpose |
 |------|---------|
 | `internal/provider/pty.go` | Generic PTY bridge provider (unix only), delegates to CLIAdapter |
-| `internal/provider/pty_adapter.go` | CLIAdapter interface + CLIConfig struct |
+| `internal/provider/cli_adapter.go` | CLIAdapter interface + CLIConfig struct (all platforms) |
+| `internal/provider/subprocess.go` | Subprocess bridge provider (all platforms, pipe-based fallback) |
+| `internal/provider/subprocess_test.go` | Subprocess bridge tests (mock CLI, sandbox dir, cancellation) |
 | `internal/provider/pty_claude.go` | ClaudeAdapter + Claude stream-json parser |
 | `internal/provider/pty_codex.go` | CodexAdapter + Codex JSONL parser |
 | `internal/provider/pty_gemini.go` | GeminiAdapter + Gemini stream-json parser |
@@ -414,6 +416,9 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 | `internal/store/seed.go` | Seeds for Claude, Codex, Gemini providers/models |
 | `internal/store/migrations/010_add_pty_provider.sql` | Migration: Claude PTY provider |
 | `internal/store/migrations/011_add_codex_gemini_providers.sql` | Migration: Codex + Gemini providers |
+| `internal/store/migrations/012_add_user_settings.sql` | Migration: user_settings table + agent default_provider |
+| `internal/store/user_settings.go` | UserSettings CRUD (fallback chain, defaults) |
+| `internal/api/settings.go` | GET/PUT /api/settings endpoints |
 | `cmd/conduit/main.go` | Multi-adapter registration, `conduit mcp` subcommand |
 | `ui/src/components/chat/ComposerToolbar.tsx` | Provider icons, model picker sets provider+model |
 | `ui/src/lib/types.ts` | AVAILABLE_MODELS includes CLI models |
@@ -429,29 +434,57 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 - [x] Phase 4: Envelope validation + retry logic
 - [x] Phase 5: CLI adapter abstraction for non-Claude tools (Codex, Gemini CLI)
 
-### Backend — Remaining
-- [ ] Subprocess adapter (pipe-based fallback for Windows)
-- [ ] Provider fallback chain: session → agent preference → user priority list → system default
-- [ ] Move utility provider/model config from env vars to database settings
-- [ ] Orphan process tracking and cleanup
-- [ ] Process health checks (detect hung CLI processes)
-- [ ] Concurrency limits (max simultaneous PTY processes per user/workspace)
-- [ ] Execution observability: extend RecordUsage to capture full execution snapshot (duration, context size, memory, adapter, cost)
-- [ ] Utility call comparison log (provider, latency, quality per background call)
+### Backend — Completed (this session)
+- [x] Subprocess adapter (pipe-based fallback for Windows)
+- [x] Provider fallback chain: session → agent preference → user priority list → system default
+- [x] Orphan process tracking and cleanup
+- [x] Process health checks (detect hung CLI processes)
+- [x] Concurrency limits (max simultaneous PTY processes per user/workspace)
+- [x] Execution observability: full execution snapshot (duration, context size, adapter, cost)
+- [x] Utility call comparison log (provider, latency, quality per background call)
 
-### Frontend
-- [ ] Settings UI: default adapter (http/pty/subprocess), provider, model, agent
-- [ ] Settings UI: utility provider + model (for autoTitle, autoTags — support Ollama, etc.)
-- [ ] Settings UI: provider fallback chain (ordered list, drag to reorder)
-- [ ] Settings UI: tool call display mode (inline | drawer | drawer-auto) — global default
-- [ ] Per-session override for tool call display mode
-- [ ] Adapter badge on session (read-only after creation)
-- [ ] "Clone session with different adapter" action
-- [ ] Tool call drawer: compact (10 rows), expandable (full chat area), closeable
-- [ ] Tool call drawer: real-time updates, bookmarks, click-to-copy
-- [ ] Tool call drawer: drag-to-resize between compact and expanded
-- [ ] Observability dashboard: execution stats, utility call log (power user opt-in)
-- [ ] Review agent/model/PTY selection UX — how session creation flows with all new options
+### Backend — Remaining
+- [x] Wire utility provider/model from database settings (DB → env var → default fallback chain + live refresh)
+- [x] Accept agent_id in session creation API (request → settings.DefaultAgent → mentat-001 fallback)
+
+### Frontend — Completed
+- [x] Settings UI: default adapter (http/pty/subprocess), provider, model, agent
+- [x] Settings UI: utility provider + model (for autoTitle, autoTags — support Ollama, etc.)
+- [x] Settings UI: provider fallback chain (ordered list, drag to reorder)
+- [x] Settings UI: tool call display mode — global default
+- [x] Settings UI: keyboard shortcuts (view + edit bindings, wired into useKeyboardShortcuts)
+- [x] Per-session override for tool call display mode
+- [x] Adapter badge on session (read-only after creation)
+- [x] "Clone session with different adapter" action
+- [x] Tool call drawer: compact, expandable (full chat area), closeable
+- [x] Tool call drawer: real-time updates, click-to-copy
+- [x] Tool call drawer: drag-to-resize between compact and expanded
+- [x] Unified event stream: shared ContentActions + ToolCallItem across inline + drawer
+- [x] Dynamic model picker (removed hardcoded AVAILABLE_MODELS)
+
+### Frontend — Completed (prior session)
+- [x] Observability dashboard: execution stats widget + utility call comparison (Chart.js + shadcn)
+- [x] Observability right-rail widget with at-a-glance stats
+- [x] Session creation UX: creation-time overrides (adapter, provider, model, agent) — inline form in sidebar
+- [x] Session creation UX: wire default_agent to backend (removed localStorage hack)
+- [x] Session creation UX: improve clone to carry title + agent
+- [x] Fork session: clone with full message history (`POST /api/sessions/{id}/fork`)
+- [x] Error persistence: tool errors + chat errors survive page refresh (localStorage)
+- [x] NavRail "New Chat" now passes defaults from userSettings
+
+### Frontend — Completed (2026-03-27 session)
+- [x] Preferences panel performance: removed loading gate, optimistic updates, keepPreviousData
+- [x] Route conflict fix: `/api/plugins/{id}/config` → `/api/plugin-config/{id}`
+- [x] Multi-session presence: `cli_active` (cyan dot), `session_archived` (sidebar invalidation)
+- [x] Provider management UI: compact flex-wrap cards, enable/disable, API keys, CLI paths, base URLs
+- [x] OS keychain storage for API keys (macOS Keychain / Windows Credential Manager / Linux Secret Service)
+- [x] Provider startup: keychain → env var → skip (removes .env dependency)
+- [x] All 11 providers seeded on every boot via SeedProviders()
+- [x] CLI auto-detection via adapter.Detect() with manual path override
+- [x] Model picker filters disabled providers, icons for all providers
+- [x] Themed horizontal scrollbars for compact provider card fields
+
+### Frontend — Remaining
 
 ### Testing
 - [ ] Integration test: full PTY event flow with real CLI

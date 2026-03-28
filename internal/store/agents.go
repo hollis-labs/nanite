@@ -18,12 +18,40 @@ type AgentProfile struct {
 	Modes           string `json:"modes"`
 	DefaultMode     string `json:"default_mode"`
 	DefaultModel    string `json:"default_model"`
+	DefaultProvider string `json:"default_provider"`
 	MCPServers      string `json:"mcp_servers"`
 	ToolPermissions string `json:"tool_permissions"`
 	CanExecute      bool   `json:"can_execute"`
 	Settings        string `json:"settings"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
+	// Schema v2 fields
+	AgentHash   string `json:"agent_hash"`
+	Version     int    `json:"version"`
+	Tools       string `json:"tools"`
+	Directories string `json:"directories"`
+	Constraints string `json:"constraints"`
+	Tags        string `json:"tags"`
+	Status      string `json:"status"`
+	Source      string `json:"source"`
+	SourceRef   string `json:"source_ref"`
+}
+
+// agentColumns is the canonical SELECT column list for agent_profiles.
+const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
+        modes, default_mode, COALESCE(default_model,''), COALESCE(default_provider,''),
+        mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at,
+        agent_hash, version, tools, directories, constraints, tags, status, source, source_ref`
+
+// scanAgent scans a row into an AgentProfile using the canonical column order.
+func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
+	return scanner.Scan(
+		&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.SystemPrompt, &a.Description,
+		&a.Modes, &a.DefaultMode, &a.DefaultModel, &a.DefaultProvider,
+		&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
+		&a.AgentHash, &a.Version, &a.Tools, &a.Directories, &a.Constraints, &a.Tags,
+		&a.Status, &a.Source, &a.SourceRef,
+	)
 }
 
 // AgentMode represents a mode configuration for an agent.
@@ -40,17 +68,8 @@ type AgentMode struct {
 // GetAgentBySlug returns an agent profile by its slug.
 func (s *Store) GetAgentBySlug(slug string) (*AgentProfile, error) {
 	var a AgentProfile
-	err := s.DB.QueryRow(
-		`SELECT id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
-		        modes, default_mode, COALESCE(default_model,''),
-		        mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at
-		 FROM agent_profiles WHERE slug = ?`, slug,
-	).Scan(
-		&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.SystemPrompt, &a.Description,
-		&a.Modes, &a.DefaultMode, &a.DefaultModel,
-		&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
-	)
-	if err != nil {
+	row := s.DB.QueryRow(`SELECT `+agentColumns+` FROM agent_profiles WHERE slug = ?`, slug)
+	if err := scanAgent(row, &a); err != nil {
 		return nil, fmt.Errorf("get agent by slug %s: %w", slug, err)
 	}
 	return &a, nil
@@ -72,17 +91,8 @@ func (s *Store) GetAgentMode(agentID, modeSlug string) (*AgentMode, error) {
 // GetAgent returns an agent profile by ID.
 func (s *Store) GetAgent(id string) (*AgentProfile, error) {
 	var a AgentProfile
-	err := s.DB.QueryRow(
-		`SELECT id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
-		        modes, default_mode, COALESCE(default_model,''),
-		        mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at
-		 FROM agent_profiles WHERE id = ?`, id,
-	).Scan(
-		&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.SystemPrompt, &a.Description,
-		&a.Modes, &a.DefaultMode, &a.DefaultModel,
-		&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
-	)
-	if err != nil {
+	row := s.DB.QueryRow(`SELECT `+agentColumns+` FROM agent_profiles WHERE id = ?`, id)
+	if err := scanAgent(row, &a); err != nil {
 		return nil, fmt.Errorf("get agent %s: %w", id, err)
 	}
 	return &a, nil
@@ -109,17 +119,46 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 	if a.Settings == "" {
 		a.Settings = "{}"
 	}
+	// v2 defaults
+	if a.Tools == "" {
+		a.Tools = "[]"
+	}
+	if a.Directories == "" {
+		a.Directories = "[]"
+	}
+	if a.Constraints == "" {
+		a.Constraints = "{}"
+	}
+	if a.Tags == "" {
+		a.Tags = "[]"
+	}
+	if a.Status == "" {
+		a.Status = "active"
+	}
+	if a.Source == "" {
+		a.Source = "api"
+	}
+	if a.Version == 0 {
+		a.Version = 1
+	}
+	if a.AgentHash == "" {
+		a.AgentHash = ComputeAgentHash(a.SystemPrompt, a.Tools, a.ToolPermissions)
+	}
 
 	_, err := s.DB.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
-		                              modes, default_mode, default_model,
+		                              modes, default_mode, default_model, default_provider,
 		                              mcp_servers, tool_permissions, can_execute, settings,
-		                              created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              created_at, updated_at,
+		                              agent_hash, version, tools, directories, constraints,
+		                              tags, status, source, source_ref)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
-		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel),
+		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now, now,
+		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
+		a.Tags, a.Status, a.Source, a.SourceRef,
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -170,18 +209,32 @@ func (s *Store) DeleteAgent(slug string) error {
 }
 
 // UpdateAgent updates mutable fields on an agent profile.
+// It recomputes agent_hash and bumps version if content fields changed.
 func (s *Store) UpdateAgent(a *AgentProfile) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Recompute hash; bump version if content changed.
+	newHash := ComputeAgentHash(a.SystemPrompt, a.Tools, a.ToolPermissions)
+	if a.AgentHash != "" && newHash != a.AgentHash {
+		a.Version++
+	}
+	a.AgentHash = newHash
+
 	_, err := s.DB.Exec(
 		`UPDATE agent_profiles SET name = ?, slug = ?, avatar = ?, system_prompt = ?, description = ?,
-		        modes = ?, default_mode = ?, default_model = ?,
+		        modes = ?, default_mode = ?, default_model = ?, default_provider = ?,
 		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
-		        updated_at = ?
+		        updated_at = ?,
+		        agent_hash = ?, version = ?, tools = ?, directories = ?, constraints = ?,
+		        tags = ?, status = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
-		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel),
+		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
-		now, a.ID,
+		now,
+		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
+		a.Tags, a.Status,
+		a.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
@@ -329,12 +382,7 @@ func (s *Store) DeleteSessionAgent(sessionID, agentID string) error {
 
 // ListAgents returns all agent profiles.
 func (s *Store) ListAgents() ([]AgentProfile, error) {
-	rows, err := s.DB.Query(
-		`SELECT id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
-		        modes, default_mode, COALESCE(default_model,''),
-		        mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at
-		 FROM agent_profiles ORDER BY name`,
-	)
+	rows, err := s.DB.Query(`SELECT ` + agentColumns + ` FROM agent_profiles ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
@@ -343,14 +391,44 @@ func (s *Store) ListAgents() ([]AgentProfile, error) {
 	out := make([]AgentProfile, 0)
 	for rows.Next() {
 		var a AgentProfile
-		if err := rows.Scan(
-			&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.SystemPrompt, &a.Description,
-			&a.Modes, &a.DefaultMode, &a.DefaultModel,
-			&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
-		); err != nil {
+		if err := scanAgent(rows, &a); err != nil {
 			return nil, fmt.Errorf("scan agent: %w", err)
 		}
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ListAgentsBySource returns all agent profiles with the given source.
+func (s *Store) ListAgentsBySource(source string) ([]AgentProfile, error) {
+	rows, err := s.DB.Query(`SELECT `+agentColumns+` FROM agent_profiles WHERE source = ? ORDER BY name`, source)
+	if err != nil {
+		return nil, fmt.Errorf("list agents by source: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]AgentProfile, 0)
+	for rows.Next() {
+		var a AgentProfile
+		if err := scanAgent(rows, &a); err != nil {
+			return nil, fmt.Errorf("scan agent: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// UpsertAgentBySlug inserts or updates an agent profile by slug.
+// Used by framework sync plugins (agentrc, etc.) to keep DB in sync with config.
+func (s *Store) UpsertAgentBySlug(a *AgentProfile) error {
+	existing, err := s.GetAgentBySlug(a.Slug)
+	if err != nil {
+		// Not found — create.
+		return s.CreateAgent(a)
+	}
+	// Found — update, preserving the ID.
+	a.ID = existing.ID
+	a.AgentHash = existing.AgentHash
+	a.Version = existing.Version
+	return s.UpdateAgent(a)
 }

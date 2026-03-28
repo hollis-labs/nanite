@@ -16,6 +16,13 @@ agents:
     skills: []
     context: agents/frontend.md
 
+  conduit-plugin-dev:
+    name: Conduit Plugin Developer
+    description: Develop, audit, and maintain Conduit plugins and the plugin scaffold
+    roles: [backend, go]
+    skills: [go-build, go-lint, go-test, doc-note, doc-search]
+    context: agents/plugin-dev.md
+
   conduit-reviewer:
     name: Conduit Code Reviewer
     description: Code review for Conduit PRs

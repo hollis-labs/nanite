@@ -15,6 +15,8 @@ export interface Session {
   project_id: string
   context_type: string | null
   context_id: string | null
+  provider: string
+  model: string
   status: string
   is_pinned: boolean
   sort_order: number
@@ -46,6 +48,9 @@ export interface Agent {
   avatar: string
   description: string
   can_execute: boolean
+  status: string
+  source: string
+  tags: string
 }
 
 export interface AgentProfile {
@@ -64,6 +69,15 @@ export interface AgentProfile {
   settings: string
   created_at: string
   updated_at: string
+  agent_hash: string
+  version: number
+  tools: string
+  directories: string
+  constraints: string
+  tags: string
+  status: string
+  source: string
+  source_ref: string
 }
 
 export interface AgentModeProfile {
@@ -164,6 +178,62 @@ export interface GlobalUsageSummary {
   by_model: ModelUsage[]
 }
 
+// --- Execution Metrics ---
+
+export interface ExecutionMetrics {
+  id: number
+  session_id: string
+  message_id: string
+  provider: string
+  adapter: string
+  model: string
+  agent_id: string
+  agent_slug: string
+  mode: string
+  duration_ms: number
+  context_messages: number
+  context_tokens: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  estimated_cost_usd: number
+  tool_iterations: number
+  tool_calls: number
+  is_utility: boolean
+  stop_reason: string
+  error: string
+  created_at: string
+}
+
+export interface UtilityCallSummary {
+  provider: string
+  model: string
+  call_type: string
+  call_count: number
+  avg_duration_ms: number
+  min_duration_ms: number
+  max_duration_ms: number
+  error_count: number
+  total_cost_usd: number
+}
+
+// --- Process Health ---
+
+export interface ProcessHealthEntry {
+  session_id: string
+  pid: number
+  uptime: number
+  idle_duration: number
+  is_stale: boolean
+}
+
+export interface ProcessHealthResponse {
+  processes: ProcessHealthEntry[]
+  total: number
+  stale_threshold: string
+}
+
 // --- Agent Modes ---
 
 export const AGENT_MODES = ['default', 'architect', 'planner', 'writer'] as const
@@ -190,42 +260,61 @@ export interface Provider {
   models: ModelOption[]
 }
 
-export const AVAILABLE_MODELS: ModelOption[] = [
-  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', provider: 'anthropic' },
-  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', provider: 'anthropic' },
-  { id: 'claude-haiku-35-20241022', label: 'Claude Haiku', provider: 'anthropic' },
-  { id: 'claude-cli', label: 'Claude CLI', provider: 'pty' },
-]
-
-// --- Workflows ---
-
-export interface WorkflowInput {
-  name: string
-  type: 'text' | 'textarea' | 'select' | 'number' | 'boolean'
-  label: string
-  required: boolean
-  default?: string | number | boolean
-  options?: string[]
+export interface ModelRecord {
+  id: string
+  provider_id: string
+  model_id: string
+  display_name: string
+  context_window: number
+  max_output: number
+  supports_tools: boolean
+  supports_vision: boolean
+  is_enabled: boolean
+  pricing: string
+  sort_order: number
+  provider_type: string
 }
 
-export interface Workflow {
-  name: string
-  description: string
-  inputs: WorkflowInput[]
+// --- User Settings ---
+
+export interface UserSettings {
+  default_provider: string
+  default_model: string
+  default_agent: string
+  utility_provider: string
+  utility_model: string
+  tool_call_display_mode: ToolCallDisplayMode
+  provider_fallback_chain: string[]
+  developer_mode: boolean
+  recover_mode: boolean
+  ext_settings: Record<string, unknown> & {
+    widget_visibility?: Record<string, boolean>
+    widget_order?: string[]
+  }
 }
 
-export interface StepResult {
+export interface ProviderConfig {
+  id: string
   name: string
-  status: 'pending' | 'running' | 'done' | 'error'
-  output?: string
-  error?: string
+  provider_type: string
+  base_url: string
+  is_enabled: boolean
+  settings: string
+  created_at: string
+  updated_at: string
 }
 
-export interface WorkflowResult {
-  workflow: string
-  status: 'pending' | 'running' | 'done' | 'error'
-  steps: StepResult[]
-  output?: string
+export interface ProviderStatus extends ProviderConfig {
+  has_api_key: boolean
+  registered: boolean
+}
+
+export interface CLIDetectionResult {
+  name: string
+  provider_type: string
+  detected: boolean
+  path: string
+  env_var: string
 }
 
 // --- Session Agents ---
@@ -306,7 +395,7 @@ export interface A2AMessage {
 // --- Presence ---
 
 export interface PresenceEvent {
-  type: 'stream_start' | 'stream_end' | 'tool_pending' | 'tool_resolved'
+  type: 'stream_start' | 'stream_end' | 'tool_pending' | 'tool_resolved' | 'cli_active' | 'session_archived'
   session_id: string
   agent_id?: string
   tool_name?: string
@@ -320,6 +409,10 @@ export interface ActiveStreamInfo {
 
 export interface PendingToolInfo {
   toolName: string
+}
+
+export interface CLIActiveInfo {
+  lastSeen: string
 }
 
 // --- Bookmarks ---
@@ -453,6 +546,33 @@ export interface PluginInfo {
   status: 'active' | 'disabled' | 'available' | 'no-binary'
   type: 'core' | 'user'
   installed: boolean
+}
+
+export interface ConfigField {
+  key: string
+  type: 'string' | 'bool' | 'int' | 'select' | 'secret'
+  label: string
+  description?: string
+  default?: unknown
+  required?: boolean
+  options?: string[]
+  component?: string
+}
+
+export interface PluginConfig {
+  plugin_id: string
+  settings: Record<string, unknown>
+  schema: ConfigField[]
+  updated_at?: string
+}
+
+export interface PluginUIComponent {
+  id: string
+  type: 'widget' | 'envelope' | 'action' | 'workflow' | 'view'
+  name: string
+  description: string
+  props?: Record<string, unknown>
+  plugin_id?: string
 }
 
 // --- Skills ---

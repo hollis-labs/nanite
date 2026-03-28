@@ -1,13 +1,112 @@
-import { useState, useMemo, useEffect, type ReactNode } from 'react'
-import { Plus, Hash, Pin, PinOff, Loader2, ChevronRight } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react'
+import { Plus, Hash, Pin, PinOff, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
+import { AdapterBadge } from '@/components/chat/AdapterBadge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
+import { useSettings, useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
-import type { Session } from '@/lib/types'
+import type { Session, UserSettings, ModelRecord, ProviderConfig, Agent } from '@/lib/types'
+
+const ADAPTER_OPTIONS = [
+  { value: '', label: 'Default' },
+  { value: 'http', label: 'HTTP (API)' },
+  { value: 'pty', label: 'PTY (CLI)' },
+  { value: 'subprocess', label: 'Subprocess' },
+]
+
+function NewSessionForm({
+  defaults,
+  models,
+  providers,
+  agents,
+  isPending,
+  onCreate,
+}: {
+  defaults: UserSettings | undefined
+  models: ModelRecord[]
+  providers: ProviderConfig[]
+  agents: Agent[]
+  isPending: boolean
+  onCreate: (overrides: { provider?: string; model?: string; agent_id?: string }) => void
+}) {
+  const [provider, setProvider] = useState(defaults?.default_provider ?? '')
+  const [model, setModel] = useState(defaults?.default_model ?? '')
+  const [agent, setAgent] = useState(defaults?.default_agent ?? '')
+
+  const providerOptions = useMemo(() =>
+    providers.map((p) => ({ value: p.provider_type, label: p.name })),
+    [providers],
+  )
+
+  const modelOptions = useMemo(() => {
+    const filtered = provider ? models.filter((m) => m.provider_type === provider) : models
+    return filtered.filter((m) => m.is_enabled).map((m) => ({ value: m.model_id, label: m.display_name }))
+  }, [models, provider])
+
+  const agentOptions = useMemo(() =>
+    agents
+      .filter((a) => a.status !== 'disabled')
+      .map((a) => ({ value: a.id, label: a.source ? `${a.name} \u00b7 ${a.source}` : a.name })),
+    [agents],
+  )
+
+  return (
+    <div className="px-3 pb-3 space-y-2">
+      <div className="space-y-1.5">
+        <FormSelect label="Provider" value={provider} options={providerOptions} onChange={(v) => { setProvider(v); setModel('') }} />
+        <FormSelect label="Model" value={model} options={modelOptions} onChange={setModel} />
+        <FormSelect label="Adapter" value="" options={ADAPTER_OPTIONS} onChange={() => {}} disabled />
+        <FormSelect label="Agent" value={agent} options={agentOptions} onChange={setAgent} />
+      </div>
+      <button
+        onClick={() => onCreate({
+          provider: provider || undefined,
+          model: model || undefined,
+          agent_id: agent || undefined,
+        })}
+        disabled={isPending}
+        className="w-full py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors disabled:opacity-50"
+      >
+        {isPending ? 'Creating...' : 'Create Session'}
+      </button>
+    </div>
+  )
+}
+
+function FormSelect({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-14 shrink-0">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <option value="">Default</option>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
 
 const TASK_CONTEXT_TYPES = new Set(['task', 'sprint', 'review', 'workflow'])
 const TASKS_COLLAPSED_KEY = 'sidebar-tasks-collapsed'
@@ -47,6 +146,18 @@ export function LeftSidebar() {
   const queryClient = useQueryClient()
   const activeStreams = useChatStore((s) => s.activeStreams)
   const pendingTools = useChatStore((s) => s.pendingTools)
+  const cliActiveSessions = useChatStore((s) => s.cliActiveSessions)
+
+  const { data: userSettings } = useSettings()
+  const { data: models } = useModels()
+  const { data: providers } = useProviders()
+  const { data: agents } = useQuery({
+    queryKey: ['agents'],
+    queryFn: api.listAgents,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const [showCreateForm, setShowCreateForm] = useState(false)
 
   const [tasksCollapsed, setTasksCollapsed] = useState(() => {
     try {
@@ -70,11 +181,24 @@ export function LeftSidebar() {
     enabled: !!activeWorkspaceId,
   })
 
+  const createWithDefaults = useCallback(() => {
+    return api.createSession({
+      workspace_id: activeWorkspaceId!,
+      provider: userSettings?.default_provider || undefined,
+      model: userSettings?.default_model || undefined,
+      agent_id: userSettings?.default_agent || undefined,
+    })
+  }, [activeWorkspaceId, userSettings])
+
   const createMutation = useMutation({
-    mutationFn: () => api.createSession({ workspace_id: activeWorkspaceId! }),
+    mutationFn: (overrides?: { provider?: string; model?: string; agent_id?: string }) =>
+      overrides
+        ? api.createSession({ workspace_id: activeWorkspaceId!, ...overrides })
+        : createWithDefaults(),
     onSuccess: (newSession) => {
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
       setActiveSession(newSession.id)
+      setShowCreateForm(false)
     },
     onError: (err) => {
       console.error('Failed to create session:', err)
@@ -130,21 +254,46 @@ export function LeftSidebar() {
     >
       <div className="min-w-68 flex flex-col h-full">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
-          <h2 className="text-sm font-semibold text-zinc-100">Sessions</h2>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-7 h-7 text-zinc-400 hover:text-zinc-100"
-            onClick={() => createMutation.mutate()}
-            disabled={!activeWorkspaceId || createMutation.isPending}
-          >
-            {createMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Plus className="w-4 h-4" />
-            )}
-          </Button>
+        <div className="border-b border-zinc-800 shrink-0">
+          <div className="flex items-center justify-between px-4 py-3">
+            <h2 className="text-sm font-semibold text-zinc-100">Sessions</h2>
+            <div className="flex items-center">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-7 h-7 text-zinc-400 hover:text-zinc-100"
+                onClick={() => createMutation.mutate(undefined)}
+                disabled={!activeWorkspaceId || createMutation.isPending}
+                title="New session with defaults"
+              >
+                {createMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-5 h-7 text-zinc-500 hover:text-zinc-300"
+                onClick={() => setShowCreateForm((o) => !o)}
+                title="Session options"
+              >
+                <ChevronDown className={`w-3 h-3 transition-transform duration-150 ${showCreateForm ? 'rotate-180' : ''}`} />
+              </Button>
+            </div>
+          </div>
+
+          {showCreateForm && (
+            <NewSessionForm
+              defaults={userSettings}
+              models={models ?? []}
+              providers={providers ?? []}
+              agents={agents ?? []}
+              isPending={createMutation.isPending}
+              onCreate={(overrides) => createMutation.mutate(overrides)}
+            />
+          )}
         </div>
 
         {/* Session list */}
@@ -174,7 +323,7 @@ export function LeftSidebar() {
                     isActive={session.id === activeSessionId}
                     onClick={() => setActiveSession(session.id)}
                     onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
-                    statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools)}
+                    statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
                   />
                 ))}
               </>
@@ -193,7 +342,7 @@ export function LeftSidebar() {
                         isActive={session.id === activeSessionId}
                         onClick={() => setActiveSession(session.id)}
                         onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
-                        statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools)}
+                        statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
                       />
                     ))}
                   </>
@@ -213,7 +362,7 @@ export function LeftSidebar() {
                         isActive={session.id === activeSessionId}
                         onClick={() => setActiveSession(session.id)}
                         onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
-                        statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools)}
+                        statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
                       />
                     ))}
                   </>
@@ -244,7 +393,7 @@ export function LeftSidebar() {
                           isActive={session.id === activeSessionId}
                           onClick={() => setActiveSession(session.id)}
                           onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
-                          statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools)}
+                          statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
                         />
                       ))}
                   </>
@@ -258,12 +407,20 @@ export function LeftSidebar() {
   )
 }
 
-function PresenceDot({ variant }: { variant: 'streaming' | 'tool-pending' }) {
+function PresenceDot({ variant }: { variant: 'streaming' | 'tool-pending' | 'cli-active' }) {
   if (variant === 'streaming') {
     return (
       <span
         className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"
         title="Streaming"
+      />
+    )
+  }
+  if (variant === 'cli-active') {
+    return (
+      <span
+        className="w-2 h-2 rounded-full bg-cyan-500 shrink-0 animate-pulse"
+        title="CLI active"
       />
     )
   }
@@ -279,12 +436,16 @@ function getPresenceIndicator(
   sessionId: string,
   activeStreams: Map<string, unknown>,
   pendingTools: Map<string, unknown>,
+  cliActiveSessions: Map<string, unknown>,
 ): ReactNode | undefined {
   if (pendingTools.has(sessionId)) {
     return <PresenceDot variant="tool-pending" />
   }
   if (activeStreams.has(sessionId)) {
     return <PresenceDot variant="streaming" />
+  }
+  if (cliActiveSessions.has(sessionId)) {
+    return <PresenceDot variant="cli-active" />
   }
   return undefined
 }
@@ -339,6 +500,7 @@ function SessionItem({
         {statusIndicator}
         <Hash className="w-3.5 h-3.5 shrink-0 opacity-50" />
         <span className="truncate flex-1">{displayTitle}</span>
+        {session.provider && <AdapterBadge provider={session.provider} size="sm" />}
         <div className="flex items-center gap-2 shrink-0">
           {hovered && (
             <span

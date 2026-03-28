@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -193,6 +194,16 @@ func cmdServe(args []string) {
 		log.Printf("output filters (default): %v", outputFilters.Names())
 	}
 	engine.OutputFilters = outputFilters
+
+	// Configure CLI process concurrency limit. Default: 10. Set to 0 for unlimited.
+	if maxProcs := os.Getenv("CONDUIT_MAX_CLI_PROCESSES"); maxProcs != "" {
+		if n, err := strconv.Atoi(maxProcs); err == nil && n >= 0 {
+			engine.ProcessTracker.MaxProcesses = n
+			log.Printf("CLI process concurrency limit: %d", n)
+		}
+	} else {
+		engine.ProcessTracker.MaxProcesses = 10
+	}
 
 	// Set up MCP manager with stdio transports (matching ~/.claude.json config).
 	mcpManager := mcp.NewManager()

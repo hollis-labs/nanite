@@ -235,6 +235,65 @@ func TestProcessTracker_KillStale_PreservesActive(t *testing.T) {
 	cmd.Wait()
 }
 
+func TestProcessTracker_AtCapacity_Unlimited(t *testing.T) {
+	pt := NewProcessTracker()
+	// MaxProcesses=0 means unlimited.
+	pt.MaxProcesses = 0
+
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+
+	pt.Track("sess-1", cmd.Process)
+	if pt.AtCapacity() {
+		t.Error("should never be at capacity when MaxProcesses=0")
+	}
+
+	cmd.Process.Kill()
+	cmd.Wait()
+}
+
+func TestProcessTracker_AtCapacity_Limited(t *testing.T) {
+	pt := NewProcessTracker()
+	pt.MaxProcesses = 2
+
+	cmds := make([]*exec.Cmd, 3)
+	for i := range cmds {
+		cmds[i] = exec.Command("sleep", "60")
+		if err := cmds[i].Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer cmds[i].Process.Kill()
+	}
+
+	if pt.AtCapacity() {
+		t.Error("should not be at capacity with 0 tracked")
+	}
+
+	pt.Track("sess-1", cmds[0].Process)
+	if pt.AtCapacity() {
+		t.Error("should not be at capacity with 1/2 tracked")
+	}
+
+	pt.Track("sess-1", cmds[1].Process)
+	if !pt.AtCapacity() {
+		t.Error("should be at capacity with 2/2 tracked")
+	}
+
+	// Untrack one — should drop below capacity.
+	pt.Untrack("sess-1", cmds[0].Process)
+	if pt.AtCapacity() {
+		t.Error("should not be at capacity after untrack (1/2)")
+	}
+
+	for _, cmd := range cmds {
+		cmd.Process.Kill()
+		cmd.Wait()
+	}
+}
+
 func TestIsProcessDone(t *testing.T) {
 	if isProcessDone(nil) {
 		t.Error("expected false for nil error")

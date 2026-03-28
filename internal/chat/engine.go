@@ -316,6 +316,8 @@ func (e *Engine) ActivePresenceState() []PresenceEvent {
 
 // generateResponse loads context, calls the provider, streams events, and saves the result.
 func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan StreamEvent) {
+	startTime := time.Now()
+
 	// Wrap the context with an overall deadline so this goroutine cannot run forever.
 	ctx, cancel := context.WithTimeout(ctx, generateResponseTimeout)
 	defer cancel()
@@ -522,6 +524,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Tool-use loop: call the provider, handle tool calls, repeat.
 	var fullContent strings.Builder
 	var finalUsage *Usage
+	var breakdown *TokenBreakdown
 
 	iteration := 0
 	for ; iteration < maxToolIterations; iteration++ {
@@ -540,7 +543,6 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 
 		// Enforce unified token budget before every provider call.
-		var breakdown *TokenBreakdown
 		var budgetErr error
 		chatMessages, tools, breakdown, budgetErr = EnforceTokenBudget(systemPrompt, chatMessages, tools, 0)
 		if budgetErr != nil {
@@ -571,6 +573,13 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		)
 		// CLI sessions (PTY or subprocess): set up sandbox directory and resume context.
 		if isCLIProvider(providerName) {
+			// Check concurrency limit before spawning a new CLI process.
+			if e.ProcessTracker != nil && e.ProcessTracker.AtCapacity() {
+				ch <- errorEvent(ErrorCodeProviderError,
+					fmt.Sprintf("CLI process limit reached (%d). Close other CLI sessions or wait for them to finish.", e.ProcessTracker.MaxProcesses),
+					map[string]interface{}{"raw": "max concurrent CLI processes exceeded"})
+				return
+			}
 			// Create/resolve sandbox directory and populate reference files.
 			if sbDir, sbErr := sandbox.Dir(sessionID); sbErr != nil {
 				log.Printf("chat: sandbox dir error: %v", sbErr)
@@ -1204,6 +1213,42 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 	}
 
+	// Record execution metrics snapshot.
+	adapterType := "http"
+	if isPTYProvider(providerName) {
+		adapterType = "pty"
+	} else if strings.HasPrefix(providerName, "sub-") {
+		adapterType = "sub"
+	}
+	metrics := &store.ExecutionMetrics{
+		SessionID:       sessionID,
+		MessageID:       assistantMsgID,
+		Provider:        providerName,
+		Adapter:         adapterType,
+		Model:           model,
+		AgentID:         agent.ID,
+		AgentSlug:       agent.Slug,
+		Mode:            mode.Slug,
+		DurationMs:      time.Since(startTime).Milliseconds(),
+		ContextMessages: len(chatMessages),
+		ToolIterations:  iteration,
+		ToolCalls:       len(toolCallRefs),
+		StopReason:      "",
+	}
+	if breakdown != nil {
+		metrics.ContextTokens = breakdown.Total
+	}
+	if finalUsage != nil {
+		metrics.InputTokens = finalUsage.InputTokens
+		metrics.OutputTokens = finalUsage.OutputTokens
+		metrics.CacheCreationTokens = finalUsage.CacheCreationTokens
+		metrics.CacheReadTokens = finalUsage.CacheReadTokens
+		metrics.StopReason = finalUsage.StopReason
+	}
+	if err := e.Store.RecordExecutionMetrics(metrics); err != nil {
+		log.Printf("chat: failed to record execution metrics: %v", err)
+	}
+
 	// Emit stream_end with envelope data so the frontend can render immediately.
 	ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: finalUsage, AgentID: agent.ID, Envelope: envelopeJSON}
 
@@ -1425,6 +1470,27 @@ func inferProvider(model string) string {
 }
 
 // autoTitle generates a title for a session from the first user message.
+// recordUtilityMetrics records an execution metric for a utility call (autoTitle, autoTags, etc.).
+func (e *Engine) recordUtilityMetrics(sessionID, callType string, duration time.Duration, callErr error) {
+	errMsg := ""
+	if callErr != nil {
+		errMsg = callErr.Error()
+	}
+	m := &store.ExecutionMetrics{
+		SessionID:  sessionID,
+		MessageID:  callType, // use call type as message ID for utility calls
+		Provider:   e.UtilityProvider,
+		Adapter:    "http",
+		Model:      e.UtilityModel,
+		DurationMs: duration.Milliseconds(),
+		IsUtility:  true,
+		Error:      errMsg,
+	}
+	if err := e.Store.RecordExecutionMetrics(m); err != nil {
+		log.Printf("chat: failed to record utility metrics for %s: %v", callType, err)
+	}
+}
+
 func (e *Engine) autoTitle(sessionID, userContent string) {
 	ctx, span := feotel.StartSpan(context.Background(), "conduit.autoTitle")
 	span.SetAttributes(attribute.String("conduit.session.id", sessionID))
@@ -1441,7 +1507,12 @@ func (e *Engine) autoTitle(sessionID, userContent string) {
 		{Role: "user", Content: fmt.Sprintf("First message: %s", userContent)},
 	}
 
+	start := time.Now()
 	title, err := prov.Complete(context.Background(), prompt, msgs, e.UtilityModel)
+	duration := time.Since(start)
+
+	e.recordUtilityMetrics(sessionID, "autoTitle", duration, err)
+
 	if err != nil {
 		log.Printf("chat: auto-title failed: %v", err)
 		return
@@ -1497,7 +1568,12 @@ func (e *Engine) autoTags(sessionID string) {
 		{Role: "user", Content: sb.String()},
 	}
 
+	start := time.Now()
 	raw, err := prov.Complete(context.Background(), prompt, tagMsgs, e.UtilityModel)
+	duration := time.Since(start)
+
+	e.recordUtilityMetrics(sessionID, "autoTags", duration, err)
+
 	if err != nil {
 		log.Printf("chat: auto-tags generation failed: %v", err)
 		return

@@ -440,9 +440,9 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 - [ ] Move utility provider/model config from env vars to database settings
 - [x] Orphan process tracking and cleanup
 - [x] Process health checks (detect hung CLI processes)
-- [ ] Concurrency limits (max simultaneous PTY processes per user/workspace)
-- [ ] Execution observability: extend RecordUsage to capture full execution snapshot (duration, context size, memory, adapter, cost)
-- [ ] Utility call comparison log (provider, latency, quality per background call)
+- [x] Concurrency limits (max simultaneous PTY processes per user/workspace)
+- [x] Execution observability: extend RecordUsage to capture full execution snapshot (duration, context size, memory, adapter, cost)
+- [x] Utility call comparison log (provider, latency, quality per background call)
 
 ### Frontend
 - [ ] Settings UI: default adapter (http/pty/subprocess), provider, model, agent

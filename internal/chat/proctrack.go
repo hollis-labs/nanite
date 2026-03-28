@@ -11,8 +11,9 @@ import (
 // keyed by session ID. When a session is archived or the engine shuts down,
 // tracked processes are killed.
 type ProcessTracker struct {
-	mu        sync.Mutex
-	processes map[string][]*trackedProcess // sessionID → running processes
+	mu           sync.Mutex
+	processes    map[string][]*trackedProcess // sessionID → running processes
+	MaxProcesses int                          // 0 = unlimited
 }
 
 type trackedProcess struct {
@@ -35,6 +36,21 @@ func NewProcessTracker() *ProcessTracker {
 	return &ProcessTracker{
 		processes: make(map[string][]*trackedProcess),
 	}
+}
+
+// AtCapacity returns true if the tracker has reached its MaxProcesses limit.
+// Returns false if MaxProcesses is 0 (unlimited).
+func (pt *ProcessTracker) AtCapacity() bool {
+	if pt.MaxProcesses <= 0 {
+		return false
+	}
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	n := 0
+	for _, procs := range pt.processes {
+		n += len(procs)
+	}
+	return n >= pt.MaxProcesses
 }
 
 // Track registers a process under the given session ID.

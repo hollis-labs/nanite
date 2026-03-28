@@ -190,6 +190,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Process Health
 	mux.HandleFunc("GET /api/processes/health", a.handleProcessHealth)
 	mux.HandleFunc("POST /api/processes/kill-stale", a.handleKillStaleProcesses)
+
+	// Execution Metrics
+	mux.HandleFunc("GET /api/sessions/{id}/metrics", a.handleGetSessionExecutionMetrics)
+	mux.HandleFunc("GET /api/metrics/executions", a.handleGetRecentExecutionMetrics)
+	mux.HandleFunc("GET /api/metrics/utility", a.handleGetUtilityCallSummary)
+	mux.HandleFunc("GET /api/metrics/utility/log", a.handleGetUtilityCallLog)
 }
 
 // jsonResp writes a JSON response with the given status code.

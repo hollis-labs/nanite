@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import type { AgentProfile, AgentModeProfile } from '@/lib/types'
-import { AVAILABLE_MODELS } from '@/lib/types'
+import { useModels } from '@/hooks/useSettings'
 
 interface AgentProfileManagerProps {}
 
@@ -30,6 +30,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
   const [showSkillPicker, setShowSkillPicker] = useState(false)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
   const queryClient = useQueryClient()
+  const { data: modelRecords } = useModels()
+  const modelOptions = (modelRecords ?? []).map((m) => ({ id: m.model_id, label: m.display_name }))
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['agent-profiles'],
@@ -353,7 +355,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 name="default_model"
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
               >
-                {AVAILABLE_MODELS.map((model) => (
+                {modelOptions.map((model) => (
                   <option key={model.id} value={model.id}>
                     {model.label}
                   </option>
@@ -508,7 +510,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                   defaultValue={agent.default_model}
                   className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
                 >
-                  {AVAILABLE_MODELS.map((model) => (
+                  {modelOptions.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.label}
                     </option>

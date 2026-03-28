@@ -2,6 +2,7 @@ import { useEffect, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
+import { useSettings } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
 
 interface KeyboardShortcutsOptions {
@@ -18,18 +19,23 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const queryClient = useQueryClient()
 
+  const { data: userSettings } = useSettings()
   const { focusComposer, sessions = [] } = options
 
   const handleNewSession = useCallback(async () => {
     if (!activeWorkspaceId) return
     try {
-      const newSession = await api.createSession({ workspace_id: activeWorkspaceId })
+      const newSession = await api.createSession({
+        workspace_id: activeWorkspaceId,
+        provider: userSettings?.default_provider || undefined,
+        model: userSettings?.default_model || undefined,
+      })
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
       setActiveSession(newSession.id)
     } catch (err) {
       console.error('Failed to create session:', err)
     }
-  }, [activeWorkspaceId, queryClient, setActiveSession])
+  }, [activeWorkspaceId, queryClient, setActiveSession, userSettings])
 
   const handleBookmarkLast = useCallback(async () => {
     if (!activeSessionId) return

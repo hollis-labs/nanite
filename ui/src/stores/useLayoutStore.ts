@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+type ToolDrawerState = 'closed' | 'compact' | 'expanded'
+
 interface LayoutState {
   leftSidebarOpen: boolean
   rightRailOpen: boolean
@@ -8,6 +10,8 @@ interface LayoutState {
   workflowPanelOpen: boolean
   taskThreadOpen: boolean
   inboxPanelOpen: boolean
+  toolDrawerState: ToolDrawerState
+  toolDrawerHeight: number
   currentPage: 'chat' | 'settings'
   toggleLeftSidebar: () => void
   toggleRightRail: () => void
@@ -21,6 +25,8 @@ interface LayoutState {
   setWorkflowPanel: (open: boolean) => void
   setTaskThread: (open: boolean) => void
   setInboxPanel: (open: boolean) => void
+  setToolDrawerState: (state: ToolDrawerState) => void
+  setToolDrawerHeight: (height: number) => void
   setCurrentPage: (page: 'chat' | 'settings') => void
 }
 
@@ -33,6 +39,8 @@ export const useLayoutStore = create<LayoutState>()(
       workflowPanelOpen: false,
       taskThreadOpen: true,
       inboxPanelOpen: false,
+      toolDrawerState: 'closed' as ToolDrawerState,
+      toolDrawerHeight: 200,
       currentPage: 'chat',
       toggleLeftSidebar: () =>
         set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),
@@ -52,6 +60,8 @@ export const useLayoutStore = create<LayoutState>()(
       setWorkflowPanel: (open) => set({ workflowPanelOpen: open }),
       setTaskThread: (open) => set({ taskThreadOpen: open }),
       setInboxPanel: (open) => set({ inboxPanelOpen: open }),
+      setToolDrawerState: (state) => set({ toolDrawerState: state }),
+      setToolDrawerHeight: (height) => set({ toolDrawerHeight: Math.max(100, Math.min(600, height)) }),
       setCurrentPage: (page) => set({ currentPage: page }),
     }),
     {

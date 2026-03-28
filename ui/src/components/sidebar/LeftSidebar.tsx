@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect, type ReactNode } from 'react'
 import { Plus, Hash, Pin, PinOff, Loader2, ChevronRight } from 'lucide-react'
+import { AdapterBadge } from '@/components/chat/AdapterBadge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
+import { useSettings } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
 import type { Session } from '@/lib/types'
 
@@ -48,6 +50,8 @@ export function LeftSidebar() {
   const activeStreams = useChatStore((s) => s.activeStreams)
   const pendingTools = useChatStore((s) => s.pendingTools)
 
+  const { data: userSettings } = useSettings()
+
   const [tasksCollapsed, setTasksCollapsed] = useState(() => {
     try {
       return localStorage.getItem(TASKS_COLLAPSED_KEY) !== 'false'
@@ -71,7 +75,11 @@ export function LeftSidebar() {
   })
 
   const createMutation = useMutation({
-    mutationFn: () => api.createSession({ workspace_id: activeWorkspaceId! }),
+    mutationFn: () => api.createSession({
+      workspace_id: activeWorkspaceId!,
+      provider: userSettings?.default_provider || undefined,
+      model: userSettings?.default_model || undefined,
+    }),
     onSuccess: (newSession) => {
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
       setActiveSession(newSession.id)
@@ -339,6 +347,7 @@ function SessionItem({
         {statusIndicator}
         <Hash className="w-3.5 h-3.5 shrink-0 opacity-50" />
         <span className="truncate flex-1">{displayTitle}</span>
+        {session.provider && <AdapterBadge provider={session.provider} size="sm" />}
         <div className="flex items-center gap-2 shrink-0">
           {hovered && (
             <span

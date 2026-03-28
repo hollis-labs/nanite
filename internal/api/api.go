@@ -182,6 +182,14 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/templates/{name}", a.handleUpdateTemplate)
 	mux.HandleFunc("DELETE /api/templates/{name}", a.handleDeleteTemplate)
 	mux.HandleFunc("POST /api/templates/{name}/apply", a.handleApplyTemplate)
+
+	// User Settings
+	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
+	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
+
+	// Process Health
+	mux.HandleFunc("GET /api/processes/health", a.handleProcessHealth)
+	mux.HandleFunc("POST /api/processes/kill-stale", a.handleKillStaleProcesses)
 }
 
 // jsonResp writes a JSON response with the given status code.

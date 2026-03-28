@@ -1,7 +1,8 @@
 import { Bot } from 'lucide-react'
 import { Widget } from './Widget'
 import { useChatStore } from '@/stores/useChatStore'
-import { AVAILABLE_MODELS, type AgentMode } from '@/lib/types'
+import { useModels } from '@/hooks/useSettings'
+import type { AgentMode } from '@/lib/types'
 
 const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; text: string }> = {
   default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
@@ -15,7 +16,8 @@ export function AgentStatusWidget() {
   const activeModel = useChatStore((s) => s.activeModel)
   const setActiveMode = useChatStore((s) => s.setActiveMode)
 
-  const modelLabel = AVAILABLE_MODELS.find((m) => m.id === activeModel)?.label || activeModel
+  const { data: models } = useModels()
+  const modelLabel = models?.find((m) => m.model_id === activeModel)?.display_name || activeModel
   const modeStyle = MODE_BADGE_STYLES[activeMode]
 
   return (

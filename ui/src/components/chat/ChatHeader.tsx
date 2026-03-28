@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar } from 'lucide-react'
+import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar, Copy } from 'lucide-react'
+import { AdapterBadge } from './AdapterBadge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -147,6 +148,32 @@ export function ChatHeader() {
     switchAgentMutation.mutate(preferred)
   }, [activeSessionId, primaryAgent?.agent_id, allAgents, switchAgentMutation])
 
+  const setActiveSession = useAppStore((s) => s.setActiveSession)
+
+  // Clone session with a different adapter (toggle PTY <-> API).
+  const cloneSessionMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeSessionId || !session) return
+      const currentProvider = session.provider || 'anthropic'
+      const isPTY = currentProvider.startsWith('pty')
+      // Toggle: if PTY, switch to anthropic API; if API, switch to pty-claude.
+      const newProvider = isPTY ? 'anthropic' : 'pty-claude'
+      const newModel = isPTY ? 'claude-sonnet-4-20250514' : 'claude-cli'
+      return api.createSession({
+        workspace_id: session.workspace_id,
+        project_id: session.project_id || undefined,
+        provider: newProvider,
+        model: newModel,
+      })
+    },
+    onSuccess: (newSession) => {
+      if (newSession) {
+        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+        setActiveSession(newSession.id)
+      }
+    },
+  })
+
   const modeStyle = MODE_BADGE_STYLES[activeMode]
 
   return (
@@ -177,6 +204,20 @@ export function ChatHeader() {
               <h1 className="text-sm font-medium text-zinc-100 cursor-default">{title}</h1>
               {shortCode && (
                 <span className="text-xs text-zinc-500">#{shortCode}</span>
+              )}
+              {session?.provider && (
+                <span className="flex items-center gap-1">
+                  <AdapterBadge provider={session.provider} size="md" />
+                  <Tooltip content={`Clone as ${session.provider.startsWith('pty') ? 'API' : 'PTY'} session`} side="bottom">
+                    <button
+                      onClick={() => cloneSessionMutation.mutate()}
+                      disabled={cloneSessionMutation.isPending}
+                      className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                  </Tooltip>
+                </span>
               )}
             </div>
           )}

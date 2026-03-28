@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { PreferencesPanel } from './PreferencesPanel'
+import { ShortcutsPanel } from './ShortcutsPanel'
 import { AgentProfileManager } from './AgentProfileManager'
 import { PromptTemplateEditor } from './PromptTemplateEditor'
 import { SkillsBrowser } from './SkillsBrowser'
@@ -6,12 +8,14 @@ import { ToolDashboard } from './ToolDashboard'
 import { PluginManager } from './PluginManager'
 import { Button } from '@/components/ui/Button'
 
-type SettingsSection = 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins'
+type SettingsSection = 'preferences' | 'shortcuts' | 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins'
 
 export default function SettingsPage() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('agents')
+  const [activeSection, setActiveSection] = useState<SettingsSection>('preferences')
 
   const sections = [
+    { id: 'preferences' as SettingsSection, label: 'Preferences' },
+    { id: 'shortcuts' as SettingsSection, label: 'Shortcuts' },
     { id: 'agents' as SettingsSection, label: 'Agents' },
     { id: 'skills' as SettingsSection, label: 'Skills' },
     { id: 'prompts' as SettingsSection, label: 'Prompts' },
@@ -21,6 +25,10 @@ export default function SettingsPage() {
 
   const renderActiveSection = () => {
     switch (activeSection) {
+      case 'preferences':
+        return <PreferencesPanel />
+      case 'shortcuts':
+        return <ShortcutsPanel />
       case 'agents':
         return <AgentProfileManager />
       case 'skills':
@@ -32,7 +40,7 @@ export default function SettingsPage() {
       case 'plugins':
         return <PluginManager />
       default:
-        return <AgentProfileManager />
+        return <PreferencesPanel />
     }
   }
 

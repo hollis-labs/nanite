@@ -1,5 +1,6 @@
 import { Bot, AlertTriangle, RefreshCw, X } from 'lucide-react'
 import { ChatHeader } from './ChatHeader'
+import { ToolCallDrawer } from './ToolCallDrawer'
 import { ChatTranscript } from './ChatTranscript'
 import { ChatComposer } from './ChatComposer'
 import { TaskThreadPanel } from '@/components/a2a/TaskThreadPanel'
@@ -34,6 +35,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
     <div className="flex-1 flex min-w-0">
       <main className="flex-1 flex flex-col min-w-0 bg-zinc-950">
         <ChatHeader />
+        <ToolCallDrawer />
         <ChatTranscript
           messages={messages}
           isStreaming={isStreaming}

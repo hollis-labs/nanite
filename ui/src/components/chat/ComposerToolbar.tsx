@@ -1,17 +1,27 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { ChevronDown, Paperclip, SendHorizonal, Square } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
+import { useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
-import { AVAILABLE_MODELS, AGENT_MODES, type AgentMode, type ModelOption, type Provider } from '@/lib/types'
+import { AGENT_MODES, type AgentMode } from '@/lib/types'
 
 const MODE_DOT_COLORS: Record<AgentMode, string> = {
   default: 'bg-blue-400',
   architect: 'bg-purple-400',
   planner: 'bg-green-400',
   writer: 'bg-amber-400',
+}
+
+const PROVIDER_ICONS: Record<string, string> = {
+  anthropic: 'A',
+  openai: 'O',
+  ollama: 'L',
+  pty: 'C',
+  'pty-claude': 'C',
+  'pty-codex': 'O',
+  'pty-gemini': 'G',
 }
 
 interface ComposerToolbarProps {
@@ -33,39 +43,40 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
   const modelRef = useRef<HTMLDivElement>(null)
   const modeRef = useRef<HTMLDivElement>(null)
 
-  // Fetch providers from API, fall back to static AVAILABLE_MODELS grouped as "Anthropic"
-  const { data: providers } = useQuery({
-    queryKey: ['providers'],
-    queryFn: api.listProviders,
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: models } = useModels()
+  const { data: providers } = useProviders()
 
-  const PROVIDER_ICONS: Record<string, string> = {
-    anthropic: 'A',
-    openai: 'O',
-    ollama: 'L',
-    pty: 'C',
-  }
+  // Group models by provider for the dropdown.
+  const groupedModels = useMemo(() => {
+    if (!models || !providers) return []
 
-  const groupedModels: Provider[] = useMemo(() => {
-    // Only use API providers if they have nested models arrays
-    if (providers && providers.length > 0 && providers[0].models) return providers
-    // Fallback: group static models by provider field
-    const groups = new Map<string, ModelOption[]>()
-    for (const m of AVAILABLE_MODELS) {
-      const p = m.provider || 'anthropic'
-      if (!groups.has(p)) groups.set(p, [])
-      groups.get(p)!.push(m)
+    const providerMap = new Map(providers.map((p) => [p.id, p]))
+    const groups = new Map<string, { id: string; name: string; icon: string; models: { id: string; label: string; provider: string }[] }>()
+
+    for (const m of models) {
+      if (!m.is_enabled) continue
+      const providerInfo = providerMap.get(m.provider_id)
+      const providerType = m.provider_type || 'anthropic'
+      if (!groups.has(m.provider_id)) {
+        groups.set(m.provider_id, {
+          id: providerType,
+          name: providerInfo?.name || providerType,
+          icon: PROVIDER_ICONS[providerType] || providerType.charAt(0).toUpperCase(),
+          models: [],
+        })
+      }
+      groups.get(m.provider_id)!.models.push({
+        id: m.model_id,
+        label: m.display_name,
+        provider: providerType,
+      })
     }
-    return Array.from(groups.entries()).map(([id, models]) => ({
-      id,
-      name: id.charAt(0).toUpperCase() + id.slice(1),
-      models,
-    }))
-  }, [providers])
 
-  const allModels = useMemo(() => groupedModels.flatMap((p) => p.models ?? []), [groupedModels])
-  const currentModel = allModels.find((m) => m.id === activeModel) || AVAILABLE_MODELS.find((m) => m.id === activeModel)
+    return Array.from(groups.values())
+  }, [models, providers])
+
+  const allModels = useMemo(() => groupedModels.flatMap((g) => g.models), [groupedModels])
+  const currentModel = allModels.find((m) => m.id === activeModel)
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -89,7 +100,6 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
     setModelOpen(false)
     if (activeSessionId) {
       try {
-        // Resolve the provider for this model so the backend routes to the right provider.
         const selected = allModels.find((m) => m.id === modelId)
         const providerType = selected?.provider || 'anthropic'
         await api.updateSession(activeSessionId, { model: modelId, provider: providerType } as never)
@@ -128,35 +138,39 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
           onClick={() => setModelOpen((o) => !o)}
           className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors py-0.5 px-1 rounded hover:bg-zinc-700/50"
         >
-          <span>{currentModel?.label || 'Select model'}</span>
+          <span>{currentModel?.label || activeModel || 'Select model'}</span>
           <ChevronDown className="w-3 h-3" />
         </button>
 
         {modelOpen && (
           <div className="absolute bottom-full left-0 mb-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 max-h-72 overflow-y-auto">
-            {groupedModels.map((provider) => (
-              <div key={provider.id}>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                  <span className="w-4 h-4 rounded bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
-                    {PROVIDER_ICONS[provider.id?.toLowerCase()] || provider.name?.charAt(0) || '?'}
-                  </span>
-                  {provider.name}
+            {groupedModels.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-zinc-500">Loading models...</div>
+            ) : (
+              groupedModels.map((group) => (
+                <div key={group.id}>
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                    <span className="w-4 h-4 rounded bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
+                      {group.icon}
+                    </span>
+                    {group.name}
+                  </div>
+                  {group.models.map((model) => (
+                    <button
+                      key={model.id}
+                      onClick={() => void handleModelSelect(model.id)}
+                      className={`w-full text-left px-3 pl-8 py-1.5 text-sm transition-colors ${
+                        model.id === activeModel
+                          ? 'bg-zinc-800 text-zinc-100'
+                          : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                      }`}
+                    >
+                      {model.label}
+                    </button>
+                  ))}
                 </div>
-                {(provider.models ?? []).map((model) => (
-                  <button
-                    key={model.id}
-                    onClick={() => void handleModelSelect(model.id)}
-                    className={`w-full text-left px-3 pl-8 py-1.5 text-sm transition-colors ${
-                      model.id === activeModel
-                        ? 'bg-zinc-800 text-zinc-100'
-                        : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
-                    }`}
-                  >
-                    {model.label}
-                  </button>
-                ))}
-              </div>
-            ))}
+              ))
+            )}
           </div>
         )}
       </div>

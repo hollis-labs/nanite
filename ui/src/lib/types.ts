@@ -15,6 +15,8 @@ export interface Session {
   project_id: string
   context_type: string | null
   context_id: string | null
+  provider: string
+  model: string
   status: string
   is_pinned: boolean
   sort_order: number
@@ -190,12 +192,45 @@ export interface Provider {
   models: ModelOption[]
 }
 
-export const AVAILABLE_MODELS: ModelOption[] = [
-  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', provider: 'anthropic' },
-  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', provider: 'anthropic' },
-  { id: 'claude-haiku-35-20241022', label: 'Claude Haiku', provider: 'anthropic' },
-  { id: 'claude-cli', label: 'Claude CLI', provider: 'pty' },
-]
+export interface ModelRecord {
+  id: string
+  provider_id: string
+  model_id: string
+  display_name: string
+  context_window: number
+  max_output: number
+  supports_tools: boolean
+  supports_vision: boolean
+  is_enabled: boolean
+  pricing: string
+  sort_order: number
+  provider_type: string
+}
+
+// --- User Settings ---
+
+export interface UserSettings {
+  default_provider: string
+  default_model: string
+  default_adapter: string
+  default_agent: string
+  utility_provider: string
+  utility_model: string
+  tool_call_display_mode: ToolCallDisplayMode
+  provider_fallback_chain: string[]
+  ext_settings: Record<string, unknown>
+}
+
+export interface ProviderConfig {
+  id: string
+  name: string
+  provider_type: string
+  base_url: string
+  is_enabled: boolean
+  settings: string
+  created_at: string
+  updated_at: string
+}
 
 // --- Workflows ---
 

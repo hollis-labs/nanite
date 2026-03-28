@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, Provider, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, Workflow, WorkflowResult, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig } from './types'
 
 const API_BASE = '/api'
 
@@ -17,7 +17,7 @@ export const api = {
     return res.json()
   },
 
-  createSession: async (data: { workspace_id: string; project_id?: string }): Promise<Session> => {
+  createSession: async (data: { workspace_id: string; project_id?: string; provider?: string; model?: string }): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -218,9 +218,33 @@ export const api = {
   },
 
   // Providers
-  listProviders: async (): Promise<Provider[]> => {
+  listProviders: async (): Promise<ProviderConfig[]> => {
     const res = await fetch(`${API_BASE}/providers`)
     if (!res.ok) throw new Error(`Failed to list providers: ${res.status}`)
+    return res.json()
+  },
+
+  // Models
+  listModels: async (): Promise<ModelRecord[]> => {
+    const res = await fetch(`${API_BASE}/models`)
+    if (!res.ok) throw new Error(`Failed to list models: ${res.status}`)
+    return res.json()
+  },
+
+  // Settings
+  getSettings: async (): Promise<UserSettings> => {
+    const res = await fetch(`${API_BASE}/settings`)
+    if (!res.ok) throw new Error(`Failed to get settings: ${res.status}`)
+    return res.json()
+  },
+
+  updateSettings: async (data: Partial<UserSettings>): Promise<UserSettings> => {
+    const res = await fetch(`${API_BASE}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error(`Failed to update settings: ${res.status}`)
     return res.json()
   },
 

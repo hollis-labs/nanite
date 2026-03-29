@@ -36,7 +36,7 @@ export function TriviaLeaderboardCard({ data, onSendMessage }: TriviaLeaderboard
 
         {entries.length === 0 ? (
           <div className="px-4 py-6 text-center text-sm text-zinc-500">
-            No scores yet. Type <code className="text-purple-400">!trivia</code> to start playing!
+            No scores yet. Type <code className="text-accent">!trivia</code> to start playing!
           </div>
         ) : (
           <div className="divide-y divide-zinc-800">
@@ -61,7 +61,7 @@ export function TriviaLeaderboardCard({ data, onSendMessage }: TriviaLeaderboard
             <button
               type="button"
               onClick={() => onSendMessage('!trivia')}
-              className="text-[11px] text-purple-400 hover:text-purple-300 transition-colors"
+              className="text-[11px] text-accent hover:text-accent-hover transition-colors"
             >
               Play a round &rarr;
             </button>

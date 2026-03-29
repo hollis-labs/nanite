@@ -123,7 +123,7 @@ function AccordionSection({
 function MessageRow({ msg }: { msg: MessageTokenDetail }) {
   const roleColors: Record<string, string> = {
     user: 'text-blue-400',
-    assistant: 'text-purple-400',
+    assistant: 'text-accent',
     system: 'text-amber-400',
     tool: 'text-green-400',
   }

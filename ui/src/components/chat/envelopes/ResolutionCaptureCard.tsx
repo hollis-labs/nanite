@@ -78,7 +78,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
   }
 
   const inputCls =
-    'w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 placeholder:text-zinc-600'
+    'w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent placeholder:text-zinc-600'
 
   return (
     <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4">
@@ -174,7 +174,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
               type="checkbox"
               checked={createArticle}
               onChange={(e) => setCreateArticle(e.target.checked)}
-              className="accent-indigo-500"
+              className="accent-accent"
             />
             <span className="text-xs text-zinc-300">
               Should this become a new KB article?
@@ -187,7 +187,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
           <Button
             type="submit"
             size="sm"
-            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-1 h-8"
+            className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-8"
             disabled={!whatFixedIt.trim()}
           >
             Submit Resolution

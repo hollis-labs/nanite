@@ -49,7 +49,7 @@ function UnknownWidgetCard({ component }: { component: PluginUIComponent }) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
       <div className="flex items-center gap-2 mb-1">
-        <Puzzle className="w-3 h-3 text-indigo-400 shrink-0" />
+        <Puzzle className="w-3 h-3 text-accent shrink-0" />
         <span className="text-xs font-medium text-zinc-200 truncate">{component.name}</span>
         {component.plugin_id && (
           <span className="text-[10px] text-zinc-600 ml-auto">{component.plugin_id}</span>

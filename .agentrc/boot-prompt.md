@@ -43,36 +43,43 @@ Always use cerberus_rebuild for deployment, not go build directly.
 ```
 Boot conduit-frontend
 
-This is a beta release prep session. Primary TODO is in .agentrc/agents/frontend.md
-under "Beta Release TODO (Frontend)".
+This is a frontend polish session. The settings pages and shell are done.
+The next focus is the chat area and envelope cards.
 
-Context files to read:
-- .agentrc/agents/frontend.md — full project context + beta TODO
-- docs/pty-bridge-evolution.md — scroll to "Frontend — Remaining" for PTY-specific items
-- CLAUDE.md — envelope system warnings (frontend registry must match backend types)
+Branch: feature/frontend-polish-phase1 (not yet merged to main)
 
-Backend APIs available:
-- GET /api/settings, PUT /api/settings — user settings (partial merge)
-  Now includes: developer_mode (bool), recover_mode (bool)
-- GET /api/processes/health — active CLI processes with uptime/idle
-- POST /api/processes/kill-stale — kill hung processes
-- GET /api/sessions/{id}/metrics — per-session execution snapshots
-- GET /api/metrics/executions?limit=N — recent executions across all sessions
-- GET /api/metrics/utility — aggregated utility call comparison
-- GET /api/metrics/utility/log?limit=N — individual utility call records
-- GET /api/providers — now includes OpenRouter + OpenZen
-- GET /api/models — now includes OR/OZ model variants
+CRITICAL — Read these before touching any code:
+- memory: feedback_ui_design_patterns.md — THE design system reference. Card patterns,
+  color tokens, icon badges, and all conventions. Deviating = inconsistency.
+- memory: project_frontend_polish.md — what's done, what remains
+- .agentrc/agents/frontend.md — full project context
+- CLAUDE.md — envelope system warnings
 
-Previously blocked, now unblocked (2026-03-28):
-- Config override components: developer_mode flag available in GET /api/settings
-- Recover mode: recover_mode flag available in GET /api/settings
-- Plugin widget mount points: no backend dependency
+Design System (established 2026-03-28 polish session):
+- Theme: CSS variables in index.css, light/dark via .light/.dark class on <html>
+- Colors: ALWAYS use semantic tokens (bg-bg, text-fg, border-border, etc.)
+  NEVER hardcode bg-zinc-*, text-zinc-*, border-zinc-* — light theme breaks
+- Accent: fire engine red #dc2626 (bg-accent, text-accent)
+- Status/toggle: blue #3B82F6 (bg-success, bg-toggle-on) — NOT green
+- Cards: rounded-xl border-border-subtle shadow-sm, two-section (header + footer)
+- Icons: neutral gray (bg-zinc-700/bg-zinc-300), NOT per-item brand colors
+- Status: tiny dot (w-1.5 h-1.5 bg-success) next to name, NOT green text
 
-Key things already done (don't redo):
-- Settings UI, preferences, shortcuts, dynamic models, adapter badges, tool call
-  drawer, unified event stream — all in commits c28e0c7 and de0bf77
-- Backend: subprocess bridge, fallback chain, process tracking, observability
+Remaining work:
+1. Chat area — ChatTranscript, ChatMessage, ChatComposer, MessageContent all still
+   use hardcoded zinc colors. Need semantic token migration.
+2. Envelope cards (25+ components in ui/src/components/chat/envelopes/) — all
+   hardcoded dark theme. These are rich response cards and need careful migration.
+3. Widget components (right rail) — hardcoded zinc
+4. Modals (SprintPlanningModal, AgentRoster) — hardcoded zinc
+5. Slash command menu — hardcoded zinc
+6. Light theme: highlight.js theme needs conditional swap (github-dark vs github)
+7. Delete ui/public/card-prototypes.html (prototype file, no longer needed)
+8. Plugin architecture items from brain dump (A2A plugin, Sprint plugin, UI hooks)
+9. Project scope feature — not started
 
-The backend agent may be working in parallel. Coordinate via the branch
-(feature/pty-bridge-frontend). Commit frequently to stay synced.
+Reference implementations for the card pattern:
+- ProviderManager.tsx — tabbed view with search/filter/sort + Variation F cards
+- ShortcutsPanel.tsx — interactive click-to-edit cards
+- AgentProfileManager.tsx — entity cards with status dots
 ```

@@ -44,7 +44,7 @@ function IndicatorMode({ toolCalls, expanded, onToggle }: { toolCalls: ToolCall[
     <div>
       <div className="flex items-center gap-1.5 py-1 px-2 text-xs text-zinc-400">
         {isRunning ? (
-          <Loader2 className="w-3 h-3 animate-spin text-indigo-400 shrink-0" />
+          <Loader2 className="w-3 h-3 animate-spin text-accent shrink-0" />
         ) : hasError ? (
           <X className="w-3 h-3 text-red-400 shrink-0" />
         ) : (

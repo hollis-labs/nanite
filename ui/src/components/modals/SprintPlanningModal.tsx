@@ -247,10 +247,10 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
           <div className="flex items-center gap-2">
-            <ListTodo className="w-4 h-4 text-indigo-400" />
+            <ListTodo className="w-4 h-4 text-accent" />
             <h2 className="text-sm font-semibold text-zinc-100">Sprint Planning</h2>
             {pendingActions.length > 0 && (
-              <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-indigo-500/20 text-indigo-300 rounded">
+              <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-accent-muted text-accent-hover rounded">
                 {pendingActions.length} pending
               </span>
             )}
@@ -270,7 +270,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
             className={cn(
               'flex-1 px-4 py-2.5 text-xs font-medium transition-colors',
               activeTab === 'tasks'
-                ? 'text-indigo-400 border-b-2 border-indigo-400'
+                ? 'text-accent border-b-2 border-accent'
                 : 'text-zinc-500 hover:text-zinc-300'
             )}
           >
@@ -281,7 +281,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
             className={cn(
               'flex-1 px-4 py-2.5 text-xs font-medium transition-colors',
               activeTab === 'backlog'
-                ? 'text-indigo-400 border-b-2 border-indigo-400'
+                ? 'text-accent border-b-2 border-accent'
                 : 'text-zinc-500 hover:text-zinc-300'
             )}
           >
@@ -313,7 +313,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                     <select
                       value={selectedSprint}
                       onChange={(e) => setSelectedSprint(e.target.value)}
-                      className="flex-1 px-2 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 outline-none focus:border-indigo-500 transition-colors"
+                      className="flex-1 px-2 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 outline-none focus:border-accent transition-colors"
                     >
                       {sprints.map(s => (
                         <option key={s.id} value={s.id}>{s.name} ({s.status})</option>
@@ -368,7 +368,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                             key={task.id}
                             className={cn(
                               'flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
-                              selectedTaskIds.has(task.id) ? 'bg-indigo-500/10 border border-indigo-500/20' : 'hover:bg-zinc-800/50 border border-transparent',
+                              selectedTaskIds.has(task.id) ? 'bg-accent-muted border border-accent/20' : 'hover:bg-zinc-800/50 border border-transparent',
                               pending && 'opacity-60'
                             )}
                           >
@@ -376,13 +376,13 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                               type="checkbox"
                               checked={selectedTaskIds.has(task.id)}
                               onChange={() => toggleTask(task.id)}
-                              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 shrink-0"
+                              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-accent focus:ring-accent focus:ring-offset-0 shrink-0"
                             />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-zinc-200 truncate">{task.title}</span>
                                 {pending && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 shrink-0">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-muted text-accent-hover shrink-0">
                                     {pending.type === 'delete' ? 'will delete' : `will ${(pending as { status: string }).status}`}
                                   </span>
                                 )}
@@ -411,7 +411,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                     <select
                       value={promotionSprintId}
                       onChange={(e) => setPromotionSprintId(e.target.value)}
-                      className="flex-1 px-2 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 outline-none focus:border-indigo-500 transition-colors"
+                      className="flex-1 px-2 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 outline-none focus:border-accent transition-colors"
                     >
                       {sprints.map(s => (
                         <option key={s.id} value={s.id}>{s.name}</option>
@@ -427,7 +427,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1 text-indigo-400 hover:text-indigo-300"
+                        className="gap-1 text-accent hover:text-accent-hover"
                         onClick={queuePromote}
                         disabled={!promotionSprintId}
                       >
@@ -458,7 +458,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                             key={item.id}
                             className={cn(
                               'flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
-                              selectedBacklogIds.has(item.id) ? 'bg-indigo-500/10 border border-indigo-500/20' : 'hover:bg-zinc-800/50 border border-transparent',
+                              selectedBacklogIds.has(item.id) ? 'bg-accent-muted border border-accent/20' : 'hover:bg-zinc-800/50 border border-transparent',
                               pending && 'opacity-60'
                             )}
                           >
@@ -466,13 +466,13 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                               type="checkbox"
                               checked={selectedBacklogIds.has(item.id)}
                               onChange={() => toggleBacklog(item.id)}
-                              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 shrink-0"
+                              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-accent focus:ring-accent focus:ring-offset-0 shrink-0"
                             />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-zinc-200 truncate">{item.title}</span>
                                 {pending && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 shrink-0">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-muted text-accent-hover shrink-0">
                                     will promote
                                   </span>
                                 )}
@@ -509,7 +509,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Notes or context..."
-            className="w-full px-3 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 placeholder-zinc-600 outline-none focus:border-indigo-500 transition-colors"
+            className="w-full px-3 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 placeholder-zinc-600 outline-none focus:border-accent transition-colors"
           />
         </div>
 

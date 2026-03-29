@@ -109,7 +109,7 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenu
                       : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
                   }`}
                 >
-                  <span className="text-sm font-mono text-indigo-400 shrink-0 w-20 truncate">/{item.name}</span>
+                  <span className="text-sm font-mono text-accent shrink-0 w-20 truncate">/{item.name}</span>
                   <span className="text-xs text-zinc-500 truncate">{item.description}</span>
                   {item.source === 'plugin' && (
                     <span className="text-[9px] text-zinc-600 bg-zinc-800 rounded px-1 py-0.5 shrink-0 ml-auto">plugin</span>

@@ -70,14 +70,14 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
                   rows={3}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed resize-none"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed resize-none"
                 />
               ) : fieldType === 'select' && schema?.options ? (
                 <select
                   value={String(value ?? '')}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {schema.options.map((opt) => (
                     <option key={opt} value={opt}>{opt}</option>
@@ -89,7 +89,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
                   value={String(value ?? '')}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               )}
             </div>

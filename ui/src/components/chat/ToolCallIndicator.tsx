@@ -11,7 +11,7 @@ export function ToolCallIndicator({ toolCall }: ToolCallIndicatorProps) {
   return (
     <div className="flex items-center gap-2 py-1 px-2 rounded-md bg-zinc-800/50 border border-zinc-700/50 text-xs">
       {status === 'running' && (
-        <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />
+        <Loader2 className="w-3.5 h-3.5 text-accent animate-spin shrink-0" />
       )}
       {status === 'done' && (
         <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />

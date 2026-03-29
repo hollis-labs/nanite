@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Eye, EyeOff, RefreshCw, Check, AlertTriangle,
-  CircleCheck, Terminal, Globe, FolderSearch,
+  Eye, EyeOff, RefreshCw, AlertTriangle, X, Search,
+  CircleCheck, Terminal, Globe, FolderSearch, Loader2,
+  ArrowUpDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -10,19 +11,19 @@ import type { ProviderStatus, CLIDetectionResult } from '@/lib/types'
 
 // --- Provider icon map ---
 
-const PROVIDER_ICONS: Record<string, { icon: string; color: string }> = {
-  anthropic:      { icon: 'A',  color: 'bg-orange-600' },
-  openai:         { icon: 'O',  color: 'bg-emerald-600' },
-  ollama:         { icon: 'Ol', color: 'bg-blue-600' },
-  gemini:         { icon: 'G',  color: 'bg-blue-500' },
-  mistral:        { icon: 'M',  color: 'bg-orange-500' },
-  'azure-openai': { icon: 'Az', color: 'bg-sky-600' },
-  pty:            { icon: 'C',  color: 'bg-violet-600' },
-  'pty-claude':   { icon: 'C',  color: 'bg-violet-600' },
-  'pty-codex':    { icon: 'Cx', color: 'bg-emerald-600' },
-  'pty-gemini':   { icon: 'G',  color: 'bg-blue-500' },
-  'pty-copilot':  { icon: 'Cp', color: 'bg-zinc-600' },
-  'pty-aider':    { icon: 'Ai', color: 'bg-green-600' },
+const PROVIDER_INITIALS: Record<string, string> = {
+  anthropic: 'A',
+  openai: 'O',
+  ollama: 'Ol',
+  gemini: 'G',
+  mistral: 'M',
+  'azure-openai': 'Az',
+  pty: 'C',
+  'pty-claude': 'C',
+  'pty-codex': 'Cx',
+  'pty-gemini': 'G',
+  'pty-copilot': 'Cp',
+  'pty-aider': 'Ai',
 }
 
 const DEFAULT_BASE_URLS: Record<string, string> = {
@@ -34,95 +35,197 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   ollama: 'http://localhost:11434',
 }
 
-function ProviderIcon({ providerType }: { providerType: string }) {
-  const entry = PROVIDER_ICONS[providerType] ?? { icon: '?', color: 'bg-zinc-700' }
+function ProviderIcon({ providerType, active }: { providerType: string; active: boolean }) {
+  const initial = PROVIDER_INITIALS[providerType] ?? '?'
   return (
-    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-md text-xs font-bold text-white shrink-0 ${entry.color}`}>
-      {entry.icon}
+    <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-xs font-bold shrink-0 ${
+      active
+        ? 'bg-zinc-700 text-zinc-300'
+        : 'bg-zinc-300 text-zinc-500'
+    }`}>
+      {initial}
     </span>
   )
 }
 
-// --- API Key Input ---
+// --- Tiny inline icons for the detail footer ---
 
-function APIKeyField({ providerId, hasKey }: { providerId: string; hasKey: boolean }) {
-  const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState('')
-  const [showKey, setShowKey] = useState(false)
-  const queryClient = useQueryClient()
+function KeyIcon() {
+  return (
+    <svg className="w-3 h-3 text-fg-faint shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+    </svg>
+  )
+}
 
-  const mutation = useMutation({
-    mutationFn: (apiKey: string) => api.setProviderAPIKey(providerId, apiKey),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['provider-statuses'] })
-      setEditing(false)
-      setValue('')
-    },
-  })
+function LinkIcon() {
+  return (
+    <svg className="w-3 h-3 text-fg-faint shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+    </svg>
+  )
+}
 
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-2">
-        {hasKey ? (
-          <span className="text-xs text-emerald-400 flex items-center gap-1">
-            <CircleCheck className="w-3 h-3" /> Key set
-          </span>
-        ) : (
-          <span className="text-xs text-zinc-500">No key</span>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs text-zinc-400 hover:text-zinc-200"
-          onClick={() => setEditing(true)}
-        >
-          {hasKey ? 'Change' : 'Set key'}
-        </Button>
-      </div>
-    )
-  }
+function FolderIcon() {
+  return (
+    <svg className="w-3 h-3 text-fg-faint shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+    </svg>
+  )
+}
+
+// --- Modal shell ---
+
+function Modal({
+  title,
+  open,
+  onClose,
+  children,
+}: {
+  title: string
+  open: boolean
+  onClose: () => void
+  children: React.ReactNode
+}) {
+  if (!open) return null
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="relative flex-1">
-        <input
-          type={showKey ? 'text' : 'password'}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="sk-..."
-          className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 pr-8 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          autoFocus
-        />
-        <button
-          type="button"
-          onClick={() => setShowKey(!showKey)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-        >
-          {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-        </button>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl">
+        <div className="flex items-center justify-between px-5 h-12 border-b border-border">
+          <h3 className="text-sm font-semibold text-fg">{title}</h3>
+          <button onClick={onClose} className="p-1 rounded text-fg-muted hover:text-fg hover:bg-surface transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-5">{children}</div>
       </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-xs text-emerald-400 hover:text-emerald-300"
-        onClick={() => mutation.mutate(value)}
-        disabled={mutation.isPending}
-      >
-        <Check className="w-3 h-3" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-xs text-zinc-500 hover:text-zinc-300"
-        onClick={() => { setEditing(false); setValue('') }}
-      >
-        Cancel
-      </Button>
     </div>
   )
 }
 
-// --- CLI Path Input ---
+// --- API Key clickable value + modal ---
+
+function APIKeyField({ provider }: { provider: ProviderStatus }) {
+  const [modalOpen, setModalOpen] = useState(false)
+  const [value, setValue] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [testResult, setTestResult] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
+  const [testError, setTestError] = useState('')
+  const queryClient = useQueryClient()
+
+  const mutation = useMutation({
+    mutationFn: (apiKey: string) => api.setProviderAPIKey(provider.id, apiKey),
+    onSuccess: () => {
+      setTestResult('testing')
+      setTestError('')
+      api.testProviderConnection(provider.id)
+        .then(() => {
+          setTestResult('success')
+          queryClient.invalidateQueries({ queryKey: ['provider-statuses'] })
+        })
+        .catch((err: Error) => {
+          setTestResult('error')
+          setTestError(err.message || 'Connection failed')
+          queryClient.invalidateQueries({ queryKey: ['provider-statuses'] })
+        })
+    },
+  })
+
+  const handleOpen = () => {
+    setValue('')
+    setShowKey(false)
+    setTestResult('idle')
+    setTestError('')
+    setModalOpen(true)
+  }
+
+  const handleSave = () => {
+    if (!value.trim()) return
+    mutation.mutate(value.trim())
+  }
+
+  return (
+    <>
+      <button onClick={handleOpen} className="text-left group">
+        {provider.has_api_key ? (
+          <span className="text-[11px] text-fg-secondary font-medium flex items-center gap-1 group-hover:text-fg transition-colors cursor-pointer">
+            Key set
+          </span>
+        ) : (
+          <span className="text-[11px] text-fg-muted group-hover:text-fg-secondary transition-colors underline underline-offset-2 decoration-border-subtle cursor-pointer">
+            Set API key
+          </span>
+        )}
+      </button>
+
+      <Modal
+        title={`${provider.name} — API Key`}
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+      >
+        <div className="space-y-4">
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSave() }}
+              placeholder="sk-..."
+              className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg pr-10 focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey(!showKey)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg-secondary"
+            >
+              {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {testResult === 'testing' && (
+            <div className="flex items-center gap-2 text-sm text-fg-secondary">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Testing connection...
+            </div>
+          )}
+          {testResult === 'success' && (
+            <div className="flex items-center gap-2 text-sm text-success bg-success-muted px-3 py-2 rounded-md">
+              <CircleCheck className="w-4 h-4" />
+              Connected successfully
+            </div>
+          )}
+          {testResult === 'error' && (
+            <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 px-3 py-2 rounded-md">
+              <AlertTriangle className="w-4 h-4" />
+              {testError || 'Connection failed'}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setModalOpen(false)}>
+              {testResult === 'success' ? 'Done' : 'Cancel'}
+            </Button>
+            {testResult !== 'success' && (
+              <Button
+                size="sm"
+                className="bg-accent hover:bg-accent-hover text-white"
+                onClick={handleSave}
+                disabled={!value.trim() || mutation.isPending || testResult === 'testing'}
+              >
+                {mutation.isPending ? 'Saving...' : 'Save & Test'}
+              </Button>
+            )}
+          </div>
+        </div>
+      </Modal>
+    </>
+  )
+}
+
+// --- CLI Path — click to edit ---
 
 function CLIPathField({
   providerId,
@@ -133,7 +236,7 @@ function CLIPathField({
   providerSettings: string
   detection?: CLIDetectionResult
 }) {
-  const [editing, setEditing] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
   const [value, setValue] = useState('')
   const queryClient = useQueryClient()
 
@@ -142,7 +245,6 @@ function CLIPathField({
     catch { return {} }
   })()
   const customPath = parsed.cli_path as string | undefined
-
   const displayPath = customPath || detection?.path || ''
   const isDetected = detection?.detected ?? false
 
@@ -154,73 +256,61 @@ function CLIPathField({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['provider-statuses'] })
       queryClient.invalidateQueries({ queryKey: ['cli-detection'] })
-      setEditing(false)
-      setValue('')
+      setModalOpen(false)
     },
   })
 
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-2">
-        {isDetected ? (
-          <span className="text-xs text-emerald-400 flex items-center gap-1 min-w-0">
-            <CircleCheck className="w-3 h-3 shrink-0" />
-            <code className="text-zinc-300 truncate max-w-[160px] inline-block overflow-x-auto provider-scroll">{displayPath}</code>
-          </span>
-        ) : (
-          <span className="text-xs text-amber-400 flex items-center gap-1">
-            <AlertTriangle className="w-3 h-3" /> Not found
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs text-zinc-400 hover:text-zinc-200 shrink-0"
-          onClick={() => { setEditing(true); setValue(displayPath) }}
-        >
-          {displayPath ? 'Change' : 'Set path'}
-        </Button>
-      </div>
-    )
+  const handleOpen = () => {
+    setValue(displayPath)
+    setModalOpen(true)
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="/usr/local/bin/claude"
-        className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
-        autoFocus
-      />
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-xs text-emerald-400 hover:text-emerald-300"
-        onClick={() => mutation.mutate(value)}
-        disabled={mutation.isPending}
-      >
-        <Check className="w-3 h-3" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-xs text-zinc-500 hover:text-zinc-300"
-        onClick={() => { setEditing(false); setValue('') }}
-      >
-        Cancel
-      </Button>
-    </div>
+    <>
+      <button onClick={handleOpen} className="text-left group">
+        {isDetected ? (
+          <code className="text-[11px] text-fg-secondary font-mono truncate max-w-[200px] inline-block provider-scroll group-hover:text-fg transition-colors cursor-pointer">{displayPath}</code>
+        ) : (
+          <span className="text-[11px] text-fg-muted group-hover:text-fg-secondary transition-colors underline underline-offset-2 decoration-border-subtle cursor-pointer">
+            Set path
+          </span>
+        )}
+      </button>
+
+      <Modal title="CLI Path" open={modalOpen} onClose={() => setModalOpen(false)}>
+        <div className="space-y-4">
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') mutation.mutate(value) }}
+            placeholder="/usr/local/bin/claude"
+            className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:ring-1 focus:ring-accent"
+            autoFocus
+          />
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-accent hover:bg-accent-hover text-white"
+              onClick={() => mutation.mutate(value)}
+              disabled={mutation.isPending}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 }
 
-// --- Base URL field ---
+// --- Base URL — click to edit ---
 
 function BaseURLField({ providerId, providerType, currentURL }: { providerId: string; providerType: string; currentURL: string }) {
   const defaultURL = DEFAULT_BASE_URLS[providerType] ?? ''
   const displayURL = currentURL || defaultURL
-  const [editing, setEditing] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
   const [value, setValue] = useState(displayURL)
   const queryClient = useQueryClient()
 
@@ -228,58 +318,52 @@ function BaseURLField({ providerId, providerType, currentURL }: { providerId: st
     mutationFn: (url: string) => api.updateProvider(providerId, { base_url: url }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['provider-statuses'] })
-      setEditing(false)
+      setModalOpen(false)
     },
   })
 
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-zinc-400 font-mono truncate max-w-[180px] inline-block overflow-x-auto provider-scroll">{displayURL || 'Not set'}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs text-zinc-400 hover:text-zinc-200 shrink-0"
-          onClick={() => { setEditing(true); setValue(displayURL) }}
-        >
-          Edit
-        </Button>
-      </div>
-    )
+  const handleOpen = () => {
+    setValue(displayURL)
+    setModalOpen(true)
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder={defaultURL || 'https://api.example.com'}
-        className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
-        autoFocus
-      />
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-xs text-emerald-400 hover:text-emerald-300"
-        onClick={() => mutation.mutate(value)}
-        disabled={mutation.isPending}
-      >
-        <Check className="w-3 h-3" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-xs text-zinc-500 hover:text-zinc-300"
-        onClick={() => { setEditing(false); setValue(displayURL) }}
-      >
-        Cancel
-      </Button>
-    </div>
+    <>
+      <button onClick={handleOpen} className="text-left group min-w-0">
+        <span className="text-[11px] text-fg-secondary font-mono truncate max-w-[200px] inline-block provider-scroll group-hover:text-fg transition-colors cursor-pointer">
+          {displayURL || 'Not set'}
+        </span>
+      </button>
+
+      <Modal title="Base URL" open={modalOpen} onClose={() => setModalOpen(false)}>
+        <div className="space-y-4">
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') mutation.mutate(value) }}
+            placeholder={defaultURL || 'https://api.example.com'}
+            className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:ring-1 focus:ring-accent"
+            autoFocus
+          />
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-accent hover:bg-accent-hover text-white"
+              onClick={() => mutation.mutate(value)}
+              disabled={mutation.isPending}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 }
 
-// --- Provider Card ---
+// --- Unified Provider Card ---
 
 function ProviderCard({
   provider,
@@ -292,14 +376,10 @@ function ProviderCard({
 }) {
   const queryClient = useQueryClient()
 
-  // Can this provider be activated?
-  // API providers need a key (or are Ollama which needs none).
-  // CLI providers need a detected binary.
   const isOllama = provider.provider_type === 'ollama'
   const canActivate = isCLI
     ? (detection?.detected ?? false)
     : (provider.has_api_key || isOllama)
-
   const isActive = provider.is_enabled && canActivate
 
   const toggleMutation = useMutation({
@@ -316,67 +396,52 @@ function ProviderCard({
   })
 
   return (
-    <div className={`rounded-lg border p-3 transition-colors w-[280px] min-w-[280px] max-w-[280px] ${
+    <div className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
       isActive
-        ? 'border-zinc-700 bg-zinc-900/50'
-        : 'border-zinc-800 bg-zinc-950/50'
+        ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
+        : 'border-border bg-white dark:bg-bg/30 opacity-45'
     }`}>
-      {/* Header: icon, name, toggle */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <ProviderIcon providerType={provider.provider_type} />
-          <div className="min-w-0">
-            <div className={`text-sm font-medium truncate ${isActive ? 'text-zinc-200' : 'text-zinc-500'}`}>
+      {/* Header: Icon · Name · Status dot · Toggle */}
+      <div className="flex items-center gap-2.5 px-3.5 py-3">
+        <ProviderIcon providerType={provider.provider_type} active={isActive} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`text-sm font-semibold truncate ${isActive ? 'text-fg' : 'text-fg-muted'}`}>
               {provider.name}
-            </div>
-            {isActive && (
-              <span className="text-[11px] text-emerald-400 flex items-center gap-1">
-                <CircleCheck className="w-2.5 h-2.5" /> Active
-              </span>
-            )}
-            {!canActivate && !isCLI && !isOllama && (
-              <span className="text-[11px] text-zinc-500">Needs API key</span>
-            )}
-            {!canActivate && isCLI && (
-              <span className="text-[11px] text-amber-400 flex items-center gap-1">
-                <AlertTriangle className="w-2.5 h-2.5" /> Not found
-              </span>
-            )}
-            {canActivate && !provider.is_enabled && (
-              <span className="text-[11px] text-zinc-500">Disabled</span>
-            )}
+            </span>
+            {isActive && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+            {!canActivate && <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />}
           </div>
         </div>
-
         <button
           onClick={() => canActivate && toggleMutation.mutate(!provider.is_enabled)}
           disabled={!canActivate}
           className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
             isActive
-              ? 'bg-indigo-600'
+              ? 'bg-toggle-on'
               : canActivate
-                ? 'bg-zinc-700 hover:bg-zinc-600'
-                : 'bg-zinc-800 cursor-not-allowed opacity-40'
+                ? 'bg-zinc-700 hover:bg-surface-hover'
+                : 'bg-surface cursor-not-allowed'
           }`}
         >
-          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+          <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
             isActive ? 'translate-x-4.5' : 'translate-x-0.5'
           }`} />
         </button>
       </div>
 
-      {/* Config fields */}
-      <div className="mt-2 space-y-2">
+      {/* Detail footer */}
+      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center gap-3">
+        {/* Field 1: Key / Path / Host */}
         {!isCLI && !isOllama && (
-          <div>
-            <div className="text-[11px] text-zinc-500 mb-0.5">API Key</div>
-            <APIKeyField providerId={provider.id} hasKey={provider.has_api_key} />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <KeyIcon />
+            <APIKeyField provider={provider} />
           </div>
         )}
-
         {isCLI && (
-          <div>
-            <div className="text-[11px] text-zinc-500 mb-0.5">CLI Path</div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <FolderIcon />
             <CLIPathField
               providerId={provider.id}
               providerSettings={provider.settings}
@@ -384,17 +449,9 @@ function ProviderCard({
             />
           </div>
         )}
-
-        {!isCLI && !isOllama && (
-          <div>
-            <div className="text-[11px] text-zinc-500 mb-0.5">Base URL</div>
-            <BaseURLField providerId={provider.id} providerType={provider.provider_type} currentURL={provider.base_url} />
-          </div>
-        )}
-
         {isOllama && (
-          <div>
-            <div className="text-[11px] text-zinc-500 mb-0.5">Host</div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <LinkIcon />
             <BaseURLField
               providerId={provider.id}
               providerType={provider.provider_type}
@@ -402,15 +459,74 @@ function ProviderCard({
             />
           </div>
         )}
+
+        {/* Separator + Field 2 */}
+        {!isCLI && !isOllama && (
+          <>
+            <div className="w-px h-3.5 bg-border shrink-0" />
+            <div className="flex items-center gap-1.5 min-w-0">
+              <LinkIcon />
+              <BaseURLField providerId={provider.id} providerType={provider.provider_type} currentURL={provider.base_url} />
+            </div>
+          </>
+        )}
+        {isCLI && (
+          <>
+            <div className="w-px h-3.5 bg-border shrink-0" />
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] text-fg-muted">
+                {detection?.detected ? 'Auto-detected' : 'Manual'}
+              </span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
 }
 
+// --- Skeleton loader ---
+
+function ProviderCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border overflow-hidden animate-pulse">
+      <div className="flex items-center gap-2.5 px-3.5 py-3">
+        <div className="w-9 h-9 rounded-lg bg-surface" />
+        <div className="h-4 bg-surface rounded w-28" />
+        <div className="flex-1" />
+        <div className="w-9 h-5 bg-surface rounded-full" />
+      </div>
+      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center gap-3">
+        <div className="h-3 bg-surface rounded w-16" />
+        <div className="h-3 bg-surface rounded w-40" />
+      </div>
+    </div>
+  )
+}
+
+// --- Sort dropdown ---
+
+type SortOption = 'alpha' | 'status' | 'updated'
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'status', label: 'Status' },
+  { value: 'alpha', label: 'Alphabetical' },
+  { value: 'updated', label: 'Recently Updated' },
+]
+
+// --- Filter types ---
+type StatusFilter = 'all' | 'active' | 'inactive'
+type ProviderTab = 'http' | 'pty'
+
 // --- Main Component ---
 
 export function ProviderManager() {
-  const { data: providers } = useQuery({
+  const [activeTab, setActiveTab] = useState<ProviderTab>('http')
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [sortBy, setSortBy] = useState<SortOption>('status')
+  const [sortMenuOpen, setSortMenuOpen] = useState(false)
+
+  const { data: providers, isLoading } = useQuery({
     queryKey: ['provider-statuses'],
     queryFn: api.listProviderStatuses,
     staleTime: 30_000,
@@ -435,67 +551,197 @@ export function ProviderManager() {
   const apiProviders = providers?.filter((p) => !isCLIProvider(p.provider_type)) ?? []
   const cliProviders = providers?.filter((p) => isCLIProvider(p.provider_type)) ?? []
 
+  const isConfigured = useCallback((p: ProviderStatus) => {
+    if (isCLIProvider(p.provider_type)) {
+      return getDetection(p.provider_type)?.detected ?? false
+    }
+    return p.has_api_key || p.provider_type === 'ollama'
+  }, [isCLIProvider, getDetection])
+
+  const filteredProviders = useMemo(() => {
+    let list = activeTab === 'http' ? apiProviders : cliProviders
+
+    if (search) {
+      const q = search.toLowerCase()
+      list = list.filter((p) => p.name.toLowerCase().includes(q))
+    }
+
+    if (statusFilter === 'active') {
+      list = list.filter((p) => p.is_enabled && isConfigured(p))
+    } else if (statusFilter === 'inactive') {
+      list = list.filter((p) => !p.is_enabled || !isConfigured(p))
+    }
+
+    if (sortBy === 'alpha') {
+      list = [...list].sort((a, b) => a.name.localeCompare(b.name))
+    } else if (sortBy === 'status') {
+      list = [...list].sort((a, b) => {
+        const aActive = a.is_enabled && isConfigured(a) ? 1 : 0
+        const bActive = b.is_enabled && isConfigured(b) ? 1 : 0
+        return bActive - aActive || a.name.localeCompare(b.name)
+      })
+    } else if (sortBy === 'updated') {
+      list = [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    }
+
+    return list
+  }, [activeTab, apiProviders, cliProviders, search, statusFilter, sortBy, isConfigured])
+
+  const filterButtons: { value: StatusFilter; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'active', label: 'Active' },
+    { value: 'inactive', label: 'Inactive' },
+  ]
+
   return (
-    <div className="space-y-8">
-      {/* API Providers */}
-      <div>
-        <div className="border-b border-zinc-800 pb-2 mb-4">
-          <div className="flex items-center gap-2">
-            <Globe className="w-4 h-4 text-zinc-400" />
-            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-              API Providers
-            </h3>
-          </div>
-          <p className="text-xs text-zinc-500 mt-1">
-            Cloud-hosted LLM APIs. Set your API key to activate.
-          </p>
+    <div className="space-y-4">
+      {/* Toolbar: Tabs + Controls */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Tabs */}
+        <div className="flex items-center gap-1 bg-surface/50 rounded-lg p-0.5">
+          <button
+            onClick={() => setActiveTab('http')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'http'
+                ? 'bg-bg-elevated text-fg shadow-sm'
+                : 'text-fg-muted hover:text-fg-secondary'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            HTTP
+            <span className="text-[11px] text-fg-faint tabular-nums">{apiProviders.length}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('pty')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'pty'
+                ? 'bg-bg-elevated text-fg shadow-sm'
+                : 'text-fg-muted hover:text-fg-secondary'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            PTY
+            <span className="text-[11px] text-fg-faint tabular-nums">{cliProviders.length}</span>
+          </button>
         </div>
-        <div className="flex flex-wrap gap-3">
-          {apiProviders.map((p) => (
-            <ProviderCard key={p.id} provider={p} isCLI={false} />
+
+        {/* Re-detect (PTY tab only) */}
+        {activeTab === 'pty' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-fg-secondary hover:text-fg"
+            onClick={() => refetchCLI()}
+            disabled={detectingCLI}
+          >
+            {detectingCLI ? (
+              <RefreshCw className="w-3 h-3 animate-spin mr-1" />
+            ) : (
+              <FolderSearch className="w-3.5 h-3.5 mr-1" />
+            )}
+            Re-detect
+          </Button>
+        )}
+
+        <div className="flex-1" />
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter..."
+            className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+          />
+        </div>
+
+        {/* Status filter */}
+        <div className="flex items-center bg-surface/50 rounded-md p-0.5">
+          {filterButtons.map((f) => (
+            <button
+              key={f.value}
+              onClick={() => setStatusFilter(f.value)}
+              className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                statusFilter === f.value
+                  ? 'bg-bg-elevated text-fg shadow-sm'
+                  : 'text-fg-muted hover:text-fg-secondary'
+              }`}
+            >
+              {f.label}
+            </button>
           ))}
+        </div>
+
+        {/* Sort */}
+        <div className="relative">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-fg-secondary hover:text-fg gap-1"
+            onClick={() => setSortMenuOpen(!sortMenuOpen)}
+          >
+            <ArrowUpDown className="w-3.5 h-3.5" />
+            {SORT_OPTIONS.find((o) => o.value === sortBy)?.label}
+          </Button>
+          {sortMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 w-44 bg-bg-elevated border border-border-subtle rounded-lg shadow-xl py-1">
+                {SORT_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => { setSortBy(opt.value); setSortMenuOpen(false) }}
+                    className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${
+                      sortBy === opt.value
+                        ? 'text-fg bg-surface'
+                        : 'text-fg-secondary hover:bg-surface/50 hover:text-fg'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* CLI Providers */}
-      <div>
-        <div className="border-b border-zinc-800 pb-2 mb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-zinc-400" />
-              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-                CLI Providers
-              </h3>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs text-zinc-400 hover:text-zinc-200"
-              onClick={() => refetchCLI()}
-              disabled={detectingCLI}
-            >
-              <FolderSearch className="w-3.5 h-3.5 mr-1.5" />
-              {detectingCLI ? (
-                <RefreshCw className="w-3 h-3 animate-spin" />
-              ) : (
-                'Re-detect'
-              )}
-            </Button>
+      {/* Provider list */}
+      <div className="grid grid-cols-2 gap-3">
+        {isLoading && (
+          <>
+            <ProviderCardSkeleton />
+            <ProviderCardSkeleton />
+            <ProviderCardSkeleton />
+            <ProviderCardSkeleton />
+          </>
+        )}
+
+        {!isLoading && filteredProviders.length === 0 && (
+          <div className="col-span-2 flex flex-col items-center justify-center py-12 text-center">
+            <Search className="w-8 h-8 text-fg-faint mb-3" />
+            <p className="text-sm text-fg-muted">No providers match your filter</p>
+            {(search || statusFilter !== 'all') && (
+              <button
+                onClick={() => { setSearch(''); setStatusFilter('all') }}
+                className="text-xs text-accent hover:text-accent-hover mt-2 transition-colors"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
-          <p className="text-xs text-zinc-500 mt-1">
-            Local CLI tools spawned via PTY. Auto-detected from your PATH.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-3">
-          {cliProviders.map((p) => (
-            <ProviderCard
-              key={p.id}
-              provider={p}
-              detection={getDetection(p.provider_type)}
-              isCLI
-            />
-          ))}
-        </div>
+        )}
+
+        {filteredProviders.map((p) => (
+          <ProviderCard
+            key={p.id}
+            provider={p}
+            detection={isCLIProvider(p.provider_type) ? getDetection(p.provider_type) : undefined}
+            isCLI={isCLIProvider(p.provider_type)}
+          />
+        ))}
       </div>
     </div>
   )

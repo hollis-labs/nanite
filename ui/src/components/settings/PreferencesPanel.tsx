@@ -1,10 +1,9 @@
 import { useMemo, useEffect, useState, useCallback, useRef } from 'react'
-import { GripVertical, X } from 'lucide-react'
+import { GripVertical, X, ChevronDown } from 'lucide-react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useSettings, useSettingsMutation, useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
 import type { ToolCallDisplayMode } from '@/lib/types'
-
 
 const TOOL_DISPLAY_OPTIONS: { value: ToolCallDisplayMode; label: string }[] = [
   { value: 'indicator', label: 'Indicator' },
@@ -13,34 +12,70 @@ const TOOL_DISPLAY_OPTIONS: { value: ToolCallDisplayMode; label: string }[] = [
   { value: 'full', label: 'Full' },
 ]
 
-function SettingsSelect({
+// --- Shared components ---
+
+function SettingsCard({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/50">
+        <h3 className="text-sm font-semibold text-fg">{title}</h3>
+        {description && (
+          <p className="text-[11px] text-fg-muted mt-0.5">{description}</p>
+        )}
+      </div>
+      <div className="px-4 py-2">{children}</div>
+    </div>
+  )
+}
+
+function SettingsRow({
   label,
   description,
+  children,
+}: {
+  label: string
+  description?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2.5">
+      <div className="min-w-0">
+        <div className="text-sm text-fg">{label}</div>
+        {description && (
+          <div className="text-[11px] text-fg-muted mt-0.5">{description}</div>
+        )}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  )
+}
+
+function SettingsSelect({
   value,
   options,
   onChange,
   disabled,
 }: {
-  label: string
-  description?: string
   value: string
   options: { value: string; label: string }[]
   onChange: (value: string) => void
   disabled?: boolean
 }) {
   return (
-    <div className="flex items-start justify-between gap-8 py-3">
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-zinc-200">{label}</div>
-        {description && (
-          <div className="text-xs text-zinc-500 mt-0.5">{description}</div>
-        )}
-      </div>
+    <div className="relative">
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="shrink-0 w-56 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
       >
         <option value="">None</option>
         {options.map((opt) => (
@@ -49,17 +84,44 @@ function SettingsSelect({
           </option>
         ))}
       </select>
+      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
     </div>
   )
 }
 
-function SectionHeader({ title }: { title: string }) {
+function Toggle({
+  checked,
+  onChange,
+  variant = 'default',
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  variant?: 'default' | 'warning'
+}) {
   return (
-    <div className="border-b border-zinc-800 pb-2 mb-1">
-      <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{title}</h3>
-    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+        checked
+          ? variant === 'warning'
+            ? 'bg-amber-600'
+            : 'bg-toggle-on'
+          : 'bg-surface-hover'
+      }`}
+    >
+      <span
+        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+          checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
+        }`}
+      />
+    </button>
   )
 }
+
+// --- Fallback Chain ---
 
 function FallbackChain({
   chain,
@@ -74,7 +136,6 @@ function FallbackChain({
   const dragItem = useRef<number | null>(null)
   const dragOverItem = useRef<number | null>(null)
 
-  // Sync when external chain changes.
   useEffect(() => {
     setItems(chain)
   }, [chain])
@@ -125,9 +186,9 @@ function FallbackChain({
   const available = providers.filter((p) => !items.includes(p.value))
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {items.length === 0 && (
-        <div className="text-xs text-zinc-600 py-2">No providers in fallback chain. Add one below.</div>
+        <div className="text-[11px] text-fg-faint py-3">No providers in fallback chain. Add one below.</div>
       )}
       {items.map((id, idx) => (
         <div
@@ -137,39 +198,42 @@ function FallbackChain({
           onDragEnter={() => handleDragEnter(idx)}
           onDragEnd={handleDragEnd}
           onDragOver={(e) => e.preventDefault()}
-          className="flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md text-sm text-zinc-200 cursor-grab active:cursor-grabbing hover:border-zinc-600 transition-colors"
+          className="flex items-center gap-2 px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-sm text-fg cursor-grab active:cursor-grabbing hover:shadow-sm transition-all"
         >
-          <GripVertical className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
-          <span className="text-xs text-zinc-500 tabular-nums w-5">{idx + 1}.</span>
+          <GripVertical className="w-3.5 h-3.5 text-fg-faint shrink-0" />
+          <span className="text-[11px] text-fg-muted tabular-nums w-5">{idx + 1}.</span>
           <span className="flex-1">{providerLabel(id)}</span>
           <button
             onClick={() => handleRemove(idx)}
-            className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
           >
             <X className="w-3 h-3" />
           </button>
         </div>
       ))}
       {available.length > 0 && (
-        <div className="flex items-center gap-2 pt-1">
+        <div className="relative">
           <select
             onChange={(e) => {
               handleAdd(e.target.value)
               e.target.value = ''
             }}
             defaultValue=""
-            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+            className="appearance-none w-full bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent cursor-pointer"
           >
             <option value="" disabled>Add provider...</option>
             {available.map((p) => (
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
           </select>
+          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
         </div>
       )}
     </div>
   )
 }
+
+// --- Main panel ---
 
 export function PreferencesPanel() {
   const { data: settings } = useSettings()
@@ -183,7 +247,6 @@ export function PreferencesPanel() {
     placeholderData: keepPreviousData,
   })
 
-  // Migrate toolCallDisplayMode from localStorage on first load.
   useEffect(() => {
     if (!settings) return
     const stored = localStorage.getItem('conduit:toolCallDisplayMode')
@@ -226,50 +289,38 @@ export function PreferencesPanel() {
   }
 
   return (
-    <div className="max-w-2xl space-y-8">
-      {/* Defaults */}
-      <div>
-        <SectionHeader title="Session Defaults" />
-        <div className="divide-y divide-zinc-800/50">
+    <div className="space-y-3">
+      <SettingsCard title="Session Defaults" description="Defaults applied when creating new chat sessions">
+        <SettingsRow label="Provider" description="Provider for new sessions">
           <SettingsSelect
-            label="Default Provider"
-            description="Provider for new sessions"
             value={settings?.default_provider ?? ''}
             options={providerOptions}
             onChange={(v) => {
-              // Batch provider + model clear into a single mutation to avoid race.
               mutation.mutate(settings?.default_model
                 ? { default_provider: v, default_model: '' }
                 : { default_provider: v })
             }}
           />
+        </SettingsRow>
+        <SettingsRow label="Model" description="Model for new sessions">
           <SettingsSelect
-            label="Default Model"
-            description="Model for new sessions"
             value={settings?.default_model ?? ''}
             options={modelOptionsForProvider}
             onChange={(v) => handleChange('default_model', v)}
           />
+        </SettingsRow>
+        <SettingsRow label="Agent" description="Agent profile for new sessions">
           <SettingsSelect
-            label="Default Agent"
-            description="Agent profile assigned to new sessions"
             value={settings?.default_agent ?? ''}
             options={agentOptions}
             onChange={(v) => handleChange('default_agent', v)}
           />
-        </div>
-      </div>
+        </SettingsRow>
+      </SettingsCard>
 
-      {/* Utility Model */}
-      <div>
-        <SectionHeader title="Utility Model" />
-        <p className="text-xs text-zinc-500 mb-2">
-          Used for background tasks like auto-title, auto-tags, and summarization.
-        </p>
-        <div className="divide-y divide-zinc-800/50">
+      <SettingsCard title="Utility Model" description="Used for auto-title, auto-tags, and summarization">
+        <SettingsRow label="Provider">
           <SettingsSelect
-            label="Utility Provider"
-            description="Provider for utility calls"
             value={settings?.utility_provider ?? ''}
             options={providerOptions}
             onChange={(v) => {
@@ -278,95 +329,49 @@ export function PreferencesPanel() {
                 : { utility_provider: v })
             }}
           />
+        </SettingsRow>
+        <SettingsRow label="Model">
           <SettingsSelect
-            label="Utility Model"
-            description="Model for utility calls"
             value={settings?.utility_model ?? ''}
             options={utilityModelOptions}
             onChange={(v) => handleChange('utility_model', v)}
           />
-        </div>
-      </div>
+        </SettingsRow>
+      </SettingsCard>
 
-      {/* Display */}
-      <div>
-        <SectionHeader title="Display" />
-        <div className="divide-y divide-zinc-800/50">
+      <SettingsCard title="Display">
+        <SettingsRow label="Tool Call Display" description="How tool calls appear in chat">
           <SettingsSelect
-            label="Tool Call Display"
-            description="How tool calls appear in chat"
             value={settings?.tool_call_display_mode ?? 'minimal'}
             options={TOOL_DISPLAY_OPTIONS}
             onChange={(v) => handleChange('tool_call_display_mode', v)}
           />
-        </div>
-      </div>
+        </SettingsRow>
+      </SettingsCard>
 
-      {/* Fallback Chain */}
-      <div>
-        <SectionHeader title="Provider Fallback Chain" />
-        <p className="text-xs text-zinc-500 mb-3">
-          When a provider is unavailable, Conduit tries the next one in order. Drag to reorder.
-        </p>
+      <SettingsCard title="Provider Fallback Chain" description="When a provider is unavailable, Conduit tries the next one. Drag to reorder.">
         <FallbackChain
           chain={settings?.provider_fallback_chain ?? []}
           providers={providerOptions}
           onChange={(chain) => mutation.mutate({ provider_fallback_chain: chain })}
         />
-      </div>
+      </SettingsCard>
 
-      {/* Advanced */}
-      <div>
-        <SectionHeader title="Advanced" />
-        <div className="divide-y divide-zinc-800/50">
-          <div className="flex items-start justify-between gap-8 py-3">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-zinc-200">Developer Mode</div>
-              <div className="text-xs text-zinc-500 mt-0.5">
-                Allow plugins to register custom React components for config fields.
-              </div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings?.developer_mode ?? false}
-              onClick={() => mutation.mutate({ developer_mode: !(settings?.developer_mode ?? false) })}
-              className={`relative shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                settings?.developer_mode ? 'bg-indigo-600' : 'bg-zinc-700'
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                  settings?.developer_mode ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
-          </div>
-          <div className="flex items-start justify-between gap-8 py-3">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-zinc-200">Recover Mode</div>
-              <div className="text-xs text-zinc-500 mt-0.5">
-                Disable all plugin UI overrides and render default primitives only.
-              </div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings?.recover_mode ?? false}
-              onClick={() => mutation.mutate({ recover_mode: !(settings?.recover_mode ?? false) })}
-              className={`relative shrink-0 inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                settings?.recover_mode ? 'bg-amber-600' : 'bg-zinc-700'
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                  settings?.recover_mode ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
-          </div>
-        </div>
-      </div>
+      <SettingsCard title="Advanced">
+        <SettingsRow label="Developer Mode" description="Allow plugins to register custom React components">
+          <Toggle
+            checked={settings?.developer_mode ?? false}
+            onChange={(v) => mutation.mutate({ developer_mode: v })}
+          />
+        </SettingsRow>
+        <SettingsRow label="Recover Mode" description="Disable all plugin UI overrides">
+          <Toggle
+            checked={settings?.recover_mode ?? false}
+            onChange={(v) => mutation.mutate({ recover_mode: v })}
+            variant="warning"
+          />
+        </SettingsRow>
+      </SettingsCard>
     </div>
   )
 }

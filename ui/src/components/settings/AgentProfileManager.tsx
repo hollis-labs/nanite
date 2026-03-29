@@ -284,7 +284,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
       case 'system': return 'bg-blue-500'
       case 'mode': return 'bg-green-500'
       case 'skill': return 'bg-yellow-500'
-      case 'context': return 'bg-purple-500'
+      case 'context': return 'bg-accent'
       default: return 'bg-gray-500'
     }
   }
@@ -311,7 +311,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-zinc-100">Agent Profiles</h2>
+          <h2 className="text-xl font-semibold text-fg">Agent Profiles</h2>
           <Button
             onClick={() => setShowCreateForm(true)}
             className="gap-2"
@@ -330,8 +330,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 onClick={() => setSourceFilter(s)}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                   sourceFilter === s
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+                    ? 'bg-accent text-white'
+                    : 'bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover'
                 }`}
               >
                 {s === 'all' ? 'All' : s}
@@ -341,12 +341,12 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-1.5 text-xs text-zinc-400 ml-auto cursor-pointer select-none">
+          <label className="flex items-center gap-1.5 text-xs text-fg-secondary ml-auto cursor-pointer select-none">
             <input
               type="checkbox"
               checked={showDisabled}
               onChange={(e) => setShowDisabled(e.target.checked)}
-              className="rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-zinc-900"
+              className="rounded border-border-subtle bg-surface text-accent focus:ring-accent focus:ring-offset-bg-elevated"
             />
             Show disabled
           </label>
@@ -354,56 +354,61 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
+            <Loader2 className="w-6 h-6 animate-spin text-fg-secondary" />
           </div>
         ) : filteredAgents.length === 0 ? (
-          <div className="text-center py-8 text-zinc-500">
+          <div className="text-center py-8 text-fg-muted">
             {agents.length === 0
               ? 'No agent profiles found. Create your first agent to get started.'
               : 'No agents match the current filters.'}
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredAgents.map((agent) => (
-              <div
-                key={agent.id}
-                className={`bg-zinc-800 rounded-lg p-4 border transition-colors cursor-pointer ${
-                  agent.status === 'disabled'
-                    ? 'border-zinc-700/50 opacity-60 hover:opacity-80'
-                    : 'border-zinc-700 hover:border-zinc-600'
-                }`}
-                onClick={() => setSelectedAgent(agent.id)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="relative w-10 h-10 rounded-full bg-zinc-700 flex items-center justify-center shrink-0">
-                    {agent.avatar ? (
-                      <span className="text-lg">{agent.avatar}</span>
-                    ) : (
-                      <User className="w-5 h-5 text-zinc-400" />
-                    )}
-                    <span className="absolute -bottom-0.5 -right-0.5 border-2 border-zinc-800 rounded-full">
-                      <StatusDot status={agent.status || 'active'} size="md" />
+          <div className="grid gap-3 grid-cols-2">
+            {filteredAgents.map((agent) => {
+              const isActive = agent.status !== 'disabled'
+              return (
+                <div
+                  key={agent.id}
+                  className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer ${
+                    isActive
+                      ? 'border-border-subtle bg-white dark:bg-bg-elevated/60 hover:shadow-md'
+                      : 'border-border bg-white dark:bg-bg/30 opacity-45'
+                  }`}
+                  onClick={() => setSelectedAgent(agent.id)}
+                >
+                  {/* Header: Icon · Name · Status dot */}
+                  <div className="flex items-center gap-2.5 px-3.5 py-3">
+                    <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-sm shrink-0 ${
+                      isActive
+                        ? 'bg-zinc-700 text-zinc-300'
+                        : 'bg-zinc-300 text-zinc-500'
+                    }`}>
+                      {agent.avatar || <User className="w-4 h-4" />}
                     </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm font-semibold truncate ${isActive ? 'text-fg' : 'text-fg-muted'}`}>
+                          {agent.name}
+                        </span>
+                        {isActive && <StatusDot status={agent.status || 'active'} />}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[11px] text-fg-muted font-mono truncate">{agent.slug}</span>
+                        <SourceBadge source={agent.source} />
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium text-zinc-100 truncate">{agent.name}</h3>
-                      <SourceBadge source={agent.source} className="bg-zinc-700" />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm text-zinc-400 truncate">{agent.slug}</p>
-                      {agent.version > 0 && (
-                        <span className="text-[10px] text-zinc-600">v{agent.version}</span>
-                      )}
-                    </div>
+
+                  {/* Detail footer */}
+                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex flex-col gap-1.5">
                     {agent.description && (
-                      <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{agent.description}</p>
+                      <p className="text-[11px] text-fg-muted line-clamp-2">{agent.description}</p>
                     )}
-                    <TagPills tags={agent.tags} max={4} className="mt-1.5" />
+                    <TagPills tags={agent.tags} max={4} />
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -422,7 +427,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <h2 className="text-xl font-semibold text-zinc-100">Create Agent Profile</h2>
+          <h2 className="text-xl font-semibold text-fg">Create Agent Profile</h2>
         </div>
 
         <form
@@ -434,22 +439,22 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         >
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Name</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
               <input
                 name="name"
                 type="text"
                 required
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 placeholder="Agent name"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Slug</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
               <input
                 name="slug"
                 type="text"
                 required
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 placeholder="agent-slug"
               />
             </div>
@@ -457,19 +462,19 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Avatar (emoji)</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Avatar (emoji)</label>
               <input
                 name="avatar"
                 type="text"
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 placeholder="🤖"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Default Model</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Default Model</label>
               <select
                 name="default_model"
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               >
                 {modelOptions.map((model) => (
                   <option key={model.id} value={model.id}>
@@ -481,43 +486,43 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Description</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Description</label>
             <input
               name="description"
               type="text"
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               placeholder="Brief description of the agent"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">System Prompt</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">System Prompt</label>
             <textarea
               name="system_prompt"
               required
               rows={8}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder="Enter the system prompt for this agent..."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">MCP Servers (JSON)</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">MCP Servers (JSON)</label>
             <textarea
               name="mcp_servers"
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder='[]'
               defaultValue="[]"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Tool Permissions (JSON)</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Permissions (JSON)</label>
             <textarea
               name="tool_permissions"
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder='{"allow": ["*"], "deny": []}'
               defaultValue="{}"
             />
@@ -528,57 +533,57 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               <input
                 name="can_execute"
                 type="checkbox"
-                className="rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-zinc-900"
+                className="rounded border-border-subtle bg-surface text-accent focus:ring-accent focus:ring-offset-bg-elevated"
               />
-              <span className="text-sm font-medium text-zinc-300">Can Execute Tools</span>
+              <span className="text-sm font-medium text-fg-secondary">Can Execute Tools</span>
             </label>
           </div>
 
           {/* v2 fields */}
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Tags</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Tags</label>
             <input
               name="tags"
               type="text"
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm"
               placeholder="backend, go, infra (comma-separated)"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Tools Allowlist</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Tools Allowlist</label>
             <textarea
               name="tools"
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder={"mcp__engine__*\nmcp__cortex__*\n(one glob pattern per line, empty = all tools)"}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Directories</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Directories</label>
             <textarea
               name="directories"
               rows={2}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder={"internal/api/\nui/src/\n(one path per line)"}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Constraints</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Constraints</label>
             <div className="grid gap-4 md:grid-cols-3">
               <div>
-                <label className="block text-xs text-zinc-500 mb-1">Max Iterations</label>
-                <input name="max_iterations" type="number" min="0" className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="10" />
+                <label className="block text-xs text-fg-muted mb-1">Max Iterations</label>
+                <input name="max_iterations" type="number" min="0" className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="10" />
               </div>
               <div>
-                <label className="block text-xs text-zinc-500 mb-1">Max Time (seconds)</label>
-                <input name="max_time_seconds" type="number" min="0" className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="300" />
+                <label className="block text-xs text-fg-muted mb-1">Max Time (seconds)</label>
+                <input name="max_time_seconds" type="number" min="0" className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="300" />
               </div>
               <div>
-                <label className="block text-xs text-zinc-500 mb-1">Retry Budget</label>
-                <input name="retry_budget" type="number" min="0" className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="3" />
+                <label className="block text-xs text-fg-muted mb-1">Retry Budget</label>
+                <input name="retry_budget" type="number" min="0" className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="3" />
               </div>
             </div>
           </div>
@@ -625,7 +630,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <h2 className="text-xl font-semibold text-zinc-100">Edit {agent.name}</h2>
+            <h2 className="text-xl font-semibold text-fg">Edit {agent.name}</h2>
           </div>
 
           <form
@@ -637,43 +642,43 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Name</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
                 <input
                   name="name"
                   type="text"
                   required
                   defaultValue={agent.name}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Slug</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
                 <input
                   name="slug"
                   type="text"
                   required
                   defaultValue={agent.slug}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 />
               </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Avatar (emoji)</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Avatar (emoji)</label>
                 <input
                   name="avatar"
                   type="text"
                   defaultValue={agent.avatar}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Default Model</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Default Model</label>
                 <select
                   name="default_model"
                   defaultValue={agent.default_model}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 >
                   {modelOptions.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -685,43 +690,43 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Description</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Description</label>
               <input
                 name="description"
                 type="text"
                 defaultValue={agent.description}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">System Prompt</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">System Prompt</label>
               <textarea
                 name="system_prompt"
                 required
                 rows={8}
                 defaultValue={agent.system_prompt}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">MCP Servers (JSON)</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">MCP Servers (JSON)</label>
               <textarea
                 name="mcp_servers"
                 rows={3}
                 defaultValue={agent.mcp_servers}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Tool Permissions (JSON)</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Permissions (JSON)</label>
               <textarea
                 name="tool_permissions"
                 rows={3}
                 defaultValue={agent.tool_permissions}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               />
             </div>
 
@@ -731,19 +736,19 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                   name="can_execute"
                   type="checkbox"
                   defaultChecked={agent.can_execute}
-                  className="rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-zinc-900"
+                  className="rounded border-border-subtle bg-surface text-accent focus:ring-accent focus:ring-offset-bg-elevated"
                 />
-                <span className="text-sm font-medium text-zinc-300">Can Execute Tools</span>
+                <span className="text-sm font-medium text-fg-secondary">Can Execute Tools</span>
               </label>
             </div>
 
             {/* v2 fields */}
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Status</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Status</label>
               <select
                 name="status"
                 defaultValue={agent.status || 'active'}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm"
               >
                 <option value="active">Active</option>
                 <option value="disabled">Disabled</option>
@@ -754,56 +759,56 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Tags</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Tags</label>
               <input
                 name="tags"
                 type="text"
                 defaultValue={(() => { try { return JSON.parse(agent.tags || '[]').join(', ') } catch { return '' } })()}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm"
                 placeholder="backend, go, infra (comma-separated)"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Tools Allowlist</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Tools Allowlist</label>
               <textarea
                 name="tools"
                 rows={3}
                 defaultValue={(() => { try { return JSON.parse(agent.tools || '[]').join('\n') } catch { return '' } })()}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
                 placeholder={"mcp__engine__*\nmcp__cortex__*\n(one glob pattern per line, empty = all tools)"}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Directories</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Directories</label>
               <textarea
                 name="directories"
                 rows={2}
                 defaultValue={(() => { try { return JSON.parse(agent.directories || '[]').join('\n') } catch { return '' } })()}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
                 placeholder={"internal/api/\nui/src/\n(one path per line)"}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Constraints</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Constraints</label>
               {(() => {
                 let c: Record<string, number> = {}
                 try { c = JSON.parse(agent.constraints || '{}') } catch { /* ignore */ }
                 return (
                   <div className="grid gap-4 md:grid-cols-3">
                     <div>
-                      <label className="block text-xs text-zinc-500 mb-1">Max Iterations</label>
-                      <input name="max_iterations" type="number" min="0" defaultValue={c.max_iterations || ''} className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="10" />
+                      <label className="block text-xs text-fg-muted mb-1">Max Iterations</label>
+                      <input name="max_iterations" type="number" min="0" defaultValue={c.max_iterations || ''} className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="10" />
                     </div>
                     <div>
-                      <label className="block text-xs text-zinc-500 mb-1">Max Time (seconds)</label>
-                      <input name="max_time_seconds" type="number" min="0" defaultValue={c.max_time_seconds || ''} className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="300" />
+                      <label className="block text-xs text-fg-muted mb-1">Max Time (seconds)</label>
+                      <input name="max_time_seconds" type="number" min="0" defaultValue={c.max_time_seconds || ''} className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="300" />
                     </div>
                     <div>
-                      <label className="block text-xs text-zinc-500 mb-1">Retry Budget</label>
-                      <input name="retry_budget" type="number" min="0" defaultValue={c.retry_budget || ''} className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 text-sm" placeholder="3" />
+                      <label className="block text-xs text-fg-muted mb-1">Retry Budget</label>
+                      <input name="retry_budget" type="number" min="0" defaultValue={c.retry_budget || ''} className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="3" />
                     </div>
                   </div>
                 )
@@ -811,31 +816,31 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
             </div>
 
             {/* Read-only metadata */}
-            <div className="border-t border-zinc-700 pt-4">
-              <label className="block text-sm font-medium text-zinc-400 mb-2">Metadata</label>
+            <div className="border-t border-border-subtle pt-4">
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Metadata</label>
               <div className="grid gap-3 md:grid-cols-2 text-sm">
                 <div className="flex items-center gap-2">
-                  <span className="text-zinc-500">Source:</span>
-                  <span className="text-zinc-300">{agent.source || 'unknown'}</span>
+                  <span className="text-fg-muted">Source:</span>
+                  <span className="text-fg-secondary">{agent.source || 'unknown'}</span>
                 </div>
                 {agent.source_ref && (
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-zinc-500 shrink-0">Source Ref:</span>
-                    <span className="text-zinc-300 truncate font-mono text-xs">{agent.source_ref}</span>
+                    <span className="text-fg-muted shrink-0">Source Ref:</span>
+                    <span className="text-fg-secondary truncate font-mono text-xs">{agent.source_ref}</span>
                   </div>
                 )}
                 <div className="flex items-center gap-2">
-                  <span className="text-zinc-500">Version:</span>
-                  <span className="text-zinc-300">v{agent.version || 0}</span>
+                  <span className="text-fg-muted">Version:</span>
+                  <span className="text-fg-secondary">v{agent.version || 0}</span>
                 </div>
                 {agent.agent_hash && (
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-zinc-500 shrink-0">Hash:</span>
-                    <span className="text-zinc-300 font-mono text-xs">{agent.agent_hash.slice(0, 12)}</span>
+                    <span className="text-fg-muted shrink-0">Hash:</span>
+                    <span className="text-fg-secondary font-mono text-xs">{agent.agent_hash.slice(0, 12)}</span>
                     <button
                       type="button"
                       onClick={() => navigator.clipboard.writeText(agent.agent_hash)}
-                      className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-700 transition-colors"
+                      className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface-hover transition-colors"
                       title="Copy full hash"
                     >
                       <Copy className="w-3 h-3" />
@@ -844,7 +849,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 )}
               </div>
               {agent.source === 'agentrc' && (
-                <p className="text-xs text-zinc-500 mt-2">This agent is managed by agentrc sync ({agent.source_ref}). Source and source_ref cannot be changed.</p>
+                <p className="text-xs text-fg-muted mt-2">This agent is managed by agentrc sync ({agent.source_ref}). Source and source_ref cannot be changed.</p>
               )}
             </div>
 
@@ -885,16 +890,16 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
             <ChevronLeft className="w-4 h-4" />
           </Button>
           <div className="flex items-center gap-3 flex-1">
-            <div className="w-10 h-10 rounded-full bg-zinc-700 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
               {agent.avatar ? (
                 <span className="text-lg">{agent.avatar}</span>
               ) : (
-                <User className="w-5 h-5 text-zinc-400" />
+                <User className="w-5 h-5 text-fg-secondary" />
               )}
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-zinc-100">{agent.name}</h2>
-              <p className="text-sm text-zinc-400">{agent.slug}</p>
+              <h2 className="text-xl font-semibold text-fg">{agent.name}</h2>
+              <p className="text-sm text-fg-secondary">{agent.slug}</p>
             </div>
           </div>
           <div className="flex gap-2">
@@ -920,30 +925,30 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Agent Details */}
           <div className="space-y-4">
-            <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <Settings className="w-5 h-5" />
               Agent Details
             </h3>
 
-            <div className="space-y-3 bg-zinc-800 rounded-lg p-4">
+            <div className="space-y-3 bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
               <div className="flex items-center gap-3 flex-wrap">
                 <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                  agent.status === 'disabled' ? 'bg-zinc-700 text-zinc-400' : 'bg-emerald-500/15 text-emerald-400'
+                  agent.status === 'disabled' ? 'bg-surface-hover text-fg-secondary' : 'bg-emerald-500/15 text-emerald-400'
                 }`}>
                   <StatusDot status={agent.status || 'active'} />
                   {agent.status || 'active'}
                 </span>
-                <SourceBadge source={agent.source} className="bg-zinc-700" />
+                <SourceBadge source={agent.source} className="bg-surface-hover" />
                 {agent.version > 0 && (
-                  <span className="text-xs text-zinc-500">v{agent.version}</span>
+                  <span className="text-xs text-fg-muted">v{agent.version}</span>
                 )}
                 {agent.agent_hash && (
-                  <span className="flex items-center gap-1 text-xs text-zinc-600 font-mono">
+                  <span className="flex items-center gap-1 text-xs text-fg-faint font-mono">
                     <Hash className="w-3 h-3" />
                     {agent.agent_hash.slice(0, 12)}
                     <button
                       onClick={() => navigator.clipboard.writeText(agent.agent_hash)}
-                      className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-700 transition-colors"
+                      className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface-hover transition-colors"
                       title="Copy full hash"
                     >
                       <Copy className="w-3 h-3" />
@@ -954,24 +959,24 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
               {agent.source_ref && (
                 <div>
-                  <label className="text-sm font-medium text-zinc-400">Source Ref</label>
-                  <p className="text-xs text-zinc-300 font-mono">{agent.source_ref}</p>
+                  <label className="text-sm font-medium text-fg-secondary">Source Ref</label>
+                  <p className="text-xs text-fg-secondary font-mono">{agent.source_ref}</p>
                 </div>
               )}
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Description</label>
-                <p className="text-zinc-200">{agent.description || 'No description'}</p>
+                <label className="text-sm font-medium text-fg-secondary">Description</label>
+                <p className="text-fg">{agent.description || 'No description'}</p>
               </div>
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Default Model</label>
-                <p className="text-zinc-200">{agent.default_model}</p>
+                <label className="text-sm font-medium text-fg-secondary">Default Model</label>
+                <p className="text-fg">{agent.default_model}</p>
               </div>
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Can Execute</label>
-                <p className="text-zinc-200">{agent.can_execute ? 'Yes' : 'No'}</p>
+                <label className="text-sm font-medium text-fg-secondary">Can Execute</label>
+                <p className="text-fg">{agent.can_execute ? 'Yes' : 'No'}</p>
               </div>
 
               {(() => {
@@ -979,7 +984,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                   const tags: string[] = JSON.parse(agent.tags || '[]')
                   return tags.length > 0 ? (
                     <div>
-                      <label className="text-sm font-medium text-zinc-400">Tags</label>
+                      <label className="text-sm font-medium text-fg-secondary">Tags</label>
                       <TagPills tags={agent.tags} max={10} className="mt-1" />
                     </div>
                   ) : null
@@ -991,10 +996,10 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                   const tools: string[] = JSON.parse(agent.tools || '[]')
                   return tools.length > 0 ? (
                     <div>
-                      <label className="text-sm font-medium text-zinc-400">Tools Allowlist</label>
+                      <label className="text-sm font-medium text-fg-secondary">Tools Allowlist</label>
                       <div className="flex gap-1 flex-wrap mt-1">
                         {tools.map((t) => (
-                          <span key={t} className="text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-300 font-mono">{t}</span>
+                          <span key={t} className="text-xs px-2 py-0.5 rounded bg-surface-hover text-fg-secondary font-mono">{t}</span>
                         ))}
                       </div>
                     </div>
@@ -1007,10 +1012,10 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                   const dirs: string[] = JSON.parse(agent.directories || '[]')
                   return dirs.length > 0 ? (
                     <div>
-                      <label className="text-sm font-medium text-zinc-400">Directories</label>
+                      <label className="text-sm font-medium text-fg-secondary">Directories</label>
                       <div className="flex gap-1 flex-wrap mt-1">
                         {dirs.map((d) => (
-                          <span key={d} className="text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-300 font-mono">{d}</span>
+                          <span key={d} className="text-xs px-2 py-0.5 rounded bg-surface-hover text-fg-secondary font-mono">{d}</span>
                         ))}
                       </div>
                     </div>
@@ -1024,11 +1029,11 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                   const entries = Object.entries(c).filter(([, v]) => v !== null && v !== undefined)
                   return entries.length > 0 ? (
                     <div>
-                      <label className="text-sm font-medium text-zinc-400">Constraints</label>
+                      <label className="text-sm font-medium text-fg-secondary">Constraints</label>
                       <div className="flex gap-3 mt-1">
                         {entries.map(([k, v]) => (
-                          <span key={k} className="text-xs text-zinc-300">
-                            <span className="text-zinc-500">{k.replace(/_/g, ' ')}:</span> {String(v)}
+                          <span key={k} className="text-xs text-fg-secondary">
+                            <span className="text-fg-muted">{k.replace(/_/g, ' ')}:</span> {String(v)}
                           </span>
                         ))}
                       </div>
@@ -1038,8 +1043,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               })()}
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">System Prompt</label>
-                <pre className="text-xs text-zinc-300 bg-zinc-900 rounded p-2 mt-1 overflow-x-auto max-h-32 overflow-y-auto font-mono">
+                <label className="text-sm font-medium text-fg-secondary">System Prompt</label>
+                <pre className="text-xs text-fg-secondary bg-bg-elevated rounded p-2 mt-1 overflow-x-auto max-h-32 overflow-y-auto font-mono">
                   {agent.system_prompt}
                 </pre>
               </div>
@@ -1049,7 +1054,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
           {/* Modes */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+              <h3 className="text-lg font-medium text-fg flex items-center gap-2">
                 <Code2 className="w-5 h-5" />
                 Modes ({modes.length})
               </h3>
@@ -1066,18 +1071,18 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
             <div className="space-y-2">
               {modes.length === 0 ? (
-                <p className="text-zinc-500 text-center py-4">No modes configured</p>
+                <p className="text-fg-muted text-center py-4">No modes configured</p>
               ) : (
                 modes.map((mode) => (
                   <div
                     key={mode.id}
-                    className="bg-zinc-800 rounded-lg p-3 flex items-center justify-between"
+                    className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-3 flex items-center justify-between"
                   >
                     <div>
-                      <h4 className="font-medium text-zinc-200">{mode.name}</h4>
-                      <p className="text-sm text-zinc-400">{mode.slug}</p>
+                      <h4 className="font-medium text-fg">{mode.name}</h4>
+                      <p className="text-sm text-fg-secondary">{mode.slug}</p>
                       {mode.prompt_addendum && (
-                        <p className="text-xs text-zinc-500 mt-1 line-clamp-1">
+                        <p className="text-xs text-fg-muted mt-1 line-clamp-1">
                           {mode.prompt_addendum}
                         </p>
                       )}
@@ -1101,7 +1106,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
             {/* Add Mode Form */}
             {showModeForm && (
-              <div className="bg-zinc-800 rounded-lg p-4">
+              <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault()
@@ -1110,44 +1115,44 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                   className="space-y-4"
                 >
                   <div>
-                    <label className="block text-sm font-medium text-zinc-300 mb-1">Mode Name</label>
+                    <label className="block text-sm font-medium text-fg-secondary mb-1">Mode Name</label>
                     <input
                       name="name"
                       type="text"
                       required
-                      className="w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500"
+                      className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                       placeholder="Mode name"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-zinc-300 mb-1">Slug</label>
+                    <label className="block text-sm font-medium text-fg-secondary mb-1">Slug</label>
                     <input
                       name="slug"
                       type="text"
                       required
-                      className="w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500"
+                      className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                       placeholder="mode-slug"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-zinc-300 mb-1">Prompt Addendum</label>
+                    <label className="block text-sm font-medium text-fg-secondary mb-1">Prompt Addendum</label>
                     <textarea
                       name="prompt_addendum"
                       required
                       rows={3}
-                      className="w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                      className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono"
                       placeholder="Additional instructions for this mode..."
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-zinc-300 mb-1">Tool Overrides (JSON)</label>
+                    <label className="block text-sm font-medium text-fg-secondary mb-1">Tool Overrides (JSON)</label>
                     <textarea
                       name="tool_overrides"
                       rows={2}
-                      className="w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                      className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono"
                       placeholder="{}"
                       defaultValue="{}"
                     />
@@ -1183,7 +1188,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         {/* Skills */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <Wrench className="w-5 h-5" />
               Skills ({agentSkills.length})
             </h3>
@@ -1201,20 +1206,20 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
           <div className="space-y-2">
             {agentSkills.length === 0 ? (
-              <p className="text-zinc-500 text-center py-4">No skills assigned</p>
+              <p className="text-fg-muted text-center py-4">No skills assigned</p>
             ) : (
               agentSkills.map((skill) => (
                 <div
                   key={skill.id}
-                  className="bg-zinc-800 rounded-lg p-3 flex items-center justify-between"
+                  className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-3 flex items-center justify-between"
                 >
                   <div>
-                    <h4 className="font-medium text-zinc-200">{skill.name}</h4>
+                    <h4 className="font-medium text-fg">{skill.name}</h4>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs bg-zinc-700 text-zinc-300 px-2 py-1 rounded">
+                      <span className="text-xs bg-surface-hover text-fg-secondary px-2 py-1 rounded">
                         {skill.category}
                       </span>
-                      <span className="text-xs text-zinc-400">{skill.slug}</span>
+                      <span className="text-xs text-fg-secondary">{skill.slug}</span>
                     </div>
                   </div>
                   <Button
@@ -1233,9 +1238,9 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
           {/* Skill Picker Modal */}
           {showSkillPicker && (
-            <div className="bg-zinc-800 rounded-lg p-4">
+            <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
-                <h4 className="font-medium text-zinc-200">Available Skills</h4>
+                <h4 className="font-medium text-fg">Available Skills</h4>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1246,21 +1251,21 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               </div>
 
               {availableSkills.length === 0 ? (
-                <p className="text-zinc-500 text-center py-4">All skills are already assigned</p>
+                <p className="text-fg-muted text-center py-4">All skills are already assigned</p>
               ) : (
                 <div className="space-y-2 max-h-64 overflow-y-auto">
                   {availableSkills.map((skill) => (
                     <div
                       key={skill.id}
-                      className="flex items-center justify-between p-2 bg-zinc-700 rounded"
+                      className="flex items-center justify-between p-2 bg-surface-hover rounded"
                     >
                       <div>
-                        <div className="font-medium text-zinc-200 text-sm">{skill.name}</div>
+                        <div className="font-medium text-fg text-sm">{skill.name}</div>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs bg-zinc-600 text-zinc-300 px-2 py-1 rounded">
+                          <span className="text-xs bg-surface-hover text-fg-secondary px-2 py-1 rounded">
                             {skill.category}
                           </span>
-                          <span className="text-xs text-zinc-400">
+                          <span className="text-xs text-fg-secondary">
                             {JSON.parse(skill.tool_bindings || '[]').length} tool{JSON.parse(skill.tool_bindings || '[]').length !== 1 ? 's' : ''}
                           </span>
                           {skill.is_builtin && (
@@ -1290,7 +1295,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         {/* Prompt Templates */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <FileText className="w-5 h-5" />
               Prompt Templates ({agentTemplates.length})
             </h3>
@@ -1308,7 +1313,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
           <div className="space-y-2">
             {agentTemplates.length === 0 ? (
-              <p className="text-zinc-500 text-center py-4">No prompt templates assigned</p>
+              <p className="text-fg-muted text-center py-4">No prompt templates assigned</p>
             ) : (
               // Sort by priority (descending)
               [...agentTemplates]
@@ -1316,17 +1321,17 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 .map((tmpl) => (
                   <div
                     key={tmpl.id}
-                    className="bg-zinc-800 rounded-lg p-3 flex items-center justify-between"
+                    className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-3 flex items-center justify-between"
                   >
                     <div>
-                      <h4 className="font-medium text-zinc-200">{tmpl.name}</h4>
+                      <h4 className="font-medium text-fg">{tmpl.name}</h4>
                       <div className="flex items-center gap-2 mt-1">
                         <div className={`w-3 h-3 rounded-full ${getScopeBadgeColor(tmpl.scope)}`} />
-                        <span className="text-xs text-zinc-300 capitalize">
+                        <span className="text-xs text-fg-secondary capitalize">
                           {tmpl.scope}
                         </span>
-                        <span className="text-xs text-zinc-400">{tmpl.slug}</span>
-                        <span className="text-xs bg-zinc-700 text-zinc-300 px-2 py-1 rounded">
+                        <span className="text-xs text-fg-secondary">{tmpl.slug}</span>
+                        <span className="text-xs bg-surface-hover text-fg-secondary px-2 py-1 rounded">
                           Priority: {tmpl.priority}
                         </span>
                       </div>
@@ -1347,9 +1352,9 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
           {/* Template Picker Modal */}
           {showTemplatePicker && (
-            <div className="bg-zinc-800 rounded-lg p-4">
+            <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
-                <h4 className="font-medium text-zinc-200">Available Templates</h4>
+                <h4 className="font-medium text-fg">Available Templates</h4>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1360,7 +1365,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               </div>
 
               {availableTemplates.length === 0 ? (
-                <p className="text-zinc-500 text-center py-4">All templates are already assigned</p>
+                <p className="text-fg-muted text-center py-4">All templates are already assigned</p>
               ) : (
                 <div className="space-y-2 max-h-64 overflow-y-auto">
                   {availableTemplates
@@ -1368,10 +1373,10 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                     .map((template) => (
                       <div
                         key={template.id}
-                        className="flex items-center justify-between p-2 bg-zinc-700 rounded"
+                        className="flex items-center justify-between p-2 bg-surface-hover rounded"
                       >
                         <div>
-                          <div className="font-medium text-zinc-200 text-sm flex items-center gap-2">
+                          <div className="font-medium text-fg text-sm flex items-center gap-2">
                             {template.name}
                             {template.is_builtin && (
                               <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in template" />
@@ -1379,13 +1384,13 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                           </div>
                           <div className="flex items-center gap-2 mt-1">
                             <div className={`w-2 h-2 rounded-full ${getScopeBadgeColor(template.scope)}`} />
-                            <span className="text-xs text-zinc-300 capitalize">
+                            <span className="text-xs text-fg-secondary capitalize">
                               {template.scope}
                             </span>
-                            <span className="text-xs text-zinc-400">
+                            <span className="text-xs text-fg-secondary">
                               Priority: {template.priority}
                             </span>
-                            <span className="text-xs text-zinc-500">
+                            <span className="text-xs text-fg-muted">
                               {JSON.parse(template.variables || '[]').length} var{JSON.parse(template.variables || '[]').length !== 1 ? 's' : ''}
                             </span>
                           </div>
@@ -1410,33 +1415,33 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
           {/* Composed Preview */}
           {agentTemplates.length > 0 && (
-            <div className="bg-zinc-800 rounded-lg p-4">
+            <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
-                <h4 className="font-medium text-zinc-200 flex items-center gap-2">
+                <h4 className="font-medium text-fg flex items-center gap-2">
                   <Eye className="w-4 h-4" />
                   Composed Template Preview
                 </h4>
-                <span className="text-xs text-zinc-400">
+                <span className="text-xs text-fg-secondary">
                   {agentTemplates.length} template{agentTemplates.length !== 1 ? 's' : ''} • Ordered by priority
                 </span>
               </div>
-              <div className="text-xs text-zinc-300 bg-zinc-900 rounded p-3 overflow-x-auto max-h-64 overflow-y-auto font-mono">
+              <div className="text-xs text-fg-secondary bg-bg-elevated rounded p-3 overflow-x-auto max-h-64 overflow-y-auto font-mono">
                 <div className="space-y-4">
                   {[...agentTemplates]
                     .sort((a, b) => b.priority - a.priority)
                     .map((tmpl) => (
-                      <div key={tmpl.id} className="border-l-2 border-zinc-600 pl-3">
-                        <div className="text-zinc-400 mb-1">
+                      <div key={tmpl.id} className="border-l-2 border-border-subtle pl-3">
+                        <div className="text-fg-secondary mb-1">
                           # {tmpl.name} ({tmpl.scope}, priority: {tmpl.priority})
                         </div>
-                        <div className="text-zinc-300">
+                        <div className="text-fg-secondary">
                           [Template body would be rendered here with variable substitution]
                         </div>
                       </div>
                     ))}
                 </div>
               </div>
-              <p className="text-xs text-zinc-500 mt-2">
+              <p className="text-xs text-fg-muted mt-2">
                 This is a simplified preview. The actual composition would include variable substitution and proper template assembly.
               </p>
             </div>
@@ -1445,22 +1450,22 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
         {/* Advanced Configuration */}
         <div className="space-y-4">
-          <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+          <h3 className="text-lg font-medium text-fg flex items-center gap-2">
             <Wrench className="w-5 h-5" />
             Advanced Configuration
           </h3>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-2">MCP Servers</label>
-              <pre className="text-xs text-zinc-300 bg-zinc-800 rounded p-3 overflow-x-auto max-h-32 overflow-y-auto font-mono">
+              <label className="block text-sm font-medium text-fg-secondary mb-2">MCP Servers</label>
+              <pre className="text-xs text-fg-secondary bg-surface rounded p-3 overflow-x-auto max-h-32 overflow-y-auto font-mono">
                 {agent.mcp_servers}
               </pre>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-2">Tool Permissions</label>
-              <pre className="text-xs text-zinc-300 bg-zinc-800 rounded p-3 overflow-x-auto max-h-32 overflow-y-auto font-mono">
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Permissions</label>
+              <pre className="text-xs text-fg-secondary bg-surface rounded p-3 overflow-x-auto max-h-32 overflow-y-auto font-mono">
                 {agent.tool_permissions}
               </pre>
             </div>
@@ -1471,9 +1476,9 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         {/* {showDeleteConfirm === agent.id && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/60" onClick={() => setShowDeleteConfirm(null)} />
-            <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-md w-full mx-4">
-              <h3 className="text-lg font-semibold text-zinc-100 mb-2">Delete Agent</h3>
-              <p className="text-zinc-400 mb-4">
+            <div className="relative bg-bg-elevated border border-border-subtle rounded-xl p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold text-fg mb-2">Delete Agent</h3>
+              <p className="text-fg-secondary mb-4">
                 Are you sure you want to delete "{agent.name}"? This action cannot be undone.
               </p>
               <div className="flex gap-2 justify-end">

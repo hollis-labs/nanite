@@ -74,14 +74,14 @@ export function RightRail() {
 
   return (
     <aside
-      className={`h-full bg-zinc-950 border-l border-zinc-800 flex flex-col transition-all duration-200 ease-in-out overflow-hidden ${
+      className={`h-full bg-bg border-l border-border flex flex-col transition-all duration-200 ease-in-out overflow-hidden ${
         open ? 'w-96' : 'w-0'
       }`}
     >
       <div className="min-w-96 h-full flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
-          <h2 className="text-sm font-semibold text-zinc-100">Widgets</h2>
+        <div className="px-4 h-12 flex items-center border-b border-border shrink-0">
+          <h2 className="text-sm font-semibold text-fg">Widgets</h2>
         </div>
 
         {/* Widget cards */}

@@ -1,40 +1,55 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Pencil, RotateCcw, X, Check } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { RotateCcw, X, Check, Keyboard } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
 import type { UserSettings } from '@/lib/types'
 
 const SHORTCUT_DEFS = [
-  { key: 'toggle_left_sidebar', label: 'Toggle Left Sidebar', default: 'mod+b' },
-  { key: 'toggle_right_rail', label: 'Toggle Right Rail', default: 'mod+/' },
-  { key: 'focus_composer', label: 'Focus Composer', default: 'mod+l' },
-  { key: 'new_session', label: 'New Session', default: 'mod+n' },
-  { key: 'search', label: 'Search / Open Sidebar', default: 'mod+k' },
-  { key: 'next_session', label: 'Next Session', default: 'mod+]' },
-  { key: 'prev_session', label: 'Previous Session', default: 'mod+[' },
-  { key: 'bookmark_last', label: 'Bookmark Last Message', default: 'mod+d' },
-  { key: 'toggle_artifacts', label: 'Toggle Artifacts Drawer', default: 'mod+.' },
+  { key: 'toggle_left_sidebar', label: 'Toggle Left Sidebar', description: 'Show or hide the sessions panel', default: 'mod+b' },
+  { key: 'toggle_right_rail', label: 'Toggle Right Rail', description: 'Show or hide the widgets panel', default: 'mod+/' },
+  { key: 'focus_composer', label: 'Focus Composer', description: 'Jump to the message input', default: 'mod+l' },
+  { key: 'new_session', label: 'New Session', description: 'Create a new chat session', default: 'mod+n' },
+  { key: 'search', label: 'Search / Open Sidebar', description: 'Open sidebar and focus search', default: 'mod+k' },
+  { key: 'next_session', label: 'Next Session', description: 'Switch to the next session', default: 'mod+]' },
+  { key: 'prev_session', label: 'Previous Session', description: 'Switch to the previous session', default: 'mod+[' },
+  { key: 'bookmark_last', label: 'Bookmark Last Message', description: 'Save the last assistant response', default: 'mod+d' },
+  { key: 'toggle_artifacts', label: 'Toggle Artifacts', description: 'Show or hide the artifacts drawer', default: 'mod+.' },
 ] as const
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
 
-function formatShortcut(binding: string): string {
-  return binding
-    .split('+')
-    .map((part) => {
-      if (part === 'mod') return isMac ? '\u2318' : 'Ctrl'
-      if (part === 'shift') return isMac ? '\u21E7' : 'Shift'
-      if (part === 'alt') return isMac ? '\u2325' : 'Alt'
-      if (part === '[') return '['
-      if (part === ']') return ']'
-      return part.toUpperCase()
-    })
-    .join(isMac ? '' : '+')
+function formatKeys(binding: string): string[] {
+  return binding.split('+').map((part) => {
+    if (part === 'mod') return isMac ? '\u2318' : 'Ctrl'
+    if (part === 'shift') return isMac ? '\u21E7' : 'Shift'
+    if (part === 'alt') return isMac ? '\u2325' : 'Alt'
+    return part.toUpperCase()
+  })
 }
 
-function keyEventToBinding(e: KeyboardEvent): string | null {
-  // Ignore modifier-only presses.
-  if (['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) return null
+function KeyBadge({ keys, active }: { keys: string[]; active?: boolean }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {keys.map((k, i) => (
+        <kbd
+          key={i}
+          className={`inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-md text-xs font-mono font-medium border shadow-sm ${
+            active
+              ? 'bg-accent/10 border-accent/30 text-accent'
+              : 'bg-bg-elevated border-border-subtle text-fg-secondary'
+          }`}
+        >
+          {k}
+        </kbd>
+      ))}
+    </div>
+  )
+}
+
+/** Returns binding string, undefined for modifier-only (ignore), or null for cancel (Escape). */
+function keyEventToBinding(e: KeyboardEvent): string | null | undefined {
+  // Modifier-only presses — ignore, don't cancel
+  if (['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) return undefined
 
   const parts: string[] = []
   if (e.metaKey || e.ctrlKey) parts.push('mod')
@@ -42,16 +57,16 @@ function keyEventToBinding(e: KeyboardEvent): string | null {
   if (e.altKey) parts.push('alt')
 
   let key = e.key.toLowerCase()
-  // Normalize special keys.
   if (key === ' ') key = 'space'
-  if (key === 'escape') return null // Cancel on Escape
+  if (key === 'escape') return null // explicit cancel
   parts.push(key)
 
   return parts.join('+')
 }
 
-function ShortcutRow({
+function ShortcutCard({
   label,
+  description,
   binding,
   isEditing,
   onEdit,
@@ -59,6 +74,7 @@ function ShortcutRow({
   onCancel,
 }: {
   label: string
+  description: string
   binding: string
   isEditing: boolean
   onEdit: () => void
@@ -66,7 +82,6 @@ function ShortcutRow({
   onCancel: () => void
 }) {
   const [captured, setCaptured] = useState<string | null>(null)
-  const cellRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!isEditing) {
@@ -78,8 +93,8 @@ function ShortcutRow({
       e.preventDefault()
       e.stopPropagation()
       const result = keyEventToBinding(e)
+      if (result === undefined) return // modifier-only, ignore
       if (result === null) {
-        // Escape pressed — cancel.
         onCancel()
         return
       }
@@ -91,57 +106,48 @@ function ShortcutRow({
   }, [isEditing, onCancel])
 
   return (
-    <div className="flex items-center justify-between py-2.5 group">
-      <div className="text-sm text-zinc-300">{label}</div>
-      <div className="flex items-center gap-2">
+    <div
+      onClick={() => !isEditing && onEdit()}
+      className={`rounded-xl border overflow-hidden transition-all cursor-pointer ${
+        isEditing
+          ? 'border-accent/40 shadow-sm ring-1 ring-accent/20'
+          : 'border-border-subtle bg-white dark:bg-bg-elevated/60 hover:border-border-subtle hover:shadow-sm'
+      }`}
+    >
+      <div className="flex items-center gap-3 px-3.5 py-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-fg">{label}</div>
+          <div className="text-[11px] text-fg-muted mt-0.5">{description}</div>
+        </div>
+
         {isEditing ? (
-          <>
-            <div
-              ref={cellRef}
-              className="min-w-[120px] px-3 py-1 bg-zinc-800 border border-indigo-500 rounded-md text-sm text-center"
-            >
-              {captured ? (
-                <span className="text-zinc-100 font-mono">{formatShortcut(captured)}</span>
-              ) : (
-                <span className="text-zinc-500 italic">Press keys...</span>
-              )}
-            </div>
-            {captured && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-6 h-6 text-green-400 hover:text-green-300 hover:bg-green-500/10"
-                onClick={() => onSave(captured)}
-                title="Confirm"
-              >
-                <Check className="w-3.5 h-3.5" />
-              </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            {captured ? (
+              <>
+                <KeyBadge keys={formatKeys(captured)} active />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="w-7 h-7 text-success hover:bg-success-muted"
+                  onClick={(e) => { e.stopPropagation(); onSave(captured) }}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                </Button>
+              </>
+            ) : (
+              <span className="text-xs text-fg-muted italic px-2">Press keys...</span>
             )}
             <Button
               variant="ghost"
               size="icon"
-              className="w-6 h-6 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50"
-              onClick={onCancel}
-              title="Cancel"
+              className="w-7 h-7 text-fg-faint hover:text-fg-secondary"
+              onClick={(e) => { e.stopPropagation(); onCancel() }}
             >
               <X className="w-3.5 h-3.5" />
             </Button>
-          </>
+          </div>
         ) : (
-          <>
-            <div className="min-w-[120px] px-3 py-1 bg-zinc-900 border border-zinc-700 rounded-md text-sm text-center">
-              <span className="text-zinc-200 font-mono">{formatShortcut(binding)}</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-6 h-6 text-zinc-600 opacity-0 group-hover:opacity-100 hover:text-zinc-300 hover:bg-zinc-700/50 transition-opacity"
-              onClick={onEdit}
-              title="Edit shortcut"
-            >
-              <Pencil className="w-3 h-3" />
-            </Button>
-          </>
+          <KeyBadge keys={formatKeys(binding)} />
         )}
       </div>
     </div>
@@ -188,29 +194,29 @@ export function ShortcutsPanel() {
   }, [settings?.ext_settings, mutation])
 
   return (
-    <div className="max-w-2xl">
-      <div className="border-b border-zinc-800 pb-2 mb-1">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-            Keyboard Shortcuts
-          </h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs text-zinc-500 hover:text-zinc-300"
-            onClick={handleResetAll}
-          >
-            <RotateCcw className="w-3 h-3 mr-1.5" />
-            Reset All
-          </Button>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Keyboard className="w-4 h-4 text-fg-muted" />
+          <p className="text-xs text-fg-muted">Click any shortcut to rebind it</p>
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-xs text-fg-secondary hover:text-fg"
+          onClick={handleResetAll}
+        >
+          <RotateCcw className="w-3 h-3 mr-1.5" />
+          Reset All
+        </Button>
       </div>
 
-      <div className="divide-y divide-zinc-800/50">
+      <div className="grid grid-cols-2 gap-2">
         {SHORTCUT_DEFS.map((def) => (
-          <ShortcutRow
+          <ShortcutCard
             key={def.key}
             label={def.label}
+            description={def.description}
             binding={getBinding(def.key, def.default)}
             isEditing={editingKey === def.key}
             onEdit={() => setEditingKey(def.key)}
@@ -220,8 +226,8 @@ export function ShortcutsPanel() {
         ))}
       </div>
 
-      <p className="mt-4 text-xs text-zinc-600">
-        {isMac ? '\u2318 = Command' : 'Mod = Ctrl'} &middot; Changes are saved automatically &middot; Custom shortcuts will be wired in a future update
+      <p className="text-xs text-fg-faint">
+        {isMac ? '\u2318 = Command' : 'Mod = Ctrl'} &middot; Changes are saved automatically
       </p>
     </div>
   )

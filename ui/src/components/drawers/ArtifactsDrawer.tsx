@@ -63,7 +63,7 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="w-5 h-5 border-2 border-zinc-700 border-t-zinc-400 rounded-full animate-spin" />
+        <div className="w-5 h-5 border-2 border-border-subtle border-t-zinc-400 rounded-full animate-spin" />
       </div>
     )
   }
@@ -74,7 +74,7 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
         <img
           src={downloadUrl}
           alt={artifact.name}
-          className="max-w-full max-h-[60vh] rounded-lg border border-zinc-800"
+          className="max-w-full max-h-[60vh] rounded-lg border border-border"
         />
       </div>
     )
@@ -82,13 +82,13 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
 
   if (content !== null) {
     return (
-      <pre className="p-4 text-xs font-mono text-zinc-300 bg-zinc-950 rounded-lg border border-zinc-800 overflow-auto max-h-[60vh] whitespace-pre-wrap break-words">
+      <pre className="p-4 text-xs font-mono text-fg-secondary bg-bg rounded-lg border border-border overflow-auto max-h-[60vh] whitespace-pre-wrap break-words">
         {content}
       </pre>
     )
   }
 
-  return <p className="text-xs text-zinc-500 italic p-4">Unable to preview this file</p>
+  return <p className="text-xs text-fg-muted italic p-4">Unable to preview this file</p>
 }
 
 function ArtifactRow({
@@ -102,13 +102,13 @@ function ArtifactRow({
   const canPreview = isPreviewable(artifact.mime_type)
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700 transition-colors">
-      <Icon className="w-5 h-5 text-zinc-500 shrink-0" />
+    <div className="flex items-center gap-3 p-3 rounded-lg bg-bg-elevated/50 border border-border hover:border-border-subtle transition-colors">
+      <Icon className="w-5 h-5 text-fg-muted shrink-0" />
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-zinc-200 truncate">{artifact.name}</p>
+        <p className="text-sm text-fg truncate">{artifact.name}</p>
         <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-xs text-zinc-600">{artifact.mime_type}</span>
-          <span className="text-xs text-zinc-600">{formatSize(artifact.size)}</span>
+          <span className="text-xs text-fg-faint">{artifact.mime_type}</span>
+          <span className="text-xs text-fg-faint">{formatSize(artifact.size)}</span>
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
@@ -116,7 +116,7 @@ function ArtifactRow({
           <button
             type="button"
             onClick={() => onPreview(artifact)}
-            className="p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded text-fg-muted hover:text-fg hover:bg-surface transition-colors"
             aria-label={`Preview ${artifact.name}`}
           >
             <Eye className="w-4 h-4" />
@@ -125,7 +125,7 @@ function ArtifactRow({
         <a
           href={`/api/artifacts/${artifact.id}/download`}
           download
-          className="p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          className="p-1.5 rounded text-fg-muted hover:text-fg hover:bg-surface transition-colors"
           aria-label={`Download ${artifact.name}`}
         >
           <Download className="w-4 h-4" />
@@ -173,44 +173,32 @@ export function ArtifactsDrawer() {
     setPreviewing(null)
   }, [activeSessionId])
 
-  return (
-    <>
-      {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/30 z-40"
-          onClick={handleClose}
-        />
-      )}
+  if (!open) return null
 
-      {/* Drawer */}
-      <div
-        className={`fixed top-0 right-0 h-full w-96 bg-zinc-950 border-l border-zinc-800 z-50 transform transition-transform duration-200 ease-in-out ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
+  return (
+      <div className="fixed inset-y-0 right-0 w-96 bg-bg border-l border-border z-50 flex flex-col shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
             {previewing ? (
               <button
                 type="button"
                 onClick={() => setPreviewing(null)}
-                className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 transition-colors"
+                className="p-0.5 rounded text-fg-muted hover:text-fg transition-colors"
                 aria-label="Back to list"
               >
                 <ArrowLeft className="w-4 h-4" />
               </button>
             ) : (
-              <Package className="w-4 h-4 text-zinc-400" />
+              <Package className="w-4 h-4 text-fg-secondary" />
             )}
-            <h2 className="text-sm font-semibold text-zinc-100 truncate">
+            <h2 className="text-sm font-semibold text-fg truncate">
               {previewing ? previewing.name : 'Artifacts'}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded text-fg-muted hover:text-fg hover:bg-surface transition-colors"
             aria-label="Close artifacts drawer"
           >
             <X className="w-4 h-4" />
@@ -218,7 +206,7 @@ export function ArtifactsDrawer() {
         </div>
 
         {/* Content */}
-        <ScrollArea className="h-[calc(100%-48px)]">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="p-3 space-y-2">
             {previewing ? (
               <ArtifactPreview artifact={previewing} />
@@ -226,15 +214,15 @@ export function ArtifactsDrawer() {
               <>
                 {isLoading && (
                   <div className="flex items-center justify-center py-12">
-                    <div className="w-5 h-5 border-2 border-zinc-700 border-t-zinc-400 rounded-full animate-spin" />
+                    <div className="w-5 h-5 border-2 border-border-subtle border-t-zinc-400 rounded-full animate-spin" />
                   </div>
                 )}
 
                 {!isLoading && artifacts.length === 0 && (
                   <div className="text-center py-12">
                     <Package className="w-10 h-10 text-zinc-800 mx-auto mb-3" />
-                    <p className="text-sm text-zinc-500">Artifacts will appear here</p>
-                    <p className="text-xs text-zinc-600 mt-1">
+                    <p className="text-sm text-fg-muted">Artifacts will appear here</p>
+                    <p className="text-xs text-fg-faint mt-1">
                       Files and outputs generated during your session
                     </p>
                   </div>
@@ -252,6 +240,5 @@ export function ArtifactsDrawer() {
           </div>
         </ScrollArea>
       </div>
-    </>
   )
 }

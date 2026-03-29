@@ -241,7 +241,7 @@ export type AgentMode = (typeof AGENT_MODES)[number]
 
 export const MODE_COLORS: Record<AgentMode, string> = {
   default: 'blue',
-  architect: 'purple',
+  architect: 'red',
   planner: 'green',
   writer: 'amber',
 }

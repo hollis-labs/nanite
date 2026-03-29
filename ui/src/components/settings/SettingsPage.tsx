@@ -1,4 +1,21 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import {
+  SlidersHorizontal,
+  Cpu,
+  Keyboard,
+  Bot,
+  Sparkles,
+  FileText,
+  Wrench,
+  Puzzle,
+  LayoutGrid,
+  Activity,
+} from 'lucide-react'
+import {
+  getInitialSettingsSection,
+  setSettingsSectionCallback,
+  updateSettingsHash,
+} from '@/hooks/useHashRoute'
 import { PreferencesPanel } from './PreferencesPanel'
 import { ShortcutsPanel } from './ShortcutsPanel'
 import { AgentProfileManager } from './AgentProfileManager'
@@ -9,25 +26,37 @@ import { PluginManager } from './PluginManager'
 import { ProviderManager } from './ProviderManager'
 import { WidgetManager } from './WidgetManager'
 import { ObservabilityDashboard } from './observability/ObservabilityDashboard'
-import { Button } from '@/components/ui/Button'
+import { ScrollArea } from '@/components/ui/ScrollArea'
 
 type SettingsSection = 'preferences' | 'providers' | 'shortcuts' | 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins' | 'widgets' | 'observability'
 
-export default function SettingsPage() {
-  const [activeSection, setActiveSection] = useState<SettingsSection>('preferences')
+const sections: { id: SettingsSection; label: string; icon: typeof SlidersHorizontal }[] = [
+  { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
+  { id: 'providers', label: 'Providers', icon: Cpu },
+  { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+  { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'skills', label: 'Skills', icon: Sparkles },
+  { id: 'prompts', label: 'Prompts', icon: FileText },
+  { id: 'tools', label: 'Tools', icon: Wrench },
+  { id: 'plugins', label: 'Plugins', icon: Puzzle },
+  { id: 'widgets', label: 'Widgets', icon: LayoutGrid },
+  { id: 'observability', label: 'Observability', icon: Activity },
+]
 
-  const sections = [
-    { id: 'preferences' as SettingsSection, label: 'Preferences' },
-    { id: 'providers' as SettingsSection, label: 'Providers' },
-    { id: 'shortcuts' as SettingsSection, label: 'Shortcuts' },
-    { id: 'agents' as SettingsSection, label: 'Agents' },
-    { id: 'skills' as SettingsSection, label: 'Skills' },
-    { id: 'prompts' as SettingsSection, label: 'Prompts' },
-    { id: 'tools' as SettingsSection, label: 'Tools' },
-    { id: 'plugins' as SettingsSection, label: 'Plugins' },
-    { id: 'widgets' as SettingsSection, label: 'Widgets' },
-    { id: 'observability' as SettingsSection, label: 'Observability' },
-  ]
+export default function SettingsPage() {
+  const [activeSection, setActiveSection] = useState<SettingsSection>(
+    () => getInitialSettingsSection() ?? 'preferences',
+  )
+
+  useEffect(() => {
+    setSettingsSectionCallback((section) => setActiveSection(section))
+    return () => setSettingsSectionCallback(null)
+  }, [])
+
+  const handleSectionChange = (section: SettingsSection) => {
+    setActiveSection(section)
+    updateSettingsHash(section)
+  }
 
   const renderActiveSection = () => {
     switch (activeSection) {
@@ -56,36 +85,50 @@ export default function SettingsPage() {
     }
   }
 
-  return (
-    <div className="flex-1 flex flex-col h-full bg-zinc-950">
-      {/* Header with tabs */}
-      <div className="border-b border-zinc-800 px-6 py-4">
-        <h1 className="text-2xl font-semibold text-zinc-100 mb-4">Settings</h1>
-        <div className="flex gap-1">
-          {sections.map((section) => (
-            <Button
-              key={section.id}
-              variant={activeSection === section.id ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setActiveSection(section.id)}
-              className={`${
-                activeSection === section.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-zinc-400 hover:text-zinc-100'
-              }`}
-            >
-              {section.label}
-            </Button>
-          ))}
-        </div>
-      </div>
+  const active = sections.find((s) => s.id === activeSection) ?? sections[0]
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-6">
-          {renderActiveSection()}
+  return (
+    <div className="flex-1 flex h-full bg-bg">
+      {/* Sidebar nav */}
+      <nav className="w-52 shrink-0 border-r border-border flex flex-col">
+        <div className="px-5 h-12 flex items-center border-b border-border shrink-0">
+          <h1 className="text-sm font-semibold text-fg">Settings</h1>
         </div>
+        <ScrollArea className="flex-1">
+          <div className="py-2 px-2">
+            {sections.map((section) => {
+              const Icon = section.icon
+              const isActive = activeSection === section.id
+              return (
+                <button
+                  key={section.id}
+                  onClick={() => handleSectionChange(section.id)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+                    isActive
+                      ? 'bg-surface text-fg'
+                      : 'text-fg-secondary hover:text-fg hover:bg-surface/50'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-accent' : ''}`} />
+                  {section.label}
+                </button>
+              )
+            })}
+          </div>
+        </ScrollArea>
+      </nav>
+
+      {/* Content area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="px-6 h-12 flex items-center border-b border-border shrink-0">
+          <h2 className="text-sm font-semibold text-fg">{active.label}</h2>
+        </div>
+        <ScrollArea className="flex-1">
+          <div className="p-6 max-w-4xl">
+            {renderActiveSection()}
+          </div>
+        </ScrollArea>
       </div>
     </div>
-  );
+  )
 }

@@ -14,11 +14,11 @@ function formatDuration(ns: number): string {
 
 function ProcessRow({ proc }: { proc: ProcessHealthEntry }) {
   return (
-    <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20 transition-colors">
-      <td className="py-1.5 pr-3 font-mono text-zinc-400">{proc.pid}</td>
-      <td className="py-1.5 pr-3 font-mono text-zinc-400 text-xs">{proc.session_id.slice(0, 8)}</td>
+    <tr className="border-b border-border/30 hover:bg-surface/20 transition-colors">
+      <td className="py-1.5 pr-3 font-mono text-fg-secondary">{proc.pid}</td>
+      <td className="py-1.5 pr-3 font-mono text-fg-secondary text-xs">{proc.session_id.slice(0, 8)}</td>
       <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-blue-400">{formatDuration(proc.uptime)}</td>
-      <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-zinc-400">{formatDuration(proc.idle_duration)}</td>
+      <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-fg-secondary">{formatDuration(proc.idle_duration)}</td>
       <td className="py-1.5 text-center">
         {proc.is_stale ? (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">stale</span>
@@ -38,13 +38,13 @@ export function ProcessHealthPanel() {
   const staleCount = processes.filter((p) => p.is_stale).length
 
   if (isLoading) {
-    return <p className="text-xs text-zinc-600 italic py-2">Loading process health...</p>
+    return <p className="text-xs text-fg-faint italic py-2">Loading process health...</p>
   }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <div className="flex items-center gap-2 text-xs text-fg-secondary">
           <Activity className="w-3.5 h-3.5" />
           <span>
             {processes.length} active process{processes.length !== 1 && 'es'}
@@ -73,12 +73,12 @@ export function ProcessHealthPanel() {
       )}
 
       {processes.length === 0 ? (
-        <p className="text-xs text-zinc-600 italic py-2">No active CLI processes</p>
+        <p className="text-xs text-fg-faint italic py-2">No active CLI processes</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+              <tr className="text-[10px] uppercase tracking-wider text-fg-muted border-b border-border">
                 <th className="text-left py-2 pr-3 font-medium">PID</th>
                 <th className="text-left py-2 pr-3 font-medium">Session</th>
                 <th className="text-right py-2 pr-3 font-medium">Uptime</th>

@@ -1,4 +1,4 @@
-import { Bot, AlertTriangle, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, RefreshCw, X, MessageSquare, Settings, Key, Puzzle } from 'lucide-react'
 import { ChatHeader } from './ChatHeader'
 import { ToolCallDrawer } from './ToolCallDrawer'
 import { ChatTranscript } from './ChatTranscript'
@@ -22,18 +22,12 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
   const { isTaskSession, taskId } = useTaskContext()
 
   if (!activeSessionId) {
-    return (
-      <main className="flex-1 flex flex-col items-center justify-center min-w-0 bg-zinc-950">
-        <Bot className="w-16 h-16 text-zinc-800 mb-4" />
-        <h2 className="text-lg font-medium text-zinc-400 mb-1">Create your first chat</h2>
-        <p className="text-sm text-zinc-600">Select a session or press Cmd+N to begin</p>
-      </main>
-    )
+    return <WelcomeScreen />
   }
 
   return (
     <div className="flex-1 flex min-w-0">
-      <main className="flex-1 flex flex-col min-w-0 bg-zinc-950">
+      <main className="flex-1 flex flex-col min-w-0 bg-bg">
         <ChatHeader />
         <ToolCallDrawer />
         <ChatTranscript
@@ -87,7 +81,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
                   </button>
                   <button
                     onClick={dismissCircuit}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-700/50 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-700/50 text-fg-secondary hover:bg-surface-hover transition-colors"
                   >
                     <X className="w-3.5 h-3.5" />
                     Dismiss
@@ -118,5 +112,78 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
         />
       )}
     </div>
+  )
+}
+
+const WELCOME_CARDS = [
+  {
+    icon: MessageSquare,
+    title: 'Start a conversation',
+    description: 'Press Cmd+N or click + in the sidebar to begin a new chat session.',
+    action: 'new-chat' as const,
+  },
+  {
+    icon: Key,
+    title: 'Connect a provider',
+    description: 'Set up an API key for Anthropic, OpenAI, or another provider to enable chat.',
+    action: 'settings-providers' as const,
+  },
+  {
+    icon: Puzzle,
+    title: 'Explore plugins',
+    description: 'Browse available plugins to extend Conduit with new tools and capabilities.',
+    action: 'settings-plugins' as const,
+  },
+  {
+    icon: Settings,
+    title: 'Configure preferences',
+    description: 'Set your default model, keyboard shortcuts, and display options.',
+    action: 'settings-preferences' as const,
+  },
+]
+
+function WelcomeScreen() {
+  const handleAction = (action: (typeof WELCOME_CARDS)[number]['action']) => {
+    if (action === 'new-chat') {
+      return
+    }
+    // Set hash first — useHashRoute will derive currentPage from the hash
+    if (action === 'settings-providers') {
+      window.location.hash = '#settings/providers'
+    } else if (action === 'settings-plugins') {
+      window.location.hash = '#settings/plugins'
+    } else if (action === 'settings-preferences') {
+      window.location.hash = '#settings'
+    }
+  }
+
+  return (
+    <main className="flex-1 flex flex-col items-center justify-center min-w-0 bg-bg px-8">
+      <div className="max-w-lg w-full text-center mb-10">
+        <h1 className="text-2xl font-semibold text-fg mb-2">Welcome to Conduit</h1>
+        <p className="text-sm text-fg-muted">
+          Multi-agent chat harness for Fragments Engine.
+          Get started by picking an action below.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 max-w-lg w-full">
+        {WELCOME_CARDS.map((card) => (
+          <button
+            key={card.action}
+            onClick={() => handleAction(card.action)}
+            className="group text-left p-4 rounded-lg border border-border bg-bg-elevated/50 hover:border-border-subtle hover:bg-bg-elevated transition-all"
+          >
+            <card.icon className="w-5 h-5 text-accent mb-3 group-hover:text-accent-hover transition-colors" />
+            <h3 className="text-sm font-medium text-fg mb-1">{card.title}</h3>
+            <p className="text-xs text-fg-muted leading-relaxed">{card.description}</p>
+          </button>
+        ))}
+      </div>
+
+      <p className="text-xs text-fg-faint mt-8">
+        Cmd+N new chat &middot; Cmd+B sidebar &middot; Cmd+/ widgets &middot; Cmd+L focus editor
+      </p>
+    </main>
   )
 }

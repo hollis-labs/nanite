@@ -1,7 +1,10 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
+  /* Zinc palette — used as raw values where needed */
   --color-zinc-50: #fafafa;
   --color-zinc-100: #f4f4f5;
   --color-zinc-200: #e4e4e7;
@@ -13,6 +16,84 @@
   --color-zinc-800: #27272a;
   --color-zinc-900: #18181b;
   --color-zinc-950: #09090b;
+
+  /* Semantic tokens — Tailwind classes: bg-bg, text-fg, border-border, etc. */
+  --color-bg: var(--c-bg);
+  --color-bg-elevated: var(--c-bg-elevated);
+  --color-surface: var(--c-surface);
+  --color-surface-hover: var(--c-surface-hover);
+  --color-surface-active: var(--c-surface-active);
+  --color-border: var(--c-border);
+  --color-border-subtle: var(--c-border-subtle);
+  --color-fg: var(--c-fg);
+  --color-fg-secondary: var(--c-fg-secondary);
+  --color-fg-muted: var(--c-fg-muted);
+  --color-fg-faint: var(--c-fg-faint);
+
+  /* Accent (fire engine red) */
+  --color-accent: var(--c-accent);
+  --color-accent-hover: var(--c-accent-hover);
+  --color-accent-active: var(--c-accent-active);
+  --color-accent-muted: var(--c-accent-muted);
+  --color-accent-fg: var(--c-accent-fg);
+
+  /* Toggle on state (emerald green) */
+  --color-toggle-on: var(--c-toggle-on);
+
+  /* Success (theme-adaptive green) */
+  --color-success: var(--c-success);
+  --color-success-muted: var(--c-success-muted);
+
+  /* Focus ring */
+  --color-ring: var(--c-ring);
+}
+
+/* ─── Dark theme (default) ─── */
+:root {
+  --c-bg: #09090b;
+  --c-bg-elevated: #18181b;
+  --c-surface: #27272a;
+  --c-surface-hover: #3f3f46;
+  --c-surface-active: #52525b;
+  --c-border: #27272a;
+  --c-border-subtle: #3f3f46;
+  --c-fg: #f4f4f5;
+  --c-fg-secondary: #a1a1aa;
+  --c-fg-muted: #71717a;
+  --c-fg-faint: #52525b;
+  --c-accent: #dc2626;
+  --c-accent-hover: #ef4444;
+  --c-accent-active: #b91c1c;
+  --c-accent-muted: rgba(220, 38, 38, 0.15);
+  --c-accent-fg: #ffffff;
+  --c-toggle-on: #3b82f6;
+  --c-success: #60a5fa;
+  --c-success-muted: rgba(59, 130, 246, 0.15);
+  --c-ring: #dc2626;
+}
+
+/* ─── Light theme ─── */
+.light {
+  --c-bg: #ffffff;
+  --c-bg-elevated: #f4f4f5;
+  --c-surface: #e4e4e7;
+  --c-surface-hover: #d4d4d8;
+  --c-surface-active: #a1a1aa;
+  --c-border: #e4e4e7;
+  --c-border-subtle: #d4d4d8;
+  --c-fg: #09090b;
+  --c-fg-secondary: #3f3f46;
+  --c-fg-muted: #71717a;
+  --c-fg-faint: #a1a1aa;
+  --c-accent: #dc2626;
+  --c-accent-hover: #b91c1c;
+  --c-accent-active: #991b1b;
+  --c-accent-muted: rgba(220, 38, 38, 0.10);
+  --c-accent-fg: #ffffff;
+  --c-toggle-on: #3b82f6;
+  --c-success: #2563eb;
+  --c-success-muted: rgba(59, 130, 246, 0.10);
+  --c-ring: #dc2626;
 }
 
 html, body, #root {
@@ -26,8 +107,8 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: var(--color-zinc-950);
-  color: var(--color-zinc-100);
+  background-color: var(--c-bg);
+  color: var(--c-fg);
 }
 
 /* Custom scrollbar for chat transcript and scroll areas */
@@ -53,6 +134,17 @@ body {
   scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
 
+/* Light mode scrollbars */
+.light .chat-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+.light .chat-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+.light .chat-scroll {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
 /* Themed horizontal scroll for compact fields (provider cards, etc.) */
 .provider-scroll::-webkit-scrollbar {
   height: 3px;
@@ -70,4 +162,14 @@ body {
 .provider-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.light .provider-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+}
+.light .provider-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+.light .provider-scroll {
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }

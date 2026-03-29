@@ -113,7 +113,7 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
                   )}
                   <TagPills tags={agent.tags} className="mt-0.5" />
                 </div>
-                <Plus className="w-4 h-4 text-zinc-600 group-hover:text-indigo-400 shrink-0 transition-colors" />
+                <Plus className="w-4 h-4 text-zinc-600 group-hover:text-accent shrink-0 transition-colors" />
               </button>
             ))
           )}

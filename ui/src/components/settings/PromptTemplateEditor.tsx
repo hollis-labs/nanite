@@ -10,6 +10,7 @@ import {
   Loader2,
   Eye,
   AlertCircle,
+  FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -119,7 +120,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
       case 'system': return 'bg-blue-500'
       case 'mode': return 'bg-green-500'
       case 'skill': return 'bg-yellow-500'
-      case 'context': return 'bg-purple-500'
+      case 'context': return 'bg-accent'
       default: return 'bg-gray-500'
     }
   }
@@ -136,54 +137,69 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
   if (!selectedTemplate && !showCreateForm) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-zinc-100">Prompt Templates</h2>
+        {/* Toolbar */}
+        <div className="flex items-center gap-3">
+          <div className="flex-1" />
           <Button
+            size="sm"
             onClick={() => setShowCreateForm(true)}
-            className="gap-2"
+            className="gap-1.5 bg-accent hover:bg-accent-hover text-white"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             Create Template
           </Button>
         </div>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
+            <Loader2 className="w-6 h-6 animate-spin text-fg-secondary" />
           </div>
         ) : sortedTemplates.length === 0 ? (
-          <div className="text-center py-8 text-zinc-500">
+          <div className="text-center py-8 text-fg-muted">
             No prompt templates found. Create your first template to get started.
           </div>
         ) : (
-          <div className="space-y-2">
-            {sortedTemplates.map((template) => (
-              <div
-                key={template.id}
-                className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
-                onClick={() => setSelectedTemplate(template.id)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="font-medium text-zinc-100">{template.name}</h3>
-                      <div className={`w-3 h-3 rounded-full ${getScopeBadgeColor(template.scope)}`} />
-                      <span className="text-xs text-zinc-400 capitalize">{template.scope}</span>
-                      {template.is_builtin && (
-                        <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in template" />
-                      )}
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <p className="text-sm text-zinc-400">{template.slug}</p>
-                      <span className="text-xs text-zinc-500">Priority: {template.priority}</span>
-                      <span className="text-xs text-zinc-500">
-                        {parseVariables(template.variables).length} variable{parseVariables(template.variables).length !== 1 ? 's' : ''}
-                      </span>
+          <div className="grid gap-3 grid-cols-2">
+            {sortedTemplates.map((template) => {
+              const varCount = parseVariables(template.variables).length
+              return (
+                <div
+                  key={template.id}
+                  className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md"
+                  onClick={() => setSelectedTemplate(template.id)}
+                >
+                  {/* Header */}
+                  <div className="flex items-center gap-2.5 px-3.5 py-3">
+                    <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-fg truncate">{template.name}</span>
+                        {template.is_builtin && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                      </div>
+                      <span className="text-[11px] text-fg-muted font-mono truncate block">{template.slug}</span>
                     </div>
                   </div>
+
+                  {/* Detail footer */}
+                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center gap-2">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-md leading-none text-white ${getScopeBadgeColor(template.scope)}`}>
+                      {template.scope}
+                    </span>
+                    <span className="text-[11px] text-fg-muted">P{template.priority}</span>
+                    {varCount > 0 && (
+                      <>
+                        <div className="w-px h-3.5 bg-border shrink-0" />
+                        <span className="text-[11px] text-fg-muted">
+                          {varCount} var{varCount !== 1 ? 's' : ''}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -202,7 +218,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <h2 className="text-xl font-semibold text-zinc-100">Create Prompt Template</h2>
+          <h2 className="text-xl font-semibold text-fg">Create Prompt Template</h2>
         </div>
 
         <form
@@ -214,22 +230,22 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
         >
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Name</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
               <input
                 name="name"
                 type="text"
                 required
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 placeholder="Template name"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Slug</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
               <input
                 name="slug"
                 type="text"
                 required
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 placeholder="template-slug"
               />
             </div>
@@ -237,11 +253,11 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Scope</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Scope</label>
               <select
                 name="scope"
                 required
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               >
                 <option value="system">System</option>
                 <option value="mode">Mode</option>
@@ -250,40 +266,40 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Priority</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Priority</label>
               <input
                 name="priority"
                 type="number"
                 min="0"
                 defaultValue="100"
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 placeholder="100"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Template Body</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Template Body</label>
             <textarea
               name="template"
               required
               rows={12}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder="Enter the template content... Use {{variable_name}} for variables."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
+            <label className="block text-sm font-medium text-fg-secondary mb-2">
               Variables Definition (JSON)
-              <span className="text-xs text-zinc-500 ml-2">
+              <span className="text-xs text-fg-muted ml-2">
                 Array of {`{name, type, required, default, description}`}
               </span>
             </label>
             <textarea
               name="variables"
               rows={6}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder={`[
   {
     "name": "user_name",
@@ -338,7 +354,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <h2 className="text-xl font-semibold text-zinc-100">Edit {template.name}</h2>
+            <h2 className="text-xl font-semibold text-fg">Edit {template.name}</h2>
           </div>
 
           <form
@@ -350,35 +366,35 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Name</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
                 <input
                   name="name"
                   type="text"
                   required
                   defaultValue={template.name}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Slug</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
                 <input
                   name="slug"
                   type="text"
                   required
                   defaultValue={template.slug}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 />
               </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Scope</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Scope</label>
                 <select
                   name="scope"
                   required
                   defaultValue={template.scope}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 >
                   <option value="system">System</option>
                   <option value="mode">Mode</option>
@@ -387,37 +403,37 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Priority</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Priority</label>
                 <input
                   name="priority"
                   type="number"
                   min="0"
                   defaultValue={template.priority}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Template Body</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Template Body</label>
               <textarea
                 name="template"
                 required
                 rows={12}
                 defaultValue={template.template}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">
+              <label className="block text-sm font-medium text-fg-secondary mb-2">
                 Variables Definition (JSON)
               </label>
               <textarea
                 name="variables"
                 rows={6}
                 defaultValue={template.variables}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               />
             </div>
 
@@ -460,13 +476,13 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           <div className="flex items-center gap-3 flex-1">
             <div className={`w-3 h-3 rounded-full ${getScopeBadgeColor(template.scope)}`} />
             <div>
-              <h2 className="text-xl font-semibold text-zinc-100 flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-fg flex items-center gap-2">
                 {template.name}
                 {template.is_builtin && (
                   <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in template" />
                 )}
               </h2>
-              <p className="text-sm text-zinc-400">{template.slug}</p>
+              <p className="text-sm text-fg-secondary">{template.slug}</p>
             </div>
           </div>
           <div className="flex gap-2">
@@ -500,42 +516,42 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Template Details */}
           <div className="space-y-4">
-            <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <Code2 className="w-5 h-5" />
               Template Details
             </h3>
 
-            <div className="space-y-3 bg-zinc-800 rounded-lg p-4">
+            <div className="space-y-3 bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
               <div>
-                <label className="text-sm font-medium text-zinc-400">Scope</label>
-                <p className="text-zinc-200 capitalize">{template.scope}</p>
+                <label className="text-sm font-medium text-fg-secondary">Scope</label>
+                <p className="text-fg capitalize">{template.scope}</p>
               </div>
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Priority</label>
-                <p className="text-zinc-200">{template.priority}</p>
+                <label className="text-sm font-medium text-fg-secondary">Priority</label>
+                <p className="text-fg">{template.priority}</p>
               </div>
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Variables ({parseVariables(template.variables).length})</label>
+                <label className="text-sm font-medium text-fg-secondary">Variables ({parseVariables(template.variables).length})</label>
                 {parseVariables(template.variables).length === 0 ? (
-                  <p className="text-zinc-500 text-sm">No variables defined</p>
+                  <p className="text-fg-muted text-sm">No variables defined</p>
                 ) : (
                   <div className="space-y-2 mt-1">
                     {parseVariables(template.variables).map((variable, index) => (
-                      <div key={index} className="bg-zinc-900 rounded p-2 text-xs">
+                      <div key={index} className="bg-bg-elevated rounded p-2 text-xs">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-mono text-zinc-300">{variable.name}</span>
-                          <span className="text-zinc-500">({variable.type})</span>
+                          <span className="font-mono text-fg-secondary">{variable.name}</span>
+                          <span className="text-fg-muted">({variable.type})</span>
                           {variable.required && (
                             <span className="text-red-400 text-[10px]">*</span>
                           )}
                         </div>
                         {variable.description && (
-                          <p className="text-zinc-500">{variable.description}</p>
+                          <p className="text-fg-muted">{variable.description}</p>
                         )}
                         {variable.default !== undefined && (
-                          <p className="text-zinc-600">Default: {String(variable.default)}</p>
+                          <p className="text-fg-faint">Default: {String(variable.default)}</p>
                         )}
                       </div>
                     ))}
@@ -544,8 +560,8 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               </div>
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Template Body</label>
-                <pre className="text-xs text-zinc-300 bg-zinc-900 rounded p-2 mt-1 overflow-x-auto max-h-40 overflow-y-auto font-mono whitespace-pre-wrap">
+                <label className="text-sm font-medium text-fg-secondary">Template Body</label>
+                <pre className="text-xs text-fg-secondary bg-bg-elevated rounded p-2 mt-1 overflow-x-auto max-h-40 overflow-y-auto font-mono whitespace-pre-wrap">
                   {template.template}
                 </pre>
               </div>
@@ -555,7 +571,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           {/* Live Preview */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+              <h3 className="text-lg font-medium text-fg flex items-center gap-2">
                 <Eye className="w-5 h-5" />
                 Live Preview
               </h3>
@@ -572,12 +588,12 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               <div className="space-y-3">
                 {/* Variable Inputs */}
                 {parseVariables(template.variables).length > 0 && (
-                  <div className="bg-zinc-800 rounded-lg p-4">
-                    <h4 className="font-medium text-zinc-200 mb-3">Sample Values</h4>
+                  <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
+                    <h4 className="font-medium text-fg mb-3">Sample Values</h4>
                     <div className="space-y-3">
                       {parseVariables(template.variables).map((variable) => (
                         <div key={variable.name}>
-                          <label className="block text-sm text-zinc-400 mb-1">
+                          <label className="block text-sm text-fg-secondary mb-1">
                             {variable.name}
                             {variable.required && <span className="text-red-400 ml-1">*</span>}
                           </label>
@@ -589,7 +605,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                                 ...prev,
                                 [variable.name]: e.target.value
                               }))}
-                              className="w-full px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500"
+                              className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                               placeholder={variable.description || `Enter ${variable.name}`}
                             />
                           ) : variable.type === 'boolean' ? (
@@ -599,7 +615,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                                 ...prev,
                                 [variable.name]: e.target.value === 'true'
                               }))}
-                              className="w-full px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500"
+                              className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                             >
                               <option value="true">true</option>
                               <option value="false">false</option>
@@ -612,7 +628,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                                 ...prev,
                                 [variable.name]: e.target.value
                               }))}
-                              className="w-full px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500"
+                              className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                               placeholder={variable.description || `Enter ${variable.name}`}
                             />
                           ) : (
@@ -623,7 +639,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                                 ...prev,
                                 [variable.name]: e.target.value
                               }))}
-                              className="w-full px-2 py-1 bg-zinc-700 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500"
+                              className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                               placeholder={variable.description || `Enter ${variable.name}`}
                             />
                           )}
@@ -634,9 +650,9 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                 )}
 
                 {/* Rendered Preview */}
-                <div className="bg-zinc-800 rounded-lg p-4">
-                  <h4 className="font-medium text-zinc-200 mb-3">Rendered Template</h4>
-                  <pre className="text-xs text-zinc-300 bg-zinc-900 rounded p-3 overflow-x-auto max-h-80 overflow-y-auto font-mono whitespace-pre-wrap">
+                <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
+                  <h4 className="font-medium text-fg mb-3">Rendered Template</h4>
+                  <pre className="text-xs text-fg-secondary bg-bg-elevated rounded p-3 overflow-x-auto max-h-80 overflow-y-auto font-mono whitespace-pre-wrap">
                     {renderTemplatePreview}
                   </pre>
                 </div>
@@ -649,12 +665,12 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
         {showDeleteConfirm === template.id && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/60" onClick={() => setShowDeleteConfirm(null)} />
-            <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-md w-full mx-4">
+            <div className="relative bg-bg-elevated border border-border-subtle rounded-xl p-6 max-w-md w-full mx-4">
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
                 <div>
-                  <h3 className="text-lg font-semibold text-zinc-100 mb-2">Delete Template</h3>
-                  <p className="text-zinc-400 mb-4">
+                  <h3 className="text-lg font-semibold text-fg mb-2">Delete Template</h3>
+                  <p className="text-fg-secondary mb-4">
                     Are you sure you want to delete "{template.name}"? This action cannot be undone and will remove the template from all agents.
                   </p>
                   <div className="flex gap-2 justify-end">

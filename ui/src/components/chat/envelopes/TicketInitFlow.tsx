@@ -126,7 +126,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
     }
   }
 
-  const inputCls = 'w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 placeholder:text-zinc-600'
+  const inputCls = 'w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent placeholder:text-zinc-600'
 
   // Step 1: Brief description
   if (step === 'describe') {
@@ -149,7 +149,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
         />
         <Button
           size="sm"
-          className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-1 h-7"
+          className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-7"
           onClick={handleDescribe}
           disabled={!description.trim()}
         >
@@ -195,7 +195,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
                 {(['low', 'medium', 'high'] as const).map((p) => (
                   <label key={p} className="flex items-center gap-1.5 cursor-pointer">
                     <input type="radio" name="ticket-priority" value={p} checked={priority === p}
-                      onChange={() => setPriority(p)} className="accent-indigo-500" />
+                      onChange={() => setPriority(p)} className="accent-accent" />
                     <span className="text-xs text-zinc-300 capitalize">{p}</span>
                   </label>
                 ))}
@@ -225,7 +225,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
             </div>
           )}
 
-          <Button size="sm" className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-1 h-8"
+          <Button size="sm" className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-8"
             onClick={() => void handleSubmit()}
             disabled={!title.trim() || !category || !fullDescription.trim()}>
             Submit Ticket
@@ -238,10 +238,10 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
   // Step 2.5: Submitting
   if (step === 'submitting') {
     return (
-      <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-4">
+      <div className="rounded-lg border border-accent/30 bg-accent-muted p-4">
         <div className="flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
-          <span className="text-sm text-indigo-300">Submitting ticket...</span>
+          <Loader2 className="h-4 w-4 animate-spin text-accent" />
+          <span className="text-sm text-accent-hover">Submitting ticket...</span>
         </div>
       </div>
     )

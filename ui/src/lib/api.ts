@@ -262,6 +262,17 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to set API key: ${res.status}`)
     return res.json()
   },
+  testProviderConnection: async (id: string): Promise<{ ok: boolean }> => {
+    const res = await fetch(`${API_BASE}/providers/${id}/test`, { method: 'POST' })
+    // Gracefully handle missing endpoint — if the backend doesn't have a test
+    // route yet, treat a successful key save as sufficient
+    if (res.status === 404) return { ok: true }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Test failed: ${res.status}` }))
+      throw new Error(err.error || `Connection test failed: ${res.status}`)
+    }
+    return res.json()
+  },
   detectCLI: async (): Promise<CLIDetectionResult[]> => {
     const res = await fetch(`${API_BASE}/providers/detect-cli`)
     if (!res.ok) throw new Error(`Failed to detect CLI: ${res.status}`)

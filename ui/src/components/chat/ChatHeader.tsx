@@ -202,13 +202,13 @@ export function ChatHeader() {
   })
 
   return (
-    <header className="flex items-center justify-between px-4 h-12 border-b border-zinc-800 shrink-0">
+    <header className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
       <div className="flex items-center gap-3">
         <Tooltip content={leftOpen ? 'Hide sidebar (Cmd+B)' : 'Show sidebar (Cmd+B)'} side="bottom">
           <Button
             variant="ghost"
             size="icon"
-            className={`w-8 h-8 ${leftOpen ? 'text-zinc-400' : 'text-zinc-600'} hover:text-zinc-100`}
+            className={`w-8 h-8 ${leftOpen ? 'text-fg-secondary' : 'text-fg-faint'} hover:text-fg`}
             onClick={toggleLeftSidebar}
           >
             <PanelLeft className="w-4 h-4" />
@@ -222,14 +222,16 @@ export function ChatHeader() {
               onChange={(e) => setEditValue(e.target.value)}
               onBlur={() => void handleSave()}
               onKeyDown={handleKeyDown}
-              className="text-sm font-medium text-zinc-100 bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 outline-none focus:border-indigo-500"
+              className="text-sm font-medium text-fg bg-surface border border-border-subtle rounded px-2 py-0.5 outline-none focus:border-accent"
             />
           ) : (
             <div className="flex items-center gap-2" onDoubleClick={handleDoubleClick}>
-              <h1 className="text-sm font-medium text-zinc-100 cursor-default">{title}</h1>
-              {shortCode && (
-                <span className="text-xs text-zinc-500">#{shortCode}</span>
-              )}
+              <div className="flex flex-col">
+                <h1 className="text-sm font-medium text-fg cursor-default leading-tight">{title}</h1>
+                {shortCode && (
+                  <span className="text-[10px] text-fg-faint font-mono leading-tight">#{shortCode}</span>
+                )}
+              </div>
               {session?.provider && (
                 <span className="flex items-center gap-1">
                   <AdapterBadge provider={session.provider} size="md" />
@@ -238,25 +240,25 @@ export function ChatHeader() {
                       <button
                         onClick={() => setForkMenuOpen((o) => !o)}
                         disabled={forkMutation.isPending}
-                        className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                        className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
                       >
                         <Copy className="w-3 h-3" />
                       </button>
                     </Tooltip>
                     {forkMenuOpen && (
-                      <div className="absolute top-full left-0 mt-1 w-44 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+                      <div className="absolute top-full left-0 mt-1 w-44 bg-bg-elevated border border-border-subtle rounded-lg shadow-xl z-50 py-1">
                         <button
                           onClick={() => forkMutation.mutate(false)}
-                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-zinc-300 hover:bg-zinc-800 transition-colors"
+                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-fg-secondary hover:bg-surface transition-colors"
                         >
-                          <Copy className="w-3 h-3 text-zinc-500" />
+                          <Copy className="w-3 h-3 text-fg-muted" />
                           Clone (empty)
                         </button>
                         <button
                           onClick={() => forkMutation.mutate(true)}
-                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-zinc-300 hover:bg-zinc-800 transition-colors"
+                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-fg-secondary hover:bg-surface transition-colors"
                         >
-                          <GitFork className="w-3 h-3 text-zinc-500" />
+                          <GitFork className="w-3 h-3 text-fg-muted" />
                           Fork (with history)
                         </button>
                       </div>
@@ -271,22 +273,22 @@ export function ChatHeader() {
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((o) => !o)}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 transition-colors hover:border-zinc-600"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface border border-border-subtle transition-colors hover:border-border-subtle"
             >
-              <Bot className="w-3 h-3 text-zinc-400" />
-              <span className="text-xs text-zinc-300">
+              <Bot className="w-3 h-3 text-fg-secondary" />
+              <span className="text-xs text-fg-secondary">
                 {activeAgentName}
               </span>
               {primaryAgentProfile?.source && (
                 <SourceBadge source={primaryAgentProfile.source} className="bg-zinc-700" />
               )}
-              <ChevronDown className="w-3 h-3 text-zinc-500" />
+              <ChevronDown className="w-3 h-3 text-fg-muted" />
             </button>
 
             {dropdownOpen && (
-              <div className="absolute top-full left-0 mt-1 w-52 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+              <div className="absolute top-full left-0 mt-1 w-52 bg-bg-elevated border border-border-subtle rounded-lg shadow-xl z-50 py-1">
                 {/* Agent section */}
-                <div className="px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                <div className="px-3 py-1.5 text-xs font-medium text-fg-muted uppercase tracking-wider">
                   Agent
                 </div>
                 {allAgents.filter((a) => a.status !== 'disabled').map((agent) => (
@@ -296,8 +298,8 @@ export function ChatHeader() {
                     disabled={switchAgentMutation.isPending}
                     className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
                       primaryAgent?.agent_id === agent.id
-                        ? 'bg-zinc-800 text-zinc-100'
-                        : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                        ? 'bg-surface text-fg'
+                        : 'text-fg-secondary hover:bg-surface/60 hover:text-fg'
                     }`}
                   >
                     <Bot className="w-3 h-3 shrink-0" />
@@ -332,8 +334,8 @@ export function ChatHeader() {
             }}
             className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
               toolDrawerState !== 'closed'
-                ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                ? 'text-accent hover:text-accent-hover hover:bg-accent-hover/10'
+                : 'text-fg-secondary hover:text-fg hover:bg-surface'
             }`}
           >
             <Wrench className="w-3.5 h-3.5" />
@@ -343,7 +345,7 @@ export function ChatHeader() {
         <Tooltip content="Sprint Planning" side="bottom">
           <button
             onClick={() => useSprintPlanningStore.getState().openSprintPlanning()}
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-fg-secondary hover:text-fg hover:bg-surface transition-colors"
           >
             <Calendar className="w-3.5 h-3.5" />
           </button>
@@ -353,7 +355,7 @@ export function ChatHeader() {
           <Tooltip content="View agents in session" side="bottom">
             <button
               onClick={() => setRosterOpen(true)}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-fg-secondary hover:text-fg hover:bg-surface transition-colors"
             >
               <Users className="w-3.5 h-3.5" />
               <span>{agentCount}</span>
@@ -364,7 +366,7 @@ export function ChatHeader() {
           <Button
             variant="ghost"
             size="icon"
-            className={`w-8 h-8 ${rightOpen ? 'text-zinc-400' : 'text-zinc-600'} hover:text-zinc-100`}
+            className={`w-8 h-8 ${rightOpen ? 'text-fg-secondary' : 'text-fg-faint'} hover:text-fg`}
             onClick={toggleRightRail}
           >
             <PanelRight className="w-4 h-4" />

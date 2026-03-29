@@ -16,11 +16,11 @@ export function TeamsMessageCard({ data }: TeamsMessageCardProps) {
   const { title, message, facts, link_url } = data
 
   return (
-    <div className="rounded-lg border border-indigo-500/30 bg-zinc-900/50 overflow-hidden">
+    <div className="rounded-lg border border-accent/30 bg-zinc-900/50 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between bg-indigo-500/5 px-4 py-3 border-b border-indigo-500/20">
+      <div className="flex items-center justify-between bg-accent-muted px-4 py-3 border-b border-accent/20">
         <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 text-indigo-400" />
+          <MessageSquare className="h-4 w-4 text-accent" />
           <span className="text-sm font-medium text-zinc-200">Teams Message</span>
         </div>
         <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-green-400">
@@ -57,7 +57,7 @@ export function TeamsMessageCard({ data }: TeamsMessageCardProps) {
             href={link_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
           >
             <ExternalLink className="h-3 w-3" />
             View Details

@@ -159,7 +159,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     editorProps: {
       attributes: {
         class:
-          'bg-transparent text-sm text-zinc-900 dark:text-composer-fg placeholder:text-zinc-400 dark:placeholder:text-composer-fg-muted outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm',
+          'bg-transparent text-sm text-zinc-900 dark:text-fg placeholder:text-zinc-400 dark:placeholder:text-fg-faint outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm',
       },
       handleKeyDown(_view, event) {
         if (event.key === 'Enter') {
@@ -207,7 +207,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       <div
         ref={dropRef}
         className={`border rounded-sm overflow-hidden transition-colors shadow-lg shadow-black/30 ${
-          dragOver ? 'border-accent bg-accent-muted' : 'border-zinc-300'
+          dragOver ? 'border-accent bg-accent-muted' : 'border-zinc-300 dark:border-border-subtle'
         }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
@@ -218,7 +218,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             Drop files to attach
           </div>
         )}
-        <div className="relative px-3 py-2 bg-white">
+        <div className="relative px-3 py-2 bg-white dark:bg-bg-elevated">
           <input
             ref={fileInputRef}
             type="file"
@@ -230,7 +230,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             className={`absolute top-2 right-2 p-1.5 rounded-md transition-colors ${
               uploading
                 ? 'text-accent animate-pulse'
-                : 'text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100'
+                : 'text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:text-fg-faint dark:hover:text-fg-secondary dark:hover:bg-surface'
             }`}
             title={uploading ? 'Uploading...' : 'Attach file'}
             disabled={!activeSessionId || uploading}

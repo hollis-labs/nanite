@@ -9,6 +9,7 @@ import {
   Puzzle,
   SlidersHorizontal,
   Sparkles,
+  User,
   Wrench,
   Zap,
 } from "lucide-react";
@@ -37,8 +38,10 @@ import { SkillsBrowser } from "./SkillsBrowser";
 import { ToolDashboard } from "./ToolDashboard";
 import { WidgetManager } from "./WidgetManager";
 import { WorkspaceProjectManager } from "./WorkspaceProjectManager";
+import { ProfilePanel } from "./ProfilePanel";
 
 const CORE_SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
+  { id: "profile", label: "Profile", icon: User },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
   { id: "providers", label: "Providers", icon: Cpu },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
@@ -89,6 +92,8 @@ export default function SettingsPage() {
 
   const renderActiveSection = () => {
     switch (activeSection) {
+      case "profile":
+        return <ProfilePanel />;
       case "preferences":
         return <PreferencesPanel />;
       case "providers":

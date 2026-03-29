@@ -329,6 +329,13 @@ export interface UserSettings {
   ext_settings: Record<string, unknown> & {
     widget_visibility?: Record<string, boolean>;
     widget_order?: string[];
+    display_name?: string;
+    avatar_url?: string;
+    email?: string;
+    timezone?: string;
+    language?: string;
+    theme_preference?: 'system' | 'light' | 'dark';
+    user_context?: string;
   };
 }
 

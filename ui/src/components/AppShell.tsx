@@ -76,9 +76,7 @@ export function AppShell() {
     enabled: !!activeSessionId,
   })
 
-  const primarySessionAgent = sessionAgents.find(
-    (a) => (a as any).is_primary === true || (a as any).is_primary === 1 || a.role === 'primary',
-  )
+  const primarySessionAgent = sessionAgents.find((a) => a.role === 'primary')
   const inboxAgentId = primarySessionAgent?.agent_id || 'mentat-001'
 
   const focusComposer = useCallback(() => {

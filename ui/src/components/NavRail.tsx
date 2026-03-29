@@ -7,6 +7,8 @@ import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useSettings } from '@/hooks/useSettings'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { useNavigationStore } from '@/stores/useNavigationStore'
+import { updateSettingsHash } from '@/hooks/useHashRoute'
 import { resolveIcon } from '@/lib/icons'
 import { api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
@@ -33,6 +35,7 @@ export function NavRail() {
   const theme = useLayoutStore((s) => s.theme)
   const toggleTheme = useLayoutStore((s) => s.toggleTheme)
   const queryClient = useQueryClient()
+  const navPush = useNavigationStore((s) => s.push)
   const { data: userSettings } = useSettings()
 
   const createSessionMutation = useMutation({
@@ -224,23 +227,38 @@ export function NavRail() {
         })}
       </div>
       <div className="mt-auto flex flex-col items-center gap-1">
-        <Tooltip content={theme === 'dark' ? 'Light mode' : 'Dark mode'} side="right">
+        <Tooltip content={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'Light mode' : 'Dark mode'} side="right">
           <Button
             variant="ghost"
             size="icon"
             className="w-10 h-10 rounded-lg text-fg-secondary hover:text-fg"
             onClick={toggleTheme}
           >
-            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            {theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </Button>
         </Tooltip>
-        <Tooltip content="Account" side="right">
+        <Tooltip content="Profile" side="right">
           <Button
             variant="ghost"
             size="icon"
-            className="w-10 h-10 rounded-lg text-fg-secondary hover:text-fg"
+            className={`w-10 h-10 rounded-lg ${
+              currentPage === 'settings' ? 'text-fg-secondary hover:text-fg' : 'text-fg-secondary hover:text-fg'
+            }`}
+            onClick={() => {
+              setCurrentPage('settings')
+              updateSettingsHash('profile' as never)
+              navPush({ view: 'settings/profile', label: 'Profile' })
+            }}
           >
-            <User className="w-5 h-5" />
+            {userSettings?.ext_settings?.avatar_url ? (
+              <img
+                src={userSettings.ext_settings.avatar_url as string}
+                alt="Profile"
+                className="size-6 rounded-md object-cover"
+              />
+            ) : (
+              <User className="w-5 h-5" />
+            )}
           </Button>
         </Tooltip>
       </div>

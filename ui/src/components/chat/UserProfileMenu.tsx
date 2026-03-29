@@ -27,6 +27,7 @@ export function UserProfileMenu() {
   const mutation = useSettingsMutation()
 
   const displayName = (settings?.ext_settings?.display_name as string) || ''
+  const avatarUrl = (settings?.ext_settings?.avatar_url as string) || ''
   const avatar = (settings?.ext_settings?.avatar as string) || ''
 
   const goToSettings = useCallback((section: string) => {
@@ -52,7 +53,9 @@ export function UserProfileMenu() {
           className="flex items-center justify-center size-6 rounded-sm bg-composer-hover text-composer-fg-secondary hover:text-composer-fg transition-colors"
           title="Profile & preferences"
         >
-          {avatar ? (
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" className="size-full rounded-sm object-cover" />
+          ) : avatar ? (
             <span className="text-xs">{avatar}</span>
           ) : (
             <User className="size-3.5" />
@@ -68,7 +71,9 @@ export function UserProfileMenu() {
         <div className="px-3 py-3">
           <div className="flex items-center gap-2.5">
             <div className="flex items-center justify-center size-9 rounded-sm bg-surface text-fg-secondary">
-              {avatar ? (
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="" className="size-full rounded-sm object-cover" />
+              ) : avatar ? (
                 <span className="text-base">{avatar}</span>
               ) : (
                 <User className="size-4" />
@@ -118,8 +123,8 @@ export function UserProfileMenu() {
 
         {/* Quick links */}
         <div className="py-1">
+          <MenuLink icon={User} label="Profile" onClick={() => goToSettings('profile')} />
           <MenuLink icon={Keyboard} label="Keyboard Shortcuts" onClick={() => goToSettings('shortcuts')} />
-          <MenuLink icon={User} label="Preferences" onClick={() => goToSettings('preferences')} />
         </div>
       </PopoverContent>
     </Popover>

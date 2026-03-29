@@ -212,12 +212,8 @@ export const api = {
     return res.json();
   },
 
-  // Agent Profiles (management)
-  listAgentProfiles: async (): Promise<AgentProfile[]> => {
-    const res = await fetch(`${API_BASE}/agents`);
-    if (!res.ok) throw new Error(`Failed to list agent profiles: ${res.status}`);
-    return res.json();
-  },
+  // Agent Profiles (full detail) — same endpoint, wider type
+  listAgentProfiles: async (): Promise<AgentProfile[]> => api.listAgents() as Promise<AgentProfile[]>,
 
   getAgentProfile: async (
     id: string,

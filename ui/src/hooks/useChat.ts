@@ -7,7 +7,18 @@ import { useChatStore } from "@/stores/useChatStore";
 
 const PAGE_SIZE = 50;
 
-let errorCounter = 0;
+/** SSE event type constants — single source of truth for stream event names */
+const SSE = {
+  DELTA: "delta",
+  TOOL_CALL: "tool_call",
+  TOOL_RESULT: "tool_result",
+  TOOL_WARNING: "tool_warning",
+  STATUS: "status",
+  CIRCUIT_OPEN: "circuit_open",
+  SESSION_TAKEOVER: "session_takeover",
+  STREAM_END: "stream_end",
+  ERROR: "error",
+} as const;
 
 function makeChatError(
   code: ChatErrorCode,
@@ -15,9 +26,8 @@ function makeChatError(
   details?: Record<string, unknown>,
   timestamp?: string,
 ): ChatError {
-  errorCounter += 1;
   return {
-    id: `err-${Date.now()}-${errorCounter}`,
+    id: `err-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
     code,
     message,
     details: details as Record<string, unknown>,
@@ -217,7 +227,7 @@ export function useChat(sessionId: string | null) {
         eventSourceRef.current = es;
         let accumulated = "";
 
-        es.addEventListener("delta", (e: MessageEvent) => {
+        es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
             accumulated += data.content;
@@ -227,7 +237,7 @@ export function useChat(sessionId: string | null) {
           }
         });
 
-        es.addEventListener("tool_call", (e: MessageEvent) => {
+        es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
           const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
           if (data.tool) {
             addToolCall({
@@ -243,7 +253,7 @@ export function useChat(sessionId: string | null) {
           }
         });
 
-        es.addEventListener("tool_result", (e: MessageEvent) => {
+        es.addEventListener(SSE.TOOL_RESULT, (e: MessageEvent) => {
           const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
           const toolId = data.tool_id || data.message_id;
           if (toolId) {
@@ -254,7 +264,7 @@ export function useChat(sessionId: string | null) {
           }
         });
 
-        es.addEventListener("tool_warning", (e: MessageEvent) => {
+        es.addEventListener(SSE.TOOL_WARNING, (e: MessageEvent) => {
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.data) {
             try {
@@ -270,19 +280,19 @@ export function useChat(sessionId: string | null) {
           }
         });
 
-        es.addEventListener("status", (e: MessageEvent) => {
+        es.addEventListener(SSE.STATUS, (e: MessageEvent) => {
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
             setStatusMessage(data.content);
           }
         });
 
-        es.addEventListener("circuit_open", () => {
+        es.addEventListener(SSE.CIRCUIT_OPEN, () => {
           setCircuitOpen(true);
           // Do NOT close the EventSource — keep it open for potential retry.
         });
 
-        es.addEventListener("session_takeover", () => {
+        es.addEventListener(SSE.SESSION_TAKEOVER, () => {
           // Another tab opened this session — stop streaming and show banner.
           console.warn("[useChat] Session takeover — another tab is now active");
           setSessionTakeover(true);
@@ -306,7 +316,7 @@ export function useChat(sessionId: string | null) {
           // Do NOT reconnect — that would cause a takeover loop.
         });
 
-        es.addEventListener("stream_end", (e: MessageEvent) => {
+        es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
           const data: StreamEvent = JSON.parse(e.data as string);
           // Add the complete assistant message
           // Parse envelope from stream_end event if present.
@@ -336,7 +346,7 @@ export function useChat(sessionId: string | null) {
           void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
         });
 
-        es.addEventListener("error", (e: MessageEvent) => {
+        es.addEventListener(SSE.ERROR, (e: MessageEvent) => {
           // Custom SSE error event from the backend (has data).
           if (e.data) {
             try {
@@ -462,7 +472,7 @@ export function useChat(sessionId: string | null) {
       eventSourceRef.current = es;
       setStreaming(true);
 
-      es.addEventListener("delta", (e: MessageEvent) => {
+      es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content) {
           appendStreamContent(data.content);
@@ -470,7 +480,7 @@ export function useChat(sessionId: string | null) {
         }
       });
 
-      es.addEventListener("stream_end", (e: MessageEvent) => {
+      es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
         const data: StreamEvent = JSON.parse(e.data as string);
         const assistantMsg: Message = {
           id: message_id,
@@ -488,11 +498,11 @@ export function useChat(sessionId: string | null) {
         eventSourceRef.current = null;
       });
 
-      es.addEventListener("circuit_open", () => {
+      es.addEventListener(SSE.CIRCUIT_OPEN, () => {
         setCircuitOpen(true);
       });
 
-      es.addEventListener("session_takeover", () => {
+      es.addEventListener(SSE.SESSION_TAKEOVER, () => {
         console.warn("[useChat] Session takeover during retry — another tab is now active");
         setSessionTakeover(true);
         clearStream();
@@ -500,7 +510,7 @@ export function useChat(sessionId: string | null) {
         eventSourceRef.current = null;
       });
 
-      es.addEventListener("error", () => {
+      es.addEventListener(SSE.ERROR, () => {
         clearStream();
         es.close();
         eventSourceRef.current = null;

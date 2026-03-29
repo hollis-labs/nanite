@@ -24,16 +24,16 @@ interface TaskDispositionCardProps {
 const DEFAULT_ACTIONS = ['Approve', 'Done', 'Request Changes', 'Defer', 'Skip']
 
 const PRIORITY_COLOR: Record<string, string> = {
-  P1: 'bg-red-500/20 text-red-400 border-red-500/25',
+  P1: 'bg-accent/20 text-accent border-accent/25',
   P2: 'bg-amber-500/20 text-amber-400 border-amber-500/25',
-  P3: 'bg-blue-500/20 text-blue-400 border-blue-500/25',
+  P3: 'bg-success/20 text-success border-success/25',
 }
 
 const STATUS_COLOR: Record<string, string> = {
   todo: 'bg-surface/50 text-fg-secondary',
-  doing: 'bg-blue-500/20 text-blue-400',
-  blocked: 'bg-red-500/20 text-red-400',
-  done: 'bg-emerald-500/20 text-emerald-400',
+  doing: 'bg-success/20 text-success',
+  blocked: 'bg-accent/20 text-accent',
+  done: 'bg-success/10 text-success',
   queued: 'bg-violet-500/20 text-violet-400',
 }
 
@@ -96,7 +96,7 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
       )}
 
       {/* Task rows */}
-      <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 overflow-hidden divide-y divide-border">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 overflow-hidden divide-y divide-border">
         {data.tasks.map(task => {
           const decision = decisions[task.id]
           const showComment = hasRequestChanges && decision === 'Request Changes'
@@ -170,7 +170,7 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
             size="sm"
             disabled={submitting || nonSkipCount === 0}
             onClick={handleSubmit}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-1 h-7"
+            className="bg-success hover:bg-success/80 text-white text-xs px-4 py-1 h-7"
           >
             {submitting ? (
               <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
@@ -181,10 +181,10 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
           </Button>
         </div>
       ) : (
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+        <div className="rounded-sm border border-success/30 bg-success/5 p-3">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            <span className="text-sm text-emerald-400">
+            <CheckCircle2 className="h-4 w-4 text-success" />
+            <span className="text-sm text-success">
               Dispositions submitted — agent is processing transitions.
             </span>
           </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Mail, Reply, Check, CheckCheck, Clock, AlertTriangle, ArrowRight, Send } from 'lucide-react'
+import { Mail, Reply, Check, CheckCheck, Clock, AlertTriangle, ArrowRight, Send } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import { api } from '@/lib/api'
@@ -15,10 +15,10 @@ const TYPE_LABELS: Record<A2AMessageType, string> = {
 }
 
 const TYPE_COLORS: Record<A2AMessageType, string> = {
-  message: 'bg-zinc-700 text-fg-secondary',
+  message: 'bg-surface text-fg-secondary',
   help_request: 'bg-amber-900/60 text-amber-300',
   directive: 'bg-accent-muted text-accent-hover',
-  status_update: 'bg-emerald-900/60 text-emerald-300',
+  status_update: 'bg-success-muted text-success',
   handoff: 'bg-accent-muted text-accent-hover',
 }
 
@@ -29,8 +29,6 @@ const STATUS_ICONS = {
   resolved: CheckCheck,
 }
 
-// --- Toast notification ---
-
 interface Toast {
   id: number
   message: string
@@ -40,13 +38,11 @@ let toastId = 0
 
 type InboxTab = 'user' | 'agent'
 
-interface InboxPanelProps {
+interface InboxContentProps {
   agentId: string
-  open: boolean
-  onClose: () => void
 }
 
-export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
+export function InboxContent({ agentId }: InboxContentProps) {
   const [activeTab, setActiveTab] = useState<InboxTab>('user')
   const [filter, setFilter] = useState<string>('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -64,10 +60,8 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
     }, 3000)
   }, [])
 
-  // The effective agent ID depends on which tab is active
   const effectiveAgentId = activeTab === 'user' ? 'user' : agentId
 
-  // Fetch agents for name lookup
   const { data: agents = [] } = useQuery({
     queryKey: ['agents'],
     queryFn: api.listAgents,
@@ -88,22 +82,19 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
     [agents],
   )
 
-  // Inbox query
   const { data: messages = [], isLoading } = useQuery({
     queryKey: ['a2a-inbox', effectiveAgentId, filter],
     queryFn: () => api.getA2AInbox(effectiveAgentId, filter || undefined),
-    enabled: open && !!effectiveAgentId,
+    enabled: !!effectiveAgentId,
     refetchInterval: 30000,
   })
 
-  // Thread query
   const { data: threadMessages = [] } = useQuery({
     queryKey: ['a2a-thread', threadView],
     queryFn: () => api.getA2AThread(threadView!),
     enabled: !!threadView,
   })
 
-  // Ack mutation
   const ackMutation = useMutation({
     mutationFn: api.ackA2AMessage,
     onSuccess: () => {
@@ -113,7 +104,6 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
     },
   })
 
-  // Resolve mutation
   const resolveMutation = useMutation({
     mutationFn: api.resolveA2AMessage,
     onSuccess: () => {
@@ -123,7 +113,6 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
     },
   })
 
-  // Send reply mutation
   const sendMutation = useMutation({
     mutationFn: api.sendA2AMessage,
     onSuccess: () => {
@@ -134,15 +123,6 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
       void queryClient.invalidateQueries({ queryKey: ['a2a-thread'] })
     },
   })
-
-  // Close thread view when panel closes
-  useEffect(() => {
-    if (!open) {
-      setThreadView(null)
-      setExpandedId(null)
-      setReplyTo(null)
-    }
-  }, [open])
 
   const handleTabSwitch = (tab: InboxTab) => {
     setActiveTab(tab)
@@ -171,48 +151,27 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
     })
   }
 
-  if (!open) return null
+  // Reset state when switching away
+  useEffect(() => {
+    return () => {
+      setThreadView(null)
+      setExpandedId(null)
+      setReplyTo(null)
+    }
+  }, [])
 
   const displayMessages = threadView ? threadMessages : messages
 
   return (
-    <div className="fixed inset-y-0 right-0 w-96 bg-bg border-l border-border z-50 flex flex-col shadow-2xl">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
-        <div className="flex items-center gap-2">
-          <Mail className="w-4 h-4 text-fg-secondary" />
-          <h2 className="text-sm font-semibold text-fg">
-            {threadView ? 'Thread' : 'Inbox'}
-          </h2>
-          {!threadView && messages.length > 0 && (
-            <span className="text-xs text-fg-muted">({messages.length})</span>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {threadView && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setThreadView(null)}
-              className="text-xs text-fg-secondary"
-            >
-              Back to inbox
-            </Button>
-          )}
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-
+    <>
       {/* Tab bar */}
       {!threadView && (
-        <div className="flex border-b border-border">
+        <div className="flex border-b border-border shrink-0">
           <button
             onClick={() => handleTabSwitch('user')}
             className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
               activeTab === 'user'
-                ? 'text-blue-400 border-b-2 border-blue-500'
+                ? 'text-success border-b-2 border-success'
                 : 'text-fg-muted hover:text-fg-secondary border-b-2 border-transparent'
             }`}
           >
@@ -222,7 +181,7 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
             onClick={() => handleTabSwitch('agent')}
             className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
               activeTab === 'agent'
-                ? 'text-blue-400 border-b-2 border-blue-500'
+                ? 'text-success border-b-2 border-success'
                 : 'text-fg-muted hover:text-fg-secondary border-b-2 border-transparent'
             }`}
           >
@@ -231,9 +190,21 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
         </div>
       )}
 
-      {/* Filter bar (inbox only) */}
+      {/* Thread back button */}
+      {threadView && (
+        <div className="px-3 py-2 border-b border-border shrink-0">
+          <button
+            onClick={() => setThreadView(null)}
+            className="text-xs text-fg-secondary hover:text-fg transition-colors"
+          >
+            &larr; Back to inbox
+          </button>
+        </div>
+      )}
+
+      {/* Filter bar */}
       {!threadView && (
-        <div className="flex gap-1 px-4 py-2 border-b border-border/50">
+        <div className="flex gap-1 px-4 py-2 border-b border-border/50 shrink-0">
           {['', 'unread', 'read', 'resolved'].map((s) => (
             <button
               key={s}
@@ -251,14 +222,14 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
       )}
 
       {/* Messages */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-12 text-fg-muted text-sm">
             Loading...
           </div>
         ) : displayMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-fg-muted text-sm gap-2">
-            <Mail className="w-8 h-8 text-zinc-700" />
+            <Mail className="w-8 h-8 text-fg-faint" />
             <span>No messages</span>
           </div>
         ) : (
@@ -275,7 +246,6 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
                     isUnread ? 'bg-bg-elevated/80' : ''
                   }`}
                 >
-                  {/* Message header */}
                   <button
                     className="w-full text-left"
                     onClick={() => {
@@ -318,7 +288,7 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
                         {formatTime(msg.created_at)}
                       </span>
                       {msg.priority === 1 && (
-                        <AlertTriangle className="w-3 h-3 text-red-400" />
+                        <AlertTriangle className="w-3 h-3 text-accent" />
                       )}
                       {msg.thread_id && msg.thread_id !== msg.id && !threadView && (
                         <button
@@ -340,7 +310,6 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
                     )}
                   </button>
 
-                  {/* Expanded body */}
                   {expanded && (
                     <div className="mt-2 ml-5">
                       <pre className="text-xs text-fg-secondary whitespace-pre-wrap font-sans leading-relaxed">
@@ -378,7 +347,6 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
                         )}
                       </div>
 
-                      {/* Inline reply */}
                       {replyTo === msg.id && (
                         <div className="mt-2 flex flex-col gap-2">
                           <textarea
@@ -425,18 +393,18 @@ export function InboxPanel({ agentId, open, onClose }: InboxPanelProps) {
 
       {/* Toast container */}
       {toasts.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
+        <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-2">
           {toasts.map((toast) => (
             <div
               key={toast.id}
-              className="px-4 py-3 bg-surface border border-border-subtle rounded-lg shadow-xl text-sm text-fg max-w-sm animate-in fade-in slide-in-from-bottom-2"
+              className="px-4 py-3 bg-surface border border-border-subtle rounded-sm shadow-xl text-sm text-fg max-w-sm animate-in fade-in slide-in-from-bottom-2"
             >
               {toast.message}
             </div>
           ))}
         </div>
       )}
-    </div>
+    </>
   )
 }
 

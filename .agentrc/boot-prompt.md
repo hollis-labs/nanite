@@ -75,6 +75,19 @@ Completed (2026-03-28 extended session):
 - Workspace switcher: hover chevron, accent ring, Add Workspace button
 - Numbered list line break fix in markdown rendering
 
+Completed (2026-03-29 session):
+- Envelope card color refinement: all green/emerald → success (blue) token,
+  cyan → neutral, rounded-lg → rounded-sm across all 26 envelope cards
+- AdapterBadge: emerald → violet (PTY), blue-500 → success (API)
+- Right rail unified panel: widgets/inbox/artifacts as tabbed views in
+  one panel (LayoutGrid/Mail/Package icons). Deleted ArtifactsDrawer.tsx
+  and InboxPanel.tsx. Extracted ArtifactsContent + InboxContent components.
+- Removed inbox icon from NavRail (inbox is in right rail now)
+- ChatHeader redesign: 2-column layout (avatar + info rows).
+  Row 1: agent dropdown + adapter badge + fork/clone.
+  Row 2: #shortcode, model, tool count, mode pills.
+  Removed useless "New Chat" title and redundant capability pills.
+
 Remaining work:
 1. Workspace CRUD GUI — proper create modal (replace window.prompt),
    settings page for edit/delete workspaces
@@ -84,12 +97,11 @@ Remaining work:
    session filtering by project_id (backend agent task)
 4. SprintPlanningModal — move to plugin (not core)
 5. Plugin architecture — A2A plugin, Sprint plugin, UI hooks/events system
-6. Envelope card design refinement — colors still feel "Microsoft-ish",
-   need more polished/professional palette
 
 Reference implementations:
 - ProviderManager.tsx — tabbed view with search/filter/sort + Variation F cards
 - ShortcutsPanel.tsx — interactive click-to-edit cards
 - CreateProjectModal.tsx — clean modal pattern for entity creation
 - ProjectDropdown.tsx — dropdown selector with inline create
+- RightRail.tsx — tabbed panel with icon tabs (widgets/inbox/artifacts)
 ```

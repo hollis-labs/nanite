@@ -81,16 +81,16 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
   if (formState === 'success' && ticketResult) {
     const routing = (ticketResult['routing'] || 'IT Service Desk — Triage') as string
     return (
-      <div className="rounded-lg border border-green-500/30 bg-bg-elevated/50 overflow-hidden">
+      <div className="rounded-sm border border-success/30 bg-bg-elevated/50 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between bg-green-500/5 px-4 py-3 border-b border-green-500/20">
+        <div className="flex items-center justify-between bg-success/5 px-4 py-3 border-b border-success/20">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-4 w-4 text-success" />
             <span className="text-sm font-medium text-fg">{ticketId}</span>
             <span className="text-sm text-fg-secondary">&mdash;</span>
             <span className="text-sm text-fg-secondary truncate">{title}</span>
           </div>
-          <span className="inline-block rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-success">
+          <span className="inline-block rounded-full bg-success/15 border border-success/25 px-2 py-0.5 text-xs text-success">
             open
           </span>
         </div>
@@ -140,7 +140,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
     'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent placeholder:text-fg-faint'
 
   return (
-    <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
       {/* Header */}
       <div className="mb-4 flex items-center gap-2">
         <Ticket className="h-4 w-4 text-fg-secondary" />

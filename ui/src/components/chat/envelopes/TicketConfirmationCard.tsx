@@ -20,10 +20,10 @@ interface TicketConfirmationCardProps {
 }
 
 const PRIORITY_STYLES: Record<string, { bg: string; text: string; border: string }> = {
-  low: { bg: 'bg-green-500/15', text: 'text-success', border: 'border-green-500/25' },
+  low: { bg: 'bg-success/15', text: 'text-success', border: 'border-success/25' },
   medium: { bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/25' },
-  high: { bg: 'bg-red-500/15', text: 'text-red-400', border: 'border-red-500/25' },
-  critical: { bg: 'bg-red-600/20', text: 'text-red-300', border: 'border-red-600/30' },
+  high: { bg: 'bg-accent/15', text: 'text-accent', border: 'border-accent/25' },
+  critical: { bg: 'bg-accent/20', text: 'text-accent', border: 'border-accent/30' },
 }
 
 export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
@@ -38,16 +38,16 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
   }
 
   return (
-    <div className="rounded-lg border border-green-500/30 bg-bg-elevated/50 overflow-hidden">
+    <div className="rounded-sm border border-success/30 bg-bg-elevated/50 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between bg-green-500/5 px-4 py-3 border-b border-green-500/20">
+      <div className="flex items-center justify-between bg-success/5 px-4 py-3 border-b border-success/20">
         <div className="flex items-center gap-2">
           <CheckCircle className="h-4 w-4 text-success" />
           <span className="text-sm font-medium text-fg">{ticket.id}</span>
           <span className="text-sm text-fg-secondary">&mdash;</span>
           <span className="text-sm text-fg-secondary truncate">{ticket.title}</span>
         </div>
-        <span className="inline-block rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-success capitalize">
+        <span className="inline-block rounded-full bg-success/15 border border-success/25 px-2 py-0.5 text-xs text-success capitalize">
           {ticket.status}
         </span>
       </div>
@@ -103,7 +103,7 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
         </div>
 
         {/* Production note */}
-        <div className="flex items-start gap-2 rounded-md border border-border-subtle bg-surface/50 px-3 py-2">
+        <div className="flex items-start gap-2 rounded-sm border border-border-subtle bg-surface/50 px-3 py-2">
           <Info className="mt-0.5 h-3 w-3 shrink-0 text-fg-muted" />
           <span className="text-xs text-fg-muted">
             In production, this ticket would be automatically created in BMC Helix ITSM

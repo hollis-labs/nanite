@@ -18,7 +18,7 @@ export function GiphyModalCard({ data }: GiphyModalCardProps) {
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-violet-500/20 bg-bg-elevated/50 overflow-hidden max-w-sm">
+      <div className="rounded-sm border border-violet-500/20 bg-bg-elevated/50 overflow-hidden max-w-sm">
         {/* Title */}
         <div className="flex items-center gap-2 px-4 pt-3 pb-2">
           <Sparkles className="h-4 w-4 text-violet-400 shrink-0" />

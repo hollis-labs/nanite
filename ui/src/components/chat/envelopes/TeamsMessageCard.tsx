@@ -16,14 +16,14 @@ export function TeamsMessageCard({ data }: TeamsMessageCardProps) {
   const { title, message, facts, link_url } = data
 
   return (
-    <div className="rounded-lg border border-accent/30 bg-bg-elevated/50 overflow-hidden">
+    <div className="rounded-sm border border-accent/30 bg-bg-elevated/50 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between bg-accent-muted px-4 py-3 border-b border-accent/20">
         <div className="flex items-center gap-2">
           <MessageSquare className="h-4 w-4 text-accent" />
           <span className="text-sm font-medium text-fg">Teams Message</span>
         </div>
-        <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-success">
+        <span className="inline-flex items-center gap-1 rounded-full bg-success/15 border border-success/25 px-2 py-0.5 text-xs text-success">
           <CheckCircle className="h-3 w-3" />
           Sent to Teams
         </span>

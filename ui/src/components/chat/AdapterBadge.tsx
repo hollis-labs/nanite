@@ -1,16 +1,16 @@
 import { Terminal, Globe } from 'lucide-react'
 
 const ADAPTER_CONFIG: Record<string, { label: string; icon: typeof Terminal; bg: string; text: string; border: string }> = {
-  pty: { label: 'PTY', icon: Terminal, bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
-  'pty-claude': { label: 'PTY', icon: Terminal, bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
-  'pty-codex': { label: 'PTY', icon: Terminal, bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
-  'pty-gemini': { label: 'PTY', icon: Terminal, bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
-  anthropic: { label: 'API', icon: Globe, bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
-  openai: { label: 'API', icon: Globe, bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
-  ollama: { label: 'API', icon: Globe, bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
+  pty: { label: 'PTY', icon: Terminal, bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/20' },
+  'pty-claude': { label: 'PTY', icon: Terminal, bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/20' },
+  'pty-codex': { label: 'PTY', icon: Terminal, bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/20' },
+  'pty-gemini': { label: 'PTY', icon: Terminal, bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/20' },
+  anthropic: { label: 'API', icon: Globe, bg: 'bg-success/10', text: 'text-success', border: 'border-success/20' },
+  openai: { label: 'API', icon: Globe, bg: 'bg-success/10', text: 'text-success', border: 'border-success/20' },
+  ollama: { label: 'API', icon: Globe, bg: 'bg-success/10', text: 'text-success', border: 'border-success/20' },
 }
 
-const DEFAULT_CONFIG = { label: 'API', icon: Globe, bg: 'bg-zinc-500/10', text: 'text-fg-secondary', border: 'border-zinc-500/20' }
+const DEFAULT_CONFIG = { label: 'API', icon: Globe, bg: 'bg-surface/50', text: 'text-fg-secondary', border: 'border-border-subtle' }
 
 function isPTYProvider(provider: string): boolean {
   return provider.startsWith('pty')

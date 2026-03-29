@@ -12,37 +12,6 @@ import { api } from '@/lib/api'
 import { AgentRoster } from './AgentRoster'
 import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 
-// Capability pills — detected, not user-set
-interface Capability {
-  label: string
-  color: string // tailwind text color class
-  bg: string    // tailwind bg class
-}
-
-function detectCapabilities(provider?: string, mode?: string, toolCount?: number): Capability[] {
-  const caps: Capability[] = []
-
-  // Agent mode — always present
-  caps.push({ label: 'Agent', color: 'text-blue-400', bg: 'bg-blue-500/15' })
-
-  // Plan mode — detected when mode is planner or architect
-  if (mode === 'planner' || mode === 'architect') {
-    caps.push({ label: 'Plan', color: 'text-green-400', bg: 'bg-green-500/15' })
-  }
-
-  // PTY — detected when using a PTY/subprocess adapter
-  if (provider?.startsWith('pty')) {
-    caps.push({ label: 'PTY', color: 'text-cyan-400', bg: 'bg-cyan-500/15' })
-  }
-
-  // Tools — detected when MCP tools are available
-  if (toolCount && toolCount > 0) {
-    caps.push({ label: 'Tools', color: 'text-amber-400', bg: 'bg-amber-500/15' })
-  }
-
-  return caps
-}
-
 export function ChatHeader() {
   const toggleLeftSidebar = useLayoutStore((s) => s.toggleLeftSidebar)
   const toggleRightRail = useLayoutStore((s) => s.toggleRightRail)
@@ -55,11 +24,8 @@ export function ChatHeader() {
   const toolCalls = useChatStore((s) => s.toolCalls)
   const queryClient = useQueryClient()
 
-  const [isEditing, setIsEditing] = useState(false)
-  const [editValue, setEditValue] = useState('')
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [rosterOpen, setRosterOpen] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const { data: session } = useQuery({
@@ -74,7 +40,6 @@ export function ChatHeader() {
     enabled: !!activeSessionId,
   })
 
-  // Tool count from the tools API for capability detection
   const { data: tools = [] } = useQuery({
     queryKey: ['tools'],
     queryFn: api.fetchTools,
@@ -88,33 +53,27 @@ export function ChatHeader() {
     queryFn: api.listAgents,
   })
 
-  // Find the primary agent for this session
   const primaryAgent = sessionAgents.find((a) => (a as any).is_primary === true || (a as any).is_primary === 1 || a.role === 'primary')
   const primaryAgentProfile = allAgents.find((a) => a.id === primaryAgent?.agent_id)
   const activeAgentName = primaryAgentProfile?.name || 'Conduit'
 
   const agentCount = sessionAgents.length
-  const title = session?.custom_name || session?.title || 'New Chat'
   const shortCode = session?.short_code
+  const toolCount = tools.length + (toolCalls?.length || 0)
 
-  // Detect capabilities
-  const capabilities = detectCapabilities(
-    session?.provider,
-    activeMode,
-    tools.length + (toolCalls?.length || 0),
-  )
+  // Model display — from session or agent profile
+  const modelName = session?.model || (primaryAgentProfile as any)?.default_model || null
+  const shortModel = modelName ? modelName.split('/').pop()?.replace(/-\d{8}$/, '') : null
 
-  // Switch primary agent for this session
+  // Switch primary agent
   const switchAgentMutation = useMutation({
     mutationFn: async (agentId: string) => {
       if (!activeSessionId) return
-      // Remove current primary if exists
       if (primaryAgent) {
         try {
           await api.removeSessionAgent(activeSessionId, primaryAgent.agent_id)
-        } catch { /* ignore if not found */ }
+        } catch { /* ignore */ }
       }
-      // Add new agent as primary
       return api.addSessionAgent(activeSessionId, agentId, 'primary')
     },
     onSuccess: () => {
@@ -122,19 +81,6 @@ export function ChatHeader() {
     },
   })
 
-  const handleDoubleClick = useCallback(() => {
-    setEditValue(title)
-    setIsEditing(true)
-  }, [title])
-
-  useEffect(() => {
-    if (isEditing) {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    }
-  }, [isEditing])
-
-  // Close dropdown on outside click
   useEffect(() => {
     if (!dropdownOpen) return
     function handleClickOutside(e: MouseEvent) {
@@ -145,28 +91,6 @@ export function ChatHeader() {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [dropdownOpen])
-
-  const handleSave = useCallback(async () => {
-    if (!activeSessionId) return
-    const trimmed = editValue.trim()
-    if (trimmed && trimmed !== title) {
-      try {
-        await api.updateSession(activeSessionId, { custom_name: trimmed } as Partial<typeof session & { custom_name: string }>)
-      } catch (err) {
-        console.error('Failed to update session title:', err)
-      }
-    }
-    setIsEditing(false)
-  }, [activeSessionId, editValue, title, session])
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      void handleSave()
-    } else if (e.key === 'Escape') {
-      setIsEditing(false)
-    }
-  }, [handleSave])
 
   const handleAgentSelect = useCallback((agentId: string) => {
     switchAgentMutation.mutate(agentId)
@@ -214,118 +138,119 @@ export function ChatHeader() {
             <PanelLeft className="w-4 h-4" />
           </Button>
         </Tooltip>
-        <div className="flex items-center gap-2">
-          {isEditing ? (
-            <input
-              ref={inputRef}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={() => void handleSave()}
-              onKeyDown={handleKeyDown}
-              className="text-sm font-medium text-fg bg-surface border border-border-subtle rounded px-2 py-0.5 outline-none focus:border-accent"
-            />
-          ) : (
-            <div className="flex items-center gap-2" onDoubleClick={handleDoubleClick}>
-              <div className="flex flex-col">
-                <h1 className="text-sm font-medium text-fg cursor-default leading-tight">{title}</h1>
-                {shortCode && (
-                  <span className="text-[10px] text-fg-faint font-mono leading-tight">#{shortCode}</span>
-                )}
-              </div>
-              {session?.provider && (
-                <span className="flex items-center gap-1">
-                  <AdapterBadge provider={session.provider} size="md" />
-                  <div className="relative" ref={forkMenuRef}>
-                    <Tooltip content="Clone or fork session" side="bottom">
-                      <button
-                        onClick={() => setForkMenuOpen((o) => !o)}
-                        disabled={forkMutation.isPending}
-                        className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </button>
-                    </Tooltip>
-                    {forkMenuOpen && (
-                      <div className="absolute top-full left-0 mt-1 w-44 bg-bg-elevated border border-border-subtle rounded-lg shadow-xl z-50 py-1">
-                        <button
-                          onClick={() => forkMutation.mutate(false)}
-                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-fg-secondary hover:bg-surface transition-colors"
-                        >
-                          <Copy className="w-3 h-3 text-fg-muted" />
-                          Clone (empty)
-                        </button>
-                        <button
-                          onClick={() => forkMutation.mutate(true)}
-                          className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-fg-secondary hover:bg-surface transition-colors"
-                        >
-                          <GitFork className="w-3 h-3 text-fg-muted" />
-                          Fork (with history)
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </span>
-              )}
-            </div>
-          )}
 
-          {/* Agent badge + dropdown */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setDropdownOpen((o) => !o)}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface border border-border-subtle transition-colors hover:border-border-subtle"
-            >
-              <Bot className="w-3 h-3 text-fg-secondary" />
-              <span className="text-xs text-fg-secondary">
-                {activeAgentName}
-              </span>
-              {primaryAgentProfile?.source && (
-                <SourceBadge source={primaryAgentProfile.source} className="bg-surface" />
-              )}
-              <ChevronDown className="w-3 h-3 text-fg-muted" />
-            </button>
-
-            {dropdownOpen && (
-              <div className="absolute top-full left-0 mt-1 w-52 bg-bg-elevated border border-border-subtle rounded-lg shadow-xl z-50 py-1">
-                {/* Agent section */}
-                <div className="px-3 py-1.5 text-xs font-medium text-fg-muted uppercase tracking-wider">
-                  Agent
-                </div>
-                {allAgents.filter((a) => a.status !== 'disabled').map((agent) => (
-                  <button
-                    key={agent.id}
-                    onClick={() => handleAgentSelect(agent.id)}
-                    disabled={switchAgentMutation.isPending}
-                    className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
-                      primaryAgent?.agent_id === agent.id
-                        ? 'bg-surface text-fg'
-                        : 'text-fg-secondary hover:bg-surface/60 hover:text-fg'
-                    }`}
-                  >
-                    <Bot className="w-3 h-3 shrink-0" />
-                    <span className="truncate">{agent.name}</span>
-                  </button>
-                ))}
-
-              </div>
-            )}
+        {/* Agent info — 2 column: avatar + info rows */}
+        <div className="flex items-center gap-2.5">
+          {/* Avatar */}
+          <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center shrink-0">
+            <Bot className="w-4 h-4 text-fg-secondary" />
           </div>
 
-          {/* Capability indicator pills */}
-          <div className="flex items-center gap-1">
-            {capabilities.map((cap) => (
-              <span
-                key={cap.label}
-                className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${cap.color} ${cap.bg}`}
-              >
-                {cap.label}
-              </span>
-            ))}
+          {/* Info columns */}
+          <div className="flex flex-col justify-center min-w-0 gap-0.5">
+            {/* Row 1: Agent dropdown + adapter badge + fork */}
+            <div className="flex items-center gap-1.5">
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  onClick={() => setDropdownOpen((o) => !o)}
+                  className="flex items-center gap-1 text-sm font-medium text-fg hover:text-fg transition-colors"
+                >
+                  <span className="truncate max-w-[180px]">{activeAgentName}</span>
+                  <ChevronDown className="w-3 h-3 text-fg-muted shrink-0" />
+                </button>
+
+                {dropdownOpen && (
+                  <div className="absolute top-full left-0 mt-1 w-52 bg-bg-elevated border border-border-subtle rounded-sm shadow-xl z-50 py-1">
+                    <div className="px-3 py-1.5 text-[10px] font-medium text-fg-muted uppercase tracking-wider">
+                      Switch Agent
+                    </div>
+                    {allAgents.filter((a) => a.status !== 'disabled').map((agent) => (
+                      <button
+                        key={agent.id}
+                        onClick={() => handleAgentSelect(agent.id)}
+                        disabled={switchAgentMutation.isPending}
+                        className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                          primaryAgent?.agent_id === agent.id
+                            ? 'bg-surface text-fg'
+                            : 'text-fg-secondary hover:bg-surface/60 hover:text-fg'
+                        }`}
+                      >
+                        <Bot className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{agent.name}</span>
+                        {agent.source && <SourceBadge source={agent.source} className="ml-auto" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {session?.provider && (
+                <AdapterBadge provider={session.provider} size="sm" />
+              )}
+
+              <div className="relative" ref={forkMenuRef}>
+                <Tooltip content="Clone or fork" side="bottom">
+                  <button
+                    onClick={() => setForkMenuOpen((o) => !o)}
+                    disabled={forkMutation.isPending}
+                    className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                  >
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </Tooltip>
+                {forkMenuOpen && (
+                  <div className="absolute top-full left-0 mt-1 w-44 bg-bg-elevated border border-border-subtle rounded-sm shadow-xl z-50 py-1">
+                    <button
+                      onClick={() => forkMutation.mutate(false)}
+                      className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-fg-secondary hover:bg-surface transition-colors"
+                    >
+                      <Copy className="w-3 h-3 text-fg-muted" />
+                      Clone (empty)
+                    </button>
+                    <button
+                      onClick={() => forkMutation.mutate(true)}
+                      className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-fg-secondary hover:bg-surface transition-colors"
+                    >
+                      <GitFork className="w-3 h-3 text-fg-muted" />
+                      Fork (with history)
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Row 2: Info pills */}
+            <div className="flex items-center gap-1">
+              {shortCode && (
+                <span className="px-1 py-0 rounded text-[10px] font-mono text-fg-faint bg-surface/50 leading-relaxed">
+                  #{shortCode}
+                </span>
+              )}
+              {shortModel && (
+                <span className="px-1 py-0 rounded text-[10px] text-fg-muted bg-surface/50 leading-relaxed truncate max-w-[120px]">
+                  {shortModel}
+                </span>
+              )}
+              {toolCount > 0 && (
+                <span className="px-1 py-0 rounded text-[10px] text-fg-muted bg-surface/50 leading-relaxed">
+                  {toolCount} tools
+                </span>
+              )}
+              {activeMode && activeMode !== 'default' && (
+                <span className="px-1 py-0 rounded text-[10px] text-amber-400 bg-amber-500/10 leading-relaxed">
+                  {activeMode}
+                </span>
+              )}
+              {primaryAgentProfile?.source && (
+                <SourceBadge source={primaryAgentProfile.source} />
+              )}
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Right side controls */}
       <div className="flex items-center gap-1">
-        {/* Tool drawer toggle */}
         <Tooltip content={toolDrawerState === 'closed' ? 'Show tool calls' : 'Hide tool calls'} side="bottom">
           <button
             onClick={() => {
@@ -341,7 +266,6 @@ export function ChatHeader() {
             <Wrench className="w-3.5 h-3.5" />
           </button>
         </Tooltip>
-        {/* Sprint planning */}
         <Tooltip content="Sprint Planning" side="bottom">
           <button
             onClick={() => useSprintPlanningStore.getState().openSprintPlanning()}
@@ -350,7 +274,6 @@ export function ChatHeader() {
             <Calendar className="w-3.5 h-3.5" />
           </button>
         </Tooltip>
-        {/* Agent count badge */}
         {agentCount > 1 && (
           <Tooltip content="View agents in session" side="bottom">
             <button
@@ -362,7 +285,7 @@ export function ChatHeader() {
             </button>
           </Tooltip>
         )}
-        <Tooltip content={rightOpen ? 'Hide widgets (Cmd+/)' : 'Show widgets (Cmd+/)'} side="bottom">
+        <Tooltip content={rightOpen ? 'Hide panel (Cmd+/)' : 'Show panel (Cmd+/)'} side="bottom">
           <Button
             variant="ghost"
             size="icon"
@@ -374,7 +297,6 @@ export function ChatHeader() {
         </Tooltip>
       </div>
 
-      {/* Agent Roster modal */}
       {rosterOpen && activeSessionId && (
         <AgentRoster sessionId={activeSessionId} onClose={() => setRosterOpen(false)} />
       )}

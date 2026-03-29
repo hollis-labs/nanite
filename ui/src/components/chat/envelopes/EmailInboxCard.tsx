@@ -31,7 +31,7 @@ export function EmailInboxCard({ data, onSendMessage }: EmailInboxCardProps) {
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-blue-500/20 bg-bg-elevated/50 overflow-hidden max-w-2xl">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 overflow-hidden max-w-2xl">
         {/* Header */}
         <div className="flex items-center justify-between bg-blue-500/5 px-4 py-3 border-b border-blue-500/20">
           <div className="flex items-center gap-2">

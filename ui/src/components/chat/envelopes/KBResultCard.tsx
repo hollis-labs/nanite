@@ -29,16 +29,16 @@ interface KBResultCardProps {
 }
 
 const SEVERITY_DOT: Record<string, string> = {
-  low: 'bg-green-400',
+  low: 'bg-success',
   medium: 'bg-amber-400',
-  high: 'bg-red-400',
-  critical: 'bg-red-500',
+  high: 'bg-accent',
+  critical: 'bg-accent',
 }
 
 function SourceBadge({ source }: { source: string | undefined }) {
   if (source === 'helix') {
     return (
-      <span className="inline-block rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/25">
+      <span className="inline-block rounded bg-success/20 px-1.5 py-0.5 text-xs font-medium text-success border border-success/25">
         Adtran KB
       </span>
     )
@@ -55,9 +55,9 @@ function ArticleCard({ article, defaultExpanded }: { article: KBArticle; default
   const dotColor = SEVERITY_DOT[article.severity] || SEVERITY_DOT['medium']
 
   return (
-    <div className={`rounded-lg border overflow-hidden ${
+    <div className={`rounded-sm border overflow-hidden ${
       article.source === 'helix'
-        ? 'border-emerald-500/20 bg-bg-elevated/50'
+        ? 'border-success/20 bg-bg-elevated/50'
         : 'border-border-subtle bg-bg-elevated/50'
     }`}>
       {/* Header */}
@@ -109,7 +109,7 @@ export function KBResultCard({ data, onSendMessage }: KBResultCardProps) {
   if (articles.length === 0) {
     return (
       <div className="space-y-3">
-        <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+        <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
           <div className="flex items-center gap-2 text-fg-muted">
             <Search className="h-4 w-4" />
             <span className="text-sm">No matching articles found for this issue.</span>
@@ -138,12 +138,12 @@ export function KBResultCard({ data, onSendMessage }: KBResultCardProps) {
 
       {/* Did this help? */}
       {feedback === 'none' && (
-        <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+        <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
           <p className="text-sm text-fg-secondary mb-3">Did this resolve your issue?</p>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
-              className="bg-green-600 hover:bg-green-500 text-white text-xs px-3 py-1 h-7"
+              className="bg-success hover:bg-success/80 text-white text-xs px-3 py-1 h-7"
               onClick={() => {
                 setFeedback('solved')
                 if (onSendMessage) {
@@ -167,7 +167,7 @@ export function KBResultCard({ data, onSendMessage }: KBResultCardProps) {
       )}
 
       {feedback === 'solved' && (
-        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3">
+        <div className="rounded-sm border border-success/30 bg-success/5 p-3">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-4 w-4 text-success" />
             <span className="text-sm text-success">Glad that helped!</span>

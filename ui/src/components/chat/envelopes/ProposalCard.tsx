@@ -23,7 +23,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
 
   if (state === 'dismissed') {
     return (
-      <div className="rounded-lg border border-border bg-bg-elevated/30 p-3 opacity-50">
+      <div className="rounded-sm border border-border bg-bg-elevated/30 p-3 opacity-50">
         <div className="flex items-center gap-2 text-xs text-fg-muted">
           <X className="w-3.5 h-3.5" />
           <span>Dismissed: {proposal.type}</span>
@@ -35,16 +35,16 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
   const isApplied = state === 'applied'
 
   return (
-    <div className={`rounded-lg border p-4 ${
+    <div className={`rounded-sm border p-4 ${
       isApplied
-        ? 'border-green-500/30 bg-green-500/5'
+        ? 'border-success/30 bg-success/5'
         : 'border-border-subtle bg-bg-elevated/50'
     }`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-sm font-medium text-fg">{proposal.type}</h4>
         {isApplied && (
-          <div className="flex items-center gap-1 text-green-400 text-xs">
+          <div className="flex items-center gap-1 text-success text-xs">
             <Check className="w-3.5 h-3.5" />
             <span>Applied</span>
           </div>
@@ -102,7 +102,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
         <div className="flex items-center gap-2 mt-4">
           <Button
             size="sm"
-            className="bg-green-600 hover:bg-green-500 text-white text-xs px-3 py-1 h-7"
+            className="bg-success hover:bg-success/80 text-white text-xs px-3 py-1 h-7"
             onClick={handleApply}
           >
             Apply

@@ -45,14 +45,14 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
 
   if (submitted) {
     return (
-      <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4">
-        <p className="text-sm text-green-400">Answers submitted</p>
+      <div className="rounded-sm border border-success/30 bg-success/5 p-4">
+        <p className="text-sm text-success">Answers submitted</p>
       </div>
     )
   }
 
   return (
-    <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4 space-y-4">
+    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4 space-y-4">
       {questions.map((q, i) => (
         <div key={i}>
           <label className="block text-sm font-medium text-fg-secondary mb-1.5">

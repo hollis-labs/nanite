@@ -18,9 +18,9 @@ interface EmailComposeCardProps {
 export function EmailComposeCard({ data }: EmailComposeCardProps) {
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-green-500/30 bg-bg-elevated/50 overflow-hidden">
+      <div className="rounded-sm border border-success/30 bg-bg-elevated/50 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between bg-green-500/5 px-4 py-3 border-b border-green-500/20">
+        <div className="flex items-center justify-between bg-success/5 px-4 py-3 border-b border-success/20">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-4 w-4 text-success" />
             <span className="text-sm font-medium text-success">Email Sent</span>

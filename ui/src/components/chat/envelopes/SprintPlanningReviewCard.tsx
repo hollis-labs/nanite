@@ -33,9 +33,9 @@ interface SprintPlanningReviewCardProps {
 }
 
 const PRIORITY_DOT: Record<string, string> = {
-  P1: 'bg-red-400',
+  P1: 'bg-accent',
   P2: 'bg-amber-400',
-  P3: 'bg-blue-400',
+  P3: 'bg-success',
 }
 
 type TaskAssignment = {
@@ -163,7 +163,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
       )}
 
       {/* Task list */}
-      <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 overflow-hidden divide-y divide-border">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 overflow-hidden divide-y divide-border">
         {pageTasks.map(task => {
           const a = assignments[task.id]
           const isExpanded = expanded[task.id] || false
@@ -229,7 +229,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
                         disabled={finished}
                         className={`h-7 px-2.5 text-xs ${
                           isOriginal
-                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                            ? 'bg-success hover:bg-success/80 text-white'
                             : 'bg-amber-600 hover:bg-amber-500 text-white'
                         }`}
                       >
@@ -315,7 +315,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
                 size="sm"
                 onClick={handleFinish}
                 disabled={confirmedCount === 0}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white h-7 text-xs px-4"
+                className="bg-success hover:bg-success/80 text-white h-7 text-xs px-4"
               >
                 <Send className="mr-1.5 h-3 w-3" />
                 Finish ({confirmedCount})
@@ -327,7 +327,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
 
       {/* Completion state */}
       {finished && (
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+        <div className="rounded-sm border border-success/30 bg-success/5 p-3">
           <div className="flex items-center gap-2">
             <Check className="h-4 w-4 text-success" />
             <span className="text-sm text-success">

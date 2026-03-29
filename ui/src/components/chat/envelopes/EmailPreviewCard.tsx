@@ -21,7 +21,7 @@ const LABEL_STYLES: Record<string, string> = {
   UNREAD: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
   IMPORTANT: 'bg-red-500/15 text-red-400 border-red-500/25',
   STARRED: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/25',
-  SENT: 'bg-green-500/15 text-green-400 border-green-500/25',
+  SENT: 'bg-success/15 text-success border-success/25',
   DRAFT: 'bg-zinc-500/15 text-fg-secondary border-zinc-500/25',
 }
 
@@ -39,7 +39,7 @@ export function EmailPreviewCard({ data }: EmailPreviewCardProps) {
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-violet-500/20 bg-bg-elevated/50 overflow-hidden max-w-2xl">
+      <div className="rounded-sm border border-violet-500/20 bg-bg-elevated/50 overflow-hidden max-w-2xl">
         {/* Header */}
         <div className="bg-violet-500/5 px-4 py-3 border-b border-violet-500/20">
           <div className="flex items-start justify-between gap-2">

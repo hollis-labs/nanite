@@ -22,7 +22,7 @@ export function MarvelCharacterCard({ data, onSendMessage }: MarvelCharacterCard
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-red-500/20 bg-bg-elevated/50 overflow-hidden max-w-md">
+      <div className="rounded-sm border border-accent/20 bg-bg-elevated/50 overflow-hidden max-w-md">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-border">
           <Shield className="h-4 w-4 text-red-400 shrink-0" />

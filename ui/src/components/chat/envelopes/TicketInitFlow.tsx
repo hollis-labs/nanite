@@ -131,7 +131,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
   // Step 1: Brief description
   if (step === 'describe') {
     return (
-      <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
         <div className="flex items-center gap-2 mb-3">
           <MessageSquare className="h-4 w-4 text-fg-secondary" />
           <span className="text-sm font-medium text-fg">Open a Support Ticket</span>
@@ -163,7 +163,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
   // Step 2: Review & edit prefilled form
   if (step === 'form' || step === 'error') {
     return (
-      <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
         <div className="flex items-center gap-2 mb-4">
           <MessageSquare className="h-4 w-4 text-fg-secondary" />
           <span className="text-sm font-medium text-fg">Review & Submit Ticket</span>
@@ -238,7 +238,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
   // Step 2.5: Submitting
   if (step === 'submitting') {
     return (
-      <div className="rounded-lg border border-accent/30 bg-accent-muted p-4">
+      <div className="rounded-sm border border-accent/30 bg-accent-muted p-4">
         <div className="flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin text-accent" />
           <span className="text-sm text-accent-hover">Submitting ticket...</span>
@@ -249,7 +249,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
 
   // Step 3: Simple confirmation (the rich card is injected by the system after the agent responds)
   return (
-    <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3">
+    <div className="rounded-sm border border-success/30 bg-success/5 p-3">
       <div className="flex items-center gap-2">
         <CheckCircle className="h-4 w-4 text-success" />
         <span className="text-sm text-success">

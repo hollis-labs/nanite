@@ -53,7 +53,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
 
   if (cardState === 'submitted') {
     return (
-      <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4">
+      <div className="rounded-sm border border-success/30 bg-success/5 p-4">
         <div className="flex items-center gap-2">
           <CheckCircle className="h-4 w-4 text-success" />
           <span className="text-sm text-success">
@@ -66,7 +66,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
 
   if (cardState === 'skipped') {
     return (
-      <div className="rounded-lg border border-border-subtle bg-bg-elevated/30 p-4">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/30 p-4">
         <div className="flex items-center gap-2">
           <MinusCircle className="h-4 w-4 text-fg-muted" />
           <span className="text-sm text-fg-muted">
@@ -81,7 +81,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
     'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent placeholder:text-fg-faint'
 
   return (
-    <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
       {/* Header */}
       <div className="mb-1 flex items-center gap-2">
         <Lightbulb className="h-4 w-4 text-fg-secondary" />

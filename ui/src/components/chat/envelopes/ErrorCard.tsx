@@ -86,7 +86,7 @@ export function ErrorCard({ data }: ErrorCardProps) {
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="rounded-lg border border-red-500/30 bg-bg-elevated/80 overflow-hidden max-w-lg">
+      <div className="rounded-sm border border-red-500/30 bg-bg-elevated/80 overflow-hidden max-w-lg">
         <div className="flex">
           {/* Left side: Giphy image (30%) */}
           <div className="w-[30%] shrink-0 bg-bg/50 flex items-center justify-center p-2">

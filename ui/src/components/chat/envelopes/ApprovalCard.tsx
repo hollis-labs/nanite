@@ -8,9 +8,9 @@ interface ApprovalCardProps {
 }
 
 const RISK_STYLES = {
-  low: { bg: 'bg-green-500/15', text: 'text-green-400', border: 'border-green-500/25', icon: ShieldCheck },
+  low: { bg: 'bg-success/15', text: 'text-success', border: 'border-success/25', icon: ShieldCheck },
   medium: { bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/25', icon: ShieldAlert },
-  high: { bg: 'bg-red-500/15', text: 'text-red-400', border: 'border-red-500/25', icon: ShieldX },
+  high: { bg: 'bg-accent/15', text: 'text-accent', border: 'border-accent/25', icon: ShieldX },
 }
 
 export function ApprovalCard({ approval }: ApprovalCardProps) {
@@ -32,10 +32,10 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
 
   if (decision === 'approved') {
     return (
-      <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4">
+      <div className="rounded-sm border border-success/30 bg-success/5 p-4">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-green-400" />
-          <span className="text-sm text-green-400">Approved: {approval.description}</span>
+          <ShieldCheck className="w-4 h-4 text-success" />
+          <span className="text-sm text-success">Approved: {approval.description}</span>
         </div>
       </div>
     )
@@ -43,17 +43,17 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
 
   if (decision === 'rejected') {
     return (
-      <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4">
+      <div className="rounded-sm border border-accent/30 bg-accent/5 p-4">
         <div className="flex items-center gap-2">
-          <ShieldX className="w-4 h-4 text-red-400" />
-          <span className="text-sm text-red-400">Rejected: {approval.description}</span>
+          <ShieldX className="w-4 h-4 text-accent" />
+          <span className="text-sm text-accent">Rejected: {approval.description}</span>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
       {/* Header with risk badge */}
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-sm font-medium text-fg">Approval Required</h4>
@@ -73,14 +73,14 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
       <div className="flex items-center gap-2">
         <Button
           size="sm"
-          className="bg-green-600 hover:bg-green-500 text-white text-xs px-3 py-1 h-7"
+          className="bg-success hover:bg-success/80 text-white text-xs px-3 py-1 h-7"
           onClick={handleApprove}
         >
           Approve
         </Button>
         <Button
           size="sm"
-          className="bg-red-600 hover:bg-red-500 text-white text-xs px-3 py-1 h-7"
+          className="bg-accent hover:bg-accent-hover text-white text-xs px-3 py-1 h-7"
           onClick={handleReject}
         >
           Reject

@@ -32,7 +32,7 @@ export function OEmbedCard({ data }: OEmbedCardProps) {
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className={`rounded-lg border ${providerColor.border} bg-bg-elevated/50 overflow-hidden max-w-md`}>
+      <div className={`rounded-sm border ${providerColor.border} bg-bg-elevated/50 overflow-hidden max-w-md`}>
         {/* Thumbnail */}
         {data.thumbnail_url && !imgError && (
           <div className="relative">
@@ -128,14 +128,14 @@ function getProviderColor(name: string): { border: string; badge: string } {
   }
   if (lower.includes('spotify')) {
     return {
-      border: 'border-green-500/20',
-      badge: 'bg-green-500/20 text-green-400 border-green-500/25',
+      border: 'border-success/20',
+      badge: 'bg-success/20 text-success border-success/25',
     }
   }
   if (lower.includes('vimeo')) {
     return {
-      border: 'border-cyan-500/20',
-      badge: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/25',
+      border: 'border-border-subtle',
+      badge: 'bg-surface-hover/50 text-fg-secondary border-border-subtle',
     }
   }
   if (lower.includes('soundcloud')) {

@@ -21,11 +21,11 @@ export function MarvelMovieCard({ data }: MarvelMovieCardProps) {
   const [imgError, setImgError] = useState(false)
 
   const rating = data.vote_average ? data.vote_average.toFixed(1) : 'N/A'
-  const ratingColor = data.vote_average >= 7 ? 'text-green-400' : data.vote_average >= 5 ? 'text-amber-400' : 'text-red-400'
+  const ratingColor = data.vote_average >= 7 ? 'text-success' : data.vote_average >= 5 ? 'text-amber-400' : 'text-accent'
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-blue-500/20 bg-bg-elevated/50 overflow-hidden max-w-md">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 overflow-hidden max-w-md">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-border">
           <Film className="h-4 w-4 text-blue-400 shrink-0" />

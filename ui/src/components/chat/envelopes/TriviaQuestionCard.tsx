@@ -19,9 +19,9 @@ interface TriviaQuestionCardProps {
 }
 
 const DIFFICULTY_COLORS: Record<string, string> = {
-  easy: 'bg-green-500/20 text-green-400 border-green-500/25',
+  easy: 'bg-success/20 text-success border-success/25',
   medium: 'bg-amber-500/20 text-amber-400 border-amber-500/25',
-  hard: 'bg-red-500/20 text-red-400 border-red-500/25',
+  hard: 'bg-accent/20 text-accent border-accent/25',
 }
 
 const ANSWER_LABELS = ['A', 'B', 'C', 'D']
@@ -39,7 +39,7 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-accent/20 bg-bg-elevated/50 overflow-hidden max-w-md">
+      <div className="rounded-sm border border-accent/20 bg-bg-elevated/50 overflow-hidden max-w-md">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-border">
           <HelpCircle className="h-4 w-4 text-accent shrink-0" />
@@ -66,7 +66,7 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
 
             if (hasResult) {
               if (i === data.correct_index) {
-                btnClass = 'border-green-500/30 bg-green-500/10 text-green-400'
+                btnClass = 'border-success/30 bg-success/10 text-success'
               } else if (i === data.selected_index) {
                 btnClass = 'border-red-500/30 bg-red-500/10 text-red-400'
               } else {
@@ -89,7 +89,7 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
                 </span>
                 <span className="flex-1">{answer}</span>
                 {hasResult && i === data.correct_index && (
-                  <CheckCircle className="h-3.5 w-3.5 text-green-400 shrink-0" />
+                  <CheckCircle className="h-3.5 w-3.5 text-success shrink-0" />
                 )}
                 {hasResult && i === data.selected_index && i !== data.correct_index && (
                   <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
@@ -103,7 +103,7 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
         {hasResult && (
           <div className={`px-4 pb-3 pt-2 border-t border-border`}>
             <div className="flex items-center justify-between">
-              <span className={`text-sm font-medium ${data.correct ? 'text-green-400' : 'text-red-400'}`}>
+              <span className={`text-sm font-medium ${data.correct ? 'text-success' : 'text-accent'}`}>
                 {data.correct ? 'Correct!' : 'Wrong!'}
               </span>
               {data.score !== undefined && (

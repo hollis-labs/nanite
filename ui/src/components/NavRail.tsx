@@ -1,4 +1,4 @@
-import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Inbox, Sun, Moon } from 'lucide-react'
+import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Sun, Moon } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -24,8 +24,6 @@ export function NavRail() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
-  const toggleInboxPanel = useLayoutStore((s) => s.toggleInboxPanel)
-  const inboxPanelOpen = useLayoutStore((s) => s.inboxPanelOpen)
   const setLeftSidebar = useLayoutStore((s) => s.setLeftSidebar)
   const currentPage = useLayoutStore((s) => s.currentPage)
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
@@ -51,22 +49,6 @@ export function NavRail() {
     queryKey: ['workspaces'],
     queryFn: api.listWorkspaces,
   })
-
-  // Fetch first agent for inbox unread count
-  const { data: agents = [] } = useQuery({
-    queryKey: ['agents'],
-    queryFn: api.listAgents,
-  })
-  const activeAgents = agents.filter((a) => a.status !== 'disabled')
-  const firstAgentId = activeAgents.length > 0 ? activeAgents[0].id : null
-
-  const { data: unreadData } = useQuery({
-    queryKey: ['a2a-unread', firstAgentId],
-    queryFn: () => api.getA2AUnreadCount(firstAgentId!),
-    enabled: !!firstAgentId,
-    refetchInterval: 30000,
-  })
-  const unreadCount = unreadData?.count ?? 0
 
   // Set default workspace on load
   useEffect(() => {
@@ -213,25 +195,6 @@ export function NavRail() {
         })}
       </div>
       <div className="mt-auto flex flex-col items-center gap-1">
-        <Tooltip content="Agent Inbox" side="right">
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`w-10 h-10 rounded-lg relative ${
-              inboxPanelOpen
-                ? 'bg-surface text-accent'
-                : 'text-fg-secondary hover:text-fg'
-            }`}
-            onClick={toggleInboxPanel}
-          >
-            <Inbox className="w-5 h-5" />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
-          </Button>
-        </Tooltip>
         <Tooltip content={theme === 'dark' ? 'Light mode' : 'Dark mode'} side="right">
           <Button
             variant="ghost"

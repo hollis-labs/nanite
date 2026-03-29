@@ -62,14 +62,15 @@ export function ChatHeader() {
   const shortCode = session?.short_code
   const toolCount = tools.length + (toolCalls?.length || 0)
 
-  // Provider — getSession may return empty; fall back to the sessions list cache
-  const sessionProvider = (() => {
-    if (session?.provider) return session.provider
-    if (!activeSessionId) return ''
-    const cached = queryClient.getQueryData<any[]>(['sessions', session?.workspace_id])
-    const match = cached?.find((s: any) => s.id === activeSessionId)
-    return match?.provider || ''
-  })()
+  // Provider — getSession may return empty; fall back to the sessions list
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
+  const { data: sessions = [] } = useQuery({
+    queryKey: ['sessions', activeWorkspaceId],
+    queryFn: () => api.listSessions(activeWorkspaceId ?? undefined),
+    enabled: !!activeWorkspaceId,
+  })
+  const sessionFromList = sessions.find((s) => s.id === activeSessionId)
+  const sessionProvider = session?.provider || sessionFromList?.provider || ''
 
   // Model display — from session or agent profile
   const modelName = session?.model || activeModel || (primaryAgentProfile as any)?.default_model || null

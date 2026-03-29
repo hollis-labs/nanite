@@ -82,8 +82,14 @@ export function UserProfileMenu() {
             <div className="flex-1 min-w-0">
               <input
                 type="text"
-                value={displayName}
-                onChange={(e) => handleNameChange(e.target.value)}
+                defaultValue={displayName}
+                onBlur={(e) => handleNameChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleNameChange((e.target as HTMLInputElement).value)
+                    ;(e.target as HTMLInputElement).blur()
+                  }
+                }}
                 placeholder="Your name"
                 className="w-full text-sm font-medium text-fg bg-transparent border-none outline-none placeholder:text-fg-faint"
               />

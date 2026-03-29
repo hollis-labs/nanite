@@ -1465,11 +1465,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	if e.Activity != nil && finalUsage != nil {
 		go e.Activity.EmitResponseComplete(ctx, sessionID, agent.ID, model, finalUsage.InputTokens, finalUsage.OutputTokens)
 	}
-	// Emit plugin events: message received + session end.
+	// Emit plugin event: assistant message received for this turn.
 	if e.PluginHost != nil {
 		elapsed := time.Since(startTime).Milliseconds()
-		go e.PluginHost.EmitMessageReceived(sessionID, assistantMsgID, "", elapsed)
-		go e.PluginHost.EmitSessionEnd(sessionID)
+		contentPreview := string(envelopeJSON)
+		if len(contentPreview) > 500 {
+			contentPreview = contentPreview[:500]
+		}
+		go e.PluginHost.EmitMessageReceived(sessionID, assistantMsgID, contentPreview, elapsed)
 	}
 
 	// Auto-title: if session has no title, generate one asynchronously.

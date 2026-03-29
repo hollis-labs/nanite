@@ -14,14 +14,15 @@ func (h *Host) SubscribeEvents() chan pluginsdk.Event {
 	return ch
 }
 
-// UnsubscribeEvents removes a subscriber channel and closes it.
+// UnsubscribeEvents removes a subscriber channel. The channel is NOT closed
+// here to avoid send-to-closed-channel panics in broadcastEvent; the caller
+// should drain and discard any remaining events after unsubscribing.
 func (h *Host) UnsubscribeEvents(ch chan pluginsdk.Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for i, sub := range h.eventSubs {
 		if sub == ch {
 			h.eventSubs = append(h.eventSubs[:i], h.eventSubs[i+1:]...)
-			close(ch)
 			return
 		}
 	}
@@ -29,13 +30,13 @@ func (h *Host) UnsubscribeEvents(ch chan pluginsdk.Event) {
 
 // broadcastEvent sends an event to all SSE subscribers. Non-blocking — if a
 // subscriber's buffer is full the event is dropped for that subscriber.
+// Holds the read lock for the duration of sends to prevent races with
+// concurrent unsubscribe operations.
 func (h *Host) broadcastEvent(event pluginsdk.Event) {
 	h.mu.RLock()
-	subs := make([]chan pluginsdk.Event, len(h.eventSubs))
-	copy(subs, h.eventSubs)
-	h.mu.RUnlock()
+	defer h.mu.RUnlock()
 
-	for _, ch := range subs {
+	for _, ch := range h.eventSubs {
 		select {
 		case ch <- event:
 		default:

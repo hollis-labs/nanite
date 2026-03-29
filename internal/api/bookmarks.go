@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/conduit/internal/provider"
 	"github.com/hollis-labs/conduit/internal/store"
@@ -136,7 +137,9 @@ func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
 		{Role: "user", Content: msg.Content},
 	}
 
-	title, err := prov.Complete(context.Background(), prompt, msgs, a.Engine.UtilityModel)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	title, err := prov.Complete(ctx, prompt, msgs, a.Engine.UtilityModel)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "autotitle failed: "+err.Error())
 		return

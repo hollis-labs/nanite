@@ -9,6 +9,7 @@ import { useModels, useProviders } from '@/hooks/useSettings'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { resolveIcon } from '@/lib/icons'
 import { api } from '@/lib/api'
+import type { UISlotEntry } from '@/lib/types'
 
 const PROVIDER_ICONS: Record<string, string> = {
   anthropic: 'A',
@@ -41,6 +42,27 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
 
   const { data: models } = useModels()
   const { data: providers } = useProviders()
+
+  const handlePluginAction = useCallback((entry: UISlotEntry) => {
+    switch (entry.action) {
+      case 'command':
+        if (activeSessionId && entry.props?.command) {
+          void api.executeCommand(String(entry.props.command), activeSessionId, '')
+        }
+        break
+      case 'navigate':
+        if (entry.props?.hash) {
+          window.location.hash = String(entry.props.hash)
+        }
+        break
+      case 'handler':
+        window.dispatchEvent(new CustomEvent('plugin-action', { detail: entry }))
+        break
+      case 'modal':
+        window.dispatchEvent(new CustomEvent('plugin-modal', { detail: entry }))
+        break
+    }
+  }, [activeSessionId])
 
   // Group models by provider for the dropdown.
   const groupedModels = useMemo(() => {
@@ -162,6 +184,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
                 <button
                   type="button"
                   className="p-1 rounded text-composer-fg-muted hover:text-composer-fg hover:bg-composer-hover transition-colors"
+                  onClick={() => handlePluginAction(entry)}
                 >
                   <PluginIcon className="w-3.5 h-3.5" />
                 </button>

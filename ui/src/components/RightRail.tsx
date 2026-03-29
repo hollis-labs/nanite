@@ -150,7 +150,7 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
                 <Tooltip key={tab.id} content={tab.label} side="bottom">
                   <button
                     type="button"
-                    onClick={() => setTab(tab.id as any)}
+                    onClick={() => setTab(tab.id)}
                     className={`p-1.5 rounded transition-colors ${
                       isActive
                         ? 'text-fg bg-surface'

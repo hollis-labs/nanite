@@ -31,11 +31,13 @@ const MAX_HISTORY = 50
 let commandHistory: string[] = []
 let historyIndex = -1
 
-// Load persisted history from localStorage once
-try {
-  const stored = localStorage.getItem('conduit:command-history')
-  if (stored) commandHistory = JSON.parse(stored)
-} catch { /* ignore */ }
+// Load persisted history from localStorage once (guarded for non-browser contexts)
+if (typeof window !== 'undefined') {
+  try {
+    const stored = localStorage.getItem('conduit:command-history')
+    if (stored) commandHistory = JSON.parse(stored)
+  } catch { /* ignore */ }
+}
 
 function pushHistory(text: string) {
   // Don't store duplicate of last entry

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -41,7 +40,7 @@ func NewTriggerDispatcher(host *Host) *TriggerDispatcher {
 }
 
 // Dispatch looks up enabled trigger rules for the given event and calls each
-// matching connector. Runs asynchronously — callers don't wait for connectors.
+// matching connector. Fully asynchronous — callers never wait for connectors.
 func (td *TriggerDispatcher) Dispatch(event pluginsdk.Event) {
 	if td.host.store == nil {
 		return
@@ -56,7 +55,6 @@ func (td *TriggerDispatcher) Dispatch(event pluginsdk.Event) {
 		return
 	}
 
-	var wg sync.WaitGroup
 	for _, rule := range rules {
 		// Check filter expression if set.
 		if rule.FilterExpr != "" && !td.matchFilter(rule.FilterExpr, event.Data) {
@@ -79,13 +77,8 @@ func (td *TriggerDispatcher) Dispatch(event pluginsdk.Event) {
 			continue
 		}
 
-		wg.Add(1)
-		go func(c pluginsdk.Connector, p map[string]interface{}, ruleID string) {
-			defer wg.Done()
-			td.sendWithRetry(c, p, ruleID)
-		}(connector, payload, rule.ID)
+		go td.sendWithRetry(connector, payload, rule.ID)
 	}
-	wg.Wait()
 }
 
 // matchFilter evaluates a simple filter expression against event data.
@@ -175,7 +168,12 @@ func (td *TriggerDispatcher) sendWithRetry(connector pluginsdk.Connector, payloa
 
 		if attempt < td.MaxRetries {
 			backoff := td.calculateBackoff(attempt)
-			time.Sleep(backoff)
+			select {
+			case <-td.host.ctx.Done():
+				td.logger.Info("trigger retry cancelled", "connector", connName, "ruleID", ruleID)
+				return
+			case <-time.After(backoff):
+			}
 		}
 	}
 

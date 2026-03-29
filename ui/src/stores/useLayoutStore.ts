@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 
 type ToolDrawerState = 'closed' | 'compact' | 'expanded'
 type Theme = 'dark' | 'light' | 'system'
-type RightRailTab = 'widgets' | 'inbox' | 'artifacts'
+type RightRailTab = 'widgets' | 'inbox' | 'artifacts' | (string & {})
 
 interface LayoutState {
   leftSidebarOpen: boolean

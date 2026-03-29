@@ -15,9 +15,11 @@ import { useLayoutStore } from "@/stores/useLayoutStore";
  */
 
 type SettingsSection =
+  | "profile"
   | "preferences"
   | "providers"
   | "shortcuts"
+  | "actions"
   | "workspaces"
   | "agents"
   | "skills"
@@ -28,9 +30,11 @@ type SettingsSection =
   | "observability";
 
 const VALID_SETTINGS_SECTIONS = new Set<string>([
+  "profile",
   "preferences",
   "providers",
   "shortcuts",
+  "actions",
   "workspaces",
   "agents",
   "skills",
@@ -140,7 +144,7 @@ export function useHashRoute() {
 
 /** Call from SettingsPage when tab changes to update the hash */
 export function updateSettingsHash(section: SettingsSection) {
-  const target = section === "preferences" ? "#settings" : `#settings/${section}`;
+  const target = `#settings/${section}`;
   if (window.location.hash !== target) {
     window.location.hash = target;
   }

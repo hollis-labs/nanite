@@ -58,7 +58,7 @@ const CORE_SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
 
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<string>(
-    () => getInitialSettingsSection() ?? "preferences",
+    () => getInitialSettingsSection() ?? "profile",
   );
   // Bump key to force remount when clicking the same section (resets sub-views)
   const [sectionKey, setSectionKey] = useState(0);

@@ -36,7 +36,7 @@ export function ContentActions({
     <div className={`flex items-center gap-1 transition-opacity duration-150 ${visible ? 'opacity-100' : 'opacity-0'} ${className}`}>
       <button
         onClick={handleCopy}
-        className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+        className="p-1 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
         aria-label="Copy"
         tabIndex={visible ? 0 : -1}
       >
@@ -47,8 +47,8 @@ export function ContentActions({
           onClick={handleBookmark}
           className={`p-1 rounded transition-colors ${
             isBookmarked
-              ? 'text-amber-500 hover:text-amber-400 hover:bg-zinc-800'
-              : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800'
+              ? 'text-amber-500 hover:text-amber-400 hover:bg-surface'
+              : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
           }`}
           aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark'}
           tabIndex={visible ? 0 : -1}

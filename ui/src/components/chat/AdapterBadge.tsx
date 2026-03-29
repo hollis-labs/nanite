@@ -10,7 +10,7 @@ const ADAPTER_CONFIG: Record<string, { label: string; icon: typeof Terminal; bg:
   ollama: { label: 'API', icon: Globe, bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
 }
 
-const DEFAULT_CONFIG = { label: 'API', icon: Globe, bg: 'bg-zinc-500/10', text: 'text-zinc-400', border: 'border-zinc-500/20' }
+const DEFAULT_CONFIG = { label: 'API', icon: Globe, bg: 'bg-zinc-500/10', text: 'text-fg-secondary', border: 'border-zinc-500/20' }
 
 function isPTYProvider(provider: string): boolean {
   return provider.startsWith('pty')

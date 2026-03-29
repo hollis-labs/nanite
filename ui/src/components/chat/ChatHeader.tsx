@@ -280,7 +280,7 @@ export function ChatHeader() {
                 {activeAgentName}
               </span>
               {primaryAgentProfile?.source && (
-                <SourceBadge source={primaryAgentProfile.source} className="bg-zinc-700" />
+                <SourceBadge source={primaryAgentProfile.source} className="bg-surface" />
               )}
               <ChevronDown className="w-3 h-3 text-fg-muted" />
             </button>

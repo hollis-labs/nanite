@@ -81,7 +81,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
                   </button>
                   <button
                     onClick={dismissCircuit}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-700/50 text-fg-secondary hover:bg-surface-hover transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-surface/50 text-fg-secondary hover:bg-surface-hover transition-colors"
                   >
                     <X className="w-3.5 h-3.5" />
                     Dismiss

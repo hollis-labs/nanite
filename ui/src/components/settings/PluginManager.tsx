@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/useAppStore'
 import { PluginConfigPanel } from './PluginConfigPanel'
+import { PluginDetailView } from './PluginDetailView'
 import type { PluginInfo } from '@/lib/types'
 
 // --- Toast notification ---
@@ -40,6 +41,7 @@ export function PluginManager() {
   const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<string | null>(null) // plugin name with action in progress
   const [configuringPlugin, setConfiguringPlugin] = useState<PluginInfo | null>(null)
+  const [detailPlugin, setDetailPlugin] = useState<PluginInfo | null>(null)
   const queryClient = useQueryClient()
   const bumpConfigVersion = useAppStore((s) => s.bumpConfigVersion)
   const configVersion = useAppStore((s) => s.configVersion)
@@ -138,7 +140,17 @@ export function PluginManager() {
     return a.name.localeCompare(b.name)
   })
 
-  // Show config panel when a plugin is selected for configuration
+  // Show detail view when a plugin card is clicked
+  if (detailPlugin) {
+    return (
+      <PluginDetailView
+        plugin={detailPlugin}
+        onBack={() => setDetailPlugin(null)}
+      />
+    )
+  }
+
+  // Show config panel when the gear icon is clicked
   if (configuringPlugin) {
     return (
       <PluginConfigPanel
@@ -234,7 +246,7 @@ export function PluginManager() {
                       : 'border-border bg-white dark:bg-bg/30 opacity-45'
                 }`}
                 onClick={() => {
-                  if (isActive || isDisabled) setConfiguringPlugin(plugin)
+                  if (isActive || isDisabled) setDetailPlugin(plugin)
                 }}
               >
                 {/* Header */}
@@ -320,9 +332,9 @@ export function PluginManager() {
                 </ContextMenuTrigger>
                 <ContextMenuContent>
                   {(isActive || isDisabled) && (
-                    <ContextMenuItem className="gap-2 text-xs" onClick={() => setConfiguringPlugin(plugin)}>
+                    <ContextMenuItem className="gap-2 text-xs" onClick={() => setDetailPlugin(plugin)}>
                       <Settings2 className="w-3.5 h-3.5" />
-                      Settings
+                      Details
                     </ContextMenuItem>
                   )}
                   {isActive && (

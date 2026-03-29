@@ -5,6 +5,7 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/
 import { api } from '@/lib/api'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
 import { PluginConfigPanel } from './PluginConfigPanel'
+import { WidgetDetailView } from './WidgetDetailView'
 import { DEFAULT_WIDGET_ORDER, isValidWidgetId } from '@/generated/plugin-widgets'
 import type { PluginUIComponent } from '@/lib/types'
 
@@ -46,6 +47,8 @@ export function WidgetManager() {
 
   // Plugin config panel state.
   const [configuringPluginId, setConfiguringPluginId] = useState<string | null>(null)
+  // Widget detail view state.
+  const [detailWidgetId, setDetailWidgetId] = useState<string | null>(null)
 
   // Drag state.
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -88,6 +91,28 @@ export function WidgetManager() {
 
   const handleDragEnd = () => {
     setDragIdx(null)
+  }
+
+  // Show widget detail view when a widget is selected.
+  if (detailWidgetId) {
+    const detailMeta = widgetMap.get(detailWidgetId)
+    if (detailMeta) {
+      return (
+        <WidgetDetailView
+          widget={detailMeta}
+          widgetId={detailWidgetId}
+          visible={isVisible(detailWidgetId)}
+          onToggleVisibility={() => toggleVisibility(detailWidgetId)}
+          onConfigurePlugin={(pluginId) => {
+            setDetailWidgetId(null)
+            setConfiguringPluginId(pluginId)
+          }}
+          onBack={() => setDetailWidgetId(null)}
+        />
+      )
+    }
+    // Fallback: widget not in map (shouldn't happen)
+    setDetailWidgetId(null)
   }
 
   // Show plugin config panel when a plugin is selected.
@@ -145,9 +170,13 @@ export function WidgetManager() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className={`text-sm font-semibold truncate ${visible ? 'text-fg' : 'text-fg-muted'}`}>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setDetailWidgetId(id) }}
+                        className={`text-sm font-semibold truncate hover:underline text-left ${visible ? 'text-fg' : 'text-fg-muted'}`}
+                      >
                         {meta?.name ?? id}
-                      </span>
+                      </button>
                       {visible && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
                     </div>
                     {meta?.plugin_id && (

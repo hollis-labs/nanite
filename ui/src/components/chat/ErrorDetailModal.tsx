@@ -1,6 +1,9 @@
-import { useCallback } from 'react'
-import { X, Copy, Check } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
+import { Copy, Check } from 'lucide-react'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import type { ChatError } from '@/lib/types'
 
 interface ErrorDetailModalProps {
@@ -30,32 +33,13 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
     }
   }, [fullPayload])
 
-  const handleBackdropClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.target === e.currentTarget) {
-        onClose()
-      }
-    },
-    [onClose]
-  )
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={handleBackdropClick}
-    >
-      <div className="bg-bg-elevated border border-border-subtle rounded-lg shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-medium text-fg">Error Details</h3>
-          <button
-            onClick={onClose}
-            className="text-fg-muted hover:text-fg-secondary transition-colors"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <Dialog open={true} onOpenChange={() => onClose()}>
+      <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
+        <DialogHeader className="px-4 py-3 border-b border-border">
+          <DialogTitle className="text-sm">Error Details</DialogTitle>
+          <DialogDescription className="sr-only">Detailed error information</DialogDescription>
+        </DialogHeader>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
@@ -107,12 +91,8 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
-          <button
-            onClick={handleCopy}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-fg-secondary bg-surface hover:bg-surface-hover rounded-md border border-border-subtle transition-colors"
-          >
+        <DialogFooter className="px-4 py-3 border-t border-border">
+          <Button variant="outline" size="sm" onClick={handleCopy} className="gap-1.5">
             {copied ? (
               <>
                 <Check className="w-3.5 h-3.5 text-success" />
@@ -124,15 +104,12 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
                 Copy Payload
               </>
             )}
-          </button>
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-xs font-medium text-fg-secondary bg-surface hover:bg-surface-hover rounded-md border border-border-subtle transition-colors"
-          >
+          </Button>
+          <Button variant="outline" size="sm" onClick={onClose}>
             Close
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

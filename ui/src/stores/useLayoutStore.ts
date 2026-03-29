@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 type ToolDrawerState = 'closed' | 'compact' | 'expanded'
-type Theme = 'dark' | 'light'
-type RightRailTab = 'widgets' | 'inbox' | 'artifacts'
+type Theme = 'dark' | 'light' | 'system'
+type RightRailTab = 'widgets' | 'inbox' | 'artifacts' | (string & {})
 
 interface LayoutState {
   leftSidebarOpen: boolean
@@ -12,7 +12,7 @@ interface LayoutState {
   taskThreadOpen: boolean
   toolDrawerState: ToolDrawerState
   toolDrawerHeight: number
-  currentPage: 'chat' | 'settings'
+  currentPage: string
   theme: Theme
   toggleLeftSidebar: () => void
   toggleRightRail: () => void
@@ -25,15 +25,23 @@ interface LayoutState {
   setTaskThread: (open: boolean) => void
   setToolDrawerState: (state: ToolDrawerState) => void
   setToolDrawerHeight: (height: number) => void
-  setCurrentPage: (page: 'chat' | 'settings') => void
+  setCurrentPage: (page: string) => void
   toggleTheme: () => void
   setTheme: (theme: Theme) => void
 }
 
+function resolveTheme(theme: Theme): 'dark' | 'light' {
+  if (theme === 'system') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  return theme
+}
+
 function applyThemeClass(theme: Theme) {
   const root = document.documentElement
+  const resolved = resolveTheme(theme)
   root.classList.remove('dark', 'light')
-  root.classList.add(theme)
+  root.classList.add(resolved)
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -76,7 +84,8 @@ export const useLayoutStore = create<LayoutState>()(
       setCurrentPage: (page) => set({ currentPage: page }),
       toggleTheme: () =>
         set((state) => {
-          const next = state.theme === 'dark' ? 'light' : 'dark'
+          const resolved = resolveTheme(state.theme)
+          const next = resolved === 'dark' ? 'light' : 'dark'
           applyThemeClass(next)
           return { theme: next }
         }),
@@ -91,6 +100,13 @@ export const useLayoutStore = create<LayoutState>()(
         if (state?.theme) {
           applyThemeClass(state.theme)
         }
+        // Listen for OS theme changes when in system mode
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+          const current = useLayoutStore.getState().theme
+          if (current === 'system') {
+            applyThemeClass('system')
+          }
+        })
       },
     }
   )

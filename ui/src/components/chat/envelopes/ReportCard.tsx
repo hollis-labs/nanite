@@ -1,5 +1,5 @@
 import { BarChart3, Clock, ChevronRight } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { MessageContent } from '../MessageContent'
 
 interface Metric {

@@ -110,5 +110,12 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		a.Engine.RefreshUtilitySettings(existing.UtilityProvider, existing.UtilityModel)
 	}
 
+	// Emit plugin event: user config changed.
+	if a.PluginHost != nil {
+		for key := range raw {
+			go a.PluginHost.EmitConfigChanged("user", key, "")
+		}
+	}
+
 	a.jsonResp(w, http.StatusOK, existing)
 }

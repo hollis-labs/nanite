@@ -1,5 +1,6 @@
 import { Suspense, Component, type ReactNode } from 'react'
-import { AlertTriangle, Loader2, Puzzle } from 'lucide-react'
+import { AlertTriangle, Puzzle } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { getWidgetComponent } from '@/generated/plugin-widgets'
 import type { PluginUIComponent } from '@/lib/types'
 
@@ -37,9 +38,10 @@ class WidgetErrorBoundary extends Component<
 /** Loading fallback shown while a lazy widget component loads. */
 function WidgetLoadingFallback() {
   return (
-    <div className="rounded-lg border border-border bg-bg-elevated/50 p-3 flex items-center justify-center gap-2">
-      <Loader2 className="w-3.5 h-3.5 text-fg-muted animate-spin" />
-      <span className="text-xs text-fg-muted">Loading widget...</span>
+    <div className="rounded-lg border border-border bg-bg-elevated/50 p-3 space-y-2">
+      <Skeleton className="h-3.5 w-1/3" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-2/3" />
     </div>
   )
 }

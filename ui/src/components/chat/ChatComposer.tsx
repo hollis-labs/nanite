@@ -3,7 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Paperclip } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ComposerToolbar } from './ComposerToolbar'
 import { SlashCommandExtension, type SlashCommand } from './extensions/SlashCommandExtension'
 import { slashCommandSuggestion } from './extensions/slashCommandSuggestion'
@@ -11,6 +11,7 @@ import { FileMentionExtension, type FileResult } from './extensions/FileMentionE
 import { fileMentionSuggestion } from './extensions/fileMentionSuggestion'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
+import type { SlashCommandDef } from '@/lib/types'
 
 interface ChatComposerProps {
   onSend: (content: string) => void
@@ -24,6 +25,30 @@ interface ChatComposerProps {
 // Set by the suggestion lifecycle callbacks (onStart/onExit).
 let slashMenuOpen = false
 let fileMentionMenuOpen = false
+
+// Command history — persisted across component remounts in module scope
+const MAX_HISTORY = 50
+let commandHistory: string[] = []
+let historyIndex = -1
+
+// Load persisted history from localStorage once (guarded for non-browser contexts)
+if (typeof window !== 'undefined') {
+  try {
+    const stored = localStorage.getItem('conduit:command-history')
+    if (stored) commandHistory = JSON.parse(stored)
+  } catch { /* ignore */ }
+}
+
+function pushHistory(text: string) {
+  // Don't store duplicate of last entry
+  if (commandHistory[0] === text) return
+  commandHistory.unshift(text)
+  if (commandHistory.length > MAX_HISTORY) commandHistory.length = MAX_HISTORY
+  historyIndex = -1
+  try {
+    localStorage.setItem('conduit:command-history', JSON.stringify(commandHistory))
+  } catch { /* ignore */ }
+}
 
 export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorReady, reloadMessages }: ChatComposerProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
@@ -60,6 +85,15 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }, [activeSessionId, queryClient])
+
+  // Fetch commands for tab-complete on args
+  const { data: commandDefs } = useQuery({
+    queryKey: ['commands'],
+    queryFn: () => api.listCommands(),
+    staleTime: 60_000,
+  })
+  const commandDefsRef = useRef<SlashCommandDef[]>([])
+  commandDefsRef.current = commandDefs ?? []
 
   // Handle slash command execution
   const handleCommand = useCallback(async (cmd: SlashCommand) => {
@@ -159,7 +193,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     editorProps: {
       attributes: {
         class:
-          'bg-transparent text-sm text-zinc-900 dark:text-fg placeholder:text-zinc-400 dark:placeholder:text-fg-faint outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm',
+          'bg-transparent text-sm text-fg placeholder:text-fg-faint outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm',
       },
       handleKeyDown(_view, event) {
         if (event.key === 'Enter') {
@@ -175,6 +209,60 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           event.preventDefault()
           handleSendRef.current()
           return true
+        }
+        // Tab: complete slash command args with options
+        if (event.key === 'Tab' && !slashMenuOpen && !fileMentionMenuOpen) {
+          const text = editor?.getText() ?? ''
+          if (text.startsWith('/')) {
+            const parts = text.split(/\s+/)
+            const cmdName = parts[0]?.slice(1) // remove leading /
+            const cmdDef = commandDefsRef.current.find((c) => c.name === cmdName)
+            if (cmdDef?.args) {
+              // Find the arg being typed (argIndex = parts.length - 2, since parts[0] is /cmd)
+              const argIdx = parts.length - 2
+              const arg = cmdDef.args[argIdx]
+              if (arg?.options && arg.options.length > 0) {
+                event.preventDefault()
+                const current = parts[parts.length - 1] ?? ''
+                // Find next option after current value (cycle)
+                const currentOptIdx = arg.options.indexOf(current)
+                const nextOpt = arg.options[(currentOptIdx + 1) % arg.options.length]
+                parts[parts.length - 1] = nextOpt ?? ''
+                const newText = parts.join(' ')
+                editor?.commands.setContent(newText)
+                editor?.commands.focus('end')
+                return true
+              }
+            }
+          }
+        }
+        // Up arrow at start of empty/single-line editor → cycle command history
+        if (event.key === 'ArrowUp' && !slashMenuOpen && !fileMentionMenuOpen) {
+          const text = editor?.getText() ?? ''
+          // Only activate history on empty or single-line content at position 0
+          const sel = editor?.state.selection
+          if (sel && sel.$head.pos <= 1 && !text.includes('\n') && commandHistory.length > 0) {
+            event.preventDefault()
+            const nextIdx = Math.min(historyIndex + 1, commandHistory.length - 1)
+            historyIndex = nextIdx
+            editor?.commands.setContent(commandHistory[nextIdx] ?? '')
+            // Move cursor to end
+            editor?.commands.focus('end')
+            return true
+          }
+        }
+        if (event.key === 'ArrowDown' && !slashMenuOpen && !fileMentionMenuOpen) {
+          if (historyIndex >= 0) {
+            event.preventDefault()
+            historyIndex--
+            if (historyIndex < 0) {
+              editor?.commands.clearContent()
+            } else {
+              editor?.commands.setContent(commandHistory[historyIndex] ?? '')
+              editor?.commands.focus('end')
+            }
+            return true
+          }
         }
         return false
       },
@@ -194,6 +282,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     if (!editor) return
     const text = editor.getText().trim()
     if (!text) return
+    pushHistory(text)
     onSend(text)
     editor.commands.clearContent()
   }, [editor, onSend])
@@ -207,7 +296,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       <div
         ref={dropRef}
         className={`border rounded-sm overflow-hidden transition-colors shadow-lg shadow-black/30 ${
-          dragOver ? 'border-accent bg-accent-muted' : 'border-zinc-300 dark:border-border-subtle'
+          dragOver ? 'border-accent bg-accent-muted' : 'border-border-subtle'
         }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
@@ -230,7 +319,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             className={`absolute top-2 right-2 p-1.5 rounded-md transition-colors ${
               uploading
                 ? 'text-accent animate-pulse'
-                : 'text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:text-fg-faint dark:hover:text-fg-secondary dark:hover:bg-surface'
+                : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
             }`}
             title={uploading ? 'Uploading...' : 'Attach file'}
             disabled={!activeSessionId || uploading}
@@ -240,7 +329,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           </button>
           <EditorContent
             editor={editor}
-            className="min-w-0 pr-8 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-zinc-400 [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
+            className="min-w-0 pr-8 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-fg-faint [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
           />
         </div>
         <ComposerToolbar

@@ -1,7 +1,8 @@
 import { Suspense, useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Save, Loader2, Eye, EyeOff } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { useSettings } from '@/hooks/useSettings'
 import { getConfigComponentOverride } from '@/generated/plugin-config-components'
@@ -173,8 +174,17 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack }: PluginConfig
       </div>
 
       {isLoading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-fg-muted" />
+        <div className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm p-4">
+              <div className="flex items-baseline gap-2 mb-2">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-12" />
+              </div>
+              <Skeleton className="h-3 w-48 mb-2" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ))}
         </div>
       )}
 

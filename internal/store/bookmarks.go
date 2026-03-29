@@ -72,6 +72,29 @@ func (s *Store) DeleteBookmark(id string) error {
 	return nil
 }
 
+// GetBookmark returns a bookmark by ID.
+func (s *Store) GetBookmark(id string) (*Bookmark, error) {
+	var b Bookmark
+	err := s.DB.QueryRow(
+		`SELECT id, message_id, session_id, COALESCE(note,''), COALESCE(tags,'[]'), created_at
+		 FROM bookmarks WHERE id = ?`,
+		id,
+	).Scan(&b.ID, &b.MessageID, &b.SessionID, &b.Note, &b.Tags, &b.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// UpdateBookmarkNote updates the note (title) on a bookmark.
+func (s *Store) UpdateBookmarkNote(id, note string) error {
+	_, err := s.DB.Exec(`UPDATE bookmarks SET note = ? WHERE id = ?`, note, id)
+	if err != nil {
+		return fmt.Errorf("update bookmark note %s: %w", id, err)
+	}
+	return nil
+}
+
 // GetBookmarkByMessage returns a bookmark for a specific message, or nil if none exists.
 func (s *Store) GetBookmarkByMessage(messageID string) (*Bookmark, error) {
 	var b Bookmark

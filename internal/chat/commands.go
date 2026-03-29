@@ -5,14 +5,27 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/hollis-labs/fragments-engine/plugin"
 )
+
+// CommandArg defines a single argument for a slash command (mirrors plugin.CommandArg).
+type CommandArg struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Options     []string `json:"options,omitempty"`
+}
 
 // SlashCommand represents a slash command available in the chat UI.
 type SlashCommand struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Category    string `json:"category"`
-	Source      string `json:"source"` // "builtin" or plugin ID
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Category    string       `json:"category"`
+	Source      string       `json:"source"`                         // "builtin" or plugin ID
+	Args        []CommandArg `json:"args,omitempty"`                 // structured argument schema
+	Permission  string       `json:"required_permission,omitempty"` // permission gate
 }
 
 // CommandResult is the outcome of executing a slash command.
@@ -104,6 +117,44 @@ func (r *CommandRegistry) Register(cmd SlashCommand, handler CommandHandler) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.commands[cmd.Name] = registeredCommand{SlashCommand: cmd, handler: handler}
+}
+
+// RegisterPluginCommand registers a slash command from a plugin into the unified
+// registry. Satisfies the plugin.CommandRegistrar interface.
+func (r *CommandRegistry) RegisterPluginCommand(cmd plugin.SlashCommandDef, source string) {
+	var h CommandHandler
+	if cmd.Handler != nil {
+		h = func(ctx context.Context, sessionID, args string) (*CommandResult, error) {
+			out, err := cmd.Handler(ctx, sessionID, args)
+			if err != nil {
+				return nil, err
+			}
+			action, _ := out["action"].(string)
+			content, _ := out["content"].(string)
+			return &CommandResult{Action: action, Content: content}, nil
+		}
+	}
+
+	// Convert plugin args to chat args.
+	var cmdArgs []CommandArg
+	for _, a := range cmd.Args {
+		cmdArgs = append(cmdArgs, CommandArg{
+			Name:        a.Name,
+			Description: a.Description,
+			Required:    a.Required,
+			Type:        a.Type,
+			Options:     a.Options,
+		})
+	}
+
+	r.Register(SlashCommand{
+		Name:        cmd.Name,
+		Description: cmd.Description,
+		Category:    cmd.Category,
+		Source:      source,
+		Args:        cmdArgs,
+		Permission:  cmd.Permission,
+	}, h)
 }
 
 // List returns all registered commands.

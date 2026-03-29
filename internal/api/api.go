@@ -37,6 +37,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/workspaces/{id}", a.handleDeleteWorkspace)
 	mux.HandleFunc("GET /api/workspaces/{wid}/projects", a.handleListProjects)
 	mux.HandleFunc("POST /api/workspaces/{wid}/projects", a.handleCreateProject)
+	mux.HandleFunc("PUT /api/workspaces/{wid}/projects/{pid}", a.handleUpdateProject)
+	mux.HandleFunc("DELETE /api/workspaces/{wid}/projects/{pid}", a.handleDeleteProject)
+	mux.HandleFunc("GET /api/projects/{id}/agents", a.handleListProjectAgents)
 
 	// Sessions
 	mux.HandleFunc("GET /api/sessions", a.handleListSessions)
@@ -69,6 +72,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/agents/{id}", a.handleUpdateAgent)
 	mux.HandleFunc("GET /api/agents/{id}/modes", a.handleListAgentModes)
 	mux.HandleFunc("POST /api/agents/{id}/modes", a.handleCreateAgentMode)
+	mux.HandleFunc("GET /api/agents/{id}/projects", a.handleListAgentProjects)
+	mux.HandleFunc("POST /api/agents/{id}/projects", a.handleAddAgentProject)
+	mux.HandleFunc("DELETE /api/agents/{id}/projects/{projectId}", a.handleRemoveAgentProject)
 
 	// Session compaction
 	mux.HandleFunc("POST /api/sessions/{id}/compact", a.handleCompactSession)
@@ -78,6 +84,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/bookmarks", a.handleCreateBookmark)
 	mux.HandleFunc("DELETE /api/bookmarks/{id}", a.handleDeleteBookmark)
 	mux.HandleFunc("POST /api/messages/{id}/bookmark", a.handleToggleBookmark)
+	mux.HandleFunc("POST /api/bookmarks/{id}/autotitle", a.handleAutotitleBookmark)
 
 	// Artifacts
 	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter
@@ -188,6 +195,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/templates/{name}", a.handleDeleteTemplate)
 	mux.HandleFunc("POST /api/templates/{name}/apply", a.handleApplyTemplate)
 
+	// Search
+	mux.HandleFunc("GET /api/search", a.handleSearchMessages)
+
 	// User Settings
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
@@ -200,6 +210,31 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Process Health
 	mux.HandleFunc("GET /api/processes/health", a.handleProcessHealth)
 	mux.HandleFunc("POST /api/processes/kill-stale", a.handleKillStaleProcesses)
+
+	// Connector Triggers
+	mux.HandleFunc("GET /api/plugins/triggers", a.handleListTriggerRules)
+	mux.HandleFunc("POST /api/plugins/triggers", a.handleCreateTriggerRule)
+	mux.HandleFunc("GET /api/plugins/triggers/{id}", a.handleGetTriggerRule)
+	mux.HandleFunc("PUT /api/plugins/triggers/{id}", a.handleUpdateTriggerRule)
+	mux.HandleFunc("DELETE /api/plugins/triggers/{id}", a.handleDeleteTriggerRule)
+
+	// Connectors (health & status)
+	mux.HandleFunc("GET /api/plugins/connectors", a.handleListConnectors)
+	mux.HandleFunc("GET /api/plugins/connectors/{name}/health", a.handleCheckConnectorHealth)
+
+	// Event Stream (SSE for external consumers)
+	mux.HandleFunc("GET /api/plugins/events/stream", a.handleEventStream)
+
+	// Keybindings (plugin-registered keyboard shortcuts)
+	mux.HandleFunc("GET /api/plugins/keybindings", a.handleListKeybindings)
+
+	// Custom Actions
+	mux.HandleFunc("GET /api/actions", a.handleListActions)
+	mux.HandleFunc("POST /api/actions", a.handleCreateAction)
+	mux.HandleFunc("GET /api/actions/{id}", a.handleGetAction)
+	mux.HandleFunc("PUT /api/actions/{id}", a.handleUpdateAction)
+	mux.HandleFunc("DELETE /api/actions/{id}", a.handleDeleteAction)
+	mux.HandleFunc("POST /api/actions/{id}/execute", a.handleExecuteAction)
 
 	// Execution Metrics
 	mux.HandleFunc("GET /api/sessions/{id}/metrics", a.handleGetSessionExecutionMetrics)

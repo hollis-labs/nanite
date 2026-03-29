@@ -24,6 +24,7 @@ func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 		ToolBindings string `json:"tool_bindings"`
 		InputSchema  string `json:"input_schema"`
 		Settings     string `json:"settings"`
+		Icon         string `json:"icon"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -42,6 +43,7 @@ func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 		ToolBindings: req.ToolBindings,
 		InputSchema:  req.InputSchema,
 		Settings:     req.Settings,
+		Icon:         req.Icon,
 	}
 	if err := a.Store.CreateSkill(sk); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
@@ -85,6 +87,7 @@ func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 		ToolBindings *string `json:"tool_bindings"`
 		InputSchema  *string `json:"input_schema"`
 		Settings     *string `json:"settings"`
+		Icon         *string `json:"icon"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -111,6 +114,9 @@ func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Settings != nil {
 		existing.Settings = *req.Settings
+	}
+	if req.Icon != nil {
+		existing.Icon = *req.Icon
 	}
 
 	if err := a.Store.UpdateSkill(existing); err != nil {

@@ -1,5 +1,6 @@
+import { useEffect, useRef } from 'react'
 import { Bookmark } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Widget } from './Widget'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
@@ -24,12 +25,32 @@ function scrollToMessage(messageId: string) {
 
 export function BookmarksWidget() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const queryClient = useQueryClient()
+  const autotitledIds = useRef(new Set<string>())
 
   const { data: bookmarks = [] } = useQuery({
     queryKey: ['bookmarks', activeSessionId],
     queryFn: () => api.listBookmarks(activeSessionId!),
     enabled: !!activeSessionId,
   })
+
+  // Auto-title bookmarks that have no custom note
+  useEffect(() => {
+    for (const bm of bookmarks) {
+      const needsTitle = !bm.note || bm.note === 'Bookmarked message' || bm.note === 'bookmark'
+      if (needsTitle && !autotitledIds.current.has(bm.id)) {
+        autotitledIds.current.add(bm.id)
+        api.autotitleBookmark(bm.id)
+          .then(() => {
+            void queryClient.invalidateQueries({ queryKey: ['bookmarks', activeSessionId] })
+          })
+          .catch(() => {
+            // Endpoint may not exist yet — silently ignore
+            autotitledIds.current.delete(bm.id)
+          })
+      }
+    }
+  }, [bookmarks, activeSessionId, queryClient])
 
   return (
     <Widget id="bookmarks" title="Bookmarks" icon={Bookmark}>

@@ -1,466 +1,581 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
-import { useChatStore } from '@/stores/useChatStore'
-import { useSprintPlanningStore } from '@/components/plugins/sprint/useSprintPlanningStore'
-import type { Message, StreamEvent, ChatError, ChatErrorCode, ToolWarning } from '@/lib/types'
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSprintPlanningStore } from "@/components/plugins/sprint/useSprintPlanningStore";
+import { api } from "@/lib/api";
+import type { ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning } from "@/lib/types";
+import { useChatStore } from "@/stores/useChatStore";
 
-let errorCounter = 0
+const PAGE_SIZE = 50;
+
+/** SSE event type constants — single source of truth for stream event names */
+const SSE = {
+  DELTA: "delta",
+  TOOL_CALL: "tool_call",
+  TOOL_RESULT: "tool_result",
+  TOOL_WARNING: "tool_warning",
+  STATUS: "status",
+  CIRCUIT_OPEN: "circuit_open",
+  SESSION_TAKEOVER: "session_takeover",
+  STREAM_END: "stream_end",
+  ERROR: "error",
+} as const;
 
 function makeChatError(
   code: ChatErrorCode,
   message: string,
   details?: Record<string, unknown>,
-  timestamp?: string
+  timestamp?: string,
 ): ChatError {
-  errorCounter += 1
   return {
-    id: `err-${Date.now()}-${errorCounter}`,
+    id: `err-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
     code,
     message,
     details: details as Record<string, unknown>,
     timestamp: timestamp || new Date().toISOString(),
-  }
+  };
 }
 
 // --- Error persistence helpers (survive page refresh) ---
 
 interface PersistedErrorState {
-  errors: ChatError[]
-  toolCalls: Array<{ id: string; tool: string; status: 'running' | 'done' | 'error'; summary?: string }>
-  errorMessage?: Message
+  errors: ChatError[];
+  toolCalls: Array<{
+    id: string;
+    tool: string;
+    status: "running" | "done" | "error";
+    summary?: string;
+  }>;
+  errorMessage?: Message;
 }
 
 function storageKey(sessionId: string) {
-  return `conduit:errorState:${sessionId}`
+  return `conduit:errorState:${sessionId}`;
 }
 
 function persistErrorState(sessionId: string, state: PersistedErrorState) {
   try {
-    localStorage.setItem(storageKey(sessionId), JSON.stringify(state))
-  } catch { /* quota exceeded — not critical */ }
+    localStorage.setItem(storageKey(sessionId), JSON.stringify(state));
+  } catch {
+    /* quota exceeded — not critical */
+  }
 }
 
 function loadPersistedErrorState(sessionId: string): PersistedErrorState | null {
   try {
-    const raw = localStorage.getItem(storageKey(sessionId))
-    if (!raw) return null
-    return JSON.parse(raw) as PersistedErrorState
+    const raw = localStorage.getItem(storageKey(sessionId));
+    if (!raw) return null;
+    return JSON.parse(raw) as PersistedErrorState;
   } catch {
-    return null
+    return null;
   }
 }
 
 function clearPersistedErrorState(sessionId: string) {
   try {
-    localStorage.removeItem(storageKey(sessionId))
-  } catch { /* ignore */ }
+    localStorage.removeItem(storageKey(sessionId));
+  } catch {
+    /* ignore */
+  }
 }
 
 export function useChat(sessionId: string | null) {
-  const [messages, setMessages] = useState<Message[]>([])
-  const eventSourceRef = useRef<EventSource | null>(null)
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [paginationState, setPaginationState] = useState<{
+    total: number;
+    oldestOffset: number;
+  } | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
-  const isStreaming = useChatStore((s) => s.isStreaming)
-  const streamingContent = useChatStore((s) => s.streamingContent)
-  const setStreaming = useChatStore((s) => s.setStreaming)
-  const setStreamingSessionId = useChatStore((s) => s.setStreamingSessionId)
-  const appendStreamContent = useChatStore((s) => s.appendStreamContent)
-  const clearStream = useChatStore((s) => s.clearStream)
-  const addToolCall = useChatStore((s) => s.addToolCall)
-  const updateToolCall = useChatStore((s) => s.updateToolCall)
-  const clearToolCalls = useChatStore((s) => s.clearToolCalls)
-  const addChatError = useChatStore((s) => s.addChatError)
-  const statusMessage = useChatStore((s) => s.statusMessage)
-  const setStatusMessage = useChatStore((s) => s.setStatusMessage)
-  const circuitOpen = useChatStore((s) => s.circuitOpen)
-  const setCircuitOpen = useChatStore((s) => s.setCircuitOpen)
-  const addToolWarning = useChatStore((s) => s.addToolWarning)
-  const clearToolWarnings = useChatStore((s) => s.clearToolWarnings)
-  const setTextOnlyMode = useChatStore((s) => s.setTextOnlyMode)
-  const sessionTakeover = useChatStore((s) => s.sessionTakeover)
-  const setSessionTakeover = useChatStore((s) => s.setSessionTakeover)
+  const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamingContent = useChatStore((s) => s.streamingContent);
+  const setStreaming = useChatStore((s) => s.setStreaming);
+  const setStreamingSessionId = useChatStore((s) => s.setStreamingSessionId);
+  const appendStreamContent = useChatStore((s) => s.appendStreamContent);
+  const clearStream = useChatStore((s) => s.clearStream);
+  const addToolCall = useChatStore((s) => s.addToolCall);
+  const updateToolCall = useChatStore((s) => s.updateToolCall);
+  const clearToolCalls = useChatStore((s) => s.clearToolCalls);
+  const addChatError = useChatStore((s) => s.addChatError);
+  const statusMessage = useChatStore((s) => s.statusMessage);
+  const setStatusMessage = useChatStore((s) => s.setStatusMessage);
+  const circuitOpen = useChatStore((s) => s.circuitOpen);
+  const setCircuitOpen = useChatStore((s) => s.setCircuitOpen);
+  const addToolWarning = useChatStore((s) => s.addToolWarning);
+  const clearToolWarnings = useChatStore((s) => s.clearToolWarnings);
+  const setTextOnlyMode = useChatStore((s) => s.setTextOnlyMode);
+  const sessionTakeover = useChatStore((s) => s.sessionTakeover);
+  const setSessionTakeover = useChatStore((s) => s.setSessionTakeover);
 
   const loadMessages = useCallback(async () => {
     if (!sessionId) {
-      setMessages([])
-      return
+      setMessages([]);
+      setPaginationState(null);
+      return;
     }
     try {
-      const msgs = await api.getMessages(sessionId)
-      const backendMessages = msgs ?? []
+      // First request to get total count and first page.
+      const firstPage = await api.getMessagePage(sessionId, PAGE_SIZE);
+
+      let backendMessages: Message[];
+      if (!firstPage.has_more) {
+        // All messages fit in one page — use them directly.
+        backendMessages = firstPage.messages ?? [];
+        setPaginationState({ total: firstPage.total, oldestOffset: 0 });
+      } else {
+        // More messages exist — load the LAST page (most recent).
+        const lastOffset = Math.max(0, firstPage.total - PAGE_SIZE);
+        const lastPage = await api.getMessagePage(sessionId, PAGE_SIZE, lastOffset);
+        backendMessages = lastPage.messages ?? [];
+        setPaginationState({ total: lastPage.total, oldestOffset: lastOffset });
+      }
 
       // Restore persisted error state (errors not saved by backend).
-      const persisted = loadPersistedErrorState(sessionId)
+      const persisted = loadPersistedErrorState(sessionId);
       if (persisted) {
-        // Inject error message if not already in backend messages.
         if (persisted.errorMessage) {
-          const exists = backendMessages.some((m) => m.id === persisted.errorMessage!.id)
+          const exists = backendMessages.some((m) => m.id === persisted.errorMessage!.id);
           if (!exists) {
-            backendMessages.push(persisted.errorMessage)
+            backendMessages.push(persisted.errorMessage);
           }
         }
-        // Restore chat errors and tool calls to store.
         for (const err of persisted.errors) {
-          addChatError(err)
+          addChatError(err);
         }
         for (const tc of persisted.toolCalls) {
-          addToolCall(tc)
+          addToolCall(tc);
         }
       }
 
-      setMessages(backendMessages)
+      setMessages(backendMessages);
     } catch (err) {
-      console.error('Failed to load messages:', err)
+      console.error("Failed to load messages:", err);
     }
-  }, [sessionId, addChatError, addToolCall])
+  }, [sessionId, addChatError, addToolCall]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!sessionId || !paginationState || paginationState.oldestOffset <= 0 || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const newOffset = Math.max(0, paginationState.oldestOffset - PAGE_SIZE);
+      const count = paginationState.oldestOffset - newOffset;
+      const page = await api.getMessagePage(sessionId, count, newOffset);
+      setMessages((prev) => [...(page.messages ?? []), ...prev]);
+      setPaginationState((p) => (p ? { ...p, oldestOffset: newOffset } : null));
+    } catch (err) {
+      console.error("Failed to load older messages:", err);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [sessionId, paginationState, loadingOlder]);
+
+  const hasOlderMessages = paginationState != null && paginationState.oldestOffset > 0;
+
+  // Jump to a specific message (for search results). Loads a window around it.
+  const jumpToMessage = useCallback(async (targetSessionId: string, messageId: string) => {
+    if (!targetSessionId) return;
+    try {
+      const page = await api.getMessagesAround(targetSessionId, messageId);
+      setMessages(page.messages ?? []);
+      setPaginationState({ total: page.total, oldestOffset: 0 }); // approximate
+    } catch (err) {
+      console.error("Failed to jump to message:", err);
+    }
+  }, []);
 
   // Load messages when sessionId changes
   useEffect(() => {
-    void loadMessages()
+    void loadMessages();
     // Clear text-only mode on session switch — it will be re-set if the new
     // session's agent also has 0 MCP tools.
-    setTextOnlyMode(false)
-  }, [loadMessages, setTextOnlyMode])
+    setTextOnlyMode(false);
+  }, [loadMessages, setTextOnlyMode]);
 
-  const sendMessage = useCallback(async (content: string) => {
-    if (!sessionId || !content.trim()) return
+  const sendMessage = useCallback(
+    async (content: string) => {
+      if (!sessionId || !content.trim()) return;
 
-    // Reset takeover state — user is actively using this tab now.
-    setSessionTakeover(false)
+      // Reset takeover state — user is actively using this tab now.
+      setSessionTakeover(false);
 
-    // Optimistically add user message
-    const tempUserMsg: Message = {
-      id: 'temp-' + Date.now(),
-      session_id: sessionId,
-      agent_id: '',
-      role: 'user',
-      content,
-      envelope: null,
-      metadata: '{}',
-      created_at: new Date().toISOString(),
-    }
-    setMessages(prev => [...prev, tempUserMsg])
-    setStreaming(true)
-    setStreamingSessionId(sessionId)
-    clearToolCalls()
-    clearToolWarnings()
-    clearPersistedErrorState(sessionId)
-    console.log('[useChat] streaming=true, sending message...')
+      // Optimistically add user message
+      const tempUserMsg: Message = {
+        id: "temp-" + Date.now(),
+        session_id: sessionId,
+        agent_id: "",
+        role: "user",
+        content,
+        envelope: null,
+        metadata: "{}",
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, tempUserMsg]);
+      setStreaming(true);
+      setStreamingSessionId(sessionId);
+      clearToolCalls();
+      clearToolWarnings();
+      clearPersistedErrorState(sessionId);
+      console.log("[useChat] streaming=true, sending message...");
 
-    try {
-      const { message_id } = await api.sendMessage({ session_id: sessionId, content })
+      try {
+        const { message_id } = await api.sendMessage({ session_id: sessionId, content });
 
-      // Connect to SSE stream
-      const es = new EventSource(`/api/stream/${message_id}`)
-      eventSourceRef.current = es
-      let accumulated = ''
+        // Connect to SSE stream
+        const es = new EventSource(`/api/stream/${message_id}`);
+        eventSourceRef.current = es;
+        let accumulated = "";
 
-      es.addEventListener('delta', (e: MessageEvent) => {
-        const data: StreamEvent = JSON.parse(e.data as string)
-        if (data.content) {
-          accumulated += data.content
-          appendStreamContent(data.content)
-          // Clear any transient status message when content starts flowing.
-          setStatusMessage(null)
-        }
-      })
-
-      es.addEventListener('tool_call', (e: MessageEvent) => {
-        const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string }
-        if (data.tool) {
-          addToolCall({
-            id: data.tool_id || data.message_id || `tc-${Date.now()}`,
-            tool: data.tool,
-            status: 'running',
-          })
-
-          // UI-trigger tools: open frontend modals/panels when the agent calls them.
-          if (data.tool === 'conduit_open_sprint_planning') {
-            useSprintPlanningStore.getState().openSprintPlanning()
+        es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
+          const data: StreamEvent = JSON.parse(e.data as string);
+          if (data.content) {
+            accumulated += data.content;
+            appendStreamContent(data.content);
+            // Clear any transient status message when content starts flowing.
+            setStatusMessage(null);
           }
-        }
-      })
+        });
 
-      es.addEventListener('tool_result', (e: MessageEvent) => {
-        const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string }
-        const toolId = data.tool_id || data.message_id
-        if (toolId) {
-          updateToolCall(toolId, {
-            status: data.error ? 'error' : 'done',
-            summary: (data.summary ?? data.error ?? '') as string,
-          })
-        }
-      })
+        es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
+          const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
+          if (data.tool) {
+            addToolCall({
+              id: data.tool_id || data.message_id || `tc-${Date.now()}`,
+              tool: data.tool,
+              status: "running",
+            });
 
-      es.addEventListener('tool_warning', (e: MessageEvent) => {
-        const data: StreamEvent = JSON.parse(e.data as string)
-        if (data.data) {
-          try {
-            const warning = JSON.parse(data.data) as ToolWarning
-            addToolWarning(warning)
-            // Set persistent text-only mode when agent has no MCP tools
-            if (warning.level === 'critical' && warning.error.includes('no MCP tools')) {
-              setTextOnlyMode(true)
+            // UI-trigger tools: open frontend modals/panels when the agent calls them.
+            if (data.tool === "conduit_open_sprint_planning") {
+              useSprintPlanningStore.getState().openSprintPlanning();
             }
-          } catch {
-            console.warn('[useChat] Failed to parse tool_warning data:', data.data)
           }
-        }
-      })
+        });
 
-      es.addEventListener('status', (e: MessageEvent) => {
-        const data: StreamEvent = JSON.parse(e.data as string)
-        if (data.content) {
-          setStatusMessage(data.content)
-        }
-      })
-
-      es.addEventListener('circuit_open', () => {
-        setCircuitOpen(true)
-        // Do NOT close the EventSource — keep it open for potential retry.
-      })
-
-      es.addEventListener('session_takeover', () => {
-        // Another tab opened this session — stop streaming and show banner.
-        console.warn('[useChat] Session takeover — another tab is now active')
-        setSessionTakeover(true)
-        // Save partial content if any.
-        if (accumulated) {
-          const partialMsg: Message = {
-            id: message_id,
-            session_id: sessionId,
-            agent_id: '',
-            role: 'assistant',
-            content: accumulated,
-            envelope: null,
-            metadata: '{}',
-            created_at: new Date().toISOString(),
+        es.addEventListener(SSE.TOOL_RESULT, (e: MessageEvent) => {
+          const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
+          const toolId = data.tool_id || data.message_id;
+          if (toolId) {
+            updateToolCall(toolId, {
+              status: data.error ? "error" : "done",
+              summary: (data.summary ?? data.error ?? "") as string,
+            });
           }
-          setMessages(prev => [...prev, partialMsg])
-        }
-        clearStream()
-        es.close()
-        eventSourceRef.current = null
-        // Do NOT reconnect — that would cause a takeover loop.
-      })
+        });
 
-      es.addEventListener('stream_end', (e: MessageEvent) => {
-        const data: StreamEvent = JSON.parse(e.data as string)
-        // Add the complete assistant message
-        // Parse envelope from stream_end event if present.
-        let envelope: string | null = null
-        if (data.envelope) {
-          envelope = typeof data.envelope === 'string' ? data.envelope : JSON.stringify(data.envelope)
-        }
-        const assistantMsg: Message = {
-          id: message_id,
-          session_id: sessionId,
-          agent_id: data.agent_id || '',
-          role: 'assistant',
-          content: accumulated,
-          envelope,
-          metadata: JSON.stringify(data.usage || {}),
-          created_at: new Date().toISOString(),
-        }
-        setMessages(prev => [...prev, assistantMsg])
-        clearStream()
-        clearPersistedErrorState(sessionId)
-        es.close()
-        eventSourceRef.current = null
-
-        // Refresh widgets that depend on session usage data
-        void queryClient.invalidateQueries({ queryKey: ['session-usage', sessionId] })
-        void queryClient.invalidateQueries({ queryKey: ['session', sessionId] })
-      })
-
-      es.addEventListener('error', (e: MessageEvent) => {
-        // Custom SSE error event from the backend (has data).
-        if (e.data) {
-          try {
-            const data: StreamEvent = JSON.parse(e.data as string)
-
-            // Handle structured error from backend
-            if (data.structured_error) {
-              const se = data.structured_error
-              addChatError(makeChatError(se.code, se.message, se.details, se.timestamp))
-              // Error envelope is sent as a delta by the backend — no need to
-              // append italic text here. The envelope card handles display.
-            } else {
-              // Fallback for unstructured errors (no envelope from backend)
-              const errMsg = data.error || 'Unknown streaming error'
-              console.error('Stream error from backend:', errMsg)
-              addChatError(makeChatError('internal_error', errMsg))
+        es.addEventListener(SSE.TOOL_WARNING, (e: MessageEvent) => {
+          const data: StreamEvent = JSON.parse(e.data as string);
+          if (data.data) {
+            try {
+              const warning = JSON.parse(data.data) as ToolWarning;
+              addToolWarning(warning);
+              // Set persistent text-only mode when agent has no MCP tools
+              if (warning.level === "critical" && warning.error.includes("no MCP tools")) {
+                setTextOnlyMode(true);
+              }
+            } catch {
+              console.warn("[useChat] Failed to parse tool_warning data:", data.data);
             }
-          } catch {
-            console.error('Stream error (unparseable):', e.data)
           }
-        }
-        // Finalize the stream with whatever we have.
-        const errorMsg: Message | undefined = accumulated ? {
-          id: message_id,
-          session_id: sessionId,
-          agent_id: '',
-          role: 'assistant',
-          content: accumulated,
-          envelope: null,
-          metadata: JSON.stringify({ had_error: true }),
-          created_at: new Date().toISOString(),
-        } : undefined
-        if (errorMsg) {
-          setMessages(prev => [...prev, errorMsg])
-        }
+        });
 
-        // Persist error state so it survives page refresh.
-        const currentErrors = useChatStore.getState().chatErrors
-        const currentToolCalls = useChatStore.getState().toolCalls
-        persistErrorState(sessionId, {
-          errors: currentErrors,
-          toolCalls: currentToolCalls,
-          errorMessage: errorMsg,
-        })
+        es.addEventListener(SSE.STATUS, (e: MessageEvent) => {
+          const data: StreamEvent = JSON.parse(e.data as string);
+          if (data.content) {
+            setStatusMessage(data.content);
+          }
+        });
 
-        clearStream()
-        es.close()
-        eventSourceRef.current = null
-      })
+        es.addEventListener(SSE.CIRCUIT_OPEN, () => {
+          setCircuitOpen(true);
+          // Do NOT close the EventSource — keep it open for potential retry.
+        });
 
-      // Handle native EventSource connection errors (no data).
-      es.onerror = () => {
-        // Only handle if the custom error listener above didn't already fire.
-        if (eventSourceRef.current) {
-          console.error('SSE connection lost')
+        es.addEventListener(SSE.SESSION_TAKEOVER, () => {
+          // Another tab opened this session — stop streaming and show banner.
+          console.warn("[useChat] Session takeover — another tab is now active");
+          setSessionTakeover(true);
+          // Save partial content if any.
           if (accumulated) {
-            const assistantMsg: Message = {
+            const partialMsg: Message = {
               id: message_id,
               session_id: sessionId,
-              agent_id: '',
-              role: 'assistant',
+              agent_id: "",
+              role: "assistant",
               content: accumulated,
               envelope: null,
-              metadata: '{}',
+              metadata: "{}",
               created_at: new Date().toISOString(),
-            }
-            setMessages(prev => [...prev, assistantMsg])
+            };
+            setMessages((prev) => [...prev, partialMsg]);
           }
-          clearStream()
-          es.close()
-          eventSourceRef.current = null
-        }
+          clearStream();
+          es.close();
+          eventSourceRef.current = null;
+          // Do NOT reconnect — that would cause a takeover loop.
+        });
+
+        es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
+          const data: StreamEvent = JSON.parse(e.data as string);
+          // Add the complete assistant message
+          // Parse envelope from stream_end event if present.
+          let envelope: string | null = null;
+          if (data.envelope) {
+            envelope =
+              typeof data.envelope === "string" ? data.envelope : JSON.stringify(data.envelope);
+          }
+          const assistantMsg: Message = {
+            id: message_id,
+            session_id: sessionId,
+            agent_id: data.agent_id || "",
+            role: "assistant",
+            content: accumulated,
+            envelope,
+            metadata: JSON.stringify(data.usage || {}),
+            created_at: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+          clearStream();
+          clearPersistedErrorState(sessionId);
+          es.close();
+          eventSourceRef.current = null;
+
+          // Refresh widgets that depend on session usage data
+          void queryClient.invalidateQueries({ queryKey: ["session-usage", sessionId] });
+          void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
+        });
+
+        es.addEventListener(SSE.ERROR, (e: MessageEvent) => {
+          // Custom SSE error event from the backend (has data).
+          if (e.data) {
+            try {
+              const data: StreamEvent = JSON.parse(e.data as string);
+
+              // Handle structured error from backend
+              if (data.structured_error) {
+                const se = data.structured_error;
+                addChatError(makeChatError(se.code, se.message, se.details, se.timestamp));
+                // Error envelope is sent as a delta by the backend — no need to
+                // append italic text here. The envelope card handles display.
+              } else {
+                // Fallback for unstructured errors (no envelope from backend)
+                const errMsg = data.error || "Unknown streaming error";
+                console.error("Stream error from backend:", errMsg);
+                addChatError(makeChatError("internal_error", errMsg));
+              }
+            } catch {
+              console.error("Stream error (unparseable):", e.data);
+            }
+          }
+          // Finalize the stream with whatever we have.
+          const errorMsg: Message | undefined = accumulated
+            ? {
+                id: message_id,
+                session_id: sessionId,
+                agent_id: "",
+                role: "assistant",
+                content: accumulated,
+                envelope: null,
+                metadata: JSON.stringify({ had_error: true }),
+                created_at: new Date().toISOString(),
+              }
+            : undefined;
+          if (errorMsg) {
+            setMessages((prev) => [...prev, errorMsg]);
+          }
+
+          // Persist error state so it survives page refresh.
+          const currentErrors = useChatStore.getState().chatErrors;
+          const currentToolCalls = useChatStore.getState().toolCalls;
+          persistErrorState(sessionId, {
+            errors: currentErrors,
+            toolCalls: currentToolCalls,
+            errorMessage: errorMsg,
+          });
+
+          clearStream();
+          es.close();
+          eventSourceRef.current = null;
+        });
+
+        // Handle native EventSource connection errors (no data).
+        es.onerror = () => {
+          // Only handle if the custom error listener above didn't already fire.
+          if (eventSourceRef.current) {
+            console.error("SSE connection lost");
+            if (accumulated) {
+              const assistantMsg: Message = {
+                id: message_id,
+                session_id: sessionId,
+                agent_id: "",
+                role: "assistant",
+                content: accumulated,
+                envelope: null,
+                metadata: "{}",
+                created_at: new Date().toISOString(),
+              };
+              setMessages((prev) => [...prev, assistantMsg]);
+            }
+            clearStream();
+            es.close();
+            eventSourceRef.current = null;
+          }
+        };
+      } catch (err) {
+        console.error("Send failed:", err);
+        clearStream();
       }
-    } catch (err) {
-      console.error('Send failed:', err)
-      clearStream()
-    }
-  }, [sessionId, queryClient, setStreaming, setStreamingSessionId, appendStreamContent, clearStream, addToolCall, updateToolCall, clearToolCalls, addToolWarning, clearToolWarnings, setTextOnlyMode, addChatError, setStatusMessage, setCircuitOpen, setSessionTakeover])
+    },
+    [
+      sessionId,
+      queryClient,
+      setStreaming,
+      setStreamingSessionId,
+      appendStreamContent,
+      clearStream,
+      addToolCall,
+      updateToolCall,
+      clearToolCalls,
+      addToolWarning,
+      clearToolWarnings,
+      setTextOnlyMode,
+      addChatError,
+      setStatusMessage,
+      setCircuitOpen,
+      setSessionTakeover,
+    ],
+  );
 
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {
-      eventSourceRef.current.close()
-      eventSourceRef.current = null
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
     }
-    clearStream()
-  }, [clearStream])
+    clearStream();
+  }, [clearStream]);
 
   const retryStream = useCallback(async () => {
-    if (!sessionId) return
-    setCircuitOpen(false)
+    if (!sessionId) return;
+    setCircuitOpen(false);
 
     try {
-      const { message_id } = await api.retryStream(sessionId)
+      const { message_id } = await api.retryStream(sessionId);
 
       // Close old event source if still open.
       if (eventSourceRef.current) {
-        eventSourceRef.current.close()
+        eventSourceRef.current.close();
       }
 
       // Open a new SSE connection for the retry.
-      const es = new EventSource(`/api/stream/${message_id}`)
-      eventSourceRef.current = es
-      setStreaming(true)
+      const es = new EventSource(`/api/stream/${message_id}`);
+      eventSourceRef.current = es;
+      setStreaming(true);
 
-      es.addEventListener('delta', (e: MessageEvent) => {
-        const data: StreamEvent = JSON.parse(e.data as string)
+      es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
+        const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content) {
-          appendStreamContent(data.content)
-          setStatusMessage(null)
+          appendStreamContent(data.content);
+          setStatusMessage(null);
         }
-      })
+      });
 
-      es.addEventListener('stream_end', (e: MessageEvent) => {
-        const data: StreamEvent = JSON.parse(e.data as string)
+      es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
+        const data: StreamEvent = JSON.parse(e.data as string);
         const assistantMsg: Message = {
           id: message_id,
           session_id: sessionId,
-          agent_id: data.agent_id || '',
-          role: 'assistant',
+          agent_id: data.agent_id || "",
+          role: "assistant",
           content: useChatStore.getState().streamingContent,
           envelope: null,
           metadata: JSON.stringify(data.usage || {}),
           created_at: new Date().toISOString(),
-        }
-        setMessages(prev => [...prev, assistantMsg])
-        clearStream()
-        es.close()
-        eventSourceRef.current = null
-      })
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+        clearStream();
+        es.close();
+        eventSourceRef.current = null;
+      });
 
-      es.addEventListener('circuit_open', () => {
-        setCircuitOpen(true)
-      })
+      es.addEventListener(SSE.CIRCUIT_OPEN, () => {
+        setCircuitOpen(true);
+      });
 
-      es.addEventListener('session_takeover', () => {
-        console.warn('[useChat] Session takeover during retry — another tab is now active')
-        setSessionTakeover(true)
-        clearStream()
-        es.close()
-        eventSourceRef.current = null
-      })
+      es.addEventListener(SSE.SESSION_TAKEOVER, () => {
+        console.warn("[useChat] Session takeover during retry — another tab is now active");
+        setSessionTakeover(true);
+        clearStream();
+        es.close();
+        eventSourceRef.current = null;
+      });
 
-      es.addEventListener('error', () => {
-        clearStream()
-        es.close()
-        eventSourceRef.current = null
-      })
+      es.addEventListener(SSE.ERROR, () => {
+        clearStream();
+        es.close();
+        eventSourceRef.current = null;
+      });
 
       es.onerror = () => {
         if (eventSourceRef.current) {
-          clearStream()
-          es.close()
-          eventSourceRef.current = null
+          clearStream();
+          es.close();
+          eventSourceRef.current = null;
         }
-      }
+      };
     } catch (err) {
-      console.error('Retry failed:', err)
-      clearStream()
+      console.error("Retry failed:", err);
+      clearStream();
     }
-  }, [sessionId, setCircuitOpen, setStreaming, appendStreamContent, setStatusMessage, clearStream, setSessionTakeover])
+  }, [
+    sessionId,
+    setCircuitOpen,
+    setStreaming,
+    appendStreamContent,
+    setStatusMessage,
+    clearStream,
+    setSessionTakeover,
+  ]);
 
   const dismissCircuit = useCallback(() => {
-    setCircuitOpen(false)
+    setCircuitOpen(false);
     if (eventSourceRef.current) {
-      eventSourceRef.current.close()
-      eventSourceRef.current = null
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
     }
     // Save partial content with interruption note.
-    const partial = useChatStore.getState().streamingContent
+    const partial = useChatStore.getState().streamingContent;
     if (partial && sessionId) {
       const msg: Message = {
         id: `partial-${Date.now()}`,
         session_id: sessionId,
-        agent_id: '',
-        role: 'assistant',
-        content: partial + '\n\n_(Response interrupted: provider rate limited)_',
+        agent_id: "",
+        role: "assistant",
+        content: partial + "\n\n_(Response interrupted: provider rate limited)_",
         envelope: null,
-        metadata: '{}',
+        metadata: "{}",
         created_at: new Date().toISOString(),
-      }
-      setMessages(prev => [...prev, msg])
+      };
+      setMessages((prev) => [...prev, msg]);
     }
-    clearStream()
-  }, [sessionId, setCircuitOpen, clearStream])
+    clearStream();
+  }, [sessionId, setCircuitOpen, clearStream]);
 
-  return { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sessionTakeover, sendMessage, loadMessages, stopStreaming, retryStream, dismissCircuit }
+  return {
+    messages,
+    isStreaming,
+    streamingContent,
+    statusMessage,
+    circuitOpen,
+    sessionTakeover,
+    sendMessage,
+    loadMessages,
+    stopStreaming,
+    retryStream,
+    dismissCircuit,
+    loadOlderMessages,
+    hasOlderMessages,
+    loadingOlder,
+    jumpToMessage,
+  };
 }

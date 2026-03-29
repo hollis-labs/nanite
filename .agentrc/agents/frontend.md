@@ -221,9 +221,9 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 2. **Duplicate API definitions** — `listAgentProfiles()` and `listAgents()` both hit `/api/agents`. One should delegate to the other.
 
-3. **Long hook dependency arrays** — `useChat.sendMessage` has 20+ dependencies, risking stale closures. Consider `useRef` for stable callback references.
+3. **Long hook dependency arrays** — `useChat.sendMessage` has 17 dependencies, risking stale closures. Consider `useRef` for stable callback references.
 
-4. **Manual Map mutations in store** — `activeStreams` and `pendingTools` use manual `Map.set()`/`Map.delete()` without immutable copies. Could use immer middleware or new Map construction.
+4. ~~**Manual Map mutations in store**~~ — **FIXED.** Store now creates immutable `new Map()` copies for all Map mutations (`activeStreams`, `pendingTools`, `cliActiveSessions`).
 
 5. **Magic event strings** — SSE event types (`'delta'`, `'tool_call'`, etc.) are hardcoded strings. Define as constants or an enum.
 
@@ -261,8 +261,8 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 - [x] **Plugin widget mount points** — `GET /api/plugins/ui-components` → `PluginWidgets` component in RightRail. Shows widget-type components with name, description, props. Gated behind developer_mode, hidden in recover_mode.
 
 ### 2. Slash Commands & Fragments v1 UX
-- [ ] Port relevant UI patterns from Fragments v1 (user will specify which).
-- [ ] Ensure TipTap slash command extension picks up plugin-registered commands (backend: `Host.RegisterCommand`).
+- [x] Port relevant UI patterns from Fragments v1 (user will specify which).
+- [x] Ensure TipTap slash command extension picks up plugin-registered commands (backend: `Host.RegisterCommand`).
 
 ### 3. Artifacts Drawer
 - [x] **Artifacts panel** — List session artifacts with preview (images, code, markdown), download, and back navigation. Eye icon for previewable types.

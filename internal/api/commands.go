@@ -4,26 +4,17 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/hollis-labs/conduit/internal/chat"
 	"github.com/hollis-labs/conduit/internal/store"
 )
 
 // handleListCommands returns all available slash commands (built-in + plugin).
+// All commands live in a single unified registry (Engine.Commands).
 func (a *API) handleListCommands(w http.ResponseWriter, r *http.Request) {
-	cmds := a.Engine.Commands.List()
-
-	// Merge plugin commands if plugin host is available.
-	if a.PluginHost != nil {
-		for _, pc := range a.PluginHost.GetSlashCommands() {
-			cmds = append(cmds, chat.SlashCommand{
-				Name:        pc.Name,
-				Description: pc.Description,
-				Category:    pc.Category,
-				Source:      "plugin",
-			})
-		}
+	if a.Engine == nil || a.Engine.Commands == nil {
+		a.jsonResp(w, http.StatusOK, []any{})
+		return
 	}
-
+	cmds := a.Engine.Commands.List()
 	a.jsonResp(w, http.StatusOK, cmds)
 }
 
@@ -45,37 +36,14 @@ func (a *API) handleExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try built-in commands first.
+	if a.Engine == nil || a.Engine.Commands == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "command system not initialized")
+		return
+	}
+
+	// Execute from the unified registry (built-in + plugin commands).
 	result, err := a.Engine.Commands.Execute(r.Context(), req.Name, req.SessionID, req.Args)
 	if err != nil {
-		// Check plugin commands as fallback.
-		if a.PluginHost != nil {
-			for _, pc := range a.PluginHost.GetSlashCommands() {
-				if pc.Name == req.Name && pc.Handler != nil {
-					out, herr := pc.Handler(r.Context(), req.SessionID, req.Args)
-					if herr != nil {
-						a.errorResp(w, http.StatusInternalServerError, herr.Error())
-						return
-					}
-					// Persist plugin command output as a system message if action=message.
-					if action, _ := out["action"].(string); action == "message" {
-						if content, _ := out["content"].(string); content != "" && req.SessionID != "" {
-							msg := &store.Message{
-								ID:        uuid.New().String(),
-								SessionID: req.SessionID,
-								Role:      "system",
-								Content:   content,
-							}
-							if err := a.Store.CreateMessage(msg); err == nil {
-								out["message_id"] = msg.ID
-							}
-						}
-					}
-					a.jsonResp(w, http.StatusOK, out)
-					return
-				}
-			}
-		}
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	fplugin "github.com/hollis-labs/fragments-engine/plugin"
 )
@@ -66,8 +65,11 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 // LoadDiscovered instantiates and loads all discovered plugins into the host,
 // respecting dependency order.  Returns the list of successfully loaded plugins.
 func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin, []error) {
-	// Sort by dependencies: plugins with no deps first.
-	sorted := sortByDeps(discovered)
+	// Topological sort: plugins load after their dependencies.
+	sorted, cycleErr := sortByDeps(discovered)
+	if cycleErr != nil {
+		return nil, []error{cycleErr}
+	}
 
 	var loaded []fplugin.Plugin
 	var errs []error
@@ -121,14 +123,63 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 	return loaded, errs
 }
 
-// sortByDeps performs a simple topological sort: plugins with no dependencies
-// come first.  For this initial implementation we do a single-pass stable sort
-// by dependency count which is sufficient when dep chains are shallow.
-func sortByDeps(plugins []DiscoveredPlugin) []DiscoveredPlugin {
-	out := make([]DiscoveredPlugin, len(plugins))
-	copy(out, plugins)
-	sort.SliceStable(out, func(i, j int) bool {
-		return len(out[i].Manifest.Dependencies) < len(out[j].Manifest.Dependencies)
-	})
-	return out
+// sortByDeps performs a topological sort using Kahn's algorithm so that
+// plugins are loaded after all of their dependencies.  Returns an error
+// if a dependency cycle is detected.
+func sortByDeps(plugins []DiscoveredPlugin) ([]DiscoveredPlugin, error) {
+	// Build index: plugin name → DiscoveredPlugin.
+	byName := make(map[string]int, len(plugins))
+	for i, p := range plugins {
+		byName[p.Manifest.Name] = i
+	}
+
+	// In-degree: how many (present) deps each plugin has.
+	inDeg := make([]int, len(plugins))
+	// Adjacency: dependencyIdx → []dependentIdx.
+	adj := make([][]int, len(plugins))
+
+	for i, p := range plugins {
+		for _, dep := range p.Manifest.Dependencies {
+			depIdx, ok := byName[dep]
+			if !ok {
+				continue // external dep — checked at load time
+			}
+			adj[depIdx] = append(adj[depIdx], i)
+			inDeg[i]++
+		}
+	}
+
+	// Seed queue with zero-in-degree nodes.
+	queue := make([]int, 0, len(plugins))
+	for i, d := range inDeg {
+		if d == 0 {
+			queue = append(queue, i)
+		}
+	}
+
+	sorted := make([]DiscoveredPlugin, 0, len(plugins))
+	for len(queue) > 0 {
+		idx := queue[0]
+		queue = queue[1:]
+		sorted = append(sorted, plugins[idx])
+		for _, depIdx := range adj[idx] {
+			inDeg[depIdx]--
+			if inDeg[depIdx] == 0 {
+				queue = append(queue, depIdx)
+			}
+		}
+	}
+
+	if len(sorted) != len(plugins) {
+		// Find the cycle participants for a useful error message.
+		var cycled []string
+		for i, d := range inDeg {
+			if d > 0 {
+				cycled = append(cycled, plugins[i].Manifest.Name)
+			}
+		}
+		return nil, fmt.Errorf("dependency cycle detected among plugins: %v", cycled)
+	}
+
+	return sorted, nil
 }

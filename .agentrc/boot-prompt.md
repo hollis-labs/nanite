@@ -5,33 +5,17 @@
 ```
 Boot conduit-backend
 
-Agent Schema v2 implementation in progress. Phases 1-2 done, Phases 3-4 remain.
-Read the plan doc: ~/.claude/plans/starry-tickling-tower.md for full context.
+Plugin evolution plan complete (all 8 phases). See docs/architecture/plugin-evolution-plan.md.
 
-Context files to read:
-- .agentrc/agents/backend.md — full project context + beta TODO
-- docs/pty-bridge-evolution.md — PTY bridge status + remaining items
-- CLAUDE.md — envelope system warnings, build/deploy rules
+Backend changes (2026-03-29):
+- All plugin evolution phases 1, 2a, 3a, 5a, 5b, 6, 8a, 8b complete
+- Phase 6: connector dispatch, health/retry, event streaming
+- Phase 8: keybindings, auto-triggers, custom actions (DB + CRUD + slash cmd registration)
+- Project CRUD: added GetProject, handleUpdateProject (PUT), handleDeleteProject (DELETE)
+  in internal/store/workspaces.go and internal/api/workspaces.go
+  Routes: PUT/DELETE /api/workspaces/{wid}/projects/{pid}
 
-Completed (2026-03-28 session):
-- Section 1 (Provider Expansion): All done. Gemini, Mistral, Azure, Copilot, Aider
-  already existed. Added OpenRouter + OpenZen providers with seeds and tests.
-- Section 2 (Plugin System): All done (config, connectors, hooks, widgets, generator, guide).
-- Section 4 (Multi-Session Presence): Done except PTY tool-level (deferred).
-- Section 5 (Artifacts): Done (auto-detect + metadata).
-- Section 7 (Small Items): Done (utility from DB, agent_id in session creation,
-  developer_mode/recover_mode flags).
-- Env cleanup: Removed godotenv/.env, Volon/Mentat vars, dead API key defaults.
-  API keys are keychain-only. Activity emitter rebranded from Volon to Engine.
-
-Remaining for future sessions:
-- Section 3 (Slash Commands) — port from Fragments v1, /status, /providers, plugin commands
-- Section 6 (Agent Model / agentrc integration) — needs decision on 6b
-- Env var migration — secrets to keychain, config to GUI settings.
-  See memory: project_env_var_cleanup.md for the full list.
-
-Pre-existing test failures (not blockers, just log them if you hit them):
-- mcp.TestSelfToolsTransport_ListTools: expects 12 tools, gets 20
+Pre-existing test failures (not blockers):
 - server.TestAuthMiddlewareEnabled: returns 200 instead of 401
 - plugin/builtin/email and plugin/builtin/teams: missing connector modules
 
@@ -43,65 +27,29 @@ Always use cerberus_rebuild for deployment, not go build directly.
 ```
 Boot conduit-frontend
 
-Frontend polish phase 1 is mostly complete. Theme migration, sidebar redesign,
-and project scope are done. Next focus is CRUD GUIs and remaining cleanup.
-
-Branch: feature/frontend-polish-phase1 (not yet merged to main)
+All Beta Release TODO (§1-9) and Plugin Evolution (Phases 1-8, except 7) complete.
+Audited and verified 2026-03-29. Working on main.
 
 CRITICAL — Read these before touching any code:
 - memory: feedback_ui_design_patterns.md — THE design system reference
-- memory: project_frontend_polish.md — what's done, what remains
-- .agentrc/agents/frontend.md — full project context
+- .agentrc/agents/frontend.md — full project context (includes Beta TODO + anti-patterns)
 - CLAUDE.md — envelope system warnings
 
-Design System (established 2026-03-28):
-- Theme: CSS variables in index.css, light/dark via .light/.dark class on <html>
-- Colors: ALWAYS use semantic tokens (bg-bg, text-fg, border-border, etc.)
-  NEVER hardcode bg-zinc-*, text-zinc-*, border-zinc-* — light theme breaks
-- Accent: fire engine red #dc2626 (bg-accent, text-accent)
-- Status/toggle: blue #3B82F6 (bg-success, bg-toggle-on) — NOT green
-- Composer: always-dark tokens (bg-composer, text-composer-fg, etc.) — same both themes
-- Cards: rounded-xl border-border-subtle shadow-sm, two-section (header + footer)
+Remaining anti-patterns (5 of 6 — #4 Map mutations was fixed):
+1. Loose TypeScript: `(a as any).is_primary` in AppShell.tsx:80
+2. Duplicate API: listAgentProfiles() and listAgents() both hit /api/agents
+3. Long deps: useChat.sendMessage has 17 dependencies
+5. Magic event strings: SSE types hardcoded in useChat.ts
+6. Global errorCounter: module-scoped in useChat.ts:10
 
-Completed (2026-03-28 extended session):
-- Semantic token migration: ~500 zinc refs replaced across 80+ files
-  (chat area, envelopes, widgets, tool calls, errors, modals, menus)
-- Chat composer redesign: always-dark with light typing area + dark toolbar
-- Light mode highlight.js theme (github light scoped under .light)
-- Sidebar redesign: "Sessions" → "Chats", project dropdown, 2-line compact
-  chat items with MessageSquare icon + count badge, AdapterBadge (PTY/API)
-- Removed NewSessionForm (creation overrides), removed tasks zone dead code
-- Project dropdown with All Chats + project list + New Project modal
-- Workspace switcher: hover chevron, accent ring, Add Workspace button
-- Numbered list line break fix in markdown rendering
+Remaining future work:
+- Phase 7: Dynamic plugin loading (subprocess + JSON-RPC backend, URL ESM frontend)
+- Tag autocomplete: tag-input.tsx exists, needs TipTap Mention extension integration
+- Plugin detail view page (tool and server detail views exist)
+- Additional envelope card designs as new plugins are built
 
-Completed (2026-03-29 session):
-- Envelope card color refinement: all green/emerald → success (blue) token,
-  cyan → neutral, rounded-lg → rounded-sm across all 26 envelope cards
-- AdapterBadge: emerald → violet (PTY), blue-500 → success (API)
-- Right rail unified panel: widgets/inbox/artifacts as tabbed views in
-  one panel (LayoutGrid/Mail/Package icons). Deleted ArtifactsDrawer.tsx
-  and InboxPanel.tsx. Extracted ArtifactsContent + InboxContent components.
-- Removed inbox icon from NavRail (inbox is in right rail now)
-- ChatHeader redesign: 2-column layout (avatar + info rows).
-  Row 1: agent dropdown + adapter badge + fork/clone.
-  Row 2: #shortcode, model, tool count, mode pills.
-  Removed useless "New Chat" title and redundant capability pills.
-
-Remaining work:
-1. Workspace CRUD GUI — proper create modal (replace window.prompt),
-   settings page for edit/delete workspaces
-2. Project CRUD GUI — settings page for edit/delete, project context files
-   (PRD, spec, architecture docs as project-scoped artifacts)
-3. Project backend gaps — GET/PUT/DELETE single project endpoints,
-   session filtering by project_id (backend agent task)
-4. SprintPlanningModal — move to plugin (not core)
-5. Plugin architecture — A2A plugin, Sprint plugin, UI hooks/events system
-
-Reference implementations:
-- ProviderManager.tsx — tabbed view with search/filter/sort + Variation F cards
-- ShortcutsPanel.tsx — interactive click-to-edit cards
-- CreateProjectModal.tsx — clean modal pattern for entity creation
-- ProjectDropdown.tsx — dropdown selector with inline create
-- RightRail.tsx — tabbed panel with icon tabs (widgets/inbox/artifacts)
+shadcn components available (23 total):
+  alert-dialog, avatar, badge, button, card, command, context-menu,
+  dialog, dropdown-menu, empty, input, kbd, popover, scroll-area,
+  select, separator, sheet, skeleton, spinner, switch, tabs, textarea, tooltip
 ```

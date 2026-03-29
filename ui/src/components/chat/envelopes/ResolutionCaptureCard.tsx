@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Lightbulb, CheckCircle, MinusCircle } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 
 interface ResolutionCaptureData {
   ticket_id?: string

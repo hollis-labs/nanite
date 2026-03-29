@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Mail, Reply, Check, CheckCheck, Clock, AlertTriangle, ArrowRight, Send } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { ScrollArea } from '@/components/ui/ScrollArea'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { api } from '@/lib/api'
 import type { A2AMessage, A2AMessageType, Agent } from '@/lib/types'
 
@@ -224,8 +225,25 @@ export function InboxContent({ agentId }: InboxContentProps) {
       {/* Messages */}
       <ScrollArea className="flex-1 min-h-0">
         {isLoading ? (
-          <div className="flex items-center justify-center py-12 text-fg-muted text-sm">
-            Loading...
+          <div className="divide-y divide-border/50">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="size-3.5 rounded-sm" />
+                    <Skeleton className="h-3.5 w-20" />
+                    <Skeleton className="h-3 w-3" />
+                    <Skeleton className="h-3.5 w-16" />
+                  </div>
+                  <Skeleton className="h-4 w-14 rounded" />
+                </div>
+                <div className="ml-5 mt-2 space-y-1.5">
+                  <Skeleton className="h-2.5 w-16" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-3/4" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : displayMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-fg-muted text-sm gap-2">

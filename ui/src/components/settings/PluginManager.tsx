@@ -6,8 +6,18 @@ import {
   AlertCircle,
   RefreshCw,
   Settings2,
+  Power,
+  PowerOff,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/useAppStore'
 import { PluginConfigPanel } from './PluginConfigPanel'
@@ -176,15 +186,18 @@ export function PluginManager() {
 
       {/* Loading */}
       {isLoading && !isError && (
-        <div className="grid gap-3 grid-cols-2">
-          {[1,2,3,4].map(i => (
-            <div key={i} className="rounded-xl border border-border overflow-hidden animate-pulse">
-              <div className="flex items-center gap-2.5 px-3.5 py-3">
-                <div className="w-9 h-9 rounded-lg bg-surface" />
-                <div className="h-4 bg-surface rounded w-28" />
+        <div className="grid grid-cols-2 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+              <div className="px-3.5 py-3 flex items-center gap-2.5">
+                <Skeleton className="size-9 rounded-lg" />
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <Skeleton className="h-3.5 w-1/2" />
+                  <Skeleton className="h-2.5 w-1/3" />
+                </div>
               </div>
-              <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
-                <div className="h-3 bg-surface rounded w-40" />
+              <div className="border-t border-border/50 px-3.5 py-2">
+                <Skeleton className="h-2.5 w-3/4" />
               </div>
             </div>
           ))}
@@ -193,10 +206,13 @@ export function PluginManager() {
 
       {/* Empty */}
       {!isLoading && !isError && sortedPlugins.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <Package className="w-8 h-8 text-fg-faint mb-3" />
-          <p className="text-sm text-fg-muted">No plugins found</p>
-        </div>
+        <Empty className="py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon"><Package /></EmptyMedia>
+            <EmptyTitle className="text-sm">No plugins found</EmptyTitle>
+            <EmptyDescription className="text-xs">Plugins will appear here once available.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       )}
 
       {/* Plugin grid */}
@@ -207,15 +223,19 @@ export function PluginManager() {
             const isDisabled = plugin.status === 'disabled'
             const isAvailable = plugin.status === 'available'
             return (
+              <ContextMenu key={plugin.name}>
+                <ContextMenuTrigger asChild>
               <div
-                key={plugin.name}
-                className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
+                className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
                   isActive
                     ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
                     : isDisabled
                       ? 'border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-55'
                       : 'border-border bg-white dark:bg-bg/30 opacity-45'
                 }`}
+                onClick={() => {
+                  if (isActive || isDisabled) setConfiguringPlugin(plugin)
+                }}
               >
                 {/* Header */}
                 <div className="flex items-center gap-2.5 px-3.5 py-3">
@@ -242,7 +262,8 @@ export function PluginManager() {
                     </div>
                   </div>
                   {/* Actions */}
-                  <div className="flex items-center gap-1 shrink-0">
+                  {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                     {plugin.type === 'core' ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">core</span>
                     ) : isActive ? (
@@ -296,6 +317,28 @@ export function PluginManager() {
                   </p>
                 </div>
               </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  {(isActive || isDisabled) && (
+                    <ContextMenuItem className="gap-2 text-xs" onClick={() => setConfiguringPlugin(plugin)}>
+                      <Settings2 className="w-3.5 h-3.5" />
+                      Settings
+                    </ContextMenuItem>
+                  )}
+                  {isActive && (
+                    <ContextMenuItem className="gap-2 text-xs" onClick={() => disableMutation.mutate(plugin.name)} disabled={isActionPending(plugin.name)}>
+                      <PowerOff className="w-3.5 h-3.5" />
+                      Disable
+                    </ContextMenuItem>
+                  )}
+                  {isDisabled && (
+                    <ContextMenuItem className="gap-2 text-xs" onClick={() => enableMutation.mutate(plugin.name)} disabled={isActionPending(plugin.name)}>
+                      <Power className="w-3.5 h-3.5" />
+                      Enable
+                    </ContextMenuItem>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
             )
           })}
         </div>

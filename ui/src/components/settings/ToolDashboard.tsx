@@ -6,14 +6,18 @@ import {
   Wrench,
   Search,
   Activity,
-  X,
   AlertCircle,
   Loader2,
   Plus,
   Pencil,
   Trash2,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import type { ToolDefinition, DiscoveryDiff, ToolSelection, ServerInfo, MCPServerConfig } from '@/lib/types'
 
@@ -311,7 +315,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
           <Button
             size="sm"
             onClick={openAddForm}
-            className="gap-1.5 bg-accent hover:bg-accent-hover text-white"
+            className="gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
             Add Server
@@ -349,14 +353,17 @@ export function ToolDashboard({}: ToolDashboardProps) {
         <div className="grid gap-3 grid-cols-2">
           {serversLoading && (
             <>
-              {[1,2,3,4].map(i => (
-                <div key={i} className="rounded-xl border border-border overflow-hidden animate-pulse">
-                  <div className="flex items-center gap-2.5 px-3.5 py-3">
-                    <div className="w-9 h-9 rounded-lg bg-surface" />
-                    <div className="h-4 bg-surface rounded w-28" />
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                  <div className="px-3.5 py-3 flex items-center gap-2.5">
+                    <Skeleton className="size-9 rounded-lg" />
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      <Skeleton className="h-3.5 w-1/2" />
+                      <Skeleton className="h-2.5 w-1/3" />
+                    </div>
                   </div>
-                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
-                    <div className="h-3 bg-surface rounded w-40" />
+                  <div className="border-t border-border/50 px-3.5 py-2">
+                    <Skeleton className="h-2.5 w-3/4" />
                   </div>
                 </div>
               ))}
@@ -364,10 +371,14 @@ export function ToolDashboard({}: ToolDashboardProps) {
           )}
 
           {!serversLoading && servers.length === 0 && (
-            <div className="col-span-2 flex flex-col items-center justify-center py-12 text-center">
-              <Server className="w-8 h-8 text-fg-faint mb-3" />
-              <p className="text-sm text-fg-muted">No MCP servers connected</p>
-              <p className="text-xs text-fg-faint mt-1">Add a server to discover tools</p>
+            <div className="col-span-2">
+              <Empty className="py-12">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon"><Server /></EmptyMedia>
+                  <EmptyTitle className="text-sm">No MCP servers connected</EmptyTitle>
+                  <EmptyDescription className="text-xs">Add a server to discover tools</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             </div>
           )}
 
@@ -377,11 +388,15 @@ export function ToolDashboard({}: ToolDashboardProps) {
             return (
               <div
                 key={server.name}
-                className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
+                className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
                   server.connected
                     ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
                     : 'border-border bg-white dark:bg-bg/30 opacity-45'
                 }`}
+                onClick={() => {
+                  setFilterServer(server.name)
+                  setActiveTab('tools')
+                }}
               >
                 {/* Header */}
                 <div className="flex items-center gap-2.5 px-3.5 py-3">
@@ -405,13 +420,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
                   {isManaged && (
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button
-                        onClick={() => openEditForm(server.name)}
+                        onClick={(e) => { e.stopPropagation(); openEditForm(server.name) }}
                         className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => setDeletingServer(server.name)}
+                        onClick={(e) => { e.stopPropagation(); setDeletingServer(server.name) }}
                         className="p-1.5 rounded text-fg-faint hover:text-red-400 hover:bg-surface transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -449,14 +464,17 @@ export function ToolDashboard({}: ToolDashboardProps) {
         <div className="grid gap-3 grid-cols-2">
           {toolsLoading && (
             <>
-              {[1,2,3,4].map(i => (
-                <div key={i} className="rounded-xl border border-border overflow-hidden animate-pulse">
-                  <div className="flex items-center gap-2.5 px-3.5 py-3">
-                    <div className="w-9 h-9 rounded-lg bg-surface" />
-                    <div className="h-4 bg-surface rounded w-36" />
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                  <div className="px-3.5 py-3 flex items-center gap-2.5">
+                    <Skeleton className="size-9 rounded-lg" />
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      <Skeleton className="h-3.5 w-1/2" />
+                      <Skeleton className="h-2.5 w-1/3" />
+                    </div>
                   </div>
-                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
-                    <div className="h-3 bg-surface rounded w-48" />
+                  <div className="border-t border-border/50 px-3.5 py-2">
+                    <Skeleton className="h-2.5 w-3/4" />
                   </div>
                 </div>
               ))}
@@ -464,19 +482,28 @@ export function ToolDashboard({}: ToolDashboardProps) {
           )}
 
           {!toolsLoading && searchedTools.length === 0 && (
-            <div className="col-span-2 flex flex-col items-center justify-center py-12 text-center">
-              <Search className="w-8 h-8 text-fg-faint mb-3" />
-              <p className="text-sm text-fg-muted">
-                {toolSearch || filterServer ? 'No tools match your filter' : 'No tools available'}
-              </p>
-              {(toolSearch || filterServer) && (
-                <button
-                  onClick={() => { setToolSearch(''); setFilterServer('') }}
-                  className="text-xs text-accent hover:text-accent-hover mt-2 transition-colors"
-                >
-                  Clear filters
-                </button>
-              )}
+            <div className="col-span-2">
+              <Empty className="py-12">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon"><Wrench /></EmptyMedia>
+                  <EmptyTitle className="text-sm">
+                    {toolSearch || filterServer ? 'No tools match your filter' : 'No tools available'}
+                  </EmptyTitle>
+                  <EmptyDescription className="text-xs">
+                    {toolSearch || filterServer
+                      ? 'Try adjusting your search or filter criteria.'
+                      : 'Connect a server to discover tools.'}
+                  </EmptyDescription>
+                </EmptyHeader>
+                {(toolSearch || filterServer) && (
+                  <button
+                    onClick={() => { setToolSearch(''); setFilterServer('') }}
+                    className="text-xs text-accent hover:text-accent-hover mt-2 transition-colors"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </Empty>
             </div>
           )}
 
@@ -553,24 +580,18 @@ export function ToolDashboard({}: ToolDashboardProps) {
       )}
 
       {/* Tool Detail Modal */}
-      {selectedTool && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-border-subtle">
-              <div className="flex items-center gap-2">
-                <Wrench className="w-5 h-5 text-fg-secondary" />
-                <h3 className="text-lg font-medium text-fg">Tool Details</h3>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setSelectedTool(null)}
-              >
-                <X className="w-4 h-4" />
-              </Button>
+      <Dialog open={!!selectedTool} onOpenChange={() => setSelectedTool(null)}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader className="px-5 pt-5">
+            <div className="flex items-center gap-2">
+              <Wrench className="w-5 h-5 text-fg-secondary" />
+              <DialogTitle>Tool Details</DialogTitle>
             </div>
+            <DialogDescription className="sr-only">Detailed information about the selected tool</DialogDescription>
+          </DialogHeader>
 
-            <div className="flex-1 overflow-auto p-6 space-y-4">
+          {selectedTool && (
+            <div className="flex-1 overflow-auto px-5 py-4 space-y-4">
               <div>
                 <h4 className="text-sm font-medium text-fg-secondary mb-2">Name</h4>
                 <code className="px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg font-mono text-sm text-fg block">
@@ -611,188 +632,188 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 </div>
               </div>
             </div>
+          )}
 
-            <div className="p-6 border-t border-border-subtle">
-              <Button
-                onClick={() => setSelectedTool(null)}
-                variant="outline"
-                className="w-full"
-              >
-                Close
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+          <DialogFooter className="px-5 pb-5 border-t border-border-subtle pt-4">
+            <Button
+              onClick={() => setSelectedTool(null)}
+              variant="outline"
+              className="w-full"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add/Edit Server Modal */}
-      {showServerForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-border-subtle">
-              <div className="flex items-center gap-2">
-                <Server className="w-5 h-5 text-fg-secondary" />
-                <h3 className="text-lg font-medium text-fg">
-                  {editingServer ? 'Edit MCP Server' : 'Add MCP Server'}
-                </h3>
-              </div>
-              <Button variant="ghost" size="icon" onClick={closeServerForm}>
-                <X className="w-4 h-4" />
-              </Button>
+      <Dialog open={showServerForm} onOpenChange={() => closeServerForm()}>
+        <DialogContent className="sm:max-w-md max-h-[85vh] flex flex-col">
+          <DialogHeader className="px-5 pt-5">
+            <div className="flex items-center gap-2">
+              <Server className="w-5 h-5 text-fg-secondary" />
+              <DialogTitle>
+                {editingServer ? 'Edit MCP Server' : 'Add MCP Server'}
+              </DialogTitle>
+            </div>
+            <DialogDescription className="sr-only">Configure an MCP server connection</DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto px-5 py-4 space-y-4">
+            {/* Name */}
+            <div>
+              <label className="block text-sm font-medium text-fg-secondary mb-1">Name</label>
+              <input
+                type="text"
+                value={serverForm.name}
+                onChange={(e) => setServerForm(f => ({ ...f, name: e.target.value }))}
+                disabled={!!editingServer}
+                placeholder="my-server"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+              />
+              {editingServer && (
+                <p className="text-xs text-fg-muted mt-1">Name cannot be changed after creation.</p>
+              )}
             </div>
 
-            <div className="flex-1 overflow-auto p-6 space-y-4">
-              {/* Name */}
+            {/* Transport Type */}
+            <div>
+              <label className="block text-sm font-medium text-fg-secondary mb-1">Transport Type</label>
+              <select
+                value={serverForm.transport_type}
+                onChange={(e) => setServerForm(f => ({ ...f, transport_type: e.target.value as 'stdio' | 'sse' }))}
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                <option value="stdio">stdio (subprocess)</option>
+                <option value="sse">SSE / HTTP</option>
+              </select>
+            </div>
+
+            {/* Command (stdio only) */}
+            {serverForm.transport_type === 'stdio' && (
               <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-1">Name</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-1">Command</label>
                 <input
                   type="text"
-                  value={serverForm.name}
-                  onChange={(e) => setServerForm(f => ({ ...f, name: e.target.value }))}
-                  disabled={!!editingServer}
-                  placeholder="my-server"
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+                  value={serverForm.command}
+                  onChange={(e) => setServerForm(f => ({ ...f, command: e.target.value }))}
+                  placeholder="/path/to/binary"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
                 />
-                {editingServer && (
-                  <p className="text-xs text-fg-muted mt-1">Name cannot be changed after creation.</p>
-                )}
               </div>
+            )}
 
-              {/* Transport Type */}
+            {/* URL (sse only) */}
+            {serverForm.transport_type === 'sse' && (
               <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-1">Transport Type</label>
-                <select
-                  value={serverForm.transport_type}
-                  onChange={(e) => setServerForm(f => ({ ...f, transport_type: e.target.value as 'stdio' | 'sse' }))}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent"
-                >
-                  <option value="stdio">stdio (subprocess)</option>
-                  <option value="sse">SSE / HTTP</option>
-                </select>
-              </div>
-
-              {/* Command (stdio only) */}
-              {serverForm.transport_type === 'stdio' && (
-                <div>
-                  <label className="block text-sm font-medium text-fg-secondary mb-1">Command</label>
-                  <input
-                    type="text"
-                    value={serverForm.command}
-                    onChange={(e) => setServerForm(f => ({ ...f, command: e.target.value }))}
-                    placeholder="/path/to/binary"
-                    className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
-                  />
-                </div>
-              )}
-
-              {/* URL (sse only) */}
-              {serverForm.transport_type === 'sse' && (
-                <div>
-                  <label className="block text-sm font-medium text-fg-secondary mb-1">URL</label>
-                  <input
-                    type="text"
-                    value={serverForm.url}
-                    onChange={(e) => setServerForm(f => ({ ...f, url: e.target.value }))}
-                    placeholder="http://localhost:8080"
-                    className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
-                  />
-                </div>
-              )}
-
-              {/* Args (stdio only) */}
-              {serverForm.transport_type === 'stdio' && (
-                <div>
-                  <label className="block text-sm font-medium text-fg-secondary mb-1">Arguments</label>
-                  <input
-                    type="text"
-                    value={serverForm.args}
-                    onChange={(e) => setServerForm(f => ({ ...f, args: e.target.value }))}
-                    placeholder="mcp, --flag, value"
-                    className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
-                  />
-                  <p className="text-xs text-fg-muted mt-1">Comma-separated list of arguments.</p>
-                </div>
-              )}
-
-              {/* Env */}
-              <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-1">Environment Variables</label>
-                <textarea
-                  value={serverForm.env}
-                  onChange={(e) => setServerForm(f => ({ ...f, env: e.target.value }))}
-                  placeholder={"KEY=value\nANOTHER_KEY=value"}
-                  rows={3}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono text-sm"
+                <label className="block text-sm font-medium text-fg-secondary mb-1">URL</label>
+                <input
+                  type="text"
+                  value={serverForm.url}
+                  onChange={(e) => setServerForm(f => ({ ...f, url: e.target.value }))}
+                  placeholder="http://localhost:8080"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
                 />
-                <p className="text-xs text-fg-muted mt-1">One KEY=VALUE per line.</p>
               </div>
+            )}
 
-              {/* Error */}
-              {serverFormError && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-red-900/30 border border-red-700/50 text-sm text-red-300">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  <span>{serverFormError}</span>
-                </div>
-              )}
+            {/* Args (stdio only) */}
+            {serverForm.transport_type === 'stdio' && (
+              <div>
+                <label className="block text-sm font-medium text-fg-secondary mb-1">Arguments</label>
+                <input
+                  type="text"
+                  value={serverForm.args}
+                  onChange={(e) => setServerForm(f => ({ ...f, args: e.target.value }))}
+                  placeholder="mcp, --flag, value"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+                <p className="text-xs text-fg-muted mt-1">Comma-separated list of arguments.</p>
+              </div>
+            )}
+
+            {/* Env */}
+            <div>
+              <label className="block text-sm font-medium text-fg-secondary mb-1">Environment Variables</label>
+              <textarea
+                value={serverForm.env}
+                onChange={(e) => setServerForm(f => ({ ...f, env: e.target.value }))}
+                placeholder={"KEY=value\nANOTHER_KEY=value"}
+                rows={3}
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono text-sm"
+              />
+              <p className="text-xs text-fg-muted mt-1">One KEY=VALUE per line.</p>
             </div>
 
-            <div className="p-6 border-t border-border-subtle flex gap-3">
-              <Button onClick={closeServerForm} variant="outline" className="flex-1">
-                Cancel
-              </Button>
-              <Button
-                onClick={handleServerFormSubmit}
-                disabled={isFormSubmitting}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                {isFormSubmitting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : editingServer ? (
-                  'Save Changes'
-                ) : (
-                  'Add Server'
-                )}
-              </Button>
-            </div>
+            {/* Error */}
+            {serverFormError && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-red-900/30 border border-red-700/50 text-sm text-red-300">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{serverFormError}</span>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+
+          <DialogFooter className="px-5 pb-5 border-t border-border-subtle pt-4 flex gap-3">
+            <Button onClick={closeServerForm} variant="outline" className="flex-1">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleServerFormSubmit}
+              disabled={isFormSubmitting}
+              className="flex-1"
+            >
+              {isFormSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : editingServer ? (
+                'Save Changes'
+              ) : (
+                'Add Server'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Modal */}
-      {deletingServer && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-sm w-full p-6">
-            <div className="flex items-center gap-2 mb-4">
+      <Dialog open={!!deletingServer} onOpenChange={() => setDeletingServer(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="px-5 pt-5">
+            <div className="flex items-center gap-2">
               <AlertCircle className="w-5 h-5 text-red-400" />
-              <h3 className="text-lg font-medium text-fg">Delete Server</h3>
+              <DialogTitle>Delete Server</DialogTitle>
             </div>
-            <p className="text-fg-secondary text-sm mb-6">
+            <DialogDescription className="sr-only">Confirm server deletion</DialogDescription>
+          </DialogHeader>
+          <div className="px-5 py-4">
+            <p className="text-fg-secondary text-sm">
               Are you sure you want to delete <span className="font-medium text-fg">{deletingServer}</span>?
               This will disconnect the server and remove its configuration.
             </p>
-            <div className="flex gap-3">
-              <Button
-                onClick={() => setDeletingServer(null)}
-                variant="outline"
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={() => deleteServerMutation.mutate(deletingServer)}
-                disabled={deleteServerMutation.isPending}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white"
-              >
-                {deleteServerMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  'Delete'
-                )}
-              </Button>
-            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter className="px-5 pb-5">
+            <Button
+              onClick={() => setDeletingServer(null)}
+              variant="outline"
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => deletingServer && deleteServerMutation.mutate(deletingServer)}
+              disabled={deleteServerMutation.isPending}
+              variant="destructive"
+              className="flex-1"
+            >
+              {deleteServerMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                'Delete'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

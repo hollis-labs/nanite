@@ -32,7 +32,7 @@ export function ErrorCard({ data }: ErrorCardProps) {
 
   const codeInfo = CODE_LABELS[data.code] ?? {
     label: data.code.toUpperCase(),
-    color: 'bg-zinc-500/20 text-fg-secondary border-zinc-500/30',
+    color: 'bg-bg-elevated text-fg-secondary border-border-subtle',
   }
 
   // Fetch a giphy image based on the query

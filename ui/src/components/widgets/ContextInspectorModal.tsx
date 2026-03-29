@@ -1,6 +1,9 @@
-import { useState, useCallback, useEffect, type ReactNode } from 'react'
+import { useState, useCallback, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { X, ChevronDown, ChevronRight, Copy, Check, Cpu, MessageSquare, Wrench, BarChart3 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, Check, Cpu, MessageSquare, Wrench, BarChart3 } from 'lucide-react'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
+} from '@/components/ui/dialog'
 import { api } from '@/lib/api'
 import type { ContextBreakdown, MessageTokenDetail, ToolTokenDetail } from '@/lib/types'
 
@@ -180,41 +183,16 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
     staleTime: 10_000,
   })
 
-  // Close on Escape key
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [open, onClose])
-
-  if (!open) return null
-
   const breakdown: ContextBreakdown | undefined = data
   const pct = breakdown ? Math.min((breakdown.total / breakdown.ceiling) * 100, 100) : 0
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div className="relative bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col mx-4">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold text-fg">Context Inspector</h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-surface transition-colors"
-          >
-            <X className="w-4 h-4 text-fg-secondary" />
-          </button>
-        </div>
+    <Dialog open={open} onOpenChange={() => onClose()}>
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col">
+        <DialogHeader className="px-4 py-3 border-b border-border">
+          <DialogTitle className="text-sm">Context Inspector</DialogTitle>
+          <DialogDescription className="sr-only">Token usage breakdown for this session</DialogDescription>
+        </DialogHeader>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
@@ -352,7 +330,7 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
             </>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

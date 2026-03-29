@@ -1,28 +1,42 @@
-import { AlertTriangle, RefreshCw, X, MessageSquare, Settings, Key, Puzzle } from 'lucide-react'
-import { ChatHeader } from './ChatHeader'
-import { ToolCallDrawer } from './ToolCallDrawer'
-import { ChatTranscript } from './ChatTranscript'
-import { ChatComposer } from './ChatComposer'
-import { TaskThreadPanel } from '@/components/a2a/TaskThreadPanel'
-import { useChat } from '@/hooks/useChat'
-import { useTaskContext } from '@/hooks/useTaskContext'
-import { useAppStore } from '@/stores/useAppStore'
-import { useLayoutStore } from '@/stores/useLayoutStore'
+import { AlertTriangle, Key, MessageSquare, Puzzle, RefreshCw, Settings, X } from "lucide-react";
+import { TaskThreadPanel } from "@/components/a2a/TaskThreadPanel";
+import { useChat } from "@/hooks/useChat";
+import { useTaskContext } from "@/hooks/useTaskContext";
+import { useAppStore } from "@/stores/useAppStore";
+import { useLayoutStore } from "@/stores/useLayoutStore";
+import { ChatComposer } from "./ChatComposer";
+import { ChatHeader } from "./ChatHeader";
+import { ChatTranscript } from "./ChatTranscript";
+import { ToolCallDrawer } from "./ToolCallDrawer";
 
 interface ChatMainProps {
-  onEditorReady?: (focus: () => void) => void
+  onEditorReady?: (focus: () => void) => void;
 }
 
 export function ChatMain({ onEditorReady }: ChatMainProps) {
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const taskThreadOpen = useLayoutStore((s) => s.taskThreadOpen)
-  const toggleTaskThread = useLayoutStore((s) => s.toggleTaskThread)
-  const { messages, isStreaming, streamingContent, statusMessage, circuitOpen, sessionTakeover, sendMessage, loadMessages, stopStreaming, retryStream, dismissCircuit } =
-    useChat(activeSessionId)
-  const { isTaskSession, taskId } = useTaskContext()
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const taskThreadOpen = useLayoutStore((s) => s.taskThreadOpen);
+  const toggleTaskThread = useLayoutStore((s) => s.toggleTaskThread);
+  const {
+    messages,
+    isStreaming,
+    streamingContent,
+    statusMessage,
+    circuitOpen,
+    sessionTakeover,
+    sendMessage,
+    loadMessages,
+    stopStreaming,
+    retryStream,
+    dismissCircuit,
+    loadOlderMessages,
+    hasOlderMessages,
+    loadingOlder,
+  } = useChat(activeSessionId);
+  const { isTaskSession, taskId } = useTaskContext();
 
   if (!activeSessionId) {
-    return <WelcomeScreen />
+    return <WelcomeScreen />;
   }
 
   return (
@@ -35,6 +49,9 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           isStreaming={isStreaming}
           streamingContent={streamingContent}
           onSendMessage={sendMessage}
+          onLoadOlder={loadOlderMessages}
+          hasOlderMessages={hasOlderMessages}
+          loadingOlder={loadingOlder}
         />
         {sessionTakeover && (
           <div className="mx-4 mb-2 rounded-lg border border-blue-500/30 bg-blue-500/10 p-4">
@@ -45,7 +62,8 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
                   This session is now active in another tab
                 </p>
                 <p className="text-xs text-blue-300/70 mt-1">
-                  The streaming connection was moved to a newer tab. Reload this page to reconnect here.
+                  The streaming connection was moved to a newer tab. Reload this page to reconnect
+                  here.
                 </p>
                 <div className="flex gap-2 mt-3">
                   <button
@@ -69,7 +87,8 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
                   Provider rate limited after multiple retries
                 </p>
                 <p className="text-xs text-amber-300/70 mt-1">
-                  The API provider has been returning rate limit errors. You can retry or dismiss to keep the partial response.
+                  The API provider has been returning rate limit errors. You can retry or dismiss to
+                  keep the partial response.
                 </p>
                 <div className="flex gap-2 mt-3">
                   <button
@@ -105,65 +124,60 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
         />
       </main>
       {isTaskSession && taskId && (
-        <TaskThreadPanel
-          taskId={taskId}
-          open={taskThreadOpen}
-          onToggle={toggleTaskThread}
-        />
+        <TaskThreadPanel taskId={taskId} open={taskThreadOpen} onToggle={toggleTaskThread} />
       )}
     </div>
-  )
+  );
 }
 
 const WELCOME_CARDS = [
   {
     icon: MessageSquare,
-    title: 'Start a conversation',
-    description: 'Press Cmd+N or click + in the sidebar to begin a new chat session.',
-    action: 'new-chat' as const,
+    title: "Start a conversation",
+    description: "Press Cmd+N or click + in the sidebar to begin a new chat session.",
+    action: "new-chat" as const,
   },
   {
     icon: Key,
-    title: 'Connect a provider',
-    description: 'Set up an API key for Anthropic, OpenAI, or another provider to enable chat.',
-    action: 'settings-providers' as const,
+    title: "Connect a provider",
+    description: "Set up an API key for Anthropic, OpenAI, or another provider to enable chat.",
+    action: "settings-providers" as const,
   },
   {
     icon: Puzzle,
-    title: 'Explore plugins',
-    description: 'Browse available plugins to extend Conduit with new tools and capabilities.',
-    action: 'settings-plugins' as const,
+    title: "Explore plugins",
+    description: "Browse available plugins to extend Conduit with new tools and capabilities.",
+    action: "settings-plugins" as const,
   },
   {
     icon: Settings,
-    title: 'Configure preferences',
-    description: 'Set your default model, keyboard shortcuts, and display options.',
-    action: 'settings-preferences' as const,
+    title: "Configure preferences",
+    description: "Set your default model, keyboard shortcuts, and display options.",
+    action: "settings-preferences" as const,
   },
-]
+];
 
 function WelcomeScreen() {
-  const handleAction = (action: (typeof WELCOME_CARDS)[number]['action']) => {
-    if (action === 'new-chat') {
-      return
+  const handleAction = (action: (typeof WELCOME_CARDS)[number]["action"]) => {
+    if (action === "new-chat") {
+      return;
     }
     // Set hash first — useHashRoute will derive currentPage from the hash
-    if (action === 'settings-providers') {
-      window.location.hash = '#settings/providers'
-    } else if (action === 'settings-plugins') {
-      window.location.hash = '#settings/plugins'
-    } else if (action === 'settings-preferences') {
-      window.location.hash = '#settings'
+    if (action === "settings-providers") {
+      window.location.hash = "#settings/providers";
+    } else if (action === "settings-plugins") {
+      window.location.hash = "#settings/plugins";
+    } else if (action === "settings-preferences") {
+      window.location.hash = "#settings";
     }
-  }
+  };
 
   return (
     <main className="flex-1 flex flex-col items-center justify-center min-w-0 bg-bg px-8">
       <div className="max-w-lg w-full text-center mb-10">
         <h1 className="text-2xl font-semibold text-fg mb-2">Welcome to Conduit</h1>
         <p className="text-sm text-fg-muted">
-          Multi-agent chat harness for Fragments Engine.
-          Get started by picking an action below.
+          Multi-agent chat harness for Fragments Engine. Get started by picking an action below.
         </p>
       </div>
 
@@ -185,5 +199,5 @@ function WelcomeScreen() {
         Cmd+N new chat &middot; Cmd+B sidebar &middot; Cmd+/ widgets &middot; Cmd+L focus editor
       </p>
     </main>
-  )
+  );
 }

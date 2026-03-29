@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ClipboardList, Loader2, CheckCircle2, MessageSquare } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 
 interface TaskItem {
   id: string

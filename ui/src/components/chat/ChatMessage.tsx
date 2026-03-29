@@ -51,24 +51,24 @@ function formatRelativeTime(dateStr: string): string {
 const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
   default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
   architect: { bg: 'bg-accent-muted', text: 'text-accent' },
-  planner: { bg: 'bg-green-500/15', text: 'text-green-400' },
+  planner: { bg: 'bg-violet-500/15', text: 'text-violet-400' },
   writer: { bg: 'bg-amber-500/15', text: 'text-amber-400' },
 }
 
 const MODE_LABEL_STYLES: Record<AgentMode, string> = {
   default: 'text-blue-400',
   architect: 'text-accent',
-  planner: 'text-green-400',
+  planner: 'text-violet-400',
   writer: 'text-amber-400',
 }
 
 // Agent colors for multi-agent sessions — deterministic by agent_id
 const AGENT_COLORS = [
   { border: 'ring-accent', badge: 'bg-accent-muted text-accent' },
-  { border: 'ring-emerald-500', badge: 'bg-emerald-500/15 text-emerald-400' },
+  { border: 'ring-violet-500', badge: 'bg-violet-500/15 text-violet-400' },
   { border: 'ring-orange-500', badge: 'bg-orange-500/15 text-orange-400' },
   { border: 'ring-pink-500', badge: 'bg-pink-500/15 text-pink-400' },
-  { border: 'ring-cyan-500', badge: 'bg-cyan-500/15 text-cyan-400' },
+  { border: 'ring-blue-500', badge: 'bg-blue-500/15 text-blue-400' },
 ]
 
 function agentColorIndex(agentId: string): number {

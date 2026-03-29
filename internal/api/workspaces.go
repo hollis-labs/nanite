@@ -140,3 +140,65 @@ func (a *API) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	a.jsonResp(w, http.StatusCreated, p)
 }
+
+func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
+	wid := r.PathValue("wid")
+	pid := r.PathValue("pid")
+
+	existing, err := a.Store.GetProject(pid)
+	if err != nil || existing.WorkspaceID != wid {
+		a.errorResp(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	var req struct {
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+		RepoPath    *string `json:"repo_path"`
+		Settings    *string `json:"settings"`
+		SortOrder   *int    `json:"sort_order"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	if req.Name != nil {
+		existing.Name = *req.Name
+	}
+	if req.Description != nil {
+		existing.Description = *req.Description
+	}
+	if req.RepoPath != nil {
+		existing.RepoPath = *req.RepoPath
+	}
+	if req.Settings != nil {
+		existing.Settings = *req.Settings
+	}
+	if req.SortOrder != nil {
+		existing.SortOrder = *req.SortOrder
+	}
+
+	if err := a.Store.UpdateProject(existing); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, existing)
+}
+
+func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	wid := r.PathValue("wid")
+	pid := r.PathValue("pid")
+
+	existing, err := a.Store.GetProject(pid)
+	if err != nil || existing.WorkspaceID != wid {
+		a.errorResp(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	if err := a.Store.DeleteProject(pid); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]string{"deleted": pid})
+}

@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { useLayoutStore } from '@/stores/useLayoutStore'
+import { useEffect, useRef } from "react";
+import { useLayoutStore } from "@/stores/useLayoutStore";
 
 /**
  * Syncs app navigation state with the URL hash.
@@ -15,123 +15,137 @@ import { useLayoutStore } from '@/stores/useLayoutStore'
  */
 
 type SettingsSection =
-  | 'preferences'
-  | 'providers'
-  | 'shortcuts'
-  | 'agents'
-  | 'skills'
-  | 'prompts'
-  | 'tools'
-  | 'plugins'
-  | 'widgets'
-  | 'observability'
+  | "profile"
+  | "preferences"
+  | "providers"
+  | "shortcuts"
+  | "actions"
+  | "workspaces"
+  | "agents"
+  | "skills"
+  | "prompts"
+  | "tools"
+  | "plugins"
+  | "widgets"
+  | "observability";
 
 const VALID_SETTINGS_SECTIONS = new Set<string>([
-  'preferences',
-  'providers',
-  'shortcuts',
-  'agents',
-  'skills',
-  'prompts',
-  'tools',
-  'plugins',
-  'widgets',
-  'observability',
-])
+  "profile",
+  "preferences",
+  "providers",
+  "shortcuts",
+  "actions",
+  "workspaces",
+  "agents",
+  "skills",
+  "prompts",
+  "tools",
+  "plugins",
+  "widgets",
+  "observability",
+]);
 
 function parseHash(hash: string): {
-  page: 'chat' | 'settings'
-  settingsSection?: SettingsSection
+  page: string;
+  settingsSection?: SettingsSection;
 } {
-  const clean = hash.replace(/^#\/?/, '')
-  if (!clean || clean === 'chat') {
-    return { page: 'chat' }
+  const clean = hash.replace(/^#\/?/, "");
+  if (!clean || clean === "chat") {
+    return { page: "chat" };
   }
-  if (clean === 'settings') {
-    return { page: 'settings' }
+  if (clean === "settings") {
+    return { page: "settings" };
   }
-  if (clean.startsWith('settings/')) {
-    const section = clean.slice('settings/'.length)
+  if (clean.startsWith("settings/")) {
+    const section = clean.slice("settings/".length);
     if (VALID_SETTINGS_SECTIONS.has(section)) {
-      return { page: 'settings', settingsSection: section as SettingsSection }
+      return { page: "settings", settingsSection: section as SettingsSection };
     }
-    return { page: 'settings' }
+    return { page: "settings" };
   }
-  return { page: 'chat' }
+  // Plugin page: #plugin-id → page = "plugin-id"
+  if (/^[a-z0-9][a-z0-9-]*$/.test(clean)) {
+    return { page: clean };
+  }
+  return { page: "chat" };
 }
 
 // Callback for settings section changes — set by SettingsPage
-let onSettingsSectionChange: ((section: SettingsSection) => void) | null = null
+let onSettingsSectionChange: ((section: SettingsSection) => void) | null = null;
 
-export function setSettingsSectionCallback(
-  cb: ((section: SettingsSection) => void) | null,
-) {
-  onSettingsSectionChange = cb
+export function setSettingsSectionCallback(cb: ((section: SettingsSection) => void) | null) {
+  onSettingsSectionChange = cb;
 }
 
 // Read initial hash and return the settings section if applicable
 export function getInitialSettingsSection(): SettingsSection | undefined {
-  const { settingsSection } = parseHash(window.location.hash)
-  return settingsSection
+  const { settingsSection } = parseHash(window.location.hash);
+  return settingsSection;
 }
 
 export function useHashRoute() {
-  const currentPage = useLayoutStore((s) => s.currentPage)
-  const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
-  const suppressHashUpdate = useRef(false)
+  const currentPage = useLayoutStore((s) => s.currentPage);
+  const setCurrentPage = useLayoutStore((s) => s.setCurrentPage);
+  const suppressHashUpdate = useRef(false);
 
   // On mount: apply hash to store
   useEffect(() => {
-    const { page, settingsSection } = parseHash(window.location.hash)
+    const { page, settingsSection } = parseHash(window.location.hash);
     if (page !== currentPage) {
-      suppressHashUpdate.current = true
-      setCurrentPage(page)
+      suppressHashUpdate.current = true;
+      setCurrentPage(page);
     }
     if (settingsSection && onSettingsSectionChange) {
-      onSettingsSectionChange(settingsSection)
+      onSettingsSectionChange(settingsSection);
     }
     // Only run on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, []);
 
   // Listen for popstate (back/forward)
   useEffect(() => {
     function handleHashChange() {
-      const { page, settingsSection } = parseHash(window.location.hash)
-      suppressHashUpdate.current = true
-      setCurrentPage(page)
+      const { page, settingsSection } = parseHash(window.location.hash);
+      suppressHashUpdate.current = true;
+      setCurrentPage(page);
       if (settingsSection && onSettingsSectionChange) {
-        onSettingsSectionChange(settingsSection)
+        onSettingsSectionChange(settingsSection);
       }
     }
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
-  }, [setCurrentPage])
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [setCurrentPage]);
 
   // Sync store → hash (preserve existing section when on settings)
   useEffect(() => {
     if (suppressHashUpdate.current) {
-      suppressHashUpdate.current = false
-      return
+      suppressHashUpdate.current = false;
+      return;
     }
-    if (currentPage === 'chat') {
-      if (window.location.hash !== '#chat') {
-        window.location.hash = '#chat'
+    if (currentPage === "chat") {
+      if (window.location.hash !== "#chat") {
+        window.location.hash = "#chat";
+      }
+    } else if (currentPage === "settings") {
+      // Only update if we're not already on a settings/* hash
+      const existing = window.location.hash.replace(/^#\/?/, "");
+      if (!existing.startsWith("settings")) {
+        window.location.hash = "#settings";
       }
     } else {
-      // Only update if we're not already on a settings/* hash
-      const existing = window.location.hash.replace(/^#\/?/, '')
-      if (!existing.startsWith('settings')) {
-        window.location.hash = '#settings'
+      // Plugin page: sync hash to page ID
+      const target = `#${currentPage}`;
+      if (window.location.hash !== target) {
+        window.location.hash = target;
       }
     }
-  }, [currentPage])
+  }, [currentPage]);
 }
 
 /** Call from SettingsPage when tab changes to update the hash */
 export function updateSettingsHash(section: SettingsSection) {
-  const target = section === 'preferences' ? '#settings' : `#settings/${section}`
+  const target = `#settings/${section}`;
   if (window.location.hash !== target) {
-    window.location.hash = target
+    window.location.hash = target;
   }
 }

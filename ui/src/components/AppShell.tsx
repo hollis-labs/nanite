@@ -1,27 +1,56 @@
-import { useCallback, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { Suspense, useState, useCallback, useRef, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { NavRail } from './NavRail'
+import { CommandPalette } from './CommandPalette'
+import { SearchModal } from './SearchModal'
 import { LeftSidebar } from './sidebar/LeftSidebar'
 import { ChatMain } from './chat/ChatMain'
 import { RightRail } from './RightRail'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { getSlotComponent } from '@/generated/plugin-slot-components'
 import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { api } from '@/lib/api'
 import SettingsPage from './settings/SettingsPage'
 import { SprintPlanningModal } from './plugins/sprint/SprintPlanningModal'
-import { useSprintPlanningStore } from './plugins/sprint/useSprintPlanningStore'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import { usePresence } from '@/hooks/usePresence'
 import { useHashRoute } from '@/hooks/useHashRoute'
 
 export function AppShell() {
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [sprintOpen, setSprintOpen] = useState(false)
+  const [sprintProjectId, setSprintProjectId] = useState<string | undefined>()
   const focusRef = useRef<(() => void) | null>(null)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
+  const queryClient = useQueryClient()
   const currentPage = useLayoutStore((s) => s.currentPage)
-  const sprintOpen = useSprintPlanningStore((s) => s.isOpen)
-  const sprintProjectId = useSprintPlanningStore((s) => s.projectId)
-  const closeSprintPlanning = useSprintPlanningStore((s) => s.closeSprintPlanning)
+
+  // Listen for plugin-modal events (e.g. sprint planning button via slot system)
+  useEffect(() => {
+    function handlePluginModal(e: Event) {
+      const detail = (e as CustomEvent).detail
+      if (detail?.component === 'sprint-planning') {
+        setSprintProjectId(detail.props?.projectId)
+        setSprintOpen(true)
+      }
+    }
+    // Also listen for plugin-action events with handler type (backward compat)
+    function handlePluginAction(e: Event) {
+      const detail = (e as CustomEvent).detail
+      if (detail?.id === 'sprint-planning') {
+        setSprintOpen(true)
+      }
+    }
+    window.addEventListener('plugin-modal', handlePluginModal)
+    window.addEventListener('plugin-action', handlePluginAction)
+    return () => {
+      window.removeEventListener('plugin-modal', handlePluginModal)
+      window.removeEventListener('plugin-action', handlePluginAction)
+    }
+  }, [])
 
   // Global tool refresh on session switch — runs even when ToolDashboard isn't mounted
   useToolRefresh()
@@ -47,9 +76,7 @@ export function AppShell() {
     enabled: !!activeSessionId,
   })
 
-  const primarySessionAgent = sessionAgents.find(
-    (a) => (a as any).is_primary === true || (a as any).is_primary === 1 || a.role === 'primary',
-  )
+  const primarySessionAgent = sessionAgents.find((a) => a.role === 'primary')
   const inboxAgentId = primarySessionAgent?.agent_id || 'mentat-001'
 
   const focusComposer = useCallback(() => {
@@ -60,10 +87,41 @@ export function AppShell() {
     focusRef.current = focus
   }, [])
 
+  const handleNewSessionFromPalette = useCallback(async () => {
+    if (!activeWorkspaceId) return
+    try {
+      const newSession = await api.createSession({ workspace_id: activeWorkspaceId })
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      useAppStore.getState().setActiveSession(newSession.id)
+      useLayoutStore.getState().setCurrentPage('chat')
+      window.location.hash = '#chat'
+    } catch {
+      // handled by UI
+    }
+  }, [activeWorkspaceId, queryClient])
+
   useKeyboardShortcuts({
     focusComposer,
     sessions: (sessions ?? []).map((s) => ({ id: s.id })),
+    openCommandPalette: () => setCommandPaletteOpen(true),
+    openSearch: () => setSearchOpen(true),
   })
+
+  const pluginNavItems = usePluginSlots('nav-rail')
+
+  const renderPluginPage = () => {
+    const entry = pluginNavItems.find((e) => e.id === currentPage)
+    if (!entry?.component) return null
+    const PluginComponent = getSlotComponent(entry.component)
+    if (!PluginComponent) return null
+    return (
+      <Suspense fallback={<div className="flex-1 flex items-center justify-center text-fg-muted text-sm">Loading...</div>}>
+        <PluginComponent {...(entry.props ?? {})} />
+      </Suspense>
+    )
+  }
+
+  const isPluginPage = currentPage !== 'chat' && currentPage !== 'settings'
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg">
@@ -73,14 +131,25 @@ export function AppShell() {
         <ChatMain onEditorReady={handleEditorReady} />
       ) : currentPage === 'settings' ? (
         <SettingsPage />
+      ) : isPluginPage ? (
+        renderPluginPage()
       ) : null}
       {currentPage === 'chat' && <RightRail inboxAgentId={inboxAgentId} />}
       {sprintOpen && (
         <SprintPlanningModal
           projectId={sprintProjectId}
-          onClose={closeSprintPlanning}
+          onClose={() => setSprintOpen(false)}
         />
       )}
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        onNewSession={handleNewSessionFromPalette}
+      />
+      <SearchModal
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+      />
     </div>
   )
 }

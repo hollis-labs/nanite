@@ -23,6 +23,7 @@ func (a *API) handleCreatePromptTemplate(w http.ResponseWriter, r *http.Request)
 		Template  string `json:"template"`
 		Variables string `json:"variables"`
 		Priority  int    `json:"priority"`
+		Icon      string `json:"icon"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -43,6 +44,7 @@ func (a *API) handleCreatePromptTemplate(w http.ResponseWriter, r *http.Request)
 		Template:  req.Template,
 		Variables: req.Variables,
 		Priority:  req.Priority,
+		Icon:      req.Icon,
 	}
 	if err := a.Store.CreatePromptTemplate(pt); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
@@ -85,6 +87,7 @@ func (a *API) handleUpdatePromptTemplate(w http.ResponseWriter, r *http.Request)
 		Template  *string `json:"template"`
 		Variables *string `json:"variables"`
 		Priority  *int    `json:"priority"`
+		Icon      *string `json:"icon"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -108,6 +111,9 @@ func (a *API) handleUpdatePromptTemplate(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Priority != nil {
 		existing.Priority = *req.Priority
+	}
+	if req.Icon != nil {
+		existing.Icon = *req.Icon
 	}
 
 	if err := a.Store.UpdatePromptTemplate(existing); err != nil {

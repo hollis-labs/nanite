@@ -1,9 +1,13 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/hollis-labs/conduit/internal/provider"
 	"github.com/hollis-labs/conduit/internal/store"
 )
 
@@ -99,4 +103,59 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 		"action":   "created",
 		"bookmark": b,
 	})
+}
+
+func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	bookmark, err := a.Store.GetBookmark(id)
+	if err != nil {
+		a.errorResp(w, http.StatusNotFound, "bookmark not found")
+		return
+	}
+
+	// Get the bookmarked message content.
+	msg, err := a.Store.GetMessage(bookmark.MessageID)
+	if err != nil {
+		a.errorResp(w, http.StatusNotFound, "bookmarked message not found")
+		return
+	}
+
+	if a.Engine == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "engine not available")
+		return
+	}
+
+	prov, ok := a.Engine.Providers.Get(a.Engine.UtilityProvider)
+	if !ok {
+		a.errorResp(w, http.StatusServiceUnavailable, "utility provider not available")
+		return
+	}
+
+	prompt := "Generate a concise 3-8 word title for this bookmarked message. Respond with ONLY the title, no quotes or punctuation."
+	msgs := []provider.ChatMessage{
+		{Role: "user", Content: msg.Content},
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	title, err := prov.Complete(ctx, prompt, msgs, a.Engine.UtilityModel)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, "autotitle failed: "+err.Error())
+		return
+	}
+
+	title = strings.TrimSpace(title)
+	if title == "" {
+		a.errorResp(w, http.StatusInternalServerError, "autotitle returned empty")
+		return
+	}
+
+	if err := a.Store.UpdateBookmarkNote(id, title); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	bookmark.Note = title
+	a.jsonResp(w, http.StatusOK, bookmark)
 }

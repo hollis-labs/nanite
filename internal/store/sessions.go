@@ -48,9 +48,14 @@ type Message struct {
 }
 
 // ListSessions returns sessions filtered by workspace, ordered by last_activity DESC.
-func (s *Store) ListSessions(workspaceID string) ([]Session, error) {
-	rows, err := s.DB.Query(
-		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
+// By default archived sessions are excluded; set includeArchived to include them.
+func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Session, error) {
+	inclArchived := false
+	if len(includeArchived) > 0 {
+		inclArchived = includeArchived[0]
+	}
+
+	query := `SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
 		        COALESCE(workspace_id,''), COALESCE(project_id,''),
 		        COALESCE(context_type,''), COALESCE(context_id,''),
 		        COALESCE(provider,''), COALESCE(model,''),
@@ -58,10 +63,13 @@ func (s *Store) ListSessions(workspaceID string) ([]Session, error) {
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
 		        last_activity, created_at, updated_at
 		 FROM sessions
-		 WHERE workspace_id = ?
-		 ORDER BY last_activity DESC`,
-		workspaceID,
-	)
+		 WHERE workspace_id = ?`
+	if !inclArchived {
+		query += ` AND status != 'archived'`
+	}
+	query += ` ORDER BY last_activity DESC`
+
+	rows, err := s.DB.Query(query, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -157,8 +165,8 @@ func (s *Store) CreateSession(sess *Session) error {
 func (s *Store) UpdateSession(sess *Session) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.DB.Exec(
-		`UPDATE sessions SET title = ?, custom_name = ?, is_pinned = ?, model = ?, provider = ?, updated_at = ? WHERE id = ?`,
-		sess.Title, sess.CustomName, sess.IsPinned, sess.Model, sess.Provider, now, sess.ID,
+		`UPDATE sessions SET title = ?, custom_name = ?, is_pinned = ?, model = ?, provider = ?, status = ?, updated_at = ? WHERE id = ?`,
+		sess.Title, sess.CustomName, sess.IsPinned, sess.Model, sess.Provider, sess.Status, now, sess.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update session: %w", err)
@@ -262,6 +270,130 @@ func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, nil
+}
+
+// MessagePage holds a page of messages plus pagination metadata.
+type MessagePage struct {
+	Messages []Message `json:"messages"`
+	Total    int       `json:"total"`
+	HasMore  bool      `json:"has_more"`
+}
+
+// ListMessagesPaginated returns a page of messages for a session with offset-based pagination.
+// Messages are returned in chronological order (created_at ASC).
+func (s *Store) ListMessagesPaginated(sessionID string, limit, offset int) (*MessagePage, error) {
+	var total int
+	if err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID,
+	).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count messages: %w", err)
+	}
+
+	rows, err := s.DB.Query(
+		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
+		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
+		        COALESCE(parent_id,''), is_compacted, created_at
+		 FROM messages WHERE session_id = ?
+		 ORDER BY created_at ASC
+		 LIMIT ? OFFSET ?`,
+		sessionID, limit, offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list messages paginated: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Message, 0)
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(
+			&m.ID, &m.SessionID, &m.AgentID, &m.Role, &m.Content,
+			&m.Envelope, &m.Metadata, &m.ParentID, &m.IsCompacted, &m.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &MessagePage{
+		Messages: out,
+		Total:    total,
+		HasMore:  offset+len(out) < total,
+	}, nil
+}
+
+// ListMessagesAroundID returns a window of messages centered on a specific message ID.
+// Returns up to `before` messages before and `after` messages after the target, plus the target itself.
+func (s *Store) ListMessagesAroundID(sessionID, messageID string, before, after int) (*MessagePage, error) {
+	// Get the target message's created_at for windowing.
+	var targetCreatedAt string
+	if err := s.DB.QueryRow(
+		`SELECT created_at FROM messages WHERE id = ? AND session_id = ?`,
+		messageID, sessionID,
+	).Scan(&targetCreatedAt); err != nil {
+		return nil, fmt.Errorf("get target message: %w", err)
+	}
+
+	var total int
+	if err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID,
+	).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count messages: %w", err)
+	}
+
+	// Fetch messages: `before` rows before target + target + `after` rows after target.
+	rows, err := s.DB.Query(
+		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
+		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
+		        COALESCE(parent_id,''), is_compacted, created_at
+		 FROM messages WHERE session_id = ? AND created_at >= (
+		     SELECT created_at FROM (
+		         SELECT created_at FROM messages
+		         WHERE session_id = ? AND created_at <= ?
+		         ORDER BY created_at DESC
+		         LIMIT ?
+		     ) sub ORDER BY created_at ASC LIMIT 1
+		 ) AND created_at <= (
+		     SELECT created_at FROM (
+		         SELECT created_at FROM messages
+		         WHERE session_id = ? AND created_at >= ?
+		         ORDER BY created_at ASC
+		         LIMIT ?
+		     ) sub ORDER BY created_at DESC LIMIT 1
+		 )
+		 ORDER BY created_at ASC`,
+		sessionID,
+		sessionID, targetCreatedAt, before+1,
+		sessionID, targetCreatedAt, after+1,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list messages around: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Message, 0)
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(
+			&m.ID, &m.SessionID, &m.AgentID, &m.Role, &m.Content,
+			&m.Envelope, &m.Metadata, &m.ParentID, &m.IsCompacted, &m.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &MessagePage{
+		Messages: out,
+		Total:    total,
+		HasMore:  true, // approximate — caller knows the window is partial
+	}, nil
 }
 
 // GetMessage returns a single message by ID.
@@ -443,6 +575,108 @@ func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
 		}
 	}
 	return nil
+}
+
+// SearchResult represents a single search hit with context.
+type SearchResult struct {
+	SessionID string `json:"session_id"`
+	MessageID string `json:"message_id"`
+	Role      string `json:"role"`
+	Snippet   string `json:"snippet"`
+	CreatedAt string `json:"created_at"`
+	// Session-level context for display.
+	SessionTitle     string `json:"session_title"`
+	SessionShortCode string `json:"session_short_code"`
+}
+
+// SearchMessages searches message content using LIKE matching.
+// Returns matches with surrounding snippet text. Filters by workspace and optionally project.
+func (s *Store) SearchMessages(query, workspaceID, projectID string, limit int) ([]SearchResult, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	likePattern := "%" + query + "%"
+
+	var rows *sql.Rows
+	var err error
+
+	if projectID != "" {
+		rows, err = s.DB.Query(
+			`SELECT m.id, m.session_id, m.role, m.content, m.created_at,
+			        COALESCE(s.title,''), s.short_code
+			 FROM messages m
+			 JOIN sessions s ON m.session_id = s.id
+			 WHERE s.workspace_id = ? AND s.project_id = ? AND s.status != 'archived'
+			   AND m.content LIKE ?
+			 ORDER BY m.created_at DESC
+			 LIMIT ?`,
+			workspaceID, projectID, likePattern, limit,
+		)
+	} else {
+		rows, err = s.DB.Query(
+			`SELECT m.id, m.session_id, m.role, m.content, m.created_at,
+			        COALESCE(s.title,''), s.short_code
+			 FROM messages m
+			 JOIN sessions s ON m.session_id = s.id
+			 WHERE s.workspace_id = ? AND s.status != 'archived'
+			   AND m.content LIKE ?
+			 ORDER BY m.created_at DESC
+			 LIMIT ?`,
+			workspaceID, likePattern, limit,
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("search messages: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]SearchResult, 0)
+	for rows.Next() {
+		var r SearchResult
+		var fullContent string
+		if err := rows.Scan(&r.MessageID, &r.SessionID, &r.Role, &fullContent, &r.CreatedAt,
+			&r.SessionTitle, &r.SessionShortCode); err != nil {
+			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+		r.Snippet = extractSnippet(fullContent, query, 80)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// extractSnippet returns a substring of content centered on the first occurrence of query,
+// padded by `radius` characters on each side. Adds ellipsis when truncated.
+func extractSnippet(content, query string, radius int) string {
+	lower := strings.ToLower(content)
+	idx := strings.Index(lower, strings.ToLower(query))
+	if idx < 0 {
+		if len(content) > radius*2 {
+			return content[:radius*2] + "..."
+		}
+		return content
+	}
+
+	start := idx - radius
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len(query) + radius
+	if end > len(content) {
+		end = len(content)
+	}
+
+	snippet := content[start:end]
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(content) {
+		snippet = snippet + "..."
+	}
+	return snippet
 }
 
 // nullIfEmpty returns nil if s is empty, otherwise returns s. Used for nullable TEXT columns.

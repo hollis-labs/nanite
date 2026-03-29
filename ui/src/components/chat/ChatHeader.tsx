@@ -1,16 +1,18 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Calendar, Copy, GitFork, Wrench } from 'lucide-react'
+import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Copy, GitFork, Wrench } from 'lucide-react'
+import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { resolveIcon } from '@/lib/icons'
 import { SourceBadge } from '@/components/agents/SourceBadge'
 import { AdapterBadge } from './AdapterBadge'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button } from '@/components/ui/Button'
-import { Tooltip } from '@/components/ui/Tooltip'
+import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/tooltip'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
 import { AgentRoster } from './AgentRoster'
-import { useSprintPlanningStore } from '@/components/plugins/sprint/useSprintPlanningStore'
+import type { UISlotEntry } from '@/lib/types'
 
 export function ChatHeader() {
   const toggleLeftSidebar = useLayoutStore((s) => s.toggleLeftSidebar)
@@ -135,6 +137,36 @@ export function ChatHeader() {
       setForkMenuOpen(false)
     },
   })
+
+  const pluginActions = usePluginSlots('chat-header-action')
+
+  // Dispatch plugin slot actions by type
+  const handlePluginAction = useCallback((entry: UISlotEntry) => {
+    switch (entry.action) {
+      case 'command':
+        // Execute a slash command
+        if (activeSessionId && entry.props?.command) {
+          void api.executeCommand(String(entry.props.command), activeSessionId, '')
+        }
+        break
+      case 'navigate':
+        // Navigate to a page/hash
+        if (entry.props?.hash) {
+          window.location.hash = String(entry.props.hash)
+        }
+        break
+      case 'handler':
+        // Dispatch a custom event that the plugin's modal/component listens for
+        window.dispatchEvent(new CustomEvent('plugin-action', { detail: { id: entry.id, entry } }))
+        break
+      case 'modal':
+        // Dispatch a modal-open event
+        window.dispatchEvent(new CustomEvent('plugin-modal', { detail: { id: entry.id, component: entry.component, props: entry.props } }))
+        break
+      default:
+        console.warn('Unknown plugin action type:', entry.action)
+    }
+  }, [activeSessionId])
 
   return (
     <header className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
@@ -277,14 +309,7 @@ export function ChatHeader() {
             <Wrench className="w-3.5 h-3.5" />
           </button>
         </Tooltip>
-        <Tooltip content="Sprint Planning" side="bottom">
-          <button
-            onClick={() => useSprintPlanningStore.getState().openSprintPlanning()}
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-fg-secondary hover:text-fg hover:bg-surface transition-colors"
-          >
-            <Calendar className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
+        {/* Sprint button removed — now delivered via chat-header-action plugin slot */}
         {agentCount > 1 && (
           <Tooltip content="View agents in session" side="bottom">
             <button
@@ -296,6 +321,20 @@ export function ChatHeader() {
             </button>
           </Tooltip>
         )}
+        {/* Plugin-registered header actions */}
+        {pluginActions.map((entry) => {
+          const PluginIcon = resolveIcon(entry.icon)
+          return (
+            <Tooltip key={entry.id} content={entry.label} side="bottom">
+              <button
+                onClick={() => handlePluginAction(entry)}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-fg-secondary hover:text-fg hover:bg-surface transition-colors"
+              >
+                <PluginIcon className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+          )
+        })}
         <Tooltip content={rightOpen ? 'Hide panel (Cmd+/)' : 'Show panel (Cmd+/)'} side="bottom">
           <Button
             variant="ghost"

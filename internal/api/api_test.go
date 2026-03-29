@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/conduit/internal/chat"
 	"github.com/hollis-labs/conduit/internal/store"
 )
 
@@ -137,7 +138,12 @@ func TestCreateAndListSessions(t *testing.T) {
 }
 
 func TestListCommands(t *testing.T) {
-	_, mux := newTestAPI(t)
+	a, mux := newTestAPI(t)
+
+	// Wire up a command registry with built-in commands.
+	a.Engine = &chat.Engine{
+		Commands: chat.NewCommandRegistry(),
+	}
 
 	req := httptest.NewRequest("GET", "/api/commands", nil)
 	w := httptest.NewRecorder()

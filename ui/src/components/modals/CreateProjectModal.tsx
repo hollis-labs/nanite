@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
-import { X } from 'lucide-react'
+import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import type { Project } from '@/lib/types'
 
@@ -31,29 +34,13 @@ export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreatePr
     createMutation.mutate()
   }, [name, createMutation])
 
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md mx-4 bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 h-12 border-b border-border">
-          <h2 className="text-sm font-semibold text-fg">New Project</h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded text-fg-muted hover:text-fg-secondary hover:bg-surface transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <Dialog open={true} onOpenChange={() => onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader className="px-5 pt-5">
+          <DialogTitle className="text-sm">New Project</DialogTitle>
+          <DialogDescription className="sr-only">Create a new project in this workspace</DialogDescription>
+        </DialogHeader>
 
         {/* Form */}
         <div className="px-5 py-4 space-y-4">
@@ -90,24 +77,20 @@ export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreatePr
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-3 border-t border-border">
-          <button
-            onClick={onClose}
-            disabled={createMutation.isPending}
-            className="px-3 py-1.5 text-xs font-medium text-fg-secondary hover:text-fg rounded-md hover:bg-surface transition-colors"
-          >
+        <DialogFooter className="px-5 py-3 border-t border-border">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={createMutation.isPending}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            size="sm"
             onClick={handleSubmit}
             disabled={!name.trim() || createMutation.isPending}
-            className="px-4 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-50"
+            className="bg-accent hover:bg-accent-hover text-white"
           >
             {createMutation.isPending ? 'Creating...' : 'Create Project'}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

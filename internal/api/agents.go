@@ -40,6 +40,7 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Status      string `json:"status"`
 		Source      string `json:"source"`
 		SourceRef   string `json:"source_ref"`
+		Icon        string `json:"icon"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -71,6 +72,7 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Status:          req.Status,
 		Source:          req.Source,
 		SourceRef:       req.SourceRef,
+		Icon:            req.Icon,
 	}
 	// Validate agent config before persisting.
 	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
@@ -141,6 +143,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		Constraints *string `json:"constraints"`
 		Tags        *string `json:"tags"`
 		Status      *string `json:"status"`
+		Icon        *string `json:"icon"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -197,6 +200,9 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Status != nil {
 		existing.Status = *req.Status
+	}
+	if req.Icon != nil {
+		existing.Icon = *req.Icon
 	}
 
 	// Validate agent config before persisting.
@@ -295,6 +301,67 @@ func (a *API) handleRemoveSessionAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// --- Agent ↔ Project many-to-many ---
+
+func (a *API) handleListAgentProjects(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	projects, err := a.Store.ListAgentProjects(agentID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, projects)
+}
+
+func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+
+	var req struct {
+		ProjectID string `json:"project_id"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.ProjectID == "" {
+		a.errorResp(w, http.StatusBadRequest, "project_id is required")
+		return
+	}
+
+	if err := a.Store.AddAgentProject(agentID, req.ProjectID); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	projects, err := a.Store.ListAgentProjects(agentID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusCreated, projects)
+}
+
+func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	projectID := r.PathValue("projectId")
+
+	if err := a.Store.RemoveAgentProject(agentID, projectID); err != nil {
+		a.errorResp(w, http.StatusNotFound, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+func (a *API) handleListProjectAgents(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	agents, err := a.Store.ListProjectAgents(projectID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, agents)
 }
 
 func (a *API) handleCreateAgentMode(w http.ResponseWriter, r *http.Request) {

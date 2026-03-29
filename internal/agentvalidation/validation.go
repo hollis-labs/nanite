@@ -153,11 +153,11 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 
 	// 10. Validate source enum
 	validSources := map[string]bool{
-		"": true, "seed": true, "api": true, "agentrc": true,
+		"": true, "system": true, "seed": true, "api": true, "agentrc": true,
 		"crewai": true, "autogen": true, "import": true,
 	}
 	if !validSources[agent.Source] {
-		result.Errors = append(result.Errors, fmt.Sprintf("source must be one of seed/api/agentrc/crewai/autogen/import, got %q", agent.Source))
+		result.Errors = append(result.Errors, fmt.Sprintf("source must be one of system/api/agentrc/crewai/autogen/import, got %q", agent.Source))
 	}
 
 	return result

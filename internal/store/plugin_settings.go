@@ -11,6 +11,7 @@ type PluginSettings struct {
 	PluginID  string         `json:"plugin_id"`
 	Settings  map[string]any `json:"settings"`
 	Schema    []ConfigField  `json:"schema"`
+	Icon      string         `json:"icon"`
 	UpdatedAt string         `json:"updated_at"`
 }
 
@@ -28,17 +29,18 @@ type ConfigField struct {
 
 // GetPluginSettings returns settings for a specific plugin.
 func (s *Store) GetPluginSettings(pluginID string) (*PluginSettings, error) {
-	var settingsJSON, schemaJSON, updatedAt string
+	var settingsJSON, schemaJSON, icon, updatedAt string
 	err := s.DB.QueryRow(
-		`SELECT settings, schema, updated_at FROM plugin_settings WHERE plugin_id = ?`,
+		`SELECT settings, schema, COALESCE(icon,''), updated_at FROM plugin_settings WHERE plugin_id = ?`,
 		pluginID,
-	).Scan(&settingsJSON, &schemaJSON, &updatedAt)
+	).Scan(&settingsJSON, &schemaJSON, &icon, &updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get plugin settings %s: %w", pluginID, err)
 	}
 
 	ps := &PluginSettings{
 		PluginID:  pluginID,
+		Icon:      icon,
 		UpdatedAt: updatedAt,
 	}
 	if err := json.Unmarshal([]byte(settingsJSON), &ps.Settings); err != nil {
@@ -93,7 +95,7 @@ func (s *Store) UpsertPluginSchema(pluginID string, schema []ConfigField) error 
 // ListPluginSettings returns settings for all plugins that have saved config.
 func (s *Store) ListPluginSettings() ([]*PluginSettings, error) {
 	rows, err := s.DB.Query(
-		`SELECT plugin_id, settings, schema, updated_at FROM plugin_settings ORDER BY plugin_id`,
+		`SELECT plugin_id, settings, schema, COALESCE(icon,''), updated_at FROM plugin_settings ORDER BY plugin_id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list plugin settings: %w", err)
@@ -102,12 +104,13 @@ func (s *Store) ListPluginSettings() ([]*PluginSettings, error) {
 
 	var results []*PluginSettings
 	for rows.Next() {
-		var pid, settingsJSON, schemaJSON, updatedAt string
-		if err := rows.Scan(&pid, &settingsJSON, &schemaJSON, &updatedAt); err != nil {
+		var pid, settingsJSON, schemaJSON, icon, updatedAt string
+		if err := rows.Scan(&pid, &settingsJSON, &schemaJSON, &icon, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan plugin settings: %w", err)
 		}
 		ps := &PluginSettings{
 			PluginID:  pid,
+			Icon:      icon,
 			UpdatedAt: updatedAt,
 		}
 		json.Unmarshal([]byte(settingsJSON), &ps.Settings)
@@ -115,6 +118,19 @@ func (s *Store) ListPluginSettings() ([]*PluginSettings, error) {
 		results = append(results, ps)
 	}
 	return results, nil
+}
+
+// UpdatePluginIcon sets the icon for a plugin.
+func (s *Store) UpdatePluginIcon(pluginID, icon string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(
+		`UPDATE plugin_settings SET icon = ?, updated_at = ? WHERE plugin_id = ?`,
+		nullIfEmpty(icon), now, pluginID,
+	)
+	if err != nil {
+		return fmt.Errorf("update plugin icon: %w", err)
+	}
+	return nil
 }
 
 // GetPluginSettingValue returns a single config value for a plugin.

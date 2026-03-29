@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 
@@ -25,45 +26,83 @@ var validComponentTypes = map[plugin.UIComponentType]bool{
 	plugin.UIComponentTypeView:     true,
 }
 
+// CommandRegistrar is the interface for registering slash commands into a
+// unified registry. Implemented by chat.CommandRegistry. Defined here to
+// avoid importing the chat package.
+type CommandRegistrar interface {
+	RegisterPluginCommand(cmd plugin.SlashCommandDef, source string)
+}
+
+// pendingRoute is an HTTP route registration deferred until the router is available.
+type pendingRoute struct {
+	pattern string
+	handler http.Handler
+}
+
+// ConnectorStatus tracks the health state of a registered connector.
+type ConnectorStatus struct {
+	Name               string    `json:"name"`
+	PluginID           string    `json:"plugin_id"`
+	Healthy            bool      `json:"healthy"`
+	LastCheckAt        time.Time `json:"last_check_at,omitempty"`
+	LastError          string    `json:"last_error,omitempty"`
+	LastErrorAt        time.Time `json:"last_error_at,omitempty"`
+	ConsecutiveFailures int      `json:"consecutive_failures"`
+}
+
 // Host implements the plugin.Host interface for Conduit.
 // It provides the runtime environment and services for plugins.
 type Host struct {
-	mu           sync.RWMutex
-	plugins      map[string]plugin.Plugin
-	eventHooks   map[string][]plugin.EventHook
-	crudHandlers map[string]plugin.CRUDHandler
+	mu            sync.RWMutex
+	plugins       map[string]plugin.Plugin
+	eventHooks    map[string][]plugin.EventHook
+	crudHandlers  map[string]plugin.CRUDHandler
 	uiComponents  []plugin.UIComponent
 	uiOwners      map[string]string // component ID → plugin ID that registered it
 	connectors    map[string]plugin.Connector
-	slashCmds    map[string]plugin.SlashCommandDef
-	services     map[string]interface{}
-	configs      map[string]*PluginConfig // per-plugin config, keyed by plugin ID
-	activePlugin string                   // ID of the plugin currently being loaded
-	store        *store.Store             // DB-backed plugin settings (nil if unavailable)
-	router       *http.ServeMux
-	logger       plugin.Logger
-	ctx          context.Context
-	ctxCancel    context.CancelFunc
+	connectorOwners  map[string]string          // connector name → plugin ID
+	connectorHealth  map[string]*ConnectorStatus // connector name → health status
+	commands      CommandRegistrar // unified command registry (nil-safe)
+	keybindings   map[string]plugin.KeybindingDef   // keybinding ID → definition
+	kbOwners      map[string]string                 // keybinding ID → plugin ID
+	slots         map[plugin.UISlotName][]plugin.UISlotEntry // slot name → entries, sorted by priority
+	services      map[string]interface{}
+	configs       map[string]*PluginConfig // per-plugin config, keyed by plugin ID
+	activePlugin  string                   // ID of the plugin currently being loaded
+	store         *store.Store             // DB-backed plugin settings (nil if unavailable)
+	router        *http.ServeMux
+	pendingRoutes []pendingRoute // routes queued before router was set
+	triggers      *TriggerDispatcher // event → connector dispatch
+	eventSubs     []chan plugin.Event // SSE subscribers for event streaming
+	logger        plugin.Logger
+	ctx           context.Context
+	ctxCancel     context.CancelFunc
 }
 
 // NewHost creates a new plugin host for Conduit.
 func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Host{
-		plugins:      make(map[string]plugin.Plugin),
-		eventHooks:   make(map[string][]plugin.EventHook),
-		crudHandlers: make(map[string]plugin.CRUDHandler),
-		uiComponents: []plugin.UIComponent{},
-		uiOwners:     make(map[string]string),
-		connectors:   make(map[string]plugin.Connector),
-		slashCmds:    make(map[string]plugin.SlashCommandDef),
-		services:     make(map[string]interface{}),
-		configs:      make(map[string]*PluginConfig),
-		router:       router,
-		logger:       logger,
-		ctx:          ctx,
-		ctxCancel:    cancel,
+	h := &Host{
+		plugins:         make(map[string]plugin.Plugin),
+		eventHooks:      make(map[string][]plugin.EventHook),
+		crudHandlers:    make(map[string]plugin.CRUDHandler),
+		uiComponents:    []plugin.UIComponent{},
+		uiOwners:        make(map[string]string),
+		connectors:      make(map[string]plugin.Connector),
+		connectorOwners: make(map[string]string),
+		connectorHealth: make(map[string]*ConnectorStatus),
+		keybindings:     make(map[string]plugin.KeybindingDef),
+		kbOwners:        make(map[string]string),
+		slots:           make(map[plugin.UISlotName][]plugin.UISlotEntry),
+		services:        make(map[string]interface{}),
+		configs:         make(map[string]*PluginConfig),
+		router:          router,
+		logger:          logger,
+		ctx:             ctx,
+		ctxCancel:       cancel,
 	}
+	h.triggers = NewTriggerDispatcher(h)
+	return h
 }
 
 // NewHostWithStore creates a minimal plugin host with just a store service.
@@ -72,29 +111,54 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 func NewHostWithStore(store interface{}) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{
-		plugins:      make(map[string]plugin.Plugin),
-		eventHooks:   make(map[string][]plugin.EventHook),
-		crudHandlers: make(map[string]plugin.CRUDHandler),
-		uiComponents: []plugin.UIComponent{},
-		uiOwners:     make(map[string]string),
-		connectors:   make(map[string]plugin.Connector),
-		slashCmds:    make(map[string]plugin.SlashCommandDef),
-		services:     make(map[string]interface{}),
-		configs:      make(map[string]*PluginConfig),
-		router:       http.NewServeMux(),
-		logger:       NewLogger("plugin-cli"),
-		ctx:          ctx,
-		ctxCancel:    cancel,
+		plugins:         make(map[string]plugin.Plugin),
+		eventHooks:      make(map[string][]plugin.EventHook),
+		crudHandlers:    make(map[string]plugin.CRUDHandler),
+		uiComponents:    []plugin.UIComponent{},
+		uiOwners:        make(map[string]string),
+		connectors:      make(map[string]plugin.Connector),
+		connectorOwners: make(map[string]string),
+		connectorHealth: make(map[string]*ConnectorStatus),
+		keybindings:     make(map[string]plugin.KeybindingDef),
+		kbOwners:        make(map[string]string),
+		slots:           make(map[plugin.UISlotName][]plugin.UISlotEntry),
+		services:        make(map[string]interface{}),
+		configs:         make(map[string]*PluginConfig),
+		router:          http.NewServeMux(),
+		logger:          NewLogger("plugin-cli"),
+		ctx:             ctx,
+		ctxCancel:       cancel,
 	}
+	h.triggers = NewTriggerDispatcher(h)
 	h.services["store"] = store
 	return h
 }
 
-// SetRouter sets the HTTP router for the plugin host.
+// SetRouter sets the HTTP router for the plugin host and replays any
+// route registrations that were queued while the router was nil.
 func (h *Host) SetRouter(router *http.ServeMux) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.router = router
+
+	// Replay any routes that were queued before the router was available.
+	for _, pr := range h.pendingRoutes {
+		router.Handle(pr.pattern, pr.handler)
+		h.logger.Info("replayed pending route", "pattern", pr.pattern)
+	}
+	h.pendingRoutes = nil
+}
+
+// registerRoute registers an HTTP route on the router, or queues it if the
+// router isn't available yet. Caller must hold h.mu (at least RLock for read,
+// Lock if appending to pendingRoutes).
+func (h *Host) registerRoute(pattern string, handler http.Handler) {
+	if h.router != nil {
+		h.router.Handle(pattern, handler)
+		return
+	}
+	h.pendingRoutes = append(h.pendingRoutes, pendingRoute{pattern: pattern, handler: handler})
+	h.logger.Info("queued route (router not yet available)", "pattern", pattern)
 }
 
 // GetPlugin retrieves another loaded plugin by ID.
@@ -120,48 +184,49 @@ func (h *Host) RegisterCRUDHandler(resourceType string, handler plugin.CRUDHandl
 		return nil
 	}
 
-	// Wire HTTP routes for this resource type
+	// Wire HTTP routes for this resource type.
+	// Uses registerRoute so routes are queued if the router isn't set yet.
 	basePath := fmt.Sprintf("/api/plugins/%s", resourceType)
 
 	// List resources: GET /api/plugins/{resourceType}
-	h.router.HandleFunc(fmt.Sprintf("GET %s", basePath), func(w http.ResponseWriter, r *http.Request) {
+	h.registerRoute(fmt.Sprintf("GET %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.RLock()
 		h2 := h.crudHandlers[resourceType]
 		h.mu.RUnlock()
 		h.handleCRUDList(w, r, h2)
-	})
+	}))
 
 	// Create resource: POST /api/plugins/{resourceType}
-	h.router.HandleFunc(fmt.Sprintf("POST %s", basePath), func(w http.ResponseWriter, r *http.Request) {
+	h.registerRoute(fmt.Sprintf("POST %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.RLock()
 		h2 := h.crudHandlers[resourceType]
 		h.mu.RUnlock()
 		h.handleCRUDCreate(w, r, h2)
-	})
+	}))
 
 	// Get resource: GET /api/plugins/{resourceType}/{id}
-	h.router.HandleFunc(fmt.Sprintf("GET %s/{id}", basePath), func(w http.ResponseWriter, r *http.Request) {
+	h.registerRoute(fmt.Sprintf("GET %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.RLock()
 		h2 := h.crudHandlers[resourceType]
 		h.mu.RUnlock()
 		h.handleCRUDRead(w, r, h2)
-	})
+	}))
 
 	// Update resource: PUT /api/plugins/{resourceType}/{id}
-	h.router.HandleFunc(fmt.Sprintf("PUT %s/{id}", basePath), func(w http.ResponseWriter, r *http.Request) {
+	h.registerRoute(fmt.Sprintf("PUT %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.RLock()
 		h2 := h.crudHandlers[resourceType]
 		h.mu.RUnlock()
 		h.handleCRUDUpdate(w, r, h2)
-	})
+	}))
 
 	// Delete resource: DELETE /api/plugins/{resourceType}/{id}
-	h.router.HandleFunc(fmt.Sprintf("DELETE %s/{id}", basePath), func(w http.ResponseWriter, r *http.Request) {
+	h.registerRoute(fmt.Sprintf("DELETE %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.RLock()
 		h2 := h.crudHandlers[resourceType]
 		h.mu.RUnlock()
 		h.handleCRUDDelete(w, r, h2)
-	})
+	}))
 
 	h.logger.Info("registered CRUD handler", "resourceType", resourceType, "basePath", basePath)
 	return nil
@@ -231,7 +296,7 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 	// If the component has a server-side handler, register the route (only once).
 	if component.Handler != nil && !alreadyRegistered {
 		path := fmt.Sprintf("/api/plugins/ui/%s", component.ID)
-		h.router.Handle(path, component.Handler)
+		h.registerRoute(path, component.Handler)
 		h.logger.Info("registered UI component handler", "id", component.ID, "path", path)
 	}
 
@@ -382,7 +447,13 @@ func (h *Host) RegisterConnector(name string, connector plugin.Connector) error 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.connectors[name] = connector
-	h.logger.Info("registered connector", "name", name)
+	h.connectorOwners[name] = h.activePlugin
+	h.connectorHealth[name] = &ConnectorStatus{
+		Name:     name,
+		PluginID: h.activePlugin,
+		Healthy:  true,
+	}
+	h.logger.Info("registered connector", "name", name, "plugin", h.activePlugin)
 	return nil
 }
 
@@ -403,6 +474,104 @@ func (h *Host) ListConnectors() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// GetConnectorStatuses returns health status for all registered connectors.
+func (h *Host) GetConnectorStatuses() []ConnectorStatus {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make([]ConnectorStatus, 0, len(h.connectorHealth))
+	for _, status := range h.connectorHealth {
+		cp := *status
+		out = append(out, cp)
+	}
+	return out
+}
+
+// CheckConnectorHealth probes the Health() method on a named connector
+// and updates its status.
+func (h *Host) CheckConnectorHealth(name string) *ConnectorStatus {
+	connector, ok := h.GetConnector(name)
+	if !ok {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
+	defer cancel()
+	err := connector.Health(ctx)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	status, exists := h.connectorHealth[name]
+	if !exists {
+		return nil
+	}
+	status.LastCheckAt = time.Now()
+	if err != nil {
+		status.Healthy = false
+		status.LastError = err.Error()
+		status.LastErrorAt = time.Now()
+		status.ConsecutiveFailures++
+	} else {
+		status.Healthy = true
+		status.LastError = ""
+		status.ConsecutiveFailures = 0
+	}
+	return &ConnectorStatus{
+		Name:                status.Name,
+		PluginID:            status.PluginID,
+		Healthy:             status.Healthy,
+		LastCheckAt:         status.LastCheckAt,
+		LastError:           status.LastError,
+		LastErrorAt:         status.LastErrorAt,
+		ConsecutiveFailures: status.ConsecutiveFailures,
+	}
+}
+
+// CheckAllConnectorHealth probes Health() on every registered connector.
+func (h *Host) CheckAllConnectorHealth() []ConnectorStatus {
+	h.mu.RLock()
+	names := make([]string, 0, len(h.connectors))
+	for name := range h.connectors {
+		names = append(names, name)
+	}
+	h.mu.RUnlock()
+
+	out := make([]ConnectorStatus, 0, len(names))
+	for _, name := range names {
+		if s := h.CheckConnectorHealth(name); s != nil {
+			out = append(out, *s)
+		}
+	}
+	return out
+}
+
+// recordConnectorFailure marks a connector as unhealthy after send retries
+// are exhausted. Called by TriggerDispatcher.
+func (h *Host) recordConnectorFailure(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	status, exists := h.connectorHealth[name]
+	if !exists {
+		return
+	}
+	status.Healthy = false
+	status.LastErrorAt = time.Now()
+	status.ConsecutiveFailures++
+}
+
+// recordConnectorSuccess marks a connector as healthy after a successful send.
+func (h *Host) recordConnectorSuccess(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	status, exists := h.connectorHealth[name]
+	if !exists {
+		return
+	}
+	status.Healthy = true
+	status.LastError = ""
+	status.ConsecutiveFailures = 0
 }
 
 // RegisterProvider registers a runtime LLM provider from a plugin.
@@ -442,22 +611,165 @@ func (h *Host) RegisterCLIAdapter(name string, adapter interface{}) error {
 	return nil
 }
 
-// RegisterCommand registers a slash command from a plugin.
-func (h *Host) RegisterCommand(cmd plugin.SlashCommandDef) error {
+// SetCommandRegistry sets the unified command registry. Called from main.go
+// after both the Engine (which owns the registry) and the Host are created.
+func (h *Host) SetCommandRegistry(reg CommandRegistrar) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.slashCmds[cmd.Name] = cmd
-	h.logger.Info("registered slash command", "name", cmd.Name, "category", cmd.Category)
+	h.commands = reg
+}
+
+// RegisterCommand registers a slash command from a plugin into the unified
+// command registry (shared with built-in commands). Source is set to the
+// calling plugin's ID.
+func (h *Host) RegisterCommand(cmd plugin.SlashCommandDef) error {
+	h.mu.RLock()
+	reg := h.commands
+	source := h.activePlugin
+	h.mu.RUnlock()
+
+	if reg == nil {
+		h.logger.Warn("RegisterCommand called but no command registry set", "name", cmd.Name)
+		return nil
+	}
+	if source == "" {
+		source = "plugin"
+	}
+	reg.RegisterPluginCommand(cmd, source)
+	h.logger.Info("registered slash command", "name", cmd.Name, "category", cmd.Category, "source", source)
 	return nil
 }
 
-// GetSlashCommands returns all plugin-registered slash commands.
-func (h *Host) GetSlashCommands() []plugin.SlashCommandDef {
+// RegisterSlot registers a UI slot entry for a named mount point in the frontend.
+// Entries are stored sorted by priority (descending — higher priority first).
+func (h *Host) RegisterSlot(entry plugin.UISlotEntry) error {
+	if entry.ID == "" {
+		return fmt.Errorf("slot entry ID is required")
+	}
+	if entry.Slot == "" {
+		return fmt.Errorf("slot name is required for entry %q", entry.ID)
+	}
+	if entry.Label == "" {
+		return fmt.Errorf("slot entry %q must have a label", entry.ID)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Set plugin ID from active plugin context if not already set.
+	if entry.PluginID == "" {
+		entry.PluginID = h.activePlugin
+	}
+
+	// Replace existing entry with same ID, or append.
+	entries := h.slots[entry.Slot]
+	replaced := false
+	for i, existing := range entries {
+		if existing.ID == entry.ID {
+			entries[i] = entry
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		entries = append(entries, entry)
+	}
+
+	// Sort by priority descending (higher priority first).
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Priority > entries[j].Priority
+	})
+
+	h.slots[entry.Slot] = entries
+	h.logger.Info("registered UI slot entry", "id", entry.ID, "slot", entry.Slot, "plugin", entry.PluginID)
+	return nil
+}
+
+// GetSlotEntries returns all registered entries for a given slot, sorted by priority.
+func (h *Host) GetSlotEntries(slot plugin.UISlotName) []plugin.UISlotEntry {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	out := make([]plugin.SlashCommandDef, 0, len(h.slashCmds))
-	for _, cmd := range h.slashCmds {
-		out = append(out, cmd)
+	entries := h.slots[slot]
+	out := make([]plugin.UISlotEntry, len(entries))
+	copy(out, entries)
+	return out
+}
+
+// GetAllSlots returns all slot entries grouped by slot name.
+func (h *Host) GetAllSlots() map[plugin.UISlotName][]plugin.UISlotEntry {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make(map[plugin.UISlotName][]plugin.UISlotEntry, len(h.slots))
+	for slot, entries := range h.slots {
+		cp := make([]plugin.UISlotEntry, len(entries))
+		copy(cp, entries)
+		out[slot] = cp
+	}
+	return out
+}
+
+// coreKeybindings is the set of binding keys reserved by core. Plugin keybindings
+// that collide with a core binding are rejected.
+var coreKeybindings = map[string]bool{
+	"mod+b":       true, // toggle left sidebar
+	"mod+/":       true, // toggle right rail
+	"mod+l":       true, // focus composer
+	"mod+n":       true, // new session
+	"mod+k":       true, // command palette
+	"shift+shift": true, // search
+	"mod+]":       true, // next session
+	"mod+[":       true, // prev session
+	"mod+d":       true, // bookmark
+	"mod+.":       true, // toggle artifacts
+}
+
+// RegisterKeybinding registers a keyboard shortcut from a plugin. The frontend
+// merges these with core bindings. Core bindings always win on collision.
+func (h *Host) RegisterKeybinding(kb plugin.KeybindingDef) error {
+	if kb.ID == "" {
+		return fmt.Errorf("keybinding ID is required")
+	}
+	if kb.Key == "" {
+		return fmt.Errorf("keybinding %q must have a key", kb.ID)
+	}
+	if kb.Label == "" {
+		return fmt.Errorf("keybinding %q must have a label", kb.ID)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Check for collision with core bindings.
+	if coreKeybindings[kb.Key] {
+		h.logger.Warn("keybinding collides with core binding, rejected",
+			"id", kb.ID, "key", kb.Key, "plugin", h.activePlugin)
+		return fmt.Errorf("keybinding %q collides with core binding for key %q", kb.ID, kb.Key)
+	}
+
+	// Check for collision with other plugin bindings (different ID, same key).
+	for existingID, existing := range h.keybindings {
+		if existing.Key == kb.Key && existingID != kb.ID {
+			owner := h.kbOwners[existingID]
+			h.logger.Warn("keybinding key collision between plugins",
+				"newID", kb.ID, "existingID", existingID, "key", kb.Key,
+				"existingPlugin", owner, "newPlugin", h.activePlugin)
+			return fmt.Errorf("keybinding key %q already registered by %q (ID: %s)", kb.Key, owner, existingID)
+		}
+	}
+
+	h.keybindings[kb.ID] = kb
+	h.kbOwners[kb.ID] = h.activePlugin
+	h.logger.Info("registered keybinding", "id", kb.ID, "key", kb.Key, "plugin", h.activePlugin)
+	return nil
+}
+
+// GetKeybindings returns all plugin-registered keybindings.
+func (h *Host) GetKeybindings() []plugin.KeybindingDef {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make([]plugin.KeybindingDef, 0, len(h.keybindings))
+	for _, kb := range h.keybindings {
+		out = append(out, kb)
 	}
 	return out
 }
@@ -556,31 +868,38 @@ func (h *Host) UnloadPlugin(id string) error {
 	return nil
 }
 
-// EmitEvent emits an event to all registered hooks.
+// EmitEvent emits an event to all registered hooks, then dispatches
+// matching trigger rules to connectors, and broadcasts to SSE subscribers.
 func (h *Host) EmitEvent(event plugin.Event) {
+	// 1. Dispatch to registered event hooks.
 	h.mu.RLock()
-	hooks, exists := h.eventHooks[event.Type]
+	hooks := h.eventHooks[event.Type]
 	h.mu.RUnlock()
 
-	if !exists {
-		return // No hooks for this event type
+	if len(hooks) > 0 {
+		var wg sync.WaitGroup
+		for _, hook := range hooks {
+			wg.Add(1)
+			go func(hook plugin.EventHook) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+				defer cancel()
+
+				if err := hook.Handle(ctx, event); err != nil {
+					h.logger.Error("event hook failed", "eventType", event.Type, "error", err)
+				}
+			}(hook)
+		}
+		wg.Wait()
 	}
 
-	// Process hooks concurrently
-	var wg sync.WaitGroup
-	for _, hook := range hooks {
-		wg.Add(1)
-		go func(hook plugin.EventHook) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
-			defer cancel()
-
-			if err := hook.Handle(ctx, event); err != nil {
-				h.logger.Error("event hook failed", "eventType", event.Type, "error", err)
-			}
-		}(hook)
+	// 2. Dispatch to trigger rules (event → connector bindings).
+	if h.triggers != nil {
+		go h.triggers.Dispatch(event)
 	}
-	wg.Wait()
+
+	// 3. Broadcast to SSE event stream subscribers.
+	h.broadcastEvent(event)
 }
 
 // UIComponentWithOwner wraps a UIComponent with its owning plugin ID.

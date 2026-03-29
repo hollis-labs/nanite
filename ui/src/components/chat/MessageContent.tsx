@@ -77,7 +77,7 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
   }
 
   return (
-    <div className="group relative my-3 rounded-lg overflow-hidden border border-border">
+    <div className="group relative my-3 rounded-sm overflow-hidden border border-border">
       {lang && (
         <div className="flex items-center justify-between px-3 py-1.5 bg-bg-elevated border-b border-border">
           <span className="text-xs text-fg-muted">{lang}</span>

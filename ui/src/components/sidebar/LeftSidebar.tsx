@@ -272,7 +272,7 @@ function ChatItem({
         {/* Line 2: #short_code · adapter badge */}
         <div className="flex items-center gap-1.5 mt-0.5">
           <span className="text-[11px] text-fg-faint font-mono">#{session.short_code}</span>
-          {session.provider && <AdapterBadge provider={session.provider} size="sm" />}
+          <AdapterBadge provider={session.provider || 'api'} size="sm" />
         </div>
       </div>
     </button>

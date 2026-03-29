@@ -16,12 +16,12 @@ interface AgentRosterProps {
 const STATUS_COLORS: Record<SessionAgent['status'], string> = {
   active: 'bg-green-400',
   idle: 'bg-amber-400',
-  offline: 'bg-zinc-600',
+  offline: 'bg-surface-active',
 }
 
 const ROLE_BORDER_COLORS: Record<SessionAgent['role'], string> = {
   primary: 'ring-accent',
-  participant: 'ring-zinc-600',
+  participant: 'ring-surface-active',
 }
 
 export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {

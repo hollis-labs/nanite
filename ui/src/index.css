@@ -206,3 +206,46 @@ body {
 .light .provider-scroll {
   scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
+
+/* ─── Light mode highlight.js (GitHub Light) ─── */
+.light .hljs { color: #24292e; background: #ffffff }
+.light .hljs-doctag,
+.light .hljs-keyword,
+.light .hljs-meta .hljs-keyword,
+.light .hljs-template-tag,
+.light .hljs-template-variable,
+.light .hljs-type,
+.light .hljs-variable.language_ { color: #d73a49 }
+.light .hljs-title,
+.light .hljs-title.class_,
+.light .hljs-title.class_.inherited__,
+.light .hljs-title.function_ { color: #6f42c1 }
+.light .hljs-attr,
+.light .hljs-attribute,
+.light .hljs-literal,
+.light .hljs-meta,
+.light .hljs-number,
+.light .hljs-operator,
+.light .hljs-variable,
+.light .hljs-selector-attr,
+.light .hljs-selector-class,
+.light .hljs-selector-id { color: #005cc5 }
+.light .hljs-regexp,
+.light .hljs-string,
+.light .hljs-meta .hljs-string { color: #032f62 }
+.light .hljs-built_in,
+.light .hljs-symbol { color: #e36209 }
+.light .hljs-comment,
+.light .hljs-code,
+.light .hljs-formula { color: #6a737d }
+.light .hljs-name,
+.light .hljs-quote,
+.light .hljs-selector-tag,
+.light .hljs-selector-pseudo { color: #22863a }
+.light .hljs-subst { color: #24292e }
+.light .hljs-section { color: #005cc5; font-weight: bold }
+.light .hljs-bullet { color: #735c0f }
+.light .hljs-emphasis { color: #24292e; font-style: italic }
+.light .hljs-strong { color: #24292e; font-weight: bold }
+.light .hljs-addition { color: #22863a; background-color: #f0fff4 }
+.light .hljs-deletion { color: #b31d28; background-color: #ffeef0 }

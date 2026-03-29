@@ -16,7 +16,7 @@ export const useAppStore = create<AppState>((set) => ({
   activeProjectId: null,
   activeSessionId: null,
   configVersion: 0,
-  setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
+  setActiveWorkspace: (id) => set({ activeWorkspaceId: id, activeProjectId: null, activeSessionId: null }),
   setActiveProject: (id) => set({ activeProjectId: id }),
   setActiveSession: (id) => set({ activeSessionId: id }),
   bumpConfigVersion: () => set((state) => ({ configVersion: state.configVersion + 1 })),

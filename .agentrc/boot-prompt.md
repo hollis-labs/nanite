@@ -43,43 +43,53 @@ Always use cerberus_rebuild for deployment, not go build directly.
 ```
 Boot conduit-frontend
 
-This is a frontend polish session. The settings pages and shell are done.
-The next focus is the chat area and envelope cards.
+Frontend polish phase 1 is mostly complete. Theme migration, sidebar redesign,
+and project scope are done. Next focus is CRUD GUIs and remaining cleanup.
 
 Branch: feature/frontend-polish-phase1 (not yet merged to main)
 
 CRITICAL — Read these before touching any code:
-- memory: feedback_ui_design_patterns.md — THE design system reference. Card patterns,
-  color tokens, icon badges, and all conventions. Deviating = inconsistency.
+- memory: feedback_ui_design_patterns.md — THE design system reference
 - memory: project_frontend_polish.md — what's done, what remains
 - .agentrc/agents/frontend.md — full project context
 - CLAUDE.md — envelope system warnings
 
-Design System (established 2026-03-28 polish session):
+Design System (established 2026-03-28):
 - Theme: CSS variables in index.css, light/dark via .light/.dark class on <html>
 - Colors: ALWAYS use semantic tokens (bg-bg, text-fg, border-border, etc.)
   NEVER hardcode bg-zinc-*, text-zinc-*, border-zinc-* — light theme breaks
 - Accent: fire engine red #dc2626 (bg-accent, text-accent)
 - Status/toggle: blue #3B82F6 (bg-success, bg-toggle-on) — NOT green
+- Composer: always-dark tokens (bg-composer, text-composer-fg, etc.) — same both themes
 - Cards: rounded-xl border-border-subtle shadow-sm, two-section (header + footer)
-- Icons: neutral gray (bg-zinc-700/bg-zinc-300), NOT per-item brand colors
-- Status: tiny dot (w-1.5 h-1.5 bg-success) next to name, NOT green text
+
+Completed (2026-03-28 extended session):
+- Semantic token migration: ~500 zinc refs replaced across 80+ files
+  (chat area, envelopes, widgets, tool calls, errors, modals, menus)
+- Chat composer redesign: always-dark with light typing area + dark toolbar
+- Light mode highlight.js theme (github light scoped under .light)
+- Sidebar redesign: "Sessions" → "Chats", project dropdown, 2-line compact
+  chat items with MessageSquare icon + count badge, AdapterBadge (PTY/API)
+- Removed NewSessionForm (creation overrides), removed tasks zone dead code
+- Project dropdown with All Chats + project list + New Project modal
+- Workspace switcher: hover chevron, accent ring, Add Workspace button
+- Numbered list line break fix in markdown rendering
 
 Remaining work:
-1. Chat area — ChatTranscript, ChatMessage, ChatComposer, MessageContent all still
-   use hardcoded zinc colors. Need semantic token migration.
-2. Envelope cards (25+ components in ui/src/components/chat/envelopes/) — all
-   hardcoded dark theme. These are rich response cards and need careful migration.
-3. Widget components (right rail) — hardcoded zinc
-4. Modals (SprintPlanningModal, AgentRoster) — hardcoded zinc
-5. Slash command menu — hardcoded zinc
-6. Light theme: highlight.js theme needs conditional swap (github-dark vs github)
-7. Delete ui/public/card-prototypes.html (prototype file, no longer needed)
-8. Plugin architecture items from brain dump (A2A plugin, Sprint plugin, UI hooks)
-9. Project scope feature — not started
+1. Workspace CRUD GUI — proper create modal (replace window.prompt),
+   settings page for edit/delete workspaces
+2. Project CRUD GUI — settings page for edit/delete, project context files
+   (PRD, spec, architecture docs as project-scoped artifacts)
+3. Project backend gaps — GET/PUT/DELETE single project endpoints,
+   session filtering by project_id (backend agent task)
+4. SprintPlanningModal — move to plugin (not core)
+5. Plugin architecture — A2A plugin, Sprint plugin, UI hooks/events system
+6. Envelope card design refinement — colors still feel "Microsoft-ish",
+   need more polished/professional palette
 
-Reference implementations for the card pattern:
+Reference implementations:
 - ProviderManager.tsx — tabbed view with search/filter/sort + Variation F cards
 - ShortcutsPanel.tsx — interactive click-to-edit cards
-- AgentProfileManager.tsx — entity cards with status dots
+- CreateProjectModal.tsx — clean modal pattern for entity creation
+- ProjectDropdown.tsx — dropdown selector with inline create
 ```

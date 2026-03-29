@@ -1,4 +1,4 @@
-import type { Session, SessionWithMessages, Message, Workspace, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary, ProcessHealthResponse, PluginConfig, PluginUIComponent } from './types'
+import type { Session, SessionWithMessages, Message, Workspace, Project, Agent, AgentProfile, AgentModeProfile, Bookmark, Artifact, SessionAgent, SessionUsageSummary, GlobalUsageSummary, ContextBreakdown, Skill, PromptTemplate, ToolDefinition, ServerInfo, DiscoveryDiff, ToolSelection, MCPServerConfig, VolonSprint, VolonTask, VolonBacklogItem, PluginInfo, A2AMessage, UserSettings, ModelRecord, ProviderConfig, ProviderStatus, CLIDetectionResult, ExecutionMetrics, UtilityCallSummary, ProcessHealthResponse, PluginConfig, PluginUIComponent } from './types'
 
 const API_BASE = '/api'
 
@@ -81,6 +81,38 @@ export const api = {
   listWorkspaces: async (): Promise<Workspace[]> => {
     const res = await fetch(`${API_BASE}/workspaces`)
     if (!res.ok) throw new Error(`Failed to list workspaces: ${res.status}`)
+    return res.json()
+  },
+
+  createWorkspace: async (data: { name: string; description?: string; icon?: string }): Promise<Workspace> => {
+    const res = await fetch(`${API_BASE}/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to create workspace: ${res.status}`)
+    }
+    return res.json()
+  },
+
+  listProjects: async (workspaceId: string): Promise<Project[]> => {
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects`)
+    if (!res.ok) throw new Error(`Failed to list projects: ${res.status}`)
+    return res.json()
+  },
+
+  createProject: async (workspaceId: string, data: { name: string; description?: string }): Promise<Project> => {
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to create project: ${res.status}`)
+    }
     return res.json()
   },
 

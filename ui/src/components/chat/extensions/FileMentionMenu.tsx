@@ -68,15 +68,15 @@ export const FileMentionMenu = forwardRef<FileMentionMenuRef, FileMentionMenuPro
 
     if (items.length === 0) {
       return (
-        <div className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-2 px-3 w-80">
-          <span className="text-xs text-zinc-500">No matching files</span>
+        <div className="bg-composer border border-composer-border-focus rounded-xl shadow-xl z-50 py-2 px-3 w-80">
+          <span className="text-xs text-composer-fg-muted">No matching files</span>
         </div>
       )
     }
 
     return (
-      <div className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 w-80 max-h-72 overflow-y-auto">
-        <div className="px-3 py-1.5 text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+      <div className="bg-composer border border-composer-border-focus rounded-xl shadow-xl z-50 py-1 w-80 max-h-72 overflow-y-auto">
+        <div className="px-3 py-1.5 text-[10px] font-medium text-composer-fg-muted uppercase tracking-wider">
           Files
         </div>
         {items.map((item, index) => (
@@ -86,18 +86,18 @@ export const FileMentionMenu = forwardRef<FileMentionMenuRef, FileMentionMenuPro
             onMouseEnter={() => setSelectedIndex(index)}
             className={`w-full text-left px-3 py-1.5 flex items-center gap-2 transition-colors ${
               index === selectedIndex
-                ? 'bg-zinc-800 text-zinc-100'
-                : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                ? 'bg-composer-hover text-composer-fg'
+                : 'text-composer-fg-secondary hover:bg-composer-hover/60 hover:text-composer-fg'
             }`}
           >
             {item.is_dir ? (
               <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             ) : (
-              <File className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+              <File className="w-3.5 h-3.5 text-composer-fg-muted shrink-0" />
             )}
             <span className="text-sm font-mono truncate flex-1">{item.path}</span>
             {!item.is_dir && item.size > 0 && (
-              <span className="text-[10px] text-zinc-600 shrink-0">{formatSize(item.size)}</span>
+              <span className="text-[10px] text-composer-fg-muted shrink-0">{formatSize(item.size)}</span>
             )}
           </button>
         ))}

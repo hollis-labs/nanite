@@ -126,17 +126,17 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
     }
   }
 
-  const inputCls = 'w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent placeholder:text-zinc-600'
+  const inputCls = 'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent placeholder:text-fg-faint'
 
   // Step 1: Brief description
   if (step === 'describe') {
     return (
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
         <div className="flex items-center gap-2 mb-3">
-          <MessageSquare className="h-4 w-4 text-zinc-400" />
-          <span className="text-sm font-medium text-zinc-200">Open a Support Ticket</span>
+          <MessageSquare className="h-4 w-4 text-fg-secondary" />
+          <span className="text-sm font-medium text-fg">Open a Support Ticket</span>
         </div>
-        <p className="text-xs text-zinc-400 mb-3">
+        <p className="text-xs text-fg-secondary mb-3">
           Briefly describe your issue and we'll prepare a ticket for you to review.
         </p>
         <textarea
@@ -163,15 +163,15 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
   // Step 2: Review & edit prefilled form
   if (step === 'form' || step === 'error') {
     return (
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
         <div className="flex items-center gap-2 mb-4">
-          <MessageSquare className="h-4 w-4 text-zinc-400" />
-          <span className="text-sm font-medium text-zinc-200">Review & Submit Ticket</span>
+          <MessageSquare className="h-4 w-4 text-fg-secondary" />
+          <span className="text-sm font-medium text-fg">Review & Submit Ticket</span>
         </div>
 
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
+            <label className="mb-1 block text-xs font-medium text-fg-secondary">
               Issue Summary <span className="text-red-400">*</span>
             </label>
             <input type="text" className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -179,7 +179,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">
+              <label className="mb-1 block text-xs font-medium text-fg-secondary">
                 Category <span className="text-red-400">*</span>
               </label>
               <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -190,13 +190,13 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">Priority</label>
+              <label className="mb-1 block text-xs font-medium text-fg-secondary">Priority</label>
               <div className="flex gap-3 pt-1.5">
                 {(['low', 'medium', 'high'] as const).map((p) => (
                   <label key={p} className="flex items-center gap-1.5 cursor-pointer">
                     <input type="radio" name="ticket-priority" value={p} checked={priority === p}
                       onChange={() => setPriority(p)} className="accent-accent" />
-                    <span className="text-xs text-zinc-300 capitalize">{p}</span>
+                    <span className="text-xs text-fg-secondary capitalize">{p}</span>
                   </label>
                 ))}
               </div>
@@ -204,7 +204,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
+            <label className="mb-1 block text-xs font-medium text-fg-secondary">
               Description <span className="text-red-400">*</span>
             </label>
             <textarea className={`${inputCls} min-h-[80px] resize-y`} value={fullDescription}
@@ -212,7 +212,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">Steps Already Tried</label>
+            <label className="mb-1 block text-xs font-medium text-fg-secondary">Steps Already Tried</label>
             <textarea className={`${inputCls} min-h-[50px] resize-y`} value={stepsTried}
               onChange={(e) => setStepsTried(e.target.value)} rows={2}
               placeholder="What have you already tried?" />
@@ -251,8 +251,8 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
   return (
     <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3">
       <div className="flex items-center gap-2">
-        <CheckCircle className="h-4 w-4 text-green-400" />
-        <span className="text-sm text-green-400">
+        <CheckCircle className="h-4 w-4 text-success" />
+        <span className="text-sm text-success">
           Ticket submitted{ticketId ? ` — ${ticketId}` : ''}
         </span>
       </div>

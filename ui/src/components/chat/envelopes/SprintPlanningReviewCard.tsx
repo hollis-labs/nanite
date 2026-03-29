@@ -135,20 +135,20 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
     <div className="space-y-3 animate-in fade-in duration-300">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-zinc-400">
+        <div className="flex items-center gap-2 text-fg-secondary">
           <LayoutList className="h-4 w-4 shrink-0" />
           <span className="text-xs font-medium">{data.title}</span>
         </div>
-        <div className="flex items-center gap-3 text-xs text-zinc-500">
+        <div className="flex items-center gap-3 text-xs text-fg-muted">
           <span>
-            <span className="text-emerald-400 font-medium">{confirmedCount}</span>/{data.tasks.length} confirmed
+            <span className="text-success font-medium">{confirmedCount}</span>/{data.tasks.length} confirmed
           </span>
           {/* Sprint legend */}
           <div className="flex items-center gap-1.5">
             {data.sprints.map(s => (
               <span
                 key={s.id}
-                className="inline-block rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400 border border-zinc-700"
+                className="inline-block rounded bg-surface px-1.5 py-0.5 text-[10px] text-fg-secondary border border-border-subtle"
                 title={s.name}
               >
                 {s.name.length > 20 ? s.name.slice(0, 20) + '…' : s.name}
@@ -159,11 +159,11 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
       </div>
 
       {data.description && (
-        <p className="text-sm text-zinc-400">{data.description}</p>
+        <p className="text-sm text-fg-secondary">{data.description}</p>
       )}
 
       {/* Task list */}
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 overflow-hidden divide-y divide-zinc-800">
+      <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 overflow-hidden divide-y divide-border">
         {pageTasks.map(task => {
           const a = assignments[task.id]
           const isExpanded = expanded[task.id] || false
@@ -178,7 +178,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
                 <button
                   type="button"
                   onClick={() => setExpanded(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
-                  className="shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="shrink-0 text-fg-muted hover:text-fg-secondary transition-colors"
                 >
                   {isExpanded ? (
                     <ChevronDown className="h-4 w-4" />
@@ -196,8 +196,8 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
                 {/* Title + ID */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-zinc-600">{task.id}</span>
-                    <span className="text-sm text-zinc-200 truncate">{task.title}</span>
+                    <span className="text-[10px] font-mono text-fg-faint">{task.id}</span>
+                    <span className="text-sm text-fg truncate">{task.title}</span>
                   </div>
                 </div>
 
@@ -205,8 +205,8 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
                 <div className="flex items-center gap-2 shrink-0">
                   {a?.confirmed ? (
                     <div className="flex items-center gap-1.5">
-                      <Check className="h-3.5 w-3.5 text-emerald-400" />
-                      <span className="text-xs text-zinc-400">{assignedName}</span>
+                      <Check className="h-3.5 w-3.5 text-success" />
+                      <span className="text-xs text-fg-secondary">{assignedName}</span>
                     </div>
                   ) : (
                     <>
@@ -214,7 +214,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
                         value={a?.sprint_id || task.suggested_sprint}
                         onChange={e => changeSprint(task.id, e.target.value)}
                         disabled={finished}
-                        className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-1 text-[11px] text-zinc-300 focus:border-zinc-500 focus:outline-none min-w-[130px]"
+                        className="rounded border border-border-subtle bg-surface px-1.5 py-1 text-[11px] text-fg-secondary focus:border-border-subtle focus:outline-none min-w-[130px]"
                       >
                         {data.sprints.map(s => (
                           <option key={s.id} value={s.id}>
@@ -252,8 +252,8 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
 
               {/* Expanded summary */}
               {isExpanded && task.summary && (
-                <div className="px-4 pb-3 pl-12 border-t border-zinc-800/50">
-                  <p className="text-xs text-zinc-400 mt-2 leading-relaxed whitespace-pre-wrap">
+                <div className="px-4 pb-3 pl-12 border-t border-border/50">
+                  <p className="text-xs text-fg-secondary mt-2 leading-relaxed whitespace-pre-wrap">
                     {task.summary.length > 300 ? task.summary.slice(0, 300) + '…' : task.summary}
                   </p>
                 </div>
@@ -275,7 +275,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
           >
             <ChevronLeft className="h-3.5 w-3.5" />
           </Button>
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-fg-muted">
             Page {page + 1} of {totalPages}
           </span>
           <Button
@@ -296,7 +296,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
                 size="sm"
                 variant="ghost"
                 onClick={confirmAllOnPage}
-                className="h-7 text-xs text-zinc-400"
+                className="h-7 text-xs text-fg-secondary"
               >
                 Accept Page
               </Button>
@@ -329,8 +329,8 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
       {finished && (
         <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
           <div className="flex items-center gap-2">
-            <Check className="h-4 w-4 text-emerald-400" />
-            <span className="text-sm text-emerald-400">
+            <Check className="h-4 w-4 text-success" />
+            <span className="text-sm text-success">
               {confirmedCount} tasks assigned to sprints — agent is updating Engine.
             </span>
           </div>

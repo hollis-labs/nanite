@@ -55,8 +55,8 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
     return (
       <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4">
         <div className="flex items-center gap-2">
-          <CheckCircle className="h-4 w-4 text-green-400" />
-          <span className="text-sm text-green-400">
+          <CheckCircle className="h-4 w-4 text-success" />
+          <span className="text-sm text-success">
             Resolution captured — thank you!
           </span>
         </div>
@@ -66,10 +66,10 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
 
   if (cardState === 'skipped') {
     return (
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900/30 p-4">
+      <div className="rounded-lg border border-border-subtle bg-bg-elevated/30 p-4">
         <div className="flex items-center gap-2">
-          <MinusCircle className="h-4 w-4 text-zinc-500" />
-          <span className="text-sm text-zinc-500">
+          <MinusCircle className="h-4 w-4 text-fg-muted" />
+          <span className="text-sm text-fg-muted">
             Resolution capture skipped
           </span>
         </div>
@@ -78,31 +78,31 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
   }
 
   const inputCls =
-    'w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent placeholder:text-zinc-600'
+    'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent placeholder:text-fg-faint'
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4">
+    <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
       {/* Header */}
       <div className="mb-1 flex items-center gap-2">
-        <Lightbulb className="h-4 w-4 text-zinc-400" />
-        <h4 className="text-sm font-medium text-zinc-200">Capture Resolution</h4>
+        <Lightbulb className="h-4 w-4 text-fg-secondary" />
+        <h4 className="text-sm font-medium text-fg">Capture Resolution</h4>
       </div>
-      <p className="mb-4 text-xs text-zinc-500">
+      <p className="mb-4 text-xs text-fg-muted">
         Help us improve the knowledge base — document what resolved this issue.
       </p>
 
       {/* Issue summary context */}
       {data.issue_summary && (
-        <div className="mb-3 rounded-md border border-zinc-700/50 bg-zinc-800/50 px-3 py-2">
-          <span className="text-xs text-zinc-500">Issue: </span>
-          <span className="text-xs text-zinc-300">{data.issue_summary}</span>
+        <div className="mb-3 rounded-md border border-border-subtle/50 bg-surface/50 px-3 py-2">
+          <span className="text-xs text-fg-muted">Issue: </span>
+          <span className="text-xs text-fg-secondary">{data.issue_summary}</span>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-3">
         {/* What Fixed It */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label className="mb-1 block text-xs font-medium text-fg-secondary">
             What Fixed It <span className="text-red-400">*</span>
           </label>
           <textarea
@@ -118,7 +118,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
         {/* Issue Category */}
         {data.categories.length > 0 && (
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
+            <label className="mb-1 block text-xs font-medium text-fg-secondary">
               Issue Category
             </label>
             <select
@@ -138,7 +138,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
 
         {/* Time Spent */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label className="mb-1 block text-xs font-medium text-fg-secondary">
             Time Spent
           </label>
           <select
@@ -155,7 +155,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
 
         {/* Related KB Articles */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label className="mb-1 block text-xs font-medium text-fg-secondary">
             Related KB Articles
           </label>
           <input
@@ -176,7 +176,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
               onChange={(e) => setCreateArticle(e.target.checked)}
               className="accent-accent"
             />
-            <span className="text-xs text-zinc-300">
+            <span className="text-xs text-fg-secondary">
               Should this become a new KB article?
             </span>
           </label>
@@ -196,7 +196,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
             type="button"
             size="sm"
             variant="ghost"
-            className="text-xs text-zinc-400 hover:text-zinc-300 px-4 py-1 h-8"
+            className="text-xs text-fg-secondary hover:text-fg-secondary px-4 py-1 h-8"
             onClick={handleSkip}
           >
             Skip

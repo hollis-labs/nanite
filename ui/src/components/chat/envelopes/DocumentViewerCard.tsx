@@ -52,11 +52,11 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
   return (
     <div className="animate-in fade-in duration-300 space-y-2">
       {/* Header */}
-      <div className="rounded-lg border border-accent/20 bg-zinc-900/50 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+      <div className="rounded-lg border border-accent/20 bg-bg-elevated/50 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-accent shrink-0" />
-            <span className="text-sm font-medium text-zinc-200">{data.title}</span>
+            <span className="text-sm font-medium text-fg">{data.title}</span>
           </div>
           <div className="flex items-center gap-1">
             {data.download_enabled && data.download_filename && (
@@ -64,7 +64,7 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
                 size="sm"
                 variant="ghost"
                 onClick={handleDownload}
-                className="h-7 px-2 text-zinc-400 hover:text-zinc-200"
+                className="h-7 px-2 text-fg-secondary hover:text-fg"
               >
                 <Download className="h-3.5 w-3.5" />
               </Button>
@@ -73,7 +73,7 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
               size="sm"
               variant="ghost"
               onClick={handleOpenNewTab}
-              className="h-7 px-2 text-zinc-400 hover:text-zinc-200"
+              className="h-7 px-2 text-fg-secondary hover:text-fg"
             >
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>
@@ -82,7 +82,7 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
 
         {/* Section nav */}
         {sectionLinks && (
-          <div className="flex items-center gap-1 px-4 py-2 border-b border-zinc-800/50 bg-zinc-900/30 overflow-x-auto">
+          <div className="flex items-center gap-1 px-4 py-2 border-b border-border/50 bg-bg-elevated/30 overflow-x-auto">
             {sectionLinks.map(section => (
               <button
                 key={section}
@@ -91,7 +91,7 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
                   const el = document.getElementById(`doc-section-${section}`)
                   el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                 }}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 whitespace-nowrap transition-colors"
+                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-fg-secondary hover:text-fg hover:bg-surface whitespace-nowrap transition-colors"
               >
                 <ChevronRight className="h-3 w-3" />
                 {section}

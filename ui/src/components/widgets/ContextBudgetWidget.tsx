@@ -75,16 +75,16 @@ export function ContextBudgetWidget() {
       <Widget id="context" title="Context" icon={Gauge}>
         <div className="space-y-2">
           {/* Context Window bar */}
-          <div className="flex justify-between text-xs text-zinc-400">
+          <div className="flex justify-between text-xs text-fg-secondary">
             <span className="flex items-center gap-1">
               Context Window
               {activeSessionId && (
                 <button
                   onClick={() => setInspectorOpen(true)}
-                  className="p-0.5 rounded hover:bg-zinc-700 transition-colors"
+                  className="p-0.5 rounded hover:bg-surface-hover transition-colors"
                   title="View context breakdown"
                 >
-                  <Info className="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+                  <Info className="w-3 h-3 text-fg-muted hover:text-fg-secondary" />
                 </button>
               )}
             </span>
@@ -92,70 +92,70 @@ export function ContextBudgetWidget() {
               {formatTokens(ctxTotal)} / {formatTokens(ctxCeiling)}
             </span>
           </div>
-          <div className="w-full bg-zinc-800 rounded-full h-1.5">
+          <div className="w-full bg-surface rounded-full h-1.5">
             <div
               className={`${getBarColor(ctxPct)} h-1.5 rounded-full transition-all duration-500`}
               style={{ width: `${Math.max(ctxPct, 1)}%` }}
             />
           </div>
-          <div className="flex justify-between text-xs text-zinc-600">
+          <div className="flex justify-between text-xs text-fg-faint">
             <span>{Math.round(ctxPct)}% filled</span>
           </div>
 
           {/* Token Usage bar */}
-          <div className="flex justify-between text-xs text-zinc-400 pt-1">
+          <div className="flex justify-between text-xs text-fg-secondary pt-1">
             <span>Token Usage</span>
             <span className={getBarTextColor(tokenPct)}>
               {formatTokens(totalTokens)} / {formatTokens(ctxCeiling)}
             </span>
           </div>
-          <div className="w-full bg-zinc-800 rounded-full h-1.5">
+          <div className="w-full bg-surface rounded-full h-1.5">
             <div
               className={`${getBarColor(tokenPct)} h-1.5 rounded-full transition-all duration-500`}
               style={{ width: `${Math.min(Math.max(tokenPct, 1), 100)}%` }}
             />
           </div>
-          <div className="flex justify-between text-xs text-zinc-600">
+          <div className="flex justify-between text-xs text-fg-faint">
             <span>{Math.round(tokenPct)}% used</span>
             <span>{formatCost(cost)}</span>
           </div>
 
           {/* Stats breakdown */}
           {(totalTokens > 0 || ctxTotal > 0) && (
-            <div className="space-y-0.5 pt-1 border-t border-zinc-800">
+            <div className="space-y-0.5 pt-1 border-t border-border">
               <div className="flex justify-between text-xs">
-                <span className="text-zinc-500">Input</span>
-                <span className="text-zinc-400">{formatTokens(inputTokens)}</span>
+                <span className="text-fg-muted">Input</span>
+                <span className="text-fg-secondary">{formatTokens(inputTokens)}</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-zinc-500">Output</span>
-                <span className="text-zinc-400">{formatTokens(outputTokens)}</span>
+                <span className="text-fg-muted">Output</span>
+                <span className="text-fg-secondary">{formatTokens(outputTokens)}</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-zinc-500">Messages</span>
-                <span className="text-zinc-400">{messageCount}</span>
+                <span className="text-fg-muted">Messages</span>
+                <span className="text-fg-secondary">{messageCount}</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-zinc-500">System Prompt</span>
-                <span className="text-zinc-400">{formatTokens(systemPromptTokens)}</span>
+                <span className="text-fg-muted">System Prompt</span>
+                <span className="text-fg-secondary">{formatTokens(systemPromptTokens)}</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-zinc-500">Tool Calls ({toolCallCount})</span>
-                <span className="text-zinc-400">{formatTokens(toolTokens)}</span>
+                <span className="text-fg-muted">Tool Calls ({toolCallCount})</span>
+                <span className="text-fg-secondary">{formatTokens(toolTokens)}</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-zinc-500">Tools Available</span>
-                <span className="text-zinc-400">{toolsAvailable}</span>
+                <span className="text-fg-muted">Tools Available</span>
+                <span className="text-fg-secondary">{toolsAvailable}</span>
               </div>
               {(cacheCreation > 0 || cacheRead > 0) && (
                 <>
                   <div className="flex justify-between text-xs">
-                    <span className="text-zinc-500">Cache Write</span>
-                    <span className="text-zinc-400">{formatTokens(cacheCreation)}</span>
+                    <span className="text-fg-muted">Cache Write</span>
+                    <span className="text-fg-secondary">{formatTokens(cacheCreation)}</span>
                   </div>
                   <div className="flex justify-between text-xs">
-                    <span className="text-zinc-500">Cache Read</span>
-                    <span className="text-emerald-400">{formatTokens(cacheRead)}</span>
+                    <span className="text-fg-muted">Cache Read</span>
+                    <span className="text-success">{formatTokens(cacheRead)}</span>
                   </div>
                 </>
               )}

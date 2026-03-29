@@ -20,7 +20,7 @@ export function EnvelopeRenderer({ envelope, onSendMessage }: EnvelopeRendererPr
   const PluginComponent = registry[envelope.type]
   if (PluginComponent && envelope.data) {
     return (
-      <Suspense fallback={<div className="animate-pulse p-4 text-sm text-zinc-400">Loading...</div>}>
+      <Suspense fallback={<div className="animate-pulse p-4 text-sm text-fg-secondary">Loading...</div>}>
         <PluginComponent data={envelope.data} {...(onSendMessage ? { onSendMessage } : {})} />
       </Suspense>
     )

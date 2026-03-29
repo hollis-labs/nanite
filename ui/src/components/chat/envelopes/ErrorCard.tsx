@@ -32,7 +32,7 @@ export function ErrorCard({ data }: ErrorCardProps) {
 
   const codeInfo = CODE_LABELS[data.code] ?? {
     label: data.code.toUpperCase(),
-    color: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+    color: 'bg-zinc-500/20 text-fg-secondary border-zinc-500/30',
   }
 
   // Fetch a giphy image based on the query
@@ -86,15 +86,15 @@ export function ErrorCard({ data }: ErrorCardProps) {
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="rounded-lg border border-red-500/30 bg-zinc-900/80 overflow-hidden max-w-lg">
+      <div className="rounded-lg border border-red-500/30 bg-bg-elevated/80 overflow-hidden max-w-lg">
         <div className="flex">
           {/* Left side: Giphy image (30%) */}
-          <div className="w-[30%] shrink-0 bg-zinc-950/50 flex items-center justify-center p-2">
+          <div className="w-[30%] shrink-0 bg-bg/50 flex items-center justify-center p-2">
             {gifUrl ? (
               <div className="relative w-full">
                 {!gifLoaded && (
-                  <div className="w-full aspect-square rounded-md bg-zinc-800 animate-pulse flex items-center justify-center">
-                    <AlertTriangle className="h-6 w-6 text-zinc-700" />
+                  <div className="w-full aspect-square rounded-md bg-surface animate-pulse flex items-center justify-center">
+                    <AlertTriangle className="h-6 w-6 text-fg-faint" />
                   </div>
                 )}
                 <img
@@ -103,12 +103,12 @@ export function ErrorCard({ data }: ErrorCardProps) {
                   className={`w-full rounded-md transition-opacity duration-300 ${gifLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'}`}
                   onLoad={() => setGifLoaded(true)}
                 />
-                <span className="block text-[8px] text-zinc-600 text-center mt-1 uppercase tracking-wider">
+                <span className="block text-[8px] text-fg-faint text-center mt-1 uppercase tracking-wider">
                   GIPHY
                 </span>
               </div>
             ) : (
-              <div className="w-full aspect-square rounded-md bg-zinc-800/50 flex items-center justify-center">
+              <div className="w-full aspect-square rounded-md bg-surface/50 flex items-center justify-center">
                 <AlertTriangle className="h-8 w-8 text-red-500/40" />
               </div>
             )}
@@ -121,19 +121,19 @@ export function ErrorCard({ data }: ErrorCardProps) {
               <span className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${codeInfo.color}`}>
                 {codeInfo.label}
               </span>
-              <span className="text-[10px] text-zinc-600 ml-auto">
+              <span className="text-[10px] text-fg-faint ml-auto">
                 {formattedTime}
               </span>
             </div>
 
             {/* Error message */}
-            <p className="text-sm text-zinc-300 leading-snug">
+            <p className="text-sm text-fg-secondary leading-snug">
               {data.message}
             </p>
 
             {/* Details preview (if present) */}
             {data.details && data.details.raw != null && (
-              <p className="text-xs text-zinc-500 font-mono truncate" title={String(data.details.raw)}>
+              <p className="text-xs text-fg-muted font-mono truncate" title={String(data.details.raw)}>
                 {String(data.details.raw).slice(0, 120)}
               </p>
             )}
@@ -142,12 +142,12 @@ export function ErrorCard({ data }: ErrorCardProps) {
             <button
               type="button"
               onClick={handleCopy}
-              className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors self-start mt-1 px-2 py-1 rounded bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50"
+              className="flex items-center gap-1.5 text-xs text-fg-secondary hover:text-fg transition-colors self-start mt-1 px-2 py-1 rounded bg-surface/50 hover:bg-surface border border-border-subtle/50"
             >
               {copied ? (
                 <>
-                  <Check className="h-3 w-3 text-green-400" />
-                  <span className="text-green-400">Copied</span>
+                  <Check className="h-3 w-3 text-success" />
+                  <span className="text-success">Copied</span>
                 </>
               ) : (
                 <>

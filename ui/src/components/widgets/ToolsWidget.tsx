@@ -26,26 +26,26 @@ export function ToolsWidget() {
       <div className="space-y-2.5">
         {isLoading ? (
           <div className="flex items-center justify-center py-3">
-            <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
-            <span className="ml-2 text-xs text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin text-fg-muted" />
+            <span className="ml-2 text-xs text-fg-muted">
               {isRefreshing ? 'Refreshing tools...' : 'Loading...'}
             </span>
           </div>
         ) : (
           <>
             <div className="flex justify-between text-xs">
-              <span className="text-zinc-500 flex items-center gap-1">
+              <span className="text-fg-muted flex items-center gap-1">
                 <Wrench className="w-3 h-3" />
                 Tools Available
               </span>
-              <span className="text-zinc-300">{tools.length}</span>
+              <span className="text-fg-secondary">{tools.length}</span>
             </div>
             <div className="flex justify-between text-xs">
-              <span className="text-zinc-500 flex items-center gap-1">
+              <span className="text-fg-muted flex items-center gap-1">
                 <Server className="w-3 h-3" />
                 MCP Servers
               </span>
-              <span className="text-zinc-300">
+              <span className="text-fg-secondary">
                 {connectedServers}/{servers.length} connected
               </span>
             </div>
@@ -54,7 +54,7 @@ export function ToolsWidget() {
         <button
           onClick={refreshTools}
           disabled={isRefreshing}
-          className="w-full text-xs text-center py-1.5 rounded-md bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          className="w-full text-xs text-center py-1.5 rounded-md bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
         >
           {isRefreshing ? (
             <Loader2 className="w-3 h-3 animate-spin" />

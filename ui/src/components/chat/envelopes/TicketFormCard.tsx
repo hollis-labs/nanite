@@ -81,16 +81,16 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
   if (formState === 'success' && ticketResult) {
     const routing = (ticketResult['routing'] || 'IT Service Desk — Triage') as string
     return (
-      <div className="rounded-lg border border-green-500/30 bg-zinc-900/50 overflow-hidden">
+      <div className="rounded-lg border border-green-500/30 bg-bg-elevated/50 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between bg-green-500/5 px-4 py-3 border-b border-green-500/20">
           <div className="flex items-center gap-2">
-            <CheckCircle className="h-4 w-4 text-green-400" />
-            <span className="text-sm font-medium text-zinc-200">{ticketId}</span>
-            <span className="text-sm text-zinc-400">&mdash;</span>
-            <span className="text-sm text-zinc-300 truncate">{title}</span>
+            <CheckCircle className="h-4 w-4 text-success" />
+            <span className="text-sm font-medium text-fg">{ticketId}</span>
+            <span className="text-sm text-fg-secondary">&mdash;</span>
+            <span className="text-sm text-fg-secondary truncate">{title}</span>
           </div>
-          <span className="inline-block rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-green-400">
+          <span className="inline-block rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-success">
             open
           </span>
         </div>
@@ -99,16 +99,16 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
           {/* Details grid */}
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <span className="block text-xs font-medium text-zinc-400 mb-0.5">Category</span>
-              <span className="text-sm text-zinc-200 capitalize">{category}</span>
+              <span className="block text-xs font-medium text-fg-secondary mb-0.5">Category</span>
+              <span className="text-sm text-fg capitalize">{category}</span>
             </div>
             <div>
-              <span className="block text-xs font-medium text-zinc-400 mb-0.5">Priority</span>
-              <span className="text-sm text-zinc-200 capitalize">{priority}</span>
+              <span className="block text-xs font-medium text-fg-secondary mb-0.5">Priority</span>
+              <span className="text-sm text-fg capitalize">{priority}</span>
             </div>
             <div>
-              <span className="block text-xs font-medium text-zinc-400 mb-0.5">Routing</span>
-              <span className="text-sm text-zinc-200">{routing}</span>
+              <span className="block text-xs font-medium text-fg-secondary mb-0.5">Routing</span>
+              <span className="text-sm text-fg">{routing}</span>
             </div>
           </div>
 
@@ -116,7 +116,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
           <div className="flex items-center gap-3 pt-1">
             <Button
               size="sm"
-              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs px-3 py-1 h-7"
+              className="bg-surface hover:bg-surface-hover text-fg text-xs px-3 py-1 h-7"
               onClick={() => window.open(`/api/plugins/ui/support-ticket-download?ticket_id=${encodeURIComponent(ticketId)}`, '_blank')}
             >
               <Download className="mr-1.5 h-3 w-3" />
@@ -125,9 +125,9 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
           </div>
 
           {/* Production note */}
-          <div className="flex items-start gap-2 rounded-md border border-zinc-700 bg-zinc-800/50 px-3 py-2">
-            <Info className="mt-0.5 h-3 w-3 shrink-0 text-zinc-500" />
-            <span className="text-xs text-zinc-500">
+          <div className="flex items-start gap-2 rounded-md border border-border-subtle bg-surface/50 px-3 py-2">
+            <Info className="mt-0.5 h-3 w-3 shrink-0 text-fg-muted" />
+            <span className="text-xs text-fg-muted">
               In production, this ticket would be automatically created in BMC Helix ITSM and routed to {routing}
             </span>
           </div>
@@ -137,20 +137,20 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
   }
 
   const inputCls =
-    'w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent placeholder:text-zinc-600'
+    'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent placeholder:text-fg-faint'
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4">
+    <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
       {/* Header */}
       <div className="mb-4 flex items-center gap-2">
-        <Ticket className="h-4 w-4 text-zinc-400" />
-        <h4 className="text-sm font-medium text-zinc-200">Create Support Ticket</h4>
+        <Ticket className="h-4 w-4 text-fg-secondary" />
+        <h4 className="text-sm font-medium text-fg">Create Support Ticket</h4>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3">
         {/* Issue Summary */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label className="mb-1 block text-xs font-medium text-fg-secondary">
             Issue Summary <span className="text-red-400">*</span>
           </label>
           <input
@@ -165,7 +165,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
 
         {/* Category */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label className="mb-1 block text-xs font-medium text-fg-secondary">
             Category <span className="text-red-400">*</span>
           </label>
           <select
@@ -185,7 +185,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
 
         {/* Priority */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">Priority</label>
+          <label className="mb-1 block text-xs font-medium text-fg-secondary">Priority</label>
           <div className="flex gap-3">
             {(['low', 'medium', 'high', 'critical'] as const).map((p) => (
               <label key={p} className="flex items-center gap-1.5 cursor-pointer">
@@ -197,7 +197,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
                   onChange={() => setPriority(p)}
                   className="accent-accent"
                 />
-                <span className="text-xs text-zinc-300 capitalize">{p}</span>
+                <span className="text-xs text-fg-secondary capitalize">{p}</span>
               </label>
             ))}
           </div>
@@ -205,7 +205,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
 
         {/* Description */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label className="mb-1 block text-xs font-medium text-fg-secondary">
             Description <span className="text-red-400">*</span>
           </label>
           <textarea
@@ -220,7 +220,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
 
         {/* Steps Already Tried */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label className="mb-1 block text-xs font-medium text-fg-secondary">
             Steps Already Tried
           </label>
           <textarea

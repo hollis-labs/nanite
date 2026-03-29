@@ -53,10 +53,10 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
   }
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4">
+    <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
       {/* Header with risk badge */}
       <div className="flex items-center justify-between mb-3">
-        <h4 className="text-sm font-medium text-zinc-200">Approval Required</h4>
+        <h4 className="text-sm font-medium text-fg">Approval Required</h4>
         <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${riskStyle.bg} border ${riskStyle.border}`}>
           <RiskIcon className={`w-3 h-3 ${riskStyle.text}`} />
           <span className={riskStyle.text}>{risk} risk</span>
@@ -64,9 +64,9 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
       </div>
 
       {/* Description */}
-      <p className="text-sm text-zinc-300 mb-2">{approval.description}</p>
+      <p className="text-sm text-fg-secondary mb-2">{approval.description}</p>
       {approval.details && (
-        <p className="text-xs text-zinc-500 mb-4">{approval.details}</p>
+        <p className="text-xs text-fg-muted mb-4">{approval.details}</p>
       )}
 
       {/* Actions */}

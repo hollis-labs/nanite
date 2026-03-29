@@ -91,14 +91,14 @@ export function VolonBacklogButton({ contextBody, projectId, className }: VolonB
   }
 
   return (
-    <div className={cn('rounded-lg border border-zinc-700 bg-zinc-900 p-3 space-y-3', className)}>
+    <div className={cn('rounded-lg border border-border-subtle bg-bg-elevated p-3 space-y-3', className)}>
       <div className="flex items-center justify-between">
-        <h4 className="text-xs font-medium text-zinc-300 uppercase tracking-wider">
+        <h4 className="text-xs font-medium text-fg-secondary uppercase tracking-wider">
           New Backlog Item
         </h4>
         <button
           onClick={handleClose}
-          className="text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="text-fg-muted hover:text-fg-secondary transition-colors"
         >
           <X className="w-3.5 h-3.5" />
         </button>
@@ -106,12 +106,12 @@ export function VolonBacklogButton({ contextBody, projectId, className }: VolonB
 
       {/* Title */}
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Title</label>
+        <label className="text-xs text-fg-muted">Title</label>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+          className="w-full rounded-md border border-border-subtle bg-surface px-2.5 py-1.5 text-sm text-fg placeholder-fg-faint focus:outline-none focus:ring-1 focus:ring-border-subtle"
           placeholder="Backlog item title"
           disabled={status === 'submitting'}
         />
@@ -119,30 +119,30 @@ export function VolonBacklogButton({ contextBody, projectId, className }: VolonB
 
       {/* Priority */}
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Priority</label>
+        <label className="text-xs text-fg-muted">Priority</label>
         <div className="relative">
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as Priority)}
-            className="w-full appearance-none rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 pr-8 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+            className="w-full appearance-none rounded-md border border-border-subtle bg-surface px-2.5 py-1.5 pr-8 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-border-subtle"
             disabled={status === 'submitting'}
           >
             <option value="A">A - High</option>
             <option value="B">B - Medium</option>
             <option value="C">C - Low</option>
           </select>
-          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-muted pointer-events-none" />
         </div>
       </div>
 
       {/* Notes */}
       <div className="space-y-1">
-        <label className="text-xs text-zinc-500">Notes (optional)</label>
+        <label className="text-xs text-fg-muted">Notes (optional)</label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
-          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500 resize-none"
+          className="w-full rounded-md border border-border-subtle bg-surface px-2.5 py-1.5 text-sm text-fg placeholder-fg-faint focus:outline-none focus:ring-1 focus:ring-border-subtle resize-none"
           placeholder="Additional context..."
           disabled={status === 'submitting'}
         />
@@ -153,7 +153,7 @@ export function VolonBacklogButton({ contextBody, projectId, className }: VolonB
         <p className="text-xs text-red-400">{errorMsg}</p>
       )}
       {status === 'success' && (
-        <p className="flex items-center gap-1 text-xs text-green-400">
+        <p className="flex items-center gap-1 text-xs text-success">
           <Check className="w-3.5 h-3.5" />
           Backlog item created
         </p>

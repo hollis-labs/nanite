@@ -34,7 +34,7 @@ export function BookmarksWidget() {
   return (
     <Widget id="bookmarks" title="Bookmarks" icon={Bookmark}>
       {bookmarks.length === 0 ? (
-        <p className="text-xs text-zinc-500 italic">
+        <p className="text-xs text-fg-muted italic">
           No bookmarks yet. Bookmark messages with Cmd+D.
         </p>
       ) : (
@@ -43,12 +43,12 @@ export function BookmarksWidget() {
             <button
               key={bm.id}
               onClick={() => scrollToMessage(bm.message_id)}
-              className="w-full text-left p-2 rounded-md bg-zinc-800/50 hover:bg-zinc-800 transition-colors group"
+              className="w-full text-left p-2 rounded-md bg-surface/50 hover:bg-surface transition-colors group"
             >
-              <p className="text-xs text-zinc-300 truncate group-hover:text-zinc-100">
+              <p className="text-xs text-fg-secondary truncate group-hover:text-fg">
                 {bm.note || 'Bookmarked message'}
               </p>
-              <p className="text-xs text-zinc-600 mt-0.5">{formatTime(bm.created_at)}</p>
+              <p className="text-xs text-fg-faint mt-0.5">{formatTime(bm.created_at)}</p>
             </button>
           ))}
         </div>

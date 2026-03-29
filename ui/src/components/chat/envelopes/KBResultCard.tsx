@@ -44,7 +44,7 @@ function SourceBadge({ source }: { source: string | undefined }) {
     )
   }
   return (
-    <span className="inline-block rounded bg-zinc-700/50 px-1.5 py-0.5 text-xs font-medium text-zinc-500 border border-zinc-700">
+    <span className="inline-block rounded bg-surface-hover/50 px-1.5 py-0.5 text-xs font-medium text-fg-muted border border-border-subtle">
       Reference
     </span>
   )
@@ -57,8 +57,8 @@ function ArticleCard({ article, defaultExpanded }: { article: KBArticle; default
   return (
     <div className={`rounded-lg border overflow-hidden ${
       article.source === 'helix'
-        ? 'border-emerald-500/20 bg-zinc-900/50'
-        : 'border-zinc-700 bg-zinc-900/50'
+        ? 'border-emerald-500/20 bg-bg-elevated/50'
+        : 'border-border-subtle bg-bg-elevated/50'
     }`}>
       {/* Header */}
       <button
@@ -68,9 +68,9 @@ function ArticleCard({ article, defaultExpanded }: { article: KBArticle; default
       >
         <div className="mt-0.5 shrink-0">
           {expanded ? (
-            <ChevronDown className="h-4 w-4 text-zinc-400" />
+            <ChevronDown className="h-4 w-4 text-fg-secondary" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-zinc-400" />
+            <ChevronRight className="h-4 w-4 text-fg-secondary" />
           )}
         </div>
 
@@ -80,21 +80,21 @@ function ArticleCard({ article, defaultExpanded }: { article: KBArticle; default
               {article.id}
             </span>
             <SourceBadge source={article.source} />
-            <span className="text-sm font-medium text-zinc-200">{article.title}</span>
+            <span className="text-sm font-medium text-fg">{article.title}</span>
           </div>
           <div className="mt-1 flex items-center gap-2">
-            <span className="inline-block rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
+            <span className="inline-block rounded-full bg-surface px-2 py-0.5 text-xs text-fg-secondary">
               {article.category}
             </span>
             <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} title={article.severity} />
-            <span className="text-xs text-zinc-500">{article.severity}</span>
+            <span className="text-xs text-fg-muted">{article.severity}</span>
           </div>
         </div>
       </button>
 
       {/* Expanded body */}
       {expanded && article.body && (
-        <div className="px-4 pb-4 ml-7 border-t border-zinc-800 pt-3">
+        <div className="px-4 pb-4 ml-7 border-t border-border pt-3">
           <MessageContent content={article.body} role="assistant" />
         </div>
       )}
@@ -109,8 +109,8 @@ export function KBResultCard({ data, onSendMessage }: KBResultCardProps) {
   if (articles.length === 0) {
     return (
       <div className="space-y-3">
-        <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4">
-          <div className="flex items-center gap-2 text-zinc-500">
+        <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+          <div className="flex items-center gap-2 text-fg-muted">
             <Search className="h-4 w-4" />
             <span className="text-sm">No matching articles found for this issue.</span>
           </div>
@@ -124,7 +124,7 @@ export function KBResultCard({ data, onSendMessage }: KBResultCardProps) {
   return (
     <div className="space-y-3">
       {/* Header */}
-      <div className="flex items-center gap-2 text-zinc-400">
+      <div className="flex items-center gap-2 text-fg-secondary">
         <BookOpen className="h-4 w-4 shrink-0" />
         <span className="text-xs font-medium">
           Knowledge Base — {articles.length} article{articles.length !== 1 ? 's' : ''} found
@@ -138,8 +138,8 @@ export function KBResultCard({ data, onSendMessage }: KBResultCardProps) {
 
       {/* Did this help? */}
       {feedback === 'none' && (
-        <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4">
-          <p className="text-sm text-zinc-300 mb-3">Did this resolve your issue?</p>
+        <div className="rounded-lg border border-border-subtle bg-bg-elevated/50 p-4">
+          <p className="text-sm text-fg-secondary mb-3">Did this resolve your issue?</p>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
@@ -156,7 +156,7 @@ export function KBResultCard({ data, onSendMessage }: KBResultCardProps) {
             </Button>
             <Button
               size="sm"
-              className="bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs px-3 py-1 h-7"
+              className="bg-surface-hover hover:bg-surface-hover text-fg text-xs px-3 py-1 h-7"
               onClick={() => setFeedback('ticket')}
             >
               <Ticket className="mr-1.5 h-3 w-3" />
@@ -169,8 +169,8 @@ export function KBResultCard({ data, onSendMessage }: KBResultCardProps) {
       {feedback === 'solved' && (
         <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3">
           <div className="flex items-center gap-2">
-            <CheckCircle className="h-4 w-4 text-green-400" />
-            <span className="text-sm text-green-400">Glad that helped!</span>
+            <CheckCircle className="h-4 w-4 text-success" />
+            <span className="text-sm text-success">Glad that helped!</span>
           </div>
         </div>
       )}

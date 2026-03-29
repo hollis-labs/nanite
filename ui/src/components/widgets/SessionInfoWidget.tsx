@@ -41,7 +41,7 @@ export function SessionInfoWidget() {
   if (!session) {
     return (
       <Widget id="session-info" title="Session Info" icon={Info}>
-        <p className="text-xs text-zinc-500 italic">No session selected</p>
+        <p className="text-xs text-fg-muted italic">No session selected</p>
       </Widget>
     )
   }
@@ -60,8 +60,8 @@ export function SessionInfoWidget() {
       <div className="space-y-1.5">
         {rows.map(({ label, value }) => (
           <div key={label} className="flex justify-between text-xs">
-            <span className="text-zinc-500">{label}</span>
-            <span className="text-zinc-300 truncate max-w-[60%] text-right">{value}</span>
+            <span className="text-fg-muted">{label}</span>
+            <span className="text-fg-secondary truncate max-w-[60%] text-right">{value}</span>
           </div>
         ))}
       </div>

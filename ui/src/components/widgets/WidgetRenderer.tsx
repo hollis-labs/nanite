@@ -37,9 +37,9 @@ class WidgetErrorBoundary extends Component<
 /** Loading fallback shown while a lazy widget component loads. */
 function WidgetLoadingFallback() {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 flex items-center justify-center gap-2">
-      <Loader2 className="w-3.5 h-3.5 text-zinc-500 animate-spin" />
-      <span className="text-xs text-zinc-500">Loading widget...</span>
+    <div className="rounded-lg border border-border bg-bg-elevated/50 p-3 flex items-center justify-center gap-2">
+      <Loader2 className="w-3.5 h-3.5 text-fg-muted animate-spin" />
+      <span className="text-xs text-fg-muted">Loading widget...</span>
     </div>
   )
 }
@@ -47,16 +47,16 @@ function WidgetLoadingFallback() {
 /** Fallback card for widgets not in the registry (plugin metadata only). */
 function UnknownWidgetCard({ component }: { component: PluginUIComponent }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+    <div className="rounded-lg border border-border bg-bg-elevated/50 p-3">
       <div className="flex items-center gap-2 mb-1">
         <Puzzle className="w-3 h-3 text-accent shrink-0" />
-        <span className="text-xs font-medium text-zinc-200 truncate">{component.name}</span>
+        <span className="text-xs font-medium text-fg truncate">{component.name}</span>
         {component.plugin_id && (
-          <span className="text-[10px] text-zinc-600 ml-auto">{component.plugin_id}</span>
+          <span className="text-[10px] text-fg-faint ml-auto">{component.plugin_id}</span>
         )}
       </div>
       {component.description && (
-        <p className="text-[11px] text-zinc-500 leading-relaxed">{component.description}</p>
+        <p className="text-[11px] text-fg-muted leading-relaxed">{component.description}</p>
       )}
     </div>
   )

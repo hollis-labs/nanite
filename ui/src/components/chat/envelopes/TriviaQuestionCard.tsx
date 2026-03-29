@@ -39,16 +39,16 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-accent/20 bg-zinc-900/50 overflow-hidden max-w-md">
+      <div className="rounded-lg border border-accent/20 bg-bg-elevated/50 overflow-hidden max-w-md">
         {/* Header */}
-        <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-zinc-800">
+        <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-border">
           <HelpCircle className="h-4 w-4 text-accent shrink-0" />
-          <span className="text-sm font-medium text-zinc-200">Trivia Time!</span>
+          <span className="text-sm font-medium text-fg">Trivia Time!</span>
           <div className="ml-auto flex items-center gap-2">
             <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium border ${difficultyClass}`}>
               {data.difficulty}
             </span>
-            <span className="text-[10px] text-zinc-600 uppercase tracking-wider">
+            <span className="text-[10px] text-fg-faint uppercase tracking-wider">
               {data.category}
             </span>
           </div>
@@ -56,13 +56,13 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
 
         {/* Question */}
         <div className="px-4 pt-3 pb-2">
-          <p className="text-sm text-zinc-200">{data.question}</p>
+          <p className="text-sm text-fg">{data.question}</p>
         </div>
 
         {/* Answer buttons */}
         <div className="px-4 pb-3 space-y-1.5">
           {data.answers.map((answer, i) => {
-            let btnClass = 'border-zinc-700 bg-zinc-800/50 hover:bg-zinc-700/50 text-zinc-300 hover:text-zinc-100'
+            let btnClass = 'border-border-subtle bg-surface/50 hover:bg-surface-hover/50 text-fg-secondary hover:text-fg'
 
             if (hasResult) {
               if (i === data.correct_index) {
@@ -70,7 +70,7 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
               } else if (i === data.selected_index) {
                 btnClass = 'border-red-500/30 bg-red-500/10 text-red-400'
               } else {
-                btnClass = 'border-zinc-800 bg-zinc-900/50 text-zinc-600'
+                btnClass = 'border-border bg-bg-elevated/50 text-fg-faint'
               }
             }
 
@@ -101,7 +101,7 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
 
         {/* Result + score */}
         {hasResult && (
-          <div className={`px-4 pb-3 pt-2 border-t border-zinc-800`}>
+          <div className={`px-4 pb-3 pt-2 border-t border-border`}>
             <div className="flex items-center justify-between">
               <span className={`text-sm font-medium ${data.correct ? 'text-green-400' : 'text-red-400'}`}>
                 {data.correct ? 'Correct!' : 'Wrong!'}
@@ -118,11 +118,11 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
 
         {/* Footer */}
         <div className="px-4 pb-2 flex items-center justify-between">
-          <span className="text-[10px] text-zinc-600 uppercase tracking-wider">
+          <span className="text-[10px] text-fg-faint uppercase tracking-wider">
             {data.source || 'Open Trivia DB'}
           </span>
           {onSendMessage && !hasResult && !submitted && (
-            <span className="text-[10px] text-zinc-600">Click an answer above</span>
+            <span className="text-[10px] text-fg-faint">Click an answer above</span>
           )}
           {onSendMessage && hasResult && (
             <button

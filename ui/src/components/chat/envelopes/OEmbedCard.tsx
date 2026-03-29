@@ -32,12 +32,12 @@ export function OEmbedCard({ data }: OEmbedCardProps) {
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className={`rounded-lg border ${providerColor.border} bg-zinc-900/50 overflow-hidden max-w-md`}>
+      <div className={`rounded-lg border ${providerColor.border} bg-bg-elevated/50 overflow-hidden max-w-md`}>
         {/* Thumbnail */}
         {data.thumbnail_url && !imgError && (
           <div className="relative">
             {!imgLoaded && (
-              <div className="w-full aspect-video bg-zinc-800 animate-pulse flex items-center justify-center">
+              <div className="w-full aspect-video bg-surface animate-pulse flex items-center justify-center">
                 <TypeIcon type={data.type} />
               </div>
             )}
@@ -53,7 +53,7 @@ export function OEmbedCard({ data }: OEmbedCardProps) {
               {data.type === 'video' && imgLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/20 transition-colors">
                   <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center">
-                    <Play className="h-5 w-5 text-zinc-900 ml-0.5" />
+                    <Play className="h-5 w-5 text-bg ml-0.5" />
                   </div>
                 </div>
               )}
@@ -68,7 +68,7 @@ export function OEmbedCard({ data }: OEmbedCardProps) {
             <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium border ${providerColor.badge}`}>
               {data.provider_name || 'Link'}
             </span>
-            <span className="flex items-center gap-1 text-[10px] text-zinc-600">
+            <span className="flex items-center gap-1 text-[10px] text-fg-faint">
               <TypeIcon type={data.type} />
               {data.type}
             </span>
@@ -80,7 +80,7 @@ export function OEmbedCard({ data }: OEmbedCardProps) {
               href={data.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block text-sm font-medium text-zinc-200 hover:text-white transition-colors line-clamp-2"
+              className="block text-sm font-medium text-fg hover:text-white transition-colors line-clamp-2"
             >
               {data.title}
             </a>
@@ -88,25 +88,25 @@ export function OEmbedCard({ data }: OEmbedCardProps) {
 
           {/* Author */}
           {data.author_name && (
-            <p className="text-xs text-zinc-500">{data.author_name}</p>
+            <p className="text-xs text-fg-muted">{data.author_name}</p>
           )}
 
           {/* Description (for rich/link types without thumbnail) */}
           {data.description && (!data.thumbnail_url || imgError) && (
-            <p className="text-xs text-zinc-400 line-clamp-3">{data.description}</p>
+            <p className="text-xs text-fg-secondary line-clamp-3">{data.description}</p>
           )}
         </div>
 
         {/* Footer */}
         <div className="px-4 pb-3 flex items-center justify-between">
-          <span className="text-[10px] text-zinc-600 truncate max-w-[200px]">
+          <span className="text-[10px] text-fg-faint truncate max-w-[200px]">
             {data.url}
           </span>
           <a
             href={data.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+            className="flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-secondary transition-colors shrink-0"
           >
             <ExternalLink className="h-3 w-3" />
             Open
@@ -145,7 +145,7 @@ function getProviderColor(name: string): { border: string; badge: string } {
     }
   }
   return {
-    border: 'border-zinc-700',
-    badge: 'bg-zinc-700/50 text-zinc-400 border-zinc-700',
+    border: 'border-border-subtle',
+    badge: 'bg-surface-hover/50 text-fg-secondary border-border-subtle',
   }
 }

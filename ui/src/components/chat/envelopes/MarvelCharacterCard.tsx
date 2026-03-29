@@ -22,12 +22,12 @@ export function MarvelCharacterCard({ data, onSendMessage }: MarvelCharacterCard
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-red-500/20 bg-zinc-900/50 overflow-hidden max-w-md">
+      <div className="rounded-lg border border-red-500/20 bg-bg-elevated/50 overflow-hidden max-w-md">
         {/* Header */}
-        <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-zinc-800">
+        <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-border">
           <Shield className="h-4 w-4 text-red-400 shrink-0" />
-          <span className="text-sm font-semibold text-zinc-200">{data.name}</span>
-          <span className="ml-auto text-[10px] text-zinc-600 uppercase tracking-wider">
+          <span className="text-sm font-semibold text-fg">{data.name}</span>
+          <span className="ml-auto text-[10px] text-fg-faint uppercase tracking-wider">
             {data.source || 'Marvel'}
           </span>
         </div>
@@ -35,10 +35,10 @@ export function MarvelCharacterCard({ data, onSendMessage }: MarvelCharacterCard
         <div className="flex gap-3 p-4">
           {/* Character image */}
           {data.image_url && !imgError && (
-            <div className="shrink-0 w-24 h-36 rounded-md overflow-hidden bg-zinc-800">
+            <div className="shrink-0 w-24 h-36 rounded-md overflow-hidden bg-surface">
               {!imgLoaded && (
-                <div className="w-full h-full animate-pulse bg-zinc-800 flex items-center justify-center">
-                  <Shield className="h-6 w-6 text-zinc-700" />
+                <div className="w-full h-full animate-pulse bg-surface flex items-center justify-center">
+                  <Shield className="h-6 w-6 text-fg-faint" />
                 </div>
               )}
               <img
@@ -54,7 +54,7 @@ export function MarvelCharacterCard({ data, onSendMessage }: MarvelCharacterCard
           {/* Info */}
           <div className="min-w-0 flex-1 space-y-2">
             {/* Description */}
-            <p className="text-xs text-zinc-400 line-clamp-4">
+            <p className="text-xs text-fg-secondary line-clamp-4">
               {data.description || 'No description available.'}
             </p>
 
@@ -74,10 +74,10 @@ export function MarvelCharacterCard({ data, onSendMessage }: MarvelCharacterCard
 
         {/* Movie appearances */}
         {data.movies && data.movies.length > 0 && (
-          <div className="px-4 pb-3 border-t border-zinc-800 pt-3">
+          <div className="px-4 pb-3 border-t border-border pt-3">
             <div className="flex items-center gap-1.5 mb-2">
-              <Film className="h-3 w-3 text-zinc-500" />
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Movie Appearances</span>
+              <Film className="h-3 w-3 text-fg-muted" />
+              <span className="text-[10px] text-fg-muted uppercase tracking-wider font-medium">Movie Appearances</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {data.movies.map((movie) => (

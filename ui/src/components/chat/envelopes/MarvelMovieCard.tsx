@@ -25,12 +25,12 @@ export function MarvelMovieCard({ data }: MarvelMovieCardProps) {
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-blue-500/20 bg-zinc-900/50 overflow-hidden max-w-md">
+      <div className="rounded-lg border border-blue-500/20 bg-bg-elevated/50 overflow-hidden max-w-md">
         {/* Header */}
-        <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-zinc-800">
+        <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-border">
           <Film className="h-4 w-4 text-blue-400 shrink-0" />
-          <span className="text-sm font-semibold text-zinc-200">{data.title}</span>
-          <span className="ml-auto text-[10px] text-zinc-600 uppercase tracking-wider">
+          <span className="text-sm font-semibold text-fg">{data.title}</span>
+          <span className="ml-auto text-[10px] text-fg-faint uppercase tracking-wider">
             {data.source || 'TMDB'}
           </span>
         </div>
@@ -38,10 +38,10 @@ export function MarvelMovieCard({ data }: MarvelMovieCardProps) {
         <div className="flex gap-3 p-4">
           {/* Poster */}
           {data.poster_url && !imgError && (
-            <div className="shrink-0 w-24 h-36 rounded-md overflow-hidden bg-zinc-800">
+            <div className="shrink-0 w-24 h-36 rounded-md overflow-hidden bg-surface">
               {!imgLoaded && (
-                <div className="w-full h-full animate-pulse bg-zinc-800 flex items-center justify-center">
-                  <Film className="h-6 w-6 text-zinc-700" />
+                <div className="w-full h-full animate-pulse bg-surface flex items-center justify-center">
+                  <Film className="h-6 w-6 text-fg-faint" />
                 </div>
               )}
               <img
@@ -56,7 +56,7 @@ export function MarvelMovieCard({ data }: MarvelMovieCardProps) {
 
           {/* Info */}
           <div className="min-w-0 flex-1 space-y-2">
-            <p className="text-xs text-zinc-400 line-clamp-4">
+            <p className="text-xs text-fg-secondary line-clamp-4">
               {data.overview || 'No overview available.'}
             </p>
 
@@ -67,13 +67,13 @@ export function MarvelMovieCard({ data }: MarvelMovieCardProps) {
                 <span>{rating}</span>
               </div>
               {data.release_date && data.release_date !== 'N/A' && (
-                <div className="flex items-center gap-1 text-zinc-500">
+                <div className="flex items-center gap-1 text-fg-muted">
                   <Calendar className="h-3 w-3" />
                   <span>{data.release_date}</span>
                 </div>
               )}
               {data.vote_count > 0 && (
-                <div className="flex items-center gap-1 text-zinc-500">
+                <div className="flex items-center gap-1 text-fg-muted">
                   <Users className="h-3 w-3" />
                   <span>{data.vote_count.toLocaleString()} votes</span>
                 </div>

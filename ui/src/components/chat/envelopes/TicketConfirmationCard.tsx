@@ -20,7 +20,7 @@ interface TicketConfirmationCardProps {
 }
 
 const PRIORITY_STYLES: Record<string, { bg: string; text: string; border: string }> = {
-  low: { bg: 'bg-green-500/15', text: 'text-green-400', border: 'border-green-500/25' },
+  low: { bg: 'bg-green-500/15', text: 'text-success', border: 'border-green-500/25' },
   medium: { bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/25' },
   high: { bg: 'bg-red-500/15', text: 'text-red-400', border: 'border-red-500/25' },
   critical: { bg: 'bg-red-600/20', text: 'text-red-300', border: 'border-red-600/30' },
@@ -38,16 +38,16 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
   }
 
   return (
-    <div className="rounded-lg border border-green-500/30 bg-zinc-900/50 overflow-hidden">
+    <div className="rounded-lg border border-green-500/30 bg-bg-elevated/50 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between bg-green-500/5 px-4 py-3 border-b border-green-500/20">
         <div className="flex items-center gap-2">
-          <CheckCircle className="h-4 w-4 text-green-400" />
-          <span className="text-sm font-medium text-zinc-200">{ticket.id}</span>
-          <span className="text-sm text-zinc-400">&mdash;</span>
-          <span className="text-sm text-zinc-300 truncate">{ticket.title}</span>
+          <CheckCircle className="h-4 w-4 text-success" />
+          <span className="text-sm font-medium text-fg">{ticket.id}</span>
+          <span className="text-sm text-fg-secondary">&mdash;</span>
+          <span className="text-sm text-fg-secondary truncate">{ticket.title}</span>
         </div>
-        <span className="inline-block rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-green-400 capitalize">
+        <span className="inline-block rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-success capitalize">
           {ticket.status}
         </span>
       </div>
@@ -57,13 +57,13 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
         <div className="grid grid-cols-3 gap-3">
           {/* Category */}
           <div>
-            <span className="block text-xs font-medium text-zinc-400 mb-0.5">Category</span>
-            <span className="text-sm text-zinc-200 capitalize">{ticket.category}</span>
+            <span className="block text-xs font-medium text-fg-secondary mb-0.5">Category</span>
+            <span className="text-sm text-fg capitalize">{ticket.category}</span>
           </div>
 
           {/* Priority */}
           <div>
-            <span className="block text-xs font-medium text-zinc-400 mb-0.5">Priority</span>
+            <span className="block text-xs font-medium text-fg-secondary mb-0.5">Priority</span>
             <span
               className={`inline-block rounded-full px-2 py-0.5 text-xs capitalize border ${prioStyle?.bg} ${prioStyle?.text} ${prioStyle?.border}`}
             >
@@ -73,19 +73,19 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
 
           {/* Routing */}
           <div>
-            <span className="block text-xs font-medium text-zinc-400 mb-0.5">Routing</span>
-            <span className="text-sm text-zinc-200">{ticket.routing}</span>
+            <span className="block text-xs font-medium text-fg-secondary mb-0.5">Routing</span>
+            <span className="text-sm text-fg">{ticket.routing}</span>
           </div>
         </div>
 
         {/* Description */}
         <div>
-          <span className="block text-xs font-medium text-zinc-400 mb-0.5">Description</span>
-          <p className="text-sm text-zinc-300">{ticket.description}</p>
+          <span className="block text-xs font-medium text-fg-secondary mb-0.5">Description</span>
+          <p className="text-sm text-fg-secondary">{ticket.description}</p>
         </div>
 
         {/* Requester & Date */}
-        <div className="flex items-center gap-4 text-xs text-zinc-500">
+        <div className="flex items-center gap-4 text-xs text-fg-muted">
           <span>Requester: {ticket.requester || 'You'}</span>
           <span>Created: {new Date(ticket.created_at).toLocaleString()}</span>
         </div>
@@ -94,7 +94,7 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
         <div className="flex items-center gap-3 pt-1">
           <Button
             size="sm"
-            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs px-3 py-1 h-7"
+            className="bg-surface hover:bg-surface-hover text-fg text-xs px-3 py-1 h-7"
             onClick={handleDownload}
           >
             <Download className="mr-1.5 h-3 w-3" />
@@ -103,9 +103,9 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
         </div>
 
         {/* Production note */}
-        <div className="flex items-start gap-2 rounded-md border border-zinc-700 bg-zinc-800/50 px-3 py-2">
-          <Info className="mt-0.5 h-3 w-3 shrink-0 text-zinc-500" />
-          <span className="text-xs text-zinc-500">
+        <div className="flex items-start gap-2 rounded-md border border-border-subtle bg-surface/50 px-3 py-2">
+          <Info className="mt-0.5 h-3 w-3 shrink-0 text-fg-muted" />
+          <span className="text-xs text-fg-muted">
             In production, this ticket would be automatically created in BMC Helix ITSM
           </span>
         </div>

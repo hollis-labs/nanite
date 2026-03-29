@@ -1,10 +1,14 @@
-import { useState, useCallback } from 'react'
+import { Suspense, useState, useCallback } from 'react'
 import { LayoutGrid, Mail, Package, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useQuery } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
+import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { resolveIcon } from '@/lib/icons'
+import { getSlotComponent } from '@/generated/plugin-slot-components'
 import type { UserSettings } from '@/lib/types'
 import { WidgetRenderer } from './widgets/WidgetRenderer'
 import { DEFAULT_WIDGET_ORDER } from '@/generated/plugin-widgets'
@@ -13,7 +17,7 @@ import { InboxContent } from './a2a/InboxContent'
 import { api } from '@/lib/api'
 import type { PluginUIComponent } from '@/lib/types'
 
-const TABS = [
+const CORE_TABS = [
   { id: 'widgets' as const, icon: LayoutGrid, label: 'Widgets' },
   { id: 'inbox' as const, icon: Mail, label: 'Inbox' },
   { id: 'artifacts' as const, icon: Package, label: 'Artifacts' },
@@ -31,6 +35,7 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
   const settingsMutation = useSettingsMutation()
   const recoverMode = settings?.recover_mode ?? false
   const [editMode, setEditMode] = useState(false)
+  const pluginTabs = usePluginSlots('right-rail-tab')
 
   // Dynamic title for artifacts preview
   const [artifactsTitle, setArtifactsTitle] = useState('Artifacts')
@@ -99,8 +104,18 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
     } as Partial<UserSettings>)
   }, [settings?.ext_settings, settingsMutation])
 
+  // Build merged tabs list
+  const allTabs = [
+    ...CORE_TABS.map((t) => ({ ...t })),
+    ...pluginTabs.map((entry) => ({
+      id: entry.id,
+      icon: resolveIcon(entry.icon),
+      label: entry.label,
+    })),
+  ]
+
   // Resolve display title
-  const displayTitle = activeTab === 'artifacts' ? artifactsTitle : TABS.find(t => t.id === activeTab)?.label ?? 'Widgets'
+  const displayTitle = activeTab === 'artifacts' ? artifactsTitle : allTabs.find(t => t.id === activeTab)?.label ?? 'Widgets'
 
   return (
     <aside
@@ -128,14 +143,14 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
                 </button>
               </Tooltip>
             )}
-            {TABS.map((tab) => {
+            {allTabs.map((tab) => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
               return (
                 <Tooltip key={tab.id} content={tab.label} side="bottom">
                   <button
                     type="button"
-                    onClick={() => setTab(tab.id)}
+                    onClick={() => setTab(tab.id as any)}
                     className={`p-1.5 rounded transition-colors ${
                       isActive
                         ? 'text-fg bg-surface'
@@ -168,13 +183,15 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
                     >
                       <GripVertical className="size-3.5 text-fg-faint cursor-grab shrink-0" />
                       <span className="text-xs text-fg flex-1 truncate">{meta?.name || id}</span>
-                      <button
-                        type="button"
-                        onClick={() => toggleWidgetVisibility(id)}
-                        className="p-1 rounded text-fg-muted hover:text-fg transition-colors"
-                      >
-                        {isVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-                      </button>
+                      <Tooltip content={isVisible ? 'Hide widget' : 'Show widget'} side="left">
+                        <button
+                          type="button"
+                          onClick={() => toggleWidgetVisibility(id)}
+                          className="p-1 rounded text-fg-muted hover:text-fg transition-colors"
+                        >
+                          {isVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                        </button>
+                      </Tooltip>
                     </div>
                   )
                 })
@@ -194,6 +211,19 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
         {activeTab === 'inbox' && (
           <InboxContent agentId={inboxAgentId} />
         )}
+
+        {/* Plugin-registered right rail tab content */}
+        {!['widgets', 'artifacts', 'inbox'].includes(activeTab) && (() => {
+          const pluginEntry = pluginTabs.find((e) => e.id === activeTab)
+          if (!pluginEntry?.component) return null
+          const PluginComponent = getSlotComponent(pluginEntry.component)
+          if (!PluginComponent) return null
+          return (
+            <Suspense fallback={<Skeleton className="h-32 w-full m-3" />}>
+              <PluginComponent {...(pluginEntry.props ?? {})} />
+            </Suspense>
+          )
+        })()}
       </div>
     </aside>
   )

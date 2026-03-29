@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Bot, ChevronDown, SendHorizonal, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/tooltip'
 import { UserProfileMenu } from './UserProfileMenu'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useModels, useProviders } from '@/hooks/useSettings'
+import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { resolveIcon } from '@/lib/icons'
 import { api } from '@/lib/api'
 
 const PROVIDER_ICONS: Record<string, string> = {
@@ -98,6 +101,8 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
     }
   }, [activeSessionId, setActiveModel, allModels])
 
+  const pluginButtons = usePluginSlots('composer-toolbar')
+
   return (
     <div className="flex items-center justify-between px-3 py-1.5 bg-composer-bar border-t border-composer-border">
       {/* Left: User profile + Model picker */}
@@ -147,33 +152,54 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
       </div>
       </div>
 
+      {/* Center: Plugin-registered toolbar items */}
+      {pluginButtons.length > 0 && (
+        <div className="flex items-center gap-0.5">
+          {pluginButtons.map((entry) => {
+            const PluginIcon = resolveIcon(entry.icon)
+            return (
+              <Tooltip key={entry.id} content={entry.label} side="top">
+                <button
+                  type="button"
+                  className="p-1 rounded text-composer-fg-muted hover:text-composer-fg hover:bg-composer-hover transition-colors"
+                >
+                  <PluginIcon className="w-3.5 h-3.5" />
+                </button>
+              </Tooltip>
+            )
+          })}
+        </div>
+      )}
+
       {/* Right: Send/Stop */}
       <div className="flex items-center gap-1">
         {isStreaming ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-7 h-7 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
-            onClick={onStop}
-            title="Stop generating"
-          >
-            <Square className="w-3.5 h-3.5" />
-          </Button>
+          <Tooltip content="Stop generating" side="top">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-7 h-7 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+              onClick={onStop}
+            >
+              <Square className="w-3.5 h-3.5" />
+            </Button>
+          </Tooltip>
         ) : (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`w-7 h-7 transition-colors ${
-              hasContent
-                ? 'text-accent hover:text-accent-hover hover:bg-accent-hover/10'
-                : 'text-composer-fg-muted'
-            }`}
-            disabled={!hasContent}
-            onClick={onSend}
-            title="Send (Enter)"
-          >
-            <SendHorizonal className="w-3.5 h-3.5" />
-          </Button>
+          <Tooltip content="Send (Enter)" side="top">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`w-7 h-7 transition-colors ${
+                hasContent
+                  ? 'text-accent hover:text-accent-hover hover:bg-accent-hover/10'
+                  : 'text-composer-fg-muted'
+              }`}
+              disabled={!hasContent}
+              onClick={onSend}
+            >
+              <SendHorizonal className="w-3.5 h-3.5" />
+            </Button>
+          </Tooltip>
         )}
       </div>
     </div>

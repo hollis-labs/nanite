@@ -98,6 +98,13 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Emit plugin event: plugin config changed.
+	if a.PluginHost != nil {
+		for key := range incoming {
+			go a.PluginHost.EmitConfigChanged(pluginID, key, "")
+		}
+	}
+
 	// Return the full settings after merge.
 	updated, err := a.Store.GetPluginSettings(pluginID)
 	if err != nil {

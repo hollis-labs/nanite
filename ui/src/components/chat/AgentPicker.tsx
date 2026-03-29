@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Search, Loader2, User, Plus } from 'lucide-react'
+import { X, Search, User, Plus } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/useAppStore'
 import { SourceBadge } from '@/components/agents/SourceBadge'
@@ -81,8 +82,16 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
         {/* List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-1 max-h-64">
           {isLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 className="w-4 h-4 animate-spin text-fg-muted" />
+            <div className="space-y-1 p-1">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 p-2">
+                  <Skeleton className="w-8 h-8 rounded-full" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-3.5 w-24" />
+                    <Skeleton className="h-2.5 w-36" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filteredAgents.length === 0 ? (
             <p className="text-sm text-fg-muted text-center py-4">

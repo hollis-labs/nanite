@@ -6,7 +6,7 @@ import {
   useCallback,
   useMemo,
 } from 'react'
-import type { SlashCommand } from './SlashCommandExtension'
+import type { SlashCommand, SlashCommandArg } from './SlashCommandExtension'
 
 interface SlashCommandMenuProps {
   items: SlashCommand[]
@@ -32,6 +32,27 @@ function groupByCategory(items: SlashCommand[]) {
     seen.get(cat)!.push(item)
   }
   return groups
+}
+
+function ArgHints({ args }: { args: SlashCommandArg[] }) {
+  return (
+    <span className="flex items-center gap-1 ml-1">
+      {args.map((arg) => (
+        <span
+          key={arg.name}
+          className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+            arg.required
+              ? 'text-accent/80 bg-accent/5 border border-accent/15'
+              : 'text-composer-fg-muted bg-composer-hover/50'
+          }`}
+          title={arg.description || `${arg.type ?? 'string'}${arg.options ? `: ${arg.options.join('|')}` : ''}`}
+        >
+          {arg.required ? arg.name : `[${arg.name}]`}
+          {arg.options && <span className="text-composer-fg-muted">*</span>}
+        </span>
+      ))}
+    </span>
+  )
 }
 
 export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenuProps>(
@@ -89,7 +110,7 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenu
     let flatIndex = -1
 
     return (
-      <div className="bg-composer border border-composer-border-focus rounded-xl shadow-xl z-50 py-1 w-72 max-h-72 overflow-y-auto">
+      <div className="bg-composer border border-composer-border-focus rounded-xl shadow-xl z-50 py-1 w-80 max-h-80 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.category}>
             <div className="px-3 py-1.5 text-[10px] font-medium text-composer-fg-muted uppercase tracking-wider">
@@ -103,17 +124,22 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenu
                   key={item.name}
                   onClick={() => selectItem(idx)}
                   onMouseEnter={() => setSelectedIndex(idx)}
-                  className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 transition-colors ${
+                  className={`w-full text-left px-3 py-1.5 transition-colors ${
                     idx === selectedIndex
                       ? 'bg-composer-hover text-composer-fg'
                       : 'text-composer-fg-secondary hover:bg-composer-hover/60 hover:text-composer-fg'
                   }`}
                 >
-                  <span className="text-sm font-mono text-accent shrink-0 w-20 truncate">/{item.name}</span>
-                  <span className="text-xs text-composer-fg-muted truncate">{item.description}</span>
-                  {item.source === 'plugin' && (
-                    <span className="text-[9px] text-composer-fg-muted bg-composer-hover rounded px-1 py-0.5 shrink-0 ml-auto">plugin</span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-mono text-accent shrink-0">/{item.name}</span>
+                    {item.args && item.args.length > 0 && <ArgHints args={item.args} />}
+                    {item.source !== 'builtin' && (
+                      <span className="text-[9px] text-composer-fg-muted bg-composer-hover rounded px-1 py-0.5 shrink-0 ml-auto">
+                        {item.source.startsWith('custom-action:') ? 'action' : 'plugin'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-composer-fg-muted mt-0.5 truncate">{item.description}</div>
                 </button>
               )
             })}

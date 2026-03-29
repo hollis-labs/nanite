@@ -22,11 +22,11 @@ const LABEL_STYLES: Record<string, string> = {
   IMPORTANT: 'bg-red-500/15 text-red-400 border-red-500/25',
   STARRED: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/25',
   SENT: 'bg-success/15 text-success border-success/25',
-  DRAFT: 'bg-zinc-500/15 text-fg-secondary border-zinc-500/25',
+  DRAFT: 'bg-bg-elevated text-fg-secondary border-border-subtle',
 }
 
 function getLabelStyle(label: string): string {
-  return LABEL_STYLES[label] || 'bg-zinc-500/15 text-fg-secondary border-zinc-500/25'
+  return LABEL_STYLES[label] || 'bg-bg-elevated text-fg-secondary border-border-subtle'
 }
 
 export function EmailPreviewCard({ data }: EmailPreviewCardProps) {

@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useMemo, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useNavigationStore } from '@/stores/useNavigationStore'
@@ -41,7 +41,7 @@ export const SHORTCUT_LABELS: Record<string, string> = {
 }
 
 /** Check if a keyboard event matches a binding string like "mod+b" or "mod+shift+k". */
-function matchesBinding(e: KeyboardEvent, binding: string): boolean {
+export function matchesBinding(e: KeyboardEvent, binding: string): boolean {
   const parts = binding.split('+')
   const key = parts[parts.length - 1]
   const needsMod = parts.includes('mod')
@@ -56,6 +56,30 @@ function matchesBinding(e: KeyboardEvent, binding: string): boolean {
   return e.key.toLowerCase() === key
 }
 
+/** Hook to fetch plugin keybindings */
+export function usePluginKeybindings() {
+  return useQuery({
+    queryKey: ['plugin-keybindings'],
+    queryFn: async () => {
+      const data = await api.listPluginKeybindings()
+      return data.keybindings
+    },
+    staleTime: 60_000,
+  })
+}
+
+/** Hook to fetch custom actions (for keybinding registration) */
+export function useActionKeybindings() {
+  return useQuery({
+    queryKey: ['actions'],
+    queryFn: async () => {
+      const data = await api.listActions()
+      return data.actions.filter((a) => a.enabled && a.keybinding)
+    },
+    staleTime: 60_000,
+  })
+}
+
 export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const toggleLeftSidebar = useLayoutStore((s) => s.toggleLeftSidebar)
   const toggleRightRail = useLayoutStore((s) => s.toggleRightRail)
@@ -67,6 +91,10 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
 
   const { data: userSettings } = useSettings()
   const { focusComposer, sessions = [], openCommandPalette, openSearch } = options
+
+  // Fetch plugin keybindings and action keybindings
+  const { data: pluginKeybindings } = usePluginKeybindings()
+  const { data: actionBindings } = useActionKeybindings()
 
   // Merge user-customized shortcuts with defaults.
   const bindings = useMemo(() => {
@@ -142,16 +170,15 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
         e.preventDefault()
         const depth = navDepth()
         if (depth > 0) {
-          // Pop the nav stack — the component watching the stack handles the actual navigation
           navPop()
         } else if (currentPage === 'settings') {
-          // Bottom of stack on settings → go to chat
           setCurrentPage('chat')
           window.location.hash = '#chat'
         }
         return
       }
 
+      // Core bindings
       if (matchesBinding(e, bindings.toggle_left_sidebar)) {
         e.preventDefault()
         toggleLeftSidebar()
@@ -179,6 +206,30 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
       } else if (matchesBinding(e, bindings.toggle_artifacts)) {
         e.preventDefault()
         toggleArtifactsDrawer()
+      } else {
+        // Check custom action keybindings
+        if (actionBindings && activeSessionId) {
+          for (const action of actionBindings) {
+            if (matchesBinding(e, action.keybinding)) {
+              e.preventDefault()
+              void api.executeAction(action.id, activeSessionId)
+              return
+            }
+          }
+        }
+        // Check plugin keybindings
+        if (pluginKeybindings) {
+          for (const kb of pluginKeybindings) {
+            if (matchesBinding(e, kb.key)) {
+              e.preventDefault()
+              // Plugin keybindings with action="command" execute the named command
+              if (kb.action === 'command' && kb.action_value && activeSessionId) {
+                void api.executeCommand(kb.action_value, activeSessionId, '')
+              }
+              return
+            }
+          }
+        }
       }
     }
 
@@ -198,6 +249,9 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     currentPage,
     setCurrentPage,
     openCommandPalette,
+    actionBindings,
+    pluginKeybindings,
+    activeSessionId,
   ])
 
   // Double-shift to open search

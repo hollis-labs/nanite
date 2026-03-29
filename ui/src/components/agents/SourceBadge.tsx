@@ -3,7 +3,7 @@ interface SourceBadgeProps {
   className?: string
 }
 
-const SOURCE_LABELS: Record<string, string> = {
+export const SOURCE_LABELS: Record<string, string> = {
   seed: 'system',
   api: 'api',
   agentrc: 'agentrc',

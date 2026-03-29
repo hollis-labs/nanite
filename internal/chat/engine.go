@@ -25,6 +25,21 @@ import (
 	"github.com/hollis-labs/conduit/internal/truncate"
 )
 
+// PluginEventEmitter is the subset of plugin.Host used by the chat engine
+// for event emission. Defined here as an interface to avoid importing the
+// plugin package (which would create a circular dependency).
+type PluginEventEmitter interface {
+	EmitSessionStart(sessionID, agentID, mode string)
+	EmitSessionEnd(sessionID string)
+	EmitAgentSwitched(sessionID, previousAgentID, newAgentID string)
+	EmitMessageSent(sessionID, messageID, content, role string, tokensUsed int)
+	EmitMessageReceived(sessionID, messageID, content string, responseTime int64)
+	EmitToolCalled(sessionID, toolName string, args, result interface{})
+	EmitToolFailed(sessionID, toolName string, args interface{}, err string)
+	EmitModeChanged(sessionID, previousMode, newMode string)
+	EmitPreHook(eventType, sessionID string, data map[string]interface{}) bool
+}
+
 // maxToolIterations is the maximum number of tool-use loop iterations.
 // 10 allows complex multi-tool tasks while still preventing runaway loops.
 const maxToolIterations = 10
@@ -157,6 +172,7 @@ type Engine struct {
 	Activity        *ActivityEmitter
 	AppConfig       *config.AppConfig // app-level tunables (presence throttle, artifact detection)
 	OutputFilters   *filter.Chain     // post-LLM output filters (nil = no filtering)
+	PluginHost          PluginEventEmitter // plugin event emission (nil-safe)
 	ProcessTracker      *ProcessTracker
 	Commands            *CommandRegistry
 	cliActiveLastEmit   sync.Map // map[sessionID]time.Time — throttle cli_active presence
@@ -188,6 +204,9 @@ func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
 		utilityModel = "claude-sonnet-4-20250514"
 	}
 
+	cmds := NewCommandRegistry()
+	cmds.RegisterServerCommands(s, providers)
+
 	return &Engine{
 		Store:           s,
 		Providers:       providers,
@@ -195,7 +214,7 @@ func NewEngine(s *store.Store, providers *provider.Registry) *Engine {
 		UtilityModel:    utilityModel,
 		Broker:          NewContextClient(s),
 		ProcessTracker:  NewProcessTracker(),
-		Commands:        NewCommandRegistry(),
+		Commands:        cmds,
 	}
 }
 
@@ -546,6 +565,10 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Notify Volon that this chat session is active.
 	if e.Activity != nil {
 		go e.Activity.EmitSessionStart(ctx, sessionID, agent.ID, model)
+	}
+	// Emit plugin event: session started.
+	if e.PluginHost != nil {
+		go e.PluginHost.EmitSessionStart(sessionID, agent.ID, model)
 	}
 
 	// Get available tools — filter by agent's assigned skills, then ToolClient, then MCP Manager.
@@ -1048,6 +1071,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					if e.Activity != nil {
 						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, false, 0)
 					}
+					if e.PluginHost != nil {
+						go e.PluginHost.EmitToolFailed(sessionID, tu.Name, tu.Input, execErr.Error())
+					}
 				} else {
 					resultText = result
 					toolSpan.SetAttributes(attribute.Int("conduit.tool.result_len", len(result)))
@@ -1055,6 +1081,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 						tu.Name, fmt.Sprintf(`{"result_len":%d,"agent_id":%q}`, len(result), agentID))
 					if e.Activity != nil {
 						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, true, len(result))
+					}
+					if e.PluginHost != nil {
+						go e.PluginHost.EmitToolCalled(sessionID, tu.Name, tu.Input, result)
 					}
 					// Capture envelope data from any tool result.
 					// Tools embed envelopes via <!--ENVELOPE_DATA:...:ENVELOPE_DATA--> markers.
@@ -1088,6 +1117,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					if e.Activity != nil {
 						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, false, 0)
 					}
+					if e.PluginHost != nil {
+						go e.PluginHost.EmitToolFailed(sessionID, tu.Name, tu.Input, execErr.Error())
+					}
 				} else {
 					resultText = result
 					toolSpan.SetAttributes(attribute.Int("conduit.tool.result_len", len(result)))
@@ -1095,6 +1127,9 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 						tu.Name, fmt.Sprintf(`{"result_len":%d}`, len(result)))
 					if e.Activity != nil {
 						go e.Activity.EmitToolCall(ctx, sessionID, tu.Name, true, len(result))
+					}
+					if e.PluginHost != nil {
+						go e.PluginHost.EmitToolCalled(sessionID, tu.Name, tu.Input, result)
 					}
 					// Capture envelope data (parity with ToolClient path).
 					if eStart := strings.Index(result, "<!--ENVELOPE_DATA:"); eStart >= 0 {
@@ -1429,6 +1464,12 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Notify Volon that the response is complete.
 	if e.Activity != nil && finalUsage != nil {
 		go e.Activity.EmitResponseComplete(ctx, sessionID, agent.ID, model, finalUsage.InputTokens, finalUsage.OutputTokens)
+	}
+	// Emit plugin events: message received + session end.
+	if e.PluginHost != nil {
+		elapsed := time.Since(startTime).Milliseconds()
+		go e.PluginHost.EmitMessageReceived(sessionID, assistantMsgID, "", elapsed)
+		go e.PluginHost.EmitSessionEnd(sessionID)
 	}
 
 	// Auto-title: if session has no title, generate one asynchronously.

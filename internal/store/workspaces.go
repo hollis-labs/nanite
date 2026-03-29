@@ -124,6 +124,18 @@ func (s *Store) ListProjects(workspaceID string) ([]Project, error) {
 	return out, rows.Err()
 }
 
+// GetProject returns a single project by ID.
+func (s *Store) GetProject(id string) (*Project, error) {
+	var p Project
+	err := s.DB.QueryRow(
+		`SELECT id, workspace_id, name, COALESCE(description,''), COALESCE(repo_path,''), settings, sort_order, created_at, updated_at FROM projects WHERE id = ?`, id,
+	).Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.Description, &p.RepoPath, &p.Settings, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get project %s: %w", id, err)
+	}
+	return &p, nil
+}
+
 // CreateProject inserts a new project.
 func (s *Store) CreateProject(p *Project) error {
 	now := time.Now().UTC().Format(time.RFC3339)

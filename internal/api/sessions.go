@@ -177,6 +177,12 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Emit plugin event when session is archived via update.
+	if req.Status != nil && *req.Status == "archived" && a.PluginHost != nil {
+		go a.PluginHost.EmitSessionArchived(id)
+	}
+
 	a.jsonResp(w, http.StatusOK, existing)
 }
 
@@ -200,6 +206,11 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	// Emit session ended event to Volon (fire-and-forget).
 	if a.Engine != nil && a.Engine.Activity != nil {
 		go a.Engine.Activity.EmitSessionEnded(r.Context(), id)
+	}
+
+	// Emit plugin event: session archived.
+	if a.PluginHost != nil {
+		go a.PluginHost.EmitSessionArchived(id)
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
@@ -233,10 +244,17 @@ func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	previousMode := sa.Mode
+
 	// Update the mode.
 	if err := a.Store.SetSessionAgentMode(sessionID, sa.AgentID, req.Mode); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Emit plugin event: mode changed.
+	if a.PluginHost != nil {
+		go a.PluginHost.EmitModeChanged(sessionID, previousMode, req.Mode)
 	}
 
 	// Return updated session info.

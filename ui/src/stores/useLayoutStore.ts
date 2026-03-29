@@ -12,7 +12,7 @@ interface LayoutState {
   taskThreadOpen: boolean
   toolDrawerState: ToolDrawerState
   toolDrawerHeight: number
-  currentPage: 'chat' | 'settings'
+  currentPage: string
   theme: Theme
   toggleLeftSidebar: () => void
   toggleRightRail: () => void
@@ -25,7 +25,7 @@ interface LayoutState {
   setTaskThread: (open: boolean) => void
   setToolDrawerState: (state: ToolDrawerState) => void
   setToolDrawerHeight: (height: number) => void
-  setCurrentPage: (page: 'chat' | 'settings') => void
+  setCurrentPage: (page: string) => void
   toggleTheme: () => void
   setTheme: (theme: Theme) => void
 }

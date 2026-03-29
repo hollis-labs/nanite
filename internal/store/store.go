@@ -83,6 +83,8 @@ func (s *Store) migrate() error {
 		"migrations/016_add_settings_mode_flags.sql",
 		"migrations/017_agent_schema_v2.sql",
 		"migrations/018_frontend_unblock.sql",
+		"migrations/019_connector_triggers.sql",
+		"migrations/020_custom_actions.sql",
 	}
 
 	for _, f := range files {

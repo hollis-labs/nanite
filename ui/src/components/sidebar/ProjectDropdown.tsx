@@ -32,26 +32,20 @@ export function ProjectDropdown({ workspaceId }: ProjectDropdownProps) {
 
   return (
     <>
-      <div className="px-3 py-2 border-b border-border">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-left hover:bg-surface/50 transition-colors outline-none">
-              {selectedProject ? (
-                <FolderOpen className="size-3.5 text-accent shrink-0" />
-              ) : (
-                <MessageSquare className="size-3.5 text-fg-muted shrink-0" />
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-fg truncate">
-                  {selectedProject?.name || 'All Chats'}
-                </div>
-                {selectedProject?.description && (
-                  <div className="text-[10px] text-fg-faint truncate">{selectedProject.description}</div>
-                )}
-              </div>
-              <ChevronsUpDown className="size-3 text-fg-faint shrink-0" />
-            </button>
-          </DropdownMenuTrigger>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left hover:bg-surface/50 transition-colors outline-none">
+            {selectedProject ? (
+              <FolderOpen className="size-3.5 text-fg-secondary shrink-0" />
+            ) : (
+              <MessageSquare className="size-3.5 text-fg-muted shrink-0" />
+            )}
+            <span className="text-sm font-semibold text-fg truncate flex-1">
+              {selectedProject?.name || 'All Chats'}
+            </span>
+            <ChevronsUpDown className="size-3 text-fg-faint shrink-0" />
+          </button>
+        </DropdownMenuTrigger>
 
           <DropdownMenuContent
             align="start"
@@ -64,7 +58,7 @@ export function ProjectDropdown({ workspaceId }: ProjectDropdownProps) {
               >
                 <MessageSquare className="size-3.5 shrink-0" />
                 <span className="flex-1">All Chats</span>
-                {!activeProjectId && <Check className="size-3 text-accent" />}
+                {!activeProjectId && <Check className="size-3 text-success" />}
               </DropdownMenuItem>
             </DropdownMenuGroup>
 
@@ -85,7 +79,7 @@ export function ProjectDropdown({ workspaceId }: ProjectDropdownProps) {
                           <div className="text-[10px] text-fg-faint truncate">{project.description}</div>
                         )}
                       </div>
-                      {activeProjectId === project.id && <Check className="size-3 text-accent shrink-0" />}
+                      {activeProjectId === project.id && <Check className="size-3 text-success shrink-0" />}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
@@ -102,7 +96,6 @@ export function ProjectDropdown({ workspaceId }: ProjectDropdownProps) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
 
       {showCreateModal && (
         <CreateProjectModal

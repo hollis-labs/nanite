@@ -1,6 +1,7 @@
 import { Wrench, RefreshCw, Loader2, Server } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { Widget } from './Widget'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import type { ToolDefinition, ServerInfo } from '@/lib/types'
@@ -24,12 +25,21 @@ export function ToolsWidget() {
   return (
     <Widget id="tools" title="Tools" icon={Wrench}>
       <div className="space-y-2.5">
-        {isLoading ? (
+        {isLoading && !isRefreshing ? (
+          <div className="space-y-2.5">
+            <div className="flex justify-between items-center">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-3 w-8" />
+            </div>
+            <div className="flex justify-between items-center">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+          </div>
+        ) : isRefreshing ? (
           <div className="flex items-center justify-center py-3">
             <Loader2 className="w-4 h-4 animate-spin text-fg-muted" />
-            <span className="ml-2 text-xs text-fg-muted">
-              {isRefreshing ? 'Refreshing tools...' : 'Loading...'}
-            </span>
+            <span className="ml-2 text-xs text-fg-muted">Refreshing tools...</span>
           </div>
         ) : (
           <>

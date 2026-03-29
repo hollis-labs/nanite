@@ -386,8 +386,22 @@ func cmdServe(args []string) {
 	pluginHost.RegisterService("toolclient", tb)
 	log.Println("plugin host initialized")
 
-	// Wire plugin host into the API for command registration.
+	// Wire plugin host into the API, engine, and command registry.
 	a.PluginHost = pluginHost
+	engine.PluginHost = pluginHost
+	pluginHost.SetCommandRegistry(engine.Commands)
+
+	// Register auto-trigger handler for custom actions.
+	plugin.RegisterAutoTriggerHandler(pluginHost)
+
+	// Register existing custom actions as slash commands.
+	if actions, err := s.ListCustomActions(); err == nil {
+		for _, action := range actions {
+			if action.SlashCommand != "" && action.Enabled {
+				a.RegisterActionCommand(&action)
+			}
+		}
+	}
 
 	// Start HTTP server — this sets the router on the plugin host.
 	srv := server.New(s, a, *port, *dev, pluginHost)

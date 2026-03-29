@@ -6,10 +6,12 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useSettings } from '@/hooks/useSettings'
+import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { resolveIcon } from '@/lib/icons'
 import { api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
 
-const navItems = [
+const CORE_NAV_ITEMS = [
   { icon: MessageSquare, label: 'Chat', id: 'chat' },
   { icon: Search, label: 'Search', id: 'search' },
   { icon: Plus, label: 'New Chat', id: 'new' },
@@ -20,6 +22,7 @@ export function NavRail() {
   const [activeItem, setActiveItem] = useState<string>('chat')
   const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const pluginNavItems = usePluginSlots('nav-rail')
 
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
@@ -158,7 +161,8 @@ export function NavRail() {
       <div className="w-8 border-t border-border-subtle mb-2" />
 
       <div className="flex flex-col items-center gap-1 flex-1">
-        {navItems.map(({ icon: Icon, label, id }) => {
+        {/* Core nav items */}
+        {CORE_NAV_ITEMS.map(({ icon: Icon, label, id }) => {
           const isActive = id === 'settings' ? currentPage === 'settings' :
                           id === 'chat' ? currentPage === 'chat' :
                           activeItem === id
@@ -189,6 +193,31 @@ export function NavRail() {
                 }}
               >
                 <Icon className="w-5 h-5" />
+              </Button>
+            </Tooltip>
+          )
+        })}
+
+        {/* Plugin-registered nav items */}
+        {pluginNavItems.map((entry) => {
+          const PluginIcon = resolveIcon(entry.icon)
+          const isActive = currentPage === entry.id
+          return (
+            <Tooltip key={entry.id} content={entry.label} side="right">
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`w-10 h-10 rounded-lg ${
+                  isActive
+                    ? 'bg-surface text-accent'
+                    : 'text-fg-secondary hover:text-fg'
+                }`}
+                onClick={() => {
+                  setCurrentPage(entry.id as any)
+                  setActiveItem(entry.id)
+                }}
+              >
+                <PluginIcon className="w-5 h-5" />
               </Button>
             </Tooltip>
           )

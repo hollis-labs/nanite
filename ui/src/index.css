@@ -47,6 +47,22 @@
   /* Focus ring */
   --color-ring: var(--c-ring);
 
+  /* shadcn standard tokens — mapped to our semantic theme */
+  --color-popover: var(--c-bg-elevated);
+  --color-popover-foreground: var(--c-fg);
+  --color-muted: var(--c-surface);
+  --color-muted-foreground: var(--c-fg-muted);
+  --color-card: var(--c-bg-elevated);
+  --color-card-foreground: var(--c-fg);
+  --color-primary: var(--c-accent);
+  --color-primary-foreground: var(--c-accent-fg);
+  --color-secondary: var(--c-surface);
+  --color-secondary-foreground: var(--c-fg);
+  --color-destructive: var(--c-accent);
+  --color-input: var(--c-border-subtle);
+  --color-background: var(--c-bg);
+  --color-foreground: var(--c-fg);
+
   /* Composer — always dark, same in both themes */
   --color-composer: var(--c-composer);
   --color-composer-bar: var(--c-composer-bar);

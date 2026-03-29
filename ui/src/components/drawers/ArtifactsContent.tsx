@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FileText, FileCode, FileImage, File, Download, Package, Eye, ArrowLeft } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import type { Artifact } from '@/lib/types'
@@ -61,8 +62,10 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="w-5 h-5 border-2 border-border-subtle border-t-fg-muted rounded-full animate-spin" />
+      <div className="p-4 space-y-3">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-5/6" />
       </div>
     )
   }
@@ -178,8 +181,16 @@ export function ArtifactsContent({ onTitleChange }: ArtifactsContentProps) {
           ) : (
             <>
               {isLoading && (
-                <div className="flex items-center justify-center py-12">
-                  <div className="w-5 h-5 border-2 border-border-subtle border-t-fg-muted rounded-full animate-spin" />
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 rounded-sm">
+                      <Skeleton className="w-5 h-5 rounded" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-3.5 w-32" />
+                        <Skeleton className="h-2.5 w-20" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 

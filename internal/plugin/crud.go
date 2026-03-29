@@ -2,9 +2,9 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/hollis-labs/fragments-engine/plugin"
 )
@@ -31,8 +31,7 @@ func (h *Host) handleCRUDList(w http.ResponseWriter, r *http.Request, handler pl
 
 	resources, err := handler.List(r.Context(), filters)
 	if err != nil {
-		h.logger.Error("CRUD list failed", "error", err)
-		h.errorResp(w, http.StatusInternalServerError, "Failed to list resources")
+		h.crudErrorResp(w, err, "Failed to list resources")
 		return
 	}
 
@@ -53,8 +52,7 @@ func (h *Host) handleCRUDCreate(w http.ResponseWriter, r *http.Request, handler 
 
 	created, err := handler.Create(r.Context(), resource)
 	if err != nil {
-		h.logger.Error("CRUD create failed", "error", err)
-		h.errorResp(w, http.StatusInternalServerError, "Failed to create resource")
+		h.crudErrorResp(w, err, "Failed to create resource")
 		return
 	}
 
@@ -71,12 +69,7 @@ func (h *Host) handleCRUDRead(w http.ResponseWriter, r *http.Request, handler pl
 
 	resource, err := handler.Read(r.Context(), id)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			h.errorResp(w, http.StatusNotFound, "Resource not found")
-		} else {
-			h.logger.Error("CRUD read failed", "id", id, "error", err)
-			h.errorResp(w, http.StatusInternalServerError, "Failed to read resource")
-		}
+		h.crudErrorResp(w, err, "Failed to read resource")
 		return
 	}
 
@@ -100,12 +93,7 @@ func (h *Host) handleCRUDUpdate(w http.ResponseWriter, r *http.Request, handler 
 
 	updated, err := handler.Update(r.Context(), id, resource)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			h.errorResp(w, http.StatusNotFound, "Resource not found")
-		} else {
-			h.logger.Error("CRUD update failed", "id", id, "error", err)
-			h.errorResp(w, http.StatusInternalServerError, "Failed to update resource")
-		}
+		h.crudErrorResp(w, err, "Failed to update resource")
 		return
 	}
 
@@ -122,16 +110,24 @@ func (h *Host) handleCRUDDelete(w http.ResponseWriter, r *http.Request, handler 
 
 	err := handler.Delete(r.Context(), id)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			h.errorResp(w, http.StatusNotFound, "Resource not found")
-		} else {
-			h.logger.Error("CRUD delete failed", "id", id, "error", err)
-			h.errorResp(w, http.StatusInternalServerError, "Failed to delete resource")
-		}
+		h.crudErrorResp(w, err, "Failed to delete resource")
 		return
 	}
 
 	h.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// crudErrorResp maps a CRUD handler error to an appropriate HTTP response.
+// If the error is a *plugin.PluginError, its Code and Message are used.
+// Otherwise falls back to 500.
+func (h *Host) crudErrorResp(w http.ResponseWriter, err error, fallbackMsg string) {
+	var pe *plugin.PluginError
+	if errors.As(err, &pe) {
+		h.errorResp(w, pe.Code, pe.Message)
+		return
+	}
+	h.logger.Error("CRUD operation failed", "error", err)
+	h.errorResp(w, http.StatusInternalServerError, fallbackMsg)
 }
 
 // jsonResp writes a JSON response with the given status code.

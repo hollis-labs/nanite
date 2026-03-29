@@ -1,634 +1,743 @@
 export interface Workspace {
-  id: string
-  name: string
-  description: string
-  icon: string
-  sort_order: number
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  sort_order: number;
 }
 
 export interface Project {
-  id: string
-  workspace_id: string
-  name: string
-  description: string
-  repo_path: string
-  settings: string
-  sort_order: number
-  created_at: string
-  updated_at: string
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string;
+  repo_path: string;
+  settings: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Session {
-  id: string
-  short_code: string
-  title: string
-  custom_name: string
-  workspace_id: string
-  project_id: string
-  context_type: string | null
-  context_id: string | null
-  provider: string
-  model: string
-  status: string
-  is_pinned: boolean
-  sort_order: number
-  message_count: number
-  tags: string
-  last_activity: string
-  created_at: string
+  id: string;
+  short_code: string;
+  title: string;
+  custom_name: string;
+  workspace_id: string;
+  project_id: string;
+  context_type: string | null;
+  context_id: string | null;
+  provider: string;
+  model: string;
+  status: string;
+  is_pinned: boolean;
+  sort_order: number;
+  message_count: number;
+  tags: string;
+  last_activity: string;
+  created_at: string;
 }
 
 export interface SessionWithMessages extends Session {
-  messages: Message[]
+  messages: Message[];
+}
+
+export interface MessagePage {
+  messages: Message[];
+  total: number;
+  has_more: boolean;
+}
+
+export interface SearchResult {
+  session_id: string;
+  message_id: string;
+  role: string;
+  snippet: string;
+  created_at: string;
+  session_title: string;
+  session_short_code: string;
 }
 
 export interface Message {
-  id: string
-  session_id: string
-  agent_id: string
-  role: 'user' | 'assistant' | 'system' | 'tool'
-  content: string
-  envelope: string | null
-  metadata: string
-  created_at: string
+  id: string;
+  session_id: string;
+  agent_id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  envelope: string | null;
+  metadata: string;
+  created_at: string;
 }
 
 export interface Agent {
-  id: string
-  name: string
-  slug: string
-  avatar: string
-  description: string
-  can_execute: boolean
-  status: string
-  source: string
-  tags: string
+  id: string;
+  name: string;
+  slug: string;
+  avatar: string;
+  description: string;
+  can_execute: boolean;
+  status: string;
+  source: string;
+  tags: string;
 }
 
 export interface AgentProfile {
-  id: string
-  name: string
-  slug: string
-  avatar: string
-  system_prompt: string
-  description: string
-  modes: string
-  default_mode: string
-  default_model: string
-  mcp_servers: string
-  tool_permissions: string
-  can_execute: boolean
-  settings: string
-  created_at: string
-  updated_at: string
-  agent_hash: string
-  version: number
-  tools: string
-  directories: string
-  constraints: string
-  tags: string
-  status: string
-  source: string
-  source_ref: string
+  id: string;
+  name: string;
+  slug: string;
+  avatar: string;
+  icon: string;
+  system_prompt: string;
+  description: string;
+  modes: string;
+  default_mode: string;
+  default_model: string;
+  mcp_servers: string;
+  tool_permissions: string;
+  can_execute: boolean;
+  settings: string;
+  created_at: string;
+  updated_at: string;
+  agent_hash: string;
+  version: number;
+  tools: string;
+  directories: string;
+  constraints: string;
+  tags: string;
+  status: string;
+  source: string;
+  source_ref: string;
 }
 
 export interface AgentModeProfile {
-  id: string
-  agent_id: string
-  slug: string
-  name: string
-  prompt_addendum: string
-  tool_overrides: string
-  settings: string
+  id: string;
+  agent_id: string;
+  slug: string;
+  name: string;
+  prompt_addendum: string;
+  tool_overrides: string;
+  settings: string;
 }
 
 // --- Chat Errors ---
 
-export type ChatErrorCode = 'rate_limit' | 'tool_error' | 'provider_error' | 'internal_error'
+export type ChatErrorCode = "rate_limit" | "tool_error" | "provider_error" | "internal_error";
 
 export interface ChatError {
-  id: string
-  code: ChatErrorCode
-  message: string
-  details?: Record<string, unknown>
-  timestamp: string
-  dismissed?: boolean
+  id: string;
+  code: ChatErrorCode;
+  message: string;
+  details?: Record<string, unknown>;
+  timestamp: string;
+  dismissed?: boolean;
 }
 
 export interface StreamEvent {
-  type: 'stream_start' | 'delta' | 'stream_end' | 'error' | 'tool_call' | 'tool_result' | 'tool_warning' | 'status' | 'circuit_open' | 'session_takeover'
-  content?: string
-  message_id?: string
-  agent_id?: string
-  usage?: { input_tokens: number; output_tokens: number; stop_reason: string }
-  error?: string
+  type:
+    | "stream_start"
+    | "delta"
+    | "stream_end"
+    | "error"
+    | "tool_call"
+    | "tool_result"
+    | "tool_warning"
+    | "status"
+    | "circuit_open"
+    | "session_takeover";
+  content?: string;
+  message_id?: string;
+  agent_id?: string;
+  usage?: { input_tokens: number; output_tokens: number; stop_reason: string };
+  error?: string;
   structured_error?: {
-    code: ChatErrorCode
-    message: string
-    details?: Record<string, unknown>
-    timestamp: string
-  }
-  tool?: string
-  summary?: string
-  envelope?: string
-  data?: string
+    code: ChatErrorCode;
+    message: string;
+    details?: Record<string, unknown>;
+    timestamp: string;
+  };
+  tool?: string;
+  summary?: string;
+  envelope?: string;
+  data?: string;
 }
 
 // --- Context Breakdown ---
 
 export interface MessageTokenDetail {
-  id: string
-  role: string
-  content_preview: string
-  tokens: number
-  is_compacted: boolean
+  id: string;
+  role: string;
+  content_preview: string;
+  tokens: number;
+  is_compacted: boolean;
 }
 
 export interface ToolTokenDetail {
-  name: string
-  tokens: number
+  name: string;
+  tokens: number;
 }
 
 export interface ContextBreakdown {
-  system_prompt_tokens: number
-  system_prompt_preview: string
-  messages: MessageTokenDetail[]
-  message_tokens_total: number
-  tools: ToolTokenDetail[]
-  tool_tokens_total: number
-  tools_available: number
-  total: number
-  ceiling: number
-  estimated_cost_usd: number
+  system_prompt_tokens: number;
+  system_prompt_preview: string;
+  messages: MessageTokenDetail[];
+  message_tokens_total: number;
+  tools: ToolTokenDetail[];
+  tool_tokens_total: number;
+  tools_available: number;
+  total: number;
+  ceiling: number;
+  estimated_cost_usd: number;
 }
 
 // --- Token Usage ---
 
 export interface SessionUsageSummary {
-  input_tokens: number
-  output_tokens: number
-  total_tokens: number
-  cache_creation_tokens: number
-  cache_read_tokens: number
-  estimated_cost_usd: number
-  message_count: number
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  estimated_cost_usd: number;
+  message_count: number;
 }
 
 export interface ModelUsage {
-  model: string
-  input_tokens: number
-  output_tokens: number
-  total_tokens: number
-  estimated_cost_usd: number
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
 }
 
 export interface GlobalUsageSummary {
-  total_input: number
-  total_output: number
-  total_tokens: number
-  total_cost: number
-  by_model: ModelUsage[]
+  total_input: number;
+  total_output: number;
+  total_tokens: number;
+  total_cost: number;
+  by_model: ModelUsage[];
 }
 
 // --- Execution Metrics ---
 
 export interface ExecutionMetrics {
-  id: number
-  session_id: string
-  message_id: string
-  provider: string
-  adapter: string
-  model: string
-  agent_id: string
-  agent_slug: string
-  mode: string
-  duration_ms: number
-  context_messages: number
-  context_tokens: number
-  input_tokens: number
-  output_tokens: number
-  cache_creation_tokens: number
-  cache_read_tokens: number
-  estimated_cost_usd: number
-  tool_iterations: number
-  tool_calls: number
-  is_utility: boolean
-  stop_reason: string
-  error: string
-  created_at: string
+  id: number;
+  session_id: string;
+  message_id: string;
+  provider: string;
+  adapter: string;
+  model: string;
+  agent_id: string;
+  agent_slug: string;
+  mode: string;
+  duration_ms: number;
+  context_messages: number;
+  context_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  estimated_cost_usd: number;
+  tool_iterations: number;
+  tool_calls: number;
+  is_utility: boolean;
+  stop_reason: string;
+  error: string;
+  created_at: string;
 }
 
 export interface UtilityCallSummary {
-  provider: string
-  model: string
-  call_type: string
-  call_count: number
-  avg_duration_ms: number
-  min_duration_ms: number
-  max_duration_ms: number
-  error_count: number
-  total_cost_usd: number
+  provider: string;
+  model: string;
+  call_type: string;
+  call_count: number;
+  avg_duration_ms: number;
+  min_duration_ms: number;
+  max_duration_ms: number;
+  error_count: number;
+  total_cost_usd: number;
 }
 
 // --- Process Health ---
 
 export interface ProcessHealthEntry {
-  session_id: string
-  pid: number
-  uptime: number
-  idle_duration: number
-  is_stale: boolean
+  session_id: string;
+  pid: number;
+  uptime: number;
+  idle_duration: number;
+  is_stale: boolean;
 }
 
 export interface ProcessHealthResponse {
-  processes: ProcessHealthEntry[]
-  total: number
-  stale_threshold: string
+  processes: ProcessHealthEntry[];
+  total: number;
+  stale_threshold: string;
 }
 
 // --- Agent Modes ---
 
-export const AGENT_MODES = ['default', 'architect', 'planner', 'writer'] as const
-export type AgentMode = (typeof AGENT_MODES)[number]
+export const AGENT_MODES = ["default", "architect", "planner", "writer"] as const;
+export type AgentMode = (typeof AGENT_MODES)[number];
 
 export const MODE_COLORS: Record<AgentMode, string> = {
-  default: 'blue',
-  architect: 'red',
-  planner: 'green',
-  writer: 'amber',
-}
+  default: "blue",
+  architect: "red",
+  planner: "green",
+  writer: "amber",
+};
 
 // --- Models ---
 
 export interface ModelOption {
-  id: string
-  label: string
-  provider?: string
+  id: string;
+  label: string;
+  provider?: string;
 }
 
 export interface Provider {
-  id: string
-  name: string
-  models: ModelOption[]
+  id: string;
+  name: string;
+  models: ModelOption[];
 }
 
 export interface ModelRecord {
-  id: string
-  provider_id: string
-  model_id: string
-  display_name: string
-  context_window: number
-  max_output: number
-  supports_tools: boolean
-  supports_vision: boolean
-  is_enabled: boolean
-  pricing: string
-  sort_order: number
-  provider_type: string
+  id: string;
+  provider_id: string;
+  model_id: string;
+  display_name: string;
+  context_window: number;
+  max_output: number;
+  supports_tools: boolean;
+  supports_vision: boolean;
+  is_enabled: boolean;
+  pricing: string;
+  sort_order: number;
+  provider_type: string;
 }
 
 // --- User Settings ---
 
 export interface UserSettings {
-  default_provider: string
-  default_model: string
-  default_agent: string
-  utility_provider: string
-  utility_model: string
-  tool_call_display_mode: ToolCallDisplayMode
-  provider_fallback_chain: string[]
-  developer_mode: boolean
-  recover_mode: boolean
+  default_provider: string;
+  default_model: string;
+  default_agent: string;
+  utility_provider: string;
+  utility_model: string;
+  tool_call_display_mode: ToolCallDisplayMode;
+  provider_fallback_chain: string[];
+  developer_mode: boolean;
+  recover_mode: boolean;
   ext_settings: Record<string, unknown> & {
-    widget_visibility?: Record<string, boolean>
-    widget_order?: string[]
-  }
+    widget_visibility?: Record<string, boolean>;
+    widget_order?: string[];
+  };
 }
 
 export interface ProviderConfig {
-  id: string
-  name: string
-  provider_type: string
-  base_url: string
-  is_enabled: boolean
-  settings: string
-  created_at: string
-  updated_at: string
+  id: string;
+  name: string;
+  provider_type: string;
+  base_url: string;
+  is_enabled: boolean;
+  settings: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ProviderStatus extends ProviderConfig {
-  has_api_key: boolean
-  registered: boolean
+  has_api_key: boolean;
+  registered: boolean;
 }
 
 export interface CLIDetectionResult {
-  name: string
-  provider_type: string
-  detected: boolean
-  path: string
-  env_var: string
+  name: string;
+  provider_type: string;
+  detected: boolean;
+  path: string;
+  env_var: string;
 }
 
 // --- Session Agents ---
 
 export interface SessionAgent {
-  id: string
-  agent_id: string
-  session_id: string
-  name: string
-  slug: string
-  avatar: string
-  role: 'primary' | 'participant'
-  status: 'active' | 'idle' | 'offline'
+  id: string;
+  agent_id: string;
+  session_id: string;
+  name: string;
+  slug: string;
+  avatar: string;
+  role: "primary" | "participant";
+  status: "active" | "idle" | "offline";
 }
 
 // --- Envelopes ---
 
 export interface Envelope {
-  kind: string
-  version: number
-  type: string
-  proposals?: Proposal[]
-  questions?: Question[]
-  approval?: ApprovalRequest
-  status?: { phase: string; progress: number }
-  data?: Record<string, unknown>
+  kind: string;
+  version: number;
+  type: string;
+  proposals?: Proposal[];
+  questions?: Question[];
+  approval?: ApprovalRequest;
+  status?: { phase: string; progress: number };
+  data?: Record<string, unknown>;
 }
 
 export interface Proposal {
-  type: string
-  payload: Record<string, unknown>
-  schema?: Record<string, SchemaField>
+  type: string;
+  payload: Record<string, unknown>;
+  schema?: Record<string, SchemaField>;
 }
 
 export interface SchemaField {
-  type: 'text' | 'textarea' | 'select' | 'number'
-  label?: string
-  options?: string[]
-  required?: boolean
+  type: "text" | "textarea" | "select" | "number";
+  label?: string;
+  options?: string[];
+  required?: boolean;
 }
 
 export interface Question {
-  prompt: string
-  type: 'text' | 'textarea' | 'select' | 'radio' | 'checkbox'
-  options?: string[]
-  required: boolean
-  default?: string
+  prompt: string;
+  type: "text" | "textarea" | "select" | "radio" | "checkbox";
+  options?: string[];
+  required: boolean;
+  default?: string;
 }
 
 export interface ApprovalRequest {
-  description: string
-  risk_level?: 'low' | 'medium' | 'high'
-  details?: string
+  description: string;
+  risk_level?: "low" | "medium" | "high";
+  details?: string;
 }
 
 // --- A2A Messages ---
 
-export type A2AMessageType = 'message' | 'help_request' | 'directive' | 'status_update' | 'handoff'
-export type A2AMessageStatus = 'unread' | 'read' | 'acknowledged' | 'resolved'
+export type A2AMessageType = "message" | "help_request" | "directive" | "status_update" | "handoff";
+export type A2AMessageStatus = "unread" | "read" | "acknowledged" | "resolved";
 
 export interface A2AMessage {
-  id: string
-  from_agent: string
-  to_agent: string
-  thread_id: string | null
-  reply_to: string | null
-  type: A2AMessageType
-  subject: string | null
-  body: string
-  metadata: string
-  priority: number
-  status: A2AMessageStatus
-  created_at: string
-  read_at: string | null
-  resolved_at: string | null
+  id: string;
+  from_agent: string;
+  to_agent: string;
+  thread_id: string | null;
+  reply_to: string | null;
+  type: A2AMessageType;
+  subject: string | null;
+  body: string;
+  metadata: string;
+  priority: number;
+  status: A2AMessageStatus;
+  created_at: string;
+  read_at: string | null;
+  resolved_at: string | null;
 }
 
 // --- Presence ---
 
 export interface PresenceEvent {
-  type: 'stream_start' | 'stream_end' | 'tool_pending' | 'tool_resolved' | 'cli_active' | 'session_archived'
-  session_id: string
-  agent_id?: string
-  tool_name?: string
-  timestamp: string
+  type:
+    | "stream_start"
+    | "stream_end"
+    | "tool_pending"
+    | "tool_resolved"
+    | "cli_active"
+    | "session_archived";
+  session_id: string;
+  agent_id?: string;
+  tool_name?: string;
+  timestamp: string;
 }
 
 export interface ActiveStreamInfo {
-  agentId: string
-  startedAt: string
+  agentId: string;
+  startedAt: string;
 }
 
 export interface PendingToolInfo {
-  toolName: string
+  toolName: string;
 }
 
 export interface CLIActiveInfo {
-  lastSeen: string
+  lastSeen: string;
 }
 
 // --- Bookmarks ---
 
 export interface Bookmark {
-  id: string
-  message_id: string
-  session_id: string
-  note: string
-  tags: string[]
-  created_at: string
+  id: string;
+  message_id: string;
+  session_id: string;
+  note: string;
+  tags: string[];
+  created_at: string;
 }
 
 // --- Artifacts ---
 
 export interface Artifact {
-  id: string
-  session_id: string
-  name: string
-  mime_type: string
-  size: number
-  created_at: string
+  id: string;
+  session_id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  created_at: string;
 }
 
 // --- Tool Call Display ---
 
-export type ToolCallDisplayMode = 'indicator' | 'minimal' | 'compact' | 'full'
+export type ToolCallDisplayMode = "indicator" | "minimal" | "compact" | "full";
 
 // --- Tool Calls ---
 
 export interface ToolCall {
-  id: string
-  tool: string
-  status: 'running' | 'done' | 'error'
-  summary?: string
+  id: string;
+  tool: string;
+  status: "running" | "done" | "error";
+  summary?: string;
 }
 
 export interface ToolWarning {
-  tool_name: string
-  error: string
-  iteration: number
-  consecutive_errors: number
-  level: 'warning' | 'critical'
+  tool_name: string;
+  error: string;
+  iteration: number;
+  consecutive_errors: number;
+  level: "warning" | "critical";
 }
 
 // --- Tool Management ---
 
 export interface ToolDefinition {
-  name: string
-  description: string
-  input_schema: Record<string, unknown>
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
 }
 
 export interface ServerInfo {
-  name: string
-  tool_count: number
-  connected: boolean
+  name: string;
+  tool_count: number;
+  connected: boolean;
 }
 
 export interface DiscoveryDiff {
-  added: string[]
-  removed: string[]
-  total: number
+  added: string[];
+  removed: string[];
+  total: number;
 }
 
 export interface ToolSelection {
-  name: string
-  description: string
-  server?: string
+  name: string;
+  description: string;
+  server?: string;
 }
 
 export interface MCPServerConfig {
-  id: string
-  name: string
-  transport_type: 'stdio' | 'sse'
-  command: string
-  url: string
-  args: string
-  env: string
-  enabled: boolean
-  created_at: string
-  updated_at: string
+  id: string;
+  name: string;
+  transport_type: "stdio" | "sse";
+  command: string;
+  url: string;
+  args: string;
+  env: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- Volon (Sprint Planning) ---
 
 export interface VolonSprint {
-  id: string
-  project_id: string
-  name: string
-  goal: string
-  status: string
-  start_date: string
-  end_date: string
-  created_at: string
-  updated_at: string
+  id: string;
+  project_id: string;
+  name: string;
+  goal: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface VolonTask {
-  id: string
-  sprint_id: string
-  project_id: string
-  title: string
-  body: string
-  priority: string
-  status: string
-  tags: string[]
-  created_at: string
-  updated_at: string
+  id: string;
+  sprint_id: string;
+  project_id: string;
+  title: string;
+  body: string;
+  priority: string;
+  status: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface VolonBacklogItem {
-  id: string
-  project_id: string
-  title: string
-  body: string
-  priority: string
-  tags: string[]
-  created_at: string
+  id: string;
+  project_id: string;
+  title: string;
+  body: string;
+  priority: string;
+  tags: string[];
+  created_at: string;
+}
+
+// --- Custom Actions ---
+
+export interface CustomAction {
+  id: string;
+  name: string;
+  description: string;
+  keybinding: string;
+  command: string;
+  slash_command: string;
+  auto_triggers: string; // JSON array: ["on_new_session", "on_agent_switch", "on_mode_change"]
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const AUTO_TRIGGER_OPTIONS = [
+  { value: "on_new_session", label: "New Session" },
+  { value: "on_agent_switch", label: "Agent Switch" },
+  { value: "on_mode_change", label: "Mode Change" },
+] as const;
+
+// --- Plugin Keybindings ---
+
+export interface PluginKeybinding {
+  id: string;
+  key: string;
+  action: string;
+  action_value: string;
+  label: string;
+  description: string;
+}
+
+// --- Slash Command Args ---
+
+export interface CommandArg {
+  name: string;
+  description?: string;
+  required?: boolean;
+  type?: string;
+  options?: string[];
+}
+
+export interface SlashCommandDef {
+  name: string;
+  description: string;
+  category: string;
+  source: string;
+  args?: CommandArg[];
+  required_permission?: string;
+}
+
+// --- UI Slots ---
+
+export type UISlotName =
+  | "nav-rail"
+  | "settings-tab"
+  | "right-rail-tab"
+  | "composer-toolbar"
+  | "chat-header-action"
+  | "context-menu:message"
+  | "context-menu:session"
+  | "command-palette";
+
+export interface UISlotEntry {
+  id: string;
+  plugin_id: string;
+  slot: UISlotName;
+  label: string;
+  icon?: string;
+  priority?: number;
+  component?: string;
+  action?: string;
+  props?: Record<string, unknown>;
 }
 
 // --- Plugins ---
 
 export interface PluginInfo {
-  name: string
-  version: string
-  description: string
-  short_desc: string
-  author: string
-  url: string
-  status: 'active' | 'disabled' | 'available' | 'no-binary'
-  type: 'core' | 'user'
-  installed: boolean
+  name: string;
+  version: string;
+  description: string;
+  short_desc: string;
+  author: string;
+  url: string;
+  status: "active" | "disabled" | "available" | "no-binary";
+  type: "core" | "user";
+  installed: boolean;
 }
 
 export interface ConfigField {
-  key: string
-  type: 'string' | 'bool' | 'int' | 'select' | 'secret'
-  label: string
-  description?: string
-  default?: unknown
-  required?: boolean
-  options?: string[]
-  component?: string
+  key: string;
+  type: "string" | "bool" | "int" | "select" | "secret";
+  label: string;
+  description?: string;
+  default?: unknown;
+  required?: boolean;
+  options?: string[];
+  component?: string;
 }
 
 export interface PluginConfig {
-  plugin_id: string
-  settings: Record<string, unknown>
-  schema: ConfigField[]
-  updated_at?: string
+  plugin_id: string;
+  settings: Record<string, unknown>;
+  schema: ConfigField[];
+  updated_at?: string;
 }
 
 export interface PluginUIComponent {
-  id: string
-  type: 'widget' | 'envelope' | 'action' | 'workflow' | 'view'
-  name: string
-  description: string
-  props?: Record<string, unknown>
-  plugin_id?: string
+  id: string;
+  type: "widget" | "envelope" | "action" | "workflow" | "view";
+  name: string;
+  description: string;
+  props?: Record<string, unknown>;
+  plugin_id?: string;
 }
 
 // --- Skills ---
 
 export interface ToolBinding {
-  server: string
-  tool: string
+  server: string;
+  tool: string;
 }
 
 export interface Skill {
-  id: string
-  name: string
-  slug: string
-  category: string
-  description: string
-  tool_bindings: string
-  input_schema: string
-  is_builtin: boolean
-  settings: string
-  created_at: string
-  updated_at: string
+  id: string;
+  name: string;
+  slug: string;
+  category: string;
+  description: string;
+  icon: string;
+  tool_bindings: string;
+  input_schema: string;
+  is_builtin: boolean;
+  settings: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- Prompt Templates ---
 
 export interface TemplateVariable {
-  name: string
-  type: 'text' | 'textarea' | 'number' | 'boolean' | 'select'
-  required: boolean
-  default?: string | number | boolean
-  description?: string
-  options?: string[]
+  name: string;
+  type: "text" | "textarea" | "number" | "boolean" | "select";
+  required: boolean;
+  default?: string | number | boolean;
+  description?: string;
+  options?: string[];
 }
 
 export interface PromptTemplate {
-  id: string
-  name: string
-  slug: string
-  scope: 'system' | 'mode' | 'skill' | 'context'
-  template: string
-  variables: string
-  priority: number
-  is_builtin: boolean
-  created_at: string
-  updated_at: string
+  id: string;
+  name: string;
+  slug: string;
+  scope: "system" | "mode" | "skill" | "context";
+  template: string;
+  variables: string;
+  priority: number;
+  icon: string;
+  is_builtin: boolean;
+  created_at: string;
+  updated_at: string;
 }
-

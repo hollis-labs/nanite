@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/hollis-labs/fragments-engine/plugin"
@@ -398,11 +399,15 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 		err := hook.Handle(ctx, event)
 		cancel()
 		if err != nil {
+			if errors.Is(err, plugin.ErrCancelled) {
+				h.logger.Info("pre-hook cancelled action", "eventType", eventType)
+				return true
+			}
 			h.logger.Error("pre-hook failed", "eventType", eventType, "error", err)
 		}
 	}
 
-	// Check if any hook set the cancel flag.
+	// Legacy: check map-based cancel flag for backward compatibility.
 	if cancelled, ok := event.Data["cancel"].(bool); ok && cancelled {
 		return true
 	}

@@ -68,6 +68,7 @@ func (s *Server) routes() {
 	if s.pluginHost != nil {
 		s.mux.HandleFunc("GET /api/plugins", s.handleListPlugins)
 		s.mux.HandleFunc("GET /api/plugins/ui-components", s.handleGetUIComponents)
+		s.mux.HandleFunc("GET /api/plugins/ui-slots", s.handleGetUISlots)
 		s.mux.HandleFunc("POST /api/plugins/events", s.handleEmitEvent)
 	}
 
@@ -169,6 +170,17 @@ func (s *Server) handleGetUIComponents(w http.ResponseWriter, r *http.Request) {
 		"components": components,
 		"count":      len(components),
 	})
+}
+
+func (s *Server) handleGetUISlots(w http.ResponseWriter, r *http.Request) {
+	if s.pluginHost == nil {
+		http.Error(w, "Plugin system not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	slots := s.pluginHost.GetAllSlots()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(slots)
 }
 
 func (s *Server) handleEmitEvent(w http.ResponseWriter, r *http.Request) {

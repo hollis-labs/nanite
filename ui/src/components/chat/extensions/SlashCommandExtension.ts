@@ -5,11 +5,21 @@ import type { Editor } from '@tiptap/react'
 
 const slashCommandPluginKey = new PluginKey('slashCommand')
 
+export interface SlashCommandArg {
+  name: string
+  description?: string
+  required?: boolean
+  type?: string
+  options?: string[]
+}
+
 export interface SlashCommand {
   name: string
   description: string
   category: string
   source: string
+  args?: SlashCommandArg[]
+  required_permission?: string
 }
 
 export type SlashCommandSuggestionOptions = Omit<SuggestionOptions<SlashCommand>, 'editor'>

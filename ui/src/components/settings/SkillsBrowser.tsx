@@ -1,132 +1,124 @@
-import { useState, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus,
-  Edit,
-  Save,
-  Loader2,
-  ChevronLeft,
-  Wrench,
-  Code2,
-  Settings,
-  Filter,
-  Trash2,
   Eye,
-} from 'lucide-react'
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+  Filter,
+  Plus,
+  Trash2,
+  Wrench,
+} from "lucide-react";
+import { useCallback, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '@/components/ui/context-menu'
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
-import { Skeleton } from '@/components/ui/skeleton'
-import { api } from '@/lib/api'
-import type { Skill, ToolBinding } from '@/lib/types'
+} from "@/components/ui/context-menu";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { DynamicIcon } from "@/components/ui/icon-picker";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import type { Skill } from "@/lib/types";
+import { SkillCreateWizard } from "./agents/SkillCreateWizard";
+import { SkillDetailView } from "./agents/SkillDetailView";
 
-function parseToolBindings(s: string): ToolBinding[] {
-  try { return JSON.parse(s) } catch { return [] }
+function parseToolBindings(s: string): { server: string; tool: string }[] {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return [];
+  }
 }
 
-function parseInputSchema(s: string): Record<string, unknown> | null {
-  try { const v = JSON.parse(s); return v && typeof v === 'object' ? v : null } catch { return null }
-}
-
-interface SkillsBrowserProps {}
+type SkillsBrowserProps = {};
 
 const SKILL_CATEGORIES = [
-  'general',
-  'development',
-  'communication',
-  'analysis',
-  'automation',
-  'integration',
-  'productivity',
-  'other',
-] as const
+  "general",
+  "development",
+  "communication",
+  "analysis",
+  "automation",
+  "integration",
+  "productivity",
+  "other",
+] as const;
 
 export function SkillsBrowser({}: SkillsBrowserProps) {
-  const [selectedSkill, setSelectedSkill] = useState<string | null>(null)
-  const [showCreateForm, setShowCreateForm] = useState(false)
-  const [editingSkill, setEditingSkill] = useState<Skill | null>(null)
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
-  const queryClient = useQueryClient()
+  const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const queryClient = useQueryClient();
 
   const { data: skills = [], isLoading } = useQuery({
-    queryKey: ['skills'],
+    queryKey: ["skills"],
     queryFn: api.listSkills,
-  })
+  });
 
   const { data: skillDetail } = useQuery({
-    queryKey: ['skill-detail', selectedSkill],
+    queryKey: ["skill-detail", selectedSkill],
     queryFn: () => api.getSkill(selectedSkill!),
     enabled: !!selectedSkill,
-  })
+  });
 
   const createMutation = useMutation({
     mutationFn: api.createSkill,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['skills'] })
-      setShowCreateForm(false)
-      setEditingSkill(null)
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      setShowCreateForm(false);
     },
-  })
+  });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<Skill> }) =>
-      api.updateSkill(id, data),
+    mutationFn: ({ id, data }: { id: string; data: Partial<Skill> }) => api.updateSkill(id, data),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['skills'] })
-      void queryClient.invalidateQueries({ queryKey: ['skill-detail', selectedSkill] })
-      setEditingSkill(null)
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      void queryClient.invalidateQueries({ queryKey: ["skill-detail", selectedSkill] });
     },
-  })
+  });
 
   const deleteMutation = useMutation({
     mutationFn: api.deleteSkill,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['skills'] })
-      setSelectedSkill(null)
-      setShowDeleteConfirm(null)
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      setSelectedSkill(null);
     },
-  })
+  });
 
-  const handleCreateSkill = useCallback((formData: FormData) => {
-    const data = {
-      name: formData.get('name') as string,
-      slug: formData.get('slug') as string,
-      category: formData.get('category') as string,
-      description: formData.get('description') as string,
-      tool_bindings: formData.get('tool_bindings') as string || '[]',
-      input_schema: formData.get('input_schema') as string || '{}',
-      settings: '{}',
-    }
-    createMutation.mutate(data)
-  }, [createMutation])
+  const handleCreateSkill = useCallback(
+    (data: {
+      name: string;
+      slug: string;
+      category: string;
+      description: string;
+      icon: string;
+      tool_bindings: string;
+      input_schema: string;
+      settings: string;
+    }) => {
+      createMutation.mutate(data);
+    },
+    [createMutation],
+  );
 
-  const handleUpdateSkill = useCallback((formData: FormData) => {
-    if (!editingSkill) return
-    const data = {
-      name: formData.get('name') as string,
-      slug: formData.get('slug') as string,
-      category: formData.get('category') as string,
-      description: formData.get('description') as string,
-      tool_bindings: formData.get('tool_bindings') as string || '[]',
-      input_schema: formData.get('input_schema') as string || '{}',
-    }
-    updateMutation.mutate({ id: editingSkill.id, data })
-  }, [editingSkill, updateMutation])
+  const handleUpdateField = useCallback(
+    (field: string, value: string) => {
+      if (!selectedSkill) return;
+      updateMutation.mutate({ id: selectedSkill, data: { [field]: value } as Partial<Skill> });
+    },
+    [selectedSkill, updateMutation],
+  );
 
   // Filter skills based on category
-  const filteredSkills = skills.filter(skill =>
-    categoryFilter === 'all' || skill.category === categoryFilter
-  )
+  const filteredSkills = skills.filter(
+    (skill) => categoryFilter === "all" || skill.category === categoryFilter,
+  );
 
   // List View
   if (!selectedSkill && !showCreateForm) {
@@ -142,7 +134,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
             >
               <option value="all">All Categories</option>
-              {SKILL_CATEGORIES.map(category => (
+              {SKILL_CATEGORIES.map((category) => (
                 <option key={category} value={category}>
                   {category.charAt(0).toUpperCase() + category.slice(1)}
                 </option>
@@ -150,11 +142,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
             </select>
           </div>
           <div className="flex-1" />
-          <Button
-            size="sm"
-            onClick={() => setShowCreateForm(true)}
-            className="gap-1.5"
-          >
+          <Button size="sm" onClick={() => setShowCreateForm(true)} className="gap-1.5">
             <Plus className="w-3.5 h-3.5" />
             Create Skill
           </Button>
@@ -163,7 +151,10 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         {isLoading ? (
           <div className="grid grid-cols-2 gap-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+              <div
+                key={i}
+                className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+              >
                 <div className="px-3.5 py-3 flex items-center gap-2.5">
                   <Skeleton className="size-9 rounded-lg" />
                   <div className="flex flex-col gap-1.5 flex-1">
@@ -180,69 +171,89 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         ) : filteredSkills.length === 0 ? (
           <Empty className="py-12">
             <EmptyHeader>
-              <EmptyMedia variant="icon"><Wrench /></EmptyMedia>
+              <EmptyMedia variant="icon">
+                <Wrench />
+              </EmptyMedia>
               <EmptyTitle className="text-sm">
-                {skills.length === 0 ? 'No skills found' : `No skills found in "${categoryFilter}" category`}
+                {skills.length === 0
+                  ? "No skills found"
+                  : `No skills found in "${categoryFilter}" category`}
               </EmptyTitle>
               <EmptyDescription className="text-xs">
                 {skills.length === 0
-                  ? 'Create your first skill to get started.'
-                  : 'Try selecting a different category.'}
+                  ? "Create your first skill to get started."
+                  : "Try selecting a different category."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
           <div className="grid gap-3 grid-cols-2">
             {filteredSkills.map((skill) => {
-              const toolCount = parseToolBindings(skill.tool_bindings).length
+              const toolCount = parseToolBindings(skill.tool_bindings).length;
               return (
                 <ContextMenu key={skill.id}>
                   <ContextMenuTrigger asChild>
-                <div
-                  className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md"
-                  onClick={() => setSelectedSkill(skill.id)}
-                >
-                  {/* Header */}
-                  <div className="flex items-center gap-2.5 px-3.5 py-3">
-                    <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
-                      <Wrench className="w-4 h-4" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-fg truncate">{skill.name}</span>
-                        {skill.is_builtin && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
-                      </div>
-                      <span className="text-[11px] text-fg-muted font-mono truncate block">{skill.slug}</span>
-                    </div>
-                  </div>
-
-                  {/* Detail footer */}
-                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">
-                        {skill.category}
-                      </span>
-                      {toolCount > 0 && (
-                        <span className="text-[11px] text-fg-muted">
-                          {toolCount} tool{toolCount !== 1 ? 's' : ''}
+                    <div
+                      className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md"
+                      onClick={() => setSelectedSkill(skill.id)}
+                    >
+                      {/* Header */}
+                      <div className="flex items-center gap-2.5 px-3.5 py-3">
+                        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
+                          <DynamicIcon name={skill.icon} className="w-4 h-4" fallback={Wrench} />
                         </span>
-                      )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-fg truncate">
+                              {skill.name}
+                            </span>
+                            {skill.is_builtin && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+                            )}
+                          </div>
+                          <span className="text-[11px] text-fg-muted font-mono truncate block">
+                            {skill.slug}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Detail footer */}
+                      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">
+                            {skill.category}
+                          </span>
+                          {toolCount > 0 && (
+                            <span className="text-[11px] text-fg-muted">
+                              {toolCount} tool{toolCount !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
+                        {skill.description && (
+                          <p className="text-[11px] text-fg-muted line-clamp-2 mt-1">
+                            {skill.description}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    {skill.description && (
-                      <p className="text-[11px] text-fg-muted line-clamp-2 mt-1">{skill.description}</p>
-                    )}
-                  </div>
-                </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent>
-                    <ContextMenuItem className="gap-2 text-xs" onClick={() => setSelectedSkill(skill.id)}>
+                    <ContextMenuItem
+                      className="gap-2 text-xs"
+                      onClick={() => setSelectedSkill(skill.id)}
+                    >
                       <Eye className="w-3.5 h-3.5" />
                       View Details
                     </ContextMenuItem>
                     {!skill.is_builtin && (
                       <>
                         <ContextMenuSeparator />
-                        <ContextMenuItem className="gap-2 text-xs text-accent" onClick={() => { setSelectedSkill(skill.id); setShowDeleteConfirm(skill.id) }}>
+                        <ContextMenuItem
+                          className="gap-2 text-xs text-accent"
+                          onClick={() => {
+                            setSelectedSkill(skill.id);
+                          }}
+                        >
                           <Trash2 className="w-3.5 h-3.5" />
                           Delete
                         </ContextMenuItem>
@@ -250,414 +261,38 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                     )}
                   </ContextMenuContent>
                 </ContextMenu>
-              )
+              );
             })}
           </div>
         )}
       </div>
-    )
+    );
   }
 
-  // Create Form
+  // Create Form (wizard)
   if (showCreateForm) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowCreateForm(false)}
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <h2 className="text-xl font-semibold text-fg">Create Skill</h2>
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            handleCreateSkill(new FormData(e.currentTarget))
-          }}
-          className="space-y-6 max-w-2xl"
-        >
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
-              <input
-                name="name"
-                type="text"
-                required
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                placeholder="Skill name"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
-              <input
-                name="slug"
-                type="text"
-                required
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                placeholder="skill-slug"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-fg-secondary mb-2">Category</label>
-            <select
-              name="category"
-              required
-              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-            >
-              {SKILL_CATEGORIES.map(category => (
-                <option key={category} value={category}>
-                  {category.charAt(0).toUpperCase() + category.slice(1)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-fg-secondary mb-2">Description</label>
-            <textarea
-              name="description"
-              rows={3}
-              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-              placeholder="Brief description of what this skill does..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Bindings (JSON)</label>
-            <textarea
-              name="tool_bindings"
-              rows={5}
-              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-              placeholder='[{"server": "filesystem", "tool": "read_file"}]'
-              defaultValue="[]"
-            />
-            <p className="text-xs text-fg-muted mt-1">
-              Array of objects with "server" and "tool" properties
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-fg-secondary mb-2">Input Schema (JSON, optional)</label>
-            <textarea
-              name="input_schema"
-              rows={5}
-              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-              placeholder='{"properties": {"query": {"type": "string", "description": "Search query"}}}'
-            />
-            <p className="text-xs text-fg-muted mt-1">
-              JSON schema describing the skill's input parameters
-            </p>
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              type="submit"
-              disabled={createMutation.isPending}
-              className="gap-2"
-            >
-              {createMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              Create Skill
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setShowCreateForm(false)}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </div>
-    )
+      <SkillCreateWizard
+        categories={SKILL_CATEGORIES}
+        onSubmit={handleCreateSkill}
+        onCancel={() => setShowCreateForm(false)}
+        isPending={createMutation.isPending}
+      />
+    );
   }
 
-  // Detail/Edit View
+  // Detail View
   if (selectedSkill && skillDetail) {
-    const skill = skillDetail
-    const isEditing = editingSkill?.id === skill.id
-
-    if (isEditing) {
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setEditingSkill(null)}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <h2 className="text-xl font-semibold text-fg">Edit {skill.name}</h2>
-          </div>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              handleUpdateSkill(new FormData(e.currentTarget))
-            }}
-            className="space-y-6 max-w-2xl"
-          >
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
-                <input
-                  name="name"
-                  type="text"
-                  required
-                  defaultValue={skill.name}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
-                <input
-                  name="slug"
-                  type="text"
-                  required
-                  defaultValue={skill.slug}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Category</label>
-              <select
-                name="category"
-                required
-                defaultValue={skill.category}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-              >
-                {SKILL_CATEGORIES.map(category => (
-                  <option key={category} value={category}>
-                    {category.charAt(0).toUpperCase() + category.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Description</label>
-              <textarea
-                name="description"
-                rows={3}
-                defaultValue={skill.description}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Bindings (JSON)</label>
-              <textarea
-                name="tool_bindings"
-                rows={5}
-                defaultValue={skill.tool_bindings}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Input Schema (JSON, optional)</label>
-              <textarea
-                name="input_schema"
-                rows={5}
-                defaultValue={skill.input_schema || '{}'}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                type="submit"
-                disabled={updateMutation.isPending}
-                className="gap-2"
-              >
-                {updateMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4" />
-                )}
-                Save Changes
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setEditingSkill(null)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </div>
-      )
-    }
-
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSelectedSkill(null)}
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <div className="flex items-center gap-3 flex-1">
-            <div>
-              <h2 className="text-xl font-semibold text-fg flex items-center gap-2">
-                {skill.name}
-                {skill.is_builtin && (
-                  <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in skill" />
-                )}
-              </h2>
-              <p className="text-sm text-fg-secondary">{skill.slug}</p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            {!skill.is_builtin && (
-              <>
-                <Button
-                  onClick={() => setEditingSkill(skill)}
-                  variant="ghost"
-                  size="icon"
-                >
-                  <Edit className="w-4 h-4" />
-                </Button>
-                <Button
-                  onClick={() => setShowDeleteConfirm(skill.id)}
-                  variant="ghost"
-                  size="icon"
-                  className="text-red-400 hover:text-red-300"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Skill Details */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
-              <Settings className="w-5 h-5" />
-              Skill Details
-            </h3>
-
-            <div className="space-y-3 bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
-              <div>
-                <label className="text-sm font-medium text-fg-secondary">Category</label>
-                <p className="text-fg capitalize">{skill.category}</p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-fg-secondary">Description</label>
-                <p className="text-fg">{skill.description || 'No description'}</p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-fg-secondary">Type</label>
-                <p className="text-fg">{skill.is_builtin ? 'Built-in' : 'Custom'}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Tool Bindings */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
-              <Wrench className="w-5 h-5" />
-              Tool Bindings ({parseToolBindings(skill.tool_bindings).length})
-            </h3>
-
-            <div className="space-y-2">
-              {parseToolBindings(skill.tool_bindings).length === 0 ? (
-                <p className="text-fg-muted text-center py-4">No tool bindings configured</p>
-              ) : (
-                parseToolBindings(skill.tool_bindings).map((binding, index) => (
-                  <div
-                    key={index}
-                    className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-3 flex items-center gap-3"
-                  >
-                    <Code2 className="w-4 h-4 text-fg-secondary shrink-0" />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-fg">
-                        {binding.server}/{binding.tool}
-                      </div>
-                      <div className="text-xs text-fg-muted">
-                        Server: {binding.server} • Tool: {binding.tool}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Input Schema */}
-        {parseInputSchema(skill.input_schema) && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
-              <Code2 className="w-5 h-5" />
-              Input Schema
-            </h3>
-
-            <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
-              <pre className="text-xs text-fg-secondary overflow-x-auto font-mono">
-                {skill.input_schema}
-              </pre>
-            </div>
-          </div>
-        )}
-
-        {/* Delete Confirmation Modal */}
-        <Dialog open={showDeleteConfirm === skill.id} onOpenChange={() => setShowDeleteConfirm(null)}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader className="px-5 pt-5">
-              <DialogTitle>Delete Skill</DialogTitle>
-              <DialogDescription className="sr-only">Confirm skill deletion</DialogDescription>
-            </DialogHeader>
-            <div className="px-5 py-4">
-              <p className="text-fg-secondary">
-                Are you sure you want to delete &quot;{skill.name}&quot;? This action cannot be undone.
-              </p>
-            </div>
-            <DialogFooter className="px-5 pb-5">
-              <Button
-                variant="ghost"
-                onClick={() => setShowDeleteConfirm(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => deleteMutation.mutate(skill.id)}
-                disabled={deleteMutation.isPending}
-                className="gap-2"
-              >
-                {deleteMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Trash2 className="w-4 h-4" />
-                )}
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-    )
+      <SkillDetailView
+        skill={skillDetail}
+        onUpdate={handleUpdateField}
+        onDelete={(id) => deleteMutation.mutate(id)}
+        isDeleting={deleteMutation.isPending}
+        onBack={() => setSelectedSkill(null)}
+      />
+    );
   }
 
-  return null
+  return null;
 }

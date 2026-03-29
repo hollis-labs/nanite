@@ -21,6 +21,7 @@ export function ChatHeader() {
   const setToolDrawerState = useLayoutStore((s) => s.setToolDrawerState)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeMode = useChatStore((s) => s.activeMode)
+  const activeModel = useChatStore((s) => s.activeModel)
   const toolCalls = useChatStore((s) => s.toolCalls)
   const queryClient = useQueryClient()
 
@@ -62,7 +63,7 @@ export function ChatHeader() {
   const toolCount = tools.length + (toolCalls?.length || 0)
 
   // Model display — from session or agent profile
-  const modelName = session?.model || (primaryAgentProfile as any)?.default_model || null
+  const modelName = session?.model || activeModel || (primaryAgentProfile as any)?.default_model || null
   const shortModel = modelName ? modelName.split('/').pop()?.replace(/-\d{8}$/, '') : null
 
   // Switch primary agent
@@ -184,8 +185,8 @@ export function ChatHeader() {
                 )}
               </div>
 
-              {session?.provider && (
-                <AdapterBadge provider={session.provider} size="sm" />
+              {session && (
+                <AdapterBadge provider={session.provider || 'api'} size="sm" />
               )}
 
               <div className="relative" ref={forkMenuRef}>

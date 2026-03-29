@@ -159,7 +159,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     editorProps: {
       attributes: {
         class:
-          'bg-transparent text-sm text-zinc-900 placeholder:text-zinc-400 outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm',
+          'bg-transparent text-sm text-composer-fg placeholder:text-composer-fg-muted outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm',
       },
       handleKeyDown(_view, event) {
         if (event.key === 'Enter') {

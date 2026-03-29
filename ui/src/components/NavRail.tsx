@@ -1,4 +1,4 @@
-import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Inbox, Sun, Moon } from 'lucide-react'
+import { MessageSquare, Search, Plus, Settings, User, ChevronDown, Loader2, Sun, Moon } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
@@ -24,8 +24,6 @@ export function NavRail() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
-  const toggleInboxPanel = useLayoutStore((s) => s.toggleInboxPanel)
-  const inboxPanelOpen = useLayoutStore((s) => s.inboxPanelOpen)
   const setLeftSidebar = useLayoutStore((s) => s.setLeftSidebar)
   const currentPage = useLayoutStore((s) => s.currentPage)
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
@@ -52,22 +50,6 @@ export function NavRail() {
     queryFn: api.listWorkspaces,
   })
 
-  // Fetch first agent for inbox unread count
-  const { data: agents = [] } = useQuery({
-    queryKey: ['agents'],
-    queryFn: api.listAgents,
-  })
-  const activeAgents = agents.filter((a) => a.status !== 'disabled')
-  const firstAgentId = activeAgents.length > 0 ? activeAgents[0].id : null
-
-  const { data: unreadData } = useQuery({
-    queryKey: ['a2a-unread', firstAgentId],
-    queryFn: () => api.getA2AUnreadCount(firstAgentId!),
-    enabled: !!firstAgentId,
-    refetchInterval: 30000,
-  })
-  const unreadCount = unreadData?.count ?? 0
-
   // Set default workspace on load
   useEffect(() => {
     if (!activeWorkspaceId && workspaces.length > 0) {
@@ -89,6 +71,18 @@ export function NavRail() {
 
   const activeWorkspace = workspaces.find((w: Workspace) => w.id === activeWorkspaceId)
 
+  const handleCreateWorkspace = useCallback(async () => {
+    const name = window.prompt('Workspace name:')
+    if (!name?.trim()) return
+    try {
+      const ws = await api.createWorkspace({ name: name.trim() })
+      void queryClient.invalidateQueries({ queryKey: ['workspaces'] })
+      setActiveWorkspace(ws.id)
+    } catch (err) {
+      console.error('Failed to create workspace:', err)
+    }
+  }, [queryClient, setActiveWorkspace])
+
   const handleSelectWorkspace = useCallback((id: string) => {
     setActiveWorkspace(id)
     setWorkspaceDropdownOpen(false)
@@ -105,20 +99,29 @@ export function NavRail() {
         <Tooltip content={activeWorkspace?.name || 'Select workspace'} side="right">
           <button
             onClick={() => setWorkspaceDropdownOpen((o) => !o)}
-            className="w-10 h-10 rounded-lg bg-surface hover:bg-surface-hover flex items-center justify-center text-sm font-semibold text-fg transition-colors relative"
+            className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-semibold transition-colors relative group ${
+              workspaceDropdownOpen
+                ? 'bg-surface-hover text-fg ring-2 ring-accent/40'
+                : 'bg-surface hover:bg-surface-hover text-fg'
+            }`}
           >
             {loadingWorkspaces ? (
               <Loader2 className="w-4 h-4 animate-spin text-fg-secondary" />
             ) : (
               <span>{workspaceInitial}</span>
             )}
-            <ChevronDown className="w-3 h-3 text-fg-muted absolute -bottom-0.5 -right-0.5" />
+            {/* Overlay chevron — visible on hover or when open */}
+            <span className={`absolute inset-x-0 -bottom-1 flex justify-center transition-opacity ${
+              workspaceDropdownOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }`}>
+              <ChevronDown className="w-3 h-3 text-fg-muted bg-bg-elevated rounded-full" />
+            </span>
           </button>
         </Tooltip>
 
         {/* Dropdown */}
-        {workspaceDropdownOpen && workspaces.length > 0 && (
-          <div className="absolute left-full top-0 ml-2 w-48 bg-bg-elevated border border-border-subtle rounded-lg shadow-xl z-50 py-1">
+        {workspaceDropdownOpen && (
+          <div className="absolute left-full top-0 ml-2 w-52 bg-white dark:bg-bg-elevated border border-border-subtle rounded-lg shadow-xl z-50 py-1">
             <div className="px-3 py-1.5 text-xs font-medium text-fg-muted uppercase tracking-wider">
               Workspaces
             </div>
@@ -128,16 +131,26 @@ export function NavRail() {
                 onClick={() => handleSelectWorkspace(w.id)}
                 className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${
                   w.id === activeWorkspaceId
-                    ? 'bg-surface text-fg'
-                    : 'text-fg-secondary hover:bg-surface/60 hover:text-fg'
+                    ? 'bg-surface/60 text-fg'
+                    : 'text-fg-secondary hover:bg-surface/40 hover:text-fg'
                 }`}
               >
-                <span className="w-6 h-6 rounded bg-zinc-700 flex items-center justify-center text-xs font-medium shrink-0">
+                <span className="w-6 h-6 rounded bg-surface-hover flex items-center justify-center text-xs font-medium shrink-0">
                   {w.icon || w.name.charAt(0).toUpperCase()}
                 </span>
                 <span className="truncate">{w.name}</span>
               </button>
             ))}
+            <div className="my-1 border-t border-border" />
+            <button
+              onClick={() => { setWorkspaceDropdownOpen(false); void handleCreateWorkspace() }}
+              className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-fg-muted hover:text-fg-secondary hover:bg-surface/40 transition-colors"
+            >
+              <span className="w-6 h-6 rounded border border-dashed border-border-subtle flex items-center justify-center shrink-0">
+                <Plus className="w-3 h-3" />
+              </span>
+              <span>Add Workspace</span>
+            </button>
           </div>
         )}
       </div>
@@ -182,25 +195,6 @@ export function NavRail() {
         })}
       </div>
       <div className="mt-auto flex flex-col items-center gap-1">
-        <Tooltip content="Agent Inbox" side="right">
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`w-10 h-10 rounded-lg relative ${
-              inboxPanelOpen
-                ? 'bg-surface text-accent'
-                : 'text-fg-secondary hover:text-fg'
-            }`}
-            onClick={toggleInboxPanel}
-          >
-            <Inbox className="w-5 h-5" />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
-          </Button>
-        </Tooltip>
         <Tooltip content={theme === 'dark' ? 'Light mode' : 'Dark mode'} side="right">
           <Button
             variant="ghost"

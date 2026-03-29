@@ -25,7 +25,7 @@ function ModeToggle({ mode, onCycle }: { mode: ToolCallDisplayMode; onCycle: () 
   return (
     <button
       onClick={onCycle}
-      className="text-zinc-500 hover:text-zinc-300 text-xs font-mono px-1 rounded hover:bg-zinc-700/50 transition-colors"
+      className="text-fg-muted hover:text-fg-secondary text-xs font-mono px-1 rounded hover:bg-surface-hover/50 transition-colors"
       title={`Tool display: ${labels[mode]} (click to cycle)`}
     >
       {icons[mode]}
@@ -42,7 +42,7 @@ function IndicatorMode({ toolCalls, expanded, onToggle }: { toolCalls: ToolCall[
 
   return (
     <div>
-      <div className="flex items-center gap-1.5 py-1 px-2 text-xs text-zinc-400">
+      <div className="flex items-center gap-1.5 py-1 px-2 text-xs text-fg-secondary">
         {isRunning ? (
           <Loader2 className="w-3 h-3 animate-spin text-accent shrink-0" />
         ) : hasError ? (
@@ -53,7 +53,7 @@ function IndicatorMode({ toolCalls, expanded, onToggle }: { toolCalls: ToolCall[
         <span>
           {allDone ? 'Used' : 'Using'} {toolCalls.length} tool{toolCalls.length !== 1 ? 's' : ''}: {uniqueNames.join(' \u00B7 ')}
         </span>
-        <button onClick={onToggle} className="text-zinc-500 hover:text-zinc-300 ml-1 font-mono text-[10px]">
+        <button onClick={onToggle} className="text-fg-muted hover:text-fg-secondary ml-1 font-mono text-[10px]">
           {expanded ? '▾' : '▸'}
         </button>
       </div>

@@ -100,7 +100,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
 
   const isUser = message.role === 'user'
   const avatarStyle = isUser
-    ? { bg: 'bg-zinc-800', text: 'text-zinc-400' }
+    ? { bg: 'bg-surface', text: 'text-fg-secondary' }
     : MODE_AVATAR_STYLES[activeMode]
 
   // Parse envelope — from saved envelope field or from streaming content.
@@ -166,7 +166,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
       {/* Content */}
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-col items-end' : ''}`}>
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-medium text-zinc-500">
+          <span className="text-xs font-medium text-fg-muted">
             {isUser ? 'You' : (agentName || 'Conduit')}
           </span>
           {isMultiAgent && !isUser && message.agent_id && (
@@ -180,7 +180,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             </span>
           )}
           {hovered && (
-            <span className="text-xs text-zinc-600">
+            <span className="text-xs text-fg-faint">
               {formatRelativeTime(message.created_at)}
             </span>
           )}
@@ -192,7 +192,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
         <div
           className={`${
             isUser
-              ? 'bg-zinc-800 rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%]'
+              ? 'bg-surface rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%]'
               : 'max-w-full'
           }`}
         >

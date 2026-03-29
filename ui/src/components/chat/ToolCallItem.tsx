@@ -26,7 +26,7 @@ export function TreeConnector({ index, total }: { index: number; total: number }
       : index === total - 1
         ? '└'
         : '├'
-  return <span className="text-zinc-600 w-3 text-center font-mono select-none">{char}</span>
+  return <span className="text-fg-faint w-3 text-center font-mono select-none">{char}</span>
 }
 
 interface ToolCallItemProps {
@@ -49,18 +49,18 @@ export function ToolCallItem({ toolCall, variant, index = 0, total = 1, defaultE
   if (variant === 'full') {
     return (
       <div
-        className="flex items-center gap-2 py-1 px-2 rounded-md bg-zinc-800/50 border border-zinc-700/50 text-xs"
+        className="flex items-center gap-2 py-1 px-2 rounded-md bg-surface/50 border border-border-subtle/50 text-xs"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
         <StatusIcon status={toolCall.status} />
-        <Wrench className="w-3 h-3 text-zinc-500 shrink-0" />
-        <span className="text-zinc-300 font-medium">{toolCall.tool}</span>
+        <Wrench className="w-3 h-3 text-fg-muted shrink-0" />
+        <span className="text-fg-secondary font-medium">{toolCall.tool}</span>
         {toolCall.summary && (
-          <span className="text-zinc-500 truncate flex-1">{toolCall.summary}</span>
+          <span className="text-fg-muted truncate flex-1">{toolCall.summary}</span>
         )}
         {toolCall.status === 'running' && !toolCall.summary && (
-          <span className="text-zinc-500 italic">Running...</span>
+          <span className="text-fg-muted italic">Running...</span>
         )}
         {hasSummary && (
           <ContentActions content={toolCall.summary!} visible={hovered} />
@@ -72,21 +72,21 @@ export function ToolCallItem({ toolCall, variant, index = 0, total = 1, defaultE
   if (variant === 'drawer') {
     return (
       <div
-        className="border-b border-zinc-800/50 last:border-b-0"
+        className="border-b border-border/50 last:border-b-0"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
         <div
-          className={`flex items-center gap-2 px-3 py-1.5 text-xs ${hasSummary ? 'cursor-pointer hover:bg-zinc-800/40' : ''}`}
+          className={`flex items-center gap-2 px-3 py-1.5 text-xs ${hasSummary ? 'cursor-pointer hover:bg-surface/40' : ''}`}
           onClick={toggleExpand}
         >
           <StatusIcon status={toolCall.status} />
-          <span className="font-mono text-zinc-300">{formatToolName(toolCall.tool)}</span>
+          <span className="font-mono text-fg-secondary">{formatToolName(toolCall.tool)}</span>
           {toolCall.status === 'running' && (
-            <span className="text-zinc-600 italic ml-auto">running...</span>
+            <span className="text-fg-faint italic ml-auto">running...</span>
           )}
           {hasSummary && !hovered && (
-            <ChevronRight className={`w-3 h-3 text-zinc-600 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} />
+            <ChevronRight className={`w-3 h-3 text-fg-faint ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} />
           )}
           {hasSummary && hovered && (
             <span className="ml-auto" onClick={(e) => e.stopPropagation()}>
@@ -96,8 +96,8 @@ export function ToolCallItem({ toolCall, variant, index = 0, total = 1, defaultE
         </div>
         {expanded && toolCall.summary && (
           <div className="px-3 pb-2">
-            <div className="max-h-32 overflow-y-auto rounded bg-zinc-900 border border-zinc-700/40 px-2 py-1">
-              <pre className="text-[10px] text-zinc-400 whitespace-pre-wrap break-all font-mono">
+            <div className="max-h-32 overflow-y-auto rounded bg-bg-elevated border border-border-subtle/40 px-2 py-1">
+              <pre className="text-[10px] text-fg-secondary whitespace-pre-wrap break-all font-mono">
                 {toolCall.summary}
               </pre>
             </div>
@@ -114,14 +114,14 @@ export function ToolCallItem({ toolCall, variant, index = 0, total = 1, defaultE
       onMouseLeave={() => setHovered(false)}
     >
       <div
-        className={`flex items-center gap-1.5 py-0.5 px-2 text-xs text-zinc-400 ${hasSummary ? 'hover:text-zinc-300 cursor-pointer' : ''}`}
+        className={`flex items-center gap-1.5 py-0.5 px-2 text-xs text-fg-secondary ${hasSummary ? 'hover:text-fg-secondary cursor-pointer' : ''}`}
         onClick={toggleExpand}
       >
         <TreeConnector index={index} total={total} />
         <StatusIcon status={toolCall.status} />
         <span className="font-mono">{formatToolName(toolCall.tool)}</span>
         {hasSummary && (
-          <ChevronRight className={`w-3 h-3 text-zinc-600 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+          <ChevronRight className={`w-3 h-3 text-fg-faint transition-transform ${expanded ? 'rotate-90' : ''}`} />
         )}
         {hasSummary && hovered && (
           <span className="ml-auto" onClick={(e) => e.stopPropagation()}>
@@ -131,8 +131,8 @@ export function ToolCallItem({ toolCall, variant, index = 0, total = 1, defaultE
       </div>
       {expanded && toolCall.summary && (
         <div className="pl-7 pr-1 py-0.5">
-          <div className="max-h-24 overflow-y-auto rounded bg-zinc-800/60 border border-zinc-700/40 px-2 py-1">
-            <pre className="text-[10px] text-zinc-400 whitespace-pre-wrap break-all font-mono">
+          <div className="max-h-24 overflow-y-auto rounded bg-surface/60 border border-border-subtle/40 px-2 py-1">
+            <pre className="text-[10px] text-fg-secondary whitespace-pre-wrap break-all font-mono">
               {toolCall.summary}
             </pre>
           </div>

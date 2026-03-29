@@ -164,9 +164,9 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
-          <Bot className="w-16 h-16 text-zinc-800 mx-auto mb-4" />
-          <h2 className="text-lg font-medium text-zinc-400 mb-1">Start a conversation with Conduit</h2>
-          <p className="text-xs text-zinc-600 mt-1">Type a message below to begin</p>
+          <Bot className="w-16 h-16 text-fg-faint mx-auto mb-4" />
+          <h2 className="text-lg font-medium text-fg-secondary mb-1">Start a conversation with Conduit</h2>
+          <p className="text-xs text-fg-faint mt-1">Type a message below to begin</p>
         </div>
       </div>
     )
@@ -177,7 +177,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
       <div className="max-w-3xl mx-auto space-y-6">
         {/* Persistent text-only mode banner (agent has 0 MCP tools) */}
         {textOnlyMode && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-md text-xs bg-zinc-800 border border-zinc-700 text-zinc-400">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-md text-xs bg-surface border border-border-subtle text-fg-secondary">
             <Info className="w-3.5 h-3.5 shrink-0" />
             <span>This agent has no tools configured — responses are text-only</span>
           </div>
@@ -221,7 +221,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
               <Bot className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-zinc-500 mb-1">Conduit</div>
+              <div className="text-xs font-medium text-fg-muted mb-1">Conduit</div>
               <MessageContent content={streamingContent} role="assistant" />
               {streamStalled && <ThinkingIndicator />}
             </div>
@@ -235,7 +235,7 @@ export function ChatTranscript({ messages, isStreaming, streamingContent, onSend
               <Bot className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-zinc-500 mb-1">Conduit</div>
+              <div className="text-xs font-medium text-fg-muted mb-1">Conduit</div>
               <ThinkingIndicator />
             </div>
           </div>

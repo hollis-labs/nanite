@@ -46,6 +46,17 @@
 
   /* Focus ring */
   --color-ring: var(--c-ring);
+
+  /* Composer — always dark, same in both themes */
+  --color-composer: var(--c-composer);
+  --color-composer-bar: var(--c-composer-bar);
+  --color-composer-border: var(--c-composer-border);
+  --color-composer-border-focus: var(--c-composer-border-focus);
+  --color-composer-fg: var(--c-composer-fg);
+  --color-composer-fg-secondary: var(--c-composer-fg-secondary);
+  --color-composer-fg-muted: var(--c-composer-fg-muted);
+  --color-composer-hover: var(--c-composer-hover);
+  --color-composer-active: var(--c-composer-active);
 }
 
 /* ─── Dark theme (default) ─── */
@@ -70,6 +81,17 @@
   --c-success: #60a5fa;
   --c-success-muted: rgba(59, 130, 246, 0.15);
   --c-ring: #dc2626;
+
+  /* Composer — always dark */
+  --c-composer: #18181b;
+  --c-composer-bar: #111113;
+  --c-composer-border: #27272a;
+  --c-composer-border-focus: #3f3f46;
+  --c-composer-fg: #f4f4f5;
+  --c-composer-fg-secondary: #a1a1aa;
+  --c-composer-fg-muted: #52525b;
+  --c-composer-hover: #27272a;
+  --c-composer-active: #3f3f46;
 }
 
 /* ─── Light theme ─── */
@@ -94,6 +116,17 @@
   --c-success: #2563eb;
   --c-success-muted: rgba(59, 130, 246, 0.10);
   --c-ring: #dc2626;
+
+  /* Composer — always dark (same as :root) */
+  --c-composer: #18181b;
+  --c-composer-bar: #111113;
+  --c-composer-border: #27272a;
+  --c-composer-border-focus: #3f3f46;
+  --c-composer-fg: #f4f4f5;
+  --c-composer-fg-secondary: #a1a1aa;
+  --c-composer-fg-muted: #52525b;
+  --c-composer-hover: #27272a;
+  --c-composer-active: #3f3f46;
 }
 
 html, body, #root {
@@ -173,3 +206,46 @@ body {
 .light .provider-scroll {
   scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
+
+/* ─── Light mode highlight.js (GitHub Light) ─── */
+.light .hljs { color: #24292e; background: #ffffff }
+.light .hljs-doctag,
+.light .hljs-keyword,
+.light .hljs-meta .hljs-keyword,
+.light .hljs-template-tag,
+.light .hljs-template-variable,
+.light .hljs-type,
+.light .hljs-variable.language_ { color: #d73a49 }
+.light .hljs-title,
+.light .hljs-title.class_,
+.light .hljs-title.class_.inherited__,
+.light .hljs-title.function_ { color: #6f42c1 }
+.light .hljs-attr,
+.light .hljs-attribute,
+.light .hljs-literal,
+.light .hljs-meta,
+.light .hljs-number,
+.light .hljs-operator,
+.light .hljs-variable,
+.light .hljs-selector-attr,
+.light .hljs-selector-class,
+.light .hljs-selector-id { color: #005cc5 }
+.light .hljs-regexp,
+.light .hljs-string,
+.light .hljs-meta .hljs-string { color: #032f62 }
+.light .hljs-built_in,
+.light .hljs-symbol { color: #e36209 }
+.light .hljs-comment,
+.light .hljs-code,
+.light .hljs-formula { color: #6a737d }
+.light .hljs-name,
+.light .hljs-quote,
+.light .hljs-selector-tag,
+.light .hljs-selector-pseudo { color: #22863a }
+.light .hljs-subst { color: #24292e }
+.light .hljs-section { color: #005cc5; font-weight: bold }
+.light .hljs-bullet { color: #735c0f }
+.light .hljs-emphasis { color: #24292e; font-style: italic }
+.light .hljs-strong { color: #24292e; font-weight: bold }
+.light .hljs-addition { color: #22863a; background-color: #f0fff4 }
+.light .hljs-deletion { color: #b31d28; background-color: #ffeef0 }

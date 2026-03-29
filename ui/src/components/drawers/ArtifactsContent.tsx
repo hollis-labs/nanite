@@ -1,8 +1,7 @@
-import { useEffect, useCallback, useState } from 'react'
-import { X, FileText, FileCode, FileImage, File, Download, Package, Eye, ArrowLeft } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { FileText, FileCode, FileImage, File, Download, Package, Eye, ArrowLeft } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/ScrollArea'
-import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import type { Artifact } from '@/lib/types'
@@ -63,7 +62,7 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="w-5 h-5 border-2 border-border-subtle border-t-zinc-400 rounded-full animate-spin" />
+        <div className="w-5 h-5 border-2 border-border-subtle border-t-fg-muted rounded-full animate-spin" />
       </div>
     )
   }
@@ -74,7 +73,7 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
         <img
           src={downloadUrl}
           alt={artifact.name}
-          className="max-w-full max-h-[60vh] rounded-lg border border-border"
+          className="max-w-full max-h-[60vh] rounded-sm border border-border"
         />
       </div>
     )
@@ -82,7 +81,7 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
 
   if (content !== null) {
     return (
-      <pre className="p-4 text-xs font-mono text-fg-secondary bg-bg rounded-lg border border-border overflow-auto max-h-[60vh] whitespace-pre-wrap break-words">
+      <pre className="p-4 text-xs font-mono text-fg-secondary bg-bg rounded-sm border border-border overflow-auto max-h-[60vh] whitespace-pre-wrap break-words">
         {content}
       </pre>
     )
@@ -102,7 +101,7 @@ function ArtifactRow({
   const canPreview = isPreviewable(artifact.mime_type)
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-lg bg-bg-elevated/50 border border-border hover:border-border-subtle transition-colors">
+    <div className="flex items-center gap-3 p-3 rounded-sm bg-bg-elevated/50 border border-border hover:border-border-subtle transition-colors">
       <Icon className="w-5 h-5 text-fg-muted shrink-0" />
       <div className="flex-1 min-w-0">
         <p className="text-sm text-fg truncate">{artifact.name}</p>
@@ -135,110 +134,76 @@ function ArtifactRow({
   )
 }
 
-export function ArtifactsDrawer() {
-  const open = useLayoutStore((s) => s.artifactsDrawerOpen)
-  const setOpen = useLayoutStore((s) => s.setArtifactsDrawer)
+interface ArtifactsContentProps {
+  onTitleChange?: (title: string) => void
+}
+
+export function ArtifactsContent({ onTitleChange }: ArtifactsContentProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const [previewing, setPreviewing] = useState<Artifact | null>(null)
 
   const { data: artifacts = [], isLoading } = useQuery({
     queryKey: ['artifacts', activeSessionId],
     queryFn: () => api.listArtifacts(activeSessionId!),
-    enabled: !!activeSessionId && open,
+    enabled: !!activeSessionId,
   })
 
-  const handleClose = useCallback(() => {
-    setOpen(false)
-    setPreviewing(null)
-  }, [setOpen])
-
-  // Close on Escape
   useEffect(() => {
-    if (!open) return
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (previewing) {
-          setPreviewing(null)
-        } else {
-          handleClose()
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, handleClose, previewing])
+    onTitleChange?.(previewing ? previewing.name : 'Artifacts')
+  }, [previewing, onTitleChange])
 
   // Reset preview when session changes
   useEffect(() => {
     setPreviewing(null)
   }, [activeSessionId])
 
-  if (!open) return null
-
   return (
-      <div className="fixed inset-y-0 right-0 w-96 bg-bg border-l border-border z-50 flex flex-col shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
-          <div className="flex items-center gap-2">
-            {previewing ? (
-              <button
-                type="button"
-                onClick={() => setPreviewing(null)}
-                className="p-0.5 rounded text-fg-muted hover:text-fg transition-colors"
-                aria-label="Back to list"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-            ) : (
-              <Package className="w-4 h-4 text-fg-secondary" />
-            )}
-            <h2 className="text-sm font-semibold text-fg truncate">
-              {previewing ? previewing.name : 'Artifacts'}
-            </h2>
-          </div>
+    <>
+      {previewing && (
+        <div className="px-3 pt-2">
           <button
-            onClick={handleClose}
-            className="p-1 rounded text-fg-muted hover:text-fg hover:bg-surface transition-colors"
-            aria-label="Close artifacts drawer"
+            type="button"
+            onClick={() => setPreviewing(null)}
+            className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg transition-colors"
           >
-            <X className="w-4 h-4" />
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Back to list
           </button>
         </div>
+      )}
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="p-3 space-y-2">
+          {previewing ? (
+            <ArtifactPreview artifact={previewing} />
+          ) : (
+            <>
+              {isLoading && (
+                <div className="flex items-center justify-center py-12">
+                  <div className="w-5 h-5 border-2 border-border-subtle border-t-fg-muted rounded-full animate-spin" />
+                </div>
+              )}
 
-        {/* Content */}
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="p-3 space-y-2">
-            {previewing ? (
-              <ArtifactPreview artifact={previewing} />
-            ) : (
-              <>
-                {isLoading && (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="w-5 h-5 border-2 border-border-subtle border-t-zinc-400 rounded-full animate-spin" />
-                  </div>
-                )}
+              {!isLoading && artifacts.length === 0 && (
+                <div className="text-center py-12">
+                  <Package className="w-10 h-10 text-fg-faint mx-auto mb-3" />
+                  <p className="text-sm text-fg-muted">Artifacts will appear here</p>
+                  <p className="text-xs text-fg-faint mt-1">
+                    Files and outputs generated during your session
+                  </p>
+                </div>
+              )}
 
-                {!isLoading && artifacts.length === 0 && (
-                  <div className="text-center py-12">
-                    <Package className="w-10 h-10 text-zinc-800 mx-auto mb-3" />
-                    <p className="text-sm text-fg-muted">Artifacts will appear here</p>
-                    <p className="text-xs text-fg-faint mt-1">
-                      Files and outputs generated during your session
-                    </p>
-                  </div>
-                )}
-
-                {artifacts.map((artifact) => (
-                  <ArtifactRow
-                    key={artifact.id}
-                    artifact={artifact}
-                    onPreview={setPreviewing}
-                  />
-                ))}
-              </>
-            )}
-          </div>
-        </ScrollArea>
-      </div>
+              {artifacts.map((artifact) => (
+                <ArtifactRow
+                  key={artifact.id}
+                  artifact={artifact}
+                  onPreview={setPreviewing}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      </ScrollArea>
+    </>
   )
 }

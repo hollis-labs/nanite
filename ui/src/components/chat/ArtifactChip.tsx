@@ -22,9 +22,9 @@ export function ArtifactChip({ name, mimeType = 'application/octet-stream' }: Ar
     <button
       type="button"
       onClick={() => setOpen(true)}
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-zinc-800 border border-zinc-700 hover:border-zinc-600 hover:bg-zinc-750 transition-colors text-xs text-zinc-300 hover:text-zinc-100 cursor-pointer"
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-surface border border-border-subtle hover:border-border-subtle hover:bg-surface-hover transition-colors text-xs text-fg-secondary hover:text-fg cursor-pointer"
     >
-      <Icon className="w-3 h-3 text-zinc-500" />
+      <Icon className="w-3 h-3 text-fg-muted" />
       <span className="font-mono truncate max-w-[200px]">{name}</span>
     </button>
   )

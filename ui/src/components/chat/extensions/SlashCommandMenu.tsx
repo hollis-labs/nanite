@@ -80,8 +80,8 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenu
 
     if (items.length === 0) {
       return (
-        <div className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-2 px-3 w-64">
-          <span className="text-xs text-zinc-500">No matching commands</span>
+        <div className="bg-composer border border-composer-border-focus rounded-xl shadow-xl z-50 py-2 px-3 w-64">
+          <span className="text-xs text-composer-fg-muted">No matching commands</span>
         </div>
       )
     }
@@ -89,10 +89,10 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenu
     let flatIndex = -1
 
     return (
-      <div className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 w-72 max-h-72 overflow-y-auto">
+      <div className="bg-composer border border-composer-border-focus rounded-xl shadow-xl z-50 py-1 w-72 max-h-72 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.category}>
-            <div className="px-3 py-1.5 text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+            <div className="px-3 py-1.5 text-[10px] font-medium text-composer-fg-muted uppercase tracking-wider">
               {group.category}
             </div>
             {group.commands.map((item) => {
@@ -105,14 +105,14 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenu
                   onMouseEnter={() => setSelectedIndex(idx)}
                   className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 transition-colors ${
                     idx === selectedIndex
-                      ? 'bg-zinc-800 text-zinc-100'
-                      : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                      ? 'bg-composer-hover text-composer-fg'
+                      : 'text-composer-fg-secondary hover:bg-composer-hover/60 hover:text-composer-fg'
                   }`}
                 >
                   <span className="text-sm font-mono text-accent shrink-0 w-20 truncate">/{item.name}</span>
-                  <span className="text-xs text-zinc-500 truncate">{item.description}</span>
+                  <span className="text-xs text-composer-fg-muted truncate">{item.description}</span>
                   {item.source === 'plugin' && (
-                    <span className="text-[9px] text-zinc-600 bg-zinc-800 rounded px-1 py-0.5 shrink-0 ml-auto">plugin</span>
+                    <span className="text-[9px] text-composer-fg-muted bg-composer-hover rounded px-1 py-0.5 shrink-0 ml-auto">plugin</span>
                   )}
                 </button>
               )

@@ -1,115 +1,16 @@
-import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react'
-import { Plus, Hash, Pin, PinOff, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
-import { AdapterBadge } from '@/components/chat/AdapterBadge'
+import { useState, useMemo, type ReactNode } from 'react'
+import { Plus, Pin, PinOff, Loader2, MessageSquare } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { ScrollArea } from '@/components/ui/ScrollArea'
+import { AdapterBadge } from '@/components/chat/AdapterBadge'
+import { ProjectDropdown } from './ProjectDropdown'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
-import { useSettings, useModels, useProviders } from '@/hooks/useSettings'
+import { useSettings } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
-import type { Session, UserSettings, ModelRecord, ProviderConfig, Agent } from '@/lib/types'
-
-const ADAPTER_OPTIONS = [
-  { value: '', label: 'Default' },
-  { value: 'http', label: 'HTTP (API)' },
-  { value: 'pty', label: 'PTY (CLI)' },
-  { value: 'subprocess', label: 'Subprocess' },
-]
-
-function NewSessionForm({
-  defaults,
-  models,
-  providers,
-  agents,
-  isPending,
-  onCreate,
-}: {
-  defaults: UserSettings | undefined
-  models: ModelRecord[]
-  providers: ProviderConfig[]
-  agents: Agent[]
-  isPending: boolean
-  onCreate: (overrides: { provider?: string; model?: string; agent_id?: string }) => void
-}) {
-  const [provider, setProvider] = useState(defaults?.default_provider ?? '')
-  const [model, setModel] = useState(defaults?.default_model ?? '')
-  const [agent, setAgent] = useState(defaults?.default_agent ?? '')
-
-  const providerOptions = useMemo(() =>
-    providers.map((p) => ({ value: p.provider_type, label: p.name })),
-    [providers],
-  )
-
-  const modelOptions = useMemo(() => {
-    const filtered = provider ? models.filter((m) => m.provider_type === provider) : models
-    return filtered.filter((m) => m.is_enabled).map((m) => ({ value: m.model_id, label: m.display_name }))
-  }, [models, provider])
-
-  const agentOptions = useMemo(() =>
-    agents
-      .filter((a) => a.status !== 'disabled')
-      .map((a) => ({ value: a.id, label: a.source ? `${a.name} \u00b7 ${a.source}` : a.name })),
-    [agents],
-  )
-
-  return (
-    <div className="px-3 pb-3 space-y-2">
-      <div className="space-y-1.5">
-        <FormSelect label="Provider" value={provider} options={providerOptions} onChange={(v) => { setProvider(v); setModel('') }} />
-        <FormSelect label="Model" value={model} options={modelOptions} onChange={setModel} />
-        <FormSelect label="Adapter" value="" options={ADAPTER_OPTIONS} onChange={() => {}} disabled />
-        <FormSelect label="Agent" value={agent} options={agentOptions} onChange={setAgent} />
-      </div>
-      <button
-        onClick={() => onCreate({
-          provider: provider || undefined,
-          model: model || undefined,
-          agent_id: agent || undefined,
-        })}
-        disabled={isPending}
-        className="w-full py-1.5 rounded-md bg-accent hover:bg-accent-hover text-white text-xs font-medium transition-colors disabled:opacity-50"
-      >
-        {isPending ? 'Creating...' : 'Create Session'}
-      </button>
-    </div>
-  )
-}
-
-function FormSelect({
-  label,
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  label: string
-  value: string
-  options: { value: string; label: string }[]
-  onChange: (value: string) => void
-  disabled?: boolean
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-[10px] uppercase tracking-wider text-fg-muted w-14 shrink-0">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className="flex-1 bg-bg-elevated border border-border-subtle rounded px-2 py-1 text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        <option value="">Default</option>
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
-    </div>
-  )
-}
-
-const TASK_CONTEXT_TYPES = new Set(['task', 'sprint', 'review', 'workflow'])
-const TASKS_COLLAPSED_KEY = 'sidebar-tasks-collapsed'
+import type { Session } from '@/lib/types'
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
@@ -130,18 +31,11 @@ function sortByActivity(a: Session, b: Session): number {
   return new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime()
 }
 
-function isTaskSession(s: Session): boolean {
-  return !!s.context_type && TASK_CONTEXT_TYPES.has(s.context_type)
-}
-
-function isConversationSession(s: Session): boolean {
-  return !s.context_type || s.context_type === 'chat' || s.context_type === ''
-}
-
 export function LeftSidebar() {
   const open = useLayoutStore((s) => s.leftSidebarOpen)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
+  const activeProjectId = useAppStore((s) => s.activeProjectId)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const queryClient = useQueryClient()
   const activeStreams = useChatStore((s) => s.activeStreams)
@@ -149,31 +43,6 @@ export function LeftSidebar() {
   const cliActiveSessions = useChatStore((s) => s.cliActiveSessions)
 
   const { data: userSettings } = useSettings()
-  const { data: models } = useModels()
-  const { data: providers } = useProviders()
-  const { data: agents } = useQuery({
-    queryKey: ['agents'],
-    queryFn: api.listAgents,
-    staleTime: 5 * 60 * 1000,
-  })
-
-  const [showCreateForm, setShowCreateForm] = useState(false)
-
-  const [tasksCollapsed, setTasksCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(TASKS_COLLAPSED_KEY) !== 'false'
-    } catch {
-      return true
-    }
-  })
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(TASKS_COLLAPSED_KEY, String(tasksCollapsed))
-    } catch {
-      // ignore
-    }
-  }, [tasksCollapsed])
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['sessions', activeWorkspaceId],
@@ -181,27 +50,18 @@ export function LeftSidebar() {
     enabled: !!activeWorkspaceId,
   })
 
-  const createWithDefaults = useCallback(() => {
-    return api.createSession({
-      workspace_id: activeWorkspaceId!,
-      provider: userSettings?.default_provider || undefined,
-      model: userSettings?.default_model || undefined,
-      agent_id: userSettings?.default_agent || undefined,
-    })
-  }, [activeWorkspaceId, userSettings])
-
   const createMutation = useMutation({
-    mutationFn: (overrides?: { provider?: string; model?: string; agent_id?: string }) =>
-      overrides
-        ? api.createSession({ workspace_id: activeWorkspaceId!, ...overrides })
-        : createWithDefaults(),
+    mutationFn: () =>
+      api.createSession({
+        workspace_id: activeWorkspaceId!,
+        project_id: activeProjectId ?? undefined,
+        provider: userSettings?.default_provider || undefined,
+        model: userSettings?.default_model || undefined,
+        agent_id: userSettings?.default_agent || undefined,
+      }),
     onSuccess: (newSession) => {
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
       setActiveSession(newSession.id)
-      setShowCreateForm(false)
-    },
-    onError: (err) => {
-      console.error('Failed to create session:', err)
     },
   })
 
@@ -210,41 +70,23 @@ export function LeftSidebar() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
     },
-    onError: (err) => {
-      console.error('Failed to toggle pin:', err)
-    },
   })
 
-  // Check if ANY session has a non-null, non-empty, non-chat context_type.
-  // If all are null/empty/chat, we degrade to flat list (no zone headers).
-  const hasAnyContextType = useMemo(
-    () => sessions.some((s: Session) => s.context_type && s.context_type !== '' && s.context_type !== 'chat'),
-    [sessions],
-  )
+  // Filter by active project (client-side)
+  const filteredSessions = useMemo(() => {
+    if (!activeProjectId) return sessions
+    return sessions.filter((s: Session) => s.project_id === activeProjectId)
+  }, [sessions, activeProjectId])
 
-  // Zone grouping — pinned sessions are excluded from Conversations/Tasks
   const pinned = useMemo(
-    () => sessions.filter((s: Session) => s.is_pinned).sort(sortByActivity),
-    [sessions],
+    () => filteredSessions.filter((s: Session) => s.is_pinned).sort(sortByActivity),
+    [filteredSessions],
   )
 
   const unpinned = useMemo(
-    () => sessions.filter((s: Session) => !s.is_pinned),
-    [sessions],
+    () => filteredSessions.filter((s: Session) => !s.is_pinned).sort(sortByActivity),
+    [filteredSessions],
   )
-
-  const conversations = useMemo(
-    () => unpinned.filter(isConversationSession).sort(sortByActivity),
-    [unpinned],
-  )
-
-  const tasks = useMemo(
-    () => unpinned.filter(isTaskSession).sort(sortByActivity),
-    [unpinned],
-  )
-
-  // Flat mode: no context_type diversity — show pinned + recent like before
-  const useFlatMode = !hasAnyContextType
 
   return (
     <aside
@@ -254,49 +96,28 @@ export function LeftSidebar() {
     >
       <div className="min-w-68 flex flex-col h-full">
         {/* Header */}
-        <div className="border-b border-border shrink-0">
-          <div className="flex items-center justify-between px-4 h-12">
-            <h2 className="text-sm font-semibold text-fg">Sessions</h2>
-            <div className="flex items-center">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-7 h-7 text-fg-secondary hover:text-fg"
-                onClick={() => createMutation.mutate(undefined)}
-                disabled={!activeWorkspaceId || createMutation.isPending}
-                title="New session with defaults"
-              >
-                {createMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Plus className="w-4 h-4" />
-                )}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-5 h-7 text-fg-muted hover:text-fg-secondary"
-                onClick={() => setShowCreateForm((o) => !o)}
-                title="Session options"
-              >
-                <ChevronDown className={`w-3 h-3 transition-transform duration-150 ${showCreateForm ? 'rotate-180' : ''}`} />
-              </Button>
-            </div>
-          </div>
-
-          {showCreateForm && (
-            <NewSessionForm
-              defaults={userSettings}
-              models={models ?? []}
-              providers={providers ?? []}
-              agents={agents ?? []}
-              isPending={createMutation.isPending}
-              onCreate={(overrides) => createMutation.mutate(overrides)}
-            />
-          )}
+        <div className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
+          <h2 className="text-sm font-semibold text-fg">Chats</h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-7 h-7 text-fg-secondary hover:text-fg"
+            onClick={() => createMutation.mutate()}
+            disabled={!activeWorkspaceId || createMutation.isPending}
+            title="New chat"
+          >
+            {createMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Plus className="w-4 h-4" />
+            )}
+          </Button>
         </div>
 
-        {/* Session list */}
+        {/* Project selector */}
+        {activeWorkspaceId && <ProjectDropdown workspaceId={activeWorkspaceId} />}
+
+        {/* Chat list */}
         <ScrollArea className="flex-1 min-h-0">
           <div className="px-2 py-2">
             {isLoading && (
@@ -305,19 +126,19 @@ export function LeftSidebar() {
               </div>
             )}
 
-            {!isLoading && sessions.length === 0 && (
+            {!isLoading && filteredSessions.length === 0 && (
               <div className="px-2 py-8 text-center">
-                <p className="text-xs text-fg-muted">No sessions yet</p>
+                <p className="text-xs text-fg-muted">No chats yet</p>
                 <p className="text-xs text-fg-faint mt-1">Click + to start a chat</p>
               </div>
             )}
 
-            {/* Zone 1: Pinned */}
+            {/* Pinned */}
             {pinned.length > 0 && (
               <>
                 <ZoneHeader icon={<Pin className="w-3 h-3" />} label="Pinned" />
                 {pinned.map((session: Session) => (
-                  <SessionItem
+                  <ChatItem
                     key={session.id}
                     session={session}
                     isActive={session.id === activeSessionId}
@@ -329,75 +150,20 @@ export function LeftSidebar() {
               </>
             )}
 
-            {useFlatMode ? (
-              /* Flat mode — no zone headers for unpinned, same as legacy */
+            {/* Recent */}
+            {unpinned.length > 0 && (
               <>
-                {unpinned.length > 0 && (
-                  <>
-                    {pinned.length > 0 && <ZoneHeader label="Recent" />}
-                    {unpinned.sort(sortByActivity).map((session: Session) => (
-                      <SessionItem
-                        key={session.id}
-                        session={session}
-                        isActive={session.id === activeSessionId}
-                        onClick={() => setActiveSession(session.id)}
-                        onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
-                        statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
-                      />
-                    ))}
-                  </>
-                )}
-              </>
-            ) : (
-              /* Zoned mode */
-              <>
-                {/* Zone 2: Conversations */}
-                {conversations.length > 0 && (
-                  <>
-                    <ZoneHeader label="Conversations" />
-                    {conversations.map((session: Session) => (
-                      <SessionItem
-                        key={session.id}
-                        session={session}
-                        isActive={session.id === activeSessionId}
-                        onClick={() => setActiveSession(session.id)}
-                        onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
-                        statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
-                      />
-                    ))}
-                  </>
-                )}
-
-                {/* Zone 3: Tasks (collapsible) */}
-                {tasks.length > 0 && (
-                  <>
-                    <button
-                      onClick={() => setTasksCollapsed((c) => !c)}
-                      className="w-full flex items-center gap-1 px-2 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wider hover:text-fg-secondary transition-colors"
-                    >
-                      <ChevronRight
-                        className={`w-3 h-3 transition-transform duration-150 ${
-                          tasksCollapsed ? '' : 'rotate-90'
-                        }`}
-                      />
-                      <span>Tasks</span>
-                      <span className="ml-auto text-[10px] bg-surface text-fg-secondary px-1.5 py-0.5 rounded-full tabular-nums leading-none">
-                        {tasks.length}
-                      </span>
-                    </button>
-                    {!tasksCollapsed &&
-                      tasks.map((session: Session) => (
-                        <SessionItem
-                          key={session.id}
-                          session={session}
-                          isActive={session.id === activeSessionId}
-                          onClick={() => setActiveSession(session.id)}
-                          onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
-                          statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
-                        />
-                      ))}
-                  </>
-                )}
+                {pinned.length > 0 && <ZoneHeader label="Recent" />}
+                {unpinned.map((session: Session) => (
+                  <ChatItem
+                    key={session.id}
+                    session={session}
+                    isActive={session.id === activeSessionId}
+                    onClick={() => setActiveSession(session.id)}
+                    onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
+                    statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
+                  />
+                ))}
               </>
             )}
           </div>
@@ -407,29 +173,18 @@ export function LeftSidebar() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
 function PresenceDot({ variant }: { variant: 'streaming' | 'tool-pending' | 'cli-active' }) {
   if (variant === 'streaming') {
-    return (
-      <span
-        className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"
-        title="Streaming"
-      />
-    )
+    return <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" title="Streaming" />
   }
   if (variant === 'cli-active') {
-    return (
-      <span
-        className="w-2 h-2 rounded-full bg-cyan-500 shrink-0 animate-pulse"
-        title="CLI active"
-      />
-    )
+    return <span className="w-2 h-2 rounded-full bg-cyan-500 shrink-0 animate-pulse" title="CLI active" />
   }
-  return (
-    <span
-      className="w-2 h-2 rounded-full bg-amber-500 shrink-0"
-      title="Tool approval pending"
-    />
-  )
+  return <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="Tool approval pending" />
 }
 
 function getPresenceIndicator(
@@ -438,15 +193,9 @@ function getPresenceIndicator(
   pendingTools: Map<string, unknown>,
   cliActiveSessions: Map<string, unknown>,
 ): ReactNode | undefined {
-  if (pendingTools.has(sessionId)) {
-    return <PresenceDot variant="tool-pending" />
-  }
-  if (activeStreams.has(sessionId)) {
-    return <PresenceDot variant="streaming" />
-  }
-  if (cliActiveSessions.has(sessionId)) {
-    return <PresenceDot variant="cli-active" />
-  }
+  if (pendingTools.has(sessionId)) return <PresenceDot variant="tool-pending" />
+  if (activeStreams.has(sessionId)) return <PresenceDot variant="streaming" />
+  if (cliActiveSessions.has(sessionId)) return <PresenceDot variant="cli-active" />
   return undefined
 }
 
@@ -459,7 +208,7 @@ function ZoneHeader({ label, icon }: { label: string; icon?: ReactNode }) {
   )
 }
 
-function SessionItem({
+function ChatItem({
   session,
   isActive,
   onClick,
@@ -473,81 +222,59 @@ function SessionItem({
   statusIndicator?: ReactNode
 }) {
   const [hovered, setHovered] = useState(false)
-  const hasTitle = !!(session.custom_name || session.title)
-  const displayTitle = session.custom_name || session.title || `#${session.short_code}`
-
-  // Parse tags from JSON string.
-  const tags: string[] = useMemo(() => {
-    try {
-      const parsed = JSON.parse(session.tags || '[]')
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  }, [session.tags])
+  const displayTitle = session.custom_name || session.title || `Chat ${session.short_code}`
 
   return (
     <button
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`w-full flex flex-col gap-1 px-2 py-2 rounded-md text-sm text-left transition-colors group ${
+      className={`w-full flex items-start gap-2 px-2 py-0.5 rounded-md text-left transition-colors group ${
         isActive
           ? 'bg-surface/60 text-fg'
           : 'text-fg-secondary hover:bg-surface/40 hover:text-fg'
       }`}
     >
-      <div className="flex items-center gap-2 w-full">
-        {statusIndicator}
-        <Hash className="w-3.5 h-3.5 shrink-0 opacity-50" />
-        <div className="flex flex-col min-w-0 flex-1">
-          <span className="truncate">{displayTitle}</span>
-          {hasTitle && session.short_code && (
-            <span className="text-[10px] text-fg-faint font-mono leading-tight">#{session.short_code}</span>
-          )}
-        </div>
-        {session.provider && <AdapterBadge provider={session.provider} size="sm" />}
-        <div className="flex items-center gap-2 shrink-0">
-          {hovered && (
-            <span
-              role="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onTogglePin()
-              }}
-              className="p-0.5 rounded text-fg-muted hover:text-fg hover:bg-surface-hover transition-colors"
-              aria-label={session.is_pinned ? 'Unpin session' : 'Pin session'}
-            >
-              {session.is_pinned ? (
-                <PinOff className="w-3 h-3" />
-              ) : (
-                <Pin className="w-3 h-3" />
-              )}
+      {/* Icon column — message count centered in icon */}
+      <div className="relative shrink-0">
+        {statusIndicator && <div className="absolute -top-1 -left-1 z-10">{statusIndicator}</div>}
+        <div className="relative w-7 h-7 flex items-center justify-center">
+          <MessageSquare className="w-5 h-5 opacity-25" />
+          {session.message_count > 0 && (
+            <span className="absolute inset-x-0 top-[5px] bottom-1.5 flex items-center justify-center text-[9px] font-bold text-fg-muted tabular-nums leading-none">
+              {session.message_count > 99 ? '99' : session.message_count}
             </span>
           )}
-          {!hovered && session.is_pinned && (
-            <Pin className="w-3 h-3 text-fg-faint" />
-          )}
-          {session.message_count > 0 && (
-            <span className="text-xs text-fg-faint tabular-nums">{session.message_count}</span>
-          )}
-          <span className="text-xs text-fg-faint">
-            {formatRelativeTime(session.last_activity)}
-          </span>
         </div>
       </div>
-      {tags.length > 0 && (
-        <div className="flex gap-1 flex-wrap pl-5">
-          {tags.slice(0, 3).map((tag) => (
+
+      {/* Content — mt aligns title baseline with icon center */}
+      <div className="flex-1 min-w-0 mt-[3px]">
+        {/* Line 1: title + time/pin */}
+        <div className="flex items-center gap-1">
+          <span className="text-sm truncate flex-1 leading-snug">{displayTitle}</span>
+          {hovered ? (
             <span
-              key={tag}
-              className="text-[10px] px-1.5 py-0 rounded-full bg-surface text-fg-muted leading-relaxed"
+              role="button"
+              onClick={(e) => { e.stopPropagation(); onTogglePin() }}
+              className="p-0.5 rounded text-fg-muted hover:text-fg hover:bg-surface-hover transition-colors shrink-0"
+              aria-label={session.is_pinned ? 'Unpin' : 'Pin'}
             >
-              {tag}
+              {session.is_pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
             </span>
-          ))}
+          ) : (
+            <>
+              {session.is_pinned && <Pin className="w-3 h-3 text-fg-faint shrink-0" />}
+              <span className="text-[11px] text-fg-faint shrink-0">{formatRelativeTime(session.last_activity)}</span>
+            </>
+          )}
         </div>
-      )}
+        {/* Line 2: #short_code · adapter badge */}
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="text-[11px] text-fg-faint font-mono">#{session.short_code}</span>
+          <AdapterBadge provider={session.provider || 'api'} size="sm" />
+        </div>
+      </div>
     </button>
   )
 }

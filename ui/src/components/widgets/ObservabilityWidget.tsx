@@ -18,7 +18,7 @@ function formatCost(usd: number): string {
 function MetricRow({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="flex justify-between items-center text-xs">
-      <span className="text-zinc-500">{label}</span>
+      <span className="text-fg-muted">{label}</span>
       <span className={`${color} font-mono tabular-nums`}>{value}</span>
     </div>
   )
@@ -45,7 +45,7 @@ export function ObservabilityWidget() {
       <div className="space-y-1.5">
         {last ? (
           <>
-            <MetricRow label="Last exec" value={`${formatDuration(last.duration_ms)} · ${last.model}`} color="text-zinc-300" />
+            <MetricRow label="Last exec" value={`${formatDuration(last.duration_ms)} · ${last.model}`} color="text-fg-secondary" />
             <MetricRow label="Avg duration" value={formatDuration(avgDuration)} color="text-blue-400" />
             <MetricRow label={`Cost (last ${total})`} value={formatCost(totalCost)} color="text-amber-400" />
             {errorCount > 0 && (
@@ -53,10 +53,10 @@ export function ObservabilityWidget() {
             )}
           </>
         ) : (
-          <p className="text-xs text-zinc-600 italic">No executions yet</p>
+          <p className="text-xs text-fg-faint italic">No executions yet</p>
         )}
-        <div className="pt-1 border-t border-zinc-800">
-          <p className="text-[10px] text-zinc-600">
+        <div className="pt-1 border-t border-border">
+          <p className="text-[10px] text-fg-faint">
             Settings → Observability for full dashboard
           </p>
         </div>

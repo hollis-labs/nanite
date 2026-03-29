@@ -23,8 +23,8 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
 
   if (state === 'dismissed') {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-3 opacity-50">
-        <div className="flex items-center gap-2 text-xs text-zinc-500">
+      <div className="rounded-sm border border-border bg-bg-elevated/30 p-3 opacity-50">
+        <div className="flex items-center gap-2 text-xs text-fg-muted">
           <X className="w-3.5 h-3.5" />
           <span>Dismissed: {proposal.type}</span>
         </div>
@@ -35,16 +35,16 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
   const isApplied = state === 'applied'
 
   return (
-    <div className={`rounded-lg border p-4 ${
+    <div className={`rounded-sm border p-4 ${
       isApplied
-        ? 'border-green-500/30 bg-green-500/5'
-        : 'border-zinc-700 bg-zinc-900/50'
+        ? 'border-success/30 bg-success/5'
+        : 'border-border-subtle bg-bg-elevated/50'
     }`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <h4 className="text-sm font-medium text-zinc-200">{proposal.type}</h4>
+        <h4 className="text-sm font-medium text-fg">{proposal.type}</h4>
         {isApplied && (
-          <div className="flex items-center gap-1 text-green-400 text-xs">
+          <div className="flex items-center gap-1 text-success text-xs">
             <Check className="w-3.5 h-3.5" />
             <span>Applied</span>
           </div>
@@ -60,7 +60,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
 
           return (
             <div key={key}>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">
+              <label className="block text-xs font-medium text-fg-secondary mb-1">
                 {label}
                 {schema?.required && <span className="text-red-400 ml-0.5">*</span>}
               </label>
@@ -70,14 +70,14 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
                   rows={3}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed resize-none"
+                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed resize-none"
                 />
               ) : fieldType === 'select' && schema?.options ? (
                 <select
                   value={String(value ?? '')}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {schema.options.map((opt) => (
                     <option key={opt} value={opt}>{opt}</option>
@@ -89,7 +89,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
                   value={String(value ?? '')}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               )}
             </div>
@@ -102,7 +102,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
         <div className="flex items-center gap-2 mt-4">
           <Button
             size="sm"
-            className="bg-green-600 hover:bg-green-500 text-white text-xs px-3 py-1 h-7"
+            className="bg-success hover:bg-success/80 text-white text-xs px-3 py-1 h-7"
             onClick={handleApply}
           >
             Apply
@@ -110,7 +110,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
           <Button
             variant="ghost"
             size="sm"
-            className="text-zinc-400 hover:text-zinc-200 text-xs px-3 py-1 h-7"
+            className="text-fg-secondary hover:text-fg text-xs px-3 py-1 h-7"
             onClick={handleDismiss}
           >
             Dismiss

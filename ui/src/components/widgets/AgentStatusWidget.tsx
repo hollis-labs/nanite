@@ -30,8 +30,8 @@ function StatusIndicator({ isStreaming, hasToolCalls }: { isStreaming: boolean; 
   }
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-2 h-2 rounded-full bg-zinc-600 shrink-0" />
-      <span className="text-zinc-400">Idle</span>
+      <span className="w-2 h-2 rounded-full bg-surface-active shrink-0" />
+      <span className="text-fg-secondary">Idle</span>
     </div>
   )
 }
@@ -51,15 +51,15 @@ export function AgentStatusWidget() {
     <Widget id="agent-status" title="Agent Status" icon={Bot}>
       <div className="space-y-2.5">
         <div className="flex justify-between text-xs">
-          <span className="text-zinc-500">Status</span>
+          <span className="text-fg-muted">Status</span>
           <StatusIndicator isStreaming={isStreaming} hasToolCalls={hasToolCalls} />
         </div>
         <div className="flex justify-between text-xs">
-          <span className="text-zinc-500">Agent</span>
-          <span className="text-zinc-300">Conduit</span>
+          <span className="text-fg-muted">Agent</span>
+          <span className="text-fg-secondary">Conduit</span>
         </div>
         <div className="flex justify-between text-xs items-center">
-          <span className="text-zinc-500">Mode</span>
+          <span className="text-fg-muted">Mode</span>
           <span
             className={`px-1.5 py-0.5 rounded text-xs ${modeStyle.bg} ${modeStyle.text} capitalize`}
           >
@@ -67,8 +67,8 @@ export function AgentStatusWidget() {
           </span>
         </div>
         <div className="flex justify-between text-xs">
-          <span className="text-zinc-500">Model</span>
-          <span className="text-zinc-300 truncate ml-2">{modelLabel}</span>
+          <span className="text-fg-muted">Model</span>
+          <span className="text-fg-secondary truncate ml-2">{modelLabel}</span>
         </div>
       </div>
     </Widget>

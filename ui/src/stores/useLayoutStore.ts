@@ -3,13 +3,13 @@ import { persist } from 'zustand/middleware'
 
 type ToolDrawerState = 'closed' | 'compact' | 'expanded'
 type Theme = 'dark' | 'light'
+type RightRailTab = 'widgets' | 'inbox' | 'artifacts'
 
 interface LayoutState {
   leftSidebarOpen: boolean
   rightRailOpen: boolean
-  artifactsDrawerOpen: boolean
+  rightRailTab: RightRailTab
   taskThreadOpen: boolean
-  inboxPanelOpen: boolean
   toolDrawerState: ToolDrawerState
   toolDrawerHeight: number
   currentPage: 'chat' | 'settings'
@@ -18,12 +18,11 @@ interface LayoutState {
   toggleRightRail: () => void
   toggleArtifactsDrawer: () => void
   toggleTaskThread: () => void
-  toggleInboxPanel: () => void
   setLeftSidebar: (open: boolean) => void
   setRightRail: (open: boolean) => void
+  setRightRailTab: (tab: RightRailTab) => void
   setArtifactsDrawer: (open: boolean) => void
   setTaskThread: (open: boolean) => void
-  setInboxPanel: (open: boolean) => void
   setToolDrawerState: (state: ToolDrawerState) => void
   setToolDrawerHeight: (height: number) => void
   setCurrentPage: (page: 'chat' | 'settings') => void
@@ -42,9 +41,8 @@ export const useLayoutStore = create<LayoutState>()(
     (set) => ({
       leftSidebarOpen: true,
       rightRailOpen: true,
-      artifactsDrawerOpen: false,
+      rightRailTab: 'widgets' as RightRailTab,
       taskThreadOpen: true,
-      inboxPanelOpen: false,
       toolDrawerState: 'closed' as ToolDrawerState,
       toolDrawerHeight: 200,
       currentPage: 'chat',
@@ -54,16 +52,25 @@ export const useLayoutStore = create<LayoutState>()(
       toggleRightRail: () =>
         set((state) => ({ rightRailOpen: !state.rightRailOpen })),
       toggleArtifactsDrawer: () =>
-        set((state) => ({ artifactsDrawerOpen: !state.artifactsDrawerOpen })),
+        set((state) => {
+          if (state.rightRailOpen && state.rightRailTab === 'artifacts') {
+            return { rightRailOpen: false }
+          }
+          return { rightRailOpen: true, rightRailTab: 'artifacts' as RightRailTab }
+        }),
       toggleTaskThread: () =>
         set((state) => ({ taskThreadOpen: !state.taskThreadOpen })),
-      toggleInboxPanel: () =>
-        set((state) => ({ inboxPanelOpen: !state.inboxPanelOpen })),
       setLeftSidebar: (open) => set({ leftSidebarOpen: open }),
       setRightRail: (open) => set({ rightRailOpen: open }),
-      setArtifactsDrawer: (open) => set({ artifactsDrawerOpen: open }),
+      setRightRailTab: (tab) => set({ rightRailTab: tab, rightRailOpen: true }),
+      setArtifactsDrawer: (open) => {
+        if (open) {
+          set({ rightRailOpen: true, rightRailTab: 'artifacts' as RightRailTab })
+        } else {
+          set({ rightRailTab: 'widgets' as RightRailTab })
+        }
+      },
       setTaskThread: (open) => set({ taskThreadOpen: open }),
-      setInboxPanel: (open) => set({ inboxPanelOpen: open }),
       setToolDrawerState: (state) => set({ toolDrawerState: state }),
       setToolDrawerHeight: (height) => set({ toolDrawerHeight: Math.max(100, Math.min(600, height)) }),
       setCurrentPage: (page) => set({ currentPage: page }),

@@ -4,7 +4,6 @@ import { NavRail } from './NavRail'
 import { LeftSidebar } from './sidebar/LeftSidebar'
 import { ChatMain } from './chat/ChatMain'
 import { RightRail } from './RightRail'
-import { ArtifactsDrawer } from './drawers/ArtifactsDrawer'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
@@ -15,14 +14,11 @@ import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import { usePresence } from '@/hooks/usePresence'
 import { useHashRoute } from '@/hooks/useHashRoute'
-import { InboxPanel } from './a2a/InboxPanel'
 
 export function AppShell() {
   const focusRef = useRef<(() => void) | null>(null)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const currentPage = useLayoutStore((s) => s.currentPage)
-  const inboxPanelOpen = useLayoutStore((s) => s.inboxPanelOpen)
-  const setInboxPanel = useLayoutStore((s) => s.setInboxPanel)
   const sprintOpen = useSprintPlanningStore((s) => s.isOpen)
   const sprintProjectId = useSprintPlanningStore((s) => s.projectId)
   const closeSprintPlanning = useSprintPlanningStore((s) => s.closeSprintPlanning)
@@ -78,13 +74,7 @@ export function AppShell() {
       ) : currentPage === 'settings' ? (
         <SettingsPage />
       ) : null}
-      {currentPage === 'chat' && <RightRail />}
-      <ArtifactsDrawer />
-      <InboxPanel
-        agentId={inboxAgentId}
-        open={inboxPanelOpen}
-        onClose={() => setInboxPanel(false)}
-      />
+      {currentPage === 'chat' && <RightRail inboxAgentId={inboxAgentId} />}
       {sprintOpen && (
         <SprintPlanningModal
           projectId={sprintProjectId}

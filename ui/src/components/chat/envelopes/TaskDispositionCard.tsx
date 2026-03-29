@@ -24,16 +24,16 @@ interface TaskDispositionCardProps {
 const DEFAULT_ACTIONS = ['Approve', 'Done', 'Request Changes', 'Defer', 'Skip']
 
 const PRIORITY_COLOR: Record<string, string> = {
-  P1: 'bg-red-500/20 text-red-400 border-red-500/25',
+  P1: 'bg-accent/20 text-accent border-accent/25',
   P2: 'bg-amber-500/20 text-amber-400 border-amber-500/25',
-  P3: 'bg-blue-500/20 text-blue-400 border-blue-500/25',
+  P3: 'bg-success/20 text-success border-success/25',
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  todo: 'bg-zinc-700/50 text-zinc-400',
-  doing: 'bg-blue-500/20 text-blue-400',
-  blocked: 'bg-red-500/20 text-red-400',
-  done: 'bg-emerald-500/20 text-emerald-400',
+  todo: 'bg-surface/50 text-fg-secondary',
+  doing: 'bg-success/20 text-success',
+  blocked: 'bg-accent/20 text-accent',
+  done: 'bg-success/10 text-success',
   queued: 'bg-violet-500/20 text-violet-400',
 }
 
@@ -86,17 +86,17 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
   return (
     <div className="space-y-3 animate-in fade-in duration-300">
       {/* Header */}
-      <div className="flex items-center gap-2 text-zinc-400">
+      <div className="flex items-center gap-2 text-fg-secondary">
         <ClipboardList className="h-4 w-4 shrink-0" />
         <span className="text-xs font-medium">{data.title}</span>
       </div>
 
       {data.description && (
-        <p className="text-sm text-zinc-400">{data.description}</p>
+        <p className="text-sm text-fg-secondary">{data.description}</p>
       )}
 
       {/* Task rows */}
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 overflow-hidden divide-y divide-zinc-800">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 overflow-hidden divide-y divide-border">
         {data.tasks.map(task => {
           const decision = decisions[task.id]
           const showComment = hasRequestChanges && decision === 'Request Changes'
@@ -107,7 +107,7 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
                 {/* Task info */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="inline-block rounded bg-zinc-700/60 px-1.5 py-0.5 text-xs font-mono text-zinc-400">
+                    <span className="inline-block rounded bg-surface/60 px-1.5 py-0.5 text-xs font-mono text-fg-secondary">
                       {task.id}
                     </span>
                     <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium border ${PRIORITY_COLOR[task.priority] || PRIORITY_COLOR['P3']}`}>
@@ -117,7 +117,7 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
                       {task.status}
                     </span>
                   </div>
-                  <p className="mt-1 text-sm text-zinc-200 truncate">{task.title}</p>
+                  <p className="mt-1 text-sm text-fg truncate">{task.title}</p>
                 </div>
 
                 {/* Action dropdown */}
@@ -126,7 +126,7 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
                     <select
                       value={decision}
                       onChange={e => setDecisions(prev => ({ ...prev, [task.id]: e.target.value }))}
-                      className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 min-w-[140px]"
+                      className="rounded-md border border-border-subtle bg-surface px-2 py-1.5 text-xs text-fg focus:border-border-subtle focus:outline-none focus:ring-1 focus:ring-border-subtle min-w-[140px]"
                     >
                       {actions.map(action => (
                         <option key={action} value={action}>
@@ -136,7 +136,7 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
                     </select>
                   </div>
                 ) : (
-                  <span className={`text-xs ${decision === 'Skip' ? 'text-zinc-600' : 'text-zinc-300 font-medium'}`}>
+                  <span className={`text-xs ${decision === 'Skip' ? 'text-fg-faint' : 'text-fg-secondary font-medium'}`}>
                     {decision === 'Skip' ? '—' : decision}
                   </span>
                 )}
@@ -151,7 +151,7 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
                     placeholder="What changes are needed?"
                     value={comments[task.id] || ''}
                     onChange={e => setComments(prev => ({ ...prev, [task.id]: e.target.value }))}
-                    className="flex-1 rounded-md border border-amber-500/30 bg-zinc-800/50 px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                    className="flex-1 rounded-md border border-amber-500/30 bg-surface/50 px-2.5 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
                   />
                 </div>
               )}
@@ -163,14 +163,14 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
       {/* Submit */}
       {!submitted ? (
         <div className="flex items-center justify-between">
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-fg-muted">
             {nonSkipCount} of {data.tasks.length} tasks will be actioned
           </span>
           <Button
             size="sm"
             disabled={submitting || nonSkipCount === 0}
             onClick={handleSubmit}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-4 py-1 h-7"
+            className="bg-success hover:bg-success/80 text-white text-xs px-4 py-1 h-7"
           >
             {submitting ? (
               <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
@@ -181,10 +181,10 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
           </Button>
         </div>
       ) : (
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+        <div className="rounded-sm border border-success/30 bg-success/5 p-3">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            <span className="text-sm text-emerald-400">
+            <CheckCircle2 className="h-4 w-4 text-success" />
+            <span className="text-sm text-success">
               Dispositions submitted — agent is processing transitions.
             </span>
           </div>

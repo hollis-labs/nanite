@@ -29,7 +29,7 @@ export function ThinkingIndicator() {
   return (
     <div className="flex items-center gap-2.5 py-2">
       <Cog className="w-4 h-4 text-accent animate-[spin_3s_linear_infinite] shrink-0" />
-      <span className="text-sm text-zinc-400 animate-pulse">
+      <span className="text-sm text-fg-secondary animate-pulse">
         {THINKING_MESSAGES[msgIndex]}
       </span>
     </div>

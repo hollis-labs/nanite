@@ -40,10 +40,10 @@ export function TaskCompleteNotificationCard({ data, onSendMessage }: TaskComple
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-      <div className={`rounded-lg border overflow-hidden ${
+      <div className={`rounded-sm border overflow-hidden ${
         isError
           ? 'border-red-500/30 bg-red-500/5'
-          : 'border-emerald-500/30 bg-emerald-500/5'
+          : 'border-success/30 bg-success/5'
       }`}>
         <div className="px-4 py-3">
           {/* Header row */}
@@ -52,14 +52,14 @@ export function TaskCompleteNotificationCard({ data, onSendMessage }: TaskComple
               {isError ? (
                 <XCircle className="h-5 w-5 text-red-400 shrink-0" />
               ) : (
-                <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
               )}
               <div>
-                <p className={`text-sm font-medium ${isError ? 'text-red-300' : 'text-emerald-300'}`}>
+                <p className={`text-sm font-medium ${isError ? 'text-red-300' : 'text-success'}`}>
                   {data.title}
                 </p>
                 {data.completed_at && (
-                  <p className="text-xs text-zinc-500 mt-0.5">
+                  <p className="text-xs text-fg-muted mt-0.5">
                     Completed at {formatTimestamp(data.completed_at)}
                   </p>
                 )}
@@ -68,7 +68,7 @@ export function TaskCompleteNotificationCard({ data, onSendMessage }: TaskComple
             <button
               type="button"
               onClick={() => setDismissed(true)}
-              className="text-zinc-600 hover:text-zinc-400 transition-colors"
+              className="text-fg-faint hover:text-fg-secondary transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
@@ -76,7 +76,7 @@ export function TaskCompleteNotificationCard({ data, onSendMessage }: TaskComple
 
           {/* Preview */}
           {data.output_preview && (
-            <p className="mt-2 text-xs text-zinc-400 line-clamp-3 ml-7">
+            <p className="mt-2 text-xs text-fg-secondary line-clamp-3 ml-7">
               {data.output_preview}
             </p>
           )}
@@ -85,7 +85,7 @@ export function TaskCompleteNotificationCard({ data, onSendMessage }: TaskComple
           {data.has_output && !isError && (
             <div className="mt-3 ml-7 flex items-center gap-2">
               {data.prompt_text && (
-                <span className="text-xs text-zinc-400">{data.prompt_text}</span>
+                <span className="text-xs text-fg-secondary">{data.prompt_text}</span>
               )}
               <Button
                 size="sm"
@@ -94,7 +94,7 @@ export function TaskCompleteNotificationCard({ data, onSendMessage }: TaskComple
                     onSendMessage(`SHOW_REPORT:${data.run_id}`)
                   }
                 }}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1 h-7"
+                className="bg-success hover:bg-success/80 text-white text-xs px-3 py-1 h-7"
               >
                 <FileText className="mr-1.5 h-3 w-3" />
                 Show Report

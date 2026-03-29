@@ -30,7 +30,7 @@ function TokenRow({
 }) {
   return (
     <div className="flex justify-between items-center text-xs">
-      <span className="text-zinc-500">{label}</span>
+      <span className="text-fg-muted">{label}</span>
       <span
         className={`${colorClass} font-mono tabular-nums transition-all duration-300`}
       >
@@ -80,14 +80,14 @@ export function TokenUsageWidget() {
             <TokenRow
               label="Output"
               value={formatTokens(output)}
-              colorClass="text-emerald-400"
+              colorClass="text-success"
             />
 
-            <div className="border-t border-zinc-800 pt-1.5 mt-1.5">
+            <div className="border-t border-border pt-1.5 mt-1.5">
               <TokenRow
                 label="Total"
                 value={formatTokens(total)}
-                colorClass="text-zinc-300"
+                colorClass="text-fg-secondary"
               />
               <TokenRow
                 label="Cost"
@@ -97,24 +97,24 @@ export function TokenUsageWidget() {
               <TokenRow
                 label="Messages"
                 value={String(messages)}
-                colorClass="text-zinc-400"
+                colorClass="text-fg-secondary"
               />
             </div>
           </>
         ) : (
-          <p className="text-xs text-zinc-600 italic">No active session</p>
+          <p className="text-xs text-fg-faint italic">No active session</p>
         )}
 
         {/* Cumulative usage */}
         {globalTotal > 0 && (
-          <div className="border-t border-zinc-800 pt-1.5 mt-1.5">
-            <p className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">
+          <div className="border-t border-border pt-1.5 mt-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
               Cumulative
             </p>
             <TokenRow
               label="All sessions"
               value={formatTokens(globalTotal)}
-              colorClass="text-zinc-400"
+              colorClass="text-fg-secondary"
             />
             <TokenRow
               label="Total cost"

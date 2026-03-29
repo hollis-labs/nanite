@@ -16,14 +16,14 @@ export function TeamsMessageCard({ data }: TeamsMessageCardProps) {
   const { title, message, facts, link_url } = data
 
   return (
-    <div className="rounded-lg border border-accent/30 bg-zinc-900/50 overflow-hidden">
+    <div className="rounded-sm border border-accent/30 bg-bg-elevated/50 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between bg-accent-muted px-4 py-3 border-b border-accent/20">
         <div className="flex items-center gap-2">
           <MessageSquare className="h-4 w-4 text-accent" />
-          <span className="text-sm font-medium text-zinc-200">Teams Message</span>
+          <span className="text-sm font-medium text-fg">Teams Message</span>
         </div>
-        <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 border border-green-500/25 px-2 py-0.5 text-xs text-green-400">
+        <span className="inline-flex items-center gap-1 rounded-full bg-success/15 border border-success/25 px-2 py-0.5 text-xs text-success">
           <CheckCircle className="h-3 w-3" />
           Sent to Teams
         </span>
@@ -32,19 +32,19 @@ export function TeamsMessageCard({ data }: TeamsMessageCardProps) {
       {/* Card content */}
       <div className="px-4 py-3 space-y-3">
         {/* Title */}
-        <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
+        <h3 className="text-sm font-semibold text-fg">{title}</h3>
 
         {/* Message */}
-        <p className="text-sm text-zinc-300 whitespace-pre-wrap">{message}</p>
+        <p className="text-sm text-fg-secondary whitespace-pre-wrap">{message}</p>
 
         {/* Facts */}
         {facts && Object.keys(facts).length > 0 && (
-          <div className="rounded-md border border-zinc-700 bg-zinc-800/50 px-3 py-2">
+          <div className="rounded-md border border-border-subtle bg-surface/50 px-3 py-2">
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
               {Object.entries(facts).map(([key, value]) => (
                 <div key={key} className="flex items-baseline gap-2">
-                  <span className="text-xs font-medium text-zinc-400 shrink-0">{key}:</span>
-                  <span className="text-xs text-zinc-200">{value}</span>
+                  <span className="text-xs font-medium text-fg-secondary shrink-0">{key}:</span>
+                  <span className="text-xs text-fg">{value}</span>
                 </div>
               ))}
             </div>

@@ -9,7 +9,7 @@ export function ToolCallIndicator({ toolCall }: ToolCallIndicatorProps) {
   const { tool, status, summary } = toolCall
 
   return (
-    <div className="flex items-center gap-2 py-1 px-2 rounded-md bg-zinc-800/50 border border-zinc-700/50 text-xs">
+    <div className="flex items-center gap-2 py-1 px-2 rounded-md bg-surface/50 border border-border-subtle/50 text-xs">
       {status === 'running' && (
         <Loader2 className="w-3.5 h-3.5 text-accent animate-spin shrink-0" />
       )}
@@ -19,13 +19,13 @@ export function ToolCallIndicator({ toolCall }: ToolCallIndicatorProps) {
       {status === 'error' && (
         <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
       )}
-      <Wrench className="w-3 h-3 text-zinc-500 shrink-0" />
-      <span className="text-zinc-300 font-medium">{tool}</span>
+      <Wrench className="w-3 h-3 text-fg-muted shrink-0" />
+      <span className="text-fg-secondary font-medium">{tool}</span>
       {summary && (
-        <span className="text-zinc-500 truncate">{summary}</span>
+        <span className="text-fg-muted truncate">{summary}</span>
       )}
       {status === 'running' && !summary && (
-        <span className="text-zinc-500 italic">Running...</span>
+        <span className="text-fg-muted italic">Running...</span>
       )}
     </div>
   )

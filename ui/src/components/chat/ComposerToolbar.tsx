@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Bot, ChevronDown, Paperclip, SendHorizonal, Square } from 'lucide-react'
+import { Bot, ChevronDown, SendHorizonal, Square } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useModels, useProviders } from '@/hooks/useSettings'
-import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 
 const PROVIDER_ICONS: Record<string, string> = {
@@ -33,12 +32,8 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
   const activeModel = useChatStore((s) => s.activeModel)
   const setActiveModel = useChatStore((s) => s.setActiveModel)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const queryClient = useQueryClient()
-
   const [modelOpen, setModelOpen] = useState(false)
-  const [uploading, setUploading] = useState(false)
   const modelRef = useRef<HTMLDivElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: models } = useModels()
   const { data: providers } = useProviders()
@@ -102,51 +97,14 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
     }
   }, [activeSessionId, setActiveModel, allModels])
 
-  const handleFileUpload = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0 || !activeSessionId) return
-    setUploading(true)
-    try {
-      for (const file of Array.from(files)) {
-        await api.uploadArtifact(activeSessionId, file)
-      }
-      queryClient.invalidateQueries({ queryKey: ['artifacts', activeSessionId] })
-    } catch (err) {
-      console.error('Failed to upload artifact:', err)
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }, [activeSessionId, queryClient])
-
   return (
-    <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800/50 rounded-b-xl border-t border-zinc-700/50">
-      {/* Left: Attach + Model picker */}
+    <div className="flex items-center justify-between px-3 py-1.5 bg-composer-bar border-t border-composer-border">
+      {/* Left: Model picker */}
       <div className="flex items-center gap-1">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => void handleFileUpload(e.target.files)}
-        />
-        <Button
-          variant="ghost"
-          size="icon"
-          className={`w-7 h-7 transition-colors ${
-            uploading
-              ? 'text-accent animate-pulse'
-              : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50'
-          }`}
-          title={uploading ? 'Uploading...' : 'Attach file'}
-          disabled={!activeSessionId || uploading}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Paperclip className="w-3.5 h-3.5" />
-        </Button>
       <div className="relative" ref={modelRef}>
         <button
           onClick={() => setModelOpen((o) => !o)}
-          className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors py-0.5 px-1 rounded hover:bg-zinc-700/50"
+          className="flex items-center gap-1 text-xs text-composer-fg-secondary hover:text-composer-fg transition-colors py-0.5 px-1.5 rounded-md hover:bg-composer-hover"
         >
           <Bot className="w-3 h-3" />
           <span className="max-w-[200px] truncate">{currentModel?.label || activeModel || 'Select model'}</span>
@@ -154,14 +112,14 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
         </button>
 
         {modelOpen && (
-          <div className="absolute bottom-full left-0 mb-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1 max-h-72 overflow-y-auto">
+          <div className="absolute bottom-full left-0 mb-1 w-56 bg-composer border border-composer-border-focus rounded-xl shadow-xl z-50 py-1 max-h-72 overflow-y-auto">
             {groupedModels.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-zinc-500">Loading models...</div>
+              <div className="px-3 py-2 text-xs text-composer-fg-muted">Loading models...</div>
             ) : (
               groupedModels.map((group) => (
                 <div key={group.id}>
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                    <span className="w-4 h-4 rounded bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 shrink-0">
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-composer-fg-muted uppercase tracking-wider">
+                    <span className="w-4 h-4 rounded bg-composer-hover flex items-center justify-center text-[10px] font-bold text-composer-fg-secondary shrink-0">
                       {group.icon}
                     </span>
                     {group.name}
@@ -172,8 +130,8 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
                       onClick={() => void handleModelSelect(model.id)}
                       className={`w-full text-left px-3 pl-8 py-1.5 text-sm transition-colors ${
                         model.id === activeModel
-                          ? 'bg-zinc-800 text-zinc-100'
-                          : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                          ? 'bg-composer-hover text-composer-fg'
+                          : 'text-composer-fg-secondary hover:bg-composer-hover/60 hover:text-composer-fg'
                       }`}
                     >
                       {model.label}
@@ -206,7 +164,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
             className={`w-7 h-7 transition-colors ${
               hasContent
                 ? 'text-accent hover:text-accent-hover hover:bg-accent-hover/10'
-                : 'text-zinc-600'
+                : 'text-composer-fg-muted'
             }`}
             disabled={!hasContent}
             onClick={onSend}

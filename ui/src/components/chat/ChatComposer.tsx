@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
+import { Paperclip } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ComposerToolbar } from './ComposerToolbar'
 import { SlashCommandExtension, type SlashCommand } from './extensions/SlashCommandExtension'
@@ -30,7 +31,9 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const queryClient = useQueryClient()
   const [dragOver, setDragOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
@@ -40,6 +43,22 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       await api.uploadArtifact(activeSessionId, file)
     }
     queryClient.invalidateQueries({ queryKey: ['artifacts', activeSessionId] })
+  }, [activeSessionId, queryClient])
+
+  const handleFileUpload = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0 || !activeSessionId) return
+    setUploading(true)
+    try {
+      for (const file of Array.from(files)) {
+        await api.uploadArtifact(activeSessionId, file)
+      }
+      queryClient.invalidateQueries({ queryKey: ['artifacts', activeSessionId] })
+    } catch (err) {
+      console.error('Failed to upload artifact:', err)
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
   }, [activeSessionId, queryClient])
 
   // Handle slash command execution
@@ -140,7 +159,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     editorProps: {
       attributes: {
         class:
-          'bg-transparent text-sm text-fg placeholder:text-fg-faint outline-none min-h-[40px] max-h-[120px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm prose-invert',
+          'bg-transparent text-sm text-zinc-900 dark:text-fg placeholder:text-zinc-400 dark:placeholder:text-fg-faint outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm',
       },
       handleKeyDown(_view, event) {
         if (event.key === 'Enter') {
@@ -187,8 +206,8 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     <div className="px-4 pb-4 pt-2 shrink-0">
       <div
         ref={dropRef}
-        className={`bg-bg-elevated border rounded-xl focus-within:border-border-subtle transition-colors shadow-lg shadow-black/20 ${
-          dragOver ? 'border-accent bg-accent-muted' : 'border-border'
+        className={`border rounded-sm overflow-hidden transition-colors shadow-lg shadow-black/30 ${
+          dragOver ? 'border-accent bg-accent-muted' : 'border-zinc-300 dark:border-border-subtle'
         }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
@@ -199,10 +218,29 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             Drop files to attach
           </div>
         )}
-        <div className="px-3 py-1">
+        <div className="relative px-3 py-2 bg-white dark:bg-bg-elevated">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => void handleFileUpload(e.target.files)}
+          />
+          <button
+            className={`absolute top-2 right-2 p-1.5 rounded-md transition-colors ${
+              uploading
+                ? 'text-accent animate-pulse'
+                : 'text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:text-fg-faint dark:hover:text-fg-secondary dark:hover:bg-surface'
+            }`}
+            title={uploading ? 'Uploading...' : 'Attach file'}
+            disabled={!activeSessionId || uploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
           <EditorContent
             editor={editor}
-            className="min-w-0 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-fg-faint [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
+            className="min-w-0 pr-8 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-zinc-400 [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
           />
         </div>
         <ComposerToolbar
@@ -212,7 +250,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           onStop={onStop}
         />
       </div>
-      <p className="text-center text-xs text-fg-faint mt-2">
+      <p className="text-center text-[11px] text-fg-faint mt-2">
         Conduit may produce inaccurate information.
       </p>
     </div>

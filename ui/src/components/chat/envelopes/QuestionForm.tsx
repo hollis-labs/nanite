@@ -45,17 +45,17 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
 
   if (submitted) {
     return (
-      <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4">
-        <p className="text-sm text-green-400">Answers submitted</p>
+      <div className="rounded-sm border border-success/30 bg-success/5 p-4">
+        <p className="text-sm text-success">Answers submitted</p>
       </div>
     )
   }
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4 space-y-4">
+    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4 space-y-4">
       {questions.map((q, i) => (
         <div key={i}>
-          <label className="block text-sm font-medium text-zinc-300 mb-1.5">
+          <label className="block text-sm font-medium text-fg-secondary mb-1.5">
             {q.prompt}
             {q.required && <span className="text-red-400 ml-0.5">*</span>}
           </label>
@@ -65,7 +65,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
               rows={3}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent resize-none"
+              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent resize-none"
             />
           )}
 
@@ -74,7 +74,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
               type="text"
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent"
+              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
             />
           )}
 
@@ -82,7 +82,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
             <select
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent"
+              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
             >
               <option value="">Select...</option>
               {q.options.map((raw) => {
@@ -97,7 +97,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
               {q.options.map((raw) => {
                 const opt = normalizeOption(raw)
                 return (
-                  <label key={opt.value} className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+                  <label key={opt.value} className="flex items-center gap-2 text-sm text-fg-secondary cursor-pointer">
                     <input
                       type="radio"
                       name={`question-${i}`}
@@ -119,7 +119,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
                 const opt = normalizeOption(raw)
                 const selected = Array.isArray(answers[i]) ? answers[i] as string[] : []
                 return (
-                  <label key={opt.value} className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+                  <label key={opt.value} className="flex items-center gap-2 text-sm text-fg-secondary cursor-pointer">
                     <input
                       type="checkbox"
                       value={opt.value}

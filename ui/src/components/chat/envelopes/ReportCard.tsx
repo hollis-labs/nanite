@@ -29,11 +29,11 @@ interface ReportCardProps {
 }
 
 const METRIC_COLORS: Record<string, { bg: string; bar: string; text: string }> = {
-  emerald: { bg: 'bg-emerald-500/10', bar: 'bg-emerald-500', text: 'text-emerald-400' },
-  green:   { bg: 'bg-green-500/10',   bar: 'bg-green-500',   text: 'text-green-400' },
+  emerald: { bg: 'bg-success/10', bar: 'bg-success', text: 'text-success' },
+  green:   { bg: 'bg-success/10', bar: 'bg-success', text: 'text-success' },
   amber:   { bg: 'bg-amber-500/10',   bar: 'bg-amber-500',   text: 'text-amber-400' },
-  red:     { bg: 'bg-red-500/10',     bar: 'bg-red-500',     text: 'text-red-400' },
-  blue:    { bg: 'bg-blue-500/10',    bar: 'bg-blue-500',    text: 'text-blue-400' },
+  red:     { bg: 'bg-accent/10',      bar: 'bg-accent',      text: 'text-accent' },
+  blue:    { bg: 'bg-success/10',     bar: 'bg-success',     text: 'text-success' },
   violet:  { bg: 'bg-violet-500/10',  bar: 'bg-violet-500',  text: 'text-violet-400' },
 }
 
@@ -42,13 +42,13 @@ function MetricCard({ metric }: { metric: Metric }) {
   const colors = METRIC_COLORS[metric.color || 'blue'] ?? fallback
 
   return (
-    <div className={`rounded-lg border border-zinc-700/50 ${colors.bg} p-3`}>
-      <div className="text-xs text-zinc-400 mb-1">{metric.label}</div>
+    <div className={`rounded-sm border border-border-subtle/50 ${colors.bg} p-3`}>
+      <div className="text-xs text-fg-secondary mb-1">{metric.label}</div>
       <div className={`text-lg font-semibold font-mono ${colors.text}`}>
         {metric.value}
       </div>
       {metric.percent != null && (
-        <div className="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+        <div className="mt-2 h-1.5 rounded-full bg-surface overflow-hidden">
           <div
             className={`h-full rounded-full ${colors.bar} transition-all duration-700 ease-out`}
             style={{ width: `${Math.min(100, Math.max(0, metric.percent))}%` }}
@@ -74,14 +74,14 @@ export function ReportCard({ data, onSendMessage }: ReportCardProps) {
   return (
     <div className="animate-in fade-in duration-300 space-y-3">
       {/* Header */}
-      <div className="rounded-lg border border-cyan-500/20 bg-zinc-900/50 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-cyan-400 shrink-0" />
-            <span className="text-sm font-medium text-zinc-200">{data.title}</span>
+            <BarChart3 className="h-4 w-4 text-fg-secondary shrink-0" />
+            <span className="text-sm font-medium text-fg">{data.title}</span>
           </div>
           {data.generated_at && (
-            <div className="flex items-center gap-1 text-xs text-zinc-500">
+            <div className="flex items-center gap-1 text-xs text-fg-muted">
               <Clock className="h-3 w-3" />
               <span>{formatTimestamp(data.generated_at)}</span>
             </div>
@@ -97,7 +97,7 @@ export function ReportCard({ data, onSendMessage }: ReportCardProps) {
 
         {/* Summary */}
         {data.summary && (
-          <div className="px-4 pb-3 border-t border-zinc-800/50 pt-3">
+          <div className="px-4 pb-3 border-t border-border/50 pt-3">
             <MessageContent content={data.summary} role="assistant" />
           </div>
         )}

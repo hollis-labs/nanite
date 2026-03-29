@@ -28,7 +28,7 @@ const CORE_ENVELOPE_REGISTRY: Record<string, LazyEnvelopeComponent> = {
 // --- PLUGIN ENTRIES (auto-generated, safe to overwrite below this line) ---
 // @PLUGIN_ENTRIES_START
 const PLUGIN_ENVELOPE_ENTRIES: Record<string, LazyEnvelopeComponent> = {
-  'sprint-planning-review': lazy(() => import('@/components/plugins/sprint/SprintPlanningReviewCard').then(m => ({ default: m.SprintPlanningReviewCard }))),
+
 };
 // @PLUGIN_ENTRIES_END
 

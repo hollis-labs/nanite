@@ -1,24 +1,29 @@
 import { useState, useEffect, useCallback } from 'react'
 import { RotateCcw, X, Check, Keyboard } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
 import type { UserSettings } from '@/lib/types'
 
 const SHORTCUT_DEFS = [
-  { key: 'toggle_left_sidebar', label: 'Toggle Left Sidebar', description: 'Show or hide the sessions panel', default: 'mod+b' },
-  { key: 'toggle_right_rail', label: 'Toggle Right Rail', description: 'Show or hide the widgets panel', default: 'mod+/' },
+  { key: 'toggle_left_sidebar', label: 'Toggle Sidebar', description: 'Show or hide the sessions panel', default: 'mod+b' },
+  { key: 'toggle_right_rail', label: 'Toggle Widgets', description: 'Show or hide the widgets panel', default: 'mod+/' },
   { key: 'focus_composer', label: 'Focus Composer', description: 'Jump to the message input', default: 'mod+l' },
-  { key: 'new_session', label: 'New Session', description: 'Create a new chat session', default: 'mod+n' },
-  { key: 'search', label: 'Search / Open Sidebar', description: 'Open sidebar and focus search', default: 'mod+k' },
+  { key: 'new_session', label: 'New Chat', description: 'Create a new chat session', default: 'mod+n' },
+  { key: 'command_palette', label: 'Command Palette', description: 'Open the command palette', default: 'mod+k' },
+  { key: 'search', label: 'Search Chats', description: 'Quick search for chats (double-tap Shift)', default: 'shift+shift' },
   { key: 'next_session', label: 'Next Session', description: 'Switch to the next session', default: 'mod+]' },
   { key: 'prev_session', label: 'Previous Session', description: 'Switch to the previous session', default: 'mod+[' },
-  { key: 'bookmark_last', label: 'Bookmark Last Message', description: 'Save the last assistant response', default: 'mod+d' },
-  { key: 'toggle_artifacts', label: 'Toggle Artifacts', description: 'Show or hide the artifacts drawer', default: 'mod+.' },
+  { key: 'bookmark_last', label: 'Bookmark Last', description: 'Save the last assistant response', default: 'mod+d' },
+  { key: 'toggle_artifacts', label: 'Toggle Artifacts', description: 'Show or hide the artifacts panel', default: 'mod+.' },
 ] as const
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
 
 function formatKeys(binding: string): string[] {
+  if (binding === 'shift+shift') {
+    const s = isMac ? '\u21E7' : 'Shift'
+    return [s, s]
+  }
   return binding.split('+').map((part) => {
     if (part === 'mod') return isMac ? '\u2318' : 'Ctrl'
     if (part === 'shift') return isMac ? '\u21E7' : 'Shift'

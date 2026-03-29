@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import type { Question } from '@/lib/types'
 
 // Options can be strings or {value, label} objects — normalize to {value, label}.

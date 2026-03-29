@@ -35,13 +35,15 @@ type AgentProfile struct {
 	Status      string `json:"status"`
 	Source      string `json:"source"`
 	SourceRef   string `json:"source_ref"`
+	Icon        string `json:"icon"`
 }
 
 // agentColumns is the canonical SELECT column list for agent_profiles.
 const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
         modes, default_mode, COALESCE(default_model,''), COALESCE(default_provider,''),
         mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at,
-        agent_hash, version, tools, directories, constraints, tags, status, source, source_ref`
+        agent_hash, version, tools, directories, constraints, tags, status, source, source_ref,
+        COALESCE(icon,'')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -50,7 +52,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.Modes, &a.DefaultMode, &a.DefaultModel, &a.DefaultProvider,
 		&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
 		&a.AgentHash, &a.Version, &a.Tools, &a.Directories, &a.Constraints, &a.Tags,
-		&a.Status, &a.Source, &a.SourceRef,
+		&a.Status, &a.Source, &a.SourceRef, &a.Icon,
 	)
 }
 
@@ -151,14 +153,14 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              mcp_servers, tool_permissions, can_execute, settings,
 		                              created_at, updated_at,
 		                              agent_hash, version, tools, directories, constraints,
-		                              tags, status, source, source_ref)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              tags, status, source, source_ref, icon)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now, now,
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
-		a.Tags, a.Status, a.Source, a.SourceRef,
+		a.Tags, a.Status, a.Source, a.SourceRef, nullIfEmpty(a.Icon),
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -226,14 +228,14 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
 		        updated_at = ?,
 		        agent_hash = ?, version = ?, tools = ?, directories = ?, constraints = ?,
-		        tags = ?, status = ?
+		        tags = ?, status = ?, icon = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now,
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
-		a.Tags, a.Status,
+		a.Tags, a.Status, nullIfEmpty(a.Icon),
 		a.ID,
 	)
 	if err != nil {

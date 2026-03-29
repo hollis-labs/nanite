@@ -1,13 +1,16 @@
-import { useEffect, useCallback, useMemo } from 'react'
+import { useEffect, useCallback, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
+import { useNavigationStore } from '@/stores/useNavigationStore'
 import { useSettings } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
 
 interface KeyboardShortcutsOptions {
   focusComposer?: () => void
   sessions?: Array<{ id: string }>
+  openCommandPalette?: () => void
+  openSearch?: () => void
 }
 
 const DEFAULT_BINDINGS: Record<string, string> = {
@@ -15,11 +18,26 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   toggle_right_rail: 'mod+/',
   focus_composer: 'mod+l',
   new_session: 'mod+n',
-  search: 'mod+k',
+  command_palette: 'mod+k',
+  search: 'shift+shift',
   next_session: 'mod+]',
   prev_session: 'mod+[',
   bookmark_last: 'mod+d',
   toggle_artifacts: 'mod+.',
+}
+
+/** Human-readable labels for shortcuts */
+export const SHORTCUT_LABELS: Record<string, string> = {
+  toggle_left_sidebar: 'Toggle sidebar',
+  toggle_right_rail: 'Toggle widgets',
+  focus_composer: 'Focus composer',
+  new_session: 'New chat',
+  command_palette: 'Command palette',
+  search: 'Search chats',
+  next_session: 'Next session',
+  prev_session: 'Previous session',
+  bookmark_last: 'Bookmark last message',
+  toggle_artifacts: 'Toggle artifacts',
 }
 
 /** Check if a keyboard event matches a binding string like "mod+b" or "mod+shift+k". */
@@ -48,7 +66,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const queryClient = useQueryClient()
 
   const { data: userSettings } = useSettings()
-  const { focusComposer, sessions = [] } = options
+  const { focusComposer, sessions = [], openCommandPalette, openSearch } = options
 
   // Merge user-customized shortcuts with defaults.
   const bindings = useMemo(() => {
@@ -100,8 +118,40 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     [activeSessionId, sessions, setActiveSession]
   )
 
+  const navPop = useNavigationStore((s) => s.pop)
+  const navDepth = useNavigationStore((s) => s.depth)
+  const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
+  const currentPage = useLayoutStore((s) => s.currentPage)
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // Escape: go back through navigation stack
+      if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        // Let Radix dialogs handle their own Escape first
+        const hasOpenDialog = document.querySelector('[data-state="open"][role="dialog"]')
+        if (hasOpenDialog) return
+
+        // Let focused inputs/textareas release focus first
+        const active = document.activeElement
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) {
+          ;(active as HTMLElement).blur()
+          e.preventDefault()
+          return
+        }
+
+        e.preventDefault()
+        const depth = navDepth()
+        if (depth > 0) {
+          // Pop the nav stack — the component watching the stack handles the actual navigation
+          navPop()
+        } else if (currentPage === 'settings') {
+          // Bottom of stack on settings → go to chat
+          setCurrentPage('chat')
+          window.location.hash = '#chat'
+        }
+        return
+      }
+
       if (matchesBinding(e, bindings.toggle_left_sidebar)) {
         e.preventDefault()
         toggleLeftSidebar()
@@ -114,10 +164,9 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
       } else if (matchesBinding(e, bindings.new_session)) {
         e.preventDefault()
         void handleNewSession()
-      } else if (matchesBinding(e, bindings.search)) {
+      } else if (matchesBinding(e, bindings.command_palette)) {
         e.preventDefault()
-        const sidebarOpen = useLayoutStore.getState().leftSidebarOpen
-        if (!sidebarOpen) toggleLeftSidebar()
+        openCommandPalette?.()
       } else if (matchesBinding(e, bindings.next_session)) {
         e.preventDefault()
         navigateSession('next')
@@ -144,5 +193,28 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     handleNewSession,
     handleBookmarkLast,
     navigateSession,
+    navPop,
+    navDepth,
+    currentPage,
+    setCurrentPage,
+    openCommandPalette,
   ])
+
+  // Double-shift to open search
+  const lastShiftTime = useRef(0)
+  useEffect(() => {
+    function handleShiftShift(e: KeyboardEvent) {
+      if (e.key !== 'Shift' || e.metaKey || e.ctrlKey || e.altKey) return
+      const now = Date.now()
+      if (now - lastShiftTime.current < 400) {
+        e.preventDefault()
+        openSearch?.()
+        lastShiftTime.current = 0
+      } else {
+        lastShiftTime.current = now
+      }
+    }
+    window.addEventListener('keydown', handleShiftShift)
+    return () => window.removeEventListener('keydown', handleShiftShift)
+  }, [openSearch])
 }

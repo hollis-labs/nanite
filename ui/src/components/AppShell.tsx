@@ -1,6 +1,8 @@
-import { useCallback, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useCallback, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { NavRail } from './NavRail'
+import { CommandPalette } from './CommandPalette'
+import { SearchModal } from './SearchModal'
 import { LeftSidebar } from './sidebar/LeftSidebar'
 import { ChatMain } from './chat/ChatMain'
 import { RightRail } from './RightRail'
@@ -16,8 +18,11 @@ import { usePresence } from '@/hooks/usePresence'
 import { useHashRoute } from '@/hooks/useHashRoute'
 
 export function AppShell() {
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const focusRef = useRef<(() => void) | null>(null)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
+  const queryClient = useQueryClient()
   const currentPage = useLayoutStore((s) => s.currentPage)
   const sprintOpen = useSprintPlanningStore((s) => s.isOpen)
   const sprintProjectId = useSprintPlanningStore((s) => s.projectId)
@@ -60,9 +65,24 @@ export function AppShell() {
     focusRef.current = focus
   }, [])
 
+  const handleNewSessionFromPalette = useCallback(async () => {
+    if (!activeWorkspaceId) return
+    try {
+      const newSession = await api.createSession({ workspace_id: activeWorkspaceId })
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      useAppStore.getState().setActiveSession(newSession.id)
+      useLayoutStore.getState().setCurrentPage('chat')
+      window.location.hash = '#chat'
+    } catch {
+      // handled by UI
+    }
+  }, [activeWorkspaceId, queryClient])
+
   useKeyboardShortcuts({
     focusComposer,
     sessions: (sessions ?? []).map((s) => ({ id: s.id })),
+    openCommandPalette: () => setCommandPaletteOpen(true),
+    openSearch: () => setSearchOpen(true),
   })
 
   return (
@@ -81,6 +101,15 @@ export function AppShell() {
           onClose={closeSprintPlanning}
         />
       )}
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        onNewSession={handleNewSessionFromPalette}
+      />
+      <SearchModal
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+      />
     </div>
   )
 }

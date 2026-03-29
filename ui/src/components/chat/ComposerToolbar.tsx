@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Bot, ChevronDown, SendHorizonal, Square } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
+import { UserProfileMenu } from './UserProfileMenu'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useModels, useProviders } from '@/hooks/useSettings'
@@ -99,8 +100,9 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
 
   return (
     <div className="flex items-center justify-between px-3 py-1.5 bg-composer-bar border-t border-composer-border">
-      {/* Left: Model picker */}
-      <div className="flex items-center gap-1">
+      {/* Left: User profile + Model picker */}
+      <div className="flex items-center gap-1.5">
+      <UserProfileMenu />
       <div className="relative" ref={modelRef}>
         <button
           onClick={() => setModelOpen((o) => !o)}

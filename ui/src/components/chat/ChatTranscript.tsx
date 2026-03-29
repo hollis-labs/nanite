@@ -1,7 +1,7 @@
 import { useEffect, useRef, useMemo, useCallback, useState, useLayoutEffect } from 'react'
 import { Bot, ArrowDown, Info } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ScrollArea } from '@/components/ui/ScrollArea'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { ChatMessage } from './ChatMessage'
 import { MessageContent } from './MessageContent'
 import { ToolCallDisplay } from './ToolCallDisplay'

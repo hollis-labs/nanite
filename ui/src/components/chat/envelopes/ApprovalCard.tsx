@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import type { ApprovalRequest } from '@/lib/types'
 
 interface ApprovalCardProps {

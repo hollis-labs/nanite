@@ -5,7 +5,7 @@ import {
   CircleCheck, Terminal, Globe, FolderSearch, Loader2,
   ArrowUpDown,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import type { ProviderStatus, CLIDetectionResult } from '@/lib/types'
 

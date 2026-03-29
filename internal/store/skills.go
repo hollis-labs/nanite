@@ -19,6 +19,7 @@ type Skill struct {
 	InputSchema  string `json:"input_schema"`  // JSON schema
 	IsBuiltin    bool   `json:"is_builtin"`
 	Settings     string `json:"settings"`
+	Icon         string `json:"icon"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
 }
@@ -33,7 +34,7 @@ type AgentSkill struct {
 // ListSkills returns all skills ordered by name.
 func (s *Store) ListSkills() ([]Skill, error) {
 	rows, err := s.DB.Query(
-		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, created_at, updated_at
+		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, COALESCE(icon,''), created_at, updated_at
 		 FROM skills ORDER BY name`,
 	)
 	if err != nil {
@@ -45,7 +46,7 @@ func (s *Store) ListSkills() ([]Skill, error) {
 	for rows.Next() {
 		var sk Skill
 		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
-			&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings,
+			&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
 			&sk.CreatedAt, &sk.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan skill: %w", err)
 		}
@@ -58,10 +59,10 @@ func (s *Store) ListSkills() ([]Skill, error) {
 func (s *Store) GetSkill(id string) (*Skill, error) {
 	var sk Skill
 	err := s.DB.QueryRow(
-		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, created_at, updated_at
+		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, COALESCE(icon,''), created_at, updated_at
 		 FROM skills WHERE id = ?`, id,
 	).Scan(&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
-		&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings,
+		&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
 		&sk.CreatedAt, &sk.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -76,10 +77,10 @@ func (s *Store) GetSkill(id string) (*Skill, error) {
 func (s *Store) GetSkillBySlug(slug string) (*Skill, error) {
 	var sk Skill
 	err := s.DB.QueryRow(
-		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, created_at, updated_at
+		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, COALESCE(icon,''), created_at, updated_at
 		 FROM skills WHERE slug = ?`, slug,
 	).Scan(&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
-		&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings,
+		&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
 		&sk.CreatedAt, &sk.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -107,10 +108,10 @@ func (s *Store) CreateSkill(sk *Skill) error {
 	}
 
 	_, err := s.DB.Exec(
-		`INSERT INTO skills (id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO skills (id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, icon, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sk.ID, sk.Name, sk.Slug, sk.Description, sk.Category,
-		sk.ToolBindings, sk.InputSchema, sk.IsBuiltin, sk.Settings,
+		sk.ToolBindings, sk.InputSchema, sk.IsBuiltin, sk.Settings, nullIfEmpty(sk.Icon),
 		now, now,
 	)
 	if err != nil {
@@ -126,10 +127,10 @@ func (s *Store) UpdateSkill(sk *Skill) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.DB.Exec(
 		`UPDATE skills SET name = ?, slug = ?, description = ?, category = ?,
-		        tool_bindings = ?, input_schema = ?, settings = ?, updated_at = ?
+		        tool_bindings = ?, input_schema = ?, settings = ?, icon = ?, updated_at = ?
 		 WHERE id = ?`,
 		sk.Name, sk.Slug, sk.Description, sk.Category,
-		sk.ToolBindings, sk.InputSchema, sk.Settings,
+		sk.ToolBindings, sk.InputSchema, sk.Settings, nullIfEmpty(sk.Icon),
 		now, sk.ID,
 	)
 	if err != nil {
@@ -177,7 +178,7 @@ func (s *Store) ListAgentSkills(agentID string) ([]Skill, error) {
 	for rows.Next() {
 		var sk Skill
 		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
-			&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings,
+			&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
 			&sk.CreatedAt, &sk.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan agent skill: %w", err)
 		}

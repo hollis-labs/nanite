@@ -2,9 +2,9 @@ import { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus,
-  Edit,
   Save,
   User,
+  Users,
   Settings,
   Loader2,
   ChevronLeft,
@@ -14,30 +14,42 @@ import {
   FileText,
   Eye,
   Copy,
-  Hash,
+  Trash2,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
+import { Skeleton } from '@/components/ui/skeleton'
 import { StatusDot } from '@/components/agents/StatusDot'
 import { SourceBadge } from '@/components/agents/SourceBadge'
 import { TagPills } from '@/components/agents/TagPills'
 import { api } from '@/lib/api'
 import type { AgentProfile, AgentModeProfile } from '@/lib/types'
-import { useModels } from '@/hooks/useSettings'
+import { useModels, useSettings } from '@/hooks/useSettings'
 
 interface AgentProfileManagerProps {}
 
 export function AgentProfileManager({}: AgentProfileManagerProps) {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [editingAgent, setEditingAgent] = useState<AgentProfile | null>(null)
   // const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null) // DELETE not implemented in backend
   const [showModeForm, setShowModeForm] = useState(false)
   const [showDisabled, setShowDisabled] = useState(false)
   const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [showSkillPicker, setShowSkillPicker] = useState(false)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
+  const [editField, setEditField] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
   const queryClient = useQueryClient()
   const { data: modelRecords } = useModels()
+  const { data: userSettings } = useSettings()
+  const defaultModel = userSettings?.default_model || ''
   const modelOptions = (modelRecords ?? []).map((m) => ({ id: m.model_id, label: m.display_name }))
 
   const { data: agents = [], isLoading } = useQuery({
@@ -80,7 +92,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
       setShowCreateForm(false)
-      setEditingAgent(null)
     },
   })
 
@@ -90,7 +101,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
       void queryClient.invalidateQueries({ queryKey: ['agent-detail', selectedAgent] })
-      setEditingAgent(null)
     },
   })
 
@@ -197,45 +207,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     createMutation.mutate(data)
   }, [createMutation])
 
-  const handleUpdateAgent = useCallback((formData: FormData) => {
-    if (!editingAgent) return
-    // Parse tools from multi-line to JSON array
-    const toolsRaw = (formData.get('tools') as string || '').trim()
-    const toolsArr = toolsRaw ? toolsRaw.split('\n').map((l) => l.trim()).filter(Boolean) : []
-    // Parse directories from multi-line to JSON array
-    const dirsRaw = (formData.get('directories') as string || '').trim()
-    const dirsArr = dirsRaw ? dirsRaw.split('\n').map((l) => l.trim()).filter(Boolean) : []
-    // Parse tags from comma-separated to JSON array
-    const tagsRaw = (formData.get('tags') as string || '').trim()
-    const tagsArr = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : []
-    // Parse constraints from individual fields
-    const constraints: Record<string, number> = {}
-    const maxIter = formData.get('max_iterations') as string
-    const maxTime = formData.get('max_time_seconds') as string
-    const retryBudget = formData.get('retry_budget') as string
-    if (maxIter) constraints.max_iterations = Number(maxIter)
-    if (maxTime) constraints.max_time_seconds = Number(maxTime)
-    if (retryBudget) constraints.retry_budget = Number(retryBudget)
-
-    const data = {
-      name: formData.get('name') as string,
-      slug: formData.get('slug') as string,
-      avatar: formData.get('avatar') as string,
-      description: formData.get('description') as string,
-      system_prompt: formData.get('system_prompt') as string,
-      default_model: formData.get('default_model') as string,
-      can_execute: formData.get('can_execute') === 'on',
-      mcp_servers: formData.get('mcp_servers') as string,
-      tool_permissions: formData.get('tool_permissions') as string,
-      status: formData.get('status') as string || 'active',
-      tools: JSON.stringify(toolsArr),
-      directories: JSON.stringify(dirsArr),
-      tags: JSON.stringify(tagsArr),
-      constraints: JSON.stringify(constraints),
-    }
-    updateMutation.mutate({ id: editingAgent.id, data })
-  }, [editingAgent, updateMutation])
-
   const handleCreateMode = useCallback((formData: FormData) => {
     if (!selectedAgent) return
     const data = {
@@ -267,6 +238,22 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     if (!selectedAgent) return
     removeTemplateMutation.mutate({ agentId: selectedAgent, templateId })
   }, [selectedAgent, removeTemplateMutation])
+
+  const startEditing = useCallback((field: string, value: string) => {
+    setEditField(field)
+    setEditValue(value)
+  }, [])
+
+  const cancelEditing = useCallback(() => {
+    setEditField(null)
+    setEditValue('')
+  }, [])
+
+  const saveField = useCallback((agentId: string, field: string, value: string) => {
+    updateMutation.mutate({ id: agentId, data: { [field]: value } as Partial<AgentProfile> })
+    setEditField(null)
+    setEditValue('')
+  }, [updateMutation])
 
   // Get available skills (not yet assigned to this agent)
   const availableSkills = allSkills.filter(skill =>
@@ -353,22 +340,44 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-fg-secondary" />
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                <div className="px-3.5 py-3 flex items-center gap-2.5">
+                  <Skeleton className="size-9 rounded-lg" />
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <Skeleton className="h-3.5 w-1/2" />
+                    <Skeleton className="h-2.5 w-1/3" />
+                  </div>
+                </div>
+                <div className="border-t border-border/50 px-3.5 py-2">
+                  <Skeleton className="h-2.5 w-3/4" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : filteredAgents.length === 0 ? (
-          <div className="text-center py-8 text-fg-muted">
-            {agents.length === 0
-              ? 'No agent profiles found. Create your first agent to get started.'
-              : 'No agents match the current filters.'}
-          </div>
+          <Empty className="py-12">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><Users /></EmptyMedia>
+              <EmptyTitle className="text-sm">
+                {agents.length === 0 ? 'No agent profiles found' : 'No agents match the current filters'}
+              </EmptyTitle>
+              <EmptyDescription className="text-xs">
+                {agents.length === 0
+                  ? 'Create your first agent to get started.'
+                  : 'Try adjusting your filters to see more results.'}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <div className="grid gap-3 grid-cols-2">
             {filteredAgents.map((agent) => {
               const isActive = agent.status !== 'disabled'
               return (
+                <ContextMenu key={agent.id}>
+                  <ContextMenuTrigger asChild>
                 <div
-                  key={agent.id}
                   className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer ${
                     isActive
                       ? 'border-border-subtle bg-white dark:bg-bg-elevated/60 hover:shadow-md'
@@ -407,6 +416,27 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                     <TagPills tags={agent.tags} max={4} />
                   </div>
                 </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem className="gap-2 text-xs" onClick={() => setSelectedAgent(agent.id)}>
+                      <Eye className="w-3.5 h-3.5" />
+                      View Details
+                    </ContextMenuItem>
+                    {agent.source === 'api' && (
+                      <>
+                        <ContextMenuItem className="gap-2 text-xs" onClick={() => setSelectedAgent(agent.id)}>
+                          <Settings className="w-3.5 h-3.5" />
+                          Edit
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem className="gap-2 text-xs text-accent" disabled>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>
               )
             })}
           </div>
@@ -474,7 +504,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               <label className="block text-sm font-medium text-fg-secondary mb-2">Default Model</label>
               <select
                 name="default_model"
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                defaultValue={defaultModel}
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent appearance-none"
               >
                 {modelOptions.map((model) => (
                   <option key={model.id} value={model.id}>
@@ -614,377 +645,168 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     )
   }
 
-  // Detail/Edit View
+  // Detail View
   if (selectedAgent && agentDetail) {
     const { agent, modes } = agentDetail
-    const isEditing = editingAgent?.id === agent.id
 
-    if (isEditing) {
-      return (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setEditingAgent(null)}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <h2 className="text-xl font-semibold text-fg">Edit {agent.name}</h2>
-          </div>
+    const inputClass = 'w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent'
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              handleUpdateAgent(new FormData(e.currentTarget))
-            }}
-            className="space-y-6 max-w-2xl"
-          >
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
-                <input
-                  name="name"
-                  type="text"
-                  required
-                  defaultValue={agent.name}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
-                <input
-                  name="slug"
-                  type="text"
-                  required
-                  defaultValue={agent.slug}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-2">Avatar (emoji)</label>
-                <input
-                  name="avatar"
-                  type="text"
-                  defaultValue={agent.avatar}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-2">Default Model</label>
-                <select
-                  name="default_model"
-                  defaultValue={agent.default_model}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                >
-                  {modelOptions.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Description</label>
-              <input
-                name="description"
-                type="text"
-                defaultValue={agent.description}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">System Prompt</label>
+    /* Inline editable field — display mode shows value, click to edit */
+    const editableField = (field: string, label: string, value: string, opts?: { type?: 'input' | 'textarea' | 'select'; selectOptions?: { id: string; label: string }[] }) => {
+      const type = opts?.type || 'input'
+      if (editField === field) {
+        const handleSave = () => saveField(agent.id, field, editValue)
+        const handleKeyDown = (e: React.KeyboardEvent) => {
+          if (e.key === 'Enter' && type !== 'textarea') handleSave()
+          if (e.key === 'Escape') cancelEditing()
+        }
+        return (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-fg-muted">{label}</span>
+            {type === 'textarea' ? (
               <textarea
-                name="system_prompt"
-                required
-                rows={8}
-                defaultValue={agent.system_prompt}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
+                autoFocus
+                rows={6}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={handleSave}
+                onKeyDown={(e) => { if (e.key === 'Escape') cancelEditing() }}
+                className={`${inputClass} font-mono`}
               />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">MCP Servers (JSON)</label>
-              <textarea
-                name="mcp_servers"
-                rows={3}
-                defaultValue={agent.mcp_servers}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Permissions (JSON)</label>
-              <textarea
-                name="tool_permissions"
-                rows={3}
-                defaultValue={agent.tool_permissions}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="flex items-center gap-2">
-                <input
-                  name="can_execute"
-                  type="checkbox"
-                  defaultChecked={agent.can_execute}
-                  className="rounded border-border-subtle bg-surface text-accent focus:ring-accent focus:ring-offset-bg-elevated"
-                />
-                <span className="text-sm font-medium text-fg-secondary">Can Execute Tools</span>
-              </label>
-            </div>
-
-            {/* v2 fields */}
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Status</label>
+            ) : type === 'select' ? (
               <select
-                name="status"
-                defaultValue={agent.status || 'active'}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm"
+                autoFocus
+                value={editValue}
+                onChange={(e) => { setEditValue(e.target.value); saveField(agent.id, field, e.target.value) }}
+                onBlur={handleSave}
+                onKeyDown={handleKeyDown}
+                className={inputClass}
               >
-                <option value="active">Active</option>
-                <option value="disabled">Disabled</option>
+                {(opts?.selectOptions || []).map((o) => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
               </select>
-              {agent.source === 'agentrc' && (
-                <p className="text-xs text-amber-500 mt-1">This agent is managed by agentrc sync. Status may be overwritten on next sync.</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Tags</label>
+            ) : (
               <input
-                name="tags"
+                autoFocus
                 type="text"
-                defaultValue={(() => { try { return JSON.parse(agent.tags || '[]').join(', ') } catch { return '' } })()}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm"
-                placeholder="backend, go, infra (comma-separated)"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={handleSave}
+                onKeyDown={handleKeyDown}
+                className={inputClass}
               />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Tools Allowlist</label>
-              <textarea
-                name="tools"
-                rows={3}
-                defaultValue={(() => { try { return JSON.parse(agent.tools || '[]').join('\n') } catch { return '' } })()}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-                placeholder={"mcp__engine__*\nmcp__cortex__*\n(one glob pattern per line, empty = all tools)"}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Directories</label>
-              <textarea
-                name="directories"
-                rows={2}
-                defaultValue={(() => { try { return JSON.parse(agent.directories || '[]').join('\n') } catch { return '' } })()}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-                placeholder={"internal/api/\nui/src/\n(one path per line)"}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Constraints</label>
-              {(() => {
-                let c: Record<string, number> = {}
-                try { c = JSON.parse(agent.constraints || '{}') } catch { /* ignore */ }
-                return (
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div>
-                      <label className="block text-xs text-fg-muted mb-1">Max Iterations</label>
-                      <input name="max_iterations" type="number" min="0" defaultValue={c.max_iterations || ''} className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="10" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-fg-muted mb-1">Max Time (seconds)</label>
-                      <input name="max_time_seconds" type="number" min="0" defaultValue={c.max_time_seconds || ''} className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="300" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-fg-muted mb-1">Retry Budget</label>
-                      <input name="retry_budget" type="number" min="0" defaultValue={c.retry_budget || ''} className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm" placeholder="3" />
-                    </div>
-                  </div>
-                )
-              })()}
-            </div>
-
-            {/* Read-only metadata */}
-            <div className="border-t border-border-subtle pt-4">
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Metadata</label>
-              <div className="grid gap-3 md:grid-cols-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-fg-muted">Source:</span>
-                  <span className="text-fg-secondary">{agent.source || 'unknown'}</span>
-                </div>
-                {agent.source_ref && (
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-fg-muted shrink-0">Source Ref:</span>
-                    <span className="text-fg-secondary truncate font-mono text-xs">{agent.source_ref}</span>
-                  </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <span className="text-fg-muted">Version:</span>
-                  <span className="text-fg-secondary">v{agent.version || 0}</span>
-                </div>
-                {agent.agent_hash && (
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-fg-muted shrink-0">Hash:</span>
-                    <span className="text-fg-secondary font-mono text-xs">{agent.agent_hash.slice(0, 12)}</span>
-                    <button
-                      type="button"
-                      onClick={() => navigator.clipboard.writeText(agent.agent_hash)}
-                      className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface-hover transition-colors"
-                      title="Copy full hash"
-                    >
-                      <Copy className="w-3 h-3" />
-                    </button>
-                  </div>
-                )}
-              </div>
-              {agent.source === 'agentrc' && (
-                <p className="text-xs text-fg-muted mt-2">This agent is managed by agentrc sync ({agent.source_ref}). Source and source_ref cannot be changed.</p>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                type="submit"
-                disabled={updateMutation.isPending}
-                className="gap-2"
-              >
-                {updateMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4" />
-                )}
-                Save Changes
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setEditingAgent(null)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
+            )}
+          </div>
+        )
+      }
+      return (
+        <div
+          className="flex justify-between items-start group cursor-pointer rounded px-1 -mx-1 py-0.5 hover:bg-surface-hover transition-colors"
+          onClick={() => startEditing(field, value)}
+        >
+          <span className="text-xs text-fg-muted">{label}</span>
+          <span className="text-xs text-fg-secondary text-right max-w-[60%] truncate">{value || '-'}</span>
         </div>
       )
     }
 
+    /* Read-only field row */
+    const readOnlyField = (label: string, value: string) => (
+      <div className="flex justify-between items-start px-1 -mx-1 py-0.5">
+        <span className="text-xs text-fg-muted">{label}</span>
+        <span className="text-xs text-fg-secondary text-right max-w-[60%] truncate">{value || '-'}</span>
+      </div>
+    )
+
     return (
       <div className="space-y-6">
+        {/* Header — profile card */}
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setSelectedAgent(null)}
+            onClick={() => { setSelectedAgent(null); cancelEditing() }}
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <div className="flex items-center gap-3 flex-1">
-            <div className="w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="size-12 rounded-sm bg-surface flex items-center justify-center shrink-0">
               {agent.avatar ? (
-                <span className="text-lg">{agent.avatar}</span>
+                <span className="text-xl">{agent.avatar}</span>
               ) : (
-                <User className="w-5 h-5 text-fg-secondary" />
+                <User className="w-6 h-6 text-fg-secondary" />
               )}
             </div>
-            <div>
-              <h2 className="text-xl font-semibold text-fg">{agent.name}</h2>
-              <p className="text-sm text-fg-secondary">{agent.slug}</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-semibold text-fg truncate">{agent.name}</h2>
+                <StatusDot status={agent.status || 'active'} />
+                <SourceBadge source={agent.source} />
+              </div>
+              <p className="text-xs text-fg-muted font-mono truncate">{agent.slug}</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              onClick={() => setEditingAgent(agent)}
-              variant="ghost"
-              size="icon"
-            >
-              <Edit className="w-4 h-4" />
-            </Button>
-            {/* Delete functionality not implemented in backend yet */}
-            {/* <Button
-              onClick={() => setShowDeleteConfirm(agent.id)}
-              variant="ghost"
-              size="icon"
-              className="text-red-400 hover:text-red-300"
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button> */}
-          </div>
+          {/* Delete functionality not implemented in backend yet */}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Agent Details */}
+          {/* Agent Details — inline editable */}
           <div className="space-y-4">
             <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <Settings className="w-5 h-5" />
               Agent Details
             </h3>
 
-            <div className="space-y-3 bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                  agent.status === 'disabled' ? 'bg-surface-hover text-fg-secondary' : 'bg-emerald-500/15 text-emerald-400'
-                }`}>
-                  <StatusDot status={agent.status || 'active'} />
-                  {agent.status || 'active'}
+            <div className="space-y-1 bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
+              {editableField('name', 'Name', agent.name)}
+              {editableField('slug', 'Slug', agent.slug)}
+              {editableField('avatar', 'Avatar', agent.avatar)}
+              {editableField('description', 'Description', agent.description)}
+              {editableField('default_model', 'Default Model', agent.default_model, {
+                type: 'select',
+                selectOptions: modelOptions,
+              })}
+
+              <div className="flex justify-between items-start px-1 -mx-1 py-0.5 group cursor-pointer rounded hover:bg-surface-hover transition-colors"
+                onClick={() => {
+                  updateMutation.mutate({ id: agent.id, data: { can_execute: !agent.can_execute } as Partial<AgentProfile> })
+                }}
+              >
+                <span className="text-xs text-fg-muted">Can Execute</span>
+                <span className={`text-xs font-medium ${agent.can_execute ? 'text-emerald-400' : 'text-fg-secondary'}`}>
+                  {agent.can_execute ? 'Yes' : 'No'}
                 </span>
-                <SourceBadge source={agent.source} className="bg-surface-hover" />
-                {agent.version > 0 && (
-                  <span className="text-xs text-fg-muted">v{agent.version}</span>
-                )}
+              </div>
+
+              {/* Read-only metadata */}
+              <div className="border-t border-border-subtle mt-2 pt-2 space-y-1">
+                {readOnlyField('Source', agent.source || 'unknown')}
+                {agent.source_ref && readOnlyField('Source Ref', agent.source_ref)}
+                {readOnlyField('Version', `v${agent.version || 0}`)}
                 {agent.agent_hash && (
-                  <span className="flex items-center gap-1 text-xs text-fg-faint font-mono">
-                    <Hash className="w-3 h-3" />
-                    {agent.agent_hash.slice(0, 12)}
-                    <button
-                      onClick={() => navigator.clipboard.writeText(agent.agent_hash)}
-                      className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface-hover transition-colors"
-                      title="Copy full hash"
-                    >
-                      <Copy className="w-3 h-3" />
-                    </button>
-                  </span>
+                  <div className="flex justify-between items-center px-1 -mx-1 py-0.5">
+                    <span className="text-xs text-fg-muted">Hash</span>
+                    <span className="flex items-center gap-1 text-xs text-fg-secondary font-mono">
+                      {agent.agent_hash.slice(0, 12)}
+                      <button
+                        onClick={() => navigator.clipboard.writeText(agent.agent_hash)}
+                        className="p-0.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface-hover transition-colors"
+                        title="Copy full hash"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    </span>
+                  </div>
                 )}
-              </div>
-
-              {agent.source_ref && (
-                <div>
-                  <label className="text-sm font-medium text-fg-secondary">Source Ref</label>
-                  <p className="text-xs text-fg-secondary font-mono">{agent.source_ref}</p>
-                </div>
-              )}
-
-              <div>
-                <label className="text-sm font-medium text-fg-secondary">Description</label>
-                <p className="text-fg">{agent.description || 'No description'}</p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-fg-secondary">Default Model</label>
-                <p className="text-fg">{agent.default_model}</p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-fg-secondary">Can Execute</label>
-                <p className="text-fg">{agent.can_execute ? 'Yes' : 'No'}</p>
               </div>
 
               {(() => {
                 try {
                   const tags: string[] = JSON.parse(agent.tags || '[]')
                   return tags.length > 0 ? (
-                    <div>
-                      <label className="text-sm font-medium text-fg-secondary">Tags</label>
+                    <div className="pt-1">
+                      <label className="text-xs text-fg-muted">Tags</label>
                       <TagPills tags={agent.tags} max={10} className="mt-1" />
                     </div>
                   ) : null
@@ -995,8 +817,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 try {
                   const tools: string[] = JSON.parse(agent.tools || '[]')
                   return tools.length > 0 ? (
-                    <div>
-                      <label className="text-sm font-medium text-fg-secondary">Tools Allowlist</label>
+                    <div className="pt-1">
+                      <label className="text-xs text-fg-muted">Tools Allowlist</label>
                       <div className="flex gap-1 flex-wrap mt-1">
                         {tools.map((t) => (
                           <span key={t} className="text-xs px-2 py-0.5 rounded bg-surface-hover text-fg-secondary font-mono">{t}</span>
@@ -1011,8 +833,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 try {
                   const dirs: string[] = JSON.parse(agent.directories || '[]')
                   return dirs.length > 0 ? (
-                    <div>
-                      <label className="text-sm font-medium text-fg-secondary">Directories</label>
+                    <div className="pt-1">
+                      <label className="text-xs text-fg-muted">Directories</label>
                       <div className="flex gap-1 flex-wrap mt-1">
                         {dirs.map((d) => (
                           <span key={d} className="text-xs px-2 py-0.5 rounded bg-surface-hover text-fg-secondary font-mono">{d}</span>
@@ -1028,8 +850,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                   const c = JSON.parse(agent.constraints || '{}')
                   const entries = Object.entries(c).filter(([, v]) => v !== null && v !== undefined)
                   return entries.length > 0 ? (
-                    <div>
-                      <label className="text-sm font-medium text-fg-secondary">Constraints</label>
+                    <div className="pt-1">
+                      <label className="text-xs text-fg-muted">Constraints</label>
                       <div className="flex gap-3 mt-1">
                         {entries.map(([k, v]) => (
                           <span key={k} className="text-xs text-fg-secondary">
@@ -1042,12 +864,31 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 } catch { return null }
               })()}
 
-              <div>
-                <label className="text-sm font-medium text-fg-secondary">System Prompt</label>
-                <pre className="text-xs text-fg-secondary bg-bg-elevated rounded p-2 mt-1 overflow-x-auto max-h-32 overflow-y-auto font-mono">
-                  {agent.system_prompt}
-                </pre>
-              </div>
+              {/* System Prompt — click to edit as textarea */}
+              {editField === 'system_prompt' ? (
+                <div className="flex flex-col gap-1 pt-1">
+                  <span className="text-xs text-fg-muted">System Prompt</span>
+                  <textarea
+                    autoFocus
+                    rows={10}
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => saveField(agent.id, 'system_prompt', editValue)}
+                    onKeyDown={(e) => { if (e.key === 'Escape') cancelEditing() }}
+                    className={`${inputClass} font-mono`}
+                  />
+                </div>
+              ) : (
+                <div
+                  className="pt-1 cursor-pointer group rounded px-1 -mx-1 py-0.5 hover:bg-surface-hover transition-colors"
+                  onClick={() => startEditing('system_prompt', agent.system_prompt)}
+                >
+                  <label className="text-xs text-fg-muted pointer-events-none">System Prompt</label>
+                  <pre className="text-xs text-fg-secondary bg-bg-elevated rounded p-2 mt-1 overflow-x-auto max-h-32 overflow-y-auto font-mono">
+                    {agent.system_prompt}
+                  </pre>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1456,18 +1297,74 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
           </h3>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">MCP Servers</label>
-              <pre className="text-xs text-fg-secondary bg-surface rounded p-3 overflow-x-auto max-h-32 overflow-y-auto font-mono">
-                {agent.mcp_servers}
-              </pre>
+            {/* MCP Servers */}
+            <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
+              <label className="block text-xs font-medium text-fg-secondary mb-2">MCP Servers</label>
+              {(() => {
+                try {
+                  const servers = JSON.parse(agent.mcp_servers || '[]')
+                  if (!Array.isArray(servers) || servers.length === 0) {
+                    return <p className="text-xs text-fg-muted">No MCP servers configured</p>
+                  }
+                  return (
+                    <div className="space-y-1.5">
+                      {servers.map((srv: Record<string, string>, i: number) => (
+                        <div key={i} className="flex items-center gap-2 text-xs bg-surface-hover rounded px-2 py-1.5">
+                          <span className="font-medium text-fg truncate">{srv.name || srv.command || `Server ${i + 1}`}</span>
+                          {srv.command && (
+                            <span className="text-fg-muted font-mono truncate ml-auto">{srv.command}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                } catch {
+                  return (
+                    <textarea
+                      readOnly
+                      rows={4}
+                      value={agent.mcp_servers}
+                      className="w-full text-xs text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md p-2 font-mono resize-none"
+                    />
+                  )
+                }
+              })()}
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Permissions</label>
-              <pre className="text-xs text-fg-secondary bg-surface rounded p-3 overflow-x-auto max-h-32 overflow-y-auto font-mono">
-                {agent.tool_permissions}
-              </pre>
+            {/* Tool Permissions */}
+            <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
+              <label className="block text-xs font-medium text-fg-secondary mb-2">Tool Permissions</label>
+              {(() => {
+                try {
+                  const perms = JSON.parse(agent.tool_permissions || '{}')
+                  if (typeof perms !== 'object' || perms === null) throw new Error('not object')
+                  const entries = Object.entries(perms)
+                  if (entries.length === 0) {
+                    return <p className="text-xs text-fg-muted">No tool permissions configured</p>
+                  }
+                  return (
+                    <div className="space-y-1.5">
+                      {entries.map(([key, val]) => (
+                        <div key={key} className="flex items-center gap-2 text-xs bg-surface-hover rounded px-2 py-1.5">
+                          <span className="font-medium text-fg">{key}</span>
+                          <span className="text-fg-muted font-mono ml-auto truncate max-w-[50%] text-right">
+                            {Array.isArray(val) ? (val as string[]).join(', ') : String(val)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                } catch {
+                  return (
+                    <textarea
+                      readOnly
+                      rows={4}
+                      value={agent.tool_permissions}
+                      className="w-full text-xs text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md p-2 font-mono resize-none"
+                    />
+                  )
+                }
+              })()}
             </div>
           </div>
         </div>

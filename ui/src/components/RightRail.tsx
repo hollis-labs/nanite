@@ -1,9 +1,11 @@
 import { useState, useCallback } from 'react'
-import { LayoutGrid, Mail, Package } from 'lucide-react'
+import { LayoutGrid, Mail, Package, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
 import { useQuery } from '@tanstack/react-query'
-import { ScrollArea } from '@/components/ui/ScrollArea'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { useLayoutStore } from '@/stores/useLayoutStore'
-import { useSettings } from '@/hooks/useSettings'
+import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
+import type { UserSettings } from '@/lib/types'
 import { WidgetRenderer } from './widgets/WidgetRenderer'
 import { DEFAULT_WIDGET_ORDER } from '@/generated/plugin-widgets'
 import { ArtifactsContent } from './drawers/ArtifactsContent'
@@ -26,7 +28,9 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
   const activeTab = useLayoutStore((s) => s.rightRailTab)
   const setTab = useLayoutStore((s) => s.setRightRailTab)
   const { data: settings } = useSettings()
+  const settingsMutation = useSettingsMutation()
   const recoverMode = settings?.recover_mode ?? false
+  const [editMode, setEditMode] = useState(false)
 
   // Dynamic title for artifacts preview
   const [artifactsTitle, setArtifactsTitle] = useState('Artifacts')
@@ -84,6 +88,17 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
     }
   })
 
+  const toggleWidgetVisibility = useCallback((widgetId: string) => {
+    const currentVisibility = (settings?.ext_settings?.widget_visibility ?? {}) as Record<string, boolean>
+    const updated = { ...currentVisibility, [widgetId]: currentVisibility[widgetId] === false }
+    settingsMutation.mutate({
+      ext_settings: {
+        ...settings?.ext_settings,
+        widget_visibility: updated,
+      },
+    } as Partial<UserSettings>)
+  }, [settings?.ext_settings, settingsMutation])
+
   // Resolve display title
   const displayTitle = activeTab === 'artifacts' ? artifactsTitle : TABS.find(t => t.id === activeTab)?.label ?? 'Widgets'
 
@@ -98,23 +113,38 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
         <div className="px-4 h-12 flex items-center justify-between border-b border-border shrink-0">
           <h2 className="text-sm font-semibold text-fg truncate">{displayTitle}</h2>
           <div className="flex items-center gap-0.5">
+            {activeTab === 'widgets' && (
+              <Tooltip content={editMode ? 'Done editing' : 'Organize widgets'} side="bottom">
+                <button
+                  type="button"
+                  onClick={() => setEditMode((e) => !e)}
+                  className={`p-1.5 rounded transition-colors ${
+                    editMode
+                      ? 'text-accent bg-accent/10'
+                      : 'text-fg-faint hover:text-fg-secondary hover:bg-surface/50'
+                  }`}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              </Tooltip>
+            )}
             {TABS.map((tab) => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
               return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setTab(tab.id)}
-                  className={`p-1.5 rounded transition-colors ${
-                    isActive
-                      ? 'text-fg bg-surface'
-                      : 'text-fg-faint hover:text-fg-secondary hover:bg-surface/50'
-                  }`}
-                  title={tab.label}
-                >
-                  <Icon className="w-4 h-4" />
-                </button>
+                <Tooltip key={tab.id} content={tab.label} side="bottom">
+                  <button
+                    type="button"
+                    onClick={() => setTab(tab.id)}
+                    className={`p-1.5 rounded transition-colors ${
+                      isActive
+                        ? 'text-fg bg-surface'
+                        : 'text-fg-faint hover:text-fg-secondary hover:bg-surface/50'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                  </button>
+                </Tooltip>
               )
             })}
           </div>
@@ -124,9 +154,35 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
         {activeTab === 'widgets' && (
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-3 space-y-3">
-              {renderList.map((w) => (
-                <WidgetRenderer key={w.id} component={w} />
-              ))}
+              {editMode ? (
+                // Edit mode: show all widgets with visibility toggles
+                orderedIds.map((id) => {
+                  const meta = widgetMap.get(id)
+                  const isVisible = !visibility || visibility[id] !== false
+                  return (
+                    <div
+                      key={id}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-border-subtle ${
+                        isVisible ? 'bg-bg-elevated/50' : 'bg-bg-elevated/20 opacity-50'
+                      }`}
+                    >
+                      <GripVertical className="size-3.5 text-fg-faint cursor-grab shrink-0" />
+                      <span className="text-xs text-fg flex-1 truncate">{meta?.name || id}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleWidgetVisibility(id)}
+                        className="p-1 rounded text-fg-muted hover:text-fg transition-colors"
+                      >
+                        {isVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                      </button>
+                    </div>
+                  )
+                })
+              ) : (
+                renderList.map((w) => (
+                  <WidgetRenderer key={w.id} component={w} />
+                ))
+              )}
             </div>
           </ScrollArea>
         )}

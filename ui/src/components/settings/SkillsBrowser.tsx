@@ -11,8 +11,21 @@ import {
   Settings,
   Filter,
   Trash2,
+  Eye,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import type { Skill, ToolBinding } from '@/lib/types'
 
@@ -140,7 +153,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
           <Button
             size="sm"
             onClick={() => setShowCreateForm(true)}
-            className="gap-1.5 bg-accent hover:bg-accent-hover text-white"
+            className="gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
             Create Skill
@@ -148,23 +161,44 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-fg-secondary" />
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                <div className="px-3.5 py-3 flex items-center gap-2.5">
+                  <Skeleton className="size-9 rounded-lg" />
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <Skeleton className="h-3.5 w-1/2" />
+                    <Skeleton className="h-2.5 w-1/3" />
+                  </div>
+                </div>
+                <div className="border-t border-border/50 px-3.5 py-2">
+                  <Skeleton className="h-2.5 w-3/4" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : filteredSkills.length === 0 ? (
-          <div className="text-center py-8 text-fg-muted">
-            {skills.length === 0 ?
-              'No skills found. Create your first skill to get started.' :
-              `No skills found in "${categoryFilter}" category.`
-            }
-          </div>
+          <Empty className="py-12">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><Wrench /></EmptyMedia>
+              <EmptyTitle className="text-sm">
+                {skills.length === 0 ? 'No skills found' : `No skills found in "${categoryFilter}" category`}
+              </EmptyTitle>
+              <EmptyDescription className="text-xs">
+                {skills.length === 0
+                  ? 'Create your first skill to get started.'
+                  : 'Try selecting a different category.'}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <div className="grid gap-3 grid-cols-2">
             {filteredSkills.map((skill) => {
               const toolCount = parseToolBindings(skill.tool_bindings).length
               return (
+                <ContextMenu key={skill.id}>
+                  <ContextMenuTrigger asChild>
                 <div
-                  key={skill.id}
                   className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md"
                   onClick={() => setSelectedSkill(skill.id)}
                 >
@@ -199,6 +233,23 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                     )}
                   </div>
                 </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem className="gap-2 text-xs" onClick={() => setSelectedSkill(skill.id)}>
+                      <Eye className="w-3.5 h-3.5" />
+                      View Details
+                    </ContextMenuItem>
+                    {!skill.is_builtin && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem className="gap-2 text-xs text-accent" onClick={() => { setSelectedSkill(skill.id); setShowDeleteConfirm(skill.id) }}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>
               )
             })}
           </div>
@@ -570,38 +621,40 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         )}
 
         {/* Delete Confirmation Modal */}
-        {showDeleteConfirm === skill.id && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/60" onClick={() => setShowDeleteConfirm(null)} />
-            <div className="relative bg-bg-elevated border border-border-subtle rounded-xl p-6 max-w-md w-full mx-4">
-              <h3 className="text-lg font-semibold text-fg mb-2">Delete Skill</h3>
-              <p className="text-fg-secondary mb-4">
-                Are you sure you want to delete "{skill.name}"? This action cannot be undone.
+        <Dialog open={showDeleteConfirm === skill.id} onOpenChange={() => setShowDeleteConfirm(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader className="px-5 pt-5">
+              <DialogTitle>Delete Skill</DialogTitle>
+              <DialogDescription className="sr-only">Confirm skill deletion</DialogDescription>
+            </DialogHeader>
+            <div className="px-5 py-4">
+              <p className="text-fg-secondary">
+                Are you sure you want to delete &quot;{skill.name}&quot;? This action cannot be undone.
               </p>
-              <div className="flex gap-2 justify-end">
-                <Button
-                  variant="ghost"
-                  onClick={() => setShowDeleteConfirm(null)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => deleteMutation.mutate(skill.id)}
-                  disabled={deleteMutation.isPending}
-                  className="gap-2"
-                >
-                  {deleteMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4" />
-                  )}
-                  Delete
-                </Button>
-              </div>
             </div>
-          </div>
-        )}
+            <DialogFooter className="px-5 pb-5">
+              <Button
+                variant="ghost"
+                onClick={() => setShowDeleteConfirm(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => deleteMutation.mutate(skill.id)}
+                disabled={deleteMutation.isPending}
+                className="gap-2"
+              >
+                {deleteMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }

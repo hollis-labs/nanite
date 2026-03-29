@@ -8,13 +8,16 @@ import (
 )
 
 func (a *API) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.URL.Query().Get("workspace_id")
+	q := r.URL.Query()
+	workspaceID := q.Get("workspace_id")
 	if workspaceID == "" {
 		a.errorResp(w, http.StatusBadRequest, "workspace_id query parameter is required")
 		return
 	}
 
-	sessions, err := a.Store.ListSessions(workspaceID)
+	includeArchived := q.Get("include_archived") == "true"
+
+	sessions, err := a.Store.ListSessions(workspaceID, includeArchived)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -138,6 +141,7 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		IsPinned   *bool   `json:"is_pinned"`
 		Model      *string `json:"model"`
 		Provider   *string `json:"provider"`
+		Status     *string `json:"status"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -158,6 +162,15 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Provider != nil {
 		existing.Provider = *req.Provider
+	}
+	if req.Status != nil {
+		switch *req.Status {
+		case "active", "paused", "archived":
+			existing.Status = *req.Status
+		default:
+			a.errorResp(w, http.StatusBadRequest, "status must be active, paused, or archived")
+			return
+		}
 	}
 
 	if err := a.Store.UpdateSession(existing); err != nil {
@@ -280,18 +293,50 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
+	q := r.URL.Query()
 
 	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
+	if l := q.Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 {
 			limit = n
 		}
 	}
 
-	messages, err := a.Store.ListMessages(sessionID, limit)
+	// "around" param: return a window centered on a specific message ID.
+	if around := q.Get("around"); around != "" {
+		before := 25
+		after := 25
+		if b := q.Get("before"); b != "" {
+			if n, err := strconv.Atoi(b); err == nil && n >= 0 {
+				before = n
+			}
+		}
+		if af := q.Get("after"); af != "" {
+			if n, err := strconv.Atoi(af); err == nil && n >= 0 {
+				after = n
+			}
+		}
+		page, err := a.Store.ListMessagesAroundID(sessionID, around, before, after)
+		if err != nil {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.jsonResp(w, http.StatusOK, page)
+		return
+	}
+
+	// Offset-based pagination.
+	offset := 0
+	if o := q.Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	page, err := a.Store.ListMessagesPaginated(sessionID, limit, offset)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, messages)
+	a.jsonResp(w, http.StatusOK, page)
 }

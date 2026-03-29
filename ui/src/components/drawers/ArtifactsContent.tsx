@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FileText, FileCode, FileImage, File, Download, Package, Eye, ArrowLeft } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { ScrollArea } from '@/components/ui/ScrollArea'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import type { Artifact } from '@/lib/types'

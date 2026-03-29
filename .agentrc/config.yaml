@@ -13,7 +13,7 @@ agents:
     name: Conduit Frontend Developer
     description: React/TypeScript UI development for the Conduit chat interface
     roles: [frontend, react]
-    skills: [frontend-design]
+    skills: [frontend-design, shadcn-ui]
     plugins: [vercel]
     context: agents/frontend.md
 
@@ -21,7 +21,8 @@ agents:
     name: Conduit Plugin Developer
     description: Develop, audit, and maintain Conduit plugins and the plugin scaffold
     roles: [backend, go]
-    skills: [go-build, go-lint, go-test, doc-note, doc-search]
+    skills: [go-build, go-lint, go-test, doc-note, doc-search, shadcn-ui]
+    plugins: [vercel]
     context: agents/plugin-dev.md
 
   conduit-reviewer:

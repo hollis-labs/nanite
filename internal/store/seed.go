@@ -44,8 +44,8 @@ func (s *Store) Seed() error {
 Your strengths: strategic thinking, context management, task decomposition, cross-domain synthesis, and clear communication. You ask clarifying questions when needed and always think before acting.`
 
 	if _, err := tx.Exec(
-		`INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute, mcp_servers)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute, mcp_servers, source)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'system')`,
 		"mentat-001", "Mentat", "mentat", mentatPrompt,
 		"Cognitive AI partner for planning and context management", false,
 		`["engine","cortex","hadron"]`,
@@ -81,8 +81,8 @@ Your strengths: strategic thinking, context management, task decomposition, cros
 
 	if _, err := tx.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute,
-		        mcp_servers, tool_permissions)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		        mcp_servers, tool_permissions, source)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system')`,
 		"developer-001", "Developer", "developer", devPrompt,
 		"Hands-on software engineering agent with dev tools", true,
 		`["engine","cortex","hadron"]`, `{}`,
@@ -119,8 +119,8 @@ Your strengths: strategic thinking, context management, task decomposition, cros
 
 	if _, err := tx.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute,
-		        mcp_servers, tool_permissions)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		        mcp_servers, tool_permissions, source)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system')`,
 		"researcher-001", "Researcher", "researcher", researchPrompt,
 		"Information gathering and analysis agent (read-only)", false,
 		`["engine","cortex"]`, `{}`,
@@ -154,8 +154,8 @@ Your strengths: strategic thinking, context management, task decomposition, cros
 
 	if _, err := tx.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute,
-		        mcp_servers, tool_permissions)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		        mcp_servers, tool_permissions, source)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system')`,
 		"orchestrator-001", "Orchestrator", "orchestrator", orchPrompt,
 		"Project management and automation agent", false,
 		`["engine","hadron"]`, `{"allow_list":["mcp__engine__*","mcp__hadron__*"]}`,
@@ -247,7 +247,7 @@ When user says "let us plan" or "create demo sprints":
 	demoToolPerms := `{"allow_list":["conduit_*","mcp__engine__engine_tasks_list","mcp__engine__engine_task_get","mcp__engine__engine_task_search","mcp__engine__engine_sprints_list","mcp__engine__engine_sprint_get","mcp__engine__engine_epics_list","mcp__engine__engine_epic_get","mcp__engine__engine_projects_list","mcp__engine__engine_portfolio_summary","mcp__engine__engine_portfolio_health","mcp__cortex__*"]}`
 
 	if _, err := tx.Exec(
-		"INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute, mcp_servers, tool_permissions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO agent_profiles (id, name, slug, system_prompt, description, can_execute, mcp_servers, tool_permissions, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system')",
 		"demo-presenter-001", "Demo Presenter", "demo-presenter", demoPrompt,
 		"AI-powered demo agent for presentations — read-only Engine access, composes envelope data directly", true,
 		`["engine","cortex"]`, demoToolPerms,

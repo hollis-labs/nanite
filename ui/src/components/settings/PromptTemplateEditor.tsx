@@ -12,7 +12,12 @@ import {
   AlertCircle,
   FileText,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import type { PromptTemplate, TemplateVariable } from '@/lib/types'
 
@@ -143,21 +148,38 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           <Button
             size="sm"
             onClick={() => setShowCreateForm(true)}
-            className="gap-1.5 bg-accent hover:bg-accent-hover text-white"
+            className="gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
-            Create Template
+            Create Prompt
           </Button>
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-fg-secondary" />
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                <div className="px-3.5 py-3 flex items-center gap-2.5">
+                  <Skeleton className="size-9 rounded-lg" />
+                  <div className="flex flex-col gap-1.5 flex-1">
+                    <Skeleton className="h-3.5 w-1/2" />
+                    <Skeleton className="h-2.5 w-1/3" />
+                  </div>
+                </div>
+                <div className="border-t border-border/50 px-3.5 py-2">
+                  <Skeleton className="h-2.5 w-3/4" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : sortedTemplates.length === 0 ? (
-          <div className="text-center py-8 text-fg-muted">
-            No prompt templates found. Create your first template to get started.
-          </div>
+          <Empty className="py-12">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><FileText /></EmptyMedia>
+              <EmptyTitle className="text-sm">No prompts found</EmptyTitle>
+              <EmptyDescription className="text-xs">Create your first prompt to get started.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <div className="grid gap-3 grid-cols-2">
             {sortedTemplates.map((template) => {
@@ -218,7 +240,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <h2 className="text-xl font-semibold text-fg">Create Prompt Template</h2>
+          <h2 className="text-xl font-semibold text-fg">Create Prompt</h2>
         </div>
 
         <form
@@ -236,7 +258,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                 type="text"
                 required
                 className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                placeholder="Template name"
+                placeholder="Prompt name"
               />
             </div>
             <div>
@@ -246,7 +268,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                 type="text"
                 required
                 className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-                placeholder="template-slug"
+                placeholder="prompt-slug"
               />
             </div>
           </div>
@@ -279,13 +301,13 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-fg-secondary mb-2">Template Body</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Prompt Body</label>
             <textarea
               name="template"
               required
               rows={12}
               className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
-              placeholder="Enter the template content... Use {{variable_name}} for variables."
+              placeholder="Enter the prompt content... Use {{variable_name}} for variables."
             />
           </div>
 
@@ -323,7 +345,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               ) : (
                 <Save className="w-4 h-4" />
               )}
-              Create Template
+              Create Prompt
             </Button>
             <Button
               type="button"
@@ -415,7 +437,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-2">Template Body</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Prompt Body</label>
               <textarea
                 name="template"
                 required
@@ -479,7 +501,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               <h2 className="text-xl font-semibold text-fg flex items-center gap-2">
                 {template.name}
                 {template.is_builtin && (
-                  <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in template" />
+                  <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in prompt" />
                 )}
               </h2>
               <p className="text-sm text-fg-secondary">{template.slug}</p>
@@ -518,7 +540,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
           <div className="space-y-4">
             <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <Code2 className="w-5 h-5" />
-              Template Details
+              Prompt Details
             </h3>
 
             <div className="space-y-3 bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
@@ -560,7 +582,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
               </div>
 
               <div>
-                <label className="text-sm font-medium text-fg-secondary">Template Body</label>
+                <label className="text-sm font-medium text-fg-secondary">Prompt Body</label>
                 <pre className="text-xs text-fg-secondary bg-bg-elevated rounded p-2 mt-1 overflow-x-auto max-h-40 overflow-y-auto font-mono whitespace-pre-wrap">
                   {template.template}
                 </pre>
@@ -651,7 +673,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
 
                 {/* Rendered Preview */}
                 <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
-                  <h4 className="font-medium text-fg mb-3">Rendered Template</h4>
+                  <h4 className="font-medium text-fg mb-3">Rendered Prompt</h4>
                   <pre className="text-xs text-fg-secondary bg-bg-elevated rounded p-3 overflow-x-auto max-h-80 overflow-y-auto font-mono whitespace-pre-wrap">
                     {renderTemplatePreview}
                   </pre>
@@ -662,43 +684,45 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
         </div>
 
         {/* Delete Confirmation Modal */}
-        {showDeleteConfirm === template.id && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/60" onClick={() => setShowDeleteConfirm(null)} />
-            <div className="relative bg-bg-elevated border border-border-subtle rounded-xl p-6 max-w-md w-full mx-4">
+        <Dialog open={showDeleteConfirm === template.id} onOpenChange={() => setShowDeleteConfirm(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader className="px-5 pt-5">
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
                 <div>
-                  <h3 className="text-lg font-semibold text-fg mb-2">Delete Template</h3>
-                  <p className="text-fg-secondary mb-4">
-                    Are you sure you want to delete "{template.name}"? This action cannot be undone and will remove the template from all agents.
-                  </p>
-                  <div className="flex gap-2 justify-end">
-                    <Button
-                      variant="ghost"
-                      onClick={() => setShowDeleteConfirm(null)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => deleteMutation.mutate(template.id)}
-                      disabled={deleteMutation.isPending}
-                      className="gap-2"
-                    >
-                      {deleteMutation.isPending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="w-4 h-4" />
-                      )}
-                      Delete
-                    </Button>
-                  </div>
+                  <DialogTitle>Delete Prompt</DialogTitle>
+                  <DialogDescription className="sr-only">Confirm prompt deletion</DialogDescription>
                 </div>
               </div>
+            </DialogHeader>
+            <div className="px-5 py-4">
+              <p className="text-fg-secondary">
+                Are you sure you want to delete &quot;{template.name}&quot;? This action cannot be undone and will remove the prompt from all agents.
+              </p>
             </div>
-          </div>
-        )}
+            <DialogFooter className="px-5 pb-5">
+              <Button
+                variant="ghost"
+                onClick={() => setShowDeleteConfirm(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => deleteMutation.mutate(template.id)}
+                disabled={deleteMutation.isPending}
+                className="gap-2"
+              >
+                {deleteMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }

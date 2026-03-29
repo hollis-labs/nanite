@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Bug, Send, Check, X, ChevronDown } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'

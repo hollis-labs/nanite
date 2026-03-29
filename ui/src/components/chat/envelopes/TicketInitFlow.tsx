@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { MessageSquare, ArrowRight, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { buildTicketDataMarker, buildTicketMessage } from './ticket-utils'
 
 interface TicketInitFlowProps {

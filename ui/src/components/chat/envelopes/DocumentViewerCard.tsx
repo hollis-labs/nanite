@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react'
 import { FileText, ExternalLink, Download, ChevronRight } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { MessageContent } from '../MessageContent'
 
 interface DocumentViewerData {

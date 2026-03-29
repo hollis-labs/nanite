@@ -37,6 +37,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/workspaces/{id}", a.handleDeleteWorkspace)
 	mux.HandleFunc("GET /api/workspaces/{wid}/projects", a.handleListProjects)
 	mux.HandleFunc("POST /api/workspaces/{wid}/projects", a.handleCreateProject)
+	mux.HandleFunc("GET /api/projects/{id}/agents", a.handleListProjectAgents)
 
 	// Sessions
 	mux.HandleFunc("GET /api/sessions", a.handleListSessions)
@@ -69,6 +70,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/agents/{id}", a.handleUpdateAgent)
 	mux.HandleFunc("GET /api/agents/{id}/modes", a.handleListAgentModes)
 	mux.HandleFunc("POST /api/agents/{id}/modes", a.handleCreateAgentMode)
+	mux.HandleFunc("GET /api/agents/{id}/projects", a.handleListAgentProjects)
+	mux.HandleFunc("POST /api/agents/{id}/projects", a.handleAddAgentProject)
+	mux.HandleFunc("DELETE /api/agents/{id}/projects/{projectId}", a.handleRemoveAgentProject)
 
 	// Session compaction
 	mux.HandleFunc("POST /api/sessions/{id}/compact", a.handleCompactSession)
@@ -78,6 +82,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/bookmarks", a.handleCreateBookmark)
 	mux.HandleFunc("DELETE /api/bookmarks/{id}", a.handleDeleteBookmark)
 	mux.HandleFunc("POST /api/messages/{id}/bookmark", a.handleToggleBookmark)
+	mux.HandleFunc("POST /api/bookmarks/{id}/autotitle", a.handleAutotitleBookmark)
 
 	// Artifacts
 	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter
@@ -187,6 +192,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/templates/{name}", a.handleUpdateTemplate)
 	mux.HandleFunc("DELETE /api/templates/{name}", a.handleDeleteTemplate)
 	mux.HandleFunc("POST /api/templates/{name}/apply", a.handleApplyTemplate)
+
+	// Search
+	mux.HandleFunc("GET /api/search", a.handleSearchMessages)
 
 	// User Settings
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)

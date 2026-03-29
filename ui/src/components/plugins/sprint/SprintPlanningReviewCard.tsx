@@ -3,7 +3,7 @@ import {
   LayoutList, ChevronDown, ChevronRight, Check, ArrowRightLeft,
   ChevronLeft, ChevronsRight, Send,
 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 
 interface SprintOption {
   id: string

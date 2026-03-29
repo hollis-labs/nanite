@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { X, Loader2, ListTodo, CheckSquare, ArrowUp, Trash2, Send, Pause, AlertCircle } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import type { VolonSprint, VolonTask, VolonBacklogItem } from '@/lib/types'

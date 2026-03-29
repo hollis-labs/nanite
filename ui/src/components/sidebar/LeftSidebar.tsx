@@ -1,8 +1,27 @@
-import { useState, useMemo, type ReactNode } from 'react'
-import { Plus, Pin, PinOff, Loader2, MessageSquare } from 'lucide-react'
+import { useState, useMemo, useRef, useEffect, type ReactNode } from 'react'
+import { Plus, Pin, PinOff, Loader2, MessageSquare, Trash2 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button } from '@/components/ui/Button'
-import { ScrollArea } from '@/components/ui/ScrollArea'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { AdapterBadge } from '@/components/chat/AdapterBadge'
 import { ProjectDropdown } from './ProjectDropdown'
 import { useLayoutStore } from '@/stores/useLayoutStore'
@@ -41,6 +60,29 @@ export function LeftSidebar() {
   const activeStreams = useChatStore((s) => s.activeStreams)
   const pendingTools = useChatStore((s) => s.pendingTools)
   const cliActiveSessions = useChatStore((s) => s.cliActiveSessions)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteSession(id),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['sessions', activeWorkspaceId] })
+      const prev = queryClient.getQueryData(['sessions', activeWorkspaceId])
+      queryClient.setQueryData(['sessions', activeWorkspaceId], (old: Session[] | undefined) =>
+        old?.filter(s => s.id !== id)
+      )
+      return { prev }
+    },
+    onSuccess: (_data, id) => {
+      if (activeSessionId === id) setActiveSession('')
+      setDeleteConfirmId(null)
+    },
+    onError: (_err, _id, context) => {
+      if (context?.prev) queryClient.setQueryData(['sessions', activeWorkspaceId], context.prev)
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    },
+  })
 
   const { data: userSettings } = useSettings()
 
@@ -67,7 +109,18 @@ export function LeftSidebar() {
 
   const pinMutation = useMutation({
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => api.pinSession(id, pinned),
-    onSuccess: () => {
+    onMutate: async ({ id, pinned }) => {
+      await queryClient.cancelQueries({ queryKey: ['sessions', activeWorkspaceId] })
+      const prev = queryClient.getQueryData(['sessions', activeWorkspaceId])
+      queryClient.setQueryData(['sessions', activeWorkspaceId], (old: Session[] | undefined) =>
+        old?.map(s => s.id === id ? { ...s, is_pinned: pinned } : s)
+      )
+      return { prev }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['sessions', activeWorkspaceId], context.prev)
+    },
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
     },
   })
@@ -87,6 +140,38 @@ export function LeftSidebar() {
     () => filteredSessions.filter((s: Session) => !s.is_pinned).sort(sortByActivity),
     [filteredSessions],
   )
+
+  // Progressive reveal — show 30 initially, load more on scroll
+  const PAGE_SIZE = 30
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+
+  // Reset visible count when project filter changes
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [activeProjectId])
+
+  const visibleUnpinned = useMemo(
+    () => unpinned.slice(0, Math.max(0, visibleCount - pinned.length)),
+    [unpinned, visibleCount, pinned.length],
+  )
+  const hasMore = pinned.length + visibleUnpinned.length < filteredSessions.length
+
+  // Intersection observer to load more
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setVisibleCount((c) => c + PAGE_SIZE)
+        }
+      },
+      { rootMargin: '100px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore])
 
   return (
     <aside
@@ -121,16 +206,27 @@ export function LeftSidebar() {
         <ScrollArea className="flex-1 min-h-0">
           <div className="px-2 py-2">
             {isLoading && (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-5 h-5 text-fg-muted animate-spin" />
+              <div className="flex flex-col gap-2 px-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-2.5 px-2 py-2">
+                    <Skeleton className="size-8 rounded-md" />
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      <Skeleton className="h-3 w-3/4" />
+                      <Skeleton className="h-2.5 w-1/2" />
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
             {!isLoading && filteredSessions.length === 0 && (
-              <div className="px-2 py-8 text-center">
-                <p className="text-xs text-fg-muted">No chats yet</p>
-                <p className="text-xs text-fg-faint mt-1">Click + to start a chat</p>
-              </div>
+              <Empty className="py-8">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon"><MessageSquare /></EmptyMedia>
+                  <EmptyTitle className="text-sm">No chats yet</EmptyTitle>
+                  <EmptyDescription className="text-xs">Click + to start a conversation</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             )}
 
             {/* Pinned */}
@@ -145,16 +241,17 @@ export function LeftSidebar() {
                     onClick={() => setActiveSession(session.id)}
                     onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
                     statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
+                    onDelete={() => setDeleteConfirmId(session.id)}
                   />
                 ))}
               </>
             )}
 
             {/* Recent */}
-            {unpinned.length > 0 && (
+            {visibleUnpinned.length > 0 && (
               <>
                 {pinned.length > 0 && <ZoneHeader label="Recent" />}
-                {unpinned.map((session: Session) => (
+                {visibleUnpinned.map((session: Session) => (
                   <ChatItem
                     key={session.id}
                     session={session}
@@ -162,13 +259,42 @@ export function LeftSidebar() {
                     onClick={() => setActiveSession(session.id)}
                     onTogglePin={() => pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })}
                     statusIndicator={getPresenceIndicator(session.id, activeStreams, pendingTools, cliActiveSessions)}
+                    onDelete={() => setDeleteConfirmId(session.id)}
                   />
                 ))}
               </>
             )}
+
+            {/* Sentinel for infinite scroll */}
+            {hasMore && (
+              <div ref={sentinelRef} className="flex items-center justify-center py-3">
+                <span className="text-[10px] text-fg-faint">Loading more...</span>
+              </div>
+            )}
           </div>
         </ScrollArea>
       </div>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null) }}>
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete chat?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this chat and all its messages. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => deleteConfirmId && deleteMutation.mutate(deleteConfirmId)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   )
 }
@@ -214,67 +340,82 @@ function ChatItem({
   onClick,
   onTogglePin,
   statusIndicator,
+  onDelete,
 }: {
   session: Session
   isActive: boolean
   onClick: () => void
   onTogglePin: () => void
   statusIndicator?: ReactNode
+  onDelete?: () => void
 }) {
   const [hovered, setHovered] = useState(false)
   const displayTitle = session.custom_name || session.title || `Chat ${session.short_code}`
 
   return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className={`w-full flex items-start gap-2 px-2 py-0.5 rounded-md text-left transition-colors group ${
-        isActive
-          ? 'bg-surface/60 text-fg'
-          : 'text-fg-secondary hover:bg-surface/40 hover:text-fg'
-      }`}
-    >
-      {/* Icon column — message count centered in icon */}
-      <div className="relative shrink-0">
-        {statusIndicator && <div className="absolute -top-1 -left-1 z-10">{statusIndicator}</div>}
-        <div className="relative w-7 h-7 flex items-center justify-center">
-          <MessageSquare className="w-5 h-5 opacity-25" />
-          {session.message_count > 0 && (
-            <span className="absolute inset-x-0 top-[5px] bottom-1.5 flex items-center justify-center text-[9px] font-bold text-fg-muted tabular-nums leading-none">
-              {session.message_count > 99 ? '99' : session.message_count}
-            </span>
-          )}
-        </div>
-      </div>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          onClick={onClick}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          className={`w-full flex items-start gap-2 px-2 py-0.5 rounded-md text-left transition-colors group ${
+            isActive
+              ? 'bg-surface/60 text-fg'
+              : 'text-fg-secondary hover:bg-surface/40 hover:text-fg'
+          }`}
+        >
+          {/* Icon column */}
+          <div className="relative shrink-0">
+            {statusIndicator && <div className="absolute -top-1 -left-1 z-10">{statusIndicator}</div>}
+            <div className="relative w-7 h-7 flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 opacity-25" />
+              {session.message_count > 0 && (
+                <span className="absolute inset-x-0 top-[5px] bottom-1.5 flex items-center justify-center text-[9px] font-bold text-fg-muted tabular-nums leading-none">
+                  {session.message_count > 99 ? '99' : session.message_count}
+                </span>
+              )}
+            </div>
+          </div>
 
-      {/* Content — mt aligns title baseline with icon center */}
-      <div className="flex-1 min-w-0 mt-[3px]">
-        {/* Line 1: title + time/pin */}
-        <div className="flex items-center gap-1">
-          <span className="text-sm truncate flex-1 leading-snug">{displayTitle}</span>
-          {hovered ? (
-            <span
-              role="button"
-              onClick={(e) => { e.stopPropagation(); onTogglePin() }}
-              className="p-0.5 rounded text-fg-muted hover:text-fg hover:bg-surface-hover transition-colors shrink-0"
-              aria-label={session.is_pinned ? 'Unpin' : 'Pin'}
-            >
-              {session.is_pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
-            </span>
-          ) : (
-            <>
-              {session.is_pinned && <Pin className="w-3 h-3 text-fg-faint shrink-0" />}
-              <span className="text-[11px] text-fg-faint shrink-0">{formatRelativeTime(session.last_activity)}</span>
-            </>
-          )}
-        </div>
-        {/* Line 2: #short_code · adapter badge */}
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="text-[11px] text-fg-faint font-mono">#{session.short_code}</span>
-          <AdapterBadge provider={session.provider || 'api'} size="sm" />
-        </div>
-      </div>
-    </button>
+          {/* Content */}
+          <div className="flex-1 min-w-0 mt-[3px]">
+            <div className="flex items-center gap-1">
+              <span className="text-sm truncate flex-1 leading-snug">{displayTitle}</span>
+              {hovered ? (
+                <span
+                  role="button"
+                  onClick={(e) => { e.stopPropagation(); onTogglePin() }}
+                  className="p-0.5 rounded text-fg-muted hover:text-fg hover:bg-surface-hover transition-colors shrink-0"
+                  aria-label={session.is_pinned ? 'Unpin' : 'Pin'}
+                >
+                  {session.is_pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+                </span>
+              ) : (
+                <>
+                  {session.is_pinned && <Pin className="w-3 h-3 text-fg-faint shrink-0" />}
+                  <span className="text-[11px] text-fg-faint shrink-0">{formatRelativeTime(session.last_activity)}</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[11px] text-fg-faint font-mono">#{session.short_code}</span>
+              <AdapterBadge provider={session.provider || 'api'} size="sm" />
+            </div>
+          </div>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={onTogglePin} className="gap-2 text-xs">
+          {session.is_pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+          {session.is_pinned ? 'Unpin' : 'Pin'}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={onDelete} className="gap-2 text-xs text-accent focus:text-accent">
+          <Trash2 className="size-3.5" />
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

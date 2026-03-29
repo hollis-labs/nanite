@@ -238,6 +238,12 @@ export const api = {
     })
   },
 
+  autotitleBookmark: async (bookmarkId: string): Promise<{ title: string }> => {
+    const res = await fetch(`${API_BASE}/bookmarks/${bookmarkId}/autotitle`, { method: 'POST' })
+    if (!res.ok) throw new Error(`Failed to autotitle bookmark: ${res.status}`)
+    return res.json()
+  },
+
   // Artifacts
   listArtifacts: async (sessionId: string): Promise<Artifact[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/artifacts`)

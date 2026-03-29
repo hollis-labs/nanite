@@ -16,6 +16,7 @@ import {
   setSettingsSectionCallback,
   updateSettingsHash,
 } from '@/hooks/useHashRoute'
+import { useNavigationStore } from '@/stores/useNavigationStore'
 import { PreferencesPanel } from './PreferencesPanel'
 import { ShortcutsPanel } from './ShortcutsPanel'
 import { AgentProfileManager } from './AgentProfileManager'
@@ -26,7 +27,7 @@ import { PluginManager } from './PluginManager'
 import { ProviderManager } from './ProviderManager'
 import { WidgetManager } from './WidgetManager'
 import { ObservabilityDashboard } from './observability/ObservabilityDashboard'
-import { ScrollArea } from '@/components/ui/ScrollArea'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 type SettingsSection = 'preferences' | 'providers' | 'shortcuts' | 'agents' | 'skills' | 'prompts' | 'tools' | 'plugins' | 'widgets' | 'observability'
 
@@ -47,15 +48,24 @@ export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<SettingsSection>(
     () => getInitialSettingsSection() ?? 'preferences',
   )
+  // Bump key to force remount when clicking the same section (resets sub-views)
+  const [sectionKey, setSectionKey] = useState(0)
 
   useEffect(() => {
     setSettingsSectionCallback((section) => setActiveSection(section))
     return () => setSettingsSectionCallback(null)
   }, [])
 
+  const navPush = useNavigationStore((s) => s.push)
+
   const handleSectionChange = (section: SettingsSection) => {
+    if (section === activeSection) {
+      // Same section clicked — bump key to reset sub-views (e.g., agent detail → list)
+      setSectionKey((k) => k + 1)
+    }
     setActiveSection(section)
     updateSettingsHash(section)
+    navPush({ view: `settings/${section}`, label: section })
   }
 
   const renderActiveSection = () => {
@@ -124,7 +134,7 @@ export default function SettingsPage() {
           <h2 className="text-sm font-semibold text-fg">{active.label}</h2>
         </div>
         <ScrollArea className="flex-1">
-          <div className="p-6 max-w-4xl">
+          <div key={`${activeSection}-${sectionKey}`} className="p-6 max-w-4xl">
             {renderActiveSection()}
           </div>
         </ScrollArea>

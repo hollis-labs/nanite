@@ -20,6 +20,7 @@ type PromptTemplate struct {
 	Variables string `json:"variables"` // JSON array of variable names
 	Priority  int    `json:"priority"`
 	IsBuiltin bool   `json:"is_builtin"`
+	Icon      string `json:"icon"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -27,7 +28,7 @@ type PromptTemplate struct {
 // ListPromptTemplates returns all prompt templates ordered by priority.
 func (s *Store) ListPromptTemplates() ([]PromptTemplate, error) {
 	rows, err := s.DB.Query(
-		`SELECT id, name, slug, scope, template, variables, priority, is_builtin, created_at, updated_at
+		`SELECT id, name, slug, scope, template, variables, priority, is_builtin, COALESCE(icon,''), created_at, updated_at
 		 FROM prompt_templates ORDER BY priority, name`,
 	)
 	if err != nil {
@@ -39,7 +40,7 @@ func (s *Store) ListPromptTemplates() ([]PromptTemplate, error) {
 	for rows.Next() {
 		var pt PromptTemplate
 		if err := rows.Scan(&pt.ID, &pt.Name, &pt.Slug, &pt.Scope, &pt.Template,
-			&pt.Variables, &pt.Priority, &pt.IsBuiltin, &pt.CreatedAt, &pt.UpdatedAt); err != nil {
+			&pt.Variables, &pt.Priority, &pt.IsBuiltin, &pt.Icon, &pt.CreatedAt, &pt.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan prompt template: %w", err)
 		}
 		out = append(out, pt)
@@ -51,10 +52,10 @@ func (s *Store) ListPromptTemplates() ([]PromptTemplate, error) {
 func (s *Store) GetPromptTemplate(id string) (*PromptTemplate, error) {
 	var pt PromptTemplate
 	err := s.DB.QueryRow(
-		`SELECT id, name, slug, scope, template, variables, priority, is_builtin, created_at, updated_at
+		`SELECT id, name, slug, scope, template, variables, priority, is_builtin, COALESCE(icon,''), created_at, updated_at
 		 FROM prompt_templates WHERE id = ?`, id,
 	).Scan(&pt.ID, &pt.Name, &pt.Slug, &pt.Scope, &pt.Template,
-		&pt.Variables, &pt.Priority, &pt.IsBuiltin, &pt.CreatedAt, &pt.UpdatedAt)
+		&pt.Variables, &pt.Priority, &pt.IsBuiltin, &pt.Icon, &pt.CreatedAt, &pt.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -68,10 +69,10 @@ func (s *Store) GetPromptTemplate(id string) (*PromptTemplate, error) {
 func (s *Store) GetPromptTemplateBySlug(slug string) (*PromptTemplate, error) {
 	var pt PromptTemplate
 	err := s.DB.QueryRow(
-		`SELECT id, name, slug, scope, template, variables, priority, is_builtin, created_at, updated_at
+		`SELECT id, name, slug, scope, template, variables, priority, is_builtin, COALESCE(icon,''), created_at, updated_at
 		 FROM prompt_templates WHERE slug = ?`, slug,
 	).Scan(&pt.ID, &pt.Name, &pt.Slug, &pt.Scope, &pt.Template,
-		&pt.Variables, &pt.Priority, &pt.IsBuiltin, &pt.CreatedAt, &pt.UpdatedAt)
+		&pt.Variables, &pt.Priority, &pt.IsBuiltin, &pt.Icon, &pt.CreatedAt, &pt.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -92,10 +93,10 @@ func (s *Store) CreatePromptTemplate(pt *PromptTemplate) error {
 	}
 
 	_, err := s.DB.Exec(
-		`INSERT INTO prompt_templates (id, name, slug, scope, template, variables, priority, is_builtin, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO prompt_templates (id, name, slug, scope, template, variables, priority, is_builtin, icon, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		pt.ID, pt.Name, pt.Slug, pt.Scope, pt.Template, pt.Variables, pt.Priority, pt.IsBuiltin,
-		now, now,
+		nullIfEmpty(pt.Icon), now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("create prompt template: %w", err)
@@ -110,10 +111,10 @@ func (s *Store) UpdatePromptTemplate(pt *PromptTemplate) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.DB.Exec(
 		`UPDATE prompt_templates SET name = ?, slug = ?, scope = ?, template = ?,
-		        variables = ?, priority = ?, updated_at = ?
+		        variables = ?, priority = ?, icon = ?, updated_at = ?
 		 WHERE id = ?`,
 		pt.Name, pt.Slug, pt.Scope, pt.Template, pt.Variables, pt.Priority,
-		now, pt.ID,
+		nullIfEmpty(pt.Icon), now, pt.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update prompt template: %w", err)
@@ -160,7 +161,7 @@ func (s *Store) ListPromptTemplatesForAgent(agentID string) ([]PromptTemplate, e
 	for rows.Next() {
 		var pt PromptTemplate
 		if err := rows.Scan(&pt.ID, &pt.Name, &pt.Slug, &pt.Scope, &pt.Template,
-			&pt.Variables, &pt.Priority, &pt.IsBuiltin, &pt.CreatedAt, &pt.UpdatedAt); err != nil {
+			&pt.Variables, &pt.Priority, &pt.IsBuiltin, &pt.Icon, &pt.CreatedAt, &pt.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan agent prompt template: %w", err)
 		}
 		out = append(out, pt)

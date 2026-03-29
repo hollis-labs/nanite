@@ -207,7 +207,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       <div
         ref={dropRef}
         className={`border rounded-sm overflow-hidden transition-colors shadow-lg shadow-black/30 ${
-          dragOver ? 'border-accent bg-accent-muted' : 'border-zinc-300 dark:border-border-subtle'
+          dragOver ? 'border-accent bg-accent-muted' : 'border-border-subtle'
         }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}

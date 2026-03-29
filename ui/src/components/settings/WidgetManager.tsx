@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { GripVertical, Eye, EyeOff, Puzzle, Settings2 } from 'lucide-react'
+import { GripVertical, Eye, EyeOff, LayoutGrid, Settings2 } from 'lucide-react'
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
 import { api } from '@/lib/api'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
 import { PluginConfigPanel } from './PluginConfigPanel'
@@ -108,11 +109,13 @@ export function WidgetManager() {
       </div>
 
       {orderedIds.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <Puzzle className="w-8 h-8 text-fg-faint mb-3" />
-          <p className="text-sm text-fg-muted">No widgets registered</p>
-          <p className="text-xs text-fg-faint mt-1">Plugins can register widgets via the plugin system</p>
-        </div>
+        <Empty className="py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon"><LayoutGrid /></EmptyMedia>
+            <EmptyTitle className="text-sm">No widgets registered</EmptyTitle>
+            <EmptyDescription className="text-xs">Plugins can register widgets via the plugin system</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <div className="grid gap-3 grid-cols-2">
           {orderedIds.map((id, idx) => {

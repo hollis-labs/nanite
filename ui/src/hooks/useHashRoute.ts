@@ -108,15 +108,22 @@ export function useHashRoute() {
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [setCurrentPage])
 
-  // Sync store → hash
+  // Sync store → hash (preserve existing section when on settings)
   useEffect(() => {
     if (suppressHashUpdate.current) {
       suppressHashUpdate.current = false
       return
     }
-    const target = currentPage === 'chat' ? '#chat' : '#settings'
-    if (window.location.hash !== target) {
-      window.location.hash = target
+    if (currentPage === 'chat') {
+      if (window.location.hash !== '#chat') {
+        window.location.hash = '#chat'
+      }
+    } else {
+      // Only update if we're not already on a settings/* hash
+      const existing = window.location.hash.replace(/^#\/?/, '')
+      if (!existing.startsWith('settings')) {
+        window.location.hash = '#settings'
+      }
     }
   }, [currentPage])
 }

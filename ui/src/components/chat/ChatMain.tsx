@@ -143,15 +143,11 @@ const WELCOME_CARDS = [
 ]
 
 function WelcomeScreen() {
-  const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
-
   const handleAction = (action: (typeof WELCOME_CARDS)[number]['action']) => {
     if (action === 'new-chat') {
-      // Focus the sidebar — NavRail handles new chat creation
       return
     }
-    setCurrentPage('settings')
-    // Hash will update via useHashRoute, and SettingsPage reads initial section from hash
+    // Set hash first — useHashRoute will derive currentPage from the hash
     if (action === 'settings-providers') {
       window.location.hash = '#settings/providers'
     } else if (action === 'settings-plugins') {

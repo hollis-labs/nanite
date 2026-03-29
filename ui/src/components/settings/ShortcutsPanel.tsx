@@ -46,8 +46,10 @@ function KeyBadge({ keys, active }: { keys: string[]; active?: boolean }) {
   )
 }
 
-function keyEventToBinding(e: KeyboardEvent): string | null {
-  if (['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) return null
+/** Returns binding string, undefined for modifier-only (ignore), or null for cancel (Escape). */
+function keyEventToBinding(e: KeyboardEvent): string | null | undefined {
+  // Modifier-only presses — ignore, don't cancel
+  if (['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) return undefined
 
   const parts: string[] = []
   if (e.metaKey || e.ctrlKey) parts.push('mod')
@@ -56,7 +58,7 @@ function keyEventToBinding(e: KeyboardEvent): string | null {
 
   let key = e.key.toLowerCase()
   if (key === ' ') key = 'space'
-  if (key === 'escape') return null
+  if (key === 'escape') return null // explicit cancel
   parts.push(key)
 
   return parts.join('+')
@@ -91,6 +93,7 @@ function ShortcutCard({
       e.preventDefault()
       e.stopPropagation()
       const result = keyEventToBinding(e)
+      if (result === undefined) return // modifier-only, ignore
       if (result === null) {
         onCancel()
         return

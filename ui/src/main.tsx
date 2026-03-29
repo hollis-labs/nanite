@@ -4,20 +4,13 @@ import './index.css'
 import App from './App.tsx'
 
 // Apply persisted theme class before first render to prevent flash
-const persisted = localStorage.getItem('conduit-layout')
-if (persisted) {
-  try {
-    const parsed = JSON.parse(persisted)
-    const theme = parsed?.state?.theme
-    if (theme === 'light' || theme === 'dark') {
-      document.documentElement.classList.add(theme)
-    } else {
-      document.documentElement.classList.add('dark')
-    }
-  } catch {
-    document.documentElement.classList.add('dark')
-  }
-} else {
+try {
+  const persisted = localStorage.getItem('conduit-layout')
+  const theme = persisted ? JSON.parse(persisted)?.state?.theme : undefined
+  document.documentElement.classList.remove('dark', 'light')
+  document.documentElement.classList.add(theme === 'light' ? 'light' : 'dark')
+} catch {
+  document.documentElement.classList.remove('dark', 'light')
   document.documentElement.classList.add('dark')
 }
 

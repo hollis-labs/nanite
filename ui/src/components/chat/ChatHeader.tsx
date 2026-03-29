@@ -62,6 +62,15 @@ export function ChatHeader() {
   const shortCode = session?.short_code
   const toolCount = tools.length + (toolCalls?.length || 0)
 
+  // Provider — getSession may return empty; fall back to the sessions list cache
+  const sessionProvider = (() => {
+    if (session?.provider) return session.provider
+    if (!activeSessionId) return ''
+    const cached = queryClient.getQueryData<any[]>(['sessions', session?.workspace_id])
+    const match = cached?.find((s: any) => s.id === activeSessionId)
+    return match?.provider || ''
+  })()
+
   // Model display — from session or agent profile
   const modelName = session?.model || activeModel || (primaryAgentProfile as any)?.default_model || null
   const shortModel = modelName ? modelName.split('/').pop()?.replace(/-\d{8}$/, '') : null
@@ -186,7 +195,7 @@ export function ChatHeader() {
               </div>
 
               {session && (
-                <AdapterBadge provider={session.provider || 'api'} size="sm" />
+                <AdapterBadge provider={sessionProvider || 'api'} size="sm" />
               )}
 
               <div className="relative" ref={forkMenuRef}>

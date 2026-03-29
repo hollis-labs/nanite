@@ -190,13 +190,13 @@ export function MessageContent({ content, role }: { content: string; role: 'user
       return <h6 className="text-xs font-medium text-fg-secondary mt-3 mb-1 uppercase tracking-wider" {...props}>{children}</h6>
     },
     ul({ children, ...props }) {
-      return <ul className="list-disc list-inside my-2 space-y-1 text-fg-secondary" {...props}>{children}</ul>
+      return <ul className="list-disc list-outside pl-5 my-2 space-y-1 text-fg-secondary" {...props}>{children}</ul>
     },
     ol({ children, ...props }) {
-      return <ol className="list-decimal list-inside my-2 space-y-1 text-fg-secondary" {...props}>{children}</ol>
+      return <ol className="list-decimal list-outside pl-5 my-2 space-y-1 text-fg-secondary" {...props}>{children}</ol>
     },
     li({ children, ...props }) {
-      return <li className="text-sm leading-relaxed" {...props}>{children}</li>
+      return <li className="text-sm leading-relaxed [&>p]:inline" {...props}>{children}</li>
     },
     p({ children, ...props }) {
       return <p className="my-2 leading-relaxed" {...props}>{children}</p>

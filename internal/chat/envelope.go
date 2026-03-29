@@ -20,12 +20,17 @@ var registeredTypes = map[string]bool{
 	"document-viewer":          true,
 	"report-card":              true,
 	"task-complete-notification": true,
-	"sprint-planning-review":   true,
 	"kb-result":                true,
 	"ticket-confirmation":      true,
 	"ticket-form":              true,
 	"resolution-capture":       true,
 	"error-report":             true,
+}
+
+// RegisterEnvelopeType adds a new envelope type to the registry at runtime.
+// Plugins call this to register their envelope types so they pass validation.
+func RegisterEnvelopeType(envelopeType string) {
+	registeredTypes[envelopeType] = true
 }
 
 // ValidateEnvelope checks required fields on a parsed envelope.

@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useChatStore } from '@/stores/useChatStore'
-import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
+import { useSprintPlanningStore } from '@/components/plugins/sprint/useSprintPlanningStore'
 import type { Message, StreamEvent, ChatError, ChatErrorCode, ToolWarning } from '@/lib/types'
 
 let errorCounter = 0

@@ -10,7 +10,7 @@ import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
 import { AgentRoster } from './AgentRoster'
-import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
+import { useSprintPlanningStore } from '@/components/plugins/sprint/useSprintPlanningStore'
 
 export function ChatHeader() {
   const toggleLeftSidebar = useLayoutStore((s) => s.toggleLeftSidebar)

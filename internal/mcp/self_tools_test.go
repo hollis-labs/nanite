@@ -43,7 +43,6 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 		"conduit_create_agent":          false,
 		"conduit_list_agents":           false,
 		"conduit_update_agent":          false,
-		"conduit_open_sprint_planning":  false,
 		"conduit_start_builder":         false,
 		"conduit_builder_step":          false,
 	}

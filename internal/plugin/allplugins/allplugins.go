@@ -18,5 +18,6 @@ import (
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/observabilitywidgets"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/oembed"
 	_ "github.com/hollis-labs/conduit/internal/plugin/builtin/sessionstats"
+	_ "github.com/hollis-labs/conduit/plugins/sprint"
 	_ "github.com/hollis-labs/conduit/plugins/support-ticket"
 )

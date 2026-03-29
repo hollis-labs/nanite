@@ -57,8 +57,6 @@ func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[
 		return st.callListAgents(args)
 	case "conduit_update_agent":
 		return st.callUpdateAgent(args)
-	case "conduit_open_sprint_planning":
-		return textResult("Sprint planning modal opened in the UI."), nil
 	case "conduit_navigate_engine":
 		return st.callNavigateEngine(args)
 	case "conduit_refresh_engine":
@@ -73,8 +71,6 @@ func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[
 		return st.callShowReport(args)
 	case "conduit_show_task_disposition":
 		return st.callShowTaskDisposition(args)
-	case "conduit_show_sprint_planning_review":
-		return st.callShowSprintPlanningReview(args)
 	case "conduit_start_builder":
 		return st.callStartBuilder(args)
 	case "conduit_builder_step":
@@ -650,47 +646,6 @@ func (st *SelfToolsTransport) callShowTaskDisposition(args map[string]any) (*Too
 	})
 
 	result := fmt.Sprintf("Task disposition card ready: %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", title, string(envJSON))
-	return textResult(result), nil
-}
-
-func (st *SelfToolsTransport) callShowSprintPlanningReview(args map[string]any) (*ToolResult, error) {
-	title, _ := args["title"].(string)
-	sprintsStr, _ := args["sprints"].(string)
-	tasksStr, _ := args["tasks"].(string)
-	if title == "" || sprintsStr == "" || tasksStr == "" {
-		return errorResult("title, sprints, and tasks are required"), nil
-	}
-
-	var sprints []any
-	if err := json.Unmarshal([]byte(sprintsStr), &sprints); err != nil {
-		return errorResult(fmt.Sprintf("invalid sprints JSON: %v", err)), nil
-	}
-	var tasks []any
-	if err := json.Unmarshal([]byte(tasksStr), &tasks); err != nil {
-		return errorResult(fmt.Sprintf("invalid tasks JSON: %v", err)), nil
-	}
-
-	envData := map[string]any{
-		"title":   title,
-		"sprints": sprints,
-		"tasks":   tasks,
-	}
-	if desc, _ := args["description"].(string); desc != "" {
-		envData["description"] = desc
-	}
-	if ps, ok := args["page_size"].(float64); ok && ps > 0 {
-		envData["page_size"] = int(ps)
-	}
-
-	envJSON, _ := json.Marshal(map[string]any{
-		"kind":    "envelope",
-		"version": 1,
-		"type":    "sprint-planning-review",
-		"data":    envData,
-	})
-
-	result := fmt.Sprintf("Sprint planning review card ready: %s (%d sprints, %d tasks)\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->",
-		title, len(sprints), len(tasks), string(envJSON))
 	return textResult(result), nil
 }
 

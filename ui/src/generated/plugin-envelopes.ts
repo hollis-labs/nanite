@@ -18,7 +18,6 @@ const CORE_ENVELOPE_REGISTRY: Record<string, LazyEnvelopeComponent> = {
   'document-viewer': lazy(() => import('@/components/chat/envelopes/DocumentViewerCard').then(m => ({ default: m.DocumentViewerCard }))),
   'report-card': lazy(() => import('@/components/chat/envelopes/ReportCard').then(m => ({ default: m.ReportCard }))),
   'task-complete-notification': lazy(() => import('@/components/chat/envelopes/TaskCompleteNotificationCard').then(m => ({ default: m.TaskCompleteNotificationCard }))),
-  'sprint-planning-review': lazy(() => import('@/components/chat/envelopes/SprintPlanningReviewCard').then(m => ({ default: m.SprintPlanningReviewCard }))),
   'kb-result': lazy(() => import('@/components/chat/envelopes/KBResultCard').then(m => ({ default: m.KBResultCard }))),
   'ticket-confirmation': lazy(() => import('@/components/chat/envelopes/TicketConfirmationCard').then(m => ({ default: m.TicketConfirmationCard }))),
   'ticket-form': lazy(() => import('@/components/chat/envelopes/TicketFormCard').then(m => ({ default: m.TicketFormCard }))),
@@ -29,7 +28,7 @@ const CORE_ENVELOPE_REGISTRY: Record<string, LazyEnvelopeComponent> = {
 // --- PLUGIN ENTRIES (auto-generated, safe to overwrite below this line) ---
 // @PLUGIN_ENTRIES_START
 const PLUGIN_ENVELOPE_ENTRIES: Record<string, LazyEnvelopeComponent> = {
-
+  'sprint-planning-review': lazy(() => import('@/components/plugins/sprint/SprintPlanningReviewCard').then(m => ({ default: m.SprintPlanningReviewCard }))),
 };
 // @PLUGIN_ENTRIES_END
 

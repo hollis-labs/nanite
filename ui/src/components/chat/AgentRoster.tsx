@@ -20,7 +20,7 @@ const STATUS_COLORS: Record<SessionAgent['status'], string> = {
 }
 
 const ROLE_BORDER_COLORS: Record<SessionAgent['role'], string> = {
-  primary: 'ring-indigo-500',
+  primary: 'ring-accent',
   participant: 'ring-zinc-600',
 }
 

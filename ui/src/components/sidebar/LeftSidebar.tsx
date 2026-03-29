@@ -69,7 +69,7 @@ function NewSessionForm({
           agent_id: agent || undefined,
         })}
         disabled={isPending}
-        className="w-full py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors disabled:opacity-50"
+        className="w-full py-1.5 rounded-md bg-accent hover:bg-accent-hover text-white text-xs font-medium transition-colors disabled:opacity-50"
       >
         {isPending ? 'Creating...' : 'Create Session'}
       </button>
@@ -92,12 +92,12 @@ function FormSelect({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-14 shrink-0">{label}</span>
+      <span className="text-[10px] uppercase tracking-wider text-fg-muted w-14 shrink-0">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex-1 bg-bg-elevated border border-border-subtle rounded px-2 py-1 text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <option value="">Default</option>
         {options.map((opt) => (
@@ -248,20 +248,20 @@ export function LeftSidebar() {
 
   return (
     <aside
-      className={`h-full bg-zinc-950 border-r border-zinc-800 flex flex-col transition-all duration-200 ease-in-out overflow-hidden ${
+      className={`h-full bg-bg border-r border-border flex flex-col transition-all duration-200 ease-in-out overflow-hidden ${
         open ? 'w-68' : 'w-0'
       }`}
     >
       <div className="min-w-68 flex flex-col h-full">
         {/* Header */}
-        <div className="border-b border-zinc-800 shrink-0">
-          <div className="flex items-center justify-between px-4 py-3">
-            <h2 className="text-sm font-semibold text-zinc-100">Sessions</h2>
+        <div className="border-b border-border shrink-0">
+          <div className="flex items-center justify-between px-4 h-12">
+            <h2 className="text-sm font-semibold text-fg">Sessions</h2>
             <div className="flex items-center">
               <Button
                 variant="ghost"
                 size="icon"
-                className="w-7 h-7 text-zinc-400 hover:text-zinc-100"
+                className="w-7 h-7 text-fg-secondary hover:text-fg"
                 onClick={() => createMutation.mutate(undefined)}
                 disabled={!activeWorkspaceId || createMutation.isPending}
                 title="New session with defaults"
@@ -275,7 +275,7 @@ export function LeftSidebar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="w-5 h-7 text-zinc-500 hover:text-zinc-300"
+                className="w-5 h-7 text-fg-muted hover:text-fg-secondary"
                 onClick={() => setShowCreateForm((o) => !o)}
                 title="Session options"
               >
@@ -301,14 +301,14 @@ export function LeftSidebar() {
           <div className="px-2 py-2">
             {isLoading && (
               <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-5 h-5 text-zinc-500 animate-spin" />
+                <Loader2 className="w-5 h-5 text-fg-muted animate-spin" />
               </div>
             )}
 
             {!isLoading && sessions.length === 0 && (
               <div className="px-2 py-8 text-center">
-                <p className="text-xs text-zinc-500">No sessions yet</p>
-                <p className="text-xs text-zinc-600 mt-1">Click + to start a chat</p>
+                <p className="text-xs text-fg-muted">No sessions yet</p>
+                <p className="text-xs text-fg-faint mt-1">Click + to start a chat</p>
               </div>
             )}
 
@@ -373,7 +373,7 @@ export function LeftSidebar() {
                   <>
                     <button
                       onClick={() => setTasksCollapsed((c) => !c)}
-                      className="w-full flex items-center gap-1 px-2 pt-3 pb-1 text-xs font-medium text-zinc-500 uppercase tracking-wider hover:text-zinc-400 transition-colors"
+                      className="w-full flex items-center gap-1 px-2 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wider hover:text-fg-secondary transition-colors"
                     >
                       <ChevronRight
                         className={`w-3 h-3 transition-transform duration-150 ${
@@ -381,7 +381,7 @@ export function LeftSidebar() {
                         }`}
                       />
                       <span>Tasks</span>
-                      <span className="ml-auto text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded-full tabular-nums leading-none">
+                      <span className="ml-auto text-[10px] bg-surface text-fg-secondary px-1.5 py-0.5 rounded-full tabular-nums leading-none">
                         {tasks.length}
                       </span>
                     </button>
@@ -452,7 +452,7 @@ function getPresenceIndicator(
 
 function ZoneHeader({ label, icon }: { label: string; icon?: ReactNode }) {
   return (
-    <div className="px-2 pt-3 pb-1 text-xs font-medium text-zinc-500 uppercase tracking-wider flex items-center gap-1">
+    <div className="px-2 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wider flex items-center gap-1">
       {icon}
       {label}
     </div>
@@ -473,6 +473,7 @@ function SessionItem({
   statusIndicator?: ReactNode
 }) {
   const [hovered, setHovered] = useState(false)
+  const hasTitle = !!(session.custom_name || session.title)
   const displayTitle = session.custom_name || session.title || `#${session.short_code}`
 
   // Parse tags from JSON string.
@@ -492,14 +493,19 @@ function SessionItem({
       onMouseLeave={() => setHovered(false)}
       className={`w-full flex flex-col gap-1 px-2 py-2 rounded-md text-sm text-left transition-colors group ${
         isActive
-          ? 'bg-zinc-800/60 text-zinc-100'
-          : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200'
+          ? 'bg-surface/60 text-fg'
+          : 'text-fg-secondary hover:bg-surface/40 hover:text-fg'
       }`}
     >
       <div className="flex items-center gap-2 w-full">
         {statusIndicator}
         <Hash className="w-3.5 h-3.5 shrink-0 opacity-50" />
-        <span className="truncate flex-1">{displayTitle}</span>
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="truncate">{displayTitle}</span>
+          {hasTitle && session.short_code && (
+            <span className="text-[10px] text-fg-faint font-mono leading-tight">#{session.short_code}</span>
+          )}
+        </div>
         {session.provider && <AdapterBadge provider={session.provider} size="sm" />}
         <div className="flex items-center gap-2 shrink-0">
           {hovered && (
@@ -509,7 +515,7 @@ function SessionItem({
                 e.stopPropagation()
                 onTogglePin()
               }}
-              className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+              className="p-0.5 rounded text-fg-muted hover:text-fg hover:bg-surface-hover transition-colors"
               aria-label={session.is_pinned ? 'Unpin session' : 'Pin session'}
             >
               {session.is_pinned ? (
@@ -520,12 +526,12 @@ function SessionItem({
             </span>
           )}
           {!hovered && session.is_pinned && (
-            <Pin className="w-3 h-3 text-zinc-600" />
+            <Pin className="w-3 h-3 text-fg-faint" />
           )}
           {session.message_count > 0 && (
-            <span className="text-xs text-zinc-600 tabular-nums">{session.message_count}</span>
+            <span className="text-xs text-fg-faint tabular-nums">{session.message_count}</span>
           )}
-          <span className="text-xs text-zinc-600">
+          <span className="text-xs text-fg-faint">
             {formatRelativeTime(session.last_activity)}
           </span>
         </div>
@@ -535,7 +541,7 @@ function SessionItem({
           {tags.slice(0, 3).map((tag) => (
             <span
               key={tag}
-              className="text-[10px] px-1.5 py-0 rounded-full bg-zinc-800 text-zinc-500 leading-relaxed"
+              className="text-[10px] px-1.5 py-0 rounded-full bg-surface text-fg-muted leading-relaxed"
             >
               {tag}
             </span>

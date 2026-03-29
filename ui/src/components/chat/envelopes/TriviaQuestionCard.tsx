@@ -39,10 +39,10 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
 
   return (
     <div className="animate-in fade-in zoom-in-95 duration-500 ease-out">
-      <div className="rounded-lg border border-purple-500/20 bg-zinc-900/50 overflow-hidden max-w-md">
+      <div className="rounded-lg border border-accent/20 bg-zinc-900/50 overflow-hidden max-w-md">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-zinc-800">
-          <HelpCircle className="h-4 w-4 text-purple-400 shrink-0" />
+          <HelpCircle className="h-4 w-4 text-accent shrink-0" />
           <span className="text-sm font-medium text-zinc-200">Trivia Time!</span>
           <div className="ml-auto flex items-center gap-2">
             <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium border ${difficultyClass}`}>
@@ -128,7 +128,7 @@ export function TriviaQuestionCard({ data, onSendMessage }: TriviaQuestionCardPr
             <button
               type="button"
               onClick={() => onSendMessage('!trivia')}
-              className="text-[11px] text-purple-400 hover:text-purple-300 transition-colors"
+              className="text-[11px] text-accent hover:text-accent-hover transition-colors"
             >
               Next question &rarr;
             </button>

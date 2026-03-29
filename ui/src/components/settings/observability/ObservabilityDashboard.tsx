@@ -8,10 +8,21 @@ import { UtilityLogTable } from './UtilityLogTable'
 import { RecentExecutionsTable } from './RecentExecutionsTable'
 import { ProcessHealthPanel } from './ProcessHealthPanel'
 
-function SectionHeader({ title }: { title: string }) {
+function Card({
+  title,
+  children,
+  className = '',
+}: {
+  title: string
+  children: React.ReactNode
+  className?: string
+}) {
   return (
-    <div className="border-b border-zinc-800 pb-2 mb-1">
-      <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{title}</h3>
+    <div className={`rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden ${className}`}>
+      <div className="px-4 py-2.5 border-b border-border/50">
+        <h4 className="text-[11px] uppercase tracking-wider text-fg-muted font-medium">{title}</h4>
+      </div>
+      <div className="p-4">{children}</div>
     </div>
   )
 }
@@ -22,41 +33,33 @@ export function ObservabilityDashboard() {
   const { data: utilityLog = [] } = useUtilityCallLog(50)
 
   return (
-    <div className="space-y-6 max-w-6xl">
-      <SectionHeader title="Overview" />
+    <div className="space-y-4 max-w-6xl">
       <KPIRow data={executions} />
 
-      <SectionHeader title="Execution Performance" />
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h4 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Duration Timeline</h4>
+      <div className="grid grid-cols-2 gap-3">
+        <Card title="Duration Timeline">
           <DurationChart data={executions} />
-        </div>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h4 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Provider Distribution</h4>
+        </Card>
+        <Card title="Provider Distribution">
           <ProviderDistributionChart data={executions} />
-        </div>
+        </Card>
       </div>
 
-      <SectionHeader title="Process Health" />
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <Card title="Process Health">
         <ProcessHealthPanel />
-      </div>
+      </Card>
 
-      <SectionHeader title="Utility Call Comparison" />
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <Card title="Utility Call Comparison">
         <UtilityTable data={utilitySummary} />
-      </div>
+      </Card>
 
-      <SectionHeader title="Utility Call Log" />
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <Card title="Utility Call Log">
         <UtilityLogTable data={utilityLog} />
-      </div>
+      </Card>
 
-      <SectionHeader title="Recent Executions" />
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <Card title="Recent Executions">
         <RecentExecutionsTable data={executions} />
-      </div>
+      </Card>
     </div>
   )
 }

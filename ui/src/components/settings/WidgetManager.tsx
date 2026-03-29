@@ -101,81 +101,89 @@ export function WidgetManager() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-zinc-100 mb-1">Widgets</h2>
-        <p className="text-sm text-zinc-400 mb-4">
-          Toggle visibility and drag to reorder right-rail widgets.
-        </p>
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3">
+        <p className="text-xs text-fg-muted">Drag to reorder. Toggle visibility with the eye icon.</p>
       </div>
 
-      <div className="space-y-2">
-        {orderedIds.map((id, idx) => {
-          if (!isValidWidgetId(id)) return null
-          const meta = widgetMap.get(id)
-          const visible = isVisible(id)
+      {orderedIds.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <Puzzle className="w-8 h-8 text-fg-faint mb-3" />
+          <p className="text-sm text-fg-muted">No widgets registered</p>
+          <p className="text-xs text-fg-faint mt-1">Plugins can register widgets via the plugin system</p>
+        </div>
+      ) : (
+        <div className="grid gap-3 grid-cols-2">
+          {orderedIds.map((id, idx) => {
+            if (!isValidWidgetId(id)) return null
+            const meta = widgetMap.get(id)
+            const visible = isVisible(id)
 
-          return (
-            <div
-              key={id}
-              draggable
-              onDragStart={() => handleDragStart(idx)}
-              onDragOver={(e) => handleDragOver(e, idx)}
-              onDragEnd={handleDragEnd}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
-                visible
-                  ? 'border-zinc-800 bg-zinc-900/50'
-                  : 'border-zinc-800/50 bg-zinc-950 opacity-60'
-              } ${dragIdx === idx ? 'ring-1 ring-indigo-500/50' : ''}`}
-            >
-              <GripVertical className="w-4 h-4 text-zinc-600 cursor-grab shrink-0" />
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-zinc-200 truncate">
-                    {meta?.name ?? id}
+            return (
+              <div
+                key={id}
+                draggable
+                onDragStart={() => handleDragStart(idx)}
+                onDragOver={(e) => handleDragOver(e, idx)}
+                onDragEnd={handleDragEnd}
+                className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
+                  visible
+                    ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
+                    : 'border-border bg-white dark:bg-bg/30 opacity-45'
+                } ${dragIdx === idx ? 'ring-1 ring-accent/30 shadow-md' : ''}`}
+              >
+                {/* Header */}
+                <div className="flex items-center gap-2.5 px-3.5 py-3">
+                  <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
+                    visible ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
+                  }`}>
+                    <GripVertical className="w-4 h-4" />
                   </span>
-                  {meta?.plugin_id && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-400 flex items-center gap-1">
-                      <Puzzle className="w-2.5 h-2.5" />
-                      {meta.plugin_id}
-                    </span>
-                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-semibold truncate ${visible ? 'text-fg' : 'text-fg-muted'}`}>
+                        {meta?.name ?? id}
+                      </span>
+                      {visible && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                    </div>
+                    {meta?.plugin_id && (
+                      <span className="text-[11px] text-fg-muted truncate block mt-0.5">{meta.plugin_id}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {meta?.plugin_id && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setConfiguringPluginId(meta.plugin_id!) }}
+                        className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                        title="Configure plugin"
+                      >
+                        <Settings2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleVisibility(id) }}
+                      className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                      title={visible ? 'Hide widget' : 'Show widget'}
+                    >
+                      {visible ? (
+                        <Eye className="w-3.5 h-3.5" />
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
+
+                {/* Detail footer */}
                 {meta?.description && (
-                  <p className="text-[11px] text-zinc-500 truncate mt-0.5">{meta.description}</p>
+                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                    <p className="text-[11px] text-fg-muted line-clamp-2">{meta.description}</p>
+                  </div>
                 )}
               </div>
-
-              {meta?.plugin_id && (
-                <button
-                  onClick={() => setConfiguringPluginId(meta.plugin_id!)}
-                  className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
-                  title={`Configure ${meta.plugin_id} plugin`}
-                >
-                  <Settings2 className="w-4 h-4 text-zinc-500" />
-                </button>
-              )}
-
-              <button
-                onClick={() => toggleVisibility(id)}
-                className="p-1.5 rounded hover:bg-zinc-800 transition-colors"
-                title={visible ? 'Hide widget' : 'Show widget'}
-              >
-                {visible ? (
-                  <Eye className="w-4 h-4 text-zinc-400" />
-                ) : (
-                  <EyeOff className="w-4 h-4 text-zinc-600" />
-                )}
-              </button>
-            </div>
-          )
-        })}
-      </div>
-
-      {orderedIds.length === 0 && (
-        <div className="text-center py-8 text-zinc-500 text-sm">
-          No widgets registered. Plugins can register widgets via the plugin system.
+            )
+          })}
         </div>
       )}
     </div>

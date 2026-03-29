@@ -14,6 +14,7 @@ import { SprintPlanningModal } from './modals/SprintPlanningModal'
 import { useSprintPlanningStore } from '@/stores/useSprintPlanningStore'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import { usePresence } from '@/hooks/usePresence'
+import { useHashRoute } from '@/hooks/useHashRoute'
 import { InboxPanel } from './a2a/InboxPanel'
 
 export function AppShell() {
@@ -31,6 +32,9 @@ export function AppShell() {
 
   // Global presence SSE — one connection per browser tab
   usePresence()
+
+  // Sync navigation state with URL hash
+  useHashRoute()
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeWorkspaceId],
@@ -66,7 +70,7 @@ export function AppShell() {
   })
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-zinc-950">
+    <div className="flex h-screen w-screen overflow-hidden bg-bg">
       <NavRail />
       {currentPage === 'chat' && <LeftSidebar />}
       {currentPage === 'chat' ? (

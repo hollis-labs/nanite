@@ -6,7 +6,7 @@ import type { AgentMode } from '@/lib/types'
 
 const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; text: string }> = {
   default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
-  architect: { bg: 'bg-purple-500/15', text: 'text-purple-400' },
+  architect: { bg: 'bg-accent-muted', text: 'text-accent' },
   planner: { bg: 'bg-green-500/15', text: 'text-green-400' },
   writer: { bg: 'bg-amber-500/15', text: 'text-amber-400' },
 }

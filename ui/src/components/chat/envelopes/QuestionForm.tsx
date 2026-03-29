@@ -65,7 +65,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
               rows={3}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 resize-none"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent resize-none"
             />
           )}
 
@@ -74,7 +74,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
               type="text"
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent"
             />
           )}
 
@@ -82,7 +82,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
             <select
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-accent"
             >
               <option value="">Select...</option>
               {q.options.map((raw) => {
@@ -104,7 +104,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
                       value={opt.value}
                       checked={answers[i] === opt.value}
                       onChange={() => setAnswers((a) => ({ ...a, [i]: opt.value }))}
-                      className="accent-indigo-500"
+                      className="accent-accent"
                     />
                     {opt.label}
                   </label>
@@ -134,7 +134,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
                           }
                         })
                       }}
-                      className="accent-indigo-500"
+                      className="accent-accent"
                     />
                     {opt.label}
                   </label>
@@ -147,7 +147,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
 
       <Button
         size="sm"
-        className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-1 h-7"
+        className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-7"
         onClick={handleSubmit}
       >
         Submit Answers

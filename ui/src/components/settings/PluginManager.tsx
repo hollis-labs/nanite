@@ -4,7 +4,6 @@ import {
   Package,
   Loader2,
   AlertCircle,
-  ExternalLink,
   RefreshCw,
   Settings2,
 } from 'lucide-react'
@@ -13,52 +12,6 @@ import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/useAppStore'
 import { PluginConfigPanel } from './PluginConfigPanel'
 import type { PluginInfo } from '@/lib/types'
-
-// --- Status / Type badge helpers ---
-
-function statusBadge(status: PluginInfo['status']) {
-  switch (status) {
-    case 'active':
-      return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-900/40 text-green-400 border border-green-700/40">
-          Active
-        </span>
-      )
-    case 'disabled':
-      return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-900/40 text-yellow-400 border border-yellow-700/40">
-          Disabled
-        </span>
-      )
-    case 'available':
-      return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
-          Available
-        </span>
-      )
-    case 'no-binary':
-      return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-900/40 text-red-400 border border-red-700/40">
-          No Binary
-        </span>
-      )
-  }
-}
-
-function typeBadge(type: PluginInfo['type']) {
-  if (type === 'core') {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-zinc-800/60 text-zinc-500 border border-zinc-700/50">
-        Core
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-900/30 text-indigo-400 border border-indigo-700/40">
-      User
-    </span>
-  )
-}
 
 // --- Toast notification ---
 
@@ -187,204 +140,178 @@ export function PluginManager() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-100 mb-1">Plugins</h2>
-          <p className="text-zinc-400 text-sm">
-            Manage installed plugins. Plugin changes require a Conduit restart.
-          </p>
-        </div>
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3">
         <Button
+          variant="ghost"
+          size="sm"
+          className="text-xs text-fg-secondary hover:text-fg"
           onClick={() => refetch()}
-          variant="outline"
-          className="flex items-center gap-2"
           disabled={isLoading}
         >
           {isLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <RefreshCw className="w-3 h-3 animate-spin mr-1" />
           ) : (
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-3.5 h-3.5 mr-1" />
           )}
           Refresh
         </Button>
+        <div className="flex-1" />
+        <p className="text-[11px] text-fg-faint">Changes require a restart</p>
       </div>
 
       {/* Error state */}
       {isError && (
-        <div className="rounded-lg border border-red-700/50 bg-red-900/20 p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-start gap-3">
+          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-red-300">Failed to load plugins</p>
-            <p className="text-sm text-red-400 mt-1">
+            <p className="text-sm font-medium text-fg">Failed to load plugins</p>
+            <p className="text-xs text-fg-muted mt-1">
               {(error as Error)?.message || 'The plugin API may not be available yet.'}
             </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-3"
-              onClick={() => refetch()}
-            >
-              Retry
-            </Button>
           </div>
         </div>
       )}
 
-      {/* Loading state */}
+      {/* Loading */}
       {isLoading && !isError && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
-        </div>
-      )}
-
-      {/* Plugin grid */}
-      {!isLoading && !isError && sortedPlugins.length === 0 && (
-        <div className="text-center py-12">
-          <Package className="w-10 h-10 mx-auto mb-3 text-zinc-600" />
-          <p className="text-zinc-400">No plugins found</p>
-          <p className="text-zinc-500 text-sm mt-1">The plugin registry is empty.</p>
-        </div>
-      )}
-
-      {!isLoading && !isError && sortedPlugins.length > 0 && (
-        <div className="grid gap-3">
-          {sortedPlugins.map((plugin) => (
-            <div
-              key={plugin.name}
-              className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-5 hover:border-zinc-700 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-4">
-                {/* Left: info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span className="font-medium text-zinc-100">{plugin.name}</span>
-                    <span className="text-xs text-zinc-500">v{plugin.version || '0.0.0'}</span>
-                    {statusBadge(plugin.status)}
-                    {typeBadge(plugin.type)}
-                  </div>
-                  <p className="text-sm text-zinc-400 leading-relaxed">
-                    {plugin.short_desc || plugin.description || 'No description available'}
-                  </p>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-zinc-500">
-                    {plugin.author && <span>by {plugin.author}</span>}
-                    {plugin.url && (
-                      <a
-                        href={plugin.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Website
-                      </a>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right: actions */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {plugin.type === 'core' ? (
-                    <span className="text-xs text-zinc-600 italic">Always active</span>
-                  ) : plugin.status === 'active' ? (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-7 h-7 text-zinc-500 hover:text-zinc-300"
-                        title="Configure"
-                        onClick={() => setConfiguringPlugin(plugin)}
-                      >
-                        <Settings2 className="w-3.5 h-3.5" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isActionPending(plugin.name)}
-                        onClick={() => disableMutation.mutate(plugin.name)}
-                      >
-                        {isActionPending(plugin.name) ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          'Disable'
-                        )}
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={isActionPending(plugin.name)}
-                        onClick={() => setConfirmUninstall(plugin.name)}
-                      >
-                        Uninstall
-                      </Button>
-                    </>
-                  ) : plugin.status === 'disabled' ? (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-7 h-7 text-zinc-500 hover:text-zinc-300"
-                        title="Configure"
-                        onClick={() => setConfiguringPlugin(plugin)}
-                      >
-                        <Settings2 className="w-3.5 h-3.5" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isActionPending(plugin.name)}
-                        onClick={() => enableMutation.mutate(plugin.name)}
-                      >
-                        {isActionPending(plugin.name) ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          'Enable'
-                        )}
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={isActionPending(plugin.name)}
-                        onClick={() => setConfirmUninstall(plugin.name)}
-                      >
-                        Uninstall
-                      </Button>
-                    </>
-                  ) : plugin.status === 'available' ? (
-                    <Button
-                      size="sm"
-                      disabled={isActionPending(plugin.name)}
-                      onClick={() => installMutation.mutate(plugin.name)}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                    >
-                      {isActionPending(plugin.name) ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        'Install'
-                      )}
-                    </Button>
-                  ) : (
-                    <span className="text-xs text-zinc-600 italic">Binary missing</span>
-                  )}
-                </div>
+        <div className="grid gap-3 grid-cols-2">
+          {[1,2,3,4].map(i => (
+            <div key={i} className="rounded-xl border border-border overflow-hidden animate-pulse">
+              <div className="flex items-center gap-2.5 px-3.5 py-3">
+                <div className="w-9 h-9 rounded-lg bg-surface" />
+                <div className="h-4 bg-surface rounded w-28" />
+              </div>
+              <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                <div className="h-3 bg-surface rounded w-40" />
               </div>
             </div>
           ))}
         </div>
       )}
 
+      {/* Empty */}
+      {!isLoading && !isError && sortedPlugins.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <Package className="w-8 h-8 text-fg-faint mb-3" />
+          <p className="text-sm text-fg-muted">No plugins found</p>
+        </div>
+      )}
+
+      {/* Plugin grid */}
+      {!isLoading && !isError && sortedPlugins.length > 0 && (
+        <div className="grid gap-3 grid-cols-2">
+          {sortedPlugins.map((plugin) => {
+            const isActive = plugin.status === 'active'
+            const isDisabled = plugin.status === 'disabled'
+            const isAvailable = plugin.status === 'available'
+            return (
+              <div
+                key={plugin.name}
+                className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
+                  isActive
+                    ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
+                    : isDisabled
+                      ? 'border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-55'
+                      : 'border-border bg-white dark:bg-bg/30 opacity-45'
+                }`}
+              >
+                {/* Header */}
+                <div className="flex items-center gap-2.5 px-3.5 py-3">
+                  <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
+                    isActive ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
+                  }`}>
+                    <Package className="w-4 h-4" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-semibold truncate ${isActive ? 'text-fg' : 'text-fg-muted'}`}>
+                        {plugin.name}
+                      </span>
+                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[11px] text-fg-muted">v{plugin.version || '0.0.0'}</span>
+                      {plugin.author && (
+                        <>
+                          <span className="text-fg-faint text-[10px]">&middot;</span>
+                          <span className="text-[11px] text-fg-muted truncate">{plugin.author}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {plugin.type === 'core' ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">core</span>
+                    ) : isActive ? (
+                      <>
+                        <button
+                          onClick={() => setConfiguringPlugin(plugin)}
+                          className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                        >
+                          <Settings2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => disableMutation.mutate(plugin.name)}
+                          disabled={isActionPending(plugin.name)}
+                          className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
+                        >
+                          {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Disable'}
+                        </button>
+                      </>
+                    ) : isDisabled ? (
+                      <>
+                        <button
+                          onClick={() => setConfiguringPlugin(plugin)}
+                          className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                        >
+                          <Settings2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => enableMutation.mutate(plugin.name)}
+                          disabled={isActionPending(plugin.name)}
+                          className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
+                        >
+                          {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Enable'}
+                        </button>
+                      </>
+                    ) : isAvailable ? (
+                      <button
+                        onClick={() => installMutation.mutate(plugin.name)}
+                        disabled={isActionPending(plugin.name)}
+                        className="px-2 py-1 text-[11px] font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-40"
+                      >
+                        {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Install'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Detail footer */}
+                <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                  <p className="text-[11px] text-fg-muted line-clamp-2">
+                    {plugin.short_desc || plugin.description || 'No description'}
+                  </p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* Uninstall confirmation modal */}
       {confirmUninstall && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-900 rounded-lg border border-zinc-700 max-w-sm w-full p-6">
+          <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-sm w-full p-6">
             <div className="flex items-center gap-2 mb-4">
               <AlertCircle className="w-5 h-5 text-red-400" />
-              <h3 className="text-lg font-medium text-zinc-100">Uninstall Plugin</h3>
+              <h3 className="text-lg font-medium text-fg">Uninstall Plugin</h3>
             </div>
-            <p className="text-zinc-300 text-sm mb-6">
+            <p className="text-fg-secondary text-sm mb-6">
               Are you sure you want to uninstall{' '}
-              <span className="font-medium text-zinc-100">{confirmUninstall}</span>?
+              <span className="font-medium text-fg">{confirmUninstall}</span>?
               This will remove the plugin and restart Conduit.
             </p>
             <div className="flex gap-3">
@@ -412,7 +339,7 @@ export function PluginManager() {
           {toasts.map((toast) => (
             <div
               key={toast.id}
-              className="px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl text-sm text-zinc-200 max-w-sm animate-in fade-in slide-in-from-bottom-2"
+              className="px-4 py-3 bg-surface border border-border-subtle rounded-lg shadow-xl text-sm text-fg max-w-sm animate-in fade-in slide-in-from-bottom-2"
             >
               {toast.message}
             </div>

@@ -35,7 +35,7 @@ const options: ChartOptions<'line'> = {
     },
     y: {
       display: true,
-      grid: { color: '#27272a' },
+      grid: { color: 'rgba(113, 113, 122, 0.15)' },
       ticks: {
         font: { size: 10 },
         callback: (value) => {

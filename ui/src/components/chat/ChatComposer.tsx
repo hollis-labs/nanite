@@ -140,7 +140,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     editorProps: {
       attributes: {
         class:
-          'bg-transparent text-sm text-zinc-100 placeholder:text-zinc-600 outline-none min-h-[40px] max-h-[120px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm prose-invert',
+          'bg-transparent text-sm text-fg placeholder:text-fg-faint outline-none min-h-[40px] max-h-[120px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm prose-invert',
       },
       handleKeyDown(_view, event) {
         if (event.key === 'Enter') {
@@ -187,22 +187,22 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     <div className="px-4 pb-4 pt-2 shrink-0">
       <div
         ref={dropRef}
-        className={`bg-zinc-900 border rounded-xl focus-within:border-zinc-700 transition-colors shadow-lg shadow-black/20 ${
-          dragOver ? 'border-indigo-500 bg-indigo-500/5' : 'border-zinc-800'
+        className={`bg-bg-elevated border rounded-xl focus-within:border-border-subtle transition-colors shadow-lg shadow-black/20 ${
+          dragOver ? 'border-accent bg-accent-muted' : 'border-border'
         }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => void handleDrop(e)}
       >
         {dragOver && (
-          <div className="px-3 py-1.5 text-xs text-indigo-400 text-center border-b border-indigo-500/30">
+          <div className="px-3 py-1.5 text-xs text-accent text-center border-b border-accent/30">
             Drop files to attach
           </div>
         )}
         <div className="px-3 py-1">
           <EditorContent
             editor={editor}
-            className="min-w-0 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-zinc-600 [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
+            className="min-w-0 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-fg-faint [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
           />
         </div>
         <ComposerToolbar
@@ -212,7 +212,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           onStop={onStop}
         />
       </div>
-      <p className="text-center text-xs text-zinc-600 mt-2">
+      <p className="text-center text-xs text-fg-faint mt-2">
         Conduit may produce inaccurate information.
       </p>
     </div>

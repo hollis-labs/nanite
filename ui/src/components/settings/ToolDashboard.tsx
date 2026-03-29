@@ -4,13 +4,9 @@ import {
   RefreshCw,
   Server,
   Wrench,
-  ChevronDown,
-  ChevronRight,
   Search,
-  Eye,
   Activity,
   X,
-  CheckCircle,
   AlertCircle,
   Loader2,
   Plus,
@@ -90,7 +86,6 @@ function configToForm(cfg: MCPServerConfig): ServerFormData {
 interface ToolDashboardProps {}
 
 export function ToolDashboard({}: ToolDashboardProps) {
-  const [expandedServers, setExpandedServers] = useState<Set<string>>(new Set())
   const [selectedTool, setSelectedTool] = useState<ToolDefinition | null>(null)
   const [filterServer, setFilterServer] = useState<string>('')
   const [intentQuery, setIntentQuery] = useState('')
@@ -180,17 +175,6 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
   // Note: auto-refresh on session switch is handled globally by useToolRefresh in AppShell.
 
-  // Event handlers
-  const toggleServer = (serverName: string) => {
-    const newExpanded = new Set(expandedServers)
-    if (newExpanded.has(serverName)) {
-      newExpanded.delete(serverName)
-    } else {
-      newExpanded.add(serverName)
-    }
-    setExpandedServers(newExpanded)
-  }
-
   const handleRefresh = () => {
     refreshMutation.mutate()
   }
@@ -259,189 +243,97 @@ export function ToolDashboard({}: ToolDashboardProps) {
     ? tools.filter(tool => tool.name.includes(filterServer))
     : tools
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-lg font-semibold text-zinc-100 mb-2">Tools & MCP Servers</h2>
-        <p className="text-zinc-400 text-sm">
-          Manage connected MCP servers and their discovered tools.
-        </p>
-      </div>
+  const [activeTab, setActiveTab] = useState<'servers' | 'tools'>('servers')
+  const [toolSearch, setToolSearch] = useState('')
 
-      {/* Refresh Controls */}
-      <div className="flex items-center gap-4">
+  const searchedTools = toolSearch
+    ? filteredTools.filter(t => t.name.toLowerCase().includes(toolSearch.toLowerCase()) || t.description?.toLowerCase().includes(toolSearch.toLowerCase()))
+    : filteredTools
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar: Tabs + Controls */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Tabs */}
+        <div className="flex items-center gap-1 bg-surface/50 rounded-lg p-0.5">
+          <button
+            onClick={() => setActiveTab('servers')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'servers'
+                ? 'bg-bg-elevated text-fg shadow-sm'
+                : 'text-fg-muted hover:text-fg-secondary'
+            }`}
+          >
+            <Server className="w-3.5 h-3.5" />
+            Servers
+            <span className="text-[11px] text-fg-faint tabular-nums">{servers.length}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('tools')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'tools'
+                ? 'bg-bg-elevated text-fg shadow-sm'
+                : 'text-fg-muted hover:text-fg-secondary'
+            }`}
+          >
+            <Wrench className="w-3.5 h-3.5" />
+            Tools
+            <span className="text-[11px] text-fg-faint tabular-nums">{tools.length}</span>
+          </button>
+        </div>
+
+        {/* Refresh */}
         <Button
+          variant="ghost"
+          size="sm"
+          className="text-xs text-fg-secondary hover:text-fg"
           onClick={handleRefresh}
           disabled={refreshMutation.isPending}
-          variant="outline"
-          className="flex items-center gap-2"
         >
           {refreshMutation.isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <RefreshCw className="w-3 h-3 animate-spin mr-1" />
           ) : (
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-3.5 h-3.5 mr-1" />
           )}
-          Refresh Tools
+          Refresh
         </Button>
 
         {refreshResult && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-blue-900/30 border border-blue-700/50">
-            <CheckCircle className="w-4 h-4 text-blue-400" />
-            <span className="text-sm text-blue-300">
-              Discovery complete: +{(refreshResult.added ?? []).length} -{(refreshResult.removed ?? []).length} (total: {refreshResult.total})
-            </span>
-            <button onClick={() => setRefreshResult(null)}>
-              <X className="w-4 h-4 text-blue-400 hover:text-blue-300" />
-            </button>
-          </div>
+          <span className="text-[11px] text-fg-muted">
+            +{(refreshResult.added ?? []).length} -{(refreshResult.removed ?? []).length} ({refreshResult.total} total)
+          </span>
         )}
-      </div>
 
-      {/* MCP Servers Section */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Server className="w-5 h-5 text-zinc-400" />
-            <h3 className="text-lg font-medium text-zinc-100">MCP Servers</h3>
-          </div>
+        <div className="flex-1" />
+
+        {/* Tab-specific controls */}
+        {activeTab === 'servers' && (
           <Button
+            size="sm"
             onClick={openAddForm}
-            variant="outline"
-            className="flex items-center gap-2"
+            className="gap-1.5 bg-accent hover:bg-accent-hover text-white"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             Add Server
           </Button>
-        </div>
-
-        {serversLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
-          </div>
-        ) : servers.length === 0 ? (
-          <div className="text-center py-8">
-            <AlertCircle className="w-8 h-8 mx-auto mb-2 text-zinc-500" />
-            <p className="text-zinc-400">No MCP servers connected</p>
-            <p className="text-zinc-500 text-sm mt-1">Click "Add Server" to configure one.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {servers.map(server => {
-              const isManaged = managedServerNames.has(server.name)
-              return (
-                <div key={server.name} className="border border-zinc-700 rounded-lg overflow-hidden">
-                  <div className="flex items-center justify-between">
-                    <button
-                      onClick={() => toggleServer(server.name)}
-                      className="flex-1 flex items-center justify-between p-4 text-left hover:bg-zinc-800/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        {expandedServers.has(server.name) ? (
-                          <ChevronDown className="w-4 h-4 text-zinc-400" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4 text-zinc-400" />
-                        )}
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${server.connected ? 'bg-green-400' : 'bg-red-400'}`} />
-                          <span className="font-medium text-zinc-100">{server.name}</span>
-                          {!isManaged && (
-                            <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">built-in</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4 text-sm text-zinc-400">
-                        <span>{server.tool_count} tools</span>
-                        <span className="capitalize">{server.connected ? 'Connected' : 'Disconnected'}</span>
-                      </div>
-                    </button>
-
-                    {isManaged && (
-                      <div className="flex items-center gap-1 pr-4">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => { e.stopPropagation(); openEditForm(server.name) }}
-                          title="Edit server"
-                        >
-                          <Pencil className="w-4 h-4 text-zinc-400" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => { e.stopPropagation(); setDeletingServer(server.name) }}
-                          title="Delete server"
-                        >
-                          <Trash2 className="w-4 h-4 text-red-400" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  {expandedServers.has(server.name) && (
-                    <div className="px-4 pb-4 border-t border-zinc-700/50">
-                      <div className="grid grid-cols-3 gap-4 pt-4 text-sm">
-                        <div>
-                          <span className="text-zinc-400">Status:</span>
-                          <span className={`ml-2 ${server.connected ? 'text-green-400' : 'text-red-400'}`}>
-                            {server.connected ? 'Connected' : 'Disconnected'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-zinc-400">Tool Count:</span>
-                          <span className="ml-2 text-zinc-100">{server.tool_count}</span>
-                        </div>
-                        <div>
-                          <span className="text-zinc-400">Transport:</span>
-                          <span className="ml-2 text-zinc-100">
-                            {isManaged
-                              ? mcpConfigs.find(c => c.name === server.name)?.transport_type?.toUpperCase() ?? 'Unknown'
-                              : 'Built-in'}
-                          </span>
-                        </div>
-                      </div>
-                      {isManaged && (() => {
-                        const cfg = mcpConfigs.find(c => c.name === server.name)
-                        if (!cfg) return null
-                        return (
-                          <div className="mt-3 pt-3 border-t border-zinc-700/30 text-sm space-y-1">
-                            {cfg.transport_type === 'stdio' && cfg.command && (
-                              <div>
-                                <span className="text-zinc-400">Command:</span>
-                                <code className="ml-2 text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded text-xs font-mono">{cfg.command}</code>
-                              </div>
-                            )}
-                            {cfg.transport_type === 'sse' && cfg.url && (
-                              <div>
-                                <span className="text-zinc-400">URL:</span>
-                                <code className="ml-2 text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded text-xs font-mono">{cfg.url}</code>
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
         )}
-      </div>
 
-      {/* Tools List Section */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
-        <div className="flex items-center justify-between mb-4">
+        {activeTab === 'tools' && (
           <div className="flex items-center gap-2">
-            <Wrench className="w-5 h-5 text-zinc-400" />
-            <h3 className="text-lg font-medium text-zinc-100">Discovered Tools</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-zinc-400" />
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
+              <input
+                type="text"
+                value={toolSearch}
+                onChange={(e) => setToolSearch(e.target.value)}
+                placeholder="Search tools..."
+                className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
             <select
               value={filterServer}
               onChange={(e) => setFilterServer(e.target.value)}
-              className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-400"
+              className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
             >
               <option value="">All servers</option>
               {servers.map(server => (
@@ -449,133 +341,225 @@ export function ToolDashboard({}: ToolDashboardProps) {
               ))}
             </select>
           </div>
-        </div>
-
-        {toolsLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
-          </div>
-        ) : filteredTools.length === 0 ? (
-          <div className="text-center py-8">
-            <AlertCircle className="w-8 h-8 mx-auto mb-2 text-zinc-500" />
-            <p className="text-zinc-400">
-              {filterServer ? `No tools found for "${filterServer}"` : 'No tools available'}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredTools.map(tool => (
-              <div
-                key={tool.name}
-                className="border border-zinc-700 rounded-lg p-4 hover:bg-zinc-800/30 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <code className="px-2 py-1 bg-zinc-800 rounded text-sm text-blue-300 font-mono">
-                        {tool.name}
-                      </code>
-                      <span className="text-xs text-zinc-500">
-                        {tool.name.includes('mcp_') ? tool.name.split('__')[1] : 'unknown'}
-                      </span>
-                    </div>
-                    <p className="text-sm text-zinc-300 leading-relaxed">
-                      {tool.description || 'No description available'}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelectedTool(tool)}
-                    className="flex items-center gap-2"
-                  >
-                    <Eye className="w-4 h-4" />
-                    Details
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
         )}
       </div>
 
-      {/* Intent Test Section */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Activity className="w-5 h-5 text-zinc-400" />
-          <h3 className="text-lg font-medium text-zinc-100">Intent Testing</h3>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">
-              Test Tool Selection
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={intentQuery}
-                onChange={(e) => setIntentQuery(e.target.value)}
-                placeholder="Enter intent query (e.g., 'list directory', 'search files')"
-                className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-400"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleIntentTest()
-                  }
-                }}
-              />
-              <Button
-                onClick={handleIntentTest}
-                disabled={!intentQuery.trim() || intentTestMutation.isPending}
-                variant="outline"
-              >
-                {intentTestMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  'Test'
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {intentTestMutation.data && (
-            <div className="mt-4">
-              <h4 className="text-sm font-medium text-zinc-300 mb-2">Selected Tools:</h4>
-              {intentTestMutation.data.length === 0 ? (
-                <p className="text-sm text-zinc-500">No tools selected for this intent</p>
-              ) : (
-                <div className="space-y-2">
-                  {intentTestMutation.data.map((tool, index) => (
-                    <div key={index} className="flex items-center gap-2 text-sm">
-                      <CheckCircle className="w-4 h-4 text-green-400" />
-                      <code className="px-2 py-1 bg-zinc-800 rounded text-blue-300 font-mono">
-                        {tool.name}
-                      </code>
-                      <span className="text-zinc-400">- {tool.description}</span>
-                    </div>
-                  ))}
+      {/* Servers tab */}
+      {activeTab === 'servers' && (
+        <div className="grid gap-3 grid-cols-2">
+          {serversLoading && (
+            <>
+              {[1,2,3,4].map(i => (
+                <div key={i} className="rounded-xl border border-border overflow-hidden animate-pulse">
+                  <div className="flex items-center gap-2.5 px-3.5 py-3">
+                    <div className="w-9 h-9 rounded-lg bg-surface" />
+                    <div className="h-4 bg-surface rounded w-28" />
+                  </div>
+                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                    <div className="h-3 bg-surface rounded w-40" />
+                  </div>
                 </div>
+              ))}
+            </>
+          )}
+
+          {!serversLoading && servers.length === 0 && (
+            <div className="col-span-2 flex flex-col items-center justify-center py-12 text-center">
+              <Server className="w-8 h-8 text-fg-faint mb-3" />
+              <p className="text-sm text-fg-muted">No MCP servers connected</p>
+              <p className="text-xs text-fg-faint mt-1">Add a server to discover tools</p>
+            </div>
+          )}
+
+          {servers.map(server => {
+            const isManaged = managedServerNames.has(server.name)
+            const cfg = isManaged ? mcpConfigs.find(c => c.name === server.name) : null
+            return (
+              <div
+                key={server.name}
+                className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
+                  server.connected
+                    ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
+                    : 'border-border bg-white dark:bg-bg/30 opacity-45'
+                }`}
+              >
+                {/* Header */}
+                <div className="flex items-center gap-2.5 px-3.5 py-3">
+                  <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
+                    server.connected ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
+                  }`}>
+                    <Server className="w-4 h-4" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-fg truncate">{server.name}</span>
+                      {server.connected && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[11px] text-fg-muted">{server.tool_count} tools</span>
+                      {!isManaged && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">built-in</span>
+                      )}
+                    </div>
+                  </div>
+                  {isManaged && (
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        onClick={() => openEditForm(server.name)}
+                        className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setDeletingServer(server.name)}
+                        className="p-1.5 rounded text-fg-faint hover:text-red-400 hover:bg-surface transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Detail footer */}
+                <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center gap-3">
+                  <span className="text-[11px] text-fg-muted capitalize">
+                    {cfg?.transport_type?.toUpperCase() ?? 'Built-in'}
+                  </span>
+                  {cfg?.command && (
+                    <>
+                      <div className="w-px h-3.5 bg-border shrink-0" />
+                      <code className="text-[11px] text-fg-secondary font-mono truncate">{cfg.command}</code>
+                    </>
+                  )}
+                  {cfg?.url && (
+                    <>
+                      <div className="w-px h-3.5 bg-border shrink-0" />
+                      <code className="text-[11px] text-fg-secondary font-mono truncate">{cfg.url}</code>
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Tools tab */}
+      {activeTab === 'tools' && (
+        <div className="grid gap-3 grid-cols-2">
+          {toolsLoading && (
+            <>
+              {[1,2,3,4].map(i => (
+                <div key={i} className="rounded-xl border border-border overflow-hidden animate-pulse">
+                  <div className="flex items-center gap-2.5 px-3.5 py-3">
+                    <div className="w-9 h-9 rounded-lg bg-surface" />
+                    <div className="h-4 bg-surface rounded w-36" />
+                  </div>
+                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                    <div className="h-3 bg-surface rounded w-48" />
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {!toolsLoading && searchedTools.length === 0 && (
+            <div className="col-span-2 flex flex-col items-center justify-center py-12 text-center">
+              <Search className="w-8 h-8 text-fg-faint mb-3" />
+              <p className="text-sm text-fg-muted">
+                {toolSearch || filterServer ? 'No tools match your filter' : 'No tools available'}
+              </p>
+              {(toolSearch || filterServer) && (
+                <button
+                  onClick={() => { setToolSearch(''); setFilterServer('') }}
+                  className="text-xs text-accent hover:text-accent-hover mt-2 transition-colors"
+                >
+                  Clear filters
+                </button>
               )}
             </div>
           )}
 
-          {intentTestMutation.error && (
-            <div className="mt-4 flex items-center gap-2 text-sm text-red-400">
-              <AlertCircle className="w-4 h-4" />
-              <span>Error testing intent: {intentTestMutation.error.message}</span>
-            </div>
-          )}
+          {searchedTools.map(tool => {
+            const serverName = tool.name.includes('mcp_') ? tool.name.split('__')[1] : undefined
+            return (
+              <div
+                key={tool.name}
+                className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md"
+                onClick={() => setSelectedTool(tool)}
+              >
+                {/* Header */}
+                <div className="flex items-center gap-2.5 px-3.5 py-3">
+                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
+                    <Wrench className="w-4 h-4" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold text-fg truncate block">{tool.name.split('__').pop()}</span>
+                    {serverName && (
+                      <span className="text-[11px] text-fg-muted truncate block">{serverName}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Detail footer */}
+                <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                  <p className="text-[11px] text-fg-muted line-clamp-2">
+                    {tool.description || 'No description'}
+                  </p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Intent Test — compact inline */}
+      <div className="flex items-center gap-2">
+        <Activity className="w-3.5 h-3.5 text-fg-faint shrink-0" />
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={intentQuery}
+            onChange={(e) => setIntentQuery(e.target.value)}
+            placeholder="Test tool selection by intent..."
+            className="w-full bg-surface/50 border border-border rounded-lg pl-3 pr-16 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent"
+            onKeyDown={(e) => { if (e.key === 'Enter') handleIntentTest() }}
+          />
+          <button
+            onClick={handleIntentTest}
+            disabled={!intentQuery.trim() || intentTestMutation.isPending}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[11px] font-medium text-fg-secondary hover:text-fg bg-bg-elevated border border-border-subtle rounded-md disabled:opacity-40 transition-colors"
+          >
+            {intentTestMutation.isPending ? 'Testing...' : 'Test'}
+          </button>
         </div>
       </div>
+
+      {intentTestMutation.data && intentTestMutation.data.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {intentTestMutation.data.map((tool, index) => (
+            <span key={index} className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none font-mono">
+              {tool.name.split('__').pop()}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {intentTestMutation.error && (
+        <p className="text-xs text-red-400 flex items-center gap-1.5">
+          <AlertCircle className="w-3 h-3" />
+          {intentTestMutation.error.message}
+        </p>
+      )}
 
       {/* Tool Detail Modal */}
       {selectedTool && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-900 rounded-lg border border-zinc-700 max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-zinc-700">
+          <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-border-subtle">
               <div className="flex items-center gap-2">
-                <Wrench className="w-5 h-5 text-zinc-400" />
-                <h3 className="text-lg font-medium text-zinc-100">Tool Details</h3>
+                <Wrench className="w-5 h-5 text-fg-secondary" />
+                <h3 className="text-lg font-medium text-fg">Tool Details</h3>
               </div>
               <Button
                 variant="ghost"
@@ -588,30 +572,30 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
             <div className="flex-1 overflow-auto p-6 space-y-4">
               <div>
-                <h4 className="text-sm font-medium text-zinc-300 mb-2">Name</h4>
-                <code className="px-3 py-2 bg-zinc-800 rounded text-blue-300 font-mono text-sm block">
+                <h4 className="text-sm font-medium text-fg-secondary mb-2">Name</h4>
+                <code className="px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg font-mono text-sm text-fg block">
                   {selectedTool.name}
                 </code>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-zinc-300 mb-2">Description</h4>
-                <p className="text-sm text-zinc-300 leading-relaxed">
+                <h4 className="text-sm font-medium text-fg-secondary mb-2">Description</h4>
+                <p className="text-sm text-fg-secondary leading-relaxed">
                   {selectedTool.description || 'No description available'}
                 </p>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-zinc-300 mb-2">Server</h4>
-                <p className="text-sm text-zinc-400">
+                <h4 className="text-sm font-medium text-fg-secondary mb-2">Server</h4>
+                <p className="text-sm text-fg-secondary">
                   {selectedTool.name.includes('mcp_') ? selectedTool.name.split('__')[1] : 'Unknown server'}
                 </p>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-zinc-300 mb-2">Input Schema</h4>
-                <div className="bg-zinc-800 rounded-lg p-4 overflow-auto">
-                  <pre className="text-sm text-zinc-300 font-mono whitespace-pre-wrap">
+                <h4 className="text-sm font-medium text-fg-secondary mb-2">Input Schema</h4>
+                <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4 overflow-auto">
+                  <pre className="text-sm text-fg-secondary font-mono whitespace-pre-wrap">
                     {selectedTool.input_schema ?
                       JSON.stringify(selectedTool.input_schema, null, 2) :
                       'No schema available'
@@ -621,14 +605,14 @@ export function ToolDashboard({}: ToolDashboardProps) {
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-zinc-300 mb-2">Referenced by Skills</h4>
-                <div className="text-sm text-zinc-500">
+                <h4 className="text-sm font-medium text-fg-secondary mb-2">Referenced by Skills</h4>
+                <div className="text-sm text-fg-muted">
                   Skills integration coming soon...
                 </div>
               </div>
             </div>
 
-            <div className="p-6 border-t border-zinc-700">
+            <div className="p-6 border-t border-border-subtle">
               <Button
                 onClick={() => setSelectedTool(null)}
                 variant="outline"
@@ -644,11 +628,11 @@ export function ToolDashboard({}: ToolDashboardProps) {
       {/* Add/Edit Server Modal */}
       {showServerForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-900 rounded-lg border border-zinc-700 max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-zinc-700">
+          <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-border-subtle">
               <div className="flex items-center gap-2">
-                <Server className="w-5 h-5 text-zinc-400" />
-                <h3 className="text-lg font-medium text-zinc-100">
+                <Server className="w-5 h-5 text-fg-secondary" />
+                <h3 className="text-lg font-medium text-fg">
                   {editingServer ? 'Edit MCP Server' : 'Add MCP Server'}
                 </h3>
               </div>
@@ -660,27 +644,27 @@ export function ToolDashboard({}: ToolDashboardProps) {
             <div className="flex-1 overflow-auto p-6 space-y-4">
               {/* Name */}
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Name</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-1">Name</label>
                 <input
                   type="text"
                   value={serverForm.name}
                   onChange={(e) => setServerForm(f => ({ ...f, name: e.target.value }))}
                   disabled={!!editingServer}
                   placeholder="my-server"
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-400 disabled:opacity-50"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
                 />
                 {editingServer && (
-                  <p className="text-xs text-zinc-500 mt-1">Name cannot be changed after creation.</p>
+                  <p className="text-xs text-fg-muted mt-1">Name cannot be changed after creation.</p>
                 )}
               </div>
 
               {/* Transport Type */}
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Transport Type</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-1">Transport Type</label>
                 <select
                   value={serverForm.transport_type}
                   onChange={(e) => setServerForm(f => ({ ...f, transport_type: e.target.value as 'stdio' | 'sse' }))}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent"
                 >
                   <option value="stdio">stdio (subprocess)</option>
                   <option value="sse">SSE / HTTP</option>
@@ -690,13 +674,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
               {/* Command (stdio only) */}
               {serverForm.transport_type === 'stdio' && (
                 <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-1">Command</label>
+                  <label className="block text-sm font-medium text-fg-secondary mb-1">Command</label>
                   <input
                     type="text"
                     value={serverForm.command}
                     onChange={(e) => setServerForm(f => ({ ...f, command: e.target.value }))}
                     placeholder="/path/to/binary"
-                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                    className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
               )}
@@ -704,13 +688,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
               {/* URL (sse only) */}
               {serverForm.transport_type === 'sse' && (
                 <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-1">URL</label>
+                  <label className="block text-sm font-medium text-fg-secondary mb-1">URL</label>
                   <input
                     type="text"
                     value={serverForm.url}
                     onChange={(e) => setServerForm(f => ({ ...f, url: e.target.value }))}
                     placeholder="http://localhost:8080"
-                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                    className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                 </div>
               )}
@@ -718,29 +702,29 @@ export function ToolDashboard({}: ToolDashboardProps) {
               {/* Args (stdio only) */}
               {serverForm.transport_type === 'stdio' && (
                 <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-1">Arguments</label>
+                  <label className="block text-sm font-medium text-fg-secondary mb-1">Arguments</label>
                   <input
                     type="text"
                     value={serverForm.args}
                     onChange={(e) => setServerForm(f => ({ ...f, args: e.target.value }))}
                     placeholder="mcp, --flag, value"
-                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                    className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
                   />
-                  <p className="text-xs text-zinc-500 mt-1">Comma-separated list of arguments.</p>
+                  <p className="text-xs text-fg-muted mt-1">Comma-separated list of arguments.</p>
                 </div>
               )}
 
               {/* Env */}
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Environment Variables</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-1">Environment Variables</label>
                 <textarea
                   value={serverForm.env}
                   onChange={(e) => setServerForm(f => ({ ...f, env: e.target.value }))}
                   placeholder={"KEY=value\nANOTHER_KEY=value"}
                   rows={3}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-400 font-mono text-sm"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono text-sm"
                 />
-                <p className="text-xs text-zinc-500 mt-1">One KEY=VALUE per line.</p>
+                <p className="text-xs text-fg-muted mt-1">One KEY=VALUE per line.</p>
               </div>
 
               {/* Error */}
@@ -752,7 +736,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
               )}
             </div>
 
-            <div className="p-6 border-t border-zinc-700 flex gap-3">
+            <div className="p-6 border-t border-border-subtle flex gap-3">
               <Button onClick={closeServerForm} variant="outline" className="flex-1">
                 Cancel
               </Button>
@@ -777,13 +761,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
       {/* Delete Confirmation Modal */}
       {deletingServer && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-900 rounded-lg border border-zinc-700 max-w-sm w-full p-6">
+          <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-sm w-full p-6">
             <div className="flex items-center gap-2 mb-4">
               <AlertCircle className="w-5 h-5 text-red-400" />
-              <h3 className="text-lg font-medium text-zinc-100">Delete Server</h3>
+              <h3 className="text-lg font-medium text-fg">Delete Server</h3>
             </div>
-            <p className="text-zinc-300 text-sm mb-6">
-              Are you sure you want to delete <span className="font-medium text-zinc-100">{deletingServer}</span>?
+            <p className="text-fg-secondary text-sm mb-6">
+              Are you sure you want to delete <span className="font-medium text-fg">{deletingServer}</span>?
               This will disconnect the server and remove its configuration.
             </p>
             <div className="flex gap-3">

@@ -19,7 +19,7 @@ export function TagPills({ tags, max = 3, className = '' }: TagPillsProps) {
       {parsed.slice(0, max).map((tag) => (
         <span
           key={tag}
-          className="text-[10px] px-1.5 py-0 rounded-full bg-zinc-800/60 text-zinc-500 leading-relaxed"
+          className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none"
         >
           {tag}
         </span>

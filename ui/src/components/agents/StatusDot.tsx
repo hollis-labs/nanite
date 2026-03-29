@@ -4,15 +4,15 @@ interface StatusDotProps {
 }
 
 const SIZE_CLASSES = {
-  sm: 'w-2 h-2',
-  md: 'w-3 h-3',
+  sm: 'w-1.5 h-1.5',
+  md: 'w-2 h-2',
 }
 
 export function StatusDot({ status, size = 'sm' }: StatusDotProps) {
-  const color = status === 'disabled' ? 'bg-zinc-600' : 'bg-emerald-500'
+  const color = status === 'disabled' ? 'bg-fg-faint' : 'bg-success'
   return (
     <span
-      className={`rounded-full ${color} ${SIZE_CLASSES[size]} inline-block`}
+      className={`rounded-full ${color} ${SIZE_CLASSES[size]} inline-block shrink-0`}
       title={status || 'active'}
     />
   )

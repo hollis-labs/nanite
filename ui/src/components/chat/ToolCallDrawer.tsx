@@ -65,7 +65,7 @@ export function ToolCallDrawer() {
         <Wrench className="w-3 h-3" />
         <span>{toolCalls.length} tool call{toolCalls.length !== 1 ? 's' : ''}</span>
         {toolCalls.some((tc) => tc.status === 'running') && (
-          <Loader2 className="w-3 h-3 animate-spin text-indigo-400 ml-1" />
+          <Loader2 className="w-3 h-3 animate-spin text-accent ml-1" />
         )}
       </button>
     )
@@ -87,7 +87,7 @@ export function ToolCallDrawer() {
             {toolCalls.length}
           </span>
           {toolCalls.some((tc) => tc.status === 'running') && (
-            <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
+            <Loader2 className="w-3 h-3 animate-spin text-accent" />
           )}
         </div>
         <div className="flex items-center gap-0.5">

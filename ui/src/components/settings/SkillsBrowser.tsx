@@ -119,82 +119,88 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
   if (!selectedSkill && !showCreateForm) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-zinc-100">Skills</h2>
+        {/* Toolbar */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Filter className="w-3.5 h-3.5 text-fg-muted" />
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
+            >
+              <option value="all">All Categories</option>
+              {SKILL_CATEGORIES.map(category => (
+                <option key={category} value={category}>
+                  {category.charAt(0).toUpperCase() + category.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1" />
           <Button
+            size="sm"
             onClick={() => setShowCreateForm(true)}
-            className="gap-2"
+            className="gap-1.5 bg-accent hover:bg-accent-hover text-white"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             Create Skill
           </Button>
         </div>
 
-        {/* Category Filter */}
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-zinc-400" />
-          <span className="text-sm text-zinc-400">Category:</span>
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-3 py-1 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 text-sm focus:outline-none focus:border-indigo-500"
-          >
-            <option value="all">All Categories</option>
-            {SKILL_CATEGORIES.map(category => (
-              <option key={category} value={category}>
-                {category.charAt(0).toUpperCase() + category.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
+            <Loader2 className="w-6 h-6 animate-spin text-fg-secondary" />
           </div>
         ) : filteredSkills.length === 0 ? (
-          <div className="text-center py-8 text-zinc-500">
+          <div className="text-center py-8 text-fg-muted">
             {skills.length === 0 ?
               'No skills found. Create your first skill to get started.' :
               `No skills found in "${categoryFilter}" category.`
             }
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredSkills.map((skill) => (
-              <div
-                key={skill.id}
-                className="bg-zinc-800 rounded-lg p-4 border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
-                onClick={() => setSelectedSkill(skill.id)}
-              >
-                <div className="space-y-2">
-                  <div className="flex items-start justify-between">
+          <div className="grid gap-3 grid-cols-2">
+            {filteredSkills.map((skill) => {
+              const toolCount = parseToolBindings(skill.tool_bindings).length
+              return (
+                <div
+                  key={skill.id}
+                  className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md"
+                  onClick={() => setSelectedSkill(skill.id)}
+                >
+                  {/* Header */}
+                  <div className="flex items-center gap-2.5 px-3.5 py-3">
+                    <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
+                      <Wrench className="w-4 h-4" />
+                    </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <h3 className="font-medium text-zinc-100 truncate">{skill.name}</h3>
-                        {skill.is_builtin && (
-                          <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in skill" />
-                        )}
+                        <span className="text-sm font-semibold text-fg truncate">{skill.name}</span>
+                        {skill.is_builtin && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
                       </div>
-                      <p className="text-sm text-zinc-400 truncate">{skill.slug}</p>
+                      <span className="text-[11px] text-fg-muted font-mono truncate block">{skill.slug}</span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs bg-zinc-700 text-zinc-300 px-2 py-1 rounded">
-                      {skill.category}
-                    </span>
-                    <span className="text-xs text-zinc-500">
-                      {parseToolBindings(skill.tool_bindings).length} tool{parseToolBindings(skill.tool_bindings).length !== 1 ? 's' : ''}
-                    </span>
+                  {/* Detail footer */}
+                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">
+                        {skill.category}
+                      </span>
+                      {toolCount > 0 && (
+                        <span className="text-[11px] text-fg-muted">
+                          {toolCount} tool{toolCount !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                    {skill.description && (
+                      <p className="text-[11px] text-fg-muted line-clamp-2 mt-1">{skill.description}</p>
+                    )}
                   </div>
-
-                  {skill.description && (
-                    <p className="text-xs text-zinc-500 line-clamp-2">{skill.description}</p>
-                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -213,7 +219,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <h2 className="text-xl font-semibold text-zinc-100">Create Skill</h2>
+          <h2 className="text-xl font-semibold text-fg">Create Skill</h2>
         </div>
 
         <form
@@ -225,33 +231,33 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         >
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Name</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
               <input
                 name="name"
                 type="text"
                 required
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 placeholder="Skill name"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Slug</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
               <input
                 name="slug"
                 type="text"
                 required
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 placeholder="skill-slug"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Category</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Category</label>
             <select
               name="category"
               required
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             >
               {SKILL_CATEGORIES.map(category => (
                 <option key={category} value={category}>
@@ -262,38 +268,38 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Description</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Description</label>
             <textarea
               name="description"
               rows={3}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               placeholder="Brief description of what this skill does..."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Tool Bindings (JSON)</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Bindings (JSON)</label>
             <textarea
               name="tool_bindings"
               rows={5}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder='[{"server": "filesystem", "tool": "read_file"}]'
               defaultValue="[]"
             />
-            <p className="text-xs text-zinc-500 mt-1">
+            <p className="text-xs text-fg-muted mt-1">
               Array of objects with "server" and "tool" properties
             </p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-2">Input Schema (JSON, optional)</label>
+            <label className="block text-sm font-medium text-fg-secondary mb-2">Input Schema (JSON, optional)</label>
             <textarea
               name="input_schema"
               rows={5}
-              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               placeholder='{"properties": {"query": {"type": "string", "description": "Search query"}}}'
             />
-            <p className="text-xs text-zinc-500 mt-1">
+            <p className="text-xs text-fg-muted mt-1">
               JSON schema describing the skill's input parameters
             </p>
           </div>
@@ -340,7 +346,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <h2 className="text-xl font-semibold text-zinc-100">Edit {skill.name}</h2>
+            <h2 className="text-xl font-semibold text-fg">Edit {skill.name}</h2>
           </div>
 
           <form
@@ -352,34 +358,34 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Name</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Name</label>
                 <input
                   name="name"
                   type="text"
                   required
                   defaultValue={skill.name}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-2">Slug</label>
+                <label className="block text-sm font-medium text-fg-secondary mb-2">Slug</label>
                 <input
                   name="slug"
                   type="text"
                   required
                   defaultValue={skill.slug}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Category</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Category</label>
               <select
                 name="category"
                 required
                 defaultValue={skill.category}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               >
                 {SKILL_CATEGORIES.map(category => (
                   <option key={category} value={category}>
@@ -390,32 +396,32 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Description</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Description</label>
               <textarea
                 name="description"
                 rows={3}
                 defaultValue={skill.description}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Tool Bindings (JSON)</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Tool Bindings (JSON)</label>
               <textarea
                 name="tool_bindings"
                 rows={5}
                 defaultValue={skill.tool_bindings}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-2">Input Schema (JSON, optional)</label>
+              <label className="block text-sm font-medium text-fg-secondary mb-2">Input Schema (JSON, optional)</label>
               <textarea
                 name="input_schema"
                 rows={5}
                 defaultValue={skill.input_schema || '{}'}
-                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent font-mono text-sm"
               />
             </div>
 
@@ -457,13 +463,13 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
           </Button>
           <div className="flex items-center gap-3 flex-1">
             <div>
-              <h2 className="text-xl font-semibold text-zinc-100 flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-fg flex items-center gap-2">
                 {skill.name}
                 {skill.is_builtin && (
                   <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Built-in skill" />
                 )}
               </h2>
-              <p className="text-sm text-zinc-400">{skill.slug}</p>
+              <p className="text-sm text-fg-secondary">{skill.slug}</p>
             </div>
           </div>
           <div className="flex gap-2">
@@ -492,51 +498,51 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Skill Details */}
           <div className="space-y-4">
-            <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <Settings className="w-5 h-5" />
               Skill Details
             </h3>
 
-            <div className="space-y-3 bg-zinc-800 rounded-lg p-4">
+            <div className="space-y-3 bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
               <div>
-                <label className="text-sm font-medium text-zinc-400">Category</label>
-                <p className="text-zinc-200 capitalize">{skill.category}</p>
+                <label className="text-sm font-medium text-fg-secondary">Category</label>
+                <p className="text-fg capitalize">{skill.category}</p>
               </div>
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Description</label>
-                <p className="text-zinc-200">{skill.description || 'No description'}</p>
+                <label className="text-sm font-medium text-fg-secondary">Description</label>
+                <p className="text-fg">{skill.description || 'No description'}</p>
               </div>
 
               <div>
-                <label className="text-sm font-medium text-zinc-400">Type</label>
-                <p className="text-zinc-200">{skill.is_builtin ? 'Built-in' : 'Custom'}</p>
+                <label className="text-sm font-medium text-fg-secondary">Type</label>
+                <p className="text-fg">{skill.is_builtin ? 'Built-in' : 'Custom'}</p>
               </div>
             </div>
           </div>
 
           {/* Tool Bindings */}
           <div className="space-y-4">
-            <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <Wrench className="w-5 h-5" />
               Tool Bindings ({parseToolBindings(skill.tool_bindings).length})
             </h3>
 
             <div className="space-y-2">
               {parseToolBindings(skill.tool_bindings).length === 0 ? (
-                <p className="text-zinc-500 text-center py-4">No tool bindings configured</p>
+                <p className="text-fg-muted text-center py-4">No tool bindings configured</p>
               ) : (
                 parseToolBindings(skill.tool_bindings).map((binding, index) => (
                   <div
                     key={index}
-                    className="bg-zinc-800 rounded-lg p-3 flex items-center gap-3"
+                    className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-3 flex items-center gap-3"
                   >
-                    <Code2 className="w-4 h-4 text-zinc-400 shrink-0" />
+                    <Code2 className="w-4 h-4 text-fg-secondary shrink-0" />
                     <div className="flex-1">
-                      <div className="text-sm font-medium text-zinc-200">
+                      <div className="text-sm font-medium text-fg">
                         {binding.server}/{binding.tool}
                       </div>
-                      <div className="text-xs text-zinc-500">
+                      <div className="text-xs text-fg-muted">
                         Server: {binding.server} • Tool: {binding.tool}
                       </div>
                     </div>
@@ -550,13 +556,13 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         {/* Input Schema */}
         {parseInputSchema(skill.input_schema) && (
           <div className="space-y-4">
-            <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+            <h3 className="text-lg font-medium text-fg flex items-center gap-2">
               <Code2 className="w-5 h-5" />
               Input Schema
             </h3>
 
-            <div className="bg-zinc-800 rounded-lg p-4">
-              <pre className="text-xs text-zinc-300 overflow-x-auto font-mono">
+            <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4">
+              <pre className="text-xs text-fg-secondary overflow-x-auto font-mono">
                 {skill.input_schema}
               </pre>
             </div>
@@ -567,9 +573,9 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
         {showDeleteConfirm === skill.id && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/60" onClick={() => setShowDeleteConfirm(null)} />
-            <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-md w-full mx-4">
-              <h3 className="text-lg font-semibold text-zinc-100 mb-2">Delete Skill</h3>
-              <p className="text-zinc-400 mb-4">
+            <div className="relative bg-bg-elevated border border-border-subtle rounded-xl p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold text-fg mb-2">Delete Skill</h3>
+              <p className="text-fg-secondary mb-4">
                 Are you sure you want to delete "{skill.name}"? This action cannot be undone.
               </p>
               <div className="flex gap-2 justify-end">

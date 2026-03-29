@@ -52,10 +52,10 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
   return (
     <div className="animate-in fade-in duration-300 space-y-2">
       {/* Header */}
-      <div className="rounded-lg border border-indigo-500/20 bg-zinc-900/50 overflow-hidden">
+      <div className="rounded-lg border border-accent/20 bg-zinc-900/50 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-indigo-400 shrink-0" />
+            <FileText className="h-4 w-4 text-accent shrink-0" />
             <span className="text-sm font-medium text-zinc-200">{data.title}</span>
           </div>
           <div className="flex items-center gap-1">

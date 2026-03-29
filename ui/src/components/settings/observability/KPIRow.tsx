@@ -33,7 +33,7 @@ export function KPIRow({ data }: KPIRowProps) {
         label="Executions"
         value={String(total)}
         icon={Activity}
-        color="text-zinc-100"
+        color="text-fg"
       />
       <StatCard
         label="Avg Duration"

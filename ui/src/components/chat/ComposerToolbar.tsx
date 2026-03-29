@@ -134,7 +134,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
           size="icon"
           className={`w-7 h-7 transition-colors ${
             uploading
-              ? 'text-indigo-400 animate-pulse'
+              ? 'text-accent animate-pulse'
               : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50'
           }`}
           title={uploading ? 'Uploading...' : 'Attach file'}
@@ -205,7 +205,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
             size="icon"
             className={`w-7 h-7 transition-colors ${
               hasContent
-                ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10'
+                ? 'text-accent hover:text-accent-hover hover:bg-accent-hover/10'
                 : 'text-zinc-600'
             }`}
             disabled={!hasContent}

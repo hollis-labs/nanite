@@ -1,10 +1,43 @@
-import { Suspense } from 'react'
+import { Suspense, Component, useSyncExternalStore, type ReactNode } from 'react'
+import { AlertTriangle } from 'lucide-react'
 import type { Envelope } from '@/lib/types'
 import { getEnvelopeComponent } from '@/generated/plugin-envelopes'
+import { subscribeRegistry, getRegistryVersion } from '@/lib/plugin-loader'
 import { useSettings } from '@/hooks/useSettings'
 import { ProposalCard } from './ProposalCard'
 import { QuestionForm } from './QuestionForm'
 import { ApprovalCard } from './ApprovalCard'
+
+/** Error boundary scoped to a single envelope — prevents a broken plugin from crashing the chat. */
+class EnvelopeErrorBoundary extends Component<
+  { type: string; children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-sm border border-red-900/50 bg-red-950/20 p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+            <span className="text-xs font-medium text-red-300">
+              Envelope failed: {this.props.type}
+            </span>
+          </div>
+          <p className="text-[11px] text-red-400/70 leading-relaxed">
+            {this.state.error.message}
+          </p>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 interface EnvelopeRendererProps {
   envelope: Envelope
@@ -15,13 +48,19 @@ export function EnvelopeRenderer({ envelope, onSendMessage }: EnvelopeRendererPr
   const { data: settings } = useSettings()
   const recoverMode = settings?.recover_mode ?? false
 
-  // Single registry lookup — recover mode filters to core-only via source field
+  // Re-render when dynamic plugins register new envelope components.
+  useSyncExternalStore(subscribeRegistry, getRegistryVersion)
+
+  // Single registry lookup — checks build-time first, then dynamic fallback.
+  // Recover mode restricts to core-only entries.
   const PluginComponent = getEnvelopeComponent(envelope.type, recoverMode)
   if (PluginComponent && envelope.data) {
     return (
-      <Suspense fallback={<div className="animate-pulse p-4 text-sm text-fg-secondary">Loading...</div>}>
-        <PluginComponent data={envelope.data} {...(onSendMessage ? { onSendMessage } : {})} />
-      </Suspense>
+      <EnvelopeErrorBoundary type={envelope.type}>
+        <Suspense fallback={<div className="animate-pulse p-4 text-sm text-fg-secondary">Loading...</div>}>
+          <PluginComponent data={envelope.data} {...(onSendMessage ? { onSendMessage } : {})} />
+        </Suspense>
+      </EnvelopeErrorBoundary>
     )
   }
 

@@ -19,6 +19,16 @@ type PluginManifest struct {
 	Config       map[string]ConfigEntry   `yaml:"config"`
 	Dependencies []string                 `yaml:"dependencies"`
 	Requires     map[string]interface{}   `yaml:"requires"`
+
+	// Runtime specifies how the plugin is executed.
+	// "builtin" (default) — compiled into the binary.
+	// "subprocess" — runs as a separate process communicating via JSON-RPC.
+	Runtime    string `yaml:"runtime"`
+
+	// Entrypoint is the executable command for subprocess plugins.
+	// Relative paths are resolved from the plugin directory.
+	// Example: "./my-plugin" or "python3 plugin.py"
+	Entrypoint string `yaml:"entrypoint"`
 }
 
 // ConfigEntry describes a single configuration value in plugin.yaml.

@@ -3,22 +3,32 @@ package plugin
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	fplugin "github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/conduit/internal/plugin/subprocess"
 )
 
 // DiscoveredPlugin holds metadata parsed from a plugin.yaml plus the
-// constructor looked up from the registry.
+// constructor looked up from the registry. For subprocess plugins, the
+// constructor is nil — a SubprocessPlugin is created at load time instead.
 type DiscoveredPlugin struct {
 	Manifest    *PluginManifest
 	Dir         string
-	Constructor PluginConstructor
+	Constructor PluginConstructor // nil for subprocess plugins
+}
+
+// IsSubprocess returns true if this plugin uses the subprocess runtime.
+func (dp DiscoveredPlugin) IsSubprocess() bool {
+	return dp.Manifest.Runtime == "subprocess"
 }
 
 // DiscoverPlugins scans the given directory for subdirectories containing
 // plugin.yaml, parses each manifest, and looks up the registered constructor.
-// Returns only plugins that have a matching constructor in the registry.
+// Returns both builtin plugins (with constructors) and subprocess plugins
+// (with nil constructors — they are instantiated at load time).
 func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 	entries, err := os.ReadDir(pluginsDir)
 	if err != nil {
@@ -46,9 +56,22 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 			return nil, fmt.Errorf("parse %s: %w", manifestPath, err)
 		}
 
+		// Subprocess plugins don't need a compiled-in constructor.
+		if manifest.Runtime == "subprocess" {
+			if manifest.Entrypoint == "" {
+				return nil, fmt.Errorf("plugin %q: runtime is subprocess but no entrypoint specified", manifest.Name)
+			}
+			discovered = append(discovered, DiscoveredPlugin{
+				Manifest: manifest,
+				Dir:      dir,
+			})
+			continue
+		}
+
+		// Builtin (default): look up the compiled-in constructor.
 		constructor, ok := LookupConstructor(manifest.Name)
 		if !ok {
-			// Plugin directory exists but no Go code registered — skip with a warning.
+			// Plugin directory exists but no Go code registered — skip.
 			continue
 		}
 
@@ -63,7 +86,8 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 }
 
 // LoadDiscovered instantiates and loads all discovered plugins into the host,
-// respecting dependency order.  Returns the list of successfully loaded plugins.
+// respecting dependency order. Supports both builtin and subprocess plugins.
+// Returns the list of successfully loaded plugins.
 func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin, []error) {
 	// Topological sort: plugins load after their dependencies.
 	sorted, cycleErr := sortByDeps(discovered)
@@ -85,8 +109,20 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 		// Store config on host so GetConfig works during Load.
 		host.SetPluginConfig(dp.Manifest.Name, cfg)
 
-		// Instantiate and load.
-		p := dp.Constructor()
+		var p fplugin.Plugin
+
+		if dp.IsSubprocess() {
+			// Subprocess plugin: create a SubprocessPlugin that bridges via JSON-RPC.
+			p, err = newSubprocessPluginFromManifest(dp)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("create subprocess plugin %s: %w", dp.Manifest.Name, err))
+				continue
+			}
+		} else {
+			// Builtin plugin: use the compiled-in constructor.
+			p = dp.Constructor()
+		}
+
 		if err := host.LoadPlugin(p); err != nil {
 			errs = append(errs, fmt.Errorf("load %s: %w", dp.Manifest.Name, err))
 			continue
@@ -95,6 +131,55 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 	}
 
 	return loaded, errs
+}
+
+// newSubprocessPluginFromManifest creates a SubprocessPlugin from a discovered
+// plugin manifest with runtime: subprocess.
+func newSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.SubprocessPlugin, error) {
+	m := dp.Manifest
+
+	// Resolve the entrypoint command and args.
+	command, args := parseEntrypoint(m.Entrypoint, dp.Dir)
+
+	// Verify the command exists.
+	if _, err := exec.LookPath(command); err != nil {
+		// Try as relative path from plugin dir.
+		absCmd := filepath.Join(dp.Dir, command)
+		if _, err := exec.LookPath(absCmd); err != nil {
+			return nil, fmt.Errorf("entrypoint %q not found: %w", m.Entrypoint, err)
+		}
+		command = absCmd
+	}
+
+	// Resolve config values for the subprocess.
+	config := make(map[string]string)
+	for key, entry := range m.Config {
+		if entry.EnvVar != "" {
+			if v := os.Getenv(entry.EnvVar); v != "" {
+				config[key] = v
+				continue
+			}
+		}
+		if entry.Default != "" {
+			config[key] = entry.Default
+		}
+	}
+
+	mgrCfg := subprocess.DefaultManagerConfig(command, dp.Dir)
+	mgrCfg.Args = args
+
+	return subprocess.NewSubprocessPlugin(dp.Dir, config, mgrCfg), nil
+}
+
+// parseEntrypoint splits an entrypoint string like "python3 plugin.py" into
+// a command and args. If the entrypoint is a single token (e.g., "./my-plugin"),
+// args is nil.
+func parseEntrypoint(entrypoint, pluginDir string) (string, []string) {
+	parts := strings.Fields(entrypoint)
+	if len(parts) == 0 {
+		return entrypoint, nil
+	}
+	return parts[0], parts[1:]
 }
 
 // LoadRegisteredBuiltins loads all registered plugin constructors that are not

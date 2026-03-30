@@ -50,6 +50,8 @@ func (s *Server) SetPluginsDir(dir string) {
 	s.pluginsDir = dir
 	// Register plugin management API routes now that we have the directory.
 	api.RegisterPluginManagementRoutes(s.mux, dir, s.store, s.pluginHost)
+	// Register plugin catalog API routes.
+	api.RegisterCatalogRoutes(s.mux, s.store, dir, s.pluginHost)
 }
 
 // ListenAndServe starts the HTTP server.

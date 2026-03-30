@@ -8,6 +8,7 @@
 // PLUGIN_ENTRIES marker. See scripts/generate-plugin-imports.mjs.
 import { lazy } from "react";
 import type { ComponentType } from "react";
+import { getDynamicEnvelope } from "@/lib/plugin-loader";
 
 // biome-ignore lint/suspicious/noExplicitAny: plugin envelope components have varied props
 type LazyEnvelopeComponent = React.LazyExoticComponent<ComponentType<any>>;
@@ -138,9 +139,15 @@ export function getEnvelopeComponent(
   recoverMode = false,
 ): LazyEnvelopeComponent | undefined {
   const entry = ENVELOPE_REGISTRY[type];
-  if (!entry) return undefined;
-  if (recoverMode && entry.source !== "core") return undefined;
-  return entry.component;
+  if (entry) {
+    if (recoverMode && entry.source !== "core") return undefined;
+    return entry.component;
+  }
+
+  // Fallback: check dynamically loaded plugins (skip in recover mode).
+  if (recoverMode) return undefined;
+  const dynamic = getDynamicEnvelope(type);
+  return dynamic?.component;
 }
 
 // Legacy exports — these are used by EnvelopeRenderer. Kept for backward compat.

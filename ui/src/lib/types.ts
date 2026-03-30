@@ -675,6 +675,39 @@ export interface PluginInfo {
   installed: boolean;
 }
 
+// --- Plugin Catalog ---
+
+export interface CatalogSource {
+  id: string;
+  name: string;
+  url: string;
+  type: "official" | "custom";
+  enabled: boolean;
+  priority: number;
+  public_key: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CatalogBrowseEntry {
+  name: string;
+  version: string;
+  description: string;
+  author?: string;
+  repo?: string;
+  archive_url: string;
+  checksum?: string;
+  signature?: string;
+  compat?: string;
+  runtime?: string;
+  tags?: string[];
+  source_id: string;
+  source_name: string;
+  installed: boolean;
+  installed_version?: string;
+  update_available?: boolean;
+}
+
 export interface ConfigField {
   key: string;
   type: "string" | "bool" | "int" | "select" | "secret";

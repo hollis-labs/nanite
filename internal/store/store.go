@@ -85,6 +85,7 @@ func (s *Store) migrate() error {
 		"migrations/018_frontend_unblock.sql",
 		"migrations/019_connector_triggers.sql",
 		"migrations/020_custom_actions.sql",
+		"migrations/021_catalog_sources.sql",
 	}
 
 	for _, f := range files {

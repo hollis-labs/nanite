@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { Bot, ChevronDown, SendHorizonal, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -39,6 +40,8 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const [modelOpen, setModelOpen] = useState(false)
   const modelRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const [dropdownPos, setDropdownPos] = useState<{ left: number; bottom: number } | null>(null)
 
   const { data: models } = useModels()
   const { data: providers } = useProviders()
@@ -69,18 +72,20 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
     if (!models || !providers) return []
 
     const providerMap = new Map(providers.map((p) => [p.id, p]))
-    const groups = new Map<string, { id: string; name: string; icon: string; models: { id: string; label: string; provider: string }[] }>()
+    const groups = new Map<string, { id: string; name: string; icon: string; isPty: boolean; models: { id: string; label: string; provider: string; isPty: boolean }[] }>()
 
     for (const m of models) {
       if (!m.is_enabled) continue
       const providerInfo = providerMap.get(m.provider_id)
       if (providerInfo && !providerInfo.is_enabled) continue
       const providerType = m.provider_type || 'anthropic'
+      const isPty = providerType.startsWith('pty')
       if (!groups.has(m.provider_id)) {
         groups.set(m.provider_id, {
           id: providerType,
           name: providerInfo?.name || providerType,
           icon: PROVIDER_ICONS[providerType] || providerType.charAt(0).toUpperCase(),
+          isPty,
           models: [],
         })
       }
@@ -88,6 +93,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
         id: m.model_id,
         label: m.display_name,
         provider: providerType,
+        isPty,
       })
     }
 
@@ -97,11 +103,17 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
   const allModels = useMemo(() => groupedModels.flatMap((g) => g.models), [groupedModels])
   const currentModel = allModels.find((m) => m.id === activeModel)
 
-  // Close dropdown on outside click
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdown on outside click — checks both the button container and the portal
   useEffect(() => {
     if (!modelOpen) return
     function handleClickOutside(e: MouseEvent) {
-      if (modelRef.current && !modelRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      if (
+        modelRef.current && !modelRef.current.contains(target) &&
+        (!dropdownRef.current || !dropdownRef.current.contains(target))
+      ) {
         setModelOpen(false)
       }
     }
@@ -130,9 +142,16 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
       {/* Left: User profile + Model picker */}
       <div className="flex items-center gap-1.5">
       <UserProfileMenu />
-      <div className="relative" ref={modelRef}>
+      <div ref={modelRef}>
         <button
-          onClick={() => setModelOpen((o) => !o)}
+          ref={buttonRef}
+          onClick={() => {
+            if (!modelOpen && buttonRef.current) {
+              const rect = buttonRef.current.getBoundingClientRect()
+              setDropdownPos({ left: rect.left, bottom: window.innerHeight - rect.top + 4 })
+            }
+            setModelOpen((o) => !o)
+          }}
           className="flex items-center gap-1 text-xs text-composer-fg-secondary hover:text-composer-fg transition-colors py-0.5 px-1.5 rounded-md hover:bg-composer-hover"
         >
           <Bot className="w-3 h-3" />
@@ -140,36 +159,48 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
           <ChevronDown className="w-3 h-3" />
         </button>
 
-        {modelOpen && (
-          <div className="absolute bottom-full left-0 mb-1 w-56 bg-composer border border-composer-border-focus rounded-xl shadow-xl z-50 py-1 max-h-72 overflow-y-auto">
+        {modelOpen && dropdownPos && createPortal(
+          <div
+            ref={dropdownRef}
+            className="fixed w-64 bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl z-[9999] py-1 max-h-80 overflow-y-auto provider-scroll"
+            style={{ left: dropdownPos.left, bottom: dropdownPos.bottom }}
+          >
             {groupedModels.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-composer-fg-muted">Loading models...</div>
+              <div className="px-3 py-2 text-xs text-fg-muted">Loading models...</div>
             ) : (
               groupedModels.map((group) => (
                 <div key={group.id}>
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-composer-fg-muted uppercase tracking-wider">
-                    <span className="w-4 h-4 rounded bg-composer-hover flex items-center justify-center text-[10px] font-bold text-composer-fg-secondary shrink-0">
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-fg-muted uppercase tracking-wider">
+                    <span className="w-4 h-4 rounded bg-surface-hover flex items-center justify-center text-[10px] font-bold text-fg-secondary shrink-0">
                       {group.icon}
                     </span>
                     {group.name}
+                    <span className={`ml-auto text-[9px] px-1 py-px rounded font-medium leading-none ${
+                      group.isPty
+                        ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/20'
+                        : 'bg-blue-500/15 text-blue-400 border border-blue-500/20'
+                    }`}>
+                      {group.isPty ? 'PTY' : 'API'}
+                    </span>
                   </div>
                   {group.models.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => void handleModelSelect(model.id)}
-                      className={`w-full text-left px-3 pl-8 py-1.5 text-sm transition-colors ${
+                      className={`w-full text-left px-3 pl-8 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
                         model.id === activeModel
-                          ? 'bg-composer-hover text-composer-fg'
-                          : 'text-composer-fg-secondary hover:bg-composer-hover/60 hover:text-composer-fg'
+                          ? 'bg-surface-hover text-fg'
+                          : 'text-fg-secondary hover:bg-surface/60 hover:text-fg'
                       }`}
                     >
-                      {model.label}
+                      <span className="truncate flex-1">{model.label}</span>
                     </button>
                   ))}
                 </div>
               ))
             )}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
       </div>

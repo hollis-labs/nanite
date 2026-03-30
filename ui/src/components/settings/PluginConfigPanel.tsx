@@ -12,6 +12,8 @@ interface PluginConfigPanelProps {
   pluginId: string
   pluginName: string
   onBack: () => void
+  /** When true, hides the header/back button (used when embedded in PluginDetailView) */
+  embedded?: boolean
 }
 
 function ConfigFieldInput({
@@ -115,7 +117,7 @@ function OverrideFieldRenderer({
   )
 }
 
-export function PluginConfigPanel({ pluginId, pluginName, onBack }: PluginConfigPanelProps) {
+export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: PluginConfigPanelProps) {
   const queryClient = useQueryClient()
   const { data: userSettings } = useSettings()
   const developerMode = userSettings?.developer_mode ?? false
@@ -158,20 +160,22 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack }: PluginConfig
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="p-1 rounded text-fg-muted hover:text-fg hover:bg-surface transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <div>
-          <h2 className="text-lg font-semibold text-fg">{pluginName} Configuration</h2>
-          <p className="text-xs text-fg-muted">Plugin settings for {pluginId}</p>
+      {/* Header — hidden when embedded in PluginDetailView */}
+      {!embedded && (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="p-1 rounded text-fg-muted hover:text-fg hover:bg-surface transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h2 className="text-lg font-semibold text-fg">{pluginName} Configuration</h2>
+            <p className="text-xs text-fg-muted">Plugin settings for {pluginId}</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {isLoading && (
         <div className="space-y-4">

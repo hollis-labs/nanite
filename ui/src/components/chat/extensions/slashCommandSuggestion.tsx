@@ -52,7 +52,7 @@ export const slashCommandSuggestion: Omit<SuggestionOptions<SlashCommand>, 'edit
 
         popup = document.createElement('div')
         popup.style.position = 'absolute'
-        popup.style.zIndex = '50'
+        popup.style.zIndex = '9999'
         document.body.appendChild(popup)
 
         root = createRoot(popup)

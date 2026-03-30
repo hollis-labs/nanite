@@ -1,10 +1,11 @@
 import type {
   A2AMessage,
-  Agent,
   AgentModeProfile,
   AgentProfile,
   Artifact,
   Bookmark,
+  CatalogBrowseEntry,
+  CatalogSource,
   CLIDetectionResult,
   ContextBreakdown,
   CustomAction,
@@ -205,15 +206,15 @@ export const api = {
     return res.json();
   },
 
-  // Agents
-  listAgents: async (): Promise<Agent[]> => {
+  // Agents — endpoint returns full AgentProfile shape
+  listAgents: async (): Promise<AgentProfile[]> => {
     const res = await fetch(`${API_BASE}/agents`);
     if (!res.ok) throw new Error(`Failed to list agents: ${res.status}`);
     return res.json();
   },
 
-  // Agent Profiles (full detail) — same endpoint, wider type
-  listAgentProfiles: async (): Promise<AgentProfile[]> => api.listAgents() as Promise<AgentProfile[]>,
+  /** @deprecated Use listAgents — same endpoint, same return type */
+  listAgentProfiles: async (): Promise<AgentProfile[]> => api.listAgents(),
 
   getAgentProfile: async (
     id: string,
@@ -897,6 +898,78 @@ export const api = {
     });
     if (!res.ok) throw new Error(`Failed to update plugin config: ${res.status}`);
     return res.json();
+  },
+
+  // --- Plugin Catalog ---
+
+  browseCatalog: async (): Promise<CatalogBrowseEntry[]> => {
+    const res = await fetch(`${API_BASE}/plugins/catalog`);
+    if (!res.ok) throw new Error(`Failed to browse catalog: ${res.status}`);
+    const ct = res.headers.get("content-type") ?? "";
+    if (!ct.includes("application/json")) {
+      throw new Error("Catalog API not available — backend may need a rebuild (cerberus_rebuild)");
+    }
+    return res.json();
+  },
+
+  refreshCatalog: async (): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plugins/catalog/refresh`, { method: "POST" });
+    if (!res.ok) throw new Error(`Failed to refresh catalog: ${res.status}`);
+  },
+
+  catalogInstall: async (name: string): Promise<{ status: string; plugin: string; version: string; source: string; message: string }> => {
+    const res = await fetch(`${API_BASE}/plugins/catalog/install`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Install failed: ${res.status}` }));
+      throw new Error(err.error || `Install failed: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  listCatalogSources: async (): Promise<CatalogSource[]> => {
+    const res = await fetch(`${API_BASE}/plugins/catalog/sources`);
+    if (!res.ok) throw new Error(`Failed to list catalog sources: ${res.status}`);
+    return res.json();
+  },
+
+  addCatalogSource: async (name: string, url: string, priority: number): Promise<CatalogSource> => {
+    const res = await fetch(`${API_BASE}/plugins/catalog/sources`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, url, priority }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Add source failed: ${res.status}` }));
+      throw new Error(err.error || `Add source failed: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  updateCatalogSource: async (id: string, data: { name?: string; url?: string; enabled?: boolean; priority?: number }): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plugins/catalog/sources/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to update catalog source: ${res.status}`);
+  },
+
+  deleteCatalogSource: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plugins/catalog/sources/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to delete catalog source: ${res.status}`);
+  },
+
+  setCatalogSourceKey: async (id: string, publicKey: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plugins/catalog/sources/${id}/key`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ public_key: publicKey }),
+    });
+    if (!res.ok) throw new Error(`Failed to set source key: ${res.status}`);
   },
 
   // --- A2A Messaging ---

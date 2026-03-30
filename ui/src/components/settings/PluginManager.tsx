@@ -8,6 +8,7 @@ import {
   Settings2,
   Power,
   PowerOff,
+  Globe,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,6 +22,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/useAppStore'
 import { PluginConfigPanel } from './PluginConfigPanel'
+import { PluginDetailView } from './PluginDetailView'
+import { CatalogBrowser } from './CatalogBrowser'
+import { CatalogSourceManager } from './CatalogSourceManager'
 import type { PluginInfo } from '@/lib/types'
 
 // --- Toast notification ---
@@ -32,19 +36,23 @@ interface Toast {
 
 let toastId = 0
 
+type Tab = 'installed' | 'catalog'
+type SubView = 'list' | 'config' | 'detail' | 'sources'
 
 // --- Main Component ---
 
 export function PluginManager() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null)
-  const [pendingAction, setPendingAction] = useState<string | null>(null) // plugin name with action in progress
+  const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [configuringPlugin, setConfiguringPlugin] = useState<PluginInfo | null>(null)
+  const [detailPlugin, setDetailPlugin] = useState<PluginInfo | null>(null)
+  const [activeTab, setActiveTab] = useState<Tab>('installed')
+  const [subView, setSubView] = useState<SubView>('list')
   const queryClient = useQueryClient()
   const bumpConfigVersion = useAppStore((s) => s.bumpConfigVersion)
   const configVersion = useAppStore((s) => s.configVersion)
 
-  // Use configVersion as part of the query key so bumping it triggers refetch
   const {
     data: plugins = [],
     isLoading,
@@ -72,6 +80,7 @@ export function PluginManager() {
       bumpConfigVersion()
       void queryClient.invalidateQueries({ queryKey: ['plugins'] })
       void queryClient.invalidateQueries({ queryKey: ['agents'] })
+      void queryClient.invalidateQueries({ queryKey: ['catalog-browse'] })
       void refetch()
       setPendingAction(null)
     },
@@ -132,13 +141,30 @@ export function PluginManager() {
     const order: Record<string, number> = { active: 0, disabled: 1, available: 2, 'no-binary': 3 }
     const diff = (order[a.status] ?? 4) - (order[b.status] ?? 4)
     if (diff !== 0) return diff
-    // Core before user within same status
     if (a.type === 'core' && b.type !== 'core') return -1
     if (a.type !== 'core' && b.type === 'core') return 1
     return a.name.localeCompare(b.name)
   })
 
-  // Show config panel when a plugin is selected for configuration
+  // --- Sub-views (detail, config, sources) ---
+
+  if (subView === 'sources') {
+    return (
+      <CatalogSourceManager
+        onBack={() => setSubView('list')}
+      />
+    )
+  }
+
+  if (detailPlugin) {
+    return (
+      <PluginDetailView
+        plugin={detailPlugin}
+        onBack={() => setDetailPlugin(null)}
+      />
+    )
+  }
+
   if (configuringPlugin) {
     return (
       <PluginConfigPanel
@@ -151,197 +177,237 @@ export function PluginManager() {
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex items-center gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs text-fg-secondary hover:text-fg"
-          onClick={() => refetch()}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <RefreshCw className="w-3 h-3 animate-spin mr-1" />
-          ) : (
-            <RefreshCw className="w-3.5 h-3.5 mr-1" />
-          )}
-          Refresh
-        </Button>
-        <div className="flex-1" />
-        <p className="text-[11px] text-fg-faint">Changes require a restart</p>
+      {/* Tab bar */}
+      <div className="flex items-center gap-2">
+        <div className="inline-flex items-center bg-surface/50 rounded-lg p-0.5">
+          <button
+            onClick={() => setActiveTab('installed')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+              activeTab === 'installed'
+                ? 'bg-bg-elevated text-fg shadow-sm'
+                : 'text-fg-muted hover:text-fg-secondary'
+            }`}
+          >
+            Installed
+            {plugins.length > 0 && (
+              <span className="ml-1.5 text-[10px] text-fg-faint">{plugins.filter((p) => p.installed).length}</span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('catalog')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+              activeTab === 'catalog'
+                ? 'bg-bg-elevated text-fg shadow-sm'
+                : 'text-fg-muted hover:text-fg-secondary'
+            }`}
+          >
+            <Globe className="w-3 h-3" />
+            Catalog
+          </button>
+        </div>
       </div>
 
-      {/* Error state */}
-      {isError && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-start gap-3">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-fg">Failed to load plugins</p>
-            <p className="text-xs text-fg-muted mt-1">
-              {(error as Error)?.message || 'The plugin API may not be available yet.'}
-            </p>
-          </div>
-        </div>
+      {/* Catalog tab */}
+      {activeTab === 'catalog' && (
+        <CatalogBrowser onManageSources={() => setSubView('sources')} />
       )}
 
-      {/* Loading */}
-      {isLoading && !isError && (
-        <div className="grid grid-cols-2 gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
-              <div className="px-3.5 py-3 flex items-center gap-2.5">
-                <Skeleton className="size-9 rounded-lg" />
-                <div className="flex flex-col gap-1.5 flex-1">
-                  <Skeleton className="h-3.5 w-1/2" />
-                  <Skeleton className="h-2.5 w-1/3" />
-                </div>
-              </div>
-              <div className="border-t border-border/50 px-3.5 py-2">
-                <Skeleton className="h-2.5 w-3/4" />
+      {/* Installed tab */}
+      {activeTab === 'installed' && (
+        <>
+          {/* Toolbar */}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-fg-secondary hover:text-fg"
+              onClick={() => refetch()}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <RefreshCw className="w-3 h-3 animate-spin mr-1" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              )}
+              Refresh
+            </Button>
+            <div className="flex-1" />
+            <p className="text-[11px] text-fg-faint">Changes require a restart</p>
+          </div>
+
+          {/* Error state */}
+          {isError && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-fg">Failed to load plugins</p>
+                <p className="text-xs text-fg-muted mt-1">
+                  {(error as Error)?.message || 'The plugin API may not be available yet.'}
+                </p>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {/* Empty */}
-      {!isLoading && !isError && sortedPlugins.length === 0 && (
-        <Empty className="py-12">
-          <EmptyHeader>
-            <EmptyMedia variant="icon"><Package /></EmptyMedia>
-            <EmptyTitle className="text-sm">No plugins found</EmptyTitle>
-            <EmptyDescription className="text-xs">Plugins will appear here once available.</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      )}
+          {/* Loading */}
+          {isLoading && !isError && (
+            <div className="grid grid-cols-2 gap-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                  <div className="px-3.5 py-3 flex items-center gap-2.5">
+                    <Skeleton className="size-9 rounded-lg" />
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      <Skeleton className="h-3.5 w-1/2" />
+                      <Skeleton className="h-2.5 w-1/3" />
+                    </div>
+                  </div>
+                  <div className="border-t border-border/50 px-3.5 py-2">
+                    <Skeleton className="h-2.5 w-3/4" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
-      {/* Plugin grid */}
-      {!isLoading && !isError && sortedPlugins.length > 0 && (
-        <div className="grid gap-3 grid-cols-2">
-          {sortedPlugins.map((plugin) => {
-            const isActive = plugin.status === 'active'
-            const isDisabled = plugin.status === 'disabled'
-            const isAvailable = plugin.status === 'available'
-            return (
-              <ContextMenu key={plugin.name}>
-                <ContextMenuTrigger asChild>
-              <div
-                className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
-                  isActive
-                    ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
-                    : isDisabled
-                      ? 'border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-55'
-                      : 'border-border bg-white dark:bg-bg/30 opacity-45'
-                }`}
-                onClick={() => {
-                  if (isActive || isDisabled) setConfiguringPlugin(plugin)
-                }}
-              >
-                {/* Header */}
-                <div className="flex items-center gap-2.5 px-3.5 py-3">
-                  <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                    isActive ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
-                  }`}>
-                    <Package className="w-4 h-4" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-sm font-semibold truncate ${isActive ? 'text-fg' : 'text-fg-muted'}`}>
-                        {plugin.name}
+          {/* Empty */}
+          {!isLoading && !isError && sortedPlugins.length === 0 && (
+            <Empty className="py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon"><Package /></EmptyMedia>
+                <EmptyTitle className="text-sm">No plugins found</EmptyTitle>
+                <EmptyDescription className="text-xs">Plugins will appear here once available.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
+
+          {/* Plugin grid */}
+          {!isLoading && !isError && sortedPlugins.length > 0 && (
+            <div className="grid gap-3 grid-cols-2">
+              {sortedPlugins.map((plugin) => {
+                const isActive = plugin.status === 'active'
+                const isDisabled = plugin.status === 'disabled'
+                const isAvailable = plugin.status === 'available'
+                return (
+                  <ContextMenu key={plugin.name}>
+                    <ContextMenuTrigger asChild>
+                  <div
+                    className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
+                      isActive
+                        ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
+                        : isDisabled
+                          ? 'border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-55'
+                          : 'border-border bg-white dark:bg-bg/30 opacity-45'
+                    }`}
+                    onClick={() => {
+                      if (isActive || isDisabled) setDetailPlugin(plugin)
+                    }}
+                  >
+                    {/* Header */}
+                    <div className="flex items-center gap-2.5 px-3.5 py-3">
+                      <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
+                        isActive ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
+                      }`}>
+                        <Package className="w-4 h-4" />
                       </span>
-                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm font-semibold truncate ${isActive ? 'text-fg' : 'text-fg-muted'}`}>
+                            {plugin.name}
+                          </span>
+                          {isActive && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[11px] text-fg-muted">v{plugin.version || '0.0.0'}</span>
+                          {plugin.author && (
+                            <>
+                              <span className="text-fg-faint text-[10px]">&middot;</span>
+                              <span className="text-[11px] text-fg-muted truncate">{plugin.author}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      {/* Actions */}
+                      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {plugin.type === 'core' ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">core</span>
+                        ) : isActive ? (
+                          <>
+                            <button
+                              onClick={() => setConfiguringPlugin(plugin)}
+                              className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                            >
+                              <Settings2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => disableMutation.mutate(plugin.name)}
+                              disabled={isActionPending(plugin.name)}
+                              className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
+                            >
+                              {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Disable'}
+                            </button>
+                          </>
+                        ) : isDisabled ? (
+                          <>
+                            <button
+                              onClick={() => setConfiguringPlugin(plugin)}
+                              className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                            >
+                              <Settings2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => enableMutation.mutate(plugin.name)}
+                              disabled={isActionPending(plugin.name)}
+                              className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
+                            >
+                              {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Enable'}
+                            </button>
+                          </>
+                        ) : isAvailable ? (
+                          <button
+                            onClick={() => installMutation.mutate(plugin.name)}
+                            disabled={isActionPending(plugin.name)}
+                            className="px-2 py-1 text-[11px] font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-40"
+                          >
+                            {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Install'}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[11px] text-fg-muted">v{plugin.version || '0.0.0'}</span>
-                      {plugin.author && (
-                        <>
-                          <span className="text-fg-faint text-[10px]">&middot;</span>
-                          <span className="text-[11px] text-fg-muted truncate">{plugin.author}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {/* Actions */}
-                  {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                    {plugin.type === 'core' ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">core</span>
-                    ) : isActive ? (
-                      <>
-                        <button
-                          onClick={() => setConfiguringPlugin(plugin)}
-                          className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
-                        >
-                          <Settings2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => disableMutation.mutate(plugin.name)}
-                          disabled={isActionPending(plugin.name)}
-                          className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
-                        >
-                          {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Disable'}
-                        </button>
-                      </>
-                    ) : isDisabled ? (
-                      <>
-                        <button
-                          onClick={() => setConfiguringPlugin(plugin)}
-                          className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
-                        >
-                          <Settings2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => enableMutation.mutate(plugin.name)}
-                          disabled={isActionPending(plugin.name)}
-                          className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
-                        >
-                          {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Enable'}
-                        </button>
-                      </>
-                    ) : isAvailable ? (
-                      <button
-                        onClick={() => installMutation.mutate(plugin.name)}
-                        disabled={isActionPending(plugin.name)}
-                        className="px-2 py-1 text-[11px] font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-40"
-                      >
-                        {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Install'}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
 
-                {/* Detail footer */}
-                <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
-                  <p className="text-[11px] text-fg-muted line-clamp-2">
-                    {plugin.short_desc || plugin.description || 'No description'}
-                  </p>
-                </div>
-              </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  {(isActive || isDisabled) && (
-                    <ContextMenuItem className="gap-2 text-xs" onClick={() => setConfiguringPlugin(plugin)}>
-                      <Settings2 className="w-3.5 h-3.5" />
-                      Settings
-                    </ContextMenuItem>
-                  )}
-                  {isActive && (
-                    <ContextMenuItem className="gap-2 text-xs" onClick={() => disableMutation.mutate(plugin.name)} disabled={isActionPending(plugin.name)}>
-                      <PowerOff className="w-3.5 h-3.5" />
-                      Disable
-                    </ContextMenuItem>
-                  )}
-                  {isDisabled && (
-                    <ContextMenuItem className="gap-2 text-xs" onClick={() => enableMutation.mutate(plugin.name)} disabled={isActionPending(plugin.name)}>
-                      <Power className="w-3.5 h-3.5" />
-                      Enable
-                    </ContextMenuItem>
-                  )}
-                </ContextMenuContent>
-              </ContextMenu>
-            )
-          })}
-        </div>
+                    {/* Detail footer */}
+                    <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                      <p className="text-[11px] text-fg-muted line-clamp-2">
+                        {plugin.short_desc || plugin.description || 'No description'}
+                      </p>
+                    </div>
+                  </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      {(isActive || isDisabled) && (
+                        <ContextMenuItem className="gap-2 text-xs" onClick={() => setDetailPlugin(plugin)}>
+                          <Settings2 className="w-3.5 h-3.5" />
+                          Details
+                        </ContextMenuItem>
+                      )}
+                      {isActive && (
+                        <ContextMenuItem className="gap-2 text-xs" onClick={() => disableMutation.mutate(plugin.name)} disabled={isActionPending(plugin.name)}>
+                          <PowerOff className="w-3.5 h-3.5" />
+                          Disable
+                        </ContextMenuItem>
+                      )}
+                      {isDisabled && (
+                        <ContextMenuItem className="gap-2 text-xs" onClick={() => enableMutation.mutate(plugin.name)} disabled={isActionPending(plugin.name)}>
+                          <Power className="w-3.5 h-3.5" />
+                          Enable
+                        </ContextMenuItem>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {/* Uninstall confirmation modal */}

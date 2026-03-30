@@ -17,6 +17,7 @@ import { SprintPlanningModal } from './plugins/sprint/SprintPlanningModal'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import { usePresence } from '@/hooks/usePresence'
 import { useHashRoute } from '@/hooks/useHashRoute'
+import { usePluginModules } from '@/hooks/usePluginModules'
 
 export function AppShell() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
@@ -60,6 +61,9 @@ export function AppShell() {
 
   // Sync navigation state with URL hash
   useHashRoute()
+
+  // Load dynamic plugin UI bundles (ESM) at startup
+  usePluginModules()
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeWorkspaceId],

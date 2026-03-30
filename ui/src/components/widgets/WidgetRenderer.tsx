@@ -1,7 +1,8 @@
-import { Suspense, Component, type ReactNode } from 'react'
+import { Suspense, Component, useSyncExternalStore, type ReactNode } from 'react'
 import { AlertTriangle, Puzzle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getWidgetComponent } from '@/generated/plugin-widgets'
+import { subscribeRegistry, getRegistryVersion } from '@/lib/plugin-loader'
 import type { PluginUIComponent } from '@/lib/types'
 
 /** Error boundary scoped to a single widget — prevents one broken widget from crashing the rail. */
@@ -75,6 +76,9 @@ interface WidgetRendererProps {
  * - Unknown widgets: metadata-only fallback card.
  */
 export function WidgetRenderer({ component }: WidgetRendererProps) {
+  // Re-render when dynamic plugins register new widget components.
+  useSyncExternalStore(subscribeRegistry, getRegistryVersion)
+
   const WidgetComponent = getWidgetComponent(component.id)
 
   if (!WidgetComponent) {

@@ -25,10 +25,14 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}M`
 }
 
-// Group files: directories first, then files
+// Group files: directories first, then files. Precompute original indices to avoid O(n^2) indexOf.
 function groupFiles(items: FileResult[]) {
-  const dirs = items.filter((f) => f.is_dir)
-  const files = items.filter((f) => !f.is_dir)
+  const dirs: { item: FileResult; idx: number }[] = []
+  const files: { item: FileResult; idx: number }[] = []
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].is_dir) dirs.push({ item: items[i], idx: i })
+    else files.push({ item: items[i], idx: i })
+  }
   return { dirs, files }
 }
 
@@ -127,9 +131,7 @@ export const FileMentionMenu = forwardRef<FileMentionMenuRef, FileMentionMenuPro
               </span>
               Directories
             </div>
-            {dirs.map((item) => {
-              const idx = items.indexOf(item)
-              return (
+            {dirs.map(({ item, idx }) => (
                 <button
                   key={item.path}
                   ref={(el) => { if (el) itemRefs.current.set(idx, el); else itemRefs.current.delete(idx) }}
@@ -144,8 +146,7 @@ export const FileMentionMenu = forwardRef<FileMentionMenuRef, FileMentionMenuPro
                   <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span className="text-xs font-mono truncate flex-1">{item.path}</span>
                 </button>
-              )
-            })}
+            ))}
           </>
         )}
         {files.length > 0 && (
@@ -156,9 +157,7 @@ export const FileMentionMenu = forwardRef<FileMentionMenuRef, FileMentionMenuPro
               </span>
               Files
             </div>
-            {files.map((item) => {
-              const idx = items.indexOf(item)
-              return (
+            {files.map(({ item, idx }) => (
                 <button
                   key={item.path}
                   ref={(el) => { if (el) itemRefs.current.set(idx, el); else itemRefs.current.delete(idx) }}
@@ -176,8 +175,7 @@ export const FileMentionMenu = forwardRef<FileMentionMenuRef, FileMentionMenuPro
                     <span className="text-[10px] text-fg-faint shrink-0">{formatSize(item.size)}</span>
                   )}
                 </button>
-              )
-            })}
+            ))}
           </>
         )}
         </div>

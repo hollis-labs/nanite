@@ -54,11 +54,12 @@ export async function loadPluginModule(pluginName: string): Promise<boolean> {
       /* @vite-ignore */ BUNDLE_PATH(pluginName)
     ) as Promise<PluginUIModule>
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Plugin "${pluginName}" UI bundle load timed out`)), LOAD_TIMEOUT_MS),
-    )
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Plugin "${pluginName}" UI bundle load timed out`)), LOAD_TIMEOUT_MS)
+    })
 
-    const mod = await Promise.race([modulePromise, timeoutPromise])
+    const mod = await Promise.race([modulePromise, timeoutPromise]).finally(() => clearTimeout(timer))
 
     if (typeof mod.register !== 'function') {
       console.warn(

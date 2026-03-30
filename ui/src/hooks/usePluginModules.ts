@@ -1,22 +1,23 @@
 /**
- * Hook that loads dynamic plugin UI bundles at app startup.
+ * Hook that loads dynamic plugin UI bundles.
  *
  * Fetches the plugin list, filters to active non-core plugins, and triggers
  * ESM bundle loading for each. Skips everything in recover mode.
+ * Re-runs when the plugin list changes (e.g., after a catalog install)
+ * but skips already-loaded plugins via isPluginLoaded().
  *
- * Call once from AppShell — it's a fire-and-forget effect, not a data hook.
+ * Call once from AppShell.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useSettings } from './useSettings'
 import { loadAllPluginModules } from '@/lib/plugin-esm'
-import { clearDynamicRegistry } from '@/lib/plugin-loader'
+import { clearDynamicRegistry, isPluginLoaded } from '@/lib/plugin-loader'
 
 export function usePluginModules() {
   const { data: settings } = useSettings()
   const recoverMode = settings?.recover_mode ?? false
-  const hasLoaded = useRef(false)
 
   // Fetch active plugins (same query the PluginManager uses).
   const { data: plugins } = useQuery({
@@ -31,16 +32,14 @@ export function usePluginModules() {
     // In recover mode, clear any previously loaded dynamic components.
     if (recoverMode) {
       clearDynamicRegistry()
-      hasLoaded.current = false
       return
     }
 
-    if (!plugins || hasLoaded.current) return
-    hasLoaded.current = true
+    if (!plugins) return
 
-    // Load bundles for active, non-core plugins.
+    // Load bundles for active, non-core plugins that haven't been loaded yet.
     const candidates = plugins
-      .filter((p) => p.status === 'active' && p.type !== 'core')
+      .filter((p) => p.status === 'active' && p.type !== 'core' && !isPluginLoaded(p.name))
       .map((p) => p.name)
 
     if (candidates.length === 0) return

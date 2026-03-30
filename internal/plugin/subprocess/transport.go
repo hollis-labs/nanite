@@ -17,16 +17,32 @@ import (
 type Transport struct {
 	w      io.Writer
 	r      *bufio.Reader
+	rClose io.Closer // underlying reader, closed to unblock pending reads
 	nextID atomic.Int64
 	mu     sync.Mutex // serializes writes and read correlation
 }
 
 // NewTransport creates a transport over the given reader/writer pair.
+// If r implements io.Closer, it will be closed by Close() to unblock
+// any pending reads.
 func NewTransport(r io.Reader, w io.Writer) *Transport {
-	return &Transport{
+	t := &Transport{
 		w: w,
 		r: bufio.NewReader(r),
 	}
+	if rc, ok := r.(io.Closer); ok {
+		t.rClose = rc
+	}
+	return t
+}
+
+// Close closes the underlying reader to unblock any goroutines blocked
+// on ReadBytes in read().
+func (t *Transport) Close() error {
+	if t.rClose != nil {
+		return t.rClose.Close()
+	}
+	return nil
 }
 
 // Call sends a JSON-RPC request and waits for a response.
@@ -112,8 +128,12 @@ func (t *Transport) read(ctx context.Context) (*RPCResponse, error) {
 		}
 		return &resp, nil
 	case <-time.After(timeout):
+		// Close the underlying reader so the goroutine blocked on
+		// ReadBytes unblocks and does not leak or corrupt future reads.
+		t.Close()
 		return nil, fmt.Errorf("timeout after %s", timeout)
 	case <-ctx.Done():
+		t.Close()
 		return nil, fmt.Errorf("context: %w", ctx.Err())
 	}
 }

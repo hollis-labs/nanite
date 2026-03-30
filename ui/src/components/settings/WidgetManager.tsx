@@ -111,8 +111,15 @@ export function WidgetManager() {
         />
       )
     }
-    // Fallback: widget not in map (shouldn't happen)
-    setDetailWidgetId(null)
+    // Fallback: widget not in map — render a safe fallback with a back button.
+    return (
+      <div className="p-4 text-sm text-fg-muted">
+        <button onClick={() => setDetailWidgetId(null)} className="text-xs text-fg-secondary hover:text-fg">
+          &larr; Back
+        </button>
+        <p className="mt-2">Widget &quot;{detailWidgetId}&quot; not found.</p>
+      </div>
+    )
   }
 
   // Show plugin config panel when a plugin is selected.

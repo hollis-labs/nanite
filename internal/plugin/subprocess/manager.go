@@ -89,6 +89,7 @@ type Manager struct {
 	transport *Transport
 	restarts  int
 	lastStart time.Time
+	waitCh    chan error // closed after cmd.Wait() returns; single waiter
 
 	// healthCancel stops the health check goroutine.
 	healthCancel context.CancelFunc
@@ -118,7 +119,10 @@ func (m *Manager) Start(ctx context.Context) (*Transport, error) {
 
 	m.state = StateStarting
 
-	cmd := exec.CommandContext(ctx, m.cfg.Command, m.cfg.Args...)
+	// Do not use CommandContext — that ties the process lifetime to the
+	// caller's context (often a short startup timeout). The process must
+	// outlive the startup phase; shutdown is handled by Stop().
+	cmd := exec.Command(m.cfg.Command, m.cfg.Args...)
 	if m.cfg.WorkDir != "" {
 		cmd.Dir = m.cfg.WorkDir
 	}
@@ -152,12 +156,17 @@ func (m *Manager) Start(ctx context.Context) (*Transport, error) {
 
 	transport := NewTransport(stdout, stdin)
 
+	waitCh := make(chan error, 1)
 	m.cmd = cmd
 	m.transport = transport
 	m.lastStart = time.Now()
 	m.state = StateRunning
+	m.waitCh = waitCh
 
-	// Monitor for unexpected exit.
+	// Single goroutine calls cmd.Wait(); both waitForExit and Stop observe waitCh.
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
 	go m.waitForExit(stderr)
 
 	// Start periodic health checks if configured.
@@ -187,6 +196,7 @@ func (m *Manager) Stop() error {
 
 	cmd := m.cmd
 	transport := m.transport
+	waitCh := m.waitCh
 	m.mu.Unlock()
 
 	// Try graceful shutdown via plugin/unload.
@@ -196,19 +206,16 @@ func (m *Manager) Stop() error {
 		cancel()
 	}
 
-	// Give the process a moment to exit cleanly.
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-
+	// Wait for the process to exit, using the single waitCh from Start().
 	select {
-	case <-done:
+	case <-waitCh:
 		// Exited cleanly.
 	case <-time.After(m.cfg.ShutdownTimeout):
 		// Force kill the process group.
 		if cmd.Process != nil {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
-		<-done
+		<-waitCh
 	}
 
 	m.mu.Lock()
@@ -243,7 +250,7 @@ func (m *Manager) Restarts() int {
 
 // waitForExit monitors the subprocess and handles unexpected exits.
 func (m *Manager) waitForExit(stderr *ringBuffer) {
-	err := m.cmd.Wait()
+	err := <-m.waitCh
 
 	m.mu.Lock()
 	if m.state == StateStopping || m.state == StateStopped {

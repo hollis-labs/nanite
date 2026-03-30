@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -107,7 +108,7 @@ func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Reques
 		Name     string `json:"name"`
 		URL      string `json:"url"`
 		Enabled  *bool  `json:"enabled"`
-		Priority int    `json:"priority"`
+		Priority *int   `json:"priority"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		cs.errorResp(w, http.StatusBadRequest, "invalid request body")
@@ -134,8 +135,8 @@ func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Reques
 		enabled = *req.Enabled
 	}
 	priority := existing.Priority
-	if req.Priority != 0 {
-		priority = req.Priority
+	if req.Priority != nil {
+		priority = *req.Priority
 	}
 
 	if err := cs.store.UpdateCatalogSource(id, name, url, enabled, priority); err != nil {
@@ -168,9 +169,15 @@ func (cs *catalogState) handleSetSourceKey(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Validate key format if non-empty (64 hex chars = 32 bytes).
-	if req.PublicKey != "" && len(req.PublicKey) != 64 {
-		cs.errorResp(w, http.StatusBadRequest, "public_key must be a 64-character hex string (32 bytes Ed25519)")
-		return
+	if req.PublicKey != "" {
+		if len(req.PublicKey) != 64 {
+			cs.errorResp(w, http.StatusBadRequest, "public_key must be a 64-character hex string (32 bytes Ed25519)")
+			return
+		}
+		if _, err := hex.DecodeString(req.PublicKey); err != nil {
+			cs.errorResp(w, http.StatusBadRequest, "public_key must be valid hex encoding")
+			return
+		}
 	}
 
 	if err := cs.store.SetCatalogSourcePublicKey(id, req.PublicKey); err != nil {

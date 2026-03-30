@@ -62,12 +62,15 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 	mux.HandleFunc("GET /api/plugins/{name}/ui/{file...}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 		file := r.PathValue("file")
-		// Prevent path traversal.
-		if strings.Contains(file, "..") {
+
+		// Resolve the allowed base directory and the requested path,
+		// then verify the target stays within the plugin's ui/ directory.
+		baseDir := filepath.Join(pluginsDir, name, "ui")
+		target := filepath.Clean(filepath.Join(baseDir, file))
+		if !strings.HasPrefix(target, filepath.Clean(baseDir)+string(filepath.Separator)) && target != filepath.Clean(baseDir) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		target := filepath.Join(pluginsDir, name, "ui", file)
 		http.ServeFile(w, r, target)
 	})
 	mux.HandleFunc("POST /api/plugins/enable", pms.handleEnable)

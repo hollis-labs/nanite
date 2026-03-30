@@ -101,14 +101,17 @@ func (sp *SubprocessPlugin) Status() plugin.PluginStatus {
 // Load starts the subprocess, performs the init handshake, and registers
 // all capabilities declared in the plugin's load manifest with the host.
 func (sp *SubprocessPlugin) Load(host plugin.Host) error {
-	ctx, cancel := context.WithTimeout(host.Context(), sp.mgr.cfg.StartupTimeout)
-	defer cancel()
-
-	// 1. Start the subprocess.
-	transport, err := sp.mgr.Start(ctx)
+	// Use a separate timeout context for the init handshake only.
+	// The process itself must not be tied to this context — canceling it
+	// would kill the subprocess as soon as Load returns.
+	transport, err := sp.mgr.Start(host.Context())
 	if err != nil {
 		return fmt.Errorf("start subprocess: %w", err)
 	}
+
+	// Short-lived context for the handshake RPCs only.
+	ctx, cancel := context.WithTimeout(host.Context(), sp.mgr.cfg.StartupTimeout)
+	defer cancel()
 
 	// 2. Init handshake — send config, receive identity.
 	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, &InitParams{

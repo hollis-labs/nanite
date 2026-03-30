@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { api } from '@/lib/api'
-import type { A2AMessage, A2AMessageType, Agent } from '@/lib/types'
+import type { A2AMessage, A2AMessageType } from '@/lib/types'
 
 const TYPE_LABELS: Record<A2AMessageType, string> = {
   message: 'Message',
@@ -69,7 +69,7 @@ export function InboxContent({ agentId }: InboxContentProps) {
   })
 
   const agentNameMap = new Map<string, string>()
-  agents.forEach((a: Agent) => {
+  agents.forEach((a) => {
     agentNameMap.set(a.id, a.name)
     agentNameMap.set(a.slug, a.name)
   })

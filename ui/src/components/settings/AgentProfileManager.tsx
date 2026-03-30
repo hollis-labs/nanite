@@ -50,7 +50,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ["agent-profiles"],
-    queryFn: api.listAgentProfiles,
+    queryFn: api.listAgents,
   });
 
   // Collect all unique tags across agents for autocomplete

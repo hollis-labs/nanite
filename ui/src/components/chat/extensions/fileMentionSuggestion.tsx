@@ -57,7 +57,7 @@ export const fileMentionSuggestion: Omit<SuggestionOptions<FileResult>, 'editor'
 
         popup = document.createElement('div')
         popup.style.position = 'absolute'
-        popup.style.zIndex = '50'
+        popup.style.zIndex = '9999'
         document.body.appendChild(popup)
 
         root = createRoot(popup)
@@ -90,6 +90,7 @@ export const fileMentionSuggestion: Omit<SuggestionOptions<FileResult>, 'editor'
         <FileMentionMenu
           items={props.items}
           command={props.command}
+          query={props.query}
           ref={(ref) => {
             menuRef = ref
           }}

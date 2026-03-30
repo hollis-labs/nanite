@@ -1,6 +1,5 @@
 import type {
   A2AMessage,
-  Agent,
   AgentModeProfile,
   AgentProfile,
   Artifact,
@@ -205,15 +204,15 @@ export const api = {
     return res.json();
   },
 
-  // Agents
-  listAgents: async (): Promise<Agent[]> => {
+  // Agents — endpoint returns full AgentProfile shape
+  listAgents: async (): Promise<AgentProfile[]> => {
     const res = await fetch(`${API_BASE}/agents`);
     if (!res.ok) throw new Error(`Failed to list agents: ${res.status}`);
     return res.json();
   },
 
-  // Agent Profiles (full detail) — same endpoint, wider type
-  listAgentProfiles: async (): Promise<AgentProfile[]> => api.listAgents() as Promise<AgentProfile[]>,
+  /** @deprecated Use listAgents — same endpoint, same return type */
+  listAgentProfiles: async (): Promise<AgentProfile[]> => api.listAgents(),
 
   getAgentProfile: async (
     id: string,

@@ -56,7 +56,7 @@ export function ChatHeader() {
     queryFn: api.listAgents,
   })
 
-  const primaryAgent = sessionAgents.find((a) => (a as any).is_primary === true || (a as any).is_primary === 1 || a.role === 'primary')
+  const primaryAgent = sessionAgents.find((a) => a.role === 'primary')
   const primaryAgentProfile = allAgents.find((a) => a.id === primaryAgent?.agent_id)
   const activeAgentName = primaryAgentProfile?.name || 'Conduit'
 
@@ -75,7 +75,7 @@ export function ChatHeader() {
   const sessionProvider = session?.provider || sessionFromList?.provider || ''
 
   // Model display — from session or agent profile
-  const modelName = session?.model || activeModel || (primaryAgentProfile as any)?.default_model || null
+  const modelName = session?.model || activeModel || primaryAgentProfile?.default_model || null
   const shortModel = modelName ? modelName.split('/').pop()?.replace(/-\d{8}$/, '') : null
 
   // Switch primary agent

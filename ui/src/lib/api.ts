@@ -2,8 +2,11 @@ import type {
   A2AMessage,
   AgentModeProfile,
   AgentProfile,
+  ApprovalDecision,
+  ApprovalScope,
   Artifact,
   Bookmark,
+  BrokerDecision,
   CatalogBrowseEntry,
   CatalogSource,
   CLIDetectionResult,
@@ -16,6 +19,7 @@ import type {
   Message,
   MessagePage,
   ModelRecord,
+  PermissionMode,
   PluginConfig,
   PluginInfo,
   PluginKeybinding,
@@ -1172,6 +1176,55 @@ export const api = {
   }> => {
     const res = await fetch(`${API_BASE}/plugins/keybindings`);
     if (!res.ok) throw new Error(`Failed to list keybindings: ${res.status}`);
+    return res.json();
+  },
+
+  // --- vNext: Permissions & Approvals ---
+
+  respondToApproval: async (
+    sessionId: string,
+    requestId: string,
+    decision: ApprovalDecision,
+    scope?: ApprovalScope,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/approvals/${requestId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, scope }),
+    });
+    if (!res.ok) throw new Error(`Failed to respond to approval: ${res.status}`);
+    return res.json();
+  },
+
+  getPermissionMode: async (): Promise<{ mode: PermissionMode }> => {
+    const res = await fetch(`${API_BASE}/permissions/mode`);
+    if (!res.ok) throw new Error(`Failed to get permission mode: ${res.status}`);
+    return res.json();
+  },
+
+  setPermissionMode: async (mode: PermissionMode): Promise<{ mode: PermissionMode }> => {
+    const res = await fetch(`${API_BASE}/permissions/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    if (!res.ok) throw new Error(`Failed to set permission mode: ${res.status}`);
+    return res.json();
+  },
+
+  // --- vNext: Broker Decisions ---
+
+  getBrokerDecisions: async (sessionId: string, limit = 50): Promise<BrokerDecision[]> => {
+    const res = await fetch(`${API_BASE}/broker/decisions?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`);
+    if (!res.ok) throw new Error(`Failed to get broker decisions: ${res.status}`);
+    return res.json();
+  },
+
+  // --- vNext: Execution Metrics (with debug snapshots) ---
+
+  getExecutionMetrics: async (sessionId: string): Promise<ExecutionMetrics[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/metrics`);
+    if (!res.ok) throw new Error(`Failed to get execution metrics: ${res.status}`);
     return res.json();
   },
 };

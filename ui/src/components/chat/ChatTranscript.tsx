@@ -6,7 +6,9 @@ import { api } from "@/lib/api";
 import type { AgentMode, Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
+import { ApprovalCard } from "./ApprovalCard";
 import { ChatMessage } from "./ChatMessage";
+import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
 import { MessageContent } from "./MessageContent";
 import { ThinkingIndicator } from "./ThinkingIndicator";
@@ -48,6 +50,7 @@ export function ChatTranscript({
   const toolCallDisplayMode = useChatStore((s) => s.toolCallDisplayMode);
   const saveToolCallDisplayMode = useChatStore((s) => s.saveToolCallDisplayMode);
   const loadToolCallDisplayMode = useChatStore((s) => s.loadToolCallDisplayMode);
+  const pendingApprovals = useChatStore((s) => s.pendingApprovals);
   const chatErrors = useChatStore((s) => s.chatErrors);
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
@@ -135,6 +138,7 @@ export function ChatTranscript({
     streamingContent,
     toolCalls.length,
     toolWarnings.length,
+    pendingApprovals.length,
     chatErrors.length,
     checkScrollPosition,
   ]);
@@ -216,6 +220,7 @@ export function ChatTranscript({
     streamingContent,
     toolCalls.length,
     toolWarnings.length,
+    pendingApprovals.length,
     chatErrors.length,
     isAtBottom,
     userHasScrolled,
@@ -260,15 +265,32 @@ export function ChatTranscript({
           </div>
         )}
 
-        {messages.map((msg) => (
-          <ChatMessage
-            key={msg.id}
-            message={msg}
-            isBookmarked={bookmarkedMessageIds.has(msg.id)}
-            onToggleBookmark={handleToggleBookmark}
-            {...(onSendMessage && { onSendMessage })}
-          />
-        ))}
+        {messages.map((msg, idx) => {
+          // Show compaction divider before the first non-compacted message
+          // when earlier messages were compacted
+          let showCompactionDivider = false;
+          if (idx > 0) {
+            try {
+              const prevMeta = JSON.parse(messages[idx - 1].metadata || '{}');
+              const currMeta = JSON.parse(msg.metadata || '{}');
+              if (prevMeta.compacted && !currMeta.compacted) {
+                showCompactionDivider = true;
+              }
+            } catch { /* ignore parse errors */ }
+          }
+
+          return (
+            <div key={msg.id}>
+              {showCompactionDivider && <CompactionDivider />}
+              <ChatMessage
+                message={msg}
+                isBookmarked={bookmarkedMessageIds.has(msg.id)}
+                onToggleBookmark={handleToggleBookmark}
+                {...(onSendMessage && { onSendMessage })}
+              />
+            </div>
+          );
+        })}
 
         {/* Tool call indicators during streaming */}
         {isStreaming && toolCalls.length > 0 && (
@@ -290,6 +312,11 @@ export function ChatTranscript({
 
         {/* Tool warning banner during streaming */}
         {isStreaming && toolWarnings.length > 0 && <ToolWarningBanner warnings={toolWarnings} />}
+
+        {/* Approval cards — inline in the message stream */}
+        {pendingApprovals.map((approval) => (
+          <ApprovalCard key={approval.request_id} approval={approval} />
+        ))}
 
         {/* Streaming message */}
         {isStreaming && streamingContent && (
@@ -336,7 +363,7 @@ export function ChatTranscript({
       {userHasScrolled && !isAtBottom && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 bg-blue-500 hover:bg-blue-600 text-white rounded-full p-3 shadow-lg transition-all duration-200 hover:scale-105"
+          className="absolute bottom-4 right-4 bg-accent hover:bg-accent-hover text-white rounded-full p-3 shadow-lg transition-all duration-200 hover:scale-105"
           aria-label="Scroll to bottom"
         >
           <ArrowDown className="w-5 h-5" />

@@ -102,6 +102,21 @@ export function AgentDetailView({
     [onUpdateAgent],
   );
 
+  // Parse agent.settings JSON for debug toggle
+  const parseSettings = (): Record<string, unknown> => {
+    try { return JSON.parse(agent.settings || "{}"); }
+    catch { return {}; }
+  };
+
+  const agentSettings = parseSettings();
+  const debugMode = agentSettings.debug === true;
+
+  const toggleDebugMode = useCallback(() => {
+    const current = (() => { try { return JSON.parse(agent.settings || "{}"); } catch { return {}; } })();
+    const updated = { ...current, debug: !current.debug };
+    onUpdateAgent({ settings: JSON.stringify(updated) } as Partial<AgentProfile>);
+  }, [agent.settings, onUpdateAgent]);
+
   const startEditing = useCallback((field: string, value: string) => {
     setEditField(field);
     setEditValue(value);
@@ -281,6 +296,25 @@ export function AgentDetailView({
                 <span className={`text-xs font-medium ${agent.can_execute ? "text-success" : "text-fg-secondary"}`}>
                   {agent.can_execute ? "Yes" : "No"}
                 </span>
+              </div>
+              <div className="flex items-center gap-3 py-1.5 rounded px-1 -mx-1">
+                <span className="text-xs text-fg-muted w-28 shrink-0">Debug Mode</span>
+                <div className="flex items-center gap-2 flex-1">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={debugMode}
+                    onClick={toggleDebugMode}
+                    className={`relative shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      debugMode ? 'bg-toggle-on' : 'bg-zinc-700'
+                    }`}
+                  >
+                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                      debugMode ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                    }`} />
+                  </button>
+                  <span className="text-[11px] text-fg-muted">Capture turn snapshots and execution details</span>
+                </div>
               </div>
             </div>
           </Card>

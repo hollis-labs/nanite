@@ -143,7 +143,8 @@ export interface StreamEvent {
     | "tool_warning"
     | "status"
     | "circuit_open"
-    | "session_takeover";
+    | "session_takeover"
+    | "approval_request";
   content?: string;
   message_id?: string;
   agent_id?: string;
@@ -242,6 +243,7 @@ export interface ExecutionMetrics {
   is_utility: boolean;
   stop_reason: string;
   error: string;
+  debug_snapshots: string;
   created_at: string;
 }
 
@@ -376,6 +378,59 @@ export interface SessionAgent {
   status: "active" | "idle" | "offline";
 }
 
+// --- Permission & Approval ---
+
+export type PermissionMode = "default" | "accept-edits" | "plan" | "yolo";
+
+export type ApprovalDecision = "allow" | "deny";
+export type ApprovalScope = "once" | "session";
+
+export interface ApprovalRequest {
+  request_id: string;
+  tool: string;
+  input: Record<string, unknown>;
+  reason: string;
+}
+
+export interface PendingApproval extends ApprovalRequest {
+  receivedAt: number; // Date.now() when SSE event arrived
+  resolved?: {
+    decision: ApprovalDecision;
+    scope?: ApprovalScope;
+  };
+}
+
+// --- Broker Decisions ---
+
+export interface BrokerDecision {
+  id: number;
+  session_id: string;
+  intent: string;
+  layer_reached: string;
+  selected_tools: string[];
+  signals: string;
+  created_at: string;
+}
+
+// --- Turn Snapshots ---
+
+export interface TurnSnapshot {
+  site: string;
+  reason: string;
+  tool_calls: TurnSnapshotToolCall[];
+  iteration: number;
+  max_turns: number;
+  timestamp: string;
+}
+
+export interface TurnSnapshotToolCall {
+  name: string;
+  duration_ms: number;
+  duration_ns?: number;
+  parallel: boolean;
+  success?: boolean;
+}
+
 // --- Envelopes ---
 
 export interface Envelope {
@@ -384,7 +439,7 @@ export interface Envelope {
   type: string;
   proposals?: Proposal[];
   questions?: Question[];
-  approval?: ApprovalRequest;
+  approval?: EnvelopeApprovalRequest;
   status?: { phase: string; progress: number };
   data?: Record<string, unknown>;
 }
@@ -410,7 +465,7 @@ export interface Question {
   default?: string;
 }
 
-export interface ApprovalRequest {
+export interface EnvelopeApprovalRequest {
   description: string;
   risk_level?: "low" | "medium" | "high";
   details?: string;

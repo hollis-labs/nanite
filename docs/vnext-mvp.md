@@ -351,7 +351,12 @@ These items from the decisions doc and backend TODO are already done:
 - **Envelope sync fragility** — Consider a build-time check that validates all backend envelope types have frontend registry entries. Doesn't need to be auto-generated, just validated.
 - **Inconsistent nil checks for optional deps** — Establish a pattern (e.g., service methods return typed errors for unavailable deps) and apply it to the handlers touched during this phase.
 
-### 7.3 Test coverage audit
+### 7.3 Context & debug panel polish
+- **Context widget: real tool token costs** — Replace the hardcoded 50-token-per-tool-call estimate in `context_breakdown.go` with actual token costs from the provider's usage response. Wire tool_use block token consumption into the context breakdown so the inspector shows accurate numbers, not event-log-count × flat estimate.
+- **Slot inspector endpoint** — Expose per-slot context window data (slot names, token counts, cache hit/miss) via a new debug API endpoint. The frontend `SlotInspectorPanel` is built and waiting for this data.
+- **Turn snapshot field alignment** — Ensure backend snapshot JSON field names match frontend types (already partially fixed: `continue_site` → `site`, `duration_ns` → `duration_ms`). Consider normalizing at the backend to avoid frontend mapping.
+
+### 7.4 Test coverage audit
 - Run coverage report, identify gaps in critical paths (chat loop, tool execution, permission checks)
 - Add tests for any untested Phase 0-6 work
 - Fix pre-existing test failures: `TestAuthMiddlewareEnabled`, stale MCP tool count test

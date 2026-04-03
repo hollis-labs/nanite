@@ -1,9 +1,17 @@
 import { useMemo, useEffect, useState, useCallback, useRef } from 'react'
 import { GripVertical, X, ChevronDown } from 'lucide-react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { usePermissionMode } from '@/hooks/usePermissionMode'
 import { useSettings, useSettingsMutation, useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
-import type { ToolCallDisplayMode } from '@/lib/types'
+import type { PermissionMode, ToolCallDisplayMode } from '@/lib/types'
+
+const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; description: string }[] = [
+  { value: 'default', label: 'Default', description: 'Prompt for destructive/write operations' },
+  { value: 'accept-edits', label: 'Accept Edits', description: 'Auto-accept file edits, prompt for shell' },
+  { value: 'plan', label: 'Plan (Read-Only)', description: 'No modifications allowed' },
+  { value: 'yolo', label: 'Yolo', description: 'Skip all permission prompts' },
+]
 
 const TOOL_DISPLAY_OPTIONS: { value: ToolCallDisplayMode; label: string }[] = [
   { value: 'indicator', label: 'Indicator' },
@@ -109,7 +117,7 @@ function Toggle({
           ? variant === 'warning'
             ? 'bg-amber-600'
             : 'bg-toggle-on'
-          : 'bg-surface-hover'
+          : 'bg-zinc-700'
       }`}
     >
       <span
@@ -238,6 +246,7 @@ function FallbackChain({
 export function PreferencesPanel() {
   const { data: settings } = useSettings()
   const mutation = useSettingsMutation()
+  const { mode: permissionMode, setMode: setPermissionMode } = usePermissionMode()
   const { data: providers } = useProviders()
   const { data: models } = useModels()
   const { data: agents } = useQuery({
@@ -316,6 +325,23 @@ export function PreferencesPanel() {
             onChange={(v) => handleChange('default_agent', v)}
           />
         </SettingsRow>
+      </SettingsCard>
+
+      <SettingsCard title="Permission Mode" description="Controls how tool execution permissions are handled">
+        <SettingsRow label="Mode" description="Determines which tool calls require approval">
+          <SettingsSelect
+            value={permissionMode}
+            options={PERMISSION_MODE_OPTIONS}
+            onChange={(v) => setPermissionMode(v as PermissionMode)}
+          />
+        </SettingsRow>
+        {permissionMode !== 'default' && (
+          <div className="pb-2">
+            <p className="text-[10px] text-fg-muted">
+              {PERMISSION_MODE_OPTIONS.find((o) => o.value === permissionMode)?.description}
+            </p>
+          </div>
+        )}
       </SettingsCard>
 
       <SettingsCard title="Utility Model" description="Used for auto-title, auto-tags, and summarization">

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo, CLIActiveInfo } from '@/lib/types'
+import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo, CLIActiveInfo, PendingApproval } from '@/lib/types'
 
 interface ChatState {
   // Streaming
@@ -25,6 +25,12 @@ interface ChatState {
   toolWarnings: ToolWarning[]
   addToolWarning: (warning: ToolWarning) => void
   clearToolWarnings: () => void
+
+  // Pending approvals (vNext permission system)
+  pendingApprovals: PendingApproval[]
+  addPendingApproval: (approval: PendingApproval) => void
+  resolvePendingApproval: (requestId: string, decision: PendingApproval['resolved']) => void
+  clearPendingApprovals: () => void
 
   // Text-only mode (agent has 0 MCP tools)
   textOnlyMode: boolean
@@ -99,6 +105,18 @@ export const useChatStore = create<ChatState>((set) => ({
   addToolWarning: (warning: ToolWarning) =>
     set((state: ChatState) => ({ toolWarnings: [...state.toolWarnings, warning] })),
   clearToolWarnings: () => set({ toolWarnings: [] }),
+
+  // Pending approvals
+  pendingApprovals: [],
+  addPendingApproval: (approval: PendingApproval) =>
+    set((state: ChatState) => ({ pendingApprovals: [...state.pendingApprovals, approval] })),
+  resolvePendingApproval: (requestId: string, decision: PendingApproval['resolved']) =>
+    set((state: ChatState) => ({
+      pendingApprovals: state.pendingApprovals.map((a) =>
+        a.request_id === requestId ? { ...a, resolved: decision } : a
+      ),
+    })),
+  clearPendingApprovals: () => set({ pendingApprovals: [] }),
 
   // Text-only mode
   textOnlyMode: false,

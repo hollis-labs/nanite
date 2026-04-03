@@ -13,6 +13,17 @@ Items deferred from the MVP scope. These build on top of the service layer and M
 
 ## High Priority (first post-MVP wave)
 
+### Token Breakdown: Tool Call vs User Content
+**Decision status:** Decided — post-MVP enhancement.
+
+The Token Usage widget correctly tracks cumulative input/output/cache tokens (Anthropic's API includes tool_use blocks in InputTokens). However, there's no way to distinguish how much of InputTokens came from tool calls vs. user content. Add a separate `tool_input_tokens` field to the usage tracking so the Token Usage widget can show a breakdown (e.g., "Input: 12,400 tokens — 8,200 content, 4,200 tool calls").
+
+**Work items:**
+- Track tool_use block token costs separately in `RecordUsage()` (requires parsing the provider's per-block token breakdown if available, or estimating from tool input JSON size)
+- Add `tool_input_tokens` column to `token_usage` table
+- Update `SessionUsageSummary` to include the breakdown
+- Frontend: add tool vs content split in TokenUsageWidget
+
 ### Memory & Continuity (§16)
 **Decision status:** Mostly decided. Q16.3 (dream process) deferred.
 

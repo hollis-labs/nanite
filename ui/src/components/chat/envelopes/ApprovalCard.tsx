@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { ApprovalRequest } from '@/lib/types'
+import type { EnvelopeApprovalRequest } from '@/lib/types'
 
 interface ApprovalCardProps {
-  approval: ApprovalRequest
+  approval: EnvelopeApprovalRequest
 }
 
 const RISK_STYLES = {

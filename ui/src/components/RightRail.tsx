@@ -1,5 +1,5 @@
 import { Suspense, useState, useCallback } from 'react'
-import { LayoutGrid, Mail, Package, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
+import { Bug, LayoutGrid, Mail, Package, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useQuery } from '@tanstack/react-query'
@@ -10,6 +10,7 @@ import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { resolveIcon } from '@/lib/icons'
 import { getSlotComponent } from '@/generated/plugin-slot-components'
 import type { UserSettings } from '@/lib/types'
+import { DebugPanelsContainer } from './chat/debug/DebugPanelsContainer'
 import { WidgetRenderer } from './widgets/WidgetRenderer'
 import { DEFAULT_WIDGET_ORDER } from '@/generated/plugin-widgets'
 import { ArtifactsContent } from './drawers/ArtifactsContent'
@@ -104,9 +105,12 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
     } as Partial<UserSettings>)
   }, [settings?.ext_settings, settingsMutation])
 
+  const developerMode = settings?.developer_mode ?? false
+
   // Build merged tabs list
   const allTabs = [
     ...CORE_TABS.map((t) => ({ ...t })),
+    ...(developerMode ? [{ id: 'debug' as const, icon: Bug, label: 'Debug' }] : []),
     ...pluginTabs.map((entry) => ({
       id: entry.id,
       icon: resolveIcon(entry.icon),
@@ -212,8 +216,16 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
           <InboxContent agentId={inboxAgentId} />
         )}
 
+        {activeTab === 'debug' && developerMode && (
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-3">
+              <DebugPanelsContainer />
+            </div>
+          </ScrollArea>
+        )}
+
         {/* Plugin-registered right rail tab content */}
-        {!['widgets', 'artifacts', 'inbox'].includes(activeTab) && (() => {
+        {!['widgets', 'artifacts', 'inbox', 'debug'].includes(activeTab) && (() => {
           const pluginEntry = pluginTabs.find((e) => e.id === activeTab)
           if (!pluginEntry?.component) return null
           const PluginComponent = getSlotComponent(pluginEntry.component)

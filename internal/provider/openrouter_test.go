@@ -44,8 +44,11 @@ func TestOpenRouter_Complete(t *testing.T) {
 	if !caps.SupportsStreamJSON {
 		t.Error("expected SupportsStreamJSON")
 	}
-	if caps.MaxTokens != 200000 {
-		t.Errorf("expected MaxTokens 200000, got %d", caps.MaxTokens)
+	if caps.MaxTokens != 0 {
+		t.Errorf("expected MaxTokens 0, got %d", caps.MaxTokens)
+	}
+	if caps.ContextWindowSize != 200000 {
+		t.Errorf("expected ContextWindowSize 200000, got %d", caps.ContextWindowSize)
 	}
 }
 

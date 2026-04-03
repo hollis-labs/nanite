@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSprintPlanningStore } from "@/components/plugins/sprint/useSprintPlanningStore";
 import { api } from "@/lib/api";
-import type { ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning } from "@/lib/types";
+import type { ApprovalRequest, ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning } from "@/lib/types";
 import { useChatStore } from "@/stores/useChatStore";
 
 const PAGE_SIZE = 50;
@@ -18,6 +18,7 @@ const SSE = {
   SESSION_TAKEOVER: "session_takeover",
   STREAM_END: "stream_end",
   ERROR: "error",
+  APPROVAL_REQUEST: "approval_request",
 } as const;
 
 function makeChatError(
@@ -207,6 +208,7 @@ export function useChat(sessionId: string | null) {
       store().setStreamingSessionId(sessionId);
       store().clearToolCalls();
       store().clearToolWarnings();
+      store().clearPendingApprovals();
       clearPersistedErrorState(sessionId);
       console.log("[useChat] streaming=true, sending message...");
 
@@ -268,6 +270,21 @@ export function useChat(sessionId: string | null) {
             } catch {
               console.warn("[useChat] Failed to parse tool_warning data:", data.data);
             }
+          }
+        });
+
+        es.addEventListener(SSE.APPROVAL_REQUEST, (e: MessageEvent) => {
+          try {
+            const evt: StreamEvent = JSON.parse(e.data as string);
+            if (evt.data) {
+              const approval = JSON.parse(evt.data) as ApprovalRequest;
+              store().addPendingApproval({
+                ...approval,
+                receivedAt: Date.now(),
+              });
+            }
+          } catch (err) {
+            console.warn("[useChat] Failed to parse approval_request event:", e.data, err);
           }
         });
 

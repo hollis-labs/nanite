@@ -38,8 +38,11 @@ func TestOpenZen_Capabilities(t *testing.T) {
 	if caps.SupportsToolCalling {
 		t.Error("expected no SupportsToolCalling")
 	}
-	if caps.MaxTokens != 200000 {
-		t.Errorf("expected MaxTokens 200000, got %d", caps.MaxTokens)
+	if caps.MaxTokens != 0 {
+		t.Errorf("expected MaxTokens 0, got %d", caps.MaxTokens)
+	}
+	if caps.ContextWindowSize != 200000 {
+		t.Errorf("expected ContextWindowSize 200000, got %d", caps.ContextWindowSize)
 	}
 }
 

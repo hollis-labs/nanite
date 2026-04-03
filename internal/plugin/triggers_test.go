@@ -35,6 +35,19 @@ func (c *testConnector) Health(_ context.Context) error {
 	return c.healthErr
 }
 
+// waitForSend polls the connector's sendCount until it reaches the expected value
+// or the timeout expires. Dispatch fires goroutines, so we must wait for them.
+func waitForSend(t *testing.T, conn *testConnector, expected int32, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if conn.sendCount.Load() >= expected {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func newTestHostWithStore(t *testing.T) (*Host, *store.Store) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -71,6 +84,7 @@ func TestTriggerDispatch_BasicFlow(t *testing.T) {
 	// Emit the event.
 	event := NewEvent("session.end", "conduit", EventData{SessionID: "s1"})
 	h.triggers.Dispatch(event)
+	waitForSend(t, conn, 1, 2*time.Second)
 
 	if conn.sendCount.Load() != 1 {
 		t.Errorf("expected 1 send, got %d", conn.sendCount.Load())
@@ -104,6 +118,7 @@ func TestTriggerDispatch_FilterExpr(t *testing.T) {
 	// Event that matches the filter.
 	matches := NewEvent("tool.called", "conduit", EventData{ToolName: "web_fetch"})
 	h.triggers.Dispatch(matches)
+	waitForSend(t, conn, 1, 2*time.Second)
 	if conn.sendCount.Load() != 1 {
 		t.Errorf("expected 1 send for matching filter, got %d", conn.sendCount.Load())
 	}
@@ -128,6 +143,7 @@ func TestTriggerDispatch_PayloadTemplate(t *testing.T) {
 
 	event := NewEvent("session.end", "conduit", EventData{SessionID: "abc-123"})
 	h.triggers.Dispatch(event)
+	waitForSend(t, conn, 1, 2*time.Second)
 
 	if conn.sendCount.Load() != 1 {
 		t.Fatalf("expected 1 send, got %d", conn.sendCount.Load())
@@ -159,6 +175,7 @@ func TestTriggerDispatch_EmptyTemplate(t *testing.T) {
 
 	event := NewEvent("session.start", "conduit", EventData{SessionID: "s1", AgentID: "a1"})
 	h.triggers.Dispatch(event)
+	waitForSend(t, conn, 1, 2*time.Second)
 
 	if conn.sendCount.Load() != 1 {
 		t.Fatalf("expected 1 send, got %d", conn.sendCount.Load())
@@ -238,6 +255,7 @@ func TestTriggerDispatch_RetryOnFailure(t *testing.T) {
 
 	event := NewEvent("session.end", "conduit", EventData{SessionID: "s1"})
 	h.triggers.Dispatch(event)
+	waitForSend(t, conn, 3, 5*time.Second)
 
 	// 1 initial + 2 retries = 3 total attempts.
 	if conn.sendCount.Load() != 3 {
@@ -372,10 +390,15 @@ func TestEventStreamUnsubscribe(t *testing.T) {
 	ch := h.SubscribeEvents()
 	h.UnsubscribeEvents(ch)
 
-	// Channel should be closed.
-	_, open := <-ch
-	if open {
-		t.Error("expected channel to be closed after unsubscribe")
+	// UnsubscribeEvents does NOT close the channel (to avoid send-to-closed panics
+	// in broadcastEvent). Verify the subscriber was removed by broadcasting an event
+	// and confirming it does NOT arrive on the unsubscribed channel.
+	h.broadcastEvent(pluginsdk.Event{Type: "after.unsub", Source: "test"})
+	select {
+	case <-ch:
+		t.Error("received event on unsubscribed channel")
+	case <-time.After(100 * time.Millisecond):
+		// Expected — no event arrives.
 	}
 
 	// Should not panic when broadcasting with no subscribers.

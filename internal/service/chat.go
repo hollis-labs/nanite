@@ -146,8 +146,11 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	// Start async generation.
-	go s.generateResponse(ctx, sessionID, assistantMsgID, content, ch)
+	// Start async generation with a detached context. The HTTP request context
+	// is cancelled when the handler returns (202 Accepted), but generateResponse
+	// runs in the background and must not be tied to the request lifecycle.
+	bgCtx := context.WithoutCancel(ctx)
+	go s.generateResponse(bgCtx, sessionID, assistantMsgID, content, ch)
 
 	return assistantMsgID, nil
 }
@@ -190,7 +193,8 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	go s.generateResponse(ctx, sessionID, assistantMsgID, userContent, ch)
+	bgCtx := context.WithoutCancel(ctx)
+	go s.generateResponse(bgCtx, sessionID, assistantMsgID, userContent, ch)
 
 	return assistantMsgID, nil
 }
@@ -220,7 +224,8 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, toSessionID)
 
-	go s.generateResponse(ctx, toSessionID, assistantMsgID, content, ch)
+	bgCtx := context.WithoutCancel(ctx)
+	go s.generateResponse(bgCtx, toSessionID, assistantMsgID, content, ch)
 
 	return assistantMsgID, nil
 }

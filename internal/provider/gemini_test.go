@@ -98,7 +98,10 @@ func TestGeminiCapabilities(t *testing.T) {
 	if !caps.SupportsImageInput {
 		t.Error("expected SupportsImageInput to be true")
 	}
-	if caps.MaxTokens != 1048576 {
-		t.Errorf("expected MaxTokens=1048576, got %d", caps.MaxTokens)
+	if caps.MaxTokens != 65536 {
+		t.Errorf("expected MaxTokens=65536, got %d", caps.MaxTokens)
+	}
+	if caps.ContextWindowSize != 1048576 {
+		t.Errorf("expected ContextWindowSize=1048576, got %d", caps.ContextWindowSize)
 	}
 }

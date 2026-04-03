@@ -55,8 +55,11 @@ func TestAnthropicCapabilities(t *testing.T) {
 	if !caps.SupportsImageInput {
 		t.Error("Anthropic should support image input")
 	}
-	if caps.MaxTokens != 200000 {
-		t.Errorf("Anthropic MaxTokens should be 200000, got %d", caps.MaxTokens)
+	if caps.MaxTokens != 16384 {
+		t.Errorf("Anthropic MaxTokens should be 16384, got %d", caps.MaxTokens)
+	}
+	if caps.ContextWindowSize != 200000 {
+		t.Errorf("Anthropic ContextWindowSize should be 200000, got %d", caps.ContextWindowSize)
 	}
 }
 
@@ -74,8 +77,11 @@ func TestOpenAICapabilities(t *testing.T) {
 	if !caps.SupportsImageInput {
 		t.Error("OpenAI should support image input")
 	}
-	if caps.MaxTokens != 128000 {
-		t.Errorf("OpenAI MaxTokens should be 128000, got %d", caps.MaxTokens)
+	if caps.MaxTokens != 16384 {
+		t.Errorf("OpenAI MaxTokens should be 16384, got %d", caps.MaxTokens)
+	}
+	if caps.ContextWindowSize != 128000 {
+		t.Errorf("OpenAI ContextWindowSize should be 128000, got %d", caps.ContextWindowSize)
 	}
 }
 

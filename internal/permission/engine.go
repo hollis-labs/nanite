@@ -51,6 +51,7 @@ type ApprovalRequest struct {
 type ApprovalResponse struct {
 	Decision Decision
 	Scope    Scope
+	TimedOut bool // true when denial was due to timeout, not explicit user action
 }
 
 // ToolMeta carries tool metadata used by the permission engine.
@@ -213,10 +214,10 @@ func (e *Engine) WaitForApproval(ctx context.Context, req *ApprovalRequest) Appr
 		return resp
 	case <-timer.C:
 		log.Printf("permission: approval %s timed out after %s — defaulting to deny", req.ID, timeout)
-		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce}
+		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: true}
 	case <-ctx.Done():
 		log.Printf("permission: approval %s cancelled — defaulting to deny", req.ID)
-		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce}
+		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: true}
 	}
 }
 

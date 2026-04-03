@@ -452,6 +452,8 @@ export function useChat(sessionId: string | null) {
   const retryStream = useCallback(async () => {
     if (!sessionId) return;
     store().setCircuitOpen(false);
+    store().clearToolCalls();
+    store().clearToolWarnings();
 
     try {
       const { message_id } = await api.retryStream(sessionId);
@@ -519,6 +521,10 @@ export function useChat(sessionId: string | null) {
       };
     } catch (err) {
       console.error("Retry failed:", err);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
       store().clearStream();
     }
   }, [sessionId]);

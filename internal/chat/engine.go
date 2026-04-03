@@ -61,9 +61,8 @@ type AgentConstraints struct {
 	// Phase 4 — Chat Loop Hardening.
 	MaxTurns           int  `json:"max_turns"`             // 0=default(25), -1=unlimited, >0=value
 	HardCeiling        int  `json:"hard_ceiling"`          // 0=default(100), absolute max turns
-	ConsecutiveFailCap int  `json:"consecutive_fail_cap"`  // 0=default(3), pause after N consecutive failures
-	IdleTimeoutSeconds int  `json:"idle_timeout_seconds"`  // 0=default(900), seconds of inactivity before suspend
-	DebugMode          bool `json:"debug_mode"`            // enable turn snapshot capture
+	ConsecutiveFailCap int `json:"consecutive_fail_cap"` // 0=default(3), pause after N consecutive failures
+	IdleTimeoutSeconds int `json:"idle_timeout_seconds"` // 0=default(900), seconds of inactivity before suspend
 }
 
 // parseAgentConstraints parses the constraints JSON from an agent profile.

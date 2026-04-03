@@ -148,7 +148,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Tool selection via ToolService ---
-	selection, err := s.tools.SelectForAgent(ctx, agentID, userContent, session.WorkspaceID)
+	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID)
 	if err != nil {
 		log.Printf("chat-service: tool selection failed: %v", err)
 		selection = &ToolSelection{}
@@ -198,7 +198,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	for i, t := range tools {
 		toolNames[i] = t.Name
 	}
-	ls := newLoopState(constraints, toolNames, constraints.DebugMode)
+	// Debug mode: per-agent setting or global developer_mode.
+	debugMode := isAgentDebugEnabled(agent.Settings) || s.isGlobalDebugMode()
+	ls := newLoopState(constraints, toolNames, debugMode)
 
 	// --- Tool-use loop ---
 	var fullContent strings.Builder
@@ -1046,4 +1048,25 @@ func (s *chatServiceImpl) recordUtilityMetrics(sessionID, callType string, durat
 		Error:      errMsg,
 	}
 	_ = s.store.RecordExecutionMetrics(m)
+}
+
+// isAgentDebugEnabled checks the agent's settings JSON for a "debug" flag.
+func isAgentDebugEnabled(settingsJSON string) bool {
+	if settingsJSON == "" {
+		return false
+	}
+	var settings struct {
+		Debug bool `json:"debug"`
+	}
+	_ = json.Unmarshal([]byte(settingsJSON), &settings)
+	return settings.Debug
+}
+
+// isGlobalDebugMode checks the user_settings developer_mode flag.
+func (s *chatServiceImpl) isGlobalDebugMode() bool {
+	settings, err := s.store.GetUserSettings()
+	if err != nil {
+		return false
+	}
+	return settings.DeveloperMode
 }

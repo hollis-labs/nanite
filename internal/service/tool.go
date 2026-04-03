@@ -34,7 +34,7 @@ type ToolService interface {
 	// SelectForAgent returns the tool set for an agent, applying intent
 	// extraction, permission filtering, allowlist filtering, and progressive
 	// discovery when the tool count exceeds the threshold.
-	SelectForAgent(ctx context.Context, agentID, userMessage, workspaceID string) (*ToolSelection, error)
+	SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string) (*ToolSelection, error)
 
 	// Execute runs a tool call, routing through ToolClient (with permission
 	// checks) when available, falling back to direct MCPManager execution.
@@ -67,11 +67,17 @@ type ToolMetaInfo struct {
 // progressive discovery is activated. Matches the existing engine constant.
 const ProgressiveDiscoveryThreshold = 5
 
+// BrokerDecisionLogger logs tool selection decisions for debugging.
+type BrokerDecisionLogger interface {
+	LogBrokerDecision(sessionID, intent, layerReached string, selectedTools []string, signals string) error
+}
+
 // toolServiceImpl is the concrete implementation of ToolService.
 type toolServiceImpl struct {
-	toolClient *toolclient.ToolClient
-	mcpManager *mcp.Manager
-	agents     AgentReader
+	toolClient     *toolclient.ToolClient
+	mcpManager     *mcp.Manager
+	agents         AgentReader
+	decisionLogger BrokerDecisionLogger
 }
 
 // NewToolService creates a ToolService. Both toolClient and mcpManager may be
@@ -84,8 +90,13 @@ func NewToolService(tc *toolclient.ToolClient, mcpMgr *mcp.Manager, agents Agent
 	}
 }
 
+// SetDecisionLogger attaches a broker decision logger (typically *store.Store).
+func (s *toolServiceImpl) SetDecisionLogger(dl BrokerDecisionLogger) {
+	s.decisionLogger = dl
+}
+
 // SelectForAgent implements ToolService.
-func (s *toolServiceImpl) SelectForAgent(ctx context.Context, agentID, userMessage, workspaceID string) (*ToolSelection, error) {
+func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string) (*ToolSelection, error) {
 	intent, hints := extractIntent(userMessage)
 	log.Printf("service/tool: extracted intent=%q hints=%v", intent, hints)
 
@@ -146,6 +157,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, agentID, userMessa
 		log.Printf("service/tool: progressive discovery active — %d MCP tools, %d builtins kept, %d catalog entries",
 			mcpToolCount, len(builtinTools)-1, len(summaries))
 
+		s.logDecision(sessionID, intent, "progressive", builtinTools)
 		return &ToolSelection{
 			Tools:       builtinTools,
 			Catalog:     catalog,
@@ -153,7 +165,26 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, agentID, userMessa
 		}, nil
 	}
 
+	layer := "broker"
+	if len(allTools) == 0 {
+		layer = "empty"
+	}
+	s.logDecision(sessionID, intent, layer, allTools)
 	return &ToolSelection{Tools: allTools}, nil
+}
+
+// logDecision persists the broker selection decision for the debug panel.
+func (s *toolServiceImpl) logDecision(sessionID, intent, layer string, tools []provider.ToolDefinition) {
+	if s.decisionLogger == nil || sessionID == "" {
+		return
+	}
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, layer, names, ""); err != nil {
+		log.Printf("service/tool: failed to log broker decision: %v", err)
+	}
 }
 
 // Execute implements ToolService. Unified execution path: ToolClient (with

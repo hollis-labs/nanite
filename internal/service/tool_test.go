@@ -64,7 +64,7 @@ func TestToolService_SelectForAgent_NoTools(t *testing.T) {
 	reader.addAgent(&store.AgentProfile{ID: "a1", Slug: "test", Status: "active"})
 
 	svc := NewToolService(nil, nil, reader)
-	sel, err := svc.SelectForAgent(context.Background(), "a1", "hello world", "")
+	sel, err := svc.SelectForAgent(context.Background(), "s1", "a1", "hello world", "")
 	if err != nil {
 		t.Fatalf("SelectForAgent: %v", err)
 	}

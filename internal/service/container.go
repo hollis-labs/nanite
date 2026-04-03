@@ -109,6 +109,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	var agentReader AgentReader = cfg.Store
 	tools := NewToolService(cfg.ToolClient, cfg.MCP, agentReader)
+	if impl, ok := tools.(*toolServiceImpl); ok {
+		impl.SetDecisionLogger(cfg.Store)
+	}
 
 	// --- Orchestration (Wave 2) ---
 

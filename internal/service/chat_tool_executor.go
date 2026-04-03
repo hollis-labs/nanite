@@ -92,7 +92,7 @@ func (s *chatServiceImpl) preCheckTools(
 			blockedResult := fmt.Sprintf("BLOCKED: Tool %q has been hard-blocked due to repeated identical results or iteration limit. "+
 				"Do NOT call this tool again. Use a different approach or inform the user.", tu.Name)
 			log.Printf("chat-service: tool %s SKIPPED (blocked)", tu.Name)
-			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult}
 			block := provider.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: blockedResult,
@@ -118,7 +118,7 @@ func (s *chatServiceImpl) preCheckTools(
 				ls.recordPermissionDenial()
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
 				log.Printf("chat-service: tool %s denied: %s", tu.Name, permResult.Reason)
-				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
@@ -147,7 +147,7 @@ func (s *chatServiceImpl) preCheckTools(
 					ls.recordPermissionDenial()
 					denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — user denied or approval timed out", tu.Name)
 					log.Printf("chat-service: tool %s denied by user (scope: %s)", tu.Name, resp.Scope)
-					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 					ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
 					block := provider.ContentBlock{
 						Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,

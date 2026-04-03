@@ -18,8 +18,8 @@ interface ChatState {
   // Tool calls (session-scoped retention)
   toolCalls: ToolCall[]
   toolCallsBySession: Map<string, { calls: ToolCall[]; lastActivity: number }>
-  addToolCall: (tc: ToolCall) => void
-  updateToolCall: (id: string, update: Partial<ToolCall>) => void
+  addToolCall: (tc: ToolCall, sessionId?: string) => void
+  updateToolCall: (id: string, update: Partial<ToolCall>, sessionId?: string) => void
   clearToolCalls: () => void
   loadSessionToolCalls: (sessionId: string | null) => void
 
@@ -96,28 +96,30 @@ export const useChatStore = create<ChatState>((set) => ({
   // Tool calls (session-scoped retention)
   toolCalls: [],
   toolCallsBySession: new Map(),
-  addToolCall: (tc) =>
+  addToolCall: (tc, sessionId?) =>
     set((state) => {
-      const updated = [...state.toolCalls, tc].slice(-50)
-      // Also update the session map
-      const sessionId = state.streamingSessionId
-      if (sessionId) {
-        const next = new Map(state.toolCallsBySession)
-        next.set(sessionId, { calls: updated, lastActivity: Date.now() })
-        return { toolCalls: updated, toolCallsBySession: next }
+      const targetSession = sessionId ?? state.streamingSessionId
+      const next = new Map(state.toolCallsBySession)
+      const existing = targetSession ? next.get(targetSession)?.calls ?? [] : state.toolCalls
+      const updated = [...existing, tc].slice(-50)
+      if (targetSession) {
+        next.set(targetSession, { calls: updated, lastActivity: Date.now() })
       }
-      return { toolCalls: updated }
+      // Only update the displayed toolCalls if this is the active session
+      const displayUpdate = targetSession === state.streamingSessionId ? { toolCalls: updated } : {}
+      return { ...displayUpdate, toolCallsBySession: next }
     }),
-  updateToolCall: (id, update) =>
+  updateToolCall: (id, update, sessionId?) =>
     set((state) => {
-      const updated = state.toolCalls.map((tc) => (tc.id === id ? { ...tc, ...update } : tc))
-      const sessionId = state.streamingSessionId
-      if (sessionId) {
-        const next = new Map(state.toolCallsBySession)
-        next.set(sessionId, { calls: updated, lastActivity: Date.now() })
-        return { toolCalls: updated, toolCallsBySession: next }
+      const targetSession = sessionId ?? state.streamingSessionId
+      const next = new Map(state.toolCallsBySession)
+      const existing = targetSession ? next.get(targetSession)?.calls ?? [] : state.toolCalls
+      const updated = existing.map((tc) => (tc.id === id ? { ...tc, ...update } : tc))
+      if (targetSession) {
+        next.set(targetSession, { calls: updated, lastActivity: Date.now() })
       }
-      return { toolCalls: updated }
+      const displayUpdate = targetSession === state.streamingSessionId ? { toolCalls: updated } : {}
+      return { ...displayUpdate, toolCallsBySession: next }
     }),
   clearToolCalls: () =>
     set((state) => {

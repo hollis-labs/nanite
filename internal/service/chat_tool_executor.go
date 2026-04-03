@@ -89,6 +89,7 @@ func (s *chatServiceImpl) preCheckTools(
 
 		// Check blocked tools.
 		if ls.blockedTools[tu.Name] || ls.isToolExhausted(tu.Name) {
+			ls.recordToolCall(tu.Name, false)
 			blockedResult := fmt.Sprintf("BLOCKED: Tool %q has been hard-blocked due to repeated identical results or iteration limit. "+
 				"Do NOT call this tool again. Use a different approach or inform the user.", tu.Name)
 			log.Printf("chat-service: tool %s SKIPPED (blocked)", tu.Name)
@@ -115,7 +116,7 @@ func (s *chatServiceImpl) preCheckTools(
 			permResult := s.permissions.Check(ctx, sessionID, tu.Name, tu.Input, meta)
 			switch permResult.Decision {
 			case permission.DecisionDeny:
-				ls.recordPermissionDenial()
+				ls.recordToolCall(tu.Name, false)
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
 				log.Printf("chat-service: tool %s denied: %s", tu.Name, permResult.Reason)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
@@ -144,11 +145,26 @@ func (s *chatServiceImpl) preCheckTools(
 
 				resp := s.permissions.WaitForApproval(ctx, req)
 				if resp.Decision != permission.DecisionAllow {
-					ls.recordPermissionDenial()
-					denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — user denied or approval timed out", tu.Name)
-					log.Printf("chat-service: tool %s denied by user (scope: %s)", tu.Name, resp.Scope)
+					ls.recordToolCall(tu.Name, false)
+					denyReason := "user denied"
+					if resp.TimedOut {
+						denyReason = "approval timed out"
+					}
+					denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, denyReason)
+					log.Printf("chat-service: tool %s denied (%s, scope: %s)", tu.Name, denyReason, resp.Scope)
 					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 					ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
+					// Warn user when consecutive failures approach the stop threshold.
+					if ls.consecutiveFailures >= ls.limits.consecutiveFailCap-1 {
+						warningJSON, _ := json.Marshal(map[string]any{
+							"tool_name":          tu.Name,
+							"error":              fmt.Sprintf("Tools failed %d times in a row — agent will pause after one more failure", ls.consecutiveFailures),
+							"iteration":          ls.iteration,
+							"consecutive_errors": ls.consecutiveFailures,
+							"level":              "critical",
+						})
+						ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
+					}
 					block := provider.ContentBlock{
 						Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 					}

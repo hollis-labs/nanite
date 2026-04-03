@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Hash, MessageSquare } from "lucide-react";
+import { FileText, Hash } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CommandDialog,
@@ -126,7 +126,7 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
       />
 
       {/* Scope filters */}
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border">
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle">
         <ScopeButton active={scope === "all"} onClick={() => setScope("all")}>
           All
         </ScopeButton>
@@ -196,18 +196,17 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
             }
           >
             {filteredSessions.map((session) => (
-              <CommandItem key={session.id} onSelect={() => selectSession(session.id)}>
-                <MessageSquare className="text-fg-faint" />
+              <CommandItem key={session.id} onSelect={() => selectSession(session.id)} className="items-start gap-1.5 py-1">
+                <div className="w-2.5 h-2.5 rounded-[2px] bg-fg-faint/40 border border-fg-faint/60 shrink-0 mt-[3.5px]" />
                 <div className="flex flex-col min-w-0 flex-1">
-                  <span className="truncate text-sm">{session.title || "Untitled"}</span>
-                  <span className="text-xs text-fg-faint flex items-center gap-1.5">
-                    <Hash className="size-2.5" />
-                    {session.short_code}
-                    <span className="mx-0.5">·</span>
-                    {session.message_count} messages
+                  <span className="truncate text-[13px] font-medium leading-snug">{session.title || "Untitled"}</span>
+                  <span className="text-[11px] text-fg-faint font-mono leading-none mt-px">
+                    #{session.short_code}
+                    <span className="mx-1 font-sans">·</span>
+                    <span className="font-sans">{session.message_count} msgs</span>
                   </span>
                 </div>
-                <span className="text-xs text-fg-faint shrink-0">
+                <span className="text-[11px] text-fg-faint shrink-0 mt-[1.5px]">
                   {formatDate(session.last_activity)}
                 </span>
               </CommandItem>

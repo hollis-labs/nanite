@@ -11,7 +11,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { AdapterBadge } from "@/components/chat/AdapterBadge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -279,14 +278,11 @@ export function LeftSidebar() {
         <ScrollArea className="flex-1 min-h-0">
           <div className="px-2 py-2">
             {isLoading && (
-              <div className="flex flex-col gap-2 px-2">
+              <div className="flex flex-col gap-1 px-2">
                 {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-2.5 px-2 py-2">
-                    <Skeleton className="size-8 rounded-md" />
-                    <div className="flex flex-col gap-1.5 flex-1">
-                      <Skeleton className="h-3 w-3/4" />
-                      <Skeleton className="h-2.5 w-1/2" />
-                    </div>
+                  <div key={i} className="flex items-center gap-2 px-2 py-1">
+                    <Skeleton className="w-3.5 h-3.5 rounded" />
+                    <Skeleton className="h-3 w-3/4 flex-1" />
                   </div>
                 ))}
               </div>
@@ -448,7 +444,7 @@ function getPresenceIndicator(
 
 function ZoneHeader({ label, icon }: { label: string; icon?: ReactNode }) {
   return (
-    <div className="px-2 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wider flex items-center gap-1">
+    <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-fg-muted uppercase tracking-wider flex items-center gap-1">
       {icon}
       {label}
     </div>
@@ -483,56 +479,41 @@ function ChatItem({
           onClick={onClick}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
-          className={`w-full flex items-start gap-2 px-2 py-0.5 rounded-md text-left transition-colors group ${
+          className={`relative w-full flex items-start gap-1.5 px-2 py-1 rounded-md text-left transition-colors group ${
             isActive
               ? "bg-surface/60 text-fg"
               : "text-fg-secondary hover:bg-surface/40 hover:text-fg"
           } ${isArchived ? "opacity-50" : ""}`}
         >
-          {/* Icon column */}
-          <div className="relative shrink-0">
+          {/* Session icon + presence */}
+          <div className="relative shrink-0 mt-[5px]">
             {statusIndicator && (
               <div className="absolute -top-1 -left-1 z-10">{statusIndicator}</div>
             )}
-            <div className="relative w-7 h-7 flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 opacity-25" />
-              {session.message_count > 0 && (
-                <span className="absolute inset-x-0 top-[5px] bottom-1.5 flex items-center justify-center text-[9px] font-bold text-fg-muted tabular-nums leading-none">
-                  {session.message_count > 99 ? "99" : session.message_count}
-                </span>
-              )}
-            </div>
+            <div className="w-2.5 h-2.5 rounded-[2px] bg-fg-faint/40 border border-fg-faint/60" />
           </div>
 
           {/* Content */}
-          <div className="flex-1 min-w-0 mt-[3px]">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
-              <span className="text-sm truncate flex-1 leading-snug">{displayTitle}</span>
-              {hovered ? (
-                <span
-                  role="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTogglePin();
-                  }}
-                  className="p-0.5 rounded text-fg-muted hover:text-fg hover:bg-surface-hover transition-colors shrink-0"
-                  aria-label={session.is_pinned ? "Unpin" : "Pin"}
-                >
-                  {session.is_pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
-                </span>
-              ) : (
-                <>
-                  {session.is_pinned && <Pin className="w-3 h-3 text-fg-faint shrink-0" />}
-                  <span className="text-[11px] text-fg-faint shrink-0">
-                    {formatRelativeTime(session.last_activity)}
-                  </span>
-                </>
-              )}
+              <span className="text-[13px] font-medium truncate flex-1 leading-snug">{displayTitle}</span>
+              {session.is_pinned && <Pin className="w-3 h-3 text-fg-faint shrink-0" />}
+              <span className={`text-[11px] text-fg-faint shrink-0 ${hovered ? "invisible" : ""}`}>
+                {formatRelativeTime(session.last_activity)}
+              </span>
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTogglePin();
+                }}
+                className={`absolute right-2 p-0.5 rounded text-fg-muted hover:text-fg hover:bg-surface-hover transition-colors ${hovered ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                aria-label={session.is_pinned ? "Unpin" : "Pin"}
+              >
+                {session.is_pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+              </span>
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[11px] text-fg-faint font-mono">#{session.short_code}</span>
-              <AdapterBadge provider={session.provider || "api"} size="sm" />
-            </div>
+            <span className="block mt-px text-[11px] text-fg-faint font-mono leading-none">#{session.short_code}</span>
           </div>
         </button>
       </ContextMenuTrigger>

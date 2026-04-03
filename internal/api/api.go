@@ -219,9 +219,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/plugins/triggers/{id}", a.handleUpdateTriggerRule)
 	mux.HandleFunc("DELETE /api/plugins/triggers/{id}", a.handleDeleteTriggerRule)
 
-	// Connectors (health & status)
-	mux.HandleFunc("GET /api/plugins/connectors", a.handleListConnectors)
-	mux.HandleFunc("GET /api/plugins/connectors/{name}/health", a.handleCheckConnectorHealth)
+	// Connectors (health & status) — under /api/connectors to avoid conflict
+	// with the /api/plugins/{name}/ui/{file...} wildcard route.
+	mux.HandleFunc("GET /api/connectors", a.handleListConnectors)
+	mux.HandleFunc("GET /api/connectors/{name}/health", a.handleCheckConnectorHealth)
 
 	// Event Stream (SSE for external consumers)
 	mux.HandleFunc("GET /api/plugins/events/stream", a.handleEventStream)

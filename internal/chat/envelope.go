@@ -84,7 +84,7 @@ type Status struct {
 // buildKBEnvelope transforms a search_kb JSON result into a conduit-envelope JSON string.
 // The search result is {"results":[...],"query":"...","total_results":N}.
 // The envelope wraps it as {"kind":"envelope","version":1,"type":"kb-result","data":{...}}.
-func buildKBEnvelope(searchResult string) string {
+func BuildKBEnvelope(searchResult string) string {
 	// The search result may have a trailing [SYSTEM: ...] instruction — strip it.
 	jsonEnd := strings.LastIndex(searchResult, "}")
 	if jsonEnd < 0 {
@@ -125,8 +125,8 @@ func buildKBEnvelope(searchResult string) string {
 	return string(data)
 }
 
-// buildTicketConfirmationEnvelope wraps ticket JSON as a ticket-confirmation envelope.
-func buildTicketConfirmationEnvelope(ticketJSON string) string {
+// BuildTicketConfirmationEnvelope wraps ticket JSON as a ticket-confirmation envelope.
+func BuildTicketConfirmationEnvelope(ticketJSON string) string {
 	var ticket map[string]any
 	if err := json.Unmarshal([]byte(ticketJSON), &ticket); err != nil {
 		return ""

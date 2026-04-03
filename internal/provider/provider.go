@@ -21,8 +21,11 @@ type ProviderCapabilities struct {
 	SupportsBatch bool
 	// SupportsImageInput indicates if the provider supports image inputs
 	SupportsImageInput bool
-	// MaxTokens indicates the maximum token limit for this provider (0 means no limit specified)
+	// MaxTokens indicates the maximum output token limit for this provider (0 means no limit specified)
 	MaxTokens int
+	// ContextWindowSize is the total context window in tokens (e.g., 200000 for Claude).
+	// Used by the slot-based context assembly to compute budgets. 0 means unknown (falls back to default).
+	ContextWindowSize int
 }
 
 // ToolDefinition describes a tool available to the LLM.

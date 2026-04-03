@@ -14,7 +14,7 @@ import (
 func (a *API) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	bookmarks, err := a.Store.ListBookmarks(sessionID)
+	bookmarks, err := a.Services.Store.ListBookmarks(sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -45,7 +45,7 @@ func (a *API) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		SessionID: req.SessionID,
 		Note:      req.Note,
 	}
-	if err := a.Store.CreateBookmark(b); err != nil {
+	if err := a.Services.Store.CreateBookmark(b); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -54,7 +54,7 @@ func (a *API) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.DeleteBookmark(id); err != nil {
+	if err := a.Services.Store.DeleteBookmark(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -65,7 +65,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("id")
 
 	// Check if bookmark exists for this message.
-	existing, err := a.Store.GetBookmarkByMessage(messageID)
+	existing, err := a.Services.Store.GetBookmarkByMessage(messageID)
 	if err != nil && err != sql.ErrNoRows {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -73,7 +73,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 
 	if existing != nil {
 		// Delete existing bookmark.
-		if err := a.Store.DeleteBookmark(existing.ID); err != nil {
+		if err := a.Services.Store.DeleteBookmark(existing.ID); err != nil {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -85,7 +85,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Need session_id from the message.
-	msg, err := a.Store.GetMessage(messageID)
+	msg, err := a.Services.Store.GetMessage(messageID)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "message not found")
 		return
@@ -95,7 +95,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 		MessageID: messageID,
 		SessionID: msg.SessionID,
 	}
-	if err := a.Store.CreateBookmark(b); err != nil {
+	if err := a.Services.Store.CreateBookmark(b); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -108,25 +108,25 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	bookmark, err := a.Store.GetBookmark(id)
+	bookmark, err := a.Services.Store.GetBookmark(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "bookmark not found")
 		return
 	}
 
 	// Get the bookmarked message content.
-	msg, err := a.Store.GetMessage(bookmark.MessageID)
+	msg, err := a.Services.Store.GetMessage(bookmark.MessageID)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "bookmarked message not found")
 		return
 	}
 
-	if a.Engine == nil {
+	if a.Services.Providers == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "engine not available")
 		return
 	}
 
-	prov, ok := a.Engine.Providers.Get(a.Engine.UtilityProvider)
+	prov, ok := a.Services.Providers.Get(a.Services.UtilityProvider)
 	if !ok {
 		a.errorResp(w, http.StatusServiceUnavailable, "utility provider not available")
 		return
@@ -139,7 +139,7 @@ func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	title, err := prov.Complete(ctx, prompt, msgs, a.Engine.UtilityModel)
+	title, err := prov.Complete(ctx, prompt, msgs, a.Services.UtilityModel)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "autotitle failed: "+err.Error())
 		return
@@ -151,7 +151,7 @@ func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.UpdateBookmarkNote(id, title); err != nil {
+	if err := a.Services.Store.UpdateBookmarkNote(id, title); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

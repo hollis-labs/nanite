@@ -9,7 +9,7 @@ import (
 // handleListTriggerRules returns all trigger rules, optionally filtered by plugin_id.
 func (a *API) handleListTriggerRules(w http.ResponseWriter, r *http.Request) {
 	pluginID := r.URL.Query().Get("plugin_id")
-	rules, err := a.Store.ListTriggerRules(pluginID)
+	rules, err := a.Services.Store.ListTriggerRules(pluginID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -46,8 +46,8 @@ func (a *API) handleCreateTriggerRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify connector exists.
-	if a.PluginHost != nil {
-		if _, ok := a.PluginHost.GetConnector(req.ConnectorName); !ok {
+	if a.Services.Plugins != nil {
+		if _, ok := a.Services.Plugins.GetConnector(req.ConnectorName); !ok {
 			a.errorResp(w, http.StatusBadRequest, "connector not found: "+req.ConnectorName)
 			return
 		}
@@ -72,7 +72,7 @@ func (a *API) handleCreateTriggerRule(w http.ResponseWriter, r *http.Request) {
 		rule.PayloadTemplate = "{}"
 	}
 
-	if err := a.Store.CreateTriggerRule(rule); err != nil {
+	if err := a.Services.Store.CreateTriggerRule(rule); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -82,7 +82,7 @@ func (a *API) handleCreateTriggerRule(w http.ResponseWriter, r *http.Request) {
 // handleGetTriggerRule returns a single trigger rule by ID.
 func (a *API) handleGetTriggerRule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	rule, err := a.Store.GetTriggerRule(id)
+	rule, err := a.Services.Store.GetTriggerRule(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
@@ -94,7 +94,7 @@ func (a *API) handleGetTriggerRule(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateTriggerRule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Store.GetTriggerRule(id)
+	existing, err := a.Services.Store.GetTriggerRule(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
@@ -118,8 +118,8 @@ func (a *API) handleUpdateTriggerRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ConnectorName != nil {
 		// Verify connector exists.
-		if a.PluginHost != nil {
-			if _, ok := a.PluginHost.GetConnector(*req.ConnectorName); !ok {
+		if a.Services.Plugins != nil {
+			if _, ok := a.Services.Plugins.GetConnector(*req.ConnectorName); !ok {
 				a.errorResp(w, http.StatusBadRequest, "connector not found: "+*req.ConnectorName)
 				return
 			}
@@ -139,7 +139,7 @@ func (a *API) handleUpdateTriggerRule(w http.ResponseWriter, r *http.Request) {
 		existing.Description = *req.Description
 	}
 
-	if err := a.Store.UpdateTriggerRule(existing); err != nil {
+	if err := a.Services.Store.UpdateTriggerRule(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -149,7 +149,7 @@ func (a *API) handleUpdateTriggerRule(w http.ResponseWriter, r *http.Request) {
 // handleDeleteTriggerRule deletes a trigger rule by ID.
 func (a *API) handleDeleteTriggerRule(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.DeleteTriggerRule(id); err != nil {
+	if err := a.Services.Store.DeleteTriggerRule(id); err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}

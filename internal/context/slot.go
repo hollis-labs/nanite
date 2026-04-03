@@ -1,0 +1,84 @@
+package context
+
+import (
+	"crypto/sha256"
+	"fmt"
+)
+
+// Slot names. Ordered by assembly priority.
+const (
+	SlotSystem       = "system"
+	SlotMemory       = "memory"
+	SlotAgent        = "agent"
+	SlotRules        = "rules"
+	SlotTools        = "tools"
+	SlotSession      = "session"
+	SlotContext      = "context"      // dynamic enrichment (plugins, context broker)
+	SlotConversation = "conversation" // messages — subject to compaction
+)
+
+// SlotOrder defines the assembly order. Slots are composed into the
+// provider payload in this sequence. Earlier slots are cached more
+// aggressively (they change less often).
+var SlotOrder = []string{
+	SlotSystem,
+	SlotMemory,
+	SlotAgent,
+	SlotRules,
+	SlotTools,
+	SlotSession,
+	SlotContext,
+	SlotConversation,
+}
+
+// Slot holds the content, budget, and cache state for a single named
+// region of the context window. Slots are the unit of caching,
+// compaction, and budget accounting.
+type Slot struct {
+	Name       string
+	Content    string
+	TokenCount int
+	CacheKey   string // SHA-256 hex of Content
+	Priority   int    // compaction priority: lower = keep longer
+	MaxTokens  int    // budget ceiling (0 = dynamic)
+	Flags      SlotFlags
+}
+
+// SlotFlags carry per-slot signals consumed by the compaction and
+// assembly pipelines.
+type SlotFlags struct {
+	UsingTools       bool // tool call/result blocks present in conversation span
+	EnrichmentActive bool // context slot has dynamic content
+	Stale            bool // content needs refresh before next assembly
+}
+
+// SlotBlock is the output unit from ContextWindow.Assemble(). Provider
+// adapters translate these into API-specific payloads and apply cache
+// markers where supported.
+type SlotBlock struct {
+	SlotName string
+	Content  string
+	CacheKey string
+	Changed  bool // true when CacheKey differs from previous turn
+}
+
+// ComputeCacheKey returns the SHA-256 hex digest of content.
+func ComputeCacheKey(content string) string {
+	h := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("%x", h)
+}
+
+// DefaultBudgets returns the default per-slot token ceilings.
+// A ceiling of 0 means "dynamic — allocated from remaining budget".
+func DefaultBudgets() map[string]int {
+	return map[string]int{
+		SlotSystem:       2000,
+		SlotMemory:       2000,
+		SlotAgent:        1000,
+		SlotRules:        500,
+		SlotTools:        0, // proportional to selected tool count
+		SlotSession:      1000,
+		SlotContext:      0, // dynamic
+		SlotConversation: 0, // gets remainder
+	}
+}

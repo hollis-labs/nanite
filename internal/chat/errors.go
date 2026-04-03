@@ -42,8 +42,8 @@ func (ce ChatError) JSON() string {
 	return string(data)
 }
 
-// classifyError inspects an error string and returns the appropriate ErrorCode.
-func classifyError(err error) ErrorCode {
+// ClassifyError inspects an error string and returns the appropriate ErrorCode.
+func ClassifyError(err error) ErrorCode {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	if strings.Contains(lower, "429") || strings.Contains(lower, "rate") {
@@ -52,8 +52,8 @@ func classifyError(err error) ErrorCode {
 	return ErrorCodeProviderError
 }
 
-// errorEvent builds a StreamEvent with a structured ChatError payload.
-func errorEvent(code ErrorCode, userMessage string, details map[string]interface{}) StreamEvent {
+// ErrorEvent builds a StreamEvent with a structured ChatError payload.
+func ErrorEvent(code ErrorCode, userMessage string, details map[string]interface{}) StreamEvent {
 	ce := NewChatError(code, userMessage, details)
 	return StreamEvent{
 		Type:            "error",
@@ -101,8 +101,8 @@ func buildErrorEnvelope(code ErrorCode, message string, details map[string]inter
 	return string(out)
 }
 
-// errorEnvelopeDelta returns a StreamEvent delta containing an error envelope block.
-func errorEnvelopeDelta(code ErrorCode, message string, details map[string]interface{}) StreamEvent {
+// ErrorEnvelopeDelta returns a StreamEvent delta containing an error envelope block.
+func ErrorEnvelopeDelta(code ErrorCode, message string, details map[string]interface{}) StreamEvent {
 	envJSON := buildErrorEnvelope(code, message, details)
 	return StreamEvent{
 		Type:    "delta",

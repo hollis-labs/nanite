@@ -9,7 +9,7 @@ import (
 )
 
 func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
-	agents, err := a.Store.ListAgents()
+	agents, err := a.Services.Store.ListAgents()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -88,7 +88,7 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Store.CreateAgent(agent); err != nil {
+	if err := a.Services.Store.CreateAgent(agent); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -97,13 +97,13 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	agent, err := a.Store.GetAgent(id)
+	agent, err := a.Services.Store.GetAgent(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	modes, err := a.Store.ListAgentModes(id)
+	modes, err := a.Services.Store.ListAgentModes(id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -118,7 +118,7 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Store.GetAgent(id)
+	existing, err := a.Services.Store.GetAgent(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
@@ -219,7 +219,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Store.UpdateAgent(existing); err != nil {
+	if err := a.Services.Store.UpdateAgent(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -228,7 +228,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListAgentModes(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	modes, err := a.Store.ListAgentModes(agentID)
+	modes, err := a.Services.Store.ListAgentModes(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -238,7 +238,7 @@ func (a *API) handleListAgentModes(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	agents, err := a.Store.ListSessionAgents(sessionID)
+	agents, err := a.Services.Store.ListSessionAgents(sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -263,7 +263,7 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify agent exists.
-	if _, err := a.Store.GetAgent(req.AgentID); err != nil {
+	if _, err := a.Services.Store.GetAgent(req.AgentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
@@ -273,18 +273,18 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 
 	// If setting a new primary, demote the current primary first.
 	if isPrimary {
-		if cur, err := a.Store.GetSessionPrimaryAgent(sessionID); err == nil {
-			_ = a.Store.EnsureSessionAgent(sessionID, cur.AgentID, cur.Mode, false)
+		if cur, err := a.Services.Store.GetSessionPrimaryAgent(sessionID); err == nil {
+			_ = a.Services.Store.EnsureSessionAgent(sessionID, cur.AgentID, cur.Mode, false)
 		}
 	}
 
-	if err := a.Store.EnsureSessionAgent(sessionID, req.AgentID, mode, isPrimary); err != nil {
+	if err := a.Services.Store.EnsureSessionAgent(sessionID, req.AgentID, mode, isPrimary); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Return the updated agents list.
-	agents, err := a.Store.ListSessionAgents(sessionID)
+	agents, err := a.Services.Store.ListSessionAgents(sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -296,7 +296,7 @@ func (a *API) handleRemoveSessionAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	agentID := r.PathValue("agentId")
 
-	if err := a.Store.DeleteSessionAgent(sessionID, agentID); err != nil {
+	if err := a.Services.Store.DeleteSessionAgent(sessionID, agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "session agent not found")
 		return
 	}
@@ -307,7 +307,7 @@ func (a *API) handleRemoveSessionAgent(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListAgentProjects(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	projects, err := a.Store.ListAgentProjects(agentID)
+	projects, err := a.Services.Store.ListAgentProjects(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -330,12 +330,12 @@ func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.AddAgentProject(agentID, req.ProjectID); err != nil {
+	if err := a.Services.Store.AddAgentProject(agentID, req.ProjectID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	projects, err := a.Store.ListAgentProjects(agentID)
+	projects, err := a.Services.Store.ListAgentProjects(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -347,7 +347,7 @@ func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	projectID := r.PathValue("projectId")
 
-	if err := a.Store.RemoveAgentProject(agentID, projectID); err != nil {
+	if err := a.Services.Store.RemoveAgentProject(agentID, projectID); err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -356,7 +356,7 @@ func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListProjectAgents(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
-	agents, err := a.Store.ListProjectAgents(projectID)
+	agents, err := a.Services.Store.ListProjectAgents(projectID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -368,7 +368,7 @@ func (a *API) handleCreateAgentMode(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
 	// Verify agent exists.
-	if _, err := a.Store.GetAgent(agentID); err != nil {
+	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
@@ -397,7 +397,7 @@ func (a *API) handleCreateAgentMode(w http.ResponseWriter, r *http.Request) {
 		ToolOverrides:  req.ToolOverrides,
 		Settings:       req.Settings,
 	}
-	if err := a.Store.CreateAgentMode(mode); err != nil {
+	if err := a.Services.Store.CreateAgentMode(mode); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

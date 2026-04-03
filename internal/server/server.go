@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/conduit/internal/api"
+	"github.com/hollis-labs/conduit/internal/version"
 	conduitplugin "github.com/hollis-labs/conduit/internal/plugin"
 	"github.com/hollis-labs/conduit/internal/store"
 )
@@ -87,7 +88,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
-		"version": "0.2.0",
+		"version": version.Version,
 	})
 }
 

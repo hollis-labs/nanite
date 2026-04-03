@@ -7,7 +7,7 @@ import (
 )
 
 func (a *API) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
-	workspaces, err := a.Store.ListWorkspaces()
+	workspaces, err := a.Services.Store.ListWorkspaces()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -37,7 +37,7 @@ func (a *API) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		Icon:        req.Icon,
 	}
-	if err := a.Store.CreateWorkspace(ws); err != nil {
+	if err := a.Services.Store.CreateWorkspace(ws); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -46,7 +46,7 @@ func (a *API) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	ws, err := a.Store.GetWorkspace(id)
+	ws, err := a.Services.Store.GetWorkspace(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "workspace not found")
 		return
@@ -57,7 +57,7 @@ func (a *API) handleGetWorkspace(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Store.GetWorkspace(id)
+	existing, err := a.Services.Store.GetWorkspace(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "workspace not found")
 		return
@@ -83,7 +83,7 @@ func (a *API) handleUpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		existing.Icon = *req.Icon
 	}
 
-	if err := a.Store.UpdateWorkspace(existing); err != nil {
+	if err := a.Services.Store.UpdateWorkspace(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -92,7 +92,7 @@ func (a *API) handleUpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.DeleteWorkspace(id); err != nil {
+	if err := a.Services.Store.DeleteWorkspace(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -101,7 +101,7 @@ func (a *API) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	wid := r.PathValue("wid")
-	projects, err := a.Store.ListProjects(wid)
+	projects, err := a.Services.Store.ListProjects(wid)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -134,7 +134,7 @@ func (a *API) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		RepoPath:    req.RepoPath,
 	}
-	if err := a.Store.CreateProject(p); err != nil {
+	if err := a.Services.Store.CreateProject(p); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -145,7 +145,7 @@ func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	wid := r.PathValue("wid")
 	pid := r.PathValue("pid")
 
-	existing, err := a.Store.GetProject(pid)
+	existing, err := a.Services.Store.GetProject(pid)
 	if err != nil || existing.WorkspaceID != wid {
 		a.errorResp(w, http.StatusNotFound, "project not found")
 		return
@@ -179,7 +179,7 @@ func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		existing.SortOrder = *req.SortOrder
 	}
 
-	if err := a.Store.UpdateProject(existing); err != nil {
+	if err := a.Services.Store.UpdateProject(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -190,13 +190,13 @@ func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	wid := r.PathValue("wid")
 	pid := r.PathValue("pid")
 
-	existing, err := a.Store.GetProject(pid)
+	existing, err := a.Services.Store.GetProject(pid)
 	if err != nil || existing.WorkspaceID != wid {
 		a.errorResp(w, http.StatusNotFound, "project not found")
 		return
 	}
 
-	if err := a.Store.DeleteProject(pid); err != nil {
+	if err := a.Services.Store.DeleteProject(pid); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

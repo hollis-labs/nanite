@@ -2,17 +2,18 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 )
 
 // handleListTools returns all registered tools.
 // GET /api/tools
 func (a *API) handleListTools(w http.ResponseWriter, r *http.Request) {
-	if a.ToolClient == nil {
+	if a.Services.ToolClient == nil {
 		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 
-	tools := a.ToolClient.ListTools()
+	tools := a.Services.ToolClient.ListTools()
 
 	type toolItem struct {
 		Name        string `json:"name"`
@@ -33,19 +34,19 @@ func (a *API) handleListTools(w http.ResponseWriter, r *http.Request) {
 // handleListToolServers returns MCP server info.
 // GET /api/tools/servers
 func (a *API) handleListToolServers(w http.ResponseWriter, r *http.Request) {
-	if a.ToolClient == nil {
+	if a.Services.ToolClient == nil {
 		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 
-	servers := a.ToolClient.ListServers()
+	servers := a.Services.ToolClient.ListServers()
 	a.jsonResp(w, http.StatusOK, servers)
 }
 
 // handleSelectTools previews tool selection for an intent.
 // POST /api/tools/select
 func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
-	if a.ToolClient == nil {
+	if a.Services.ToolClient == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "tool client not configured")
 		return
 	}
@@ -62,7 +63,7 @@ func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
 		req.Intent = "*"
 	}
 
-	tools, err := a.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "")
+	tools, err := a.Services.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "")
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -74,12 +75,12 @@ func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
 // handleRefreshTools triggers MCP tool discovery and syncs with skills table.
 // POST /api/tools/refresh
 func (a *API) handleRefreshTools(w http.ResponseWriter, r *http.Request) {
-	if a.MCPManager == nil {
+	if a.Services.MCP == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
 		return
 	}
 
-	diff, err := a.MCPManager.AutoDiscover(r.Context(), a.Store)
+	diff, err := a.Services.MCP.AutoDiscover(r.Context(), a.Services.Store)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -93,14 +94,14 @@ func (a *API) handleRefreshTools(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
-	if a.ToolClient == nil {
+	if a.Services.ToolClient == nil {
 		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 
 	// Get all tools and filter by agent permissions.
-	allTools := a.ToolClient.ListTools()
-	perms := a.ToolClient.GetPermissions(agentID)
+	allTools := a.Services.ToolClient.ListTools()
+	perms := a.Services.ToolClient.GetPermissions(agentID)
 
 	type toolItem struct {
 		Name        string `json:"name"`
@@ -119,4 +120,29 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, items)
+}
+
+// handleListBrokerDecisions returns broker decision logs for a session.
+// GET /api/broker/decisions?session_id=X&limit=N
+func (a *API) handleListBrokerDecisions(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		a.errorResp(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+
+	limit := 50
+	if ls := r.URL.Query().Get("limit"); ls != "" {
+		if n, err := strconv.Atoi(ls); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	decisions, err := a.Services.Store.ListBrokerDecisions(sessionID, limit)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusOK, decisions)
 }

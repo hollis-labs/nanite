@@ -20,11 +20,11 @@ func (a *API) handlePresenceStream(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	// Register this client for presence events.
-	clientID, events := a.Engine.RegisterPresenceClient()
-	defer a.Engine.UnregisterPresenceClient(clientID)
+	clientID, events := a.Services.Streams.RegisterPresenceClient()
+	defer a.Services.Streams.UnregisterPresenceClient(clientID)
 
 	// Send current state — all currently-streaming sessions.
-	for _, evt := range a.Engine.ActivePresenceState() {
+	for _, evt := range a.Services.Streams.ActivePresenceState() {
 		data, _ := json.Marshal(evt)
 		fmt.Fprintf(w, "data: %s\n\n", data)
 	}

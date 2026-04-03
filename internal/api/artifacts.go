@@ -14,7 +14,7 @@ import (
 func (a *API) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	artifacts, err := a.Store.ListArtifacts(sessionID)
+	artifacts, err := a.Services.Store.ListArtifacts(sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -28,7 +28,7 @@ func (a *API) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	artifact, err := a.Store.GetArtifact(id)
+	artifact, err := a.Services.Store.GetArtifact(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "artifact not found")
 		return
@@ -107,7 +107,7 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 		SizeBytes:   written,
 		StoragePath: storagePath,
 	}
-	if err := a.Store.CreateArtifact(artifact); err != nil {
+	if err := a.Services.Store.CreateArtifact(artifact); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -161,7 +161,7 @@ func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
 		SourceAgentID:  req.AgentID,
 		SourcePluginID: req.PluginID,
 	}
-	if err := a.Store.CreateArtifact(artifact); err != nil {
+	if err := a.Services.Store.CreateArtifact(artifact); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -180,7 +180,7 @@ func (a *API) handleListArtifactsByOrigin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	artifacts, err := a.Store.ListArtifactsByOrigin(sessionID, origin)
+	artifacts, err := a.Services.Store.ListArtifactsByOrigin(sessionID, origin)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

@@ -72,7 +72,7 @@ func (a *API) handleA2AInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback: SQLite store.
-	msgs, err := a.Store.GetA2AInbox(agentID, status)
+	msgs, err := a.Services.Store.GetA2AInbox(agentID, status)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -101,7 +101,7 @@ func (a *API) handleA2AThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgs, err := a.Store.GetA2AThread(threadID)
+	msgs, err := a.Services.Store.GetA2AThread(threadID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -142,7 +142,7 @@ func (a *API) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.SendA2AMessage(&msg); err != nil {
+	if err := a.Services.Store.SendA2AMessage(&msg); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -166,7 +166,7 @@ func (a *API) handleA2AAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.AckA2AMessage(id); err != nil {
+	if err := a.Services.Store.AckA2AMessage(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -190,7 +190,7 @@ func (a *API) handleA2AResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.ResolveA2AMessage(id); err != nil {
+	if err := a.Services.Store.ResolveA2AMessage(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -215,7 +215,7 @@ func (a *API) handleA2AUnreadCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := a.Store.A2AUnreadCount(agentID)
+	count, err := a.Services.Store.A2AUnreadCount(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

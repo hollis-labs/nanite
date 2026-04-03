@@ -17,7 +17,7 @@ func (a *API) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 	includeArchived := q.Get("include_archived") == "true"
 
-	sessions, err := a.Store.ListSessions(workspaceID, includeArchived)
+	sessions, err := a.Services.Store.ListSessions(workspaceID, includeArchived)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -48,7 +48,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Model:       req.Model,
 		Provider:    req.Provider,
 	}
-	if err := a.Store.CreateSession(sess); err != nil {
+	if err := a.Services.Store.CreateSession(sess); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -56,7 +56,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	// Resolve agent: request param → user settings default → mentat-001.
 	agentID := req.AgentID
 	if agentID == "" {
-		if settings, err := a.Store.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
+		if settings, err := a.Services.Store.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
 			agentID = settings.DefaultAgent
 		}
 	}
@@ -65,14 +65,14 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Assign the resolved agent as primary.
-	if err := a.Store.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
+	if err := a.Services.Store.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
 		// Log but don't fail — session was created successfully.
 		_ = err
 	}
 
 	// Emit session creation event to Volon (fire-and-forget).
-	if a.Engine != nil && a.Engine.Activity != nil {
-		go a.Engine.Activity.EmitSessionCreated(r.Context(), sess.ID, sess.WorkspaceID)
+	if a.Services.Activity != nil {
+		go a.Services.Activity.EmitSessionCreated(r.Context(), sess.ID, sess.WorkspaceID)
 	}
 
 	a.jsonResp(w, http.StatusCreated, sess)
@@ -96,7 +96,7 @@ func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 		Model:    req.Model,
 	}
 
-	newSess, err := a.Store.ForkSession(sourceID, overrides, req.IncludeMessages)
+	newSess, err := a.Services.Store.ForkSession(sourceID, overrides, req.IncludeMessages)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -107,14 +107,14 @@ func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sess, err := a.Store.GetSession(id)
+	sess, err := a.Services.Store.GetSession(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
 	}
 
 	// Also return recent messages.
-	messages, err := a.Store.ListMessages(id, 50)
+	messages, err := a.Services.Store.ListMessages(id, 50)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -129,7 +129,7 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Store.GetSession(id)
+	existing, err := a.Services.Store.GetSession(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
@@ -173,14 +173,14 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Store.UpdateSession(existing); err != nil {
+	if err := a.Services.Store.UpdateSession(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Emit plugin event when session is archived via update.
-	if req.Status != nil && *req.Status == "archived" && a.PluginHost != nil {
-		go a.PluginHost.EmitSessionArchived(id)
+	if req.Status != nil && *req.Status == "archived" && a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitSessionArchived(id)
 	}
 
 	a.jsonResp(w, http.StatusOK, existing)
@@ -188,29 +188,27 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.ArchiveSession(id); err != nil {
+	if err := a.Services.Store.ArchiveSession(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Kill any orphaned CLI processes for this session.
-	if a.Engine != nil {
-		a.Engine.KillSessionProcesses(id)
+	if a.Services.ProcessTracker != nil {
+		a.Services.ProcessTracker.KillSession(id)
 	}
 
 	// Broadcast session archived presence so UI updates immediately.
-	if a.Engine != nil {
-		a.Engine.BroadcastSessionArchived(id)
-	}
+	a.Services.Streams.BroadcastSessionArchived(id)
 
 	// Emit session ended event to Volon (fire-and-forget).
-	if a.Engine != nil && a.Engine.Activity != nil {
-		go a.Engine.Activity.EmitSessionEnded(r.Context(), id)
+	if a.Services.Activity != nil {
+		go a.Services.Activity.EmitSessionEnded(r.Context(), id)
 	}
 
 	// Emit plugin event: session archived.
-	if a.PluginHost != nil {
-		go a.PluginHost.EmitSessionArchived(id)
+	if a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitSessionArchived(id)
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
@@ -232,14 +230,14 @@ func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the primary agent for this session.
-	sa, err := a.Store.GetSessionPrimaryAgent(sessionID)
+	sa, err := a.Services.Store.GetSessionPrimaryAgent(sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "no primary agent for session")
 		return
 	}
 
 	// Verify the mode exists for this agent.
-	if _, err := a.Store.GetAgentMode(sa.AgentID, req.Mode); err != nil {
+	if _, err := a.Services.Store.GetAgentMode(sa.AgentID, req.Mode); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "unknown mode: "+req.Mode)
 		return
 	}
@@ -247,18 +245,18 @@ func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 	previousMode := sa.Mode
 
 	// Update the mode.
-	if err := a.Store.SetSessionAgentMode(sessionID, sa.AgentID, req.Mode); err != nil {
+	if err := a.Services.Store.SetSessionAgentMode(sessionID, sa.AgentID, req.Mode); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Emit plugin event: mode changed.
-	if a.PluginHost != nil {
-		go a.PluginHost.EmitModeChanged(sessionID, previousMode, req.Mode)
+	if a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitModeChanged(sessionID, previousMode, req.Mode)
 	}
 
 	// Return updated session info.
-	sess, err := a.Store.GetSession(sessionID)
+	sess, err := a.Services.Store.GetSession(sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -274,7 +272,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
 	// Load all messages for the session.
-	messages, err := a.Store.ListMessages(sessionID, 1000)
+	messages, err := a.Services.Store.ListMessages(sessionID, 1000)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -294,7 +292,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save compaction summary on session.
-	if err := a.Store.UpdateSessionCompaction(sessionID, summary); err != nil {
+	if err := a.Services.Store.UpdateSessionCompaction(sessionID, summary); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -302,7 +300,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	// Mark all messages as compacted.
 	for _, m := range messages {
 		if !m.IsCompacted {
-			_ = a.Store.UpdateMessageContent(m.ID, m.Content, true)
+			_ = a.Services.Store.UpdateMessageContent(m.ID, m.Content, true)
 		}
 	}
 
@@ -334,7 +332,7 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 				after = n
 			}
 		}
-		page, err := a.Store.ListMessagesAroundID(sessionID, around, before, after)
+		page, err := a.Services.Store.ListMessagesAroundID(sessionID, around, before, after)
 		if err != nil {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
@@ -351,7 +349,7 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	page, err := a.Store.ListMessagesPaginated(sessionID, limit, offset)
+	page, err := a.Services.Store.ListMessagesPaginated(sessionID, limit, offset)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

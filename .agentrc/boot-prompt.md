@@ -5,21 +5,37 @@
 ```
 Boot conduit-backend
 
-Plugin evolution plan complete (all 8 phases). See docs/architecture/plugin-evolution-plan.md.
+vNext MVP in progress. Phases 0-4 complete 2026-04-02.
 
-Backend changes (2026-03-29):
-- All plugin evolution phases 1, 2a, 3a, 5a, 5b, 6, 8a, 8b complete
-- Phase 6: connector dispatch, health/retry, event streaming
-- Phase 8: keybindings, auto-triggers, custom actions (DB + CRUD + slash cmd registration)
-- Project CRUD: added GetProject, handleUpdateProject (PUT), handleDeleteProject (DELETE)
-  in internal/store/workspaces.go and internal/api/workspaces.go
-  Routes: PUT/DELETE /api/workspaces/{wid}/projects/{pid}
+KEY DOCS:
+- MVP plan: docs/vnext-mvp.md (8 phases, selected work)
+- Post-MVP backlog: docs/vnext-backlog.md
+- Phase 4 plan: ~/.claude/plans/quirky-cooking-blum.md
+- Architecture decisions: /Users/chrispian/Projects-apps/agent-workspaces/exploration/conduit-vnext-decisions.md
+
+COMPLETED:
+- Service layer decomposition (Waves 0-4): internal/service/ with Container, all domain services
+- Phase 0 cleanup: exports.go deleted, helpers consolidated, setupMCPServers deleted (DB-only now), version constant added (internal/version/)
+- Phase 1 — Tool System & Broker vNext: internal/tool/ (Tool interface, builder, YAML loader), internal/tool/broker/ (3-layer progressive resolution, decision logging), migration adapters
+- Phase 2 — Context Window & Compaction: internal/context/ (slot architecture, cache keys, compaction pipeline), provider ModelSelector, ContextService.AssembleSlots(), compaction events
+- Phase 3 — Permission & Approval: internal/permission/ (rule engine, 4 modes, approval flow with SSE + timeout), API endpoints, wired into chat loop
+- Phase 4 — Chat Loop Hardening: loopState struct (chat_loop_state.go), 7 named continuation sites, parallel tool execution (chat_tool_executor.go with WaitGroup), 5-layer iteration control (shouldStop), turn snapshots (debug mode → execution_metrics), AgentConstraints extended (MaxTurns/HardCeiling/ConsecutiveFailCap/IdleTimeout/DebugMode), ToolMetaInfo extended (IsConcurrencySafe/MaxIterations)
+
+CURRENT: Phase 5 — Agent System (decisions doc §8)
+- MD-based agent definitions, file discovery (6 locations), seed.go cleanup, worktree isolation
+
+PRINCIPLES:
+- Consult before architecture decisions
+- Greenfield modules alongside old code, migrate when ready
+- go build + go vet + go test clean after every task
+- Always use cerberus_rebuild for deployment, not go build directly
+- Quality over speed. We are building polished software, not rushing to check boxes.
+- Favor flexible, maintainable patterns (Adapter, Pipeline, etc.) that make future changes cheap. This is an established project convention.
+- Tech debt: fix it now, or explicitly log it for deferral. Never silently ignore it.
+- Do it right the first time. Shortcuts only with clear, justified rationale.
 
 Pre-existing test failures (not blockers):
 - server.TestAuthMiddlewareEnabled: returns 200 instead of 401
-- plugin/builtin/email and plugin/builtin/teams: missing connector modules
-
-Always use cerberus_rebuild for deployment, not go build directly.
 ```
 
 ## Frontend Agent

@@ -22,7 +22,7 @@ func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgID, err := a.Engine.HandleMessage(req.SessionID, req.Content)
+	msgID, err := a.Services.Chat.HandleMessage(r.Context(), req.SessionID, req.Content)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -50,7 +50,7 @@ func (a *API) handleAgentMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgID, err := a.Engine.SendAgentMessage(req.FromSessionID, toSessionID, req.Content)
+	msgID, err := a.Services.Chat.SendAgentMessage(r.Context(), req.FromSessionID, toSessionID, req.Content)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -85,7 +85,7 @@ func (a *API) handleDelegateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.Engine.DelegateTask(r.Context(), chat.DelegationRequest{
+	result, err := a.Services.Chat.DelegateTask(r.Context(), chat.DelegationRequest{
 		ParentSessionID: parentSessionID,
 		Title:           req.Title,
 		Description:     req.Description,
@@ -126,7 +126,7 @@ func (a *API) handleDelegateAndAggregate(w http.ResponseWriter, r *http.Request)
 		model = "claude-sonnet-4-20250514"
 	}
 
-	result, err := a.Engine.DelegateAndAggregate(r.Context(), parentSessionID, req.Message, model)
+	result, err := a.Services.Chat.DelegateAndAggregate(r.Context(), parentSessionID, req.Message, model)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -142,7 +142,7 @@ func (a *API) handleRetryStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgID, err := a.Engine.RetryLastMessage(sessionID)
+	msgID, err := a.Services.Chat.RetryLastMessage(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -157,7 +157,7 @@ func (a *API) handleRetryStream(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("messageID")
 
-	ch, ok := a.Engine.GetStream(messageID)
+	ch, ok := a.Services.Streams.GetStream(messageID)
 	if !ok {
 		a.errorResp(w, http.StatusNotFound, "stream not found")
 		return
@@ -179,9 +179,9 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	// If another tab already has an active SSE connection for this session,
 	// it will receive a session_takeover event and be closed.
 	var sseDone <-chan struct{}
-	if sessionID, found := a.Engine.GetSessionForMessage(messageID); found {
-		sseDone = a.Engine.RegisterSSEConnection(sessionID)
-		defer a.Engine.UnregisterSSEConnection(sessionID, sseDone)
+	if sessionID, found := a.Services.Streams.GetSessionForMessage(messageID); found {
+		sseDone = a.Services.Streams.RegisterSSE(sessionID)
+		defer a.Services.Streams.UnregisterSSE(sessionID, sseDone)
 	}
 
 	ctx := r.Context()

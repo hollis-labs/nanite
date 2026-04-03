@@ -57,11 +57,18 @@ type AgentConstraints struct {
 	MaxIterations  int `json:"max_iterations"`
 	MaxTimeSeconds int `json:"max_time_seconds"`
 	RetryBudget    int `json:"retry_budget"`
+
+	// Phase 4 — Chat Loop Hardening.
+	MaxTurns           int  `json:"max_turns"`             // 0=default(25), -1=unlimited, >0=value
+	HardCeiling        int  `json:"hard_ceiling"`          // 0=default(100), absolute max turns
+	ConsecutiveFailCap int  `json:"consecutive_fail_cap"`  // 0=default(3), pause after N consecutive failures
+	IdleTimeoutSeconds int  `json:"idle_timeout_seconds"`  // 0=default(900), seconds of inactivity before suspend
+	DebugMode          bool `json:"debug_mode"`            // enable turn snapshot capture
 }
 
 // parseAgentConstraints parses the constraints JSON from an agent profile.
 // Returns zero-value struct on empty/invalid input (no constraints enforced).
-func parseAgentConstraints(raw string) AgentConstraints {
+func ParseAgentConstraints(raw string) AgentConstraints {
 	var c AgentConstraints
 	if raw == "" || raw == "{}" {
 		return c
@@ -94,7 +101,7 @@ When using file and search tools, follow these rules:
 
 // buildToolCatalog formats tool summaries as a compact catalog string for
 // injection into the system prompt during progressive discovery.
-func buildToolCatalog(summaries []toolclient.ToolSummary) string {
+func BuildToolCatalog(summaries []toolclient.ToolSummary) string {
 	if len(summaries) == 0 {
 		return ""
 	}
@@ -438,7 +445,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Load session.
 	session, err := e.Store.GetSession(sessionID)
 	if err != nil {
-		ch <- errorEvent(ErrorCodeInternal, "Failed to load session", map[string]interface{}{"raw": err.Error()})
+		ch <- ErrorEvent(ErrorCodeInternal, "Failed to load session", map[string]interface{}{"raw": err.Error()})
 		return
 	}
 
@@ -466,19 +473,19 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Fallback to slug lookup for backwards compatibility.
 		agent, err = e.Store.GetAgentBySlug("mentat")
 		if err != nil {
-			ch <- errorEvent(ErrorCodeInternal, "Failed to load agent", map[string]interface{}{"raw": err.Error()})
+			ch <- ErrorEvent(ErrorCodeInternal, "Failed to load agent", map[string]interface{}{"raw": err.Error()})
 			return
 		}
 	}
 
 	// Block disabled agents from responding.
 	if agent.Status == "disabled" {
-		ch <- errorEvent(ErrorCodeInternal, fmt.Sprintf("Agent %q is disabled", agent.Name), nil)
+		ch <- ErrorEvent(ErrorCodeInternal, fmt.Sprintf("Agent %q is disabled", agent.Name), nil)
 		return
 	}
 
 	// Parse agent constraints (schema v2).
-	constraints := parseAgentConstraints(agent.Constraints)
+	constraints := ParseAgentConstraints(agent.Constraints)
 
 	// Override context timeout if the agent has a max_time_seconds constraint.
 	if constraints.MaxTimeSeconds > 0 {
@@ -506,7 +513,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Assemble context via broker.
 	systemPrompt, chatMessages, err := e.Broker.AssembleContext(ctx, session, agent, mode, workspace)
 	if err != nil {
-		ch <- errorEvent(ErrorCodeInternal, "Failed to assemble context", map[string]interface{}{"raw": err.Error()})
+		ch <- ErrorEvent(ErrorCodeInternal, "Failed to assemble context", map[string]interface{}{"raw": err.Error()})
 		return
 	}
 
@@ -527,7 +534,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// 5. System default ("anthropic")
 	providerName, prov := e.resolveProvider(session.Provider, agent.DefaultProvider, model)
 	if prov == nil {
-		ch <- errorEvent(ErrorCodeProviderError, fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName), map[string]interface{}{"raw": fmt.Sprintf("provider %q not registered", providerName)})
+		ch <- ErrorEvent(ErrorCodeProviderError, fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName), map[string]interface{}{"raw": fmt.Sprintf("provider %q not registered", providerName)})
 		return
 	}
 
@@ -655,11 +662,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		// Check if the overall deadline has been exceeded.
 		if ctx.Err() != nil {
 			log.Printf("[WARN] generateResponse context cancelled: %v (session=%s)", ctx.Err(), sessionID)
-			ch <- errorEnvelopeDelta(ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
+			ch <- ErrorEnvelopeDelta(ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
 			})
-			ch <- errorEvent(ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
+			ch <- ErrorEvent(ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
 			})
@@ -674,7 +681,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			if e.Activity != nil {
 				go e.Activity.EmitContextBudgetExceeded(ctx, sessionID, breakdown.Total, breakdown.Ceiling)
 			}
-			ch <- errorEvent(ErrorCodeInternal, "Context too large after all reductions",
+			ch <- ErrorEvent(ErrorCodeInternal, "Context too large after all reductions",
 				map[string]interface{}{
 					"total":   breakdown.Total,
 					"ceiling": breakdown.Ceiling,
@@ -696,10 +703,10 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
 		)
 		// CLI sessions (PTY or subprocess): set up sandbox directory and resume context.
-		if isCLIProvider(providerName) {
+		if IsCLIProvider(providerName) {
 			// Check concurrency limit before spawning a new CLI process.
 			if e.ProcessTracker != nil && e.ProcessTracker.AtCapacity() {
-				ch <- errorEvent(ErrorCodeProviderError,
+				ch <- ErrorEvent(ErrorCodeProviderError,
 					fmt.Sprintf("CLI process limit reached (%d). Close other CLI sessions or wait for them to finish.", e.ProcessTracker.MaxProcesses),
 					map[string]interface{}{"raw": "max concurrent CLI processes exceeded"})
 				return
@@ -758,7 +765,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				fmt.Sprintf("iteration %d: %v", iteration, err),
 				fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d}`, model, len(tools), len(chatMessages)))
 			if e.Activity != nil {
-				errCode := classifyError(err)
+				errCode := ClassifyError(err)
 				go e.Activity.EmitError(ctx, sessionID, "provider_error", err.Error())
 				if errCode == ErrorCodeRateLimit {
 					go e.Activity.EmitRateLimitHit(ctx, sessionID, "anthropic", 0)
@@ -776,8 +783,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 				"model": model,
 				"tools": len(tools),
 			}
-			ch <- errorEnvelopeDelta(classifyError(err), "Provider streaming failed", errDetails)
-			ch <- errorEvent(classifyError(err), "Provider streaming failed", errDetails)
+			ch <- ErrorEnvelopeDelta(ClassifyError(err), "Provider streaming failed", errDetails)
+			ch <- ErrorEvent(ClassifyError(err), "Provider streaming failed", errDetails)
 			return
 		}
 
@@ -791,7 +798,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			switch evt.Type {
 			case "delta":
 				// Resolve any pending PTY tool (CLI returned text after a tool call).
-				if lastPTYToolPending != "" && isCLIProvider(providerName) {
+				if lastPTYToolPending != "" && IsCLIProvider(providerName) {
 					e.broadcastPresence(PresenceEvent{
 						Type:      "tool_resolved",
 						SessionID: sessionID,
@@ -811,7 +818,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					// PTY/subprocess sessions: CLI manages tools internally,
 					// so emit tool_pending presence here (API sessions emit
 					// this later in the tool execution loop).
-					if isCLIProvider(providerName) {
+					if IsCLIProvider(providerName) {
 						// Resolve the previous tool before starting a new one.
 						if lastPTYToolPending != "" {
 							e.broadcastPresence(PresenceEvent{
@@ -862,8 +869,8 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					"raw":   evt.Error,
 					"model": model,
 				}
-				ch <- errorEnvelopeDelta(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
-				ch <- errorEvent(classifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
+				ch <- ErrorEnvelopeDelta(ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
+				ch <- ErrorEvent(ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", streamErrDetails)
 				return
 			case "session_id":
 				// PTY bridge emits the CLI session ID from the system init event.
@@ -886,7 +893,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 
 		// Resolve any remaining PTY tool presence after stream ends.
-		if lastPTYToolPending != "" && isCLIProvider(providerName) {
+		if lastPTYToolPending != "" && IsCLIProvider(providerName) {
 			e.broadcastPresence(PresenceEvent{
 				Type:      "tool_resolved",
 				SessionID: sessionID,
@@ -908,7 +915,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					fmt.Sprintf("iteration %d: response truncated by max_tokens", iteration),
 					fmt.Sprintf(`{"model":%q,"iteration":%d}`, model, iteration))
 				// Emit error envelope so the user sees a visible card.
-				ch <- errorEnvelopeDelta(ErrorCodeInternal, "Response truncated — hit output token limit", map[string]interface{}{
+				ch <- ErrorEnvelopeDelta(ErrorCodeInternal, "Response truncated — hit output token limit", map[string]interface{}{
 					"stop_reason": "max_tokens",
 					"iteration":   iteration,
 					"model":       model,
@@ -1093,7 +1100,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 						if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
 							envelopePayload := tail[:eEnd]
 							if strings.HasSuffix(tu.Name, "__search_kb") {
-								if env := buildKBEnvelope(envelopePayload); env != "" {
+								if env := BuildKBEnvelope(envelopePayload); env != "" {
 									pendingEnvelopes = append(pendingEnvelopes, env)
 								}
 							} else {
@@ -1137,7 +1144,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 						if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
 							envelopePayload := tail[:eEnd]
 							if strings.HasSuffix(tu.Name, "__search_kb") {
-								if env := buildKBEnvelope(envelopePayload); env != "" {
+								if env := BuildKBEnvelope(envelopePayload); env != "" {
 									pendingEnvelopes = append(pendingEnvelopes, env)
 								}
 							} else {
@@ -1300,7 +1307,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	if iteration >= iterationCap {
 		log.Printf("[WARN] Tool loop exhausted after %d iterations for session=%s agent=%s", iteration, sessionID, agent.ID)
-		ch <- errorEnvelopeDelta(ErrorCodeInternal, fmt.Sprintf("Response may be incomplete — tool step limit (%d) reached. The assistant was still working when the limit was hit.", iterationCap), nil)
+		ch <- ErrorEnvelopeDelta(ErrorCodeInternal, fmt.Sprintf("Response may be incomplete — tool step limit (%d) reached. The assistant was still working when the limit was hit.", iterationCap), nil)
 	}
 
 	// Apply output filters (e.g. strip emoji) before parsing envelopes.
@@ -1325,7 +1332,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		tail := userContent[tStart+len("<!--TICKET_DATA:"):]
 		if tEnd := strings.Index(tail, ":TICKET_DATA-->"); tEnd >= 0 {
 			ticketJSON := tail[:tEnd]
-			env := buildTicketConfirmationEnvelope(ticketJSON)
+			env := BuildTicketConfirmationEnvelope(ticketJSON)
 			if env != "" {
 				envelopeBlock := "\n\n```conduit-envelope\n" + env + "\n```"
 				responseContent += envelopeBlock
@@ -1339,14 +1346,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Log envelope validation errors.
 	for _, envErr := range envErrors {
-		log.Printf("chat: envelope error (%s): %s", envErr.Reason, truncateStr(envErr.Raw, 200))
+		log.Printf("chat: envelope error (%s): %s", envErr.Reason, TruncateStr(envErr.Raw, 200))
 		e.Store.LogEvent(sessionID, "envelope_error", "warning",
-			envErr.Reason, fmt.Sprintf(`{"raw":%q}`, truncateStr(envErr.Raw, 500)))
+			envErr.Reason, fmt.Sprintf(`{"raw":%q}`, TruncateStr(envErr.Raw, 500)))
 	}
 
 	// CLI envelope retry: if there were fatal envelope errors (invalid_json)
 	// and this is a CLI session with --resume, send one correction prompt.
-	if len(envErrors) > 0 && isCLIProvider(providerName) {
+	if len(envErrors) > 0 && IsCLIProvider(providerName) {
 		hasFatal := false
 		for _, envErr := range envErrors {
 			if envErr.Reason == "invalid_json" {
@@ -1392,7 +1399,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Wrap in structured format.
 	structured := WrapResponse(cleanContent, tier, toolCallRefs, envRefs, wasTruncated, hasError)
-	logStructuredWarnings(structured)
+	LogStructuredWarnings(structured)
 	structuredJSON := structured.MarshalContent()
 
 	// Save assistant message to DB.
@@ -1406,7 +1413,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	}
 	if err := e.Store.CreateMessage(assistantMsg); err != nil {
 		log.Printf("chat: failed to save assistant message: %v", err)
-		ch <- errorEvent(ErrorCodeInternal, "Failed to save response", map[string]interface{}{"raw": err.Error()})
+		ch <- ErrorEvent(ErrorCodeInternal, "Failed to save response", map[string]interface{}{"raw": err.Error()})
 		return
 	}
 
@@ -1424,7 +1431,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Record execution metrics snapshot.
 	adapterType := "http"
-	if isPTYProvider(providerName) {
+	if IsPTYProvider(providerName) {
 		adapterType = "pty"
 	} else if strings.HasPrefix(providerName, "sub-") {
 		adapterType = "sub"
@@ -1547,7 +1554,7 @@ func (e *Engine) retryEnvelopeCorrection(
 			"Error: %s\n\n"+
 			"Please re-emit the envelope as a valid JSON object inside a ```conduit-envelope fenced block "+
 			"with kind, version (1), and type fields.",
-		truncateStr(errDetail.Raw, 1000), errDetail.Reason,
+		TruncateStr(errDetail.Raw, 1000), errDetail.Reason,
 	)
 
 	log.Printf("chat: envelope retry for session %s — sending correction prompt", sessionID)
@@ -1599,7 +1606,7 @@ func (e *Engine) retryEnvelopeCorrection(
 }
 
 // truncateStr truncates a string to maxLen, appending "..." if truncated.
-func truncateStr(s string, maxLen int) string {
+func TruncateStr(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
@@ -1611,7 +1618,7 @@ func truncateStr(s string, maxLen int) string {
 // unknown model names to the wrong provider API.
 // isCLIProvider returns true if the provider name is any CLI adapter variant
 // (PTY bridge or subprocess bridge).
-func isCLIProvider(name string) bool {
+func IsCLIProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-") || strings.HasPrefix(name, "sub-")
 }
 
@@ -1673,7 +1680,7 @@ func (e *Engine) PlaceArtifact(sessionID, messageID, agentID, name, mimeType, st
 }
 
 // isPTYProvider returns true if the provider name is any PTY adapter variant.
-func isPTYProvider(name string) bool {
+func IsPTYProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-")
 }
 
@@ -1682,7 +1689,7 @@ func isPTYProvider(name string) bool {
 //  1. sessionProvider (explicit per-session)
 //  2. agentProvider (agent profile default)
 //  3. User's fallback chain (from user_settings, first registered wins)
-//  4. inferProvider(model) — map model name to provider
+//  4. InferProvider(model) — map model name to provider
 //  5. System default ("anthropic")
 //
 // Returns the provider name and the Provider, or ("name", nil) if none available.
@@ -1714,7 +1721,7 @@ func (e *Engine) resolveProvider(sessionProvider, agentProvider, model string) (
 	}
 
 	// 4. Infer from model name.
-	inferred := inferProvider(model)
+	inferred := InferProvider(model)
 	if p, ok := e.Providers.Get(inferred); ok {
 		return inferred, p
 	}
@@ -1727,7 +1734,7 @@ func (e *Engine) resolveProvider(sessionProvider, agentProvider, model string) (
 	return inferred, nil
 }
 
-func inferProvider(model string) string {
+func InferProvider(model string) string {
 	switch {
 	case model == "claude-cli":
 		return "pty"
@@ -2031,7 +2038,7 @@ func (e *Engine) getToolsForAgent(ctx context.Context, agentID, userMessage, wor
 	}
 	if mcpToolCount > ProgressiveDiscoveryThreshold && e.ToolClient != nil {
 		summaries := e.ToolClient.ListToolSummaries()
-		catalog := buildToolCatalog(summaries)
+		catalog := BuildToolCatalog(summaries)
 		// Keep builtin (non-MCP) tools alongside request_tools — they're small
 		// and should always be available without progressive discovery lookup.
 		builtinTools := []provider.ToolDefinition{requestToolsDef}

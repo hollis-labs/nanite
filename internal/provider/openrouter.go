@@ -228,6 +228,7 @@ func (o *OpenRouter) Capabilities() ProviderCapabilities {
 		SupportsStreamJSON:  true,
 		SupportsToolCalling: false,
 		SupportsImageInput:  true, // Depends on underlying model, but most top models support it
-		MaxTokens:           200000,
+		MaxTokens:           0,      // Variable — depends on routed model
+		ContextWindowSize:   200000, // Upper bound for supported models
 	}
 }

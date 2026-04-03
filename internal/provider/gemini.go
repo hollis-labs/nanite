@@ -284,6 +284,7 @@ func (g *Gemini) Capabilities() ProviderCapabilities {
 		SupportsToolCalling:         false, // Not yet implemented for Gemini HTTP
 		SupportsImageInput:          true,
 		SupportsSystemPromptCaching: true, // Gemini supports context caching
-		MaxTokens:                   1048576,
+		MaxTokens:                   65536,   // Gemini 2.5 Pro max output tokens
+		ContextWindowSize:           1048576, // Gemini 2.5 Pro context window
 	}
 }

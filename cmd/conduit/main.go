@@ -31,9 +31,11 @@ import (
 	"github.com/hollis-labs/conduit/internal/provider"
 	"github.com/hollis-labs/conduit/internal/secrets"
 	"github.com/hollis-labs/conduit/internal/server"
+	"github.com/hollis-labs/conduit/internal/service"
 	"github.com/hollis-labs/conduit/internal/store"
 	"github.com/hollis-labs/conduit/internal/toolclient"
 	"github.com/hollis-labs/conduit/internal/truncate"
+	"github.com/hollis-labs/conduit/internal/version"
 	"github.com/hollis-labs/nexus/messaging"
 	"github.com/hollis-labs/tool-broker/broker"
 )
@@ -41,7 +43,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: conduit <command>")
-		fmt.Fprintln(os.Stderr, "commands: serve, plugin")
+		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, version")
 		os.Exit(1)
 	}
 
@@ -52,6 +54,8 @@ func main() {
 		cmdPlugin(os.Args[2:])
 	case "mcp":
 		cmdMCP(os.Args[2:])
+	case "version", "--version", "-v":
+		fmt.Println("conduit " + version.Full())
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -227,130 +231,112 @@ func cmdServe(args []string) {
 	log.Printf("app config loaded (cli_active_throttle=%ds, auto_detect_tools=%d)",
 		appCfg.Presence.CLIActiveThrottleSeconds, len(appCfg.Artifacts.AutoDetectTools))
 
-	// Create chat engine. Utility provider/model read from DB settings first,
-	// then env vars, then defaults. See Engine.NewEngine for cascade.
-	engine := chat.NewEngine(s, registry)
-	engine.AppConfig = appCfg
-
 	// Configure output filters. Default: strip emoji from LLM responses.
 	outputFilters := filter.NewChain()
 	outputFilters.Add("no_emoji", filter.NoEmoji)
 	log.Printf("output filters: %v", outputFilters.Names())
-	engine.OutputFilters = outputFilters
 
-	// Configure CLI process concurrency limit. Default: 10. Set to 0 for unlimited.
-	if maxProcs := os.Getenv("CONDUIT_MAX_CLI_PROCESSES"); maxProcs != "" {
-		if n, err := strconv.Atoi(maxProcs); err == nil && n >= 0 {
-			engine.ProcessTracker.MaxProcesses = n
-			log.Printf("CLI process concurrency limit: %d", n)
-		}
-	} else {
-		engine.ProcessTracker.MaxProcesses = 10
-	}
-
-	// Set up MCP manager with stdio transports (matching ~/.claude.json config).
+	// Set up MCP manager. User-configured servers loaded from DB below.
 	mcpManager := mcp.NewManager()
-	setupMCPServers(mcpManager)
 
-	// Register built-in dev tools (grep, read, write) scoped to common project dirs.
+	// Register built-in dev/general/self-service tools.
 	homeDir, _ := os.UserHomeDir()
-	devTools := mcp.NewDevToolsTransport([]string{
+	mcpManager.AddServer("dev", mcp.NewDevToolsTransport([]string{
 		filepath.Join(homeDir, "Projects-apps"),
 		filepath.Join(homeDir, "Projects"),
-	})
-	mcpManager.AddServer("dev", devTools)
+	}))
+	mcpManager.AddServer("general", mcp.NewGeneralToolsTransport())
+	mcpManager.AddServer("self", mcp.NewSelfToolsTransport(s))
 
-	// Register built-in general utility tools.
-	generalTools := mcp.NewGeneralToolsTransport()
-	mcpManager.AddServer("general", generalTools)
-
-	// Register self-service tools (skill/agent/workflow CRUD).
-	selfTools := mcp.NewSelfToolsTransport(s)
-	mcpManager.AddServer("self", selfTools)
-
-	// Load user-configured MCP servers from the database.
+	// Load user-configured MCP servers and auto-discover tools.
 	loadPersistedMCPServers(s, mcpManager)
-
-	// Initialize the tool broker with default rules before discovery.
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
-
-	// Discover tools from MCP servers and auto-sync with skills table.
-	diff, err := mcpManager.AutoDiscover(context.Background(), s)
-	if err != nil {
+	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
 		log.Printf("WARNING: MCP auto-discovery failed: %v", err)
 	} else {
 		log.Printf("MCP auto-discovery: %d tools total, %d added, %d removed",
 			diff.Total, len(diff.Added), len(diff.Removed))
 	}
 
-	engine.MCPManager = mcpManager
-
 	// Create tool broker for permission-checked tool access.
-	// Share the MCPManager's broker so the ToolClient has all discovered tools.
-	// Without this, the ToolClient creates its own empty broker and tool selection
-	// falls back to direct MCP discovery, bypassing intent scoring.
 	tb := toolclient.New(mcpManager, s, nil)
 	if mcpManager.Broker != nil {
 		tb.LocalBroker = mcpManager.Broker
 		log.Printf("toolclient: sharing MCPManager broker (%d tool summaries)", len(mcpManager.Broker.AllTools()))
 	}
-
-	// Register self-service tools as built-in (always available).
 	selfToolDefs := mcp.SelfToolProviderDefinitions()
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	log.Printf("registered %d self-service built-in tools", len(selfToolDefs))
 
-	engine.ToolClient = tb
+	// Set up activity emitter (Volon GUI events).
+	activity := chat.NewActivityEmitter("")
 
-	// Set up orchestrator for task decomposition and delegation.
-	orchestrator := chat.NewOrchestrator(registry, mcpManager)
-	engine.Orchestrator = orchestrator
-	log.Println("orchestrator initialized (decomposition + delegation enabled)")
+	// Resolve utility provider/model from DB → env → defaults.
+	utilityProvider, utilityModel := "", ""
+	if settings, err := s.GetUserSettings(); err == nil {
+		utilityProvider = settings.UtilityProvider
+		utilityModel = settings.UtilityModel
+	}
+	if utilityProvider == "" {
+		utilityProvider = "anthropic"
+	}
+	if utilityModel == "" {
+		utilityModel = "claude-sonnet-4-20250514"
+	}
 
-	// Set up activity emitter to push events to Engine's activity feed.
-	// Configured via ENGINE_ACTIVITY_URL env var; disabled when unset.
-	engine.Activity = chat.NewActivityEmitter("")
-
-	// Clean up MCP subprocesses and CLI processes on shutdown.
-	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		<-sigCh
-		log.Println("shutting down...")
-		engine.Shutdown()
-		mcpManager.Close()
-		os.Exit(0)
-	}()
-
-	// Periodic cleanup of saved tool outputs (every hour, removes files older than 7 days).
-	go func() {
-		truncate.Cleanup() // run once on startup
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			truncate.Cleanup()
+	// CLI process concurrency limit.
+	maxCLIProcs := 10
+	if maxProcs := os.Getenv("CONDUIT_MAX_CLI_PROCESSES"); maxProcs != "" {
+		if n, err := strconv.Atoi(maxProcs); err == nil && n >= 0 {
+			maxCLIProcs = n
 		}
-	}()
+	}
 
-	// Periodic stale process reaper — kills CLI processes idle for over 5 minutes.
-	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			if killed := engine.ProcessTracker.KillStale(5 * time.Minute); killed > 0 {
-				log.Printf("stale process reaper: killed %d hung CLI processes", killed)
-			}
-		}
-	}()
+	// Create plugin host (before container so it can be wired as a dependency).
+	logger := plugin.NewLogger("conduit-plugin")
+	pluginHost := plugin.NewHost(nil, logger)
+	pluginHost.SetStore(s)
+	pluginHost.RegisterService("store", s)
+	pluginHost.RegisterService("mcp", mcpManager)
+	pluginHost.RegisterService("toolclient", tb)
+	log.Println("plugin host initialized")
+
+	// --- Service container: single wiring point ---
+	container, err := service.NewContainer(service.ContainerConfig{
+		Store:           s,
+		Providers:       registry,
+		MCP:             mcpManager,
+		ToolClient:      tb,
+		Plugins:         pluginHost,
+		AppConfig:       appCfg,
+		Activity:        activity,
+		OutputFilter:    outputFilters,
+		UtilityProvider: utilityProvider,
+		UtilityModel:    utilityModel,
+		MaxCLIProcesses: maxCLIProcs,
+	})
+	if err != nil {
+		log.Fatalf("failed to create service container: %v", err)
+	}
+
+	// Wire plugin host command registry from the container.
+	pluginHost.SetCommandRegistry(container.Commands)
+	pluginHost.RegisterService("container", container)
+	plugin.RegisterAutoTriggerHandler(pluginHost)
 
 	// Create API layer.
-	a := api.New(s, engine)
-	a.MCPManager = mcpManager
-	a.ToolClient = tb
+	a := api.New(container)
+
+	// Register existing custom actions as slash commands.
+	if actions, err := s.ListCustomActions(); err == nil {
+		for _, action := range actions {
+			if action.SlashCommand != "" && action.Enabled {
+				a.RegisterActionCommand(&action)
+			}
+		}
+	}
 
 	// Connect to Engine Postgres for Nexus A2A messaging.
-	// Uses ENGINE_POSTGRES_DSN env var, then a default local DSN.
-	// When unavailable, A2A falls back to SQLite.
 	nexusDSN := os.Getenv("ENGINE_POSTGRES_DSN")
 	if nexusDSN == "" {
 		nexusDSN = "postgres://localhost/engine?sslmode=disable"
@@ -372,49 +358,46 @@ func cmdServe(args []string) {
 		log.Printf("nexus messaging: connected to Engine Postgres (%s)", nexusDSN)
 	}
 
-	// Create plugin host.
-	logger := plugin.NewLogger("conduit-plugin")
-	pluginHost := plugin.NewHost(nil, logger)
+	// Shutdown handler.
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		log.Println("shutting down...")
+		container.Shutdown()
+		os.Exit(0)
+	}()
 
-	// Wire DB store for plugin config persistence.
-	pluginHost.SetStore(s)
+	// Periodic cleanup of saved tool outputs.
+	go func() {
+		truncate.Cleanup()
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			truncate.Cleanup()
+		}
+	}()
 
-	// Register core services for plugin access.
-	pluginHost.RegisterService("store", s)
-	pluginHost.RegisterService("engine", engine)
-	pluginHost.RegisterService("mcp", mcpManager)
-	pluginHost.RegisterService("toolclient", tb)
-	log.Println("plugin host initialized")
-
-	// Wire plugin host into the API, engine, and command registry.
-	a.PluginHost = pluginHost
-	engine.PluginHost = pluginHost
-	pluginHost.SetCommandRegistry(engine.Commands)
-
-	// Register auto-trigger handler for custom actions.
-	plugin.RegisterAutoTriggerHandler(pluginHost)
-
-	// Register existing custom actions as slash commands.
-	if actions, err := s.ListCustomActions(); err == nil {
-		for _, action := range actions {
-			if action.SlashCommand != "" && action.Enabled {
-				a.RegisterActionCommand(&action)
+	// Periodic stale process reaper.
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if killed := container.ProcessTracker.KillStale(5 * time.Minute); killed > 0 {
+				log.Printf("stale process reaper: killed %d hung CLI processes", killed)
 			}
 		}
-	}
+	}()
 
-	// Start HTTP server — this sets the router on the plugin host.
+	// Start HTTP server.
 	srv := server.New(s, a, *port, *dev, pluginHost)
 
-	// Resolve plugins directory for discovery and management API.
-	// Auto-discover and load plugins from the plugins/ directory.
-	// Plugins self-register via init() in the allplugins import above.
+	// Discover and load plugins.
 	pluginsDir := filepath.Join(filepath.Dir(*dbPath), "plugins")
 	if envDir := os.Getenv("CONDUIT_PLUGINS_DIR"); envDir != "" {
 		pluginsDir = envDir
 	}
-	discovered, discErr := plugin.DiscoverPlugins(pluginsDir)
-	if discErr != nil {
+	if discovered, discErr := plugin.DiscoverPlugins(pluginsDir); discErr != nil {
 		log.Printf("WARNING: plugin discovery failed: %v", discErr)
 	} else {
 		loaded, loadErrs := plugin.LoadDiscovered(pluginHost, discovered)
@@ -423,81 +406,24 @@ func cmdServe(args []string) {
 		}
 		log.Printf("plugins: discovered %d, loaded %d", len(discovered), len(loaded))
 	}
-
-	// Load any registered builtins not found via filesystem discovery.
-	builtins, builtinErrs := plugin.LoadRegisteredBuiltins(pluginHost)
-	for _, e := range builtinErrs {
-		log.Printf("WARNING: %v", e)
-	}
-	if len(builtins) > 0 {
+	if builtins, builtinErrs := plugin.LoadRegisteredBuiltins(pluginHost); len(builtins) > 0 {
+		for _, e := range builtinErrs {
+			log.Printf("WARNING: %v", e)
+		}
 		log.Printf("plugins: loaded %d builtin(s)", len(builtins))
 	}
 
-	// Re-discover tools after plugins — plugins may register new MCP servers
-	// (e.g., support-kb) that weren't present during initial auto-discovery.
-	postPluginDiff, err := mcpManager.AutoDiscover(context.Background(), s)
-	if err != nil {
+	// Re-discover tools after plugins (they may register new MCP servers).
+	if postDiff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
 		log.Printf("WARNING: post-plugin MCP discovery failed: %v", err)
-	} else if len(postPluginDiff.Added) > 0 {
-		log.Printf("post-plugin MCP discovery: %d new tools added: %v", len(postPluginDiff.Added), postPluginDiff.Added)
+	} else if len(postDiff.Added) > 0 {
+		log.Printf("post-plugin MCP discovery: %d new tools added: %v", len(postDiff.Added), postDiff.Added)
 	}
 
-	// Register plugin management API routes (install/uninstall/disable/enable).
 	srv.SetPluginsDir(pluginsDir)
 
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
-	}
-}
-
-// setupMCPServers configures MCP server connections.
-// Uses stdio transports matching the ~/.claude.json MCP server config.
-func setupMCPServers(m *mcp.Manager) {
-	home, _ := os.UserHomeDir()
-
-	// Engine — task/sprint/project management (formerly Volon)
-	engineBin := home + "/go/bin/engine"
-	if _, err := os.Stat(engineBin); err == nil {
-		m.AddStdioServer("engine", engineBin, []string{
-			"mcp",
-		}, []string{
-			"ENGINE_REPO=" + home + "/Projects-apps/fragments-engine/engine",
-			"ENGINE_POSTGRES_DSN=postgres://localhost/engine?sslmode=disable",
-		})
-	} else {
-		log.Printf("mcp: engine binary not found at %s, skipping", engineBin)
-	}
-
-	// Hadron — blueprint/automation engine
-	hadronBin := home + "/Projects-apps/hadron/bin/hadrond"
-	if _, err := os.Stat(hadronBin); err == nil {
-		m.AddStdioServer("hadron", hadronBin, []string{
-			"mcp",
-			"-db", home + "/.hadron/state/hadron.db",
-			"-logs", home + "/.hadron/logs",
-			"-data", home + "/.hadron",
-			"-token", "conduit-local-dev",
-			"-token-scopes", "run.write,schedule.write,pipeline.write",
-		}, nil)
-	} else {
-		log.Printf("mcp: hadron binary not found at %s, skipping", hadronBin)
-	}
-
-	// Cortex — context/memory registry
-	cortexBin := home + "/Projects-apps/cortex/contextd"
-	cortexToken := os.Getenv("CORTEX_MCP_TOKEN")
-	if cortexToken == "" {
-		cortexToken = "5c116cf443a1e70de66f6ac242e1f06161837dca1f7a62a3bd63494bb0b0d4bb"
-	}
-	if _, err := os.Stat(cortexBin); err == nil {
-		m.AddStdioServer("cortex", cortexBin, []string{
-			"mcp",
-			"-token", cortexToken,
-		}, []string{
-			"CONTEXTD_ROOT=" + home + "/.cortex",
-		})
-	} else {
-		log.Printf("mcp: cortex binary not found at %s, skipping", cortexBin)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	condmcp "github.com/hollis-labs/conduit/internal/mcp"
 	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/conduit/internal/version"
 )
 
 // Server is a Conduit MCP server that exposes self-service tools
@@ -32,7 +33,7 @@ func New(s *store.Store, sessionID string) *Server {
 func (s *Server) Run(ctx context.Context) error {
 	srv := server.NewMCPServer(
 		"conduit",
-		"0.2.0",
+		version.Version,
 		server.WithToolCapabilities(true),
 	)
 	s.registerTools(srv)

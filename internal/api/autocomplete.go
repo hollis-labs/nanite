@@ -133,11 +133,11 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 func resolveRoot(a *API, sessionID string) string {
 	if sessionID != "" {
 		// Look up session → workspace → projects with repo_path.
-		session, err := a.Store.GetSession(sessionID)
+		session, err := a.Services.Store.GetSession(sessionID)
 		if err == nil && session != nil {
 			// If session has a project_id, use that project's repo_path.
 			if session.ProjectID != "" {
-				projects, err := a.Store.ListProjects(session.WorkspaceID)
+				projects, err := a.Services.Store.ListProjects(session.WorkspaceID)
 				if err == nil {
 					for _, p := range projects {
 						if p.ID == session.ProjectID && p.RepoPath != "" {
@@ -148,7 +148,7 @@ func resolveRoot(a *API, sessionID string) string {
 			}
 			// Otherwise, try the first project in the workspace with a repo_path.
 			if session.WorkspaceID != "" {
-				projects, err := a.Store.ListProjects(session.WorkspaceID)
+				projects, err := a.Services.Store.ListProjects(session.WorkspaceID)
 				if err == nil {
 					for _, p := range projects {
 						if p.RepoPath != "" {

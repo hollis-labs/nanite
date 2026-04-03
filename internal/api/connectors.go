@@ -7,7 +7,7 @@ import (
 // handleListConnectors returns all registered connectors with their health status.
 // If ?check=true is passed, it probes Health() on each connector first.
 func (a *API) handleListConnectors(w http.ResponseWriter, r *http.Request) {
-	if a.PluginHost == nil {
+	if a.Services.Plugins == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "plugin system not initialized")
 		return
 	}
@@ -15,7 +15,7 @@ func (a *API) handleListConnectors(w http.ResponseWriter, r *http.Request) {
 	check := r.URL.Query().Get("check") == "true"
 
 	if check {
-		statuses := a.PluginHost.CheckAllConnectorHealth()
+		statuses := a.Services.Plugins.CheckAllConnectorHealth()
 		a.jsonResp(w, http.StatusOK, map[string]any{
 			"connectors": statuses,
 			"count":      len(statuses),
@@ -24,7 +24,7 @@ func (a *API) handleListConnectors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	statuses := a.PluginHost.GetConnectorStatuses()
+	statuses := a.Services.Plugins.GetConnectorStatuses()
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"connectors": statuses,
 		"count":      len(statuses),
@@ -34,13 +34,13 @@ func (a *API) handleListConnectors(w http.ResponseWriter, r *http.Request) {
 
 // handleCheckConnectorHealth probes a single connector's Health() method.
 func (a *API) handleCheckConnectorHealth(w http.ResponseWriter, r *http.Request) {
-	if a.PluginHost == nil {
+	if a.Services.Plugins == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "plugin system not initialized")
 		return
 	}
 
 	name := r.PathValue("name")
-	status := a.PluginHost.CheckConnectorHealth(name)
+	status := a.Services.Plugins.CheckConnectorHealth(name)
 	if status == nil {
 		a.errorResp(w, http.StatusNotFound, "connector not found: "+name)
 		return

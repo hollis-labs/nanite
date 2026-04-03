@@ -1,0 +1,410 @@
+# Conduit vNext — MVP Selected Work
+
+**Created:** 2026-04-02
+**Status:** Planning
+**Source:** [conduit-vnext-decisions.md](/Users/chrispian/Projects-apps/agent-workspaces/exploration/conduit-vnext-decisions.md)
+**Service Layer Plan:** [piped-herding-stallman.md](/Users/chrispian/.claude/plans/piped-herding-stallman.md) (COMPLETE)
+
+## Goal
+
+Ship a beta-ready Conduit with clean architecture, solid chat experience, and no known bugs. This is the initial release — no existing users, no backward compatibility constraints. We are simplifying, fixing, refactoring, and polishing as we go. Each phase should leave the codebase better than it found it.
+
+## Guiding Principles
+
+- **Consult before architecture decisions.** Each phase starts with a quick alignment check before implementation begins.
+- **Greenfield when optimal.** Since there are no users, prefer creating new modules alongside old ones and migrating when ready (the service layer pattern) over trying to reorganize in-place.
+- **No functionality loss.** Everything that works today must still work after each phase.
+- **Clean as you go.** Weave cleanup into each phase rather than batching it at the end.
+- **Build passes at every checkpoint.** `go build`, `go vet`, `go test` clean after every phase.
+
+## Completed Work (Pre-MVP)
+
+These items from the decisions doc and backend TODO are already done:
+
+- **Service layer decomposition** — Waves 0-4 complete. Engine decoupled from API/main. All adapters call service interfaces. (`internal/service/`)
+- **Provider expansion** — 8 HTTP providers (Anthropic, OpenAI, Gemini, Mistral, Azure, OpenRouter, OpenZen, Ollama) + 8 CLI adapters (Claude, Codex, Gemini, Copilot, Aider, Junie, Kiro, Qwen)
+- **Plugin system beta** — Config, connectors, hooks, events, pre-hooks, widget registration, generator, guide
+- **Multi-session presence** — Multiple simultaneous streams, `session_archived` event, CLI active throttle
+- **Artifacts** — Auto-detect from tool calls, drawer UI, inline chips, upload/drag-drop
+- **Small backend items** — Utility model from DB settings, agent_id in session creation
+
+---
+
+## Phase 0 — Cleanup & Foundation
+
+**Depends on:** Service layer (complete)
+**Goal:** Clean up service layer leftovers and address anti-patterns that will get harder to fix later.
+
+### 0.1 Export cleanup
+- Delete `internal/chat/exports.go` (6 thin aliases)
+- Rename the 6 original unexported functions to exported: `ErrorEvent`, `ErrorEnvelopeDelta`, `ClassifyError`, `BuildKBEnvelope`, `BuildTicketConfirmationEnvelope`, `LogStructuredWarnings`
+- Update all callers in `internal/service/` to import from `chat` directly
+- **Verify:** `go build` + `go test` clean
+
+### 0.2 Consolidate duplicated helpers
+- Identify helpers duplicated between `internal/service/` and `internal/chat/`: `extractIntent`, `buildToolCatalog`, `filterToolsByAllowlist`, `isCLIProvider`, `isPTYProvider`, `inferProvider`, `parseAgentConstraints`, `truncateStr`
+- For each: either export from `chat` and import in `service`, or move to a shared internal package if the dependency direction is wrong
+- Delete the duplicates
+- **Verify:** `go build` + `go test` clean
+
+### 0.3 Hardcoded paths and secrets
+- `cmd/conduit/main.go` `setupMCPServers()`: Replace hardcoded absolute paths (`~/go/bin/engine`, `~/Projects-apps/hadron/bin/hadrond`) with config-driven MCP server definitions
+- Remove hardcoded Cortex MCP token fallback — require env var or config
+- **Verify:** `conduit serve` starts with config-driven MCP servers
+
+### 0.4 Version string
+- Create a central `internal/version/version.go` with `var Version = "0.3.0"` (or appropriate)
+- Wire into `server.go:handleHealth`, CLI `--version` flag, and any other version references
+- Use `ldflags` to inject git SHA at build time
+
+### Frontend (Phase 0)
+- No frontend work in this phase
+
+---
+
+## Phase 1 — Tool System & Broker vNext
+
+**Depends on:** Phase 0
+**Decisions doc:** §2 (Tool System), §3 (Tool Broker vNext)
+**Goal:** Formalize tool metadata and upgrade the broker from simple selection to progressive resolution with decision logging.
+
+### 1.1 Tool interface & metadata
+- Define `Tool` interface in new `internal/tool/` package (greenfield):
+  - `Name()`, `Description()`, `Category()`, `InputSchema()` (JSON Schema)
+  - `Call(ctx, input, execCtx) (*ToolResult, error)`
+  - `IsConcurrencySafe(input)`, `IsReadOnly(input)`, `IsDestructive(input)` — input-dependent flags
+  - `DefaultPermissions()`, `ValidateInput()`, `Tags()`
+- Builder pattern: `NewTool(name, desc, ...ToolOption)` with `WithCategory()`, `WithSchema()`, etc.
+- Categories: `core-io`, `search`, `mcp`, `agent`, `session`, `context`, `mode`
+- **Verify:** Compile-time interface checks, unit tests for builder
+
+### 1.2 YAML tool definitions
+- Tool loader discovers `.conduit/tools/*.yaml` (project) and `~/.conduit/tools/*.yaml` (user)
+- Parses JSON Schema from YAML, wraps execution (shell subprocess or Hadron blueprint)
+- Registers as `Tool` with `source: "yaml"`
+- **Verify:** Create a sample YAML tool, load and execute it
+
+### 1.3 Broker progressive resolution (Layers 1-3)
+- Greenfield broker in `internal/tool/broker/` (or extend `internal/toolclient/`)
+- Layer 1 (Explicit): Caller specifies tools, active skill bindings, agent config
+- Layer 2 (Rule-Based): Project rules (`.conduit/broker.yaml`), user rules (`~/.conduit/broker.yaml`), MCP server tool sets, context mode rules
+- Layer 3 (Fast Classifier): Score signals (envelope metadata, agent config, session context, mode) → map to mode preset → tool set
+- Rule format per decisions doc §3 (match patterns, intent tags, priority, presets, always_available)
+- Fallback: top-N by relevance + always-available set
+- **Verify:** Unit tests for each layer, integration test for full resolution chain
+
+### 1.4 Broker decision logging
+- `broker_decisions` SQLite table: `id`, `session_id`, `intent`, `layer_reached`, `selected_tools` (JSON), `signals` (JSON), `created_at`
+- Migration file for new table
+- API endpoint: `GET /api/broker/decisions?session_id=X`
+- **Verify:** Decision logged on every tool selection, queryable via API
+
+### 1.5 Migrate existing tools to new interface
+- Wrap existing MCP tools, dev tools, self tools to implement new `Tool` interface
+- Existing `toolclient.SelectTools()` delegates to new broker
+- Old broker code removed once migration verified
+- **Verify:** All existing tool flows work unchanged, `go test` clean
+
+### Frontend (Phase 1)
+- Broker decision inspector (debug panel) — shows layer reached, signals, selected tools per turn
+- YAML tool editor (stretch — could be post-MVP)
+
+---
+
+## Phase 2 — Context Window & Compaction
+
+**Depends on:** Phase 1 (tool metadata needed for tool slot budgeting)
+**Decisions doc:** §4 (Slot Architecture), §5 (Compaction), §15 partial (operation-specific model selection for summaries)
+**Goal:** Replace flat context assembly with slot-based architecture. Add summary compaction with cheap model.
+
+### 2.1 Slot architecture
+- Greenfield `internal/context/` package (or extend `internal/service/context.go`)
+- `ContextSlot` struct: Name, Content, TokenCount, CacheKey (SHA-256), Priority, MaxTokens, Flags
+- `ContextWindow` struct: Slots map, TotalBudget, UsedTokens, CacheHits, PrevHashes
+- Slot ordering: System → Memory → Agent → Rules → Tools → Session → Context → Conversation
+- Dynamic budget: static slots allocated first, conversation gets remainder, total = provider window * 0.80
+- **Verify:** Unit tests for budget allocation, slot assembly
+
+### 2.2 Cache key system
+- SHA-256 hash per slot per turn
+- Compare against previous turn: unchanged → mark cacheable
+- Provider adapter interprets: Anthropic uses `cache_control: 'ephemeral'`, others skip
+- **Verify:** Cache hit/miss tracking works across turns
+
+### 2.3 Integrate with ChatService
+- Replace `ContextService.AssembleContext()` internals with slot-based assembly
+- `ContextWindow.Assemble()` produces the `[]provider.ContentBlock` the provider expects
+- Existing ContextService interface unchanged — slot architecture is internal
+- **Verify:** Send messages, verify streaming works, context assembly correct
+
+### 2.4 Summary compaction
+- Operation-specific model selection: `Registry.ModelForOperation("summarization")` returns cheapest available model
+- If only one model configured, use it; if multiple, prefer haiku-class
+- Compaction identifies oldest messages exceeding budget → summarizes with cheap model → replaces span
+- Compaction escalation: drop Context enrichment → summarize Conversation → strip tool blocks from non-tool spans → reduce Tools slot
+- **Verify:** Compaction triggers at budget threshold, summary replaces messages correctly
+
+### 2.5 Compaction events
+- `PreCompact` event: payload with messages being compacted, session context, reason
+- `PostCompact` event: payload with summary, tokens saved, slot state
+- Plugins can subscribe (foundation for memory extraction in post-MVP)
+- **Verify:** Events fire, plugin hooks receive payloads
+
+### Frontend (Phase 2)
+- Slot inspector debug panel (shows slot names, token counts, cache status per turn)
+- Compaction indicator in chat (visual marker where summary replaced messages)
+
+---
+
+## Phase 3 — Permission & Approval
+
+**Depends on:** Phase 1 (tool metadata: `isDestructive`, `isReadOnly`)
+**Decisions doc:** §6 (Permission & Approval Model)
+**Goal:** Add per-invocation permission gating with deterministic rules, approval UX, and yolo mode.
+
+### 3.1 Rule engine
+- New `internal/permission/` package (greenfield)
+- Rule format: tool pattern + input pattern → behavior (deny/ask/allow)
+- Rule sources in priority order: session → agent config → project (`.conduit/permissions.yaml`) → user (`~/.conduit/permissions.yaml`)
+- Evaluation: deny > ask > allow, first match wins within same priority
+- Permission modes: `default`, `accept-edits`, `plan` (read-only), `yolo`
+- **Verify:** Unit tests for rule matching, priority ordering, mode behaviors
+
+### 3.2 Three approval scopes
+- "Allow once" — this invocation only, not persisted
+- "Allow for this session" — stored in session state, cleared on session end
+- "Always allow for this project" — written to `.conduit/permissions.yaml`
+- **Verify:** Each scope persists/clears correctly
+
+### 3.3 Yolo mode
+- Per-session: toggle in session state (GUI toggle or API call)
+- Per-project: `mode: yolo` in `.conduit/permissions.yaml`
+- Skips all permission prompts when active
+- **Verify:** Yolo bypasses permission checks at both scopes
+
+### 3.4 API approval flow
+- Tool hits "ask" → API returns `202 Accepted` with `{ approval_request_id, tool, input, reason }`
+- Same event pushed on session SSE stream
+- Client responds via `POST /sessions/{id}/approvals/{request_id}` with `{ decision, scope }`
+- Timeout: configurable (default 60s) → default deny
+- **Verify:** Full round-trip: tool triggers ask → SSE event → client responds → tool proceeds/blocked
+
+### 3.5 Wire into chat loop
+- Insert permission check between tool selection and tool execution in `chat_generate.go`
+- `CheckPermissions(tool, input, session)` → allow/deny/ask
+- On "ask": pause execution, emit approval request, wait for callback or timeout
+- On deny: emit `PermissionDenied` event, skip tool, feed denial back to LLM
+- **Verify:** End-to-end flow with destructive tool triggering approval
+
+### Frontend (Phase 3)
+- Permission approval component in chat (inline card with Allow Once / Allow Session / Allow Project buttons)
+- Yolo mode toggle in session settings
+- Permission rules editor in settings (`.conduit/permissions.yaml` management)
+
+---
+
+## Phase 4 — Chat Loop Hardening ✅
+
+**Depends on:** Phase 2 (slot-aware compaction), Phase 3 (permission continuation)
+**Decisions doc:** §7 (Chat Loop & Streaming Architecture)
+**Goal:** Formalize the chat loop with named continuation sites, parallel tool execution, and layered iteration control.
+**Completed:** 2026-04-02
+**Plan:** `~/.claude/plans/quirky-cooking-blum.md`
+
+### 4.1 Named continuation sites — DONE
+- `ContinueSite` type with 7 named constants in `internal/service/chat_loop_state.go`
+- `continueWith(site, reason)` method logs site + reason at each continuation point
+- Active sites: `CONTINUE_TOOL_RESULTS` (after tool execution), `CONTINUE_COMPACTION` (after budget reduction), `CONTINUE_PERMISSION` (after approval)
+- Future sites labeled with TODO comments: `CONTINUE_RECOVERY`, `CONTINUE_AGENT_RETURN`, `CONTINUE_HOOK_MODIFIED`, `CONTINUE_MODE_CHANGE`
+
+### 4.2 Parallel tool execution — DONE
+- `preCheckTools()` evaluates permission + blocked status before execution
+- `executeToolBatch()` partitions tools: concurrent-safe via `sync.WaitGroup`, serial one at a time
+- `postProcessToolResults()` handles stuck loop detection, truncation, envelopes, artifacts in original order
+- Concurrency safety inferred via `ToolMetaInfo.IsConcurrencySafe` (read/search/fetch → safe, write/edit/bash → unsafe)
+- New file: `internal/service/chat_tool_executor.go`
+
+### 4.3 Layered iteration control — DONE
+- `loopState` struct consolidates 12+ scattered loop variables into `internal/service/chat_loop_state.go`
+- `shouldStop()` checks 5 layers: consecutive failures (cap=3), idle timeout (15min), max turns (25), hard ceiling (100), retry budget
+- `recordToolCall()` tracks per-tool call counts + consecutive failures
+- `AgentConstraints` extended: `MaxTurns`, `HardCeiling`, `ConsecutiveFailCap`, `IdleTimeoutSeconds`, `DebugMode`
+- `ToolMetaInfo` extended: `IsConcurrencySafe`, `MaxIterations`
+- Old `maxToolIterations=10` constant removed
+
+### 4.4 Turn snapshots (debug mode) — DONE
+- `TurnSnapshot` / `ToolCallSnapshot` structs with `captureSnapshot()` / `captureSnapshotWithTools()` methods
+- Gated by `AgentConstraints.DebugMode` — zero overhead when off
+- Snapshots serialized to `execution_metrics.debug_snapshots` (JSON blob)
+- Migration: `023_add_debug_snapshots.sql`
+
+### Frontend (Phase 4)
+- Turn snapshot viewer (debug panel — shows continuation path, tool calls, timing)
+- Iteration limit warning in chat (when approaching max turns)
+
+---
+
+## Phase 5 — Agent System
+
+**Depends on:** Phase 1 (tool bindings), Phase 3 (permission modes per agent)
+**Decisions doc:** §8 (Agent System)
+**Goal:** Move agent definitions from DB-only to MD-based file format as source of truth. DB stores runtime state only.
+
+### 5.1 Agent file format
+- YAML frontmatter + markdown system prompt body
+- Fields: `name`, `description`, `model` (or `inherit`), `tools` (allowlist), `permissionMode`, `maxTurns`, `skills`, `mcpServers`, `memory`, `effort`, `isolation` (optional: `worktree`), `tags`
+- Cross-compatible with Claude Code agent format where fields overlap
+
+### 5.2 Agent loader & discovery
+- Discovers MD files from 6 locations (priority order):
+  1. CLI `--agent` flag
+  2. `.conduit/agents/` (project)
+  3. `~/.conduit/agents/` (user)
+  4. `plugins/{name}/agents/` (plugin-provided)
+  5. `.agentrc/agents/` (agentrc ecosystem)
+  6. `.claude/agents/` (Claude Code ecosystem)
+- Parses YAML frontmatter, registers as agent definitions
+- DB stores only session-agent bindings and runtime overrides
+
+### 5.3 Built-in minimal agents
+- Ship as MD files, not seed.go code:
+  - Default chat agent (no special tools, general purpose)
+  - Code agent (dev tools, file access)
+  - Research agent (web tools, read-only)
+  - Task agent (Engine tools, sprint/task management)
+- These replace the current seeded agents (Mentat, Developer, Researcher, Orchestrator)
+- Demo Presenter stays as a separate concern (plugin-provided or config-driven)
+
+### 5.4 Seed.go cleanup
+- Extract agent definitions from `Seed()` — agents now come from MD files
+- Extract provider/model data into a YAML data file loaded at seed time
+- Eliminate duplication between `Seed()` and `SeedProviders()`
+- `SeedAgentSkillBindings()` becomes unnecessary once agents declare skills in their MD files
+- **Verify:** Fresh DB seeds correctly from files, existing DBs unaffected
+
+### 5.5 Worktree isolation
+- `isolation: worktree` in agent definition → create git worktree for session
+- Clean up on session end
+- **Verify:** Agent session operates in worktree, cleanup is clean
+
+### 5.6 AgentService migration
+- `AgentService.Get/List` reads from file-based loader (primary) + DB overrides
+- `AgentService.ResolveForSession` unchanged (already in service layer)
+- GUI agent list shows file-based agents
+- **Verify:** All agent flows work with file-based definitions
+
+### Frontend (Phase 5)
+- Agent file editor (read/write MD files via API)
+- Agent picker shows source (file location) and agent metadata
+- Agent mode switcher reflects modes from agent definition
+
+---
+
+## Phase 6 — Skill System
+
+**Depends on:** Phase 5 (agent definitions reference skills)
+**Decisions doc:** §9 (Skill System)
+**Goal:** Implement Agent Skills spec compatible skills with discovery, execution, and broker integration.
+
+### 6.1 Skill file format
+- Agent Skills spec (agentskills.io) compatible
+- YAML frontmatter: `name`, `description`, `argument-hint`, `allowed-tools`, `model`, `effort`, `context` (inline or fork), `tags`, `broker-hints` (Conduit extension)
+- Markdown body with optional `` !`command` `` dynamic context injection
+
+### 6.2 Skill loader & discovery
+- Discovery chain (priority): `.conduit/skills/` → `~/.conduit/skills/` → `.agentrc/skills/` → `.claude/skills/` → plugin `skills/`
+- Parse YAML frontmatter, register in SkillService
+- Dynamic context: shell commands run at skill load time via subprocess, output injected
+
+### 6.3 Skill execution
+- Inline (default): Skill prompt injected into current session context
+- Fork (`context: fork`): New isolated session, skill prompt as system context
+- Skill-tool bindings: `allowed-tools` constrains which tools the LLM can use during skill execution
+- Broker hints: `broker-hints` feeds into broker Layer 2 rules during skill execution
+
+### 6.4 Slash command integration
+- Skills discoverable via `/` autocomplete
+- `/skillname [args]` triggers skill execution
+- Plugin-registered skills appear alongside file-based skills
+- **Verify:** Skill execution works inline and forked, tools constrained correctly
+
+### Frontend (Phase 6)
+- Skill browser (list available skills with source, description)
+- Skill argument prompt (when skill has `argument-hint`)
+
+---
+
+## Phase 7 — Slash Commands & Polish
+
+**Depends on:** Phase 5 (agent system), Phase 6 (skills as commands)
+**Decisions doc:** §3a (Slash Commands from backend TODO)
+**Goal:** Round out the command system, fix remaining anti-patterns, final polish pass.
+
+### 7.1 New slash commands
+- `/status` — Session info: agent, model, provider, message count, token usage, active mode
+- `/providers` — List registered providers and their status (available/unavailable, API key configured)
+- `/export` — Export session (format TBD: markdown transcript, JSON)
+- Review Fragments v1 commands for anything else worth porting
+
+### 7.2 Remaining anti-patterns
+- **Migration ordering** — Evaluate: switch from explicit file list to directory listing, or add a migration framework. Low risk since we're pre-release.
+- **Envelope sync fragility** — Consider a build-time check that validates all backend envelope types have frontend registry entries. Doesn't need to be auto-generated, just validated.
+- **Inconsistent nil checks for optional deps** — Establish a pattern (e.g., service methods return typed errors for unavailable deps) and apply it to the handlers touched during this phase.
+
+### 7.3 Test coverage audit
+- Run coverage report, identify gaps in critical paths (chat loop, tool execution, permission checks)
+- Add tests for any untested Phase 0-6 work
+- Fix pre-existing test failures: `TestAuthMiddlewareEnabled`, stale MCP tool count test
+- **Verify:** `go test ./...` fully clean, no skipped or known-broken tests
+
+### Frontend (Phase 7)
+- Slash command autocomplete updates (new commands, skill commands)
+- Polish pass on all new Phase 0-6 UI (debug panels, permission approval, agent editor, skill browser)
+- Envelope sync validation (build-time check)
+
+---
+
+## Phase Summary
+
+| Phase | Scope | Decisions Doc | Key Deliverable |
+|-------|-------|--------------|-----------------|
+| 0 | Cleanup & Foundation | — | Clean service layer, no hardcoded paths |
+| 1 | Tool System & Broker | §2, §3 | Formal tool interface, progressive broker, decision logging |
+| 2 | Context & Compaction | §4, §5, §15 | Slot architecture, summary compaction, cheap model selection |
+| 3 | Permission & Approval | §6 | Rule engine, 3 scopes, yolo, API approval flow |
+| 4 | Chat Loop Hardening | §7 | Continuation sites, parallel tools, iteration limits |
+| 5 | Agent System | §8 | MD-based agents, file discovery, seed cleanup |
+| 6 | Skill System | §9 | Agent Skills spec, discovery, broker integration |
+| 7 | Slash Commands & Polish | §3a, misc | New commands, anti-pattern fixes, test coverage |
+
+### Dependency Graph
+
+```
+Phase 0 (cleanup)
+    │
+    ▼
+Phase 1 (tools & broker)
+    │
+    ├──────────────────┐
+    ▼                  ▼
+Phase 2 (context)    Phase 3 (permissions)
+    │                  │
+    └────────┬─────────┘
+             ▼
+Phase 4 (chat loop)
+             │
+             ▼
+Phase 5 (agents)
+             │
+             ▼
+Phase 6 (skills)
+             │
+             ▼
+Phase 7 (commands & polish)
+```
+
+Note: Phases 2 and 3 can run in parallel (separate sessions) after Phase 1 completes. Phase 4 needs both. Phases 5 and 6 are sequential. Phase 7 is the final polish pass.
+
+### Frontend Work Stream
+
+Frontend items are listed per-phase above. They can be executed in parallel by frontend agents in separate sessions. The frontend work stream depends on the corresponding backend phase being complete (or at least API-stable).

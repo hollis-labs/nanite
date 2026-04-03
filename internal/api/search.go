@@ -31,7 +31,7 @@ func (a *API) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, err := a.Store.SearchMessages(query, workspaceID, projectID, limit)
+	results, err := a.Services.Store.SearchMessages(query, workspaceID, projectID, limit)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

@@ -40,7 +40,7 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 	sessionID := r.PathValue("id")
 
 	// Get messages for the session.
-	messages, err := a.Store.ListMessages(sessionID, 200)
+	messages, err := a.Services.Store.ListMessages(sessionID, 200)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -68,12 +68,12 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 	// Get the session's agent and its system prompt.
 	systemPrompt := ""
 	systemTokens := 500 // base estimate
-	if a.Engine != nil {
-		session, err := a.Store.GetSession(sessionID)
+	if a.Services.Store != nil {
+		session, err := a.Services.Store.GetSession(sessionID)
 		if err == nil && session != nil {
-			agents, err := a.Store.ListSessionAgents(session.ID)
+			agents, err := a.Services.Store.ListSessionAgents(session.ID)
 			if err == nil && len(agents) > 0 {
-				agent, err := a.Store.GetAgent(agents[0].AgentID)
+				agent, err := a.Services.Store.GetAgent(agents[0].AgentID)
 				if err == nil && agent != nil {
 					systemPrompt = agent.SystemPrompt
 					systemTokens = chat.EstimateTokens(systemPrompt)
@@ -83,7 +83,7 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Count tool calls from the event log (tool results aren't stored as messages).
-	toolCallCount := a.Store.CountSessionToolCalls(sessionID)
+	toolCallCount := a.Services.Store.CountSessionToolCalls(sessionID)
 	toolDetails := make([]ToolTokenDetail, 0)
 	toolTokensTotal := 0
 	if toolCallCount > 0 {
@@ -97,8 +97,8 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 
 	// Total available tools (for display, not context cost).
 	toolsAvailable := 0
-	if a.ToolClient != nil {
-		toolsAvailable = len(a.ToolClient.ListTools())
+	if a.Services.ToolClient != nil {
+		toolsAvailable = len(a.Services.ToolClient.ListTools())
 	}
 
 	// System prompt preview for the inspector.
@@ -112,7 +112,7 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 
 	// Get cost from usage summary.
 	costUSD := 0.0
-	usage, err := a.Store.GetSessionUsage(sessionID)
+	usage, err := a.Services.Store.GetSessionUsage(sessionID)
 	if err == nil && usage != nil {
 		costUSD = usage.EstimatedCostUSD
 	}

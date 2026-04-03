@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/conduit/internal/version"
 	"github.com/hollis-labs/fragments-engine/plugin"
 )
 
@@ -118,7 +119,7 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 		PluginDir: sp.pluginDir,
 		Config:    sp.config,
 		HostInfo: HostInfo{
-			Version:  "0.2.0", // TODO: inject from build
+			Version:  version.Version,
 			Protocol: ProtocolVersion,
 		},
 	})

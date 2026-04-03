@@ -6,7 +6,7 @@ import (
 )
 
 func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.Store.GetUserSettings()
+	settings, err := a.Services.Store.GetUserSettings()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load settings")
 		return
@@ -16,7 +16,7 @@ func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Read existing settings first for partial merge.
-	existing, err := a.Store.GetUserSettings()
+	existing, err := a.Services.Store.GetUserSettings()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load current settings")
 		return
@@ -99,21 +99,19 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Store.UpdateUserSettings(existing); err != nil {
+	if err := a.Services.Store.UpdateUserSettings(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to update settings")
 		return
 	}
 
 	// Sync utility provider/model to the running engine so changes take effect
 	// immediately without a restart.
-	if a.Engine != nil {
-		a.Engine.RefreshUtilitySettings(existing.UtilityProvider, existing.UtilityModel)
-	}
+	a.Services.RefreshUtilitySettings(existing.UtilityProvider, existing.UtilityModel)
 
 	// Emit plugin event: user config changed.
-	if a.PluginHost != nil {
+	if a.Services.Plugins != nil {
 		for key := range raw {
-			go a.PluginHost.EmitConfigChanged("user", key, "")
+			go a.Services.Plugins.EmitConfigChanged("user", key, "")
 		}
 	}
 

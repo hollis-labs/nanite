@@ -21,12 +21,12 @@ func (a *API) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.UpdateProvider(id, update); err != nil {
+	if err := a.Services.Store.UpdateProvider(id, update); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to update provider: "+err.Error())
 		return
 	}
 
-	p, err := a.Store.GetProvider(id)
+	p, err := a.Services.Store.GetProvider(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "provider not found")
 		return
@@ -67,14 +67,14 @@ func (a *API) handleSetProviderAPIKey(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleGetProviderStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	p, err := a.Store.GetProvider(id)
+	p, err := a.Services.Store.GetProvider(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "provider not found")
 		return
 	}
 
 	hasKey := secrets.Has(secrets.ProviderKeyName(id))
-	registered := a.Engine != nil && a.Engine.Providers.Has(p.ProviderType)
+	registered := a.Services.Providers != nil && a.Services.Providers.Has(p.ProviderType)
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"provider":   p,
@@ -120,7 +120,7 @@ func (a *API) handleDetectCLI(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Check if a custom path is stored in provider settings.
-		if p, err := a.Store.GetProvider(s.provID); err == nil && p.Settings != "" && p.Settings != "{}" {
+		if p, err := a.Services.Store.GetProvider(s.provID); err == nil && p.Settings != "" && p.Settings != "{}" {
 			var settings map[string]string
 			if json.Unmarshal([]byte(p.Settings), &settings) == nil {
 				if cp, ok := settings["cli_path"]; ok && cp != "" {
@@ -145,7 +145,7 @@ func (a *API) handleDetectCLI(w http.ResponseWriter, r *http.Request) {
 
 // handleGetAllProviderStatuses returns all providers with their runtime status.
 func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Request) {
-	providers, err := a.Store.ListProviders()
+	providers, err := a.Services.Store.ListProviders()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -160,11 +160,11 @@ func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Reques
 	out := make([]providerStatus, 0, len(providers))
 	for _, p := range providers {
 		hasKey := secrets.Has(secrets.ProviderKeyName(p.ID))
-		registered := a.Engine != nil && a.Engine.Providers.Has(p.ProviderType)
+		registered := a.Services.Providers != nil && a.Services.Providers.Has(p.ProviderType)
 
 		// For CLI providers, also check pty- and sub- variants.
 		if !registered && strings.HasPrefix(p.ProviderType, "pty-") {
-			registered = a.Engine != nil && (a.Engine.Providers.Has(p.ProviderType) || a.Engine.Providers.Has("sub-"+strings.TrimPrefix(p.ProviderType, "pty-")))
+			registered = a.Services.Providers != nil && (a.Services.Providers.Has(p.ProviderType) || a.Services.Providers.Has("sub-"+strings.TrimPrefix(p.ProviderType, "pty-")))
 		}
 
 		out = append(out, providerStatus{

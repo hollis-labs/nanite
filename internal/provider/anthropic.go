@@ -765,6 +765,7 @@ func (a *Anthropic) Capabilities() ProviderCapabilities {
 		SupportsToolCalling:         true,  // Anthropic supports function calling
 		SupportsBatch:               false, // No batch API support in current implementation
 		SupportsImageInput:          true,  // Anthropic supports image inputs
-		MaxTokens:                   200000, // Claude 3.5 Sonnet supports up to 200k tokens
+		MaxTokens:                   16384,  // Claude max output tokens (default)
+		ContextWindowSize:           200000, // Claude models support 200k context window
 	}
 }

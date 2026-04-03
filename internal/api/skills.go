@@ -7,7 +7,7 @@ import (
 )
 
 func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
-	skills, err := a.Store.ListSkills()
+	skills, err := a.Services.Store.ListSkills()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -45,7 +45,7 @@ func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 		Settings:     req.Settings,
 		Icon:         req.Icon,
 	}
-	if err := a.Store.CreateSkill(sk); err != nil {
+	if err := a.Services.Store.CreateSkill(sk); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -54,7 +54,7 @@ func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sk, err := a.Store.GetSkill(id)
+	sk, err := a.Services.Store.GetSkill(id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -69,7 +69,7 @@ func (a *API) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Store.GetSkill(id)
+	existing, err := a.Services.Store.GetSkill(id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -119,7 +119,7 @@ func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 		existing.Icon = *req.Icon
 	}
 
-	if err := a.Store.UpdateSkill(existing); err != nil {
+	if err := a.Services.Store.UpdateSkill(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -128,7 +128,7 @@ func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.DeleteSkill(id); err != nil {
+	if err := a.Services.Store.DeleteSkill(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -137,7 +137,7 @@ func (a *API) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListAgentSkills(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	skills, err := a.Store.ListAgentSkills(agentID)
+	skills, err := a.Services.Store.ListAgentSkills(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -162,23 +162,23 @@ func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify agent exists.
-	if _, err := a.Store.GetAgent(agentID); err != nil {
+	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 	// Verify skill exists.
-	sk, err := a.Store.GetSkill(req.SkillID)
+	sk, err := a.Services.Store.GetSkill(req.SkillID)
 	if err != nil || sk == nil {
 		a.errorResp(w, http.StatusNotFound, "skill not found")
 		return
 	}
 
-	if err := a.Store.AssignSkillToAgent(agentID, req.SkillID, req.Config); err != nil {
+	if err := a.Services.Store.AssignSkillToAgent(agentID, req.SkillID, req.Config); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	skills, err := a.Store.ListAgentSkills(agentID)
+	skills, err := a.Services.Store.ListAgentSkills(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -190,7 +190,7 @@ func (a *API) handleRemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	skillID := r.PathValue("skillId")
 
-	if err := a.Store.RemoveSkillFromAgent(agentID, skillID); err != nil {
+	if err := a.Services.Store.RemoveSkillFromAgent(agentID, skillID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

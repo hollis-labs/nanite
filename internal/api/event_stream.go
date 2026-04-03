@@ -12,7 +12,7 @@ import (
 //
 // Example: GET /api/plugins/events/stream?events=tool.called,session.start
 func (a *API) handleEventStream(w http.ResponseWriter, r *http.Request) {
-	if a.PluginHost == nil {
+	if a.Services.Plugins == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "plugin system not initialized")
 		return
 	}
@@ -36,8 +36,8 @@ func (a *API) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Subscribe to the event bus.
-	ch := a.PluginHost.SubscribeEvents()
-	defer a.PluginHost.UnsubscribeEvents(ch)
+	ch := a.Services.Plugins.SubscribeEvents()
+	defer a.Services.Plugins.UnsubscribeEvents(ch)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

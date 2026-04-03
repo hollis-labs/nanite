@@ -26,6 +26,7 @@ type ExecutionMetrics struct {
 	IsUtility           bool    `json:"is_utility"`
 	StopReason          string  `json:"stop_reason"`
 	Error               string  `json:"error"`
+	DebugSnapshots      string  `json:"debug_snapshots,omitempty"` // JSON blob of TurnSnapshot[]
 	CreatedAt           string  `json:"created_at"`
 }
 
@@ -46,7 +47,8 @@ const executionMetricsCols = `id, session_id, message_id, provider, adapter, mod
 	agent_id, agent_slug, mode, duration_ms,
 	context_messages, context_tokens, input_tokens, output_tokens,
 	cache_creation_tokens, cache_read_tokens, estimated_cost_usd,
-	tool_iterations, tool_calls, is_utility, stop_reason, error, created_at`
+	tool_iterations, tool_calls, is_utility, stop_reason, error,
+	COALESCE(debug_snapshots, '') AS debug_snapshots, created_at`
 
 func scanExecutionMetrics(rows interface{ Scan(...any) error }) (ExecutionMetrics, error) {
 	var m ExecutionMetrics
@@ -55,7 +57,8 @@ func scanExecutionMetrics(rows interface{ Scan(...any) error }) (ExecutionMetric
 		&m.AgentID, &m.AgentSlug, &m.Mode, &m.DurationMs,
 		&m.ContextMessages, &m.ContextTokens, &m.InputTokens, &m.OutputTokens,
 		&m.CacheCreationTokens, &m.CacheReadTokens, &m.EstimatedCostUSD,
-		&m.ToolIterations, &m.ToolCalls, &m.IsUtility, &m.StopReason, &m.Error, &m.CreatedAt,
+		&m.ToolIterations, &m.ToolCalls, &m.IsUtility, &m.StopReason, &m.Error,
+		&m.DebugSnapshots, &m.CreatedAt,
 	)
 	return m, err
 }
@@ -69,13 +72,15 @@ func (s *Store) RecordExecutionMetrics(m *ExecutionMetrics) error {
 			 agent_id, agent_slug, mode, duration_ms,
 			 context_messages, context_tokens, input_tokens, output_tokens,
 			 cache_creation_tokens, cache_read_tokens, estimated_cost_usd,
-			 tool_iterations, tool_calls, is_utility, stop_reason, error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 tool_iterations, tool_calls, is_utility, stop_reason, error,
+			 debug_snapshots)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.SessionID, m.MessageID, m.Provider, m.Adapter, m.Model,
 		m.AgentID, m.AgentSlug, m.Mode, m.DurationMs,
 		m.ContextMessages, m.ContextTokens, m.InputTokens, m.OutputTokens,
 		m.CacheCreationTokens, m.CacheReadTokens, m.EstimatedCostUSD,
 		m.ToolIterations, m.ToolCalls, m.IsUtility, m.StopReason, m.Error,
+		m.DebugSnapshots,
 	)
 	if err != nil {
 		return fmt.Errorf("record execution metrics: %w", err)

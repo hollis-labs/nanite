@@ -7,7 +7,7 @@ import (
 )
 
 func (a *API) handleListPromptTemplates(w http.ResponseWriter, r *http.Request) {
-	templates, err := a.Store.ListPromptTemplates()
+	templates, err := a.Services.Store.ListPromptTemplates()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -46,7 +46,7 @@ func (a *API) handleCreatePromptTemplate(w http.ResponseWriter, r *http.Request)
 		Priority:  req.Priority,
 		Icon:      req.Icon,
 	}
-	if err := a.Store.CreatePromptTemplate(pt); err != nil {
+	if err := a.Services.Store.CreatePromptTemplate(pt); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -55,7 +55,7 @@ func (a *API) handleCreatePromptTemplate(w http.ResponseWriter, r *http.Request)
 
 func (a *API) handleGetPromptTemplate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	pt, err := a.Store.GetPromptTemplate(id)
+	pt, err := a.Services.Store.GetPromptTemplate(id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -70,7 +70,7 @@ func (a *API) handleGetPromptTemplate(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdatePromptTemplate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Store.GetPromptTemplate(id)
+	existing, err := a.Services.Store.GetPromptTemplate(id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -116,7 +116,7 @@ func (a *API) handleUpdatePromptTemplate(w http.ResponseWriter, r *http.Request)
 		existing.Icon = *req.Icon
 	}
 
-	if err := a.Store.UpdatePromptTemplate(existing); err != nil {
+	if err := a.Services.Store.UpdatePromptTemplate(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -125,7 +125,7 @@ func (a *API) handleUpdatePromptTemplate(w http.ResponseWriter, r *http.Request)
 
 func (a *API) handleDeletePromptTemplate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.DeletePromptTemplate(id); err != nil {
+	if err := a.Services.Store.DeletePromptTemplate(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -134,7 +134,7 @@ func (a *API) handleDeletePromptTemplate(w http.ResponseWriter, r *http.Request)
 
 func (a *API) handleListAgentPromptTemplates(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	templates, err := a.Store.ListPromptTemplatesForAgent(agentID)
+	templates, err := a.Services.Store.ListPromptTemplatesForAgent(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -158,23 +158,23 @@ func (a *API) handleAssignAgentPromptTemplate(w http.ResponseWriter, r *http.Req
 	}
 
 	// Verify agent exists.
-	if _, err := a.Store.GetAgent(agentID); err != nil {
+	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 	// Verify template exists.
-	pt, err := a.Store.GetPromptTemplate(req.TemplateID)
+	pt, err := a.Services.Store.GetPromptTemplate(req.TemplateID)
 	if err != nil || pt == nil {
 		a.errorResp(w, http.StatusNotFound, "prompt template not found")
 		return
 	}
 
-	if err := a.Store.AssignPromptTemplateToAgent(agentID, req.TemplateID); err != nil {
+	if err := a.Services.Store.AssignPromptTemplateToAgent(agentID, req.TemplateID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	templates, err := a.Store.ListPromptTemplatesForAgent(agentID)
+	templates, err := a.Services.Store.ListPromptTemplatesForAgent(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -186,7 +186,7 @@ func (a *API) handleRemoveAgentPromptTemplate(w http.ResponseWriter, r *http.Req
 	agentID := r.PathValue("id")
 	templateID := r.PathValue("templateId")
 
-	if err := a.Store.RemovePromptTemplateFromAgent(agentID, templateID); err != nil {
+	if err := a.Services.Store.RemovePromptTemplateFromAgent(agentID, templateID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

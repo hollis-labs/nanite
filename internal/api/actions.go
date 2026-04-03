@@ -10,7 +10,7 @@ import (
 
 // handleListActions returns all custom actions.
 func (a *API) handleListActions(w http.ResponseWriter, r *http.Request) {
-	actions, err := a.Store.ListCustomActions()
+	actions, err := a.Services.Store.ListCustomActions()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -62,7 +62,7 @@ func (a *API) handleCreateAction(w http.ResponseWriter, r *http.Request) {
 		Enabled:      enabled,
 	}
 
-	if err := a.Store.CreateCustomAction(action); err != nil {
+	if err := a.Services.Store.CreateCustomAction(action); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -78,7 +78,7 @@ func (a *API) handleCreateAction(w http.ResponseWriter, r *http.Request) {
 // handleGetAction returns a single custom action by ID.
 func (a *API) handleGetAction(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	action, err := a.Store.GetCustomAction(id)
+	action, err := a.Services.Store.GetCustomAction(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
@@ -90,7 +90,7 @@ func (a *API) handleGetAction(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateAction(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Store.GetCustomAction(id)
+	existing, err := a.Services.Store.GetCustomAction(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
@@ -132,7 +132,7 @@ func (a *API) handleUpdateAction(w http.ResponseWriter, r *http.Request) {
 		existing.Enabled = *req.Enabled
 	}
 
-	if err := a.Store.UpdateCustomAction(existing); err != nil {
+	if err := a.Services.Store.UpdateCustomAction(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -148,7 +148,7 @@ func (a *API) handleUpdateAction(w http.ResponseWriter, r *http.Request) {
 // handleDeleteAction deletes a custom action by ID.
 func (a *API) handleDeleteAction(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.DeleteCustomAction(id); err != nil {
+	if err := a.Services.Store.DeleteCustomAction(id); err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -159,7 +159,7 @@ func (a *API) handleDeleteAction(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	action, err := a.Store.GetCustomAction(id)
+	action, err := a.Services.Store.GetCustomAction(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
@@ -193,11 +193,11 @@ func (a *API) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 // RegisterActionCommand registers a custom action as a slash command
 // in the Engine's command registry.
 func (a *API) RegisterActionCommand(action *store.CustomAction) {
-	if a.Engine == nil || a.Engine.Commands == nil {
+	if a.Services.Commands == nil {
 		return
 	}
 
-	a.Engine.Commands.Register(
+	a.Services.Commands.Register(
 		chat.SlashCommand{
 			Name:        action.SlashCommand,
 			Description: action.Description,

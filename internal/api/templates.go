@@ -10,7 +10,7 @@ import (
 )
 
 func (a *API) handleListTemplates(w http.ResponseWriter, r *http.Request) {
-	templates, err := a.Store.ListTemplates()
+	templates, err := a.Services.Store.ListTemplates()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -20,7 +20,7 @@ func (a *API) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	t, err := a.Store.GetTemplate(name)
+	t, err := a.Services.Store.GetTemplate(name)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -53,7 +53,7 @@ func (a *API) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t := &store.Template{Name: req.Name, Template: req.Template}
-	if err := a.Store.CreateTemplate(t); err != nil {
+	if err := a.Services.Store.CreateTemplate(t); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -79,7 +79,7 @@ func (a *API) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.UpdateTemplate(name, req.Template); err != nil {
+	if err := a.Services.Store.UpdateTemplate(name, req.Template); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -88,7 +88,7 @@ func (a *API) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := a.Store.DeleteTemplate(name); err != nil {
+	if err := a.Services.Store.DeleteTemplate(name); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -110,7 +110,7 @@ func (a *API) handleApplyTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, err := a.Store.GetTemplate(name)
+	tmpl, err := a.Services.Store.GetTemplate(name)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -121,7 +121,7 @@ func (a *API) handleApplyTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the last assistant message from the session.
-	messages, err := a.Store.ListMessages(req.SessionID, 20)
+	messages, err := a.Services.Store.ListMessages(req.SessionID, 20)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -137,7 +137,7 @@ func (a *API) handleApplyTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get session title.
-	sess, err := a.Store.GetSession(req.SessionID)
+	sess, err := a.Services.Store.GetSession(req.SessionID)
 	if err == nil && sess != nil {
 		lastTitle = sess.Title
 	}

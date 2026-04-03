@@ -18,7 +18,7 @@ type volonBacklogRequest struct {
 // handleCreateVolonBacklog proxies a backlog capture request to the Volon MCP server.
 // POST /api/volon/backlog
 func (a *API) handleCreateVolonBacklog(w http.ResponseWriter, r *http.Request) {
-	if a.MCPManager == nil {
+	if a.Services.MCP == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
 		return
 	}
@@ -51,7 +51,7 @@ func (a *API) handleCreateVolonBacklog(w http.ResponseWriter, r *http.Request) {
 		args["tags"] = string(tagsJSON)
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_capture", args)
+	result, err := a.Services.MCP.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_capture", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon backlog capture failed: %v", err))
 		return
@@ -74,7 +74,7 @@ func (a *API) handleCreateVolonBacklog(w http.ResponseWriter, r *http.Request) {
 // handleVolonListSprints proxies volon_sprints_list.
 // GET /api/volon/sprints?project_id=X
 func (a *API) handleVolonListSprints(w http.ResponseWriter, r *http.Request) {
-	if a.MCPManager == nil {
+	if a.Services.MCP == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
 		return
 	}
@@ -84,7 +84,7 @@ func (a *API) handleVolonListSprints(w http.ResponseWriter, r *http.Request) {
 		args["project_id"] = pid
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_sprints_list", args)
+	result, err := a.Services.MCP.ExecuteTool(r.Context(), "mcp__engine__engine_sprints_list", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon sprints_list: %v", err))
 		return
@@ -96,7 +96,7 @@ func (a *API) handleVolonListSprints(w http.ResponseWriter, r *http.Request) {
 // handleVolonListTasks proxies volon_tasks_list.
 // GET /api/volon/tasks?sprint_id=X&status=Y&project_id=Z
 func (a *API) handleVolonListTasks(w http.ResponseWriter, r *http.Request) {
-	if a.MCPManager == nil {
+	if a.Services.MCP == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
 		return
 	}
@@ -112,7 +112,7 @@ func (a *API) handleVolonListTasks(w http.ResponseWriter, r *http.Request) {
 		args["project_id"] = pid
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_tasks_list", args)
+	result, err := a.Services.MCP.ExecuteTool(r.Context(), "mcp__engine__engine_tasks_list", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon tasks_list: %v", err))
 		return
@@ -124,7 +124,7 @@ func (a *API) handleVolonListTasks(w http.ResponseWriter, r *http.Request) {
 // handleVolonListBacklog proxies volon_backlog_list.
 // GET /api/volon/backlog?project_id=X
 func (a *API) handleVolonListBacklog(w http.ResponseWriter, r *http.Request) {
-	if a.MCPManager == nil {
+	if a.Services.MCP == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
 		return
 	}
@@ -134,7 +134,7 @@ func (a *API) handleVolonListBacklog(w http.ResponseWriter, r *http.Request) {
 		args["project_id"] = pid
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_list", args)
+	result, err := a.Services.MCP.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_list", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon backlog_list: %v", err))
 		return
@@ -146,7 +146,7 @@ func (a *API) handleVolonListBacklog(w http.ResponseWriter, r *http.Request) {
 // handleVolonTransitionTask proxies volon_task_transition.
 // POST /api/volon/tasks/{id}/transition  body: {"status":"done"}
 func (a *API) handleVolonTransitionTask(w http.ResponseWriter, r *http.Request) {
-	if a.MCPManager == nil {
+	if a.Services.MCP == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
 		return
 	}
@@ -174,7 +174,7 @@ func (a *API) handleVolonTransitionTask(w http.ResponseWriter, r *http.Request) 
 		"status": req.Status,
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_task_transition", args)
+	result, err := a.Services.MCP.ExecuteTool(r.Context(), "mcp__engine__engine_task_transition", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon task_transition: %v", err))
 		return
@@ -186,7 +186,7 @@ func (a *API) handleVolonTransitionTask(w http.ResponseWriter, r *http.Request) 
 // handleVolonPromoteBacklog proxies volon_backlog_promote.
 // POST /api/volon/backlog/{id}/promote  body: {"sprint_id":"..."}
 func (a *API) handleVolonPromoteBacklog(w http.ResponseWriter, r *http.Request) {
-	if a.MCPManager == nil {
+	if a.Services.MCP == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
 		return
 	}
@@ -214,7 +214,7 @@ func (a *API) handleVolonPromoteBacklog(w http.ResponseWriter, r *http.Request) 
 		"sprint_id": req.SprintID,
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_promote", args)
+	result, err := a.Services.MCP.ExecuteTool(r.Context(), "mcp__engine__engine_backlog_promote", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon backlog_promote: %v", err))
 		return
@@ -226,7 +226,7 @@ func (a *API) handleVolonPromoteBacklog(w http.ResponseWriter, r *http.Request) 
 // handleVolonDeleteTask proxies volon_task_delete.
 // DELETE /api/volon/tasks/{id}
 func (a *API) handleVolonDeleteTask(w http.ResponseWriter, r *http.Request) {
-	if a.MCPManager == nil {
+	if a.Services.MCP == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
 		return
 	}
@@ -241,7 +241,7 @@ func (a *API) handleVolonDeleteTask(w http.ResponseWriter, r *http.Request) {
 		"id": taskID,
 	}
 
-	result, err := a.MCPManager.ExecuteTool(r.Context(), "mcp__engine__engine_task_delete", args)
+	result, err := a.Services.MCP.ExecuteTool(r.Context(), "mcp__engine__engine_task_delete", args)
 	if err != nil {
 		a.errorResp(w, http.StatusBadGateway, fmt.Sprintf("volon task_delete: %v", err))
 		return

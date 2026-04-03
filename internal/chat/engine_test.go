@@ -132,7 +132,7 @@ func TestBuildToolCatalog(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := buildToolCatalog(tt.summaries)
+			result := BuildToolCatalog(tt.summaries)
 			if tt.wantEmpty {
 				if result != "" {
 					t.Errorf("expected empty catalog, got %q", result)

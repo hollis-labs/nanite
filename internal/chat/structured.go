@@ -86,8 +86,8 @@ func ValidateStructured(sm StructuredMessage) []string {
 	return warnings
 }
 
-// logStructuredWarnings validates a StructuredMessage and logs any warnings.
-func logStructuredWarnings(sm StructuredMessage) {
+// LogStructuredWarnings validates a StructuredMessage and logs any warnings.
+func LogStructuredWarnings(sm StructuredMessage) {
 	if warnings := ValidateStructured(sm); len(warnings) > 0 {
 		for _, w := range warnings {
 			log.Printf("chat: structured message warning: %s", w)

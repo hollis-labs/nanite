@@ -27,7 +27,7 @@ func secretFieldKeys(schema []store.ConfigField) map[string]bool {
 func (a *API) handleGetPluginConfig(w http.ResponseWriter, r *http.Request) {
 	pluginID := r.PathValue("id")
 
-	settings, err := a.Store.GetPluginSettings(pluginID)
+	settings, err := a.Services.Store.GetPluginSettings(pluginID)
 	if err != nil {
 		// No settings saved yet — return empty defaults.
 		a.jsonResp(w, http.StatusOK, map[string]any{
@@ -62,7 +62,7 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load existing settings + schema to identify secret fields.
-	existing, err := a.Store.GetPluginSettings(pluginID)
+	existing, err := a.Services.Store.GetPluginSettings(pluginID)
 	var secKeys map[string]bool
 	if err == nil && existing != nil {
 		secKeys = secretFieldKeys(existing.Schema)
@@ -93,20 +93,20 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Store.UpsertPluginSettings(pluginID, dbSettings); err != nil {
+	if err := a.Services.Store.UpsertPluginSettings(pluginID, dbSettings); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to save plugin config")
 		return
 	}
 
 	// Emit plugin event: plugin config changed.
-	if a.PluginHost != nil {
+	if a.Services.Plugins != nil {
 		for key := range incoming {
-			go a.PluginHost.EmitConfigChanged(pluginID, key, "")
+			go a.Services.Plugins.EmitConfigChanged(pluginID, key, "")
 		}
 	}
 
 	// Return the full settings after merge.
-	updated, err := a.Store.GetPluginSettings(pluginID)
+	updated, err := a.Services.Store.GetPluginSettings(pluginID)
 	if err != nil {
 		a.jsonResp(w, http.StatusOK, map[string]any{"plugin_id": pluginID, "settings": dbSettings})
 		return
@@ -127,7 +127,7 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleListPluginSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.Store.ListPluginSettings()
+	settings, err := a.Services.Store.ListPluginSettings()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to list plugin settings")
 		return

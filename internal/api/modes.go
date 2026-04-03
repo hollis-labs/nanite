@@ -7,7 +7,7 @@ import (
 )
 
 func (a *API) handleListModes(w http.ResponseWriter, r *http.Request) {
-	modes, err := a.Store.ListModes()
+	modes, err := a.Services.Store.ListModes()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -17,7 +17,7 @@ func (a *API) handleListModes(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetMode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	m, err := a.Store.GetMode(id)
+	m, err := a.Services.Store.GetMode(id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -53,7 +53,7 @@ func (a *API) handleCreateMode(w http.ResponseWriter, r *http.Request) {
 		ToolOverrides:  req.ToolOverrides,
 		Settings:       req.Settings,
 	}
-	if err := a.Store.CreateMode(m); err != nil {
+	if err := a.Services.Store.CreateMode(m); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -63,7 +63,7 @@ func (a *API) handleCreateMode(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateMode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Store.GetMode(id)
+	existing, err := a.Services.Store.GetMode(id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -101,7 +101,7 @@ func (a *API) handleUpdateMode(w http.ResponseWriter, r *http.Request) {
 		existing.Settings = *req.Settings
 	}
 
-	if err := a.Store.UpdateMode(existing); err != nil {
+	if err := a.Services.Store.UpdateMode(existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -110,7 +110,7 @@ func (a *API) handleUpdateMode(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteMode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.DeleteMode(id); err != nil {
+	if err := a.Services.Store.DeleteMode(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -133,23 +133,23 @@ func (a *API) handleAssignModeToAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify agent exists.
-	if _, err := a.Store.GetAgent(agentID); err != nil {
+	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 	// Verify mode exists.
-	m, err := a.Store.GetMode(req.ModeID)
+	m, err := a.Services.Store.GetMode(req.ModeID)
 	if err != nil || m == nil {
 		a.errorResp(w, http.StatusNotFound, "mode not found")
 		return
 	}
 
-	if err := a.Store.AssignModeToAgent(agentID, req.ModeID); err != nil {
+	if err := a.Services.Store.AssignModeToAgent(agentID, req.ModeID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	modes, err := a.Store.GetAgentAssignedModes(agentID)
+	modes, err := a.Services.Store.GetAgentAssignedModes(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -161,7 +161,7 @@ func (a *API) handleUnassignModeFromAgent(w http.ResponseWriter, r *http.Request
 	agentID := r.PathValue("id")
 	modeID := r.PathValue("modeId")
 
-	if err := a.Store.UnassignModeFromAgent(agentID, modeID); err != nil {
+	if err := a.Services.Store.UnassignModeFromAgent(agentID, modeID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -170,7 +170,7 @@ func (a *API) handleUnassignModeFromAgent(w http.ResponseWriter, r *http.Request
 
 func (a *API) handleListAgentAssignedModes(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	modes, err := a.Store.GetAgentAssignedModes(agentID)
+	modes, err := a.Services.Store.GetAgentAssignedModes(agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

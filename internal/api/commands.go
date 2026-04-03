@@ -10,11 +10,11 @@ import (
 // handleListCommands returns all available slash commands (built-in + plugin).
 // All commands live in a single unified registry (Engine.Commands).
 func (a *API) handleListCommands(w http.ResponseWriter, r *http.Request) {
-	if a.Engine == nil || a.Engine.Commands == nil {
+	if a.Services.Commands == nil {
 		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
-	cmds := a.Engine.Commands.List()
+	cmds := a.Services.Commands.List()
 	a.jsonResp(w, http.StatusOK, cmds)
 }
 
@@ -36,13 +36,13 @@ func (a *API) handleExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.Engine == nil || a.Engine.Commands == nil {
+	if a.Services.Commands == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "command system not initialized")
 		return
 	}
 
 	// Execute from the unified registry (built-in + plugin commands).
-	result, err := a.Engine.Commands.Execute(r.Context(), req.Name, req.SessionID, req.Args)
+	result, err := a.Services.Commands.Execute(r.Context(), req.Name, req.SessionID, req.Args)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
@@ -56,7 +56,7 @@ func (a *API) handleExecuteCommand(w http.ResponseWriter, r *http.Request) {
 			Role:      "system",
 			Content:   result.Content,
 		}
-		if err := a.Store.CreateMessage(msg); err == nil {
+		if err := a.Services.Store.CreateMessage(msg); err == nil {
 			result.MessageID = msg.ID
 		}
 	}

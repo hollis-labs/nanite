@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/conduit/internal/chat"
+	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/conduit/internal/service"
 	"github.com/hollis-labs/conduit/internal/store"
 )
 
@@ -21,7 +23,15 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	a := New(s, nil) // nil engine — we only test handlers that don't need it
+	svc, err := service.NewContainer(service.ContainerConfig{
+		Store:     s,
+		Providers: provider.NewRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("service.NewContainer: %v", err)
+	}
+
+	a := New(svc)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -83,12 +93,12 @@ func TestCreateAndListSessions(t *testing.T) {
 
 	// Create a workspace first.
 	ws := &store.Workspace{ID: "ws-api", Name: "API Test"}
-	if err := a.Store.CreateWorkspace(ws); err != nil {
+	if err := a.Services.Store.CreateWorkspace(ws); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 
 	// Seed an agent so EnsureSessionAgent doesn't fail on FK constraint.
-	if err := a.Store.CreateAgent(&store.AgentProfile{
+	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
 		ID:           "mentat-001",
 		Name:         "Mentat",
 		Slug:         "mentat",
@@ -141,9 +151,7 @@ func TestListCommands(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	// Wire up a command registry with built-in commands.
-	a.Engine = &chat.Engine{
-		Commands: chat.NewCommandRegistry(),
-	}
+	a.Services.Commands = chat.NewCommandRegistry()
 
 	req := httptest.NewRequest("GET", "/api/commands", nil)
 	w := httptest.NewRecorder()

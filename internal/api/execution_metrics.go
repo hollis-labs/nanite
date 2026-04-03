@@ -7,7 +7,7 @@ import (
 
 func (a *API) handleGetSessionExecutionMetrics(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	metrics, err := a.Store.GetSessionExecutionMetrics(sessionID)
+	metrics, err := a.Services.Store.GetSessionExecutionMetrics(sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load execution metrics")
 		return
@@ -22,7 +22,7 @@ func (a *API) handleGetRecentExecutionMetrics(w http.ResponseWriter, r *http.Req
 			limit = n
 		}
 	}
-	metrics, err := a.Store.GetRecentExecutionMetrics(limit)
+	metrics, err := a.Services.Store.GetRecentExecutionMetrics(limit)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load execution metrics")
 		return
@@ -31,7 +31,7 @@ func (a *API) handleGetRecentExecutionMetrics(w http.ResponseWriter, r *http.Req
 }
 
 func (a *API) handleGetUtilityCallSummary(w http.ResponseWriter, r *http.Request) {
-	summary, err := a.Store.GetUtilityCallSummary()
+	summary, err := a.Services.Store.GetUtilityCallSummary()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load utility call summary")
 		return
@@ -46,7 +46,7 @@ func (a *API) handleGetUtilityCallLog(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	log, err := a.Store.GetUtilityCallLog(limit)
+	log, err := a.Services.Store.GetUtilityCallLog(limit)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load utility call log")
 		return

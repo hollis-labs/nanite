@@ -4,27 +4,22 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/mcp"
-	conduitplugin "github.com/hollis-labs/conduit/internal/plugin"
-	"github.com/hollis-labs/conduit/internal/store"
-	"github.com/hollis-labs/conduit/internal/toolclient"
+	"github.com/hollis-labs/conduit/internal/service"
 	"github.com/hollis-labs/nexus/messaging"
 )
 
 // API holds dependencies for HTTP handlers.
 type API struct {
-	Store          *store.Store
-	Engine         *chat.Engine
-	ToolClient     *toolclient.ToolClient
-	MCPManager     *mcp.Manager
-	PluginHost *conduitplugin.Host
-	NexusMsg       messaging.Store // Nexus Postgres-backed A2A messaging (nil = fallback to SQLite)
+	Services *service.Container
+
+	// NexusMsg is the Postgres-backed A2A messaging store.
+	// nil = fall back to SQLite via Services.Store.
+	NexusMsg messaging.Store
 }
 
-// New creates a new API instance.
-func New(s *store.Store, engine *chat.Engine) *API {
-	return &API{Store: s, Engine: engine}
+// New creates a new API instance from a service container.
+func New(svc *service.Container) *API {
+	return &API{Services: svc}
 }
 
 // RegisterRoutes wires all API routes onto the given ServeMux.
@@ -130,7 +125,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tools/servers", a.handleListToolServers)
 	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
 	mux.HandleFunc("POST /api/tools/refresh", a.handleRefreshTools)
+	mux.HandleFunc("GET /api/broker/decisions", a.handleListBrokerDecisions)
 	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
+
+	// Permissions & Approvals
+	mux.HandleFunc("GET /api/permissions/mode", a.handleGetPermissionMode)
+	mux.HandleFunc("PUT /api/permissions/mode", a.handleSetPermissionMode)
+	mux.HandleFunc("POST /api/sessions/{id}/approvals/{requestId}", a.handleRespondApproval)
 
 	// Skills
 	mux.HandleFunc("GET /api/skills", a.handleListSkills)

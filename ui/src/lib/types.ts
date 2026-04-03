@@ -555,6 +555,7 @@ export interface ToolCall {
   tool: string;
   status: "running" | "done" | "error";
   summary?: string;
+  detail?: string;
 }
 
 export interface ToolWarning {

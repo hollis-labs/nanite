@@ -15,11 +15,13 @@ interface ChatState {
   statusMessage: string | null
   setStatusMessage: (msg: string | null) => void
 
-  // Tool calls
+  // Tool calls (session-scoped retention)
   toolCalls: ToolCall[]
+  toolCallsBySession: Map<string, { calls: ToolCall[]; lastActivity: number }>
   addToolCall: (tc: ToolCall) => void
   updateToolCall: (id: string, update: Partial<ToolCall>) => void
   clearToolCalls: () => void
+  loadSessionToolCalls: (sessionId: string | null) => void
 
   // Tool warnings
   toolWarnings: ToolWarning[]
@@ -91,14 +93,57 @@ export const useChatStore = create<ChatState>((set) => ({
   statusMessage: null,
   setStatusMessage: (msg) => set({ statusMessage: msg }),
 
-  // Tool calls
+  // Tool calls (session-scoped retention)
   toolCalls: [],
-  addToolCall: (tc) => set((state) => ({ toolCalls: [...state.toolCalls, tc] })),
+  toolCallsBySession: new Map(),
+  addToolCall: (tc) =>
+    set((state) => {
+      const updated = [...state.toolCalls, tc].slice(-50)
+      // Also update the session map
+      const sessionId = state.streamingSessionId
+      if (sessionId) {
+        const next = new Map(state.toolCallsBySession)
+        next.set(sessionId, { calls: updated, lastActivity: Date.now() })
+        return { toolCalls: updated, toolCallsBySession: next }
+      }
+      return { toolCalls: updated }
+    }),
   updateToolCall: (id, update) =>
-    set((state) => ({
-      toolCalls: state.toolCalls.map((tc) => (tc.id === id ? { ...tc, ...update } : tc)),
-    })),
-  clearToolCalls: () => set({ toolCalls: [] }),
+    set((state) => {
+      const updated = state.toolCalls.map((tc) => (tc.id === id ? { ...tc, ...update } : tc))
+      const sessionId = state.streamingSessionId
+      if (sessionId) {
+        const next = new Map(state.toolCallsBySession)
+        next.set(sessionId, { calls: updated, lastActivity: Date.now() })
+        return { toolCalls: updated, toolCallsBySession: next }
+      }
+      return { toolCalls: updated }
+    }),
+  clearToolCalls: () =>
+    set((state) => {
+      const sessionId = state.streamingSessionId
+      if (sessionId) {
+        const next = new Map(state.toolCallsBySession)
+        next.set(sessionId, { calls: [], lastActivity: Date.now() })
+        return { toolCalls: [], toolCallsBySession: next }
+      }
+      return { toolCalls: [] }
+    }),
+  loadSessionToolCalls: (sessionId) =>
+    set((state) => {
+      if (!sessionId) return { toolCalls: [] }
+      // Prune stale entries (>15 min inactive)
+      const cutoff = Date.now() - 15 * 60 * 1000
+      const next = new Map(state.toolCallsBySession)
+      for (const [id, entry] of next) {
+        if (entry.lastActivity < cutoff) next.delete(id)
+      }
+      const entry = next.get(sessionId)
+      return {
+        toolCalls: entry?.calls ?? [],
+        toolCallsBySession: next,
+      }
+    }),
 
   // Tool warnings
   toolWarnings: [],

@@ -140,6 +140,7 @@ type StreamEvent struct {
 	Summary         string     `json:"summary,omitempty"`           // tool result summary
 	Envelope        string     `json:"envelope,omitempty"`          // JSON envelope data for stream_end
 	Data            string     `json:"data,omitempty"`              // JSON payload for tool_warning events
+	Detail          string     `json:"detail,omitempty"`            // Short label for tool_call (e.g., command, path)
 }
 
 // Usage contains token usage for a completed response.

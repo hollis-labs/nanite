@@ -14,6 +14,7 @@ export function ToolCallDrawer() {
   const dragging = useRef(false)
   const startY = useRef(0)
   const startHeight = useRef(0)
+  const didDrag = useRef(false)
 
   const isOpen = drawerState !== 'closed'
   const hasTools = toolCalls.length > 0
@@ -26,27 +27,28 @@ export function ToolCallDrawer() {
     }
   }, [toolCalls.length, isOpen])
 
-  // Double-click tab: toggle open/closed
-  const handleTabDoubleClick = useCallback(() => {
+  // Tab click: toggle open/closed (only fires if user didn't drag)
+  const handleTabClick = useCallback(() => {
+    if (didDrag.current) {
+      didDrag.current = false
+      return
+    }
     setDrawerState(isOpen ? 'closed' : 'compact')
   }, [isOpen, setDrawerState])
 
-  // Single click tab: open if closed
-  const handleTabClick = useCallback(() => {
-    if (!isOpen) setDrawerState('compact')
-  }, [isOpen, setDrawerState])
-
-  // Drag tab to resize
+  // Tab mousedown: start drag to resize (only when open)
   const handleTabMouseDown = useCallback((e: React.MouseEvent) => {
     if (!isOpen) return
     e.preventDefault()
     dragging.current = true
+    didDrag.current = false
     startY.current = e.clientY
     startHeight.current = drawerHeight
 
     const handleMouseMove = (ev: MouseEvent) => {
       if (!dragging.current) return
       const delta = ev.clientY - startY.current
+      if (Math.abs(delta) > 3) didDrag.current = true
       setDrawerHeight(startHeight.current + delta)
     }
 
@@ -60,44 +62,33 @@ export function ToolCallDrawer() {
     window.addEventListener('mouseup', handleMouseUp)
   }, [isOpen, drawerHeight, setDrawerHeight])
 
-  // Don't render anything if there are no tool calls
-  if (!hasTools) return null
-
+  // Tab is always at the bottom of the drawer unit.
+  // When closed: only the tab is visible (panel hidden).
+  // When open: panel above, tab below — tab is the drawer's bottom edge.
   return (
-    <div className="relative shrink-0">
-      {/* Pull tab — always visible, centered under the header */}
-      <div className="flex justify-center">
-        <button
-          type="button"
-          onClick={handleTabClick}
-          onDoubleClick={handleTabDoubleClick}
-          onMouseDown={handleTabMouseDown}
-          className={`
-            flex items-center gap-1.5 px-3 py-1 rounded-b-lg text-xs transition-all
-            border border-t-0 border-border-subtle shadow-sm
-            ${isOpen
-              ? 'bg-bg-elevated text-fg-secondary cursor-row-resize'
-              : 'bg-bg-elevated/80 text-fg-muted hover:text-fg-secondary hover:bg-bg-elevated cursor-pointer'
-            }
-          `}
-        >
-          <Wrench className="size-3" />
-          <span className="tabular-nums">{toolCalls.length}</span>
-          {hasRunning && <Loader2 className="size-3 animate-spin text-accent" />}
-        </button>
-      </div>
-
-      {/* Drawer panel — floats above chat */}
+    <div className="shrink-0">
+      {/* Panel — only when open, above the tab */}
       {isOpen && (
         <div
-          className="absolute left-[10%] right-[10%] top-0 z-10 bg-bg-elevated border border-border-subtle rounded-b-xl shadow-xl overflow-hidden flex flex-col"
+          className="bg-bg-elevated border-b border-border-subtle overflow-hidden flex flex-col"
           style={{ height: `${drawerHeight}px` }}
         >
-          {/* Tool call list */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
-            {toolCalls.map((tc) => (
-              <ToolCallItem key={tc.id} toolCall={tc} variant="drawer" />
-            ))}
+          {/* Tool call list or empty state */}
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto min-h-0 chat-scroll"
+          >
+            {hasTools ? (
+              toolCalls.map((tc) => (
+                <ToolCallItem key={tc.id} toolCall={tc} variant="drawer" />
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                <Wrench className="w-8 h-8 text-fg-faint mb-3" />
+                <p className="text-xs text-fg-secondary">Tool calls will appear here as the agent uses tools.</p>
+                <p className="text-[10px] text-fg-faint mt-1">Tool call history is kept per session and clears after 15 minutes of inactivity.</p>
+              </div>
+            )}
           </div>
 
           {/* Bottom drag handle */}
@@ -125,6 +116,27 @@ export function ToolCallDrawer() {
           </div>
         </div>
       )}
+
+      {/* Tab — always visible, right-aligned, attached to bottom of drawer */}
+      <div className="flex justify-end pr-2.5">
+        <button
+          type="button"
+          onClick={handleTabClick}
+          onMouseDown={handleTabMouseDown}
+          className={`
+            flex items-center gap-1.5 px-4 py-1 rounded-b-lg text-xs transition-all
+            border border-t-0 border-border-subtle shadow-sm
+            ${isOpen
+              ? 'bg-bg-elevated text-fg-secondary cursor-row-resize'
+              : 'bg-bg-elevated/80 text-fg-muted hover:text-fg-secondary hover:bg-bg-elevated cursor-pointer'
+            }
+          `}
+        >
+          <Wrench className="size-3" />
+          <span className="tabular-nums">{toolCalls.length}</span>
+          {hasRunning && <Loader2 className="size-3 animate-spin text-accent" />}
+        </button>
+      </div>
     </div>
   )
 }

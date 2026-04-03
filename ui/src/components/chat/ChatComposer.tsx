@@ -2,13 +2,14 @@ import { useEffect, useCallback, useState, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { Paperclip } from 'lucide-react'
+import { Paperclip, Zap } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ComposerToolbar } from './ComposerToolbar'
 import { SlashCommandExtension, type SlashCommand } from './extensions/SlashCommandExtension'
 import { slashCommandSuggestion } from './extensions/slashCommandSuggestion'
 import { FileMentionExtension, type FileResult } from './extensions/FileMentionExtension'
 import { fileMentionSuggestion } from './extensions/fileMentionSuggestion'
+import { usePermissionMode } from '@/hooks/usePermissionMode'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import type { SlashCommandDef } from '@/lib/types'
@@ -55,6 +56,8 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const queryClient = useQueryClient()
+  const { mode: permissionMode, setMode: setPermissionMode } = usePermissionMode()
+  const isYolo = permissionMode === 'yolo'
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
@@ -315,21 +318,34 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             className="hidden"
             onChange={(e) => void handleFileUpload(e.target.files)}
           />
-          <button
-            className={`absolute top-2 right-2 p-1.5 rounded-md transition-colors ${
-              uploading
-                ? 'text-accent animate-pulse'
-                : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
-            }`}
-            title={uploading ? 'Uploading...' : 'Attach file'}
-            disabled={!activeSessionId || uploading}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip className="w-4 h-4" />
-          </button>
+          <div className="absolute top-2 right-2 flex items-center gap-0.5">
+            <button
+              className={`p-1.5 rounded-md transition-colors ${
+                isYolo
+                  ? 'text-toggle-on bg-toggle-on/10 hover:bg-toggle-on/20'
+                  : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
+              }`}
+              title={isYolo ? 'Yolo mode active — click to reset' : 'Enable Yolo mode'}
+              onClick={() => setPermissionMode(isYolo ? 'default' : 'yolo')}
+            >
+              <Zap className={`w-4 h-4 ${isYolo ? 'fill-current' : ''}`} />
+            </button>
+            <button
+              className={`p-1.5 rounded-md transition-colors ${
+                uploading
+                  ? 'text-accent animate-pulse'
+                  : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
+              }`}
+              title={uploading ? 'Uploading...' : 'Attach file'}
+              disabled={!activeSessionId || uploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+          </div>
           <EditorContent
             editor={editor}
-            className="min-w-0 pr-8 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-fg-faint [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
+            className="min-w-0 pr-16 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-fg-faint [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
           />
         </div>
         <ComposerToolbar

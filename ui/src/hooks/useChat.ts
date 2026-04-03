@@ -4,6 +4,7 @@ import { useSprintPlanningStore } from "@/components/plugins/sprint/useSprintPla
 import { api } from "@/lib/api";
 import type { ApprovalRequest, ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning } from "@/lib/types";
 import { useChatStore } from "@/stores/useChatStore";
+import { useLayoutStore } from "@/stores/useLayoutStore";
 
 const PAGE_SIZE = 50;
 
@@ -180,10 +181,14 @@ export function useChat(sessionId: string | null) {
   // Load messages when sessionId changes
   useEffect(() => {
     void loadMessages();
+    // Load retained tool calls for this session (prunes stale entries)
+    store().loadSessionToolCalls(sessionId);
+    // Close the tool drawer on session switch — user opens as needed
+    useLayoutStore.getState().setToolDrawerState('closed');
     // Clear text-only mode on session switch — it will be re-set if the new
     // session's agent also has 0 MCP tools.
     store().setTextOnlyMode(false);
-  }, [loadMessages]);
+  }, [loadMessages, sessionId]);
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -231,12 +236,13 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
-          const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
+          const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string; detail?: string };
           if (data.tool) {
             store().addToolCall({
               id: data.tool_id || data.message_id || `tc-${Date.now()}`,
               tool: data.tool,
               status: "running",
+              detail: data.detail,
             });
 
             // UI-trigger tools: open frontend modals/panels when the agent calls them.

@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Copy, GitFork, Wrench, Zap } from 'lucide-react'
-import { usePermissionMode } from '@/hooks/usePermissionMode'
+import { PanelLeft, PanelRight, Bot, ChevronDown, Users, Copy, GitFork } from 'lucide-react'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { resolveIcon } from '@/lib/icons'
 import { SourceBadge } from '@/components/agents/SourceBadge'
@@ -20,8 +19,6 @@ export function ChatHeader() {
   const toggleRightRail = useLayoutStore((s) => s.toggleRightRail)
   const leftOpen = useLayoutStore((s) => s.leftSidebarOpen)
   const rightOpen = useLayoutStore((s) => s.rightRailOpen)
-  const toolDrawerState = useLayoutStore((s) => s.toolDrawerState)
-  const setToolDrawerState = useLayoutStore((s) => s.setToolDrawerState)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeMode = useChatStore((s) => s.activeMode)
   const activeModel = useChatStore((s) => s.activeModel)
@@ -138,9 +135,6 @@ export function ChatHeader() {
       setForkMenuOpen(false)
     },
   })
-
-  const { mode: permissionMode, setMode: setPermissionMode } = usePermissionMode()
-  const isYolo = permissionMode === 'yolo'
 
   const pluginActions = usePluginSlots('chat-header-action')
 
@@ -298,34 +292,6 @@ export function ChatHeader() {
 
       {/* Right side controls */}
       <div className="flex items-center gap-1">
-        <Tooltip content={isYolo ? 'Yolo mode active — click to reset to Default' : 'Enable Yolo mode (skip all permission prompts)'} side="bottom">
-          <button
-            onClick={() => setPermissionMode(isYolo ? 'default' : 'yolo')}
-            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
-              isYolo
-                ? 'text-toggle-on bg-toggle-on/10 hover:bg-toggle-on/20'
-                : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
-            }`}
-          >
-            <Zap className={`w-3.5 h-3.5 ${isYolo ? 'fill-current' : ''}`} />
-            {isYolo && <span className="font-medium">YOLO</span>}
-          </button>
-        </Tooltip>
-        <Tooltip content={toolDrawerState === 'closed' ? 'Show tool calls' : 'Hide tool calls'} side="bottom">
-          <button
-            onClick={() => {
-              const next = toolDrawerState === 'closed' ? 'compact' : toolDrawerState === 'compact' ? 'expanded' : 'closed'
-              setToolDrawerState(next)
-            }}
-            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
-              toolDrawerState !== 'closed'
-                ? 'text-accent hover:text-accent-hover hover:bg-accent-hover/10'
-                : 'text-fg-secondary hover:text-fg hover:bg-surface'
-            }`}
-          >
-            <Wrench className="w-3.5 h-3.5" />
-          </button>
-        </Tooltip>
         {/* Sprint button removed — now delivered via chat-header-action plugin slot */}
         {agentCount > 1 && (
           <Tooltip content="View agents in session" side="bottom">

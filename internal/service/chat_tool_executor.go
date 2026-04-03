@@ -251,7 +251,7 @@ func (s *chatServiceImpl) executeSingleTool(
 		Type: "tool_pending", SessionID: sessionID, AgentID: agentID,
 		ToolName: tu.Name, Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
-	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 	if mu != nil {
 		mu.Unlock()
 	}
@@ -412,4 +412,49 @@ func (s *chatServiceImpl) postProcessToolResults(
 	}
 
 	return resultBlocks, refs
+}
+
+// toolCallDetail extracts a short human-readable label from a tool's input.
+// For dev_bash this is the command, for file tools the path, etc.
+func toolCallDetail(toolName string, input map[string]any) string {
+	get := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := input[k]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+
+	var detail string
+	switch {
+	case strings.HasSuffix(toolName, "dev_bash"):
+		detail = get("command", "cmd")
+	case strings.HasSuffix(toolName, "dev_read"):
+		detail = get("path", "file_path")
+	case strings.HasSuffix(toolName, "dev_write"), strings.HasSuffix(toolName, "dev_edit"):
+		detail = get("file_path", "path")
+	case strings.HasSuffix(toolName, "dev_grep"):
+		detail = get("pattern")
+	case strings.HasSuffix(toolName, "dev_glob"):
+		detail = get("pattern")
+	case strings.HasSuffix(toolName, "web_fetch"):
+		detail = get("url")
+	case strings.HasSuffix(toolName, "web_search"):
+		detail = get("query")
+	}
+
+	if detail == "" {
+		return ""
+	}
+	// Truncate long details (e.g., multi-line bash commands).
+	if i := strings.IndexByte(detail, '\n'); i > 0 {
+		detail = detail[:i] + "…"
+	}
+	if len(detail) > 120 {
+		detail = detail[:117] + "…"
+	}
+	return detail
 }

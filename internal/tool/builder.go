@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -47,6 +48,7 @@ func WithSchemaMap(s map[string]any) ToolOption {
 	return func(t *toolImpl) {
 		data, err := json.Marshal(s)
 		if err != nil {
+			log.Printf("tool: WithSchemaMap marshal error for tool %q: %v", t.name, err)
 			return
 		}
 		t.inputSchema = data
@@ -144,7 +146,9 @@ func (t *toolImpl) Tags() []string {
 	if t.tags == nil {
 		return []string{}
 	}
-	return t.tags
+	out := make([]string, len(t.tags))
+	copy(out, t.tags)
+	return out
 }
 
 func (t *toolImpl) Call(ctx context.Context, input map[string]any, execCtx ExecutionContext) (*ToolResult, error) {

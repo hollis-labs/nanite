@@ -21,10 +21,13 @@ type ProviderCapabilities struct {
 	SupportsBatch bool
 	// SupportsImageInput indicates if the provider supports image inputs
 	SupportsImageInput bool
-	// MaxTokens indicates the maximum output token limit for this provider (0 means no limit specified)
+	// MaxTokens is the maximum *output* tokens the model can generate in a single response
+	// (e.g., 16384 for Claude Sonnet). Do NOT set this to the context window size.
+	// 0 means no limit specified (provider default applies).
 	MaxTokens int
-	// ContextWindowSize is the total context window in tokens (e.g., 200000 for Claude).
-	// Used by the slot-based context assembly to compute budgets. 0 means unknown (falls back to default).
+	// ContextWindowSize is the total context window in tokens (input + output combined,
+	// e.g., 200000 for Claude). Used by slot-based context assembly for budget computation.
+	// 0 means unknown (falls back to default).
 	ContextWindowSize int
 }
 

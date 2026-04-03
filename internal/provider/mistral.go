@@ -227,6 +227,7 @@ func (m *Mistral) Capabilities() ProviderCapabilities {
 		SupportsStreamJSON:  true,
 		SupportsToolCalling: false, // Not yet implemented
 		SupportsImageInput:  true,  // Pixtral models support vision
-		MaxTokens:           131072,
+		MaxTokens:           16384,  // Mistral Large max output tokens
+		ContextWindowSize:   131072, // Mistral Large context window
 	}
 }

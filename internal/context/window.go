@@ -2,6 +2,7 @@ package context
 
 import (
 	"log"
+	"unicode/utf8"
 )
 
 // BudgetFraction is the fraction of the provider context window used as the
@@ -175,6 +176,10 @@ func (cw *ContextWindow) truncateSlot(s *Slot) {
 	maxBytes := s.MaxTokens * 4
 	if len(s.Content) <= maxBytes {
 		return
+	}
+	// Walk back to a valid UTF-8 rune boundary to avoid splitting multi-byte chars.
+	for maxBytes > 0 && !utf8.RuneStart(s.Content[maxBytes]) {
+		maxBytes--
 	}
 	s.Content = s.Content[:maxBytes] + "\n[truncated]"
 	s.TokenCount = cw.estimator.Estimate(s.Content)

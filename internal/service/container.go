@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/hollis-labs/conduit/internal/chat"
 	"github.com/hollis-labs/conduit/internal/config"
@@ -113,7 +114,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	streams := NewStreamManager()
 	if cfg.AppConfig != nil && cfg.AppConfig.Presence.CLIActiveThrottleSeconds > 0 {
-		streams.CLIActiveThrottleInterval = 0 // use per-call config; or set from AppConfig
+		streams.CLIActiveThrottleInterval = time.Duration(cfg.AppConfig.Presence.CLIActiveThrottleSeconds) * time.Second
 	}
 
 	contextClient := chat.NewContextClient(cfg.Store)
@@ -127,9 +128,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	processTracker := chat.NewProcessTracker()
 	if cfg.MaxCLIProcesses > 0 {
 		processTracker.MaxProcesses = cfg.MaxCLIProcesses
-	} else {
-		processTracker.MaxProcesses = 10
 	}
+	// 0 = unlimited (leave at ProcessTracker's zero-value default)
 
 	orchestrator := chat.NewOrchestrator(cfg.Providers, cfg.MCP)
 

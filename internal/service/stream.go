@@ -95,13 +95,13 @@ func (sm *StreamManager) UnregisterSSE(sessionID string, done <-chan struct{}) {
 		return
 	}
 	current := val.(*sseConn)
-	select {
-	case <-current.done:
-		// Already taken over — don't delete the replacement's slot.
-	default:
-		sm.sessionSSE.CompareAndDelete(sessionID, val)
+	// Only delete if the caller is still the active connection. If a takeover
+	// happened, current.done differs from the caller's done channel — leave
+	// the replacement's slot untouched.
+	if current.done != done {
+		return
 	}
-	_ = done // parameter kept for API symmetry with Engine's original signature
+	sm.sessionSSE.CompareAndDelete(sessionID, val)
 }
 
 // --- Presence ---

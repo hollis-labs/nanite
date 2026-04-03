@@ -114,7 +114,7 @@ func (c *CompositeEmitter) EmitModeChanged(ctx context.Context, sessionID, previ
 
 func (c *CompositeEmitter) EmitPreCompact(ctx context.Context, sessionID string, messageCount int, reason string) {
 	if c.activity != nil {
-		go c.activity.EmitContextBudgetExceeded(ctx, sessionID, messageCount, 0)
+		go c.activity.EmitPreCompact(ctx, sessionID, messageCount, reason)
 	}
 	// Plugin pre-compact hook: plugins can extract ADR, memories, etc.
 	// before the raw content is replaced.

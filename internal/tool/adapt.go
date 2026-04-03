@@ -2,6 +2,7 @@ package tool
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/hollis-labs/conduit/internal/provider"
 )
@@ -89,7 +90,18 @@ func isReadOnlyCommand(cmd string) bool {
 	readOnlyPrefixes := []string{
 		"ls ", "cat ", "head ", "tail ", "grep ", "find ", "wc ",
 		"git log", "git status", "git diff", "git show", "git branch",
-		"go vet", "go test", "echo ", "pwd", "whoami", "date", "env",
+		"go vet", "go test", "echo ",
+	}
+	// Bare commands (no arguments) that are always read-only.
+	readOnlyExact := []string{
+		"ls", "cat", "head", "tail", "grep", "find", "wc",
+		"pwd", "whoami", "date", "env", "echo",
+	}
+	cmd = strings.TrimLeft(cmd, " \t")
+	for _, exact := range readOnlyExact {
+		if cmd == exact {
+			return true
+		}
 	}
 	for _, prefix := range readOnlyPrefixes {
 		if len(cmd) >= len(prefix) && cmd[:len(prefix)] == prefix {

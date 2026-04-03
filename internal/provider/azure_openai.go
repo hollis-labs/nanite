@@ -244,6 +244,7 @@ func (az *AzureOpenAI) Capabilities() ProviderCapabilities {
 		SupportsStreamJSON:  true,
 		SupportsToolCalling: false, // Not yet implemented
 		SupportsImageInput:  true,  // GPT-4o/Turbo on Azure support vision
-		MaxTokens:           128000,
+		MaxTokens:           16384,  // Azure OpenAI max output tokens
+		ContextWindowSize:   128000, // Azure OpenAI context window
 	}
 }

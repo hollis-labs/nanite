@@ -235,6 +235,7 @@ func (oz *OpenZen) Capabilities() ProviderCapabilities {
 		SupportsStreamJSON:  true,
 		SupportsToolCalling: false,
 		SupportsImageInput:  true,
-		MaxTokens:           200000,
+		MaxTokens:           0,      // Variable — depends on routed model
+		ContextWindowSize:   200000, // Upper bound for supported models
 	}
 }

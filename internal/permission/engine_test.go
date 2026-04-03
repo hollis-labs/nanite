@@ -142,7 +142,7 @@ func TestApprovalFlow(t *testing.T) {
 	// Respond in a goroutine.
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		e.Respond(req.ID, DecisionAllow, ScopeSession)
+		e.Respond(req.ID, DecisionAllow, ScopeSession, "s1")
 	}()
 
 	resp := e.WaitForApproval(context.Background(), req)
@@ -175,7 +175,7 @@ func TestApprovalTimeout(t *testing.T) {
 
 func TestRespondToExpired(t *testing.T) {
 	e := NewEngine(ModeDefault, nil)
-	ok := e.Respond("nonexistent", DecisionAllow, ScopeOnce)
+	ok := e.Respond("nonexistent", DecisionAllow, ScopeOnce, "")
 	if ok {
 		t.Error("responding to nonexistent request should return false")
 	}

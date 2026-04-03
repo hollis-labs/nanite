@@ -249,6 +249,7 @@ func (o *OpenAI) Capabilities() ProviderCapabilities {
 		SupportsToolCalling:         false, // Tool calling not implemented (StreamChatWithTools ignores tools)
 		SupportsBatch:               false, // No batch API support in current implementation
 		SupportsImageInput:          true,  // GPT-4o and GPT-4 Turbo support image inputs
-		MaxTokens:                   128000, // GPT-4o supports up to 128k tokens
+		MaxTokens:                   16384,  // GPT-4o max output tokens
+		ContextWindowSize:           128000, // GPT-4o context window
 	}
 }

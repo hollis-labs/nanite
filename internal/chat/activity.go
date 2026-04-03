@@ -207,6 +207,20 @@ func (e *ActivityEmitter) EmitContextBudgetExceeded(ctx context.Context, session
 	})
 }
 
+// EmitPreCompact records that a compaction cycle is about to run.
+func (e *ActivityEmitter) EmitPreCompact(ctx context.Context, sessionID string, messageCount int, reason string) {
+	e.Emit(ctx, activityEvent{
+		EventType:   EventPreCompact,
+		EntityType:  "chat_session",
+		EntityID:    sessionID,
+		EntityTitle: "Context compaction starting",
+		Payload:     fmt.Sprintf(`{"message_count":%d,"reason":%q}`, messageCount, reason),
+	})
+}
+
+// EventPreCompact is the activity event type for pre-compaction.
+const EventPreCompact = "chat_pre_compact"
+
 // EventModeChanged is the activity event type for agent mode changes.
 const EventModeChanged = "chat_mode_changed"
 

@@ -222,12 +222,17 @@ func (e *Engine) WaitForApproval(ctx context.Context, req *ApprovalRequest) Appr
 
 // Respond delivers a response to a pending approval request.
 // Returns false if the request doesn't exist (already timed out or responded).
-func (e *Engine) Respond(requestID string, decision Decision, scope Scope) bool {
+func (e *Engine) Respond(requestID string, decision Decision, scope Scope, sessionID string) bool {
 	val, ok := e.pendingApprovals.Load(requestID)
 	if !ok {
 		return false
 	}
 	req := val.(*ApprovalRequest)
+
+	// Validate the approval request belongs to the claimed session.
+	if sessionID != "" && req.SessionID != sessionID {
+		return false
+	}
 
 	// Record session grant if scope is session.
 	if decision == DecisionAllow && scope == ScopeSession {

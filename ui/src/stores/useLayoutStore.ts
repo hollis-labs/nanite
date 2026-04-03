@@ -52,7 +52,7 @@ export const useLayoutStore = create<LayoutState>()(
       rightRailTab: 'widgets' as RightRailTab,
       taskThreadOpen: true,
       toolDrawerState: 'closed' as ToolDrawerState,
-      toolDrawerHeight: 200,
+      toolDrawerHeight: 240,
       currentPage: 'chat',
       theme: 'dark' as Theme,
       toggleLeftSidebar: () =>

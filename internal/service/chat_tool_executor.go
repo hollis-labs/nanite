@@ -92,7 +92,7 @@ func (s *chatServiceImpl) preCheckTools(
 			blockedResult := fmt.Sprintf("BLOCKED: Tool %q has been hard-blocked due to repeated identical results or iteration limit. "+
 				"Do NOT call this tool again. Use a different approach or inform the user.", tu.Name)
 			log.Printf("chat-service: tool %s SKIPPED (blocked)", tu.Name)
-			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult}
 			block := provider.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: blockedResult,
@@ -118,7 +118,7 @@ func (s *chatServiceImpl) preCheckTools(
 				ls.recordPermissionDenial()
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
 				log.Printf("chat-service: tool %s denied: %s", tu.Name, permResult.Reason)
-				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
@@ -147,7 +147,7 @@ func (s *chatServiceImpl) preCheckTools(
 					ls.recordPermissionDenial()
 					denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — user denied or approval timed out", tu.Name)
 					log.Printf("chat-service: tool %s denied by user (scope: %s)", tu.Name, resp.Scope)
-					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 					ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
 					block := provider.ContentBlock{
 						Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
@@ -251,7 +251,7 @@ func (s *chatServiceImpl) executeSingleTool(
 		Type: "tool_pending", SessionID: sessionID, AgentID: agentID,
 		ToolName: tu.Name, Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
-	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 	if mu != nil {
 		mu.Unlock()
 	}
@@ -412,4 +412,49 @@ func (s *chatServiceImpl) postProcessToolResults(
 	}
 
 	return resultBlocks, refs
+}
+
+// toolCallDetail extracts a short human-readable label from a tool's input.
+// For dev_bash this is the command, for file tools the path, etc.
+func toolCallDetail(toolName string, input map[string]any) string {
+	get := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := input[k]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+
+	var detail string
+	switch {
+	case strings.HasSuffix(toolName, "dev_bash"):
+		detail = get("command", "cmd")
+	case strings.HasSuffix(toolName, "dev_read"):
+		detail = get("path", "file_path")
+	case strings.HasSuffix(toolName, "dev_write"), strings.HasSuffix(toolName, "dev_edit"):
+		detail = get("file_path", "path")
+	case strings.HasSuffix(toolName, "dev_grep"):
+		detail = get("pattern")
+	case strings.HasSuffix(toolName, "dev_glob"):
+		detail = get("pattern")
+	case strings.HasSuffix(toolName, "web_fetch"):
+		detail = get("url")
+	case strings.HasSuffix(toolName, "web_search"):
+		detail = get("query")
+	}
+
+	if detail == "" {
+		return ""
+	}
+	// Truncate long details (e.g., multi-line bash commands).
+	if i := strings.IndexByte(detail, '\n'); i > 0 {
+		detail = detail[:i] + "…"
+	}
+	if len(detail) > 120 {
+		detail = detail[:117] + "…"
+	}
+	return detail
 }

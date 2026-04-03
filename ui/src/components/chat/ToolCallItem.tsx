@@ -81,15 +81,20 @@ export function ToolCallItem({ toolCall, variant, index = 0, total = 1, defaultE
           onClick={toggleExpand}
         >
           <StatusIcon status={toolCall.status} />
-          <span className="font-mono text-fg-secondary">{formatToolName(toolCall.tool)}</span>
-          {toolCall.status === 'running' && (
-            <span className="text-fg-faint italic ml-auto">running...</span>
+          <div className="min-w-0 flex-1">
+            <span className="font-mono text-fg-secondary">{formatToolName(toolCall.tool)}</span>
+            {toolCall.detail && (
+              <p className="font-mono text-[10px] text-fg-muted truncate">{toolCall.detail}</p>
+            )}
+          </div>
+          {toolCall.status === 'running' && !toolCall.detail && (
+            <span className="text-fg-faint italic shrink-0">running...</span>
           )}
           {hasSummary && !hovered && (
-            <ChevronRight className={`w-3 h-3 text-fg-faint ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} />
+            <ChevronRight className={`w-3 h-3 text-fg-faint shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} />
           )}
           {hasSummary && hovered && (
-            <span className="ml-auto" onClick={(e) => e.stopPropagation()}>
+            <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
               <ContentActions content={toolCall.summary!} visible={true} />
             </span>
           )}

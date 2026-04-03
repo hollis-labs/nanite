@@ -157,6 +157,8 @@ export interface StreamEvent {
     timestamp: string;
   };
   tool?: string;
+  tool_id?: string;
+  detail?: string;
   summary?: string;
   envelope?: string;
   data?: string;
@@ -555,6 +557,7 @@ export interface ToolCall {
   tool: string;
   status: "running" | "done" | "error";
   summary?: string;
+  detail?: string;
 }
 
 export interface ToolWarning {

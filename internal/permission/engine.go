@@ -217,7 +217,7 @@ func (e *Engine) WaitForApproval(ctx context.Context, req *ApprovalRequest) Appr
 		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: true}
 	case <-ctx.Done():
 		log.Printf("permission: approval %s cancelled — defaulting to deny", req.ID)
-		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: true}
+		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: false}
 	}
 }
 

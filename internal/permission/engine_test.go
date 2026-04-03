@@ -152,6 +152,9 @@ func TestApprovalFlow(t *testing.T) {
 	if resp.Scope != ScopeSession {
 		t.Errorf("expected session scope, got %s", resp.Scope)
 	}
+	if resp.TimedOut {
+		t.Error("expected TimedOut=false for user response")
+	}
 
 	// Session grant should have been recorded.
 	e.mu.RLock()
@@ -171,6 +174,9 @@ func TestApprovalTimeout(t *testing.T) {
 	if resp.Decision != DecisionDeny {
 		t.Errorf("timeout should default to deny, got %s", resp.Decision)
 	}
+	if !resp.TimedOut {
+		t.Error("expected TimedOut=true on timeout")
+	}
 }
 
 func TestRespondToExpired(t *testing.T) {
@@ -178,5 +184,26 @@ func TestRespondToExpired(t *testing.T) {
 	ok := e.Respond("nonexistent", DecisionAllow, ScopeOnce, "")
 	if ok {
 		t.Error("responding to nonexistent request should return false")
+	}
+}
+
+func TestApprovalContextCancel(t *testing.T) {
+	e := NewEngine(ModeDefault, nil)
+	e.SetApprovalTimeout(10 * time.Second) // long timeout, won't fire
+
+	req := e.RequestApproval("s1", "rm", nil, "destructive")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	resp := e.WaitForApproval(ctx, req)
+	if resp.Decision != DecisionDeny {
+		t.Errorf("expected deny on cancel, got %s", resp.Decision)
+	}
+	if resp.TimedOut {
+		t.Error("expected TimedOut=false on context cancel (not a timeout)")
 	}
 }

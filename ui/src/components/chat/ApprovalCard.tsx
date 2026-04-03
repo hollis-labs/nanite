@@ -58,12 +58,14 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
     }
   }, [approval.resolved])
 
-  // Auto-deny on timeout — guarded against race with manual approval and unmount
+  // Auto-deny on timeout — fires once via ref guard to prevent repeated calls
+  const autoDeniedRef = useRef(false)
   useEffect(() => {
-    if (secondsLeft === 0 && !approval.resolved && !submitting) {
+    if (secondsLeft === 0 && !approval.resolved && !autoDeniedRef.current) {
+      autoDeniedRef.current = true
       void handleDecision('deny')
     }
-  }, [secondsLeft, approval.resolved, submitting, handleDecision])
+  }, [secondsLeft, approval.resolved, handleDecision])
 
   // Summarize tool input (first 2 keys, truncated)
   const inputSummary = summarizeInput(approval.input)

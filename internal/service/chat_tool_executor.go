@@ -116,7 +116,6 @@ func (s *chatServiceImpl) preCheckTools(
 			permResult := s.permissions.Check(ctx, sessionID, tu.Name, tu.Input, meta)
 			switch permResult.Decision {
 			case permission.DecisionDeny:
-				ls.recordPermissionDenial()
 				ls.recordToolCall(tu.Name, false)
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
 				log.Printf("chat-service: tool %s denied: %s", tu.Name, permResult.Reason)
@@ -146,7 +145,6 @@ func (s *chatServiceImpl) preCheckTools(
 
 				resp := s.permissions.WaitForApproval(ctx, req)
 				if resp.Decision != permission.DecisionAllow {
-					ls.recordPermissionDenial()
 					ls.recordToolCall(tu.Name, false)
 					denyReason := "user denied"
 					if resp.TimedOut {
@@ -156,11 +154,11 @@ func (s *chatServiceImpl) preCheckTools(
 					log.Printf("chat-service: tool %s denied (%s, scope: %s)", tu.Name, denyReason, resp.Scope)
 					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 					ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
-					// Warn user when consecutive denials approach the stop threshold.
+					// Warn user when consecutive failures approach the stop threshold.
 					if ls.consecutiveFailures >= ls.limits.consecutiveFailCap-1 {
 						warningJSON, _ := json.Marshal(map[string]any{
 							"tool_name":          tu.Name,
-							"error":              fmt.Sprintf("Tool denied %d times in a row — agent will pause after one more denial", ls.consecutiveFailures),
+							"error":              fmt.Sprintf("Tools failed %d times in a row — agent will pause after one more failure", ls.consecutiveFailures),
 							"iteration":          ls.iteration,
 							"consecutive_errors": ls.consecutiveFailures,
 							"level":              "critical",

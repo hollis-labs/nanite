@@ -18,7 +18,7 @@ interface BrokerDecisionsPanelProps {
   sessionId: string
 }
 
-export function BrokerDecisionsPanel({ sessionId }: BrokerDecisionsPanelProps) {
+export function BrokerDecisionsContent({ sessionId }: BrokerDecisionsPanelProps) {
   const { data: rawDecisions, isLoading } = useQuery({
     queryKey: ['broker-decisions', sessionId],
     queryFn: () => api.getBrokerDecisions(sessionId),
@@ -28,19 +28,22 @@ export function BrokerDecisionsPanel({ sessionId }: BrokerDecisionsPanelProps) {
   })
   const decisions = rawDecisions ?? []
 
+  if (isLoading) return <p className="text-[11px] text-fg-muted">Loading...</p>
+  if (decisions.length === 0) return <p className="text-[11px] text-fg-faint">No broker decisions recorded for this session.</p>
+
   return (
-    <DebugPanel title="Broker Decisions" icon={GitBranch} badge={decisions.length || undefined}>
-      {isLoading ? (
-        <p className="text-[11px] text-fg-muted">Loading...</p>
-      ) : decisions.length === 0 ? (
-        <p className="text-[11px] text-fg-faint">No broker decisions recorded for this session.</p>
-      ) : (
-        <div className="space-y-1">
-          {decisions.map((d) => (
-            <DecisionRow key={d.id} decision={d} />
-          ))}
-        </div>
-      )}
+    <div className="space-y-1">
+      {decisions.map((d) => (
+        <DecisionRow key={d.id} decision={d} />
+      ))}
+    </div>
+  )
+}
+
+export function BrokerDecisionsPanel({ sessionId }: BrokerDecisionsPanelProps) {
+  return (
+    <DebugPanel title="Broker Decisions" icon={GitBranch}>
+      <BrokerDecisionsContent sessionId={sessionId} />
     </DebugPanel>
   )
 }

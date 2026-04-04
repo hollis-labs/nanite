@@ -92,7 +92,7 @@ export function TokenUsageWidget() {
               <TokenRow
                 label="Cost"
                 value={formatCost(cost)}
-                colorClass="text-amber-400"
+                colorClass="text-status-warn"
               />
               <TokenRow
                 label="Messages"
@@ -119,7 +119,7 @@ export function TokenUsageWidget() {
             <TokenRow
               label="Total cost"
               value={formatCost(globalCost)}
-              colorClass="text-amber-400/70"
+              colorClass="text-status-warn/70"
             />
           </div>
         )}

@@ -6,7 +6,8 @@ import { api } from '@/lib/api'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
 import { PluginConfigPanel } from './PluginConfigPanel'
 import { WidgetDetailView } from './WidgetDetailView'
-import { DEFAULT_WIDGET_ORDER, isValidWidgetId } from '@/generated/plugin-widgets'
+import { DEVELOPER_ONLY_WIDGETS, isValidWidgetId } from '@/generated/plugin-widgets'
+import { buildWidgetOrder } from '@/lib/widget-order'
 import type { PluginUIComponent } from '@/lib/types'
 
 export function WidgetManager() {
@@ -27,31 +28,24 @@ export function WidgetManager() {
 
   // Current preferences.
   const visibility = settings?.ext_settings?.widget_visibility ?? {}
-  const savedOrder = settings?.ext_settings?.widget_order ?? []
+  const savedOrder = settings?.ext_settings?.widget_order as string[] | undefined
 
-  // Build ordered list: saved order first, then any new widgets not yet in the order.
-  const baseOrder = savedOrder.length ? savedOrder : DEFAULT_WIDGET_ORDER
-  const seen = new Set<string>()
-  const orderedIds: string[] = []
-  for (const id of baseOrder) {
-    if (widgetMap.has(id) || DEFAULT_WIDGET_ORDER.includes(id)) {
-      orderedIds.push(id)
-      seen.add(id)
-    }
-  }
-  for (const w of widgets) {
-    if (!seen.has(w.id)) {
-      orderedIds.push(w.id)
-    }
-  }
+  const orderedIds = buildWidgetOrder(savedOrder, widgets)
+
+  const developerMode = settings?.developer_mode ?? false
+  const displayIds = orderedIds.filter((id) => !DEVELOPER_ONLY_WIDGETS.has(id) || developerMode)
 
   // Plugin config panel state.
   const [configuringPluginId, setConfiguringPluginId] = useState<string | null>(null)
   // Widget detail view state.
   const [detailWidgetId, setDetailWidgetId] = useState<string | null>(null)
 
-  // Drag state.
+  // Drag state — track visually via local state, persist only on drop.
   const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null)
+
+  // Use drag-in-progress order for rendering when actively dragging.
+  const effectiveDisplayIds = dragOrder ?? displayIds
 
   const isVisible = (id: string) => visibility[id] !== false
 
@@ -72,25 +66,35 @@ export function WidgetManager() {
     savePreferences(next, orderedIds)
   }
 
+  /** Reconstruct full order preserving hidden widgets in their original slots. */
+  const mergeDisplayOrder = (reordered: string[]): string[] => {
+    const displayIdSet = new Set(displayIds)
+    let reorderedIdx = 0
+    return orderedIds.map((id) => (displayIdSet.has(id) ? reordered[reorderedIdx++] : id))
+  }
+
   const handleDragStart = (idx: number) => {
     setDragIdx(idx)
+    setDragOrder(null)
   }
 
   const handleDragOver = (e: React.DragEvent, idx: number) => {
     e.preventDefault()
     if (dragIdx === null || dragIdx === idx) return
-    const reordered = [...orderedIds]
+    const base = dragOrder ?? displayIds
+    const reordered = [...base]
     const [moved] = reordered.splice(dragIdx, 1)
     reordered.splice(idx, 0, moved)
-    // We don't save on every drag-over — just update visual via state.
-    // Save happens on drop.
     setDragIdx(idx)
-    // Optimistically update order in settings.
-    savePreferences(visibility, reordered)
+    setDragOrder(reordered)
   }
 
   const handleDragEnd = () => {
+    if (dragOrder) {
+      savePreferences(visibility, mergeDisplayOrder(dragOrder))
+    }
     setDragIdx(null)
+    setDragOrder(null)
   }
 
   // Show widget detail view when a widget is selected.
@@ -140,7 +144,7 @@ export function WidgetManager() {
         <p className="text-xs text-fg-muted">Drag to reorder. Toggle visibility with the eye icon.</p>
       </div>
 
-      {orderedIds.length === 0 ? (
+      {effectiveDisplayIds.length === 0 ? (
         <Empty className="py-12">
           <EmptyHeader>
             <EmptyMedia variant="icon"><LayoutGrid /></EmptyMedia>
@@ -150,7 +154,7 @@ export function WidgetManager() {
         </Empty>
       ) : (
         <div className="grid gap-3 grid-cols-2">
-          {orderedIds.map((id, idx) => {
+          {effectiveDisplayIds.map((id, idx) => {
             if (!isValidWidgetId(id)) return null
             const meta = widgetMap.get(id)
             const visible = isVisible(id)

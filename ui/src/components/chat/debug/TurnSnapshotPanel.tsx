@@ -9,7 +9,7 @@ interface TurnSnapshotPanelProps {
   sessionId: string
 }
 
-export function TurnSnapshotPanel({ sessionId }: TurnSnapshotPanelProps) {
+export function TurnSnapshotContent({ sessionId }: TurnSnapshotPanelProps) {
   const { data: metrics = [], isLoading } = useQuery({
     queryKey: ['execution-metrics', sessionId],
     queryFn: () => api.getExecutionMetrics(sessionId),
@@ -17,7 +17,6 @@ export function TurnSnapshotPanel({ sessionId }: TurnSnapshotPanelProps) {
     staleTime: 10_000,
   })
 
-  // Collect all turn snapshots across all metrics — null-safe
   const snapshots = useMemo(() => {
     const all: TurnSnapshot[] = []
     for (const m of metrics) {
@@ -42,19 +41,22 @@ export function TurnSnapshotPanel({ sessionId }: TurnSnapshotPanelProps) {
     return all
   }, [metrics])
 
+  if (isLoading) return <p className="text-[11px] text-fg-muted">Loading...</p>
+  if (snapshots.length === 0) return <p className="text-[11px] text-fg-faint">No snapshots captured. Enable debug mode on the agent or turn on developer mode in settings.</p>
+
   return (
-    <DebugPanel title="Turn Snapshots" icon={Activity} badge={snapshots.length || undefined}>
-      {isLoading ? (
-        <p className="text-[11px] text-fg-muted">Loading...</p>
-      ) : snapshots.length === 0 ? (
-        <p className="text-[11px] text-fg-faint">No snapshots captured. Enable debug mode on the agent or turn on developer mode in settings.</p>
-      ) : (
-        <div className="space-y-1">
-          {snapshots.map((snap, idx) => (
-            <SnapshotRow key={`${snap.timestamp}-${idx}`} snapshot={snap} />
-          ))}
-        </div>
-      )}
+    <div className="space-y-1">
+      {snapshots.map((snap, idx) => (
+        <SnapshotRow key={`${snap.timestamp}-${idx}`} snapshot={snap} />
+      ))}
+    </div>
+  )
+}
+
+export function TurnSnapshotPanel({ sessionId }: TurnSnapshotPanelProps) {
+  return (
+    <DebugPanel title="Turn Snapshots" icon={Activity}>
+      <TurnSnapshotContent sessionId={sessionId} />
     </DebugPanel>
   )
 }

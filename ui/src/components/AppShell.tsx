@@ -45,11 +45,16 @@ export function AppShell() {
         setSprintOpen(true)
       }
     }
+    function handleOpenSearch() {
+      setSearchOpen(true)
+    }
     window.addEventListener('plugin-modal', handlePluginModal)
     window.addEventListener('plugin-action', handlePluginAction)
+    window.addEventListener('open-search', handleOpenSearch)
     return () => {
       window.removeEventListener('plugin-modal', handlePluginModal)
       window.removeEventListener('plugin-action', handlePluginAction)
+      window.removeEventListener('open-search', handleOpenSearch)
     }
   }, [])
 

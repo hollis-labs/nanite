@@ -29,7 +29,6 @@ export function NavRail() {
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
-  const setLeftSidebar = useLayoutStore((s) => s.setLeftSidebar)
   const currentPage = useLayoutStore((s) => s.currentPage)
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
   const theme = useLayoutStore((s) => s.theme)
@@ -183,7 +182,7 @@ export function NavRail() {
                   if (id === 'new') {
                     if (activeWorkspaceId) createSessionMutation.mutate()
                   } else if (id === 'search') {
-                    setLeftSidebar(true)
+                    window.dispatchEvent(new CustomEvent('open-search'))
                   } else if (id === 'settings') {
                     setCurrentPage('settings')
                     setActiveItem(id)

@@ -16,9 +16,9 @@ function scrollToMessage(messageId: string) {
   const el = document.querySelector(`[data-message-id="${messageId}"]`)
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    el.classList.add('ring-1', 'ring-amber-500/50', 'rounded-lg')
+    el.classList.add('ring-1', 'ring-status-warn/50', 'rounded-lg')
     setTimeout(() => {
-      el.classList.remove('ring-1', 'ring-amber-500/50', 'rounded-lg')
+      el.classList.remove('ring-1', 'ring-status-warn/50', 'rounded-lg')
     }, 2000)
   }
 }

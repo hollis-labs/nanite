@@ -1,5 +1,5 @@
 import { Suspense, useState, useCallback } from 'react'
-import { Bug, LayoutGrid, Mail, Package, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
+import { LayoutGrid, Mail, Package, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useQuery } from '@tanstack/react-query'
@@ -10,9 +10,9 @@ import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { resolveIcon } from '@/lib/icons'
 import { getSlotComponent } from '@/generated/plugin-slot-components'
 import type { UserSettings } from '@/lib/types'
-import { DebugPanelsContainer } from './chat/debug/DebugPanelsContainer'
 import { WidgetRenderer } from './widgets/WidgetRenderer'
-import { DEFAULT_WIDGET_ORDER } from '@/generated/plugin-widgets'
+import { DEVELOPER_ONLY_WIDGETS } from '@/generated/plugin-widgets'
+import { buildWidgetOrder, filterVisibleWidgets } from '@/lib/widget-order'
 import { ArtifactsContent } from './drawers/ArtifactsContent'
 import { InboxContent } from './a2a/InboxContent'
 import { api } from '@/lib/api'
@@ -57,33 +57,12 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
     widgetMap.set(w.id, w)
   }
 
-  const visibility = settings?.ext_settings?.widget_visibility
-  const userOrder = settings?.ext_settings?.widget_order
+  const developerMode = settings?.developer_mode ?? false
+  const visibility = settings?.ext_settings?.widget_visibility as Record<string, boolean> | undefined
+  const userOrder = settings?.ext_settings?.widget_order as string[] | undefined
 
-  const baseOrder = userOrder?.length ? userOrder : DEFAULT_WIDGET_ORDER
-  const seen = new Set<string>()
-  const orderedIds: string[] = []
-
-  for (const id of baseOrder) {
-    if (widgetMap.has(id) || DEFAULT_WIDGET_ORDER.includes(id)) {
-      orderedIds.push(id)
-      seen.add(id)
-    }
-  }
-
-  if (!recoverMode) {
-    for (const w of allWidgets) {
-      if (!seen.has(w.id)) {
-        orderedIds.push(w.id)
-        seen.add(w.id)
-      }
-    }
-  }
-
-  const visibleIds = orderedIds.filter((id) => {
-    if (!visibility) return true
-    return visibility[id] !== false
-  })
+  const orderedIds = buildWidgetOrder(userOrder, allWidgets, { skipPluginAppend: recoverMode })
+  const visibleIds = filterVisibleWidgets(orderedIds, developerMode, visibility)
 
   const renderList: PluginUIComponent[] = visibleIds.map((id) => {
     return widgetMap.get(id) ?? {
@@ -105,12 +84,9 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
     } as Partial<UserSettings>)
   }, [settings?.ext_settings, settingsMutation])
 
-  const developerMode = settings?.developer_mode ?? false
-
   // Build merged tabs list
   const allTabs = [
     ...CORE_TABS.map((t) => ({ ...t })),
-    ...(developerMode ? [{ id: 'debug' as const, icon: Bug, label: 'Debug' }] : []),
     ...pluginTabs.map((entry) => ({
       id: entry.id,
       icon: resolveIcon(entry.icon),
@@ -132,21 +108,22 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
         <div className="px-4 h-12 flex items-center justify-between border-b border-border shrink-0">
           <h2 className="text-sm font-semibold text-fg truncate">{displayTitle}</h2>
           <div className="flex items-center gap-0.5">
-            {activeTab === 'widgets' && (
-              <Tooltip content={editMode ? 'Done editing' : 'Organize widgets'} side="bottom">
-                <button
-                  type="button"
-                  onClick={() => setEditMode((e) => !e)}
-                  className={`p-1.5 rounded transition-colors ${
-                    editMode
+            <Tooltip content={activeTab === 'widgets' ? (editMode ? 'Done editing' : 'Organize widgets') : 'Organize widgets'} side="bottom">
+              <button
+                type="button"
+                onClick={() => { if (activeTab === 'widgets') setEditMode((e) => !e) }}
+                disabled={activeTab !== 'widgets'}
+                className={`p-1.5 rounded transition-colors ${
+                  activeTab !== 'widgets'
+                    ? 'text-fg-faint/30 cursor-default'
+                    : editMode
                       ? 'text-accent bg-accent/10'
                       : 'text-fg-faint hover:text-fg-secondary hover:bg-surface/50'
-                  }`}
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-              </Tooltip>
-            )}
+                }`}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
             {allTabs.map((tab) => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
@@ -175,7 +152,7 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
             <div className="p-3 space-y-3">
               {editMode ? (
                 // Edit mode: show all widgets with visibility toggles
-                orderedIds.map((id) => {
+                orderedIds.filter((id) => !DEVELOPER_ONLY_WIDGETS.has(id) || developerMode).map((id) => {
                   const meta = widgetMap.get(id)
                   const isVisible = !visibility || visibility[id] !== false
                   return (
@@ -216,16 +193,8 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
           <InboxContent agentId={inboxAgentId} />
         )}
 
-        {activeTab === 'debug' && developerMode && (
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="p-3">
-              <DebugPanelsContainer />
-            </div>
-          </ScrollArea>
-        )}
-
         {/* Plugin-registered right rail tab content */}
-        {!['widgets', 'artifacts', 'inbox', 'debug'].includes(activeTab) && (() => {
+        {!['widgets', 'artifacts', 'inbox'].includes(activeTab) && (() => {
           const pluginEntry = pluginTabs.find((e) => e.id === activeTab)
           if (!pluginEntry?.component) return null
           const PluginComponent = getSlotComponent(pluginEntry.component)

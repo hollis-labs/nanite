@@ -40,9 +40,14 @@
   /* Toggle on state (emerald green) */
   --color-toggle-on: var(--c-toggle-on);
 
-  /* Success (theme-adaptive green) */
+  /* Success (theme-adaptive blue) */
   --color-success: var(--c-success);
   --color-success-muted: var(--c-success-muted);
+
+  /* Widget status colors — muted, easy on the eyes */
+  --color-status-ok: var(--c-status-ok);
+  --color-status-warn: var(--c-status-warn);
+  --color-status-danger: var(--c-status-danger);
 
   /* Focus ring */
   --color-ring: var(--c-ring);
@@ -96,6 +101,9 @@
   --c-toggle-on: #3b82f6;
   --c-success: #60a5fa;
   --c-success-muted: rgba(59, 130, 246, 0.15);
+  --c-status-ok: #6b9e8a;
+  --c-status-warn: #b09060;
+  --c-status-danger: #c07070;
   --c-ring: #dc2626;
 
   /* Composer — always dark */
@@ -131,6 +139,9 @@
   --c-toggle-on: #3b82f6;
   --c-success: #2563eb;
   --c-success-muted: rgba(59, 130, 246, 0.10);
+  --c-status-ok: #4a7a65;
+  --c-status-warn: #8a6d3e;
+  --c-status-danger: #a05050;
   --c-ring: #dc2626;
 
   /* Composer — always dark (same as :root) */

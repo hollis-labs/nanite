@@ -22,21 +22,21 @@ function formatCost(usd: number): string {
 }
 
 function getPctColor(pct: number): string {
-  if (pct < 50) return 'text-success'
-  if (pct < 75) return 'text-amber-400'
-  return 'text-red-400'
+  if (pct < 50) return 'text-status-ok'
+  if (pct < 75) return 'text-status-warn'
+  return 'text-status-danger'
 }
 
 function getBarColor(pct: number): string {
-  if (pct < 50) return 'bg-green-500'
-  if (pct < 75) return 'bg-amber-500'
-  return 'bg-red-500'
+  if (pct < 50) return 'bg-status-ok'
+  if (pct < 75) return 'bg-status-warn'
+  return 'bg-status-danger'
 }
 
 function getBadgeColor(pct: number): string {
-  if (pct < 50) return 'bg-green-500/15 text-success border-green-500/30'
-  if (pct < 75) return 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-  return 'bg-red-500/15 text-red-400 border-red-500/30'
+  if (pct < 50) return 'bg-status-ok/15 text-status-ok border-status-ok/30'
+  if (pct < 75) return 'bg-status-warn/15 text-status-warn border-status-warn/30'
+  return 'bg-status-danger/15 text-status-danger border-status-danger/30'
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ function MessageRow({ msg }: { msg: MessageTokenDetail }) {
   const roleColors: Record<string, string> = {
     user: 'text-blue-400',
     assistant: 'text-accent',
-    system: 'text-amber-400',
+    system: 'text-status-warn',
     tool: 'text-success',
   }
 
@@ -227,7 +227,7 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
               {/* System Prompt */}
               <AccordionSection
                 title="System Prompt"
-                icon={<Cpu className="w-3.5 h-3.5 text-amber-400" />}
+                icon={<Cpu className="w-3.5 h-3.5 text-status-warn" />}
                 tokens={breakdown.system_prompt_tokens}
                 totalCeiling={breakdown.ceiling}
               >

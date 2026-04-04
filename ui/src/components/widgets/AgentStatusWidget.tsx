@@ -5,26 +5,26 @@ import { useModels } from '@/hooks/useSettings'
 import type { AgentMode } from '@/lib/types'
 
 const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; text: string }> = {
-  default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
+  default: { bg: 'bg-success/15', text: 'text-success' },
   architect: { bg: 'bg-accent-muted', text: 'text-accent' },
-  planner: { bg: 'bg-green-500/15', text: 'text-green-400' },
-  writer: { bg: 'bg-amber-500/15', text: 'text-amber-400' },
+  planner: { bg: 'bg-status-ok/15', text: 'text-status-ok' },
+  writer: { bg: 'bg-status-warn/15', text: 'text-status-warn' },
 }
 
 function StatusIndicator({ isStreaming, hasToolCalls }: { isStreaming: boolean; hasToolCalls: boolean }) {
   if (hasToolCalls) {
     return (
       <div className="flex items-center gap-1.5">
-        <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0 animate-pulse" />
-        <span className="text-amber-400">Tool pending</span>
+        <span className="w-2 h-2 rounded-full bg-status-warn shrink-0 animate-pulse" />
+        <span className="text-status-warn">Tool pending</span>
       </div>
     )
   }
   if (isStreaming) {
     return (
       <div className="flex items-center gap-1.5">
-        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
-        <span className="text-emerald-400">Streaming</span>
+        <span className="w-2 h-2 rounded-full bg-status-ok shrink-0 animate-pulse" />
+        <span className="text-status-ok">Streaming</span>
       </div>
     )
   }

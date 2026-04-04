@@ -6,7 +6,8 @@ import { api } from '@/lib/api'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
 import { PluginConfigPanel } from './PluginConfigPanel'
 import { WidgetDetailView } from './WidgetDetailView'
-import { DEFAULT_WIDGET_ORDER, isValidWidgetId } from '@/generated/plugin-widgets'
+import { DEVELOPER_ONLY_WIDGETS, isValidWidgetId } from '@/generated/plugin-widgets'
+import { buildWidgetOrder } from '@/lib/widget-order'
 import type { PluginUIComponent } from '@/lib/types'
 
 export function WidgetManager() {
@@ -27,23 +28,12 @@ export function WidgetManager() {
 
   // Current preferences.
   const visibility = settings?.ext_settings?.widget_visibility ?? {}
-  const savedOrder = settings?.ext_settings?.widget_order ?? []
+  const savedOrder = settings?.ext_settings?.widget_order as string[] | undefined
 
-  // Build ordered list: saved order first, then any new widgets not yet in the order.
-  const baseOrder = savedOrder.length ? savedOrder : DEFAULT_WIDGET_ORDER
-  const seen = new Set<string>()
-  const orderedIds: string[] = []
-  for (const id of baseOrder) {
-    if (widgetMap.has(id) || DEFAULT_WIDGET_ORDER.includes(id)) {
-      orderedIds.push(id)
-      seen.add(id)
-    }
-  }
-  for (const w of widgets) {
-    if (!seen.has(w.id)) {
-      orderedIds.push(w.id)
-    }
-  }
+  const orderedIds = buildWidgetOrder(savedOrder, widgets)
+
+  const developerMode = settings?.developer_mode ?? false
+  const displayIds = orderedIds.filter((id) => !DEVELOPER_ONLY_WIDGETS.has(id) || developerMode)
 
   // Plugin config panel state.
   const [configuringPluginId, setConfiguringPluginId] = useState<string | null>(null)
@@ -79,14 +69,16 @@ export function WidgetManager() {
   const handleDragOver = (e: React.DragEvent, idx: number) => {
     e.preventDefault()
     if (dragIdx === null || dragIdx === idx) return
-    const reordered = [...orderedIds]
+    // Reorder displayIds, then reconstruct full order preserving hidden widgets
+    const reordered = [...displayIds]
     const [moved] = reordered.splice(dragIdx, 1)
     reordered.splice(idx, 0, moved)
-    // We don't save on every drag-over — just update visual via state.
-    // Save happens on drop.
+    // Merge back: hidden (filtered-out) widgets keep their relative positions,
+    // visible widgets use the new order.
+    const hiddenIds = orderedIds.filter((id) => !displayIds.includes(id))
+    const fullOrder = [...reordered, ...hiddenIds]
     setDragIdx(idx)
-    // Optimistically update order in settings.
-    savePreferences(visibility, reordered)
+    savePreferences(visibility, fullOrder)
   }
 
   const handleDragEnd = () => {
@@ -140,7 +132,7 @@ export function WidgetManager() {
         <p className="text-xs text-fg-muted">Drag to reorder. Toggle visibility with the eye icon.</p>
       </div>
 
-      {orderedIds.length === 0 ? (
+      {displayIds.length === 0 ? (
         <Empty className="py-12">
           <EmptyHeader>
             <EmptyMedia variant="icon"><LayoutGrid /></EmptyMedia>
@@ -150,7 +142,7 @@ export function WidgetManager() {
         </Empty>
       ) : (
         <div className="grid gap-3 grid-cols-2">
-          {orderedIds.map((id, idx) => {
+          {displayIds.map((id, idx) => {
             if (!isValidWidgetId(id)) return null
             const meta = widgetMap.get(id)
             const visible = isVisible(id)

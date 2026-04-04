@@ -135,7 +135,7 @@ export const useChatStore = create<ChatState>((set) => ({
     set((state) => {
       if (!sessionId) return { toolCalls: [] }
       const next = new Map(state.toolCallsBySession)
-      // Prune stale entries unless retention is -1 (keep until refresh)
+      // Prune stale entries only when retention is non-negative; negative values keep until refresh
       if (retentionMinutes >= 0) {
         const cutoff = Date.now() - retentionMinutes * 60 * 1000
         for (const [id, entry] of next) {

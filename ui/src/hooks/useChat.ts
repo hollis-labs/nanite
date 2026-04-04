@@ -181,8 +181,11 @@ export function useChat(sessionId: string | null) {
   // Load messages when sessionId changes
   useEffect(() => {
     void loadMessages();
-    // Load retained tool calls for this session (prunes stale entries)
-    const retention = queryClient.getQueryData<UserSettings>(['settings'])?.tool_drawer_retention ?? 15
+    // Load retained tool calls — skip prune if settings not yet cached (avoids
+    // pruning with wrong default when user configured -1). Re-runs when settings load
+    // via the separate effect below.
+    const settings = queryClient.getQueryData<UserSettings>(['settings'])
+    const retention = settings ? settings.tool_drawer_retention : -1
     store().loadSessionToolCalls(sessionId, retention);
     // Close the tool drawer on session switch — user opens as needed
     useLayoutStore.getState().setToolDrawerState('closed');

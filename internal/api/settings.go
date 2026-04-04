@@ -89,10 +89,24 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'tool_stream_behavior'")
 			return
 		}
+		switch existing.ToolStreamBehavior {
+		case "streaming", "persist", "hidden":
+			// valid
+		default:
+			a.errorResp(w, http.StatusBadRequest, "tool_stream_behavior must be one of: streaming, persist, hidden")
+			return
+		}
 	}
 	if v, ok := raw["tool_drawer_retention"]; ok {
 		if err := json.Unmarshal(v, &existing.ToolDrawerRetention); err != nil {
 			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'tool_drawer_retention'")
+			return
+		}
+		switch existing.ToolDrawerRetention {
+		case -1, 5, 15, 30, 60:
+			// valid
+		default:
+			a.errorResp(w, http.StatusBadRequest, "tool_drawer_retention must be one of: -1, 5, 15, 30, 60")
 			return
 		}
 	}

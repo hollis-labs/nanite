@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -233,23 +234,32 @@ func TestAgentService_ResolveForSession_SettingsDefault(t *testing.T) {
 
 func TestAgentService_ResolveForSession_HardcodedFallback(t *testing.T) {
 	reader := newStubReader()
-	// Add the mentat fallback agent by slug (the slug-based fallback path).
-	fallback := &store.AgentProfile{ID: "mentat-001", Name: "Mentat", Slug: "mentat", Status: "active"}
-	reader.addAgent(fallback)
-
 	writer := &stubAgentWriter{}
+
+	// Provide the built-in default agent via FileAgents (the new fallback path).
+	defaultDef := &agent.Definition{
+		Name:         "Default",
+		Slug:         "default",
+		SystemPrompt: "You are a helpful assistant.",
+		Source:       "builtin",
+	}
+
 	svc := NewAgentService(AgentServiceConfig{
-		Agents:   reader,
-		Writers:  writer,
-		Settings: &stubSettings{defaultAgent: ""},
+		Agents:     reader,
+		Writers:    writer,
+		Settings:   &stubSettings{defaultAgent: ""},
+		FileAgents: []*agent.Definition{defaultDef},
 	})
 
 	got, _, err := svc.ResolveForSession(context.Background(), "orphan-sess")
 	if err != nil {
 		t.Fatalf("ResolveForSession: %v", err)
 	}
-	if got.ID != "mentat-001" {
-		t.Errorf("agent ID = %q, want %q", got.ID, "mentat-001")
+	if got.ID != "file-default" {
+		t.Errorf("agent ID = %q, want %q", got.ID, "file-default")
+	}
+	if got.Slug != "default" {
+		t.Errorf("agent slug = %q, want %q", got.Slug, "default")
 	}
 }
 

@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+const STORAGE_KEY = 'nanite-active-workspace'
+
 interface AppState {
   activeWorkspaceId: string | null
   activeProjectId: string | null
@@ -12,11 +14,14 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  activeWorkspaceId: null,
+  activeWorkspaceId: localStorage.getItem(STORAGE_KEY),
   activeProjectId: null,
   activeSessionId: null,
   configVersion: 0,
-  setActiveWorkspace: (id) => set({ activeWorkspaceId: id, activeProjectId: null, activeSessionId: null }),
+  setActiveWorkspace: (id) => {
+    localStorage.setItem(STORAGE_KEY, id)
+    set({ activeWorkspaceId: id, activeProjectId: null, activeSessionId: null })
+  },
   setActiveProject: (id) => set({ activeProjectId: id }),
   setActiveSession: (id) => set({ activeSessionId: id }),
   bumpConfigVersion: () => set((state) => ({ configVersion: state.configVersion + 1 })),

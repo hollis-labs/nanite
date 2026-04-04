@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/plugin"
 )
 
 // fakeHost implements plugin.Host for testing SubprocessPlugin.registerManifest.

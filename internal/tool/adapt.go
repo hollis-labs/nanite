@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/nanite/internal/provider"
 )
 
 // WrapProviderDef wraps a provider.ToolDefinition as a Tool interface

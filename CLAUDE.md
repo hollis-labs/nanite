@@ -1,4 +1,4 @@
-# CONDUIT — Chat Harness
+# NANITE — Chat Harness
 
 Agent-agnostic multi-agent chat harness for Fragments Engine.
 
@@ -6,29 +6,30 @@ Agent-agnostic multi-agent chat harness for Fragments Engine.
 
 ```bash
 # Backend — compile check only (does NOT deploy)
-go build ./cmd/conduit/
+go build ./cmd/nanite/
 go test ./...
 
 # Frontend
 cd ui && npm install && npm run build
 ```
 
-**Deploying changes:** Always use Cerberus. Direct `go build` outputs to `./conduit` in the project root, but the running service uses `~/go/bin/conduit` (installed by Cerberus via `go install`). These are **separate binaries** — editing one does not affect the other.
+**Deploying changes:** Always use Cerberus. Direct `go build` outputs to `./nanite` in the project root, but the running service uses `~/go/bin/nanite` (installed by Cerberus via `go install`). These are **separate binaries** — editing one does not affect the other.
 
 ```bash
 # Build + restart the running service (use this, not go build):
-cerberus_rebuild conduit-api --reason "description of changes"
+cerberus_rebuild nanite-api --reason "description of changes"
 
 # Restart without rebuilding:
-cerberus_restart conduit-api --reason "reason"
+cerberus_restart nanite-api --reason "reason"
 
 # Verify deployment:
-cerberus_logs conduit-api
+cerberus_logs nanite-api
 ```
 
 ## Architecture
 
-- `cmd/conduit/` — Entry point
+- `cmd/nanite/` — Entry point
+- `internal/brand/` — App identity constants (single source of truth for rebranding)
 - `internal/api/` — HTTP API handlers
 - `internal/chat/` — Chat engine (orchestration, context, delegation)
 - `internal/mcp/` — MCP client integration

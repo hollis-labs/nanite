@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	pluginsdk "github.com/hollis-labs/fragments-engine/plugin"
+	pluginsdk "github.com/hollis-labs/plugin"
 )
 
 // AutoTriggerHandler maps plugin events to custom action auto-triggers.

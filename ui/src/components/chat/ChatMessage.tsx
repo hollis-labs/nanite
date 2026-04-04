@@ -131,7 +131,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
 
     // 2. During streaming, extract from content (envelope field not set yet).
     if (message.content) {
-      const pattern = /```(?:volon-envelope|conduit-envelope)\s*\n([\s\S]*?)```/g
+      const pattern = /```(?:volon-envelope|nanite-envelope)\s*\n([\s\S]*?)```/g
       const envelopes: Envelope[] = []
       let match
       while ((match = pattern.exec(message.content)) !== null) {
@@ -167,7 +167,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-col items-end' : ''}`}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-medium text-fg-muted">
-            {isUser ? 'You' : (agentName || 'Conduit')}
+            {isUser ? 'You' : (agentName || 'Nanite')}
           </span>
           {isMultiAgent && !isUser && message.agent_id && (
             <span className={`text-xs px-1.5 py-0.5 rounded-full ${AGENT_COLORS[agentColorIndex(message.agent_id)].badge}`}>

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/builders"
-	"github.com/hollis-labs/conduit/internal/crossapp"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/builders"
+	"github.com/hollis-labs/nanite/internal/crossapp"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // SelfToolsTransport provides self-service tools that let the agent
@@ -43,37 +43,37 @@ func (st *SelfToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 // CallTool dispatches to the appropriate handler based on tool name.
 func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[string]any) (*ToolResult, error) {
 	switch name {
-	case "conduit_create_skill":
+	case "nanite_create_skill":
 		return st.callCreateSkill(args)
-	case "conduit_list_skills":
+	case "nanite_list_skills":
 		return st.callListSkills(args)
-	case "conduit_update_skill":
+	case "nanite_update_skill":
 		return st.callUpdateSkill(args)
-	case "conduit_delete_skill":
+	case "nanite_delete_skill":
 		return st.callDeleteSkill(args)
-	case "conduit_create_agent":
+	case "nanite_create_agent":
 		return st.callCreateAgent(args)
-	case "conduit_list_agents":
+	case "nanite_list_agents":
 		return st.callListAgents(args)
-	case "conduit_update_agent":
+	case "nanite_update_agent":
 		return st.callUpdateAgent(args)
-	case "conduit_navigate_engine":
+	case "nanite_navigate_engine":
 		return st.callNavigateEngine(args)
-	case "conduit_refresh_engine":
+	case "nanite_refresh_engine":
 		return st.callRefreshEngine(args)
-	case "conduit_show_giphy":
+	case "nanite_show_giphy":
 		return st.callShowGiphy(args)
-	case "conduit_run_report":
+	case "nanite_run_report":
 		return st.callRunReport(args)
-	case "conduit_show_document":
+	case "nanite_show_document":
 		return st.callShowDocument(args)
-	case "conduit_show_report":
+	case "nanite_show_report":
 		return st.callShowReport(args)
-	case "conduit_show_task_disposition":
+	case "nanite_show_task_disposition":
 		return st.callShowTaskDisposition(args)
-	case "conduit_start_builder":
+	case "nanite_start_builder":
 		return st.callStartBuilder(args)
-	case "conduit_builder_step":
+	case "nanite_builder_step":
 		return st.callBuilderStep(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil

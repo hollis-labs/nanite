@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/plugin"
 )
 
 // TestPlugin implements the plugin.Plugin interface for testing
@@ -305,13 +305,13 @@ func TestEventCatalog(t *testing.T) {
 		Mode:      "chat",
 	}
 
-	event := NewEvent(EventSessionStart, "conduit", data)
+	event := NewEvent(EventSessionStart, "nanite", data)
 	if event.Type != EventSessionStart {
 		t.Errorf("Expected event type '%s', got '%s'", EventSessionStart, event.Type)
 	}
 
-	if event.Source != "conduit" {
-		t.Errorf("Expected event source 'conduit', got '%s'", event.Source)
+	if event.Source != "nanite" {
+		t.Errorf("Expected event source 'nanite', got '%s'", event.Source)
 	}
 
 	if event.SessionID != "test-session" {

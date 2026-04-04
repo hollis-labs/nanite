@@ -111,7 +111,7 @@ Trademark protection ensures:
 
 If you are unsure whether your usage is acceptable, contact:
 
-https://github.com/hollis-labs/conduit/issues
+https://github.com/hollis-labs/nanite/issues
 
 ---
 

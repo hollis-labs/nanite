@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/plugin"
 )
 
 // Logger implements plugin.Logger using Go's standard log package

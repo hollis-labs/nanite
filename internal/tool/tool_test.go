@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 func TestNewTool_Defaults(t *testing.T) {

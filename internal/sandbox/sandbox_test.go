@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func TestDir_CreatesDirectory(t *testing.T) {
@@ -82,7 +82,7 @@ func TestPopulate_CreatesAllFiles(t *testing.T) {
 
 	// Verify CLAUDE.md exists and is compact.
 	claudeMD := readFile(t, filepath.Join(dir, "CLAUDE.md"))
-	assertContains(t, claudeMD, "# Conduit Agent — Test Agent", "agent name header")
+	assertContains(t, claudeMD, "# Nanite Agent — Test Agent", "agent name header")
 	assertContains(t, claudeMD, "A test agent for unit testing.", "agent description")
 	assertContains(t, claudeMD, ".sandbox/envelope-schema.md", "pointer to envelope schema")
 	assertContains(t, claudeMD, ".sandbox/agent-context.md", "pointer to agent context")
@@ -95,12 +95,12 @@ func TestPopulate_CreatesAllFiles(t *testing.T) {
 
 	// Verify .sandbox/envelope-schema.md exists with full spec.
 	envelopeMD := readFile(t, filepath.Join(subDir, "envelope-schema.md"))
-	assertContains(t, envelopeMD, "# Conduit Envelope Schema", "schema header")
+	assertContains(t, envelopeMD, "# Nanite Envelope Schema", "schema header")
 	assertContains(t, envelopeMD, "### Question Object", "question field reference")
 	assertContains(t, envelopeMD, "### Proposal Object", "proposal field reference")
 	assertContains(t, envelopeMD, "### Approval Object", "approval field reference")
 	assertContains(t, envelopeMD, "ticket-confirmation", "registered type")
-	assertContains(t, envelopeMD, "conduit-envelope", "code fence tag")
+	assertContains(t, envelopeMD, "nanite-envelope", "code fence tag")
 
 	// Verify .sandbox/agent-context.md exists with agent details.
 	agentMD := readFile(t, filepath.Join(subDir, "agent-context.md"))
@@ -115,7 +115,7 @@ func TestPopulate_CreatesAllFiles(t *testing.T) {
 	// Verify .mcp.json exists with correct structure.
 	mcpJSON := readFile(t, filepath.Join(dir, ".mcp.json"))
 	assertContains(t, mcpJSON, `"mcpServers"`, "mcpServers key")
-	assertContains(t, mcpJSON, `"conduit"`, "conduit server entry")
+	assertContains(t, mcpJSON, `"nanite"`, "nanite server entry")
 	assertContains(t, mcpJSON, `"mcp"`, "mcp subcommand in args")
 	assertContains(t, mcpJSON, `"/tmp/test.db"`, "db path in args")
 	assertContains(t, mcpJSON, `"test-sess"`, "session ID in args")
@@ -136,7 +136,7 @@ func TestPopulate_EmptyDescription(t *testing.T) {
 	}
 
 	claudeMD := readFile(t, filepath.Join(dir, "CLAUDE.md"))
-	assertContains(t, claudeMD, "# Conduit Agent — Minimal Agent", "agent name")
+	assertContains(t, claudeMD, "# Nanite Agent — Minimal Agent", "agent name")
 	// Should not have triple newline from empty description.
 	if strings.Contains(claudeMD, "\n\n\n") {
 		t.Error("unexpected triple newline from empty description")

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/hollis-labs/conduit/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/mcp"
 )
 
 // SprintToolsTransport implements mcp.MCPTransport and exposes sprint planning
@@ -21,7 +21,7 @@ func NewSprintToolsTransport(mgr *mcp.Manager) *SprintToolsTransport {
 func (t *SprintToolsTransport) ListTools(ctx context.Context) ([]mcp.Tool, error) {
 	return []mcp.Tool{
 		{
-			Name:        "conduit_open_sprint_planning",
+			Name:        "nanite_open_sprint_planning",
 			Description: "Open the sprint planning modal in the UI. Use when the user asks to review sprints, plan work, or manage tasks and backlog.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -31,7 +31,7 @@ func (t *SprintToolsTransport) ListTools(ctx context.Context) ([]mcp.Tool, error
 			},
 		},
 		{
-			Name:        "conduit_show_sprint_planning_review",
+			Name:        "nanite_show_sprint_planning_review",
 			Description: "Display an interactive sprint planning review card. Shows tasks with suggested sprint assignments. Users can accept or move tasks to different sprints. Each action is reactive — updates Engine in real-time. Use after creating demo sprints and tasks, when the user wants to review and assign them.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -50,9 +50,9 @@ func (t *SprintToolsTransport) ListTools(ctx context.Context) ([]mcp.Tool, error
 
 func (t *SprintToolsTransport) CallTool(ctx context.Context, name string, args map[string]any) (*mcp.ToolResult, error) {
 	switch name {
-	case "conduit_open_sprint_planning":
+	case "nanite_open_sprint_planning":
 		return textResult("Sprint planning modal opened in the UI."), nil
-	case "conduit_show_sprint_planning_review":
+	case "nanite_show_sprint_planning_review":
 		return t.callShowSprintPlanningReview(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil

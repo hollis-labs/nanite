@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	fplugin "github.com/hollis-labs/fragments-engine/plugin"
-	"github.com/hollis-labs/conduit/internal/plugin/subprocess"
+	fplugin "github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
 
 // DiscoveredPlugin holds metadata parsed from a plugin.yaml plus the

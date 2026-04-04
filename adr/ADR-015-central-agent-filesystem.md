@@ -81,5 +81,5 @@ Every doc written to the central filesystem also gets a Cortex pointer record wi
 
 ## References
 
-- ADR-013 (Conduit Separation) — central `~/.agentrc/` model
+- ADR-013 (Nanite Separation) — central `~/.agentrc/` model
 - CONDUIT-S3-CENTRAL-AGENTRC sprint — implementation vehicle

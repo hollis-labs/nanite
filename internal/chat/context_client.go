@@ -10,9 +10,9 @@ import (
 	feotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/hollis-labs/conduit/internal/contextbroker"
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/contextbroker"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // DefaultBudgetPct is the default fraction of the context window to use.
@@ -50,12 +50,12 @@ func NewContextClient(s *store.Store) *ContextClient {
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
 func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
-	_, span := feotel.StartSpan(ctx, "conduit.broker.assembleContext")
+	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleContext")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("conduit.session.id", session.ID),
-		attribute.String("conduit.agent.id", agent.ID),
+		attribute.String("nanite.session.id", session.ID),
+		attribute.String("nanite.agent.id", agent.ID),
 	)
 
 	// 1. Build the system prompt using prompt templates.
@@ -103,10 +103,10 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	}
 
 	span.SetAttributes(
-		attribute.Int("conduit.broker.system_tokens", systemTokens),
-		attribute.Int("conduit.broker.message_count", len(chatMessages)),
-		attribute.Int("conduit.broker.total_tokens", totalTokens),
-		attribute.Int("conduit.broker.budget", budget),
+		attribute.Int("nanite.broker.system_tokens", systemTokens),
+		attribute.Int("nanite.broker.message_count", len(chatMessages)),
+		attribute.Int("nanite.broker.total_tokens", totalTokens),
+		attribute.Int("nanite.broker.budget", budget),
 	)
 
 	log.Printf("broker: assembled context — system=%d tokens, messages=%d, total=%d tokens (budget=%d)",

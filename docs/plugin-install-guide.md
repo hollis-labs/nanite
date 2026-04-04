@@ -1,6 +1,6 @@
 # Plugin Install / Uninstall Guide
 
-Conduit plugins can be managed via the **GUI** (Settings → Plugins) or the **CLI** (`conduit plugin`). All operations take effect immediately — no restart required.
+Nanite plugins can be managed via the **GUI** (Settings → Plugins) or the **CLI** (`nanite plugin`). All operations take effect immediately — no restart required.
 
 ## GUI (Settings → Plugins)
 
@@ -14,31 +14,31 @@ Actions per plugin:
 - **Core plugins** (e.g. session-stats): Always active, no actions
 - **User plugins**: Install, Uninstall, Disable, Enable buttons
 
-Changes are immediate — the agent dropdown, MCP tools, and CRUD endpoints update without restarting Conduit.
+Changes are immediate — the agent dropdown, MCP tools, and CRUD endpoints update without restarting Nanite.
 
 ## CLI
 
 ```bash
 # List all installed plugins
-conduit plugin list
+nanite plugin list
 
 # Install from the hollis-labs GitHub org
-conduit plugin install support-ticket
+nanite plugin install support-ticket
 
 # Disable (keeps files, removes from runtime)
-conduit plugin disable support-ticket
+nanite plugin disable support-ticket
 
 # Re-enable
-conduit plugin enable support-ticket
+nanite plugin enable support-ticket
 
 # Uninstall (removes files + cleans up agent profiles)
-conduit plugin uninstall support-ticket
+nanite plugin uninstall support-ticket
 ```
 
-The CLI auto-restarts Conduit via Cerberus after each operation. Use `--no-restart` to skip:
+The CLI auto-restarts Nanite via Cerberus after each operation. Use `--no-restart` to skip:
 
 ```bash
-conduit plugin install support-ticket --no-restart
+nanite plugin install support-ticket --no-restart
 ```
 
 ## REST API
@@ -91,7 +91,7 @@ plugins:
     type: core
 ```
 
-- `core` plugins ship with Conduit and can't be uninstalled
+- `core` plugins ship with Nanite and can't be uninstalled
 - `user` plugins can be installed/uninstalled/disabled
 
 ## For developers: adding a new plugin
@@ -112,8 +112,8 @@ plugins:
 ## Troubleshooting
 
 **Plugin not appearing after install?**
-- Check `conduit plugin list` — status should be `active`
-- Check Conduit logs for load errors: `cerberus logs conduit-api`
+- Check `nanite plugin list` — status should be `active`
+- Check Nanite logs for load errors: `cerberus logs nanite-api`
 
 **Agent not in dropdown after enable?**
 - Hard-refresh the browser (Cmd+Shift+R) if the cache-bust didn't trigger

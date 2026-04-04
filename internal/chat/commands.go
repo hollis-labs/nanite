@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/plugin"
 )
 
 // CommandArg defines a single argument for a slash command (mirrors plugin.CommandArg).

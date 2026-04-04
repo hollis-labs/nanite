@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // AgentService encapsulates agent profile CRUD and the session-agent

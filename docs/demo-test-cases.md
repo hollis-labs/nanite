@@ -1,7 +1,7 @@
 # Demo Presenter — Test Cases
 
 **Agent:** Demo Presenter
-**Setup:** Open Conduit (`localhost:5176`) and Engine GUI (`localhost:1420`) side-by-side. Select "Demo Presenter" from the agent dropdown. Start a new session for each test group.
+**Setup:** Open Nanite (`localhost:5176`) and Engine GUI (`localhost:1420`) side-by-side. Select "Demo Presenter" from the agent dropdown. Start a new session for each test group.
 
 ---
 
@@ -12,7 +12,7 @@
 **Expected:**
 - Engine GUI navigates to the Tasks page
 - Agent confirms with a brief message
-- Conduit Link indicator in Engine NavRail is green
+- Nanite Link indicator in Engine NavRail is green
 
 ### 1b. Navigation with project filter
 **Prompt:** "Show me the tasks for the engine project"
@@ -64,7 +64,7 @@ from the previous view.
 ## 2. Sprint Planning Review
 
 ### 2a. Full planning flow
-**Prompt:** "I'm doing a demo. Let's demonstrate how we can use Conduit to plan and manage tasks. Please create 2-3 demo sprints and 4-8 tasks per sprint. Then let's review the tasks — you suggest which sprints they go in."
+**Prompt:** "I'm doing a demo. Let's demonstrate how we can use Nanite to plan and manage tasks. Please create 2-3 demo sprints and 4-8 tasks per sprint. Then let's review the tasks — you suggest which sprints they go in."
 **Expected:**
 - Agent creates demo data (may narrate or call Engine MCP tools)
 - Interactive SprintPlanningReviewCard appears in chat
@@ -140,7 +140,7 @@ from the previous view.
 ### 5a. Run a report
 **Prompt:** "Run the executive summary report"
 **Expected:**
-- Agent calls `conduit_run_report`
+- Agent calls `nanite_run_report`
 - TaskCompleteNotificationCard appears:
   - Green checkmark icon
   - "Report Complete: executive-summary"
@@ -210,7 +210,7 @@ from the previous view.
 
 This is the suggested order for the Monday demo:
 
-1. **Open both screens** — Conduit + Engine side-by-side
+1. **Open both screens** — Nanite + Engine side-by-side
 2. **"Show me the tasks page"** → Engine navigates (wow moment: chat controls the dashboard)
 3. **"Show me P1 tasks for the engine project"** → Filters apply live
 4. **"Let's plan some sprints"** → Sprint planning card appears, interact with Add/Move/Finish
@@ -224,10 +224,10 @@ This is the suggested order for the Monday demo:
 
 ## Environment Requirements
 
-- **Conduit API:** `localhost:8090` (Cerberus managed)
-- **Conduit Frontend:** `localhost:5176` (Vite dev server)
+- **Nanite API:** `localhost:8090` (Cerberus managed)
+- **Nanite Frontend:** `localhost:5176` (Vite dev server)
 - **Engine API:** `localhost:8085` (GUI server with SSE)
 - **Engine Frontend:** `localhost:1420` (Vite dev server)
-- **GIPHY_API_KEY:** Set in `conduit/.env` for live GIF search (optional — demo mode works without)
+- **GIPHY_API_KEY:** Set in `nanite/.env` for live GIF search (optional — demo mode works without)
 - **Demo Presenter agent:** Must be seeded in DB (check Settings → Agents)
-- **Conduit Link:** Green indicator in Engine NavRail confirms SSE connection
+- **Nanite Link:** Green indicator in Engine NavRail confirms SSE connection

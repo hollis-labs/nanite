@@ -5,7 +5,7 @@
 
 ## Overview
 
-Conduit's tool system has five distinct phases: **Discovery → Selection → Delivery → Execution → Enforcement**. Understanding each phase is critical because they have different enforcement guarantees.
+Nanite's tool system has five distinct phases: **Discovery → Selection → Delivery → Execution → Enforcement**. Understanding each phase is critical because they have different enforcement guarantees.
 
 ## Phase 1: Discovery
 
@@ -52,7 +52,7 @@ User message: "List all tasks in the engine project"
   - Drop lowest-ranked until under budget
        │
        ▼
-  Prepend builtins (conduit_start_builder, etc.)
+  Prepend builtins (nanite_start_builder, etc.)
        │
        ▼
   CheckPermission(agentID, toolName) for EACH tool
@@ -69,7 +69,7 @@ User message: "List all tasks in the engine project"
 
 ## Phase 3: Delivery (Progressive Discovery)
 
-When the selected tool count exceeds the ProgressiveDiscoveryThreshold (5 MCP tools), Conduit switches to progressive discovery mode.
+When the selected tool count exceeds the ProgressiveDiscoveryThreshold (5 MCP tools), Nanite switches to progressive discovery mode.
 
 ### Without Progressive Discovery (≤5 MCP tools)
 
@@ -82,7 +82,7 @@ Instead of sending 15+ tool definitions (~15K tokens):
 
 1. Send ONLY:
    - request_tools (meta-tool for on-demand loading)
-   - Builtin tools (conduit_start_builder, etc.)
+   - Builtin tools (nanite_start_builder, etc.)
 
 2. Inject into system prompt:
    "## Available Tool Catalog
@@ -114,7 +114,7 @@ Guards:
 
 ```
 LLM returns tool_use block:
-  { name: "engine_tasks_list", input: { project_id: "conduit" } }
+  { name: "engine_tasks_list", input: { project_id: "nanite" } }
        │
        ▼
   ToolClient.CallTool(agentID, name, input)

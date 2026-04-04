@@ -52,7 +52,7 @@ func ValidateEnvelope(env Envelope, raw string) *EnvelopeError {
 type Envelope struct {
 	Kind      string         `json:"kind"`
 	Version   int            `json:"version"`
-	Type      string         `json:"type"`                // standard, conduit, custom
+	Type      string         `json:"type"`                // standard, nanite, custom
 	Proposals []Proposal     `json:"proposals,omitempty"`
 	Questions []Question     `json:"questions,omitempty"`
 	Status    *Status        `json:"status,omitempty"`
@@ -81,7 +81,7 @@ type Status struct {
 	Progress float64 `json:"progress"`
 }
 
-// buildKBEnvelope transforms a search_kb JSON result into a conduit-envelope JSON string.
+// buildKBEnvelope transforms a search_kb JSON result into a nanite-envelope JSON string.
 // The search result is {"results":[...],"query":"...","total_results":N}.
 // The envelope wraps it as {"kind":"envelope","version":1,"type":"kb-result","data":{...}}.
 func BuildKBEnvelope(searchResult string) string {
@@ -94,7 +94,7 @@ func BuildKBEnvelope(searchResult string) string {
 
 	// Parse the search result to sanitize body fields.
 	// Body content may contain triple backticks (markdown code fences)
-	// which break the conduit-envelope fence delimiter.
+	// which break the nanite-envelope fence delimiter.
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(jsonPart), &parsed); err != nil {
 		return ""
@@ -144,8 +144,8 @@ func BuildTicketConfirmationEnvelope(ticketJSON string) string {
 	return string(data)
 }
 
-// envelopePattern matches fenced code blocks with volon-envelope or conduit-envelope language tags.
-var envelopePattern = regexp.MustCompile("(?s)```(?:volon-envelope|conduit-envelope)\\s*\n(.*?)```")
+// envelopePattern matches fenced code blocks with volon-envelope or nanite-envelope language tags.
+var envelopePattern = regexp.MustCompile("(?s)```(?:volon-envelope|nanite-envelope)\\s*\n(.*?)```")
 
 // ParseEnvelopes extracts envelope blocks from assistant message content.
 // Returns the parsed envelopes, the remaining text with envelope blocks removed,

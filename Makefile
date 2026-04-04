@@ -2,11 +2,11 @@
 
 # Build React SPA then embed in Go binary
 build: build-ui
-	go build -o conduit ./cmd/conduit
+	go build -o nanite ./cmd/nanite
 
 # Install to ~/go/bin/ (used by MCP and Cerberus)
 install: build-ui
-	go install ./cmd/conduit
+	go install ./cmd/nanite
 
 build-ui:
 	cd ui && npm run build
@@ -19,7 +19,7 @@ dev:
 
 # Clean build artifacts
 clean:
-	rm -f conduit
+	rm -f nanite
 	rm -rf ui/dist
 
 # Run Go tests
@@ -28,4 +28,4 @@ test:
 
 # Run with default settings
 run: build
-	./conduit serve --port 8090
+	./nanite serve --port 8090

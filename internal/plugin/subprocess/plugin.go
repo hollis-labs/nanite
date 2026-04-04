@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/version"
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/nanite/internal/version"
+	"github.com/hollis-labs/plugin"
 )
 
 // SubprocessPlugin implements plugin.Plugin by proxying all operations over

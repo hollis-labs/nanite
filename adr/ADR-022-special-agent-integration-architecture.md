@@ -7,7 +7,7 @@
 
 ## Context
 
-Fragments Engine has five core services (Conduit, Cortex, Volon, Hadron, Nanite), each with an associated Special Agent. As the agent tier matures, communication patterns between agents and services have accumulated inconsistently — some agents use MCP, some call HTTP APIs directly, and some shell out to CLI tools. This creates:
+Fragments Engine has five core services (Nanite, Cortex, Volon, Hadron, Beacon), each with an associated Special Agent. As the agent tier matures, communication patterns between agents and services have accumulated inconsistently — some agents use MCP, some call HTTP APIs directly, and some shell out to CLI tools. This creates:
 
 - Performance overhead from unnecessary MCP round-trips when an agent operates on its own service
 - No clear protocol boundary for cross-service communication
@@ -107,8 +107,8 @@ Adopt a **three-layer integration model** for all Special Agents. Each layer has
 
 ## References
 
-- ADR-013: Conduit Separation — establishes service boundary between Conduit and Mentat Agent
+- ADR-013: Nanite Separation — establishes service boundary between Nanite and Mentat Agent
 - ADR-019: Volon GUI Chat Convergence — dual-mode binary pattern applied to Volon
 - Dual-mode binary pattern: `cmd/volon` and `cmd/gui-server` in the Volon repo
 - Agent taxonomy in memory: Special Agents vs System Agents, primary/secondary classification
-- `tiamat-tool-broker`: shared library for tool intent analysis used by Conduit
+- `tiamat-tool-broker`: shared library for tool intent analysis used by Nanite

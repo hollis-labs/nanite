@@ -13,10 +13,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/permission"
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/truncate"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/truncate"
 )
 
 // toolPlanStatus describes the outcome of pre-checking a tool.
@@ -289,7 +289,7 @@ func (s *chatServiceImpl) executeSingleTool(
 			s.events.EmitToolFailed(ctx, sessionID, tu.Name, tu.Input, resultText)
 		}
 	} else {
-		toolSpan.SetAttributes(attribute.Int("conduit.tool.result_len", len(resultText)))
+		toolSpan.SetAttributes(attribute.Int("nanite.tool.result_len", len(resultText)))
 		s.store.LogEvent(sessionID, "tool_call", "tool",
 			tu.Name, fmt.Sprintf(`{"result_len":%d,"agent_id":%q}`, len(resultText), agentID))
 		if s.events != nil {

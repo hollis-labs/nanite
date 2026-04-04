@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AppConfig holds application-level tunables loaded from config/conduit.yaml.
+// AppConfig holds application-level tunables loaded from config/nanite.yaml.
 type AppConfig struct {
 	Presence  PresenceConfig  `yaml:"presence"`
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
@@ -40,7 +40,7 @@ func DefaultAppConfig() *AppConfig {
 	}
 }
 
-// LoadAppConfig reads config/conduit.yaml and returns the parsed config.
+// LoadAppConfig reads config/nanite.yaml and returns the parsed config.
 // Returns defaults if the file doesn't exist.
 func LoadAppConfig(path string) (*AppConfig, error) {
 	cfg := DefaultAppConfig()

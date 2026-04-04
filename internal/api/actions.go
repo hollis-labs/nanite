@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // handleListActions returns all custom actions.

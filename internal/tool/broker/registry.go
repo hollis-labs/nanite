@@ -3,7 +3,7 @@ package broker
 import (
 	"sync"
 
-	"github.com/hollis-labs/conduit/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 // Registry is a thread-safe tool registry. The broker resolves tools from here.

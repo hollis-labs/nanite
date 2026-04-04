@@ -87,7 +87,7 @@ func TestLoadRulesFromFile(t *testing.T) {
 
 func TestSaveAndLoadRules(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".conduit", "permissions.yaml")
+	path := filepath.Join(dir, ".nanite", "permissions.yaml")
 
 	rs := &RuleSet{
 		Mode: ModeAcceptEdits,

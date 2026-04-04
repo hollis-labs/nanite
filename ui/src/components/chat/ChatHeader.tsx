@@ -56,7 +56,7 @@ export function ChatHeader() {
 
   const primaryAgent = sessionAgents.find((a) => a.role === 'primary')
   const primaryAgentProfile = allAgents.find((a) => a.id === primaryAgent?.agent_id)
-  const activeAgentName = primaryAgentProfile?.name || 'Conduit'
+  const activeAgentName = primaryAgentProfile?.name || 'Nanite'
 
   const agentCount = sessionAgents.length
   const shortCode = session?.short_code

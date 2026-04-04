@@ -30,8 +30,8 @@ hooks_dir: ~/.agentrc/hooks/shared
 	projectYAML := `
 version: 1
 project:
-  name: conduit
-  root: ~/Projects-apps/fragments-engine/conduit
+  name: nanite
+  root: ~/Projects-apps/nanite
 role: volon-managed
 boot_profiles:
   - worker
@@ -59,8 +59,8 @@ executor:
 	}
 
 	// Project scalars override user.
-	if cfg.Project.Name != "conduit" {
-		t.Errorf("Project.Name = %q, want %q", cfg.Project.Name, "conduit")
+	if cfg.Project.Name != "nanite" {
+		t.Errorf("Project.Name = %q, want %q", cfg.Project.Name, "nanite")
 	}
 	if cfg.Role != "volon-managed" {
 		t.Errorf("Role = %q, want %q", cfg.Role, "volon-managed")
@@ -162,10 +162,10 @@ func TestProjectRoot_ExpandsTilde(t *testing.T) {
 	}
 
 	cfg := &Config{
-		Project: ProjectConfig{Root: "~/Projects-apps/fragments-engine/conduit"},
+		Project: ProjectConfig{Root: "~/Projects-apps/nanite"},
 	}
 	got := cfg.ProjectRoot()
-	want := filepath.Join(home, "Projects-apps/fragments-engine/conduit")
+	want := filepath.Join(home, "Projects-apps/nanite")
 	if got != want {
 		t.Errorf("ProjectRoot() = %q, want %q", got, want)
 	}

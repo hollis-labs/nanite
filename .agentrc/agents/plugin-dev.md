@@ -1,8 +1,8 @@
-# Agent Context: Conduit Plugin Developer
+# Agent Context: Nanite Plugin Developer
 
 ## Purpose
 
-Develop, audit, and maintain plugins for the Conduit chat interface. This includes the plugin contract in `libs/plugin/`, the plugin scaffold, individual plugins under `conduit/plugins/`, and associated documentation.
+Develop, audit, and maintain plugins for the Nanite chat interface. This includes the plugin contract in `libs/plugin/`, the plugin scaffold, individual plugins under `nanite/plugins/`, and associated documentation.
 
 ## Key Paths
 
@@ -13,11 +13,11 @@ Develop, audit, and maintain plugins for the Conduit chat interface. This includ
 | `libs/plugin/registry.go` | Plugin registry |
 | `libs/plugin/uiregistry.go` | UI component registry (widget, envelope, action, workflow, view) |
 | `libs/plugin/example.go` | Reference implementation — shows Load/Unload, CRUD, events, UI |
-| `conduit/internal/plugin/` | Host implementation, plugin loading, hot-swap |
-| `conduit/internal/plugin/builtin/` | Compiled-in plugin Go code |
-| `conduit/plugins/` | Plugin activation directory (yaml manifests, `repos.yaml`) |
-| `conduit/docs/architecture/plugin-system.md` | Architecture doc |
-| `conduit/docs/plugin-install-guide.md` | Install/manage guide (GUI, CLI, REST API) |
+| `nanite/internal/plugin/` | Host implementation, plugin loading, hot-swap |
+| `nanite/internal/plugin/builtin/` | Compiled-in plugin Go code |
+| `nanite/plugins/` | Plugin activation directory (yaml manifests, `repos.yaml`) |
+| `nanite/docs/architecture/plugin-system.md` | Architecture doc |
+| `nanite/docs/plugin-install-guide.md` | Install/manage guide (GUI, CLI, REST API) |
 
 ## Plugin Contract Summary
 
@@ -65,8 +65,8 @@ CRUD auto-wires 5 HTTP routes per resource type. Event hooks run concurrently wi
 
 ## Conventions
 
-- Plugin Go code lives in `conduit/internal/plugin/builtin/<name>/`
-- Plugin manifest + UI + agent profiles live in `conduit/plugins/<name>/`
+- Plugin Go code lives in `nanite/internal/plugin/builtin/<name>/`
+- Plugin manifest + UI + agent profiles live in `nanite/plugins/<name>/`
 - Registration via `init()` calling `hostplugin.RegisterPlugin()`
 - Blank import in `internal/plugin/allplugins/allplugins.go`
 - Agent seeding is idempotent (check-before-create)

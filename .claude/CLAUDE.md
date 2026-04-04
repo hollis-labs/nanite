@@ -1,4 +1,4 @@
-# Conduit — agentrc adapter
+# Nanite — agentrc adapter
 
 ## agentrc
 - If `.agentrc/boot-prompt.md` exists, read it first for session context.

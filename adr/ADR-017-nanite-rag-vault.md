@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-03-13
 **Deciders:** chrispian, Mentat
-**Relates to:** ADR-016 (Carrier Absorption), ADR-013 (Conduit Separation)
+**Relates to:** ADR-016 (Carrier Absorption), ADR-013 (Nanite Separation)
 
 ## Context
 
@@ -43,8 +43,8 @@ Evolve Nanite into a configurable RAG vault system while preserving its standalo
   - Domain-specific retrieval logic (entity extraction for lore vaults, code awareness for dev vaults)
 - Runs as a background process within Nanite or as a Hadron-scheduled job
 
-#### 4. Conduit Plugin (Deep Integration)
-- Rich conversational access to any vault via Conduit
+#### 4. Nanite Plugin (Deep Integration)
+- Rich conversational access to any vault via Nanite
 - Vault selection in chat context (switch between Second Brain, GM vault, dev notes, etc.)
 - `/recall` command for explicit retrieval
 - Ambient context injection (auto-retrieve relevant items based on conversation)
@@ -52,7 +52,7 @@ Evolve Nanite into a configurable RAG vault system while preserving its standalo
 
 ### Example Use Cases
 
-| Vault | Domain | System Agent Behavior | Conduit Command |
+| Vault | Domain | System Agent Behavior | Nanite Command |
 |-------|--------|----------------------|-----------------|
 | Second Brain | Personal notes | Broad semantic retrieval | `/recall` |
 | GM Assistant | Gameworld knowledge | Entity-focused, lore consistency | `/lore` |
@@ -61,7 +61,7 @@ Evolve Nanite into a configurable RAG vault system while preserving its standalo
 
 ### Dual Distribution Model
 - **Standalone**: Nanite desktop app works as-is — notes, tasks, vaults, keyboard UX
-- **Integrated**: Nanite MCP exposes vault operations; Conduit plugin provides conversational access
+- **Integrated**: Nanite MCP exposes vault operations; Nanite plugin provides conversational access
 - The binary is the product, the MCP is the API, the plugin is the integration
 
 ## Consequences
@@ -88,5 +88,5 @@ Evolve Nanite into a configurable RAG vault system while preserving its standalo
 1. **Phase 1**: Add `sqlite-vec` integration, embedding column, basic similarity search API
 2. **Phase 2**: Vault profiles (YAML config per vault), retrieval strategy configuration
 3. **Phase 3**: System Agent skeleton — embed on save, background index maintenance
-4. **Phase 4**: Conduit plugin — conversational vault access, ambient context injection
+4. **Phase 4**: Nanite plugin — conversational vault access, ambient context injection
 5. **Phase 5**: Cross-vault search, vault sharing/export format

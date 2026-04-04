@@ -1,4 +1,4 @@
-// Package tool defines the canonical tool interface for Conduit.
+// Package tool defines the canonical tool interface for Nanite.
 //
 // All tools — builtin, MCP-bridged, YAML-defined, plugin-provided —
 // implement the Tool interface. The builder pattern (NewTool + ToolOption)

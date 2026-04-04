@@ -3,8 +3,8 @@ package tool_test
 import (
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/tool"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 func TestWrapProviderDef(t *testing.T) {
@@ -84,7 +84,7 @@ func TestWrapExistingTools(t *testing.T) {
 		{Name: "dev_read", Description: "read"},
 		{Name: "dev_write", Description: "write"},
 		{Name: "web_fetch", Description: "fetch"},
-		{Name: "conduit_list_agents", Description: "list agents"},
+		{Name: "nanite_list_agents", Description: "list agents"},
 		{Name: "mcp__engine__task_create", Description: "create task"},
 		{Name: "unknown_tool", Description: "mystery"},
 	}
@@ -102,9 +102,9 @@ func TestWrapExistingTools(t *testing.T) {
 	if tools[2].Category() != tool.CategorySearch {
 		t.Errorf("web_fetch category = %q", tools[2].Category())
 	}
-	// conduit_list_agents → agent
+	// nanite_list_agents → agent
 	if tools[3].Category() != tool.CategoryAgent {
-		t.Errorf("conduit_list_agents category = %q", tools[3].Category())
+		t.Errorf("nanite_list_agents category = %q", tools[3].Category())
 	}
 	// mcp__ tool → mcp
 	if tools[4].Category() != tool.CategoryMCP {

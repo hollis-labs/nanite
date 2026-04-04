@@ -5,14 +5,16 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/brand"
 )
 
 // basicAuthMiddleware returns a middleware that enforces HTTP Basic Auth on /api/ routes
-// (except /api/health) when CONDUIT_AUTH_USER and CONDUIT_AUTH_PASSWORD env vars are set.
+// (except /api/health) when NANITE_AUTH_USER and NANITE_AUTH_PASSWORD env vars are set.
 // If neither is set, the middleware is a no-op (local dev mode).
 func basicAuthMiddleware(next http.Handler) http.Handler {
-	user := os.Getenv("CONDUIT_AUTH_USER")
-	pass := os.Getenv("CONDUIT_AUTH_PASSWORD")
+	user := os.Getenv(brand.Env("AUTH_USER"))
+	pass := os.Getenv(brand.Env("AUTH_PASSWORD"))
 
 	// If no credentials configured, skip auth entirely (local dev mode).
 	if user == "" && pass == "" {
@@ -35,7 +37,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		// Check Basic Auth credentials.
 		reqUser, reqPass, ok := r.BasicAuth()
 		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="conduit"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="` + brand.ID + `"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -44,7 +46,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		passMatch := subtle.ConstantTimeCompare([]byte(reqPass), []byte(pass)) == 1
 
 		if !userMatch || !passMatch {
-			w.Header().Set("WWW-Authenticate", `Basic realm="conduit"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="` + brand.ID + `"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

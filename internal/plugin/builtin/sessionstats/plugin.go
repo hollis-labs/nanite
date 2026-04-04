@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	hostplugin "github.com/hollis-labs/conduit/internal/plugin"
-	conduitstore "github.com/hollis-labs/conduit/internal/store"
-	"github.com/hollis-labs/fragments-engine/plugin"
+	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
+	nanitestore "github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/plugin"
 )
 
 func init() {
@@ -42,7 +42,7 @@ func (p *SessionStatsPlugin) Load(host plugin.Host) error {
 		type hasDB interface{ GetSQLDB() *sql.DB }
 		if s, ok := svc.(hasDB); ok {
 			db = s.GetSQLDB()
-		} else if st, ok := svc.(*conduitstore.Store); ok {
+		} else if st, ok := svc.(*nanitestore.Store); ok {
 			db = st.DB
 		}
 	}

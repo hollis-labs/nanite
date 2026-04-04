@@ -440,7 +440,7 @@ func DefaultToolKnowledge() *ToolKnowledge {
 				},
 				// ── UI Triggers ─────────────────────────────────────
 				{
-					Name:             "conduit_open_sprint_planning",
+					Name:             "nanite_open_sprint_planning",
 					Category:         "general",
 					ShortDescription: "Open sprint planning modal to review sprints and tasks",
 					Server:           "self",
@@ -448,42 +448,42 @@ func DefaultToolKnowledge() *ToolKnowledge {
 				},
 				// ── Self-service & Builders ──────────────────────────
 				{
-					Name:             "conduit_start_builder",
+					Name:             "nanite_start_builder",
 					Category:         "general",
 					ShortDescription: "Start interactive builder for agents, skills, or templates",
 					Server:           "self",
 					UseCases:         []string{"create agent step-by-step", "interactive form", "guided creation", "interview", "collect data"},
 				},
 				{
-					Name:             "conduit_builder_step",
+					Name:             "nanite_builder_step",
 					Category:         "general",
 					ShortDescription: "Submit a value for the current builder step",
 					Server:           "self",
 					UseCases:         []string{"builder flow", "step-by-step form", "guided input"},
 				},
 				{
-					Name:             "conduit_create_skill",
+					Name:             "nanite_create_skill",
 					Category:         "general",
 					ShortDescription: "Create a new skill binding tools to a category",
 					Server:           "self",
 					UseCases:         []string{"new skill", "tool binding", "skill creation"},
 				},
 				{
-					Name:             "conduit_create_agent",
+					Name:             "nanite_create_agent",
 					Category:         "general",
 					ShortDescription: "Create a new agent profile with system prompt",
 					Server:           "self",
 					UseCases:         []string{"new agent", "agent creation", "add persona"},
 				},
 				{
-					Name:             "conduit_list_skills",
+					Name:             "nanite_list_skills",
 					Category:         "general",
 					ShortDescription: "List all skills with name, slug, and category",
 					Server:           "self",
 					UseCases:         []string{"browse skills", "skill inventory"},
 				},
 				{
-					Name:             "conduit_list_agents",
+					Name:             "nanite_list_agents",
 					Category:         "general",
 					ShortDescription: "List all agent profiles",
 					Server:           "self",

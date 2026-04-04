@@ -39,7 +39,7 @@ type brokerYAML struct {
 }
 
 // LoadRules loads and merges broker rules from the standard locations.
-// Priority (highest to lowest): project (.conduit/broker.yaml) → user (~/.conduit/broker.yaml).
+// Priority (highest to lowest): project (.nanite/broker.yaml) → user (~/.nanite/broker.yaml).
 // workingDir is the project root.
 func LoadRules(workingDir string) *RuleSet {
 	merged := &RuleSet{
@@ -49,7 +49,7 @@ func LoadRules(workingDir string) *RuleSet {
 	// Load user-level first (lower priority — project overrides).
 	home, err := os.UserHomeDir()
 	if err == nil {
-		userPath := filepath.Join(home, ".conduit", "broker.yaml")
+		userPath := filepath.Join(home, ".nanite", "broker.yaml")
 		if rs, err := loadRuleFile(userPath); err == nil {
 			mergeRuleSet(merged, rs)
 		}
@@ -57,7 +57,7 @@ func LoadRules(workingDir string) *RuleSet {
 
 	// Load project-level (higher priority).
 	if workingDir != "" {
-		projectPath := filepath.Join(workingDir, ".conduit", "broker.yaml")
+		projectPath := filepath.Join(workingDir, ".nanite", "broker.yaml")
 		if rs, err := loadRuleFile(projectPath); err == nil {
 			mergeRuleSet(merged, rs)
 		}

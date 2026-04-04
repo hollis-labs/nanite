@@ -26,7 +26,7 @@ Classify Sigil as **core infrastructure / shared tool**, not a product in the po
 
 | Tier | Projects | Identity |
 |------|----------|----------|
-| **Core Platform** | Conduit, Cortex, Volon | The product — what users interact with |
+| **Core Platform** | Nanite, Cortex, Volon | The product — what users interact with |
 | **Ecosystem Tools** | Hadron, Nanite | Standalone value + Fragments Engine plugins |
 | **Shared Infrastructure** | Sigil, tiamat-otel, tiamat-mcp-helpers, fragments-ingest | Libraries and tools that agents/apps consume |
 | **Absorbed** | Carrier | Special Agent + shared ingest lib (ADR-016) |
@@ -36,13 +36,13 @@ Classify Sigil as **core infrastructure / shared tool**, not a product in the po
 - **Keep separate repo and binary** — it works independently and has a clean CLI
 - **Don't position in product marketing** — it's not alongside Hadron/Nanite in the lineup
 - **MCP integration stays** — agents use Sigil via MCP for UI generation tasks
-- **No Conduit plugin needed** — the `/sigil-ui` skill is sufficient; Sigil doesn't need rich chat integration
+- **No Nanite plugin needed** — the `/sigil-ui` skill is sufficient; Sigil doesn't need rich chat integration
 - **No epics or sprints tracked as "product work"** — improvements tracked as infrastructure/tooling tasks
 
 ## Consequences
 
 ### Positive
-- Clearer product narrative: Fragments Engine = Conduit + Cortex + Volon + ecosystem tools
+- Clearer product narrative: Fragments Engine = Nanite + Cortex + Volon + ecosystem tools
 - Sigil development stays focused on code generation quality, not product features
 - Reduces portfolio cognitive load (fewer "products" to explain)
 

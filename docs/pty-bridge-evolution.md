@@ -6,7 +6,7 @@
 
 ## Current State (2026-03-27)
 
-The PTY bridge is a multi-CLI provider system (`internal/provider/pty.go`) that spawns CLI tools (Claude, Codex, Gemini) in pseudo-terminals, reads structured output, and maps events to Conduit's `StreamEvent` types. It supports multi-turn sessions, per-session sandboxing, MCP tool access, and envelope validation with retry.
+The PTY bridge is a multi-CLI provider system (`internal/provider/pty.go`) that spawns CLI tools (Claude, Codex, Gemini) in pseudo-terminals, reads structured output, and maps events to Nanite's `StreamEvent` types. It supports multi-turn sessions, per-session sandboxing, MCP tool access, and envelope validation with retry.
 
 ### Implemented
 - **Provider interface:** `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`
@@ -14,8 +14,8 @@ The PTY bridge is a multi-CLI provider system (`internal/provider/pty.go`) that 
 - **Three adapters:** Claude (`pty_claude.go`), Codex (`pty_codex.go`), Gemini (`pty_gemini.go`)
 - **Dynamic provider routing:** `session.Provider` routes to correct provider; `inferProvider()` handles `claude-cli`, `codex-cli`, `gemini-cli`; `isPTYProvider()` matches all PTY variants
 - **Multi-turn sessions** (Phase 3): CLI session ID captured from system init event, persisted in session metadata, `--resume` used on subsequent messages
-- **Per-session sandbox** (Phase 1): `~/.conduit/sandboxes/<session-id>/` with CLAUDE.md (compact rules + pointers) and `.sandbox/` subdir (envelope-schema.md, agent-context.md)
-- **Conduit MCP server** (Phase 2): `conduit mcp` subcommand via `mark3labs/mcp-go`, exposes all self-service tools (skills, agents, workflows, envelope helpers) over stdio JSON-RPC. Sandbox `.mcp.json` points CLI to this server.
+- **Per-session sandbox** (Phase 1): `~/.nanite/sandboxes/<session-id>/` with CLAUDE.md (compact rules + pointers) and `.sandbox/` subdir (envelope-schema.md, agent-context.md)
+- **Nanite MCP server** (Phase 2): `nanite mcp` subcommand via `mark3labs/mcp-go`, exposes all self-service tools (skills, agents, workflows, envelope helpers) over stdio JSON-RPC. Sandbox `.mcp.json` points CLI to this server.
 - **Envelope validation + retry** (Phase 4): `ParseEnvelopes()` returns validation errors; PTY sessions get one correction prompt via `--resume` for fatal errors
 - **Utility provider/model:** `UtilityProvider` + `UtilityModel` on Engine, configurable via env vars
 - **Registration:** Auto-detection of all available CLIs at startup; backwards-compat `"pty"` alias for Claude
@@ -28,7 +28,7 @@ The PTY bridge is a multi-CLI provider system (`internal/provider/pty.go`) that 
 2. User sends message → engine loads session, resolves provider to PTY bridge
 3. Engine creates sandbox dir, writes CLAUDE.md + .sandbox/ + .mcp.json
 4. PTY bridge delegates to adapter: `adapter.BuildArgs(prompt, systemPrompt, cliSessionID)` → spawns CLI in sandbox dir
-5. CLI discovers Conduit MCP server via `.mcp.json`, can call skills/envelope tools
+5. CLI discovers Nanite MCP server via `.mcp.json`, can call skills/envelope tools
 6. Goroutine reads PTY output, delegates to `adapter.ParseLine()`, emits StreamEvents
 7. Engine captures CLI session ID from system init event, persists for `--resume` on next turn
 8. Engine parses envelopes from response; on validation errors, sends correction prompt (max 1 retry)
@@ -66,17 +66,17 @@ Spawn CLI, send prompt, get response, process exits. No session state.
 First message uses `-p`. Subsequent messages use `--resume <cli-session-id> -p "<next message>"`. CLI maintains its own conversation history and compaction.
 
 **Use for:**
-- Interactive chat sessions (the primary Conduit use case)
+- Interactive chat sessions (the primary Nanite use case)
 - Multi-step debugging / refactoring loops
 - Any task where turn N depends on context from turn N-1
 
-**Desired pattern:** All Conduit chat sessions backed by PTY should use `--resume`. All utility/one-shot calls should use `-p`. The provider can decide based on whether a CLI session ID exists for the Conduit session.
+**Desired pattern:** All Nanite chat sessions backed by PTY should use `--resume`. All utility/one-shot calls should use `-p`. The provider can decide based on whether a CLI session ID exists for the Nanite session.
 
 ---
 
 ## Provider Interface Reference
 
-Every Conduit provider (Anthropic, OpenAI, Ollama, PTY) implements:
+Every Nanite provider (Anthropic, OpenAI, Ollama, PTY) implements:
 
 | Method | Purpose | PTY implementation |
 |--------|---------|-------------------|
@@ -92,7 +92,7 @@ Every Conduit provider (Anthropic, OpenAI, Ollama, PTY) implements:
 **Goal:** Each PTY session runs in an isolated directory tailored to its context.
 
 ### Design
-- Default sandbox directory (e.g. `~/.conduit/sandboxes/<session-id>/`)
+- Default sandbox directory (e.g. `~/.nanite/sandboxes/<session-id>/`)
 - Override hierarchy: global config → workspace config → session-level override
 - Pre-populate sandbox with:
   - `CLAUDE.md` — agent behavior, envelope format instructions, compaction-safe context
@@ -104,22 +104,22 @@ Claude CLI reads `CLAUDE.md` from its working directory at boot and re-reads aft
 
 ---
 
-## Phase 2: Conduit as MCP Server
+## Phase 2: Nanite as MCP Server
 
-**Goal:** PTY-spawned CLIs connect back to Conduit for skills, tools, and control.
+**Goal:** PTY-spawned CLIs connect back to Nanite for skills, tools, and control.
 
 ### Architecture
 
 ```
 ┌──────────────────────────────┐
-│         Conduit Engine        │
+│         Nanite Engine        │
 │  ┌────────┐  ┌────────────┐  │
 │  │ Agent  │  │ Tool Broker │  │
 │  │Profiles│  │   Rules     │  │
 │  └───┬────┘  └──────┬─────┘  │
 │      │              │         │
 │  ┌───┴──────────────┴─────┐  │
-│  │   Conduit MCP Server   │  │
+│  │   Nanite MCP Server   │  │
 │  │  (exposes skills,      │  │
 │  │   tools, envelopes)    │  │
 │  └───────────┬────────────┘  │
@@ -128,14 +128,14 @@ Claude CLI reads `CLAUDE.md` from its working directory at boot and re-reads aft
     ┌──────────┴──────────┐
     │   Claude CLI (PTY)  │
     │  reads .mcp.json    │
-    │  connects to Conduit│
+    │  connects to Nanite│
     └─────────────────────┘
 ```
 
 ### How it works
-1. Before spawning the CLI, Conduit writes a `.mcp.json` in the sandbox directory pointing to its own MCP endpoint
-2. CLI discovers the Conduit MCP server at boot alongside any other configured servers
-3. Conduit's MCP server exposes:
+1. Before spawning the CLI, Nanite writes a `.mcp.json` in the sandbox directory pointing to its own MCP endpoint
+2. CLI discovers the Nanite MCP server at boot alongside any other configured servers
+3. Nanite's MCP server exposes:
    - **Skills** as callable MCP tools (same skills the API-backed agents use)
    - **Tool broker rules** — permission checks before execution
    - **Envelope helpers** — tools that return pre-formatted envelope blocks
@@ -143,7 +143,7 @@ Claude CLI reads `CLAUDE.md` from its working directory at boot and re-reads aft
 4. CLI calls these tools like any other MCP tool — no special integration needed
 
 ### Benefits
-- Single source of truth for skills and tools (Conduit's database)
+- Single source of truth for skills and tools (Nanite's database)
 - Tool broker enforces the same permission rules regardless of provider path
 - Skills can be updated centrally without restarting PTY sessions (CLI re-discovers on next tool list)
 - No CLI-specific configuration management — everything flows through MCP
@@ -156,14 +156,14 @@ Claude CLI reads `CLAUDE.md` from its working directory at boot and re-reads aft
 
 ### Approach
 - Use Claude CLI's `--resume <session-id>` flag for subsequent messages
-- Map Conduit session IDs to CLI session IDs (store in session metadata or a lookup table)
+- Map Nanite session IDs to CLI session IDs (store in session metadata or a lookup table)
 - First message: `claude -p "..." --output-format stream-json --verbose`
 - Subsequent messages: `claude --resume <cli-session-id> -p "..." --output-format stream-json --verbose`
 
 ### Considerations
-- CLI manages its own context window and compaction — Conduit cannot control this
+- CLI manages its own context window and compaction — Nanite cannot control this
 - `CLAUDE.md` survives CLI compaction, so critical instructions persist
-- Conduit's message history and CLI's internal history will diverge — Conduit is the source of truth for the UI, CLI history is internal
+- Nanite's message history and CLI's internal history will diverge — Nanite is the source of truth for the UI, CLI history is internal
 - Session cleanup: need to manage CLI session files in the sandbox directory
 
 ---
@@ -277,7 +277,7 @@ Currently the engine does: `session.Provider` → `inferProvider(model)` → `"a
 
 ### Utility Provider Configuration
 
-Currently: `CONDUIT_UTILITY_PROVIDER` and `CONDUIT_UTILITY_MODEL` env vars, defaults to Anthropic Sonnet.
+Currently: `NANITE_UTILITY_PROVIDER` and `NANITE_UTILITY_MODEL` env vars, defaults to Anthropic Sonnet.
 
 Target: stored in user settings (database), editable from settings UI. Support any registered provider — including Ollama for local experimentation with titles/tags.
 
@@ -352,11 +352,11 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 
 1. **CLAUDE.md is the contract** — Anything the CLI must know goes in the sandbox's CLAUDE.md. It's the only injection point that survives compaction.
 
-2. **MCP is the bridge** — Don't try to make the CLI understand Conduit concepts. Expose them as MCP tools. The CLI stays generic; Conduit controls the environment.
+2. **MCP is the bridge** — Don't try to make the CLI understand Nanite concepts. Expose them as MCP tools. The CLI stays generic; Nanite controls the environment.
 
-3. **Sandbox directory is the control surface** — Working directory, CLAUDE.md, .mcp.json — these three files define the CLI's entire operating context. Conduit assembles them before spawning.
+3. **Sandbox directory is the control surface** — Working directory, CLAUDE.md, .mcp.json — these three files define the CLI's entire operating context. Nanite assembles them before spawning.
 
-4. **Conduit is source of truth** — The CLI's internal state (conversation history, compaction) is a black box. Conduit tracks messages, usage, and session state independently.
+4. **Nanite is source of truth** — The CLI's internal state (conversation history, compaction) is a black box. Nanite tracks messages, usage, and session state independently.
 
 5. **`-p` for tasks, `--resume` for chats** — Single-turn execution for stateless work (utilities, one-shots, fan-out). Multi-turn sessions for conversational use cases.
 
@@ -404,7 +404,7 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 | `internal/provider/provider.go` | Provider interface, StreamEvent (with SessionID), context keys |
 | `internal/sandbox/sandbox.go` | Per-session sandbox dirs, CLAUDE.md, .sandbox/, .mcp.json |
 | `internal/sandbox/sandbox_test.go` | Sandbox unit tests |
-| `internal/mcpserver/server.go` | Conduit MCP server (mark3labs/mcp-go, stdio) |
+| `internal/mcpserver/server.go` | Nanite MCP server (mark3labs/mcp-go, stdio) |
 | `internal/mcpserver/handlers.go` | Tool handlers, envelope marker conversion |
 | `internal/mcpserver/server_test.go` | MCP server unit tests |
 | `internal/chat/engine.go` | Provider routing, sandbox setup, session ID capture, envelope retry |
@@ -419,7 +419,7 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 | `internal/store/migrations/012_add_user_settings.sql` | Migration: user_settings table + agent default_provider |
 | `internal/store/user_settings.go` | UserSettings CRUD (fallback chain, defaults) |
 | `internal/api/settings.go` | GET/PUT /api/settings endpoints |
-| `cmd/conduit/main.go` | Multi-adapter registration, `conduit mcp` subcommand |
+| `cmd/nanite/main.go` | Multi-adapter registration, `nanite mcp` subcommand |
 | `ui/src/components/chat/ComposerToolbar.tsx` | Provider icons, model picker sets provider+model |
 | `ui/src/lib/types.ts` | AVAILABLE_MODELS includes CLI models |
 
@@ -429,7 +429,7 @@ When experimenting with different providers for utility calls (e.g. local Llama 
 
 ### Backend — Completed
 - [x] Phase 1: Per-session sandbox directories with CLAUDE.md + .sandbox/ + .mcp.json generation
-- [x] Phase 2: Conduit as MCP server (`conduit mcp` subcommand, mark3labs/mcp-go)
+- [x] Phase 2: Nanite as MCP server (`nanite mcp` subcommand, mark3labs/mcp-go)
 - [x] Phase 3: Multi-turn sessions via `--resume`
 - [x] Phase 4: Envelope validation + retry logic
 - [x] Phase 5: CLI adapter abstraction for non-Claude tools (Codex, Gemini CLI)

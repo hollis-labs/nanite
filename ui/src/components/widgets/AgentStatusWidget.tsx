@@ -56,7 +56,7 @@ export function AgentStatusWidget() {
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-fg-muted">Agent</span>
-          <span className="text-fg-secondary">Conduit</span>
+          <span className="text-fg-secondary">Nanite</span>
         </div>
         <div className="flex justify-between text-xs items-center">
           <span className="text-fg-muted">Mode</span>

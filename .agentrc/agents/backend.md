@@ -1,15 +1,15 @@
-# Backend Context — Conduit
+# Backend Context — Nanite
 
 > Project-specific backend conventions. Loaded by the backend agent role when working in this project.
-> Lives at `conduit/.agentrc/agents/backend.md`.
+> Lives at `nanite/.agentrc/agents/backend.md`.
 
 ## Stack
 
 - **Go version:** 1.26.1
-- **Module path:** `github.com/hollis-labs/conduit`
+- **Module path:** `github.com/hollis-labs/nanite`
 - **Router:** `net/http` stdlib (`http.ServeMux` with Go 1.22+ method routing: `"GET /api/..."`)
 - **Database:** SQLite via `modernc.org/sqlite v1.46.1` (WAL mode, foreign keys, busy_timeout=5000). PostgreSQL via `github.com/lib/pq v1.12.0` for Nexus A2A messaging only.
-- **CLI framework:** None (manual `os.Args` switch in `cmd/conduit/main.go`)
+- **CLI framework:** None (manual `os.Args` switch in `cmd/nanite/main.go`)
 - **Config format:** YAML (`gopkg.in/yaml.v3`) for agentrc config; `.env` via `github.com/joho/godotenv`
 - **Tracing:** OpenTelemetry (`go.opentelemetry.io/otel v1.41.0`) via `github.com/hollis-labs/otel` wrapper
 - **Notable dependencies:**
@@ -25,7 +25,7 @@
 
 ```
 cmd/
-└── conduit/
+└── nanite/
     ├── main.go              # Entrypoint: serve, plugin, mcp subcommands (494 lines)
     └── plugin_cmd.go        # Plugin CLI subcommand
 internal/
@@ -60,7 +60,7 @@ internal/
 │   ├── self_tools_transport.go  # Self-service MCP transport (762 lines)
 │   ├── stdio_transport.go   # Stdio subprocess transport
 │   └── http_transport.go    # HTTP/SSE transport
-├── mcpserver/               # Conduit's own MCP server (exposed via `conduit mcp`)
+├── mcpserver/               # Nanite's own MCP server (exposed via `nanite mcp`)
 ├── plugin/                  # Plugin host, discovery, lifecycle, events
 ├── provider/                # LLM provider adapters
 │   ├── provider.go          # Provider interface + core types
@@ -114,7 +114,7 @@ ui/                          # React SPA (see frontend.md)
 | contextbroker | `internal/contextbroker/` | Universal context retrieval. Queries multiple sources (Cortex, PCC, Engine, Session) with token budget allocation and relevance ranking. |
 | filter | `internal/filter/` | Composable output filter chain applied to LLM responses (e.g., `no_emoji`). |
 | mcp | `internal/mcp/` | MCP server manager: lifecycle management for stdio/HTTP transports, built-in dev/general/self-service tools, auto-discovery, tool broker integration. |
-| mcpserver | `internal/mcpserver/` | Conduit's own MCP server (JSON-RPC over stdio). Exposes conduit tools to external MCP clients (e.g., Claude CLI). |
+| mcpserver | `internal/mcpserver/` | Nanite's own MCP server (JSON-RPC over stdio). Exposes nanite tools to external MCP clients (e.g., Claude CLI). |
 | plugin | `internal/plugin/` | Plugin host: discovery, loading, lifecycle, event bus, UI component registry. Supports both built-in and external plugins. |
 | provider | `internal/provider/` | LLM provider adapters implementing the `Provider` interface: Anthropic, OpenAI, Ollama, PTY bridge (Claude/Codex/Gemini CLIs). Includes circuit breaker, rate limiter, retry, cache, event pipeline, scope guard. |
 | sandbox | `internal/sandbox/` | Sandboxed execution environment for agent tool calls. |
@@ -144,8 +144,8 @@ ui/                          # React SPA (see frontend.md)
 
 ### Configuration
 - Config loaded once at startup via `config.Load()`. Merges user-level (`~/.agentrc/agentrc.yaml`) with project-level (`./agentrc.yaml`). Project values override user values. *File: `internal/config/config.go:58-68`*
-- Provider API keys from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`. *File: `cmd/conduit/main.go:126-134`*
-- Auth from env: `CONDUIT_AUTH_USER`, `CONDUIT_AUTH_PASSWORD` (no-op when unset). *File: `internal/server/auth.go:14-16`*
+- Provider API keys from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`. *File: `cmd/nanite/main.go:126-134`*
+- Auth from env: `NANITE_AUTH_USER`, `NANITE_AUTH_PASSWORD` (no-op when unset). *File: `internal/server/auth.go:14-16`*
 
 ### Database Access
 - Raw SQL queries with `database/sql`. No ORM or query builder. *File: `internal/store/sessions.go:52-64`*
@@ -157,7 +157,7 @@ ui/                          # React SPA (see frontend.md)
 ### Provider Interface
 - All LLM providers implement `Provider` interface: `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`. *File: `internal/provider/provider.go:84-91`*
 - Streaming via channels: `<-chan StreamEvent`. Events: `delta`, `tool_use`, `usage`, `error`, `done`, `session_id`. *File: `internal/provider/provider.go:56-63`*
-- Provider registration: `registry.Register("name", provider)`. *File: `cmd/conduit/main.go:128-151`*
+- Provider registration: `registry.Register("name", provider)`. *File: `cmd/nanite/main.go:128-151`*
 
 ### Middleware Chain
 - Order: `recoverMiddleware(loggingMiddleware(basicAuthMiddleware(corsMiddleware(mux))))`. *File: `internal/server/server.go:57`*
@@ -184,9 +184,9 @@ ui/                          # React SPA (see frontend.md)
 
 - **Manual migration ordering** -- Migration files are listed explicitly as a string slice in `store.go:67-77` rather than using directory listing or a migration framework. Adding a migration requires editing both the file AND the Go source. The embedded FS has 11 files but the code only lists 9. *File: `internal/store/store.go:67-77` vs `internal/store/migrations/` (11 files)*
 
-- **Hardcoded MCP server paths** -- `setupMCPServers()` in `main.go` hardcodes absolute paths like `home + "/go/bin/engine"` and `home + "/Projects-apps/hadron/bin/hadrond"`. These are developer-machine-specific and will break for other contributors. *File: `cmd/conduit/main.go:377-419`*
+- **Hardcoded MCP server paths** -- `setupMCPServers()` in `main.go` hardcodes absolute paths like `home + "/go/bin/engine"` and `home + "/Projects-apps/hadron/bin/hadrond"`. These are developer-machine-specific and will break for other contributors. *File: `cmd/nanite/main.go:377-419`*
 
-- **Hardcoded Cortex MCP token** -- A hex token is hardcoded as a fallback in `setupMCPServers()`. *File: `cmd/conduit/main.go:407-409`*
+- **Hardcoded Cortex MCP token** -- A hex token is hardcoded as a fallback in `setupMCPServers()`. *File: `cmd/nanite/main.go:407-409`*
 
 - **Hardcoded default model** -- `"claude-sonnet-4-20250514"` appears as a hardcoded default in `handleDelegateAndAggregate` and `Engine.UtilityModel`. Should be a constant or config value. *File: `internal/api/messages.go:128`, `internal/chat/engine.go:156`*
 
@@ -198,7 +198,7 @@ ui/                          # React SPA (see frontend.md)
 
 - **Anonymous struct request bodies** -- Every handler defines its own inline `var req struct {...}` for request parsing. No shared request/response types. This makes API documentation and type reuse impossible. *File: `internal/api/sessions.go:27-31`, `internal/api/messages.go:12-15`, etc.*
 
-- **Fat `main.go` wiring** -- `cmdServe()` in `main.go` is 307 lines of manual dependency wiring. No dependency injection container or wire framework. Every new subsystem requires editing main.go. *File: `cmd/conduit/main.go:62-369`*
+- **Fat `main.go` wiring** -- `cmdServe()` in `main.go` is 307 lines of manual dependency wiring. No dependency injection container or wire framework. Every new subsystem requires editing main.go. *File: `cmd/nanite/main.go:62-369`*
 
 - **Inconsistent nil checks for optional deps** -- API handlers check `if a.ToolClient == nil` inline. Some handlers (e.g., `handleListTools`) return empty arrays, others return errors. No consistent pattern for optional dependency availability. *File: `internal/api/tools.go:10-12` vs `tools.go:49`*
 
@@ -269,7 +269,7 @@ All registered in `main.go` cliAdapters slice and `handleDetectCLI` API endpoint
 
 #### 2d. Plugin docs, example, generator — DONE
 - [x] **Plugin example** — support-ticket plugin cleaned up
-- [x] **Plugin generator** — `conduit plugin new <name>` with `--with-agent`, `--with-envelope`, `--with-crud`
+- [x] **Plugin generator** — `nanite plugin new <name>` with `--with-agent`, `--with-envelope`, `--with-crud`
 - [x] **Plugin guide** — `docs/plugin-install-guide.md`
 
 ### 3. Slash Commands & UI/UX from Fragments v1
@@ -322,9 +322,9 @@ Currently agents are DB records (AgentProfile in `internal/store/agents.go`). Th
 - [ ] **Per-project/session overrides** — tools, skills, permissions, and directories should be overridable at the project level (`projects.settings` JSON) and session level (`sessions.metadata` JSON). Define merge semantics: session overrides project overrides agent defaults.
 
 #### 6b. agentrc integration (backend — needs decision)
-- [ ] **Decision needed:** How standalone should Conduit be? Options:
-  1. **Import agentrc configs** — Read `~/.agentrc/config.yaml` and `.agentrc/config.yaml` at startup, create/update AgentProfile records from them. Conduit owns the runtime, agentrc provides definitions.
-  2. **Full integration** — Conduit's config loader (`internal/config/`) already merges user+project agentrc YAML. Extend this to populate agent profiles from the merged config.
+- [ ] **Decision needed:** How standalone should Nanite be? Options:
+  1. **Import agentrc configs** — Read `~/.agentrc/config.yaml` and `.agentrc/config.yaml` at startup, create/update AgentProfile records from them. Nanite owns the runtime, agentrc provides definitions.
+  2. **Full integration** — Nanite's config loader (`internal/config/`) already merges user+project agentrc YAML. Extend this to populate agent profiles from the merged config.
   3. **Adapter layer** — Define an `AgentSource` interface. One implementation reads from DB, another reads from agentrc YAML. Engine queries the source at runtime. Allows switching or layering.
 - [ ] **Agent framework adapters (future)** — Consider adapters for other agent definition formats (e.g., CrewAI, AutoGen, LangGraph agent configs). These would implement the same `AgentSource` interface.
 
@@ -335,25 +335,25 @@ Currently agents are DB records (AgentProfile in `internal/store/agents.go`). Th
 
 ## Build & Run
 
-- **Build:** `make build` (builds UI first, then Go binary) or `go build -o conduit ./cmd/conduit`
-- **Install:** `make install` (builds UI, then `go install ./cmd/conduit` to `~/go/bin/`)
+- **Build:** `make build` (builds UI first, then Go binary) or `go build -o nanite ./cmd/nanite`
+- **Install:** `make install` (builds UI, then `go install ./cmd/nanite` to `~/go/bin/`)
 - **Test:** `make test` or `go test ./...`
 - **Lint:** `golangci-lint run --new --timeout 30s` (via lefthook pre-commit)
 - **Vet:** `go vet ./...` (via lefthook pre-commit)
 - **Format:** `gofmt` + `goimports` (via lefthook pre-commit)
-- **Run:** `./conduit serve --port 8090 --db ./conduit.db` or `make run`
-- **Run (dev):** `./conduit serve --port 8090 --dev` (skips embedded SPA, use Vite dev server separately)
-- **Run MCP server:** `./conduit mcp --db ./conduit.db [--session ID]` (stdio JSON-RPC)
+- **Run:** `./nanite serve --port 8090 --db ./nanite.db` or `make run`
+- **Run (dev):** `./nanite serve --port 8090 --dev` (skips embedded SPA, use Vite dev server separately)
+- **Run MCP server:** `./nanite mcp --db ./nanite.db [--session ID]` (stdio JSON-RPC)
 - **Docker:** `docker-compose up` (multi-stage: Node build -> Go build -> Alpine runtime, port 8090)
 
 ## Notes
 
-- **Deploying changes:** Use Cerberus (`cerberus_rebuild conduit-api --reason "..."`). Direct `go build` outputs to `./conduit` in the project root, but the running service uses `~/go/bin/conduit` installed by Cerberus. These are separate binaries.
+- **Deploying changes:** Use Cerberus (`cerberus_rebuild nanite-api --reason "..."`). Direct `go build` outputs to `./nanite` in the project root, but the running service uses `~/go/bin/nanite` installed by Cerberus. These are separate binaries.
 - **Pre-commit hooks via lefthook:** `gofmt`, `goimports`, `golangci-lint --new`, `go vet` (parallel). Frontend: `biome check`. Pre-push: `go test ./...`.
 - **SPA embedding:** Go binary embeds the built UI from `internal/server/ui_dist/` via `//go:embed`. The `-dev` flag skips this for local development with Vite HMR.
-- **Auth:** Optional basic auth via `CONDUIT_AUTH_USER` / `CONDUIT_AUTH_PASSWORD` env vars. Disabled when unset (local dev). `/api/health` is always exempt.
+- **Auth:** Optional basic auth via `NANITE_AUTH_USER` / `NANITE_AUTH_PASSWORD` env vars. Disabled when unset (local dev). `/api/health` is always exempt.
 - **A2A messaging:** Prefers Postgres (via `ENGINE_POSTGRES_DSN` or `VOLON_POSTGRES_DSN` env var) for Nexus-backed messaging. Falls back to SQLite when Postgres is unavailable.
 - **Provider registration:** Anthropic/OpenAI require API keys; Ollama is always registered (local); PTY adapters auto-detect installed CLI binaries (Claude, Codex, Gemini).
 - **Tool broker:** Manages tool permissions and intent-based selection. Progressive discovery kicks in above 5 tools (sends summaries to LLM, LLM requests full schemas via `request_tools` meta-tool).
-- **Output filters:** Configurable via `MENTAT_OUTPUT_FILTERS` env var (comma-separated). Default: `no_emoji`.
+- **Output filters:** Configurable via `NANITE_OUTPUT_FILTERS` env var (comma-separated). Default: `no_emoji`.
 - **Local replace directives:** Four sibling libraries (`../libs/otel`, `../libs/toolbroker`, `../libs/plugin`, `../../nexus`) are referenced via `replace` in `go.mod`. These must be present locally for builds to work.

@@ -234,7 +234,7 @@ The message chrome (UI around the message) can have actions.
   2. Frontend extracts: message content, metadata, session context
   3. POST /api/nanite/ingest {
        content: message.text,
-       source: "conduit",
+       source: "nanite",
        session_id: "...",
        message_id: "...",
        tags: ["captured-from-chat"]

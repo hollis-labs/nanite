@@ -204,7 +204,7 @@ func (g *HadronBlueprintGate) calculateRelevance(bp struct {
 			relevance += 0.8
 		}
 		// Match common project patterns
-		if (projectScope == "mentat" || projectScope == "conduit") &&
+		if (projectScope == "mentat" || projectScope == "nanite") &&
 		   (strings.Contains(name, "build") || strings.Contains(name, "test")) {
 			relevance += 0.4
 		}

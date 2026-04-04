@@ -82,7 +82,7 @@ type errorEnvelopeData struct {
 	Timestamp  string                `json:"timestamp"`
 }
 
-// buildErrorEnvelope creates a JSON string for an error-report conduit-envelope block.
+// buildErrorEnvelope creates a JSON string for an error-report nanite-envelope block.
 func buildErrorEnvelope(code ErrorCode, message string, details map[string]interface{}) string {
 	data := errorEnvelopeData{
 		Code:       string(code),
@@ -106,6 +106,6 @@ func ErrorEnvelopeDelta(code ErrorCode, message string, details map[string]inter
 	envJSON := buildErrorEnvelope(code, message, details)
 	return StreamEvent{
 		Type:    "delta",
-		Content: fmt.Sprintf("\n\n```conduit-envelope\n%s\n```", envJSON),
+		Content: fmt.Sprintf("\n\n```nanite-envelope\n%s\n```", envJSON),
 	}
 }

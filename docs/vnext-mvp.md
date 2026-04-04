@@ -1,4 +1,4 @@
-# Conduit vNext — MVP Selected Work
+# Nanite vNext — MVP Selected Work
 
 **Created:** 2026-04-02
 **Status:** Planning
@@ -7,7 +7,7 @@
 
 ## Goal
 
-Ship a beta-ready Conduit with clean architecture, solid chat experience, and no known bugs. This is the initial release — no existing users, no backward compatibility constraints. We are simplifying, fixing, refactoring, and polishing as we go. Each phase should leave the codebase better than it found it.
+Ship a beta-ready Nanite with clean architecture, solid chat experience, and no known bugs. This is the initial release — no existing users, no backward compatibility constraints. We are simplifying, fixing, refactoring, and polishing as we go. Each phase should leave the codebase better than it found it.
 
 ## Guiding Principles
 
@@ -48,9 +48,9 @@ These items from the decisions doc and backend TODO are already done:
 - **Verify:** `go build` + `go test` clean
 
 ### 0.3 Hardcoded paths and secrets
-- `cmd/conduit/main.go` `setupMCPServers()`: Replace hardcoded absolute paths (`~/go/bin/engine`, `~/Projects-apps/hadron/bin/hadrond`) with config-driven MCP server definitions
+- `cmd/nanite/main.go` `setupMCPServers()`: Replace hardcoded absolute paths (`~/go/bin/engine`, `~/Projects-apps/hadron/bin/hadrond`) with config-driven MCP server definitions
 - Remove hardcoded Cortex MCP token fallback — require env var or config
-- **Verify:** `conduit serve` starts with config-driven MCP servers
+- **Verify:** `nanite serve` starts with config-driven MCP servers
 
 ### 0.4 Version string
 - Create a central `internal/version/version.go` with `var Version = "0.3.0"` (or appropriate)
@@ -79,7 +79,7 @@ These items from the decisions doc and backend TODO are already done:
 - **Verify:** Compile-time interface checks, unit tests for builder
 
 ### 1.2 YAML tool definitions
-- Tool loader discovers `.conduit/tools/*.yaml` (project) and `~/.conduit/tools/*.yaml` (user)
+- Tool loader discovers `.nanite/tools/*.yaml` (project) and `~/.nanite/tools/*.yaml` (user)
 - Parses JSON Schema from YAML, wraps execution (shell subprocess or Hadron blueprint)
 - Registers as `Tool` with `source: "yaml"`
 - **Verify:** Create a sample YAML tool, load and execute it
@@ -87,7 +87,7 @@ These items from the decisions doc and backend TODO are already done:
 ### 1.3 Broker progressive resolution (Layers 1-3)
 - Greenfield broker in `internal/tool/broker/` (or extend `internal/toolclient/`)
 - Layer 1 (Explicit): Caller specifies tools, active skill bindings, agent config
-- Layer 2 (Rule-Based): Project rules (`.conduit/broker.yaml`), user rules (`~/.conduit/broker.yaml`), MCP server tool sets, context mode rules
+- Layer 2 (Rule-Based): Project rules (`.nanite/broker.yaml`), user rules (`~/.nanite/broker.yaml`), MCP server tool sets, context mode rules
 - Layer 3 (Fast Classifier): Score signals (envelope metadata, agent config, session context, mode) → map to mode preset → tool set
 - Rule format per decisions doc §3 (match patterns, intent tags, priority, presets, always_available)
 - Fallback: top-N by relevance + always-available set
@@ -165,7 +165,7 @@ These items from the decisions doc and backend TODO are already done:
 ### 3.1 Rule engine
 - New `internal/permission/` package (greenfield)
 - Rule format: tool pattern + input pattern → behavior (deny/ask/allow)
-- Rule sources in priority order: session → agent config → project (`.conduit/permissions.yaml`) → user (`~/.conduit/permissions.yaml`)
+- Rule sources in priority order: session → agent config → project (`.nanite/permissions.yaml`) → user (`~/.nanite/permissions.yaml`)
 - Evaluation: deny > ask > allow, first match wins within same priority
 - Permission modes: `default`, `accept-edits`, `plan` (read-only), `yolo`
 - **Verify:** Unit tests for rule matching, priority ordering, mode behaviors
@@ -173,12 +173,12 @@ These items from the decisions doc and backend TODO are already done:
 ### 3.2 Three approval scopes
 - "Allow once" — this invocation only, not persisted
 - "Allow for this session" — stored in session state, cleared on session end
-- "Always allow for this project" — written to `.conduit/permissions.yaml`
+- "Always allow for this project" — written to `.nanite/permissions.yaml`
 - **Verify:** Each scope persists/clears correctly
 
 ### 3.3 Yolo mode
 - Per-session: toggle in session state (GUI toggle or API call)
-- Per-project: `mode: yolo` in `.conduit/permissions.yaml`
+- Per-project: `mode: yolo` in `.nanite/permissions.yaml`
 - Skips all permission prompts when active
 - **Verify:** Yolo bypasses permission checks at both scopes
 
@@ -199,7 +199,7 @@ These items from the decisions doc and backend TODO are already done:
 ### Frontend (Phase 3)
 - Permission approval component in chat (inline card with Allow Once / Allow Session / Allow Project buttons)
 - Yolo mode toggle in session settings
-- Permission rules editor in settings (`.conduit/permissions.yaml` management)
+- Permission rules editor in settings (`.nanite/permissions.yaml` management)
 
 ---
 
@@ -258,8 +258,8 @@ These items from the decisions doc and backend TODO are already done:
 ### 5.2 Agent loader & discovery
 - Discovers MD files from 6 locations (priority order):
   1. CLI `--agent` flag
-  2. `.conduit/agents/` (project)
-  3. `~/.conduit/agents/` (user)
+  2. `.nanite/agents/` (project)
+  3. `~/.nanite/agents/` (user)
   4. `plugins/{name}/agents/` (plugin-provided)
   5. `.agentrc/agents/` (agentrc ecosystem)
   6. `.claude/agents/` (Claude Code ecosystem)
@@ -308,11 +308,11 @@ These items from the decisions doc and backend TODO are already done:
 
 ### 6.1 Skill file format
 - Agent Skills spec (agentskills.io) compatible
-- YAML frontmatter: `name`, `description`, `argument-hint`, `allowed-tools`, `model`, `effort`, `context` (inline or fork), `tags`, `broker-hints` (Conduit extension)
+- YAML frontmatter: `name`, `description`, `argument-hint`, `allowed-tools`, `model`, `effort`, `context` (inline or fork), `tags`, `broker-hints` (Nanite extension)
 - Markdown body with optional `` !`command` `` dynamic context injection
 
 ### 6.2 Skill loader & discovery
-- Discovery chain (priority): `.conduit/skills/` → `~/.conduit/skills/` → `.agentrc/skills/` → `.claude/skills/` → plugin `skills/`
+- Discovery chain (priority): `.nanite/skills/` → `~/.nanite/skills/` → `.agentrc/skills/` → `.claude/skills/` → plugin `skills/`
 - Parse YAML frontmatter, register in SkillService
 - Dynamic context: shell commands run at skill load time via subprocess, output injected
 

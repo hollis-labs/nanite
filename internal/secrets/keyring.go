@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/zalando/go-keyring"
 )
 
-const serviceName = "conduit"
+var serviceName = brand.ID
 
 // Set stores a secret in the OS keychain under the given key.
 func Set(key, value string) error {

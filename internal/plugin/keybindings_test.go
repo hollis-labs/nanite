@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	pluginsdk "github.com/hollis-labs/fragments-engine/plugin"
+	pluginsdk "github.com/hollis-labs/plugin"
 )
 
 func TestRegisterKeybinding(t *testing.T) {

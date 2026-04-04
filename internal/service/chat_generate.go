@@ -13,10 +13,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/sandbox"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/sandbox"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // generateResponseTimeout is the maximum wall-clock time a single
@@ -48,10 +48,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	ctx, cancel := context.WithTimeout(ctx, generateResponseTimeout)
 	defer cancel()
 
-	ctx, span := feotel.StartSpan(ctx, "conduit.service.generateResponse")
+	ctx, span := feotel.StartSpan(ctx, "nanite.service.generateResponse")
 	span.SetAttributes(
-		attribute.String("conduit.session.id", sessionID),
-		attribute.String("conduit.message.id", assistantMsgID),
+		attribute.String("nanite.session.id", sessionID),
+		attribute.String("nanite.message.id", assistantMsgID),
 	)
 	defer span.End()
 
@@ -255,14 +255,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 
 		// --- Provider call ---
-		provCtx, provSpan := feotel.StartSpan(ctx, "conduit.provider.call")
+		provCtx, provSpan := feotel.StartSpan(ctx, "nanite.provider.call")
 		provSpan.SetAttributes(
-			attribute.String("conduit.model", model),
-			attribute.Int("conduit.iteration", ls.iteration),
-			attribute.Int("conduit.tools.count", len(tools)),
-			attribute.Int("conduit.messages.count", len(chatMessages)),
-			attribute.Int("conduit.tokens.total", breakdown.Total),
-			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
+			attribute.String("nanite.model", model),
+			attribute.Int("nanite.iteration", ls.iteration),
+			attribute.Int("nanite.tools.count", len(tools)),
+			attribute.Int("nanite.messages.count", len(chatMessages)),
+			attribute.Int("nanite.tokens.total", breakdown.Total),
+			attribute.Int("nanite.tokens.ceiling", breakdown.Ceiling),
 		)
 
 		// CLI session setup.
@@ -517,7 +517,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Inject pending envelopes.
 	for _, env := range ls.pendingEnvelopes {
-		envelopeBlock := "\n\n```conduit-envelope\n" + env + "\n```"
+		envelopeBlock := "\n\n```nanite-envelope\n" + env + "\n```"
 		responseContent += envelopeBlock
 		ch <- chat.StreamEvent{Type: "delta", Content: envelopeBlock}
 	}
@@ -529,7 +529,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			ticketJSON := tail[:tEnd]
 			env := chat.BuildTicketConfirmationEnvelope(ticketJSON)
 			if env != "" {
-				envelopeBlock := "\n\n```conduit-envelope\n" + env + "\n```"
+				envelopeBlock := "\n\n```nanite-envelope\n" + env + "\n```"
 				responseContent += envelopeBlock
 				ch <- chat.StreamEvent{Type: "delta", Content: envelopeBlock}
 			}
@@ -905,7 +905,7 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 		"Your previous response contained a malformed envelope block that could not be parsed.\n\n"+
 			"Raw content:\n```\n%s\n```\n\n"+
 			"Error: %s\n\n"+
-			"Please re-emit the envelope as a valid JSON object inside a ```conduit-envelope fenced block "+
+			"Please re-emit the envelope as a valid JSON object inside a ```nanite-envelope fenced block "+
 			"with kind, version (1), and type fields.",
 		chat.TruncateStr(errDetail.Raw, 1000), errDetail.Reason,
 	)

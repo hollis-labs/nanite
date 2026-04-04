@@ -3,7 +3,7 @@ package mcpserver
 import (
 	"testing"
 
-	condmcp "github.com/hollis-labs/conduit/internal/mcp"
+	condmcp "github.com/hollis-labs/nanite/internal/mcp"
 )
 
 func TestExtractText(t *testing.T) {
@@ -44,7 +44,7 @@ func TestConvertEnvelopeMarkers(t *testing.T) {
 
 	got := convertEnvelopeMarkers(input)
 
-	expected := "Found a GIF!\n\n\n```conduit-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"giphy-modal\",\"data\":{\"title\":\"cat\"}}\n```"
+	expected := "Found a GIF!\n\n\n```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"giphy-modal\",\"data\":{\"title\":\"cat\"}}\n```"
 	if got != expected {
 		t.Errorf("got:\n%s\n\nexpected:\n%s", got, expected)
 	}
@@ -66,8 +66,8 @@ func TestConvertEnvelopeMarkers_Multiple(t *testing.T) {
 		t.Error("expected markers to be converted")
 	}
 	// Both should be converted.
-	if count := countOccurrences(got, "```conduit-envelope"); count != 2 {
-		t.Errorf("expected 2 conduit-envelope blocks, got %d", count)
+	if count := countOccurrences(got, "```nanite-envelope"); count != 2 {
+		t.Errorf("expected 2 nanite-envelope blocks, got %d", count)
 	}
 }
 

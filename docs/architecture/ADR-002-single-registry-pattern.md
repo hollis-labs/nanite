@@ -26,7 +26,7 @@ Affected systems today:
 ### Pattern
 
 Every registry entry includes a `source` field:
-- `"core"` — shipped with Conduit, always present
+- `"core"` — shipped with Nanite, always present
 - `"{plugin-id}"` — contributed by a specific plugin
 
 This field replaces separate registries and enables:

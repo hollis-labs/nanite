@@ -8,6 +8,6 @@ const (
 	ScopeOnce Scope = "once"
 	// ScopeSession grants permission for the remainder of this session.
 	ScopeSession Scope = "session"
-	// ScopeProject writes permission to .conduit/permissions.yaml.
+	// ScopeProject writes permission to .nanite/permissions.yaml.
 	ScopeProject Scope = "project"
 )

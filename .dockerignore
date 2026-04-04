@@ -7,7 +7,7 @@ ui/dist
 *.db
 *.db-wal
 *.db-shm
-conduit
-conduit.exe
+nanite
+nanite.exe
 docs
 adr

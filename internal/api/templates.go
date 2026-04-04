@@ -6,7 +6,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func (a *API) handleListTemplates(w http.ResponseWriter, r *http.Request) {

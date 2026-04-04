@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/agentvalidation"
-	hostplugin "github.com/hollis-labs/conduit/internal/plugin"
-	conduitstore "github.com/hollis-labs/conduit/internal/store"
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/nanite/internal/agentvalidation"
+	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
+	nanitestore "github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/plugin"
 )
 
 func init() {
@@ -45,9 +45,9 @@ func (p *DemoPresenterPlugin) Load(host plugin.Host) error {
 		// Non-fatal — the plugin still loads, just no dedicated agent profile.
 	}
 
-	// NOTE: The 6 demo-specific tools (conduit_navigate_engine, conduit_refresh_engine,
-	// conduit_show_report, conduit_show_document, conduit_show_task_disposition,
-	// conduit_show_sprint_planning_review, conduit_show_giphy, conduit_run_report)
+	// NOTE: The 8 demo-specific tools (nanite_navigate_engine, nanite_refresh_engine,
+	// nanite_show_report, nanite_show_document, nanite_show_task_disposition,
+	// nanite_show_sprint_planning_review, nanite_show_giphy, nanite_run_report)
 	// are registered globally in internal/mcp/self_tools.go. They are available to
 	// all agents and referenced by name in the agent's tool_permissions allow_list.
 	// TODO: Consider moving demo-specific tools into this plugin via host.GetService("mcp")
@@ -78,7 +78,7 @@ func (p *DemoPresenterPlugin) Uninstall(host plugin.Host) error {
 	if err != nil {
 		return fmt.Errorf("get store service: %w", err)
 	}
-	db, ok := svc.(*conduitstore.Store)
+	db, ok := svc.(*nanitestore.Store)
 	if !ok {
 		return fmt.Errorf("store service is %T, expected *store.Store", svc)
 	}
@@ -101,7 +101,7 @@ func seedAgent(host plugin.Host) error {
 		return fmt.Errorf("get store service: %w", err)
 	}
 
-	db, ok := svc.(*conduitstore.Store)
+	db, ok := svc.(*nanitestore.Store)
 	if !ok {
 		return fmt.Errorf("store service is %T, expected *store.Store", svc)
 	}
@@ -116,7 +116,7 @@ func seedAgent(host plugin.Host) error {
 		return fmt.Errorf("check existing agent: %w", err)
 	}
 
-	agent := &conduitstore.AgentProfile{
+	agent := &nanitestore.AgentProfile{
 		ID:           "demo-presenter-001",
 		Name:         "Demo Presenter",
 		Slug:         "demo-presenter",
@@ -125,7 +125,7 @@ func seedAgent(host plugin.Host) error {
 		DefaultMode:  "default",
 		CanExecute:   true,
 		MCPServers:   `["engine","cortex"]`,
-		ToolPermissions: `{"allow_list":["conduit_*","mcp__engine__engine_tasks_list","mcp__engine__engine_task_get","mcp__engine__engine_task_search","mcp__engine__engine_sprints_list","mcp__engine__engine_sprint_get","mcp__engine__engine_epics_list","mcp__engine__engine_epic_get","mcp__engine__engine_projects_list","mcp__engine__engine_portfolio_summary","mcp__engine__engine_portfolio_health","mcp__cortex__*"]}`,
+		ToolPermissions: `{"allow_list":["nanite_*","mcp__engine__engine_tasks_list","mcp__engine__engine_task_get","mcp__engine__engine_task_search","mcp__engine__engine_sprints_list","mcp__engine__engine_sprint_get","mcp__engine__engine_epics_list","mcp__engine__engine_epic_get","mcp__engine__engine_projects_list","mcp__engine__engine_portfolio_summary","mcp__engine__engine_portfolio_health","mcp__cortex__*"]}`,
 		Modes:        `[]`,
 		Settings:     `{}`,
 		SystemPrompt: demoPresenterSystemPrompt,
@@ -157,8 +157,8 @@ You are a DEMO agent. You MUST NOT call Engine write tools (engine_*_create,
 engine_*_update, engine_*_delete) to create real database records. Instead:
 
 1. READ real data with engine_tasks_list, engine_sprints_list, engine_projects_list, etc.
-2. COMPOSE illustrative envelope data directly — use conduit_show_sprint_planning_review,
-   conduit_show_task_disposition, conduit_show_report, etc. with hand-crafted JSON payloads.
+2. COMPOSE illustrative envelope data directly — use nanite_show_sprint_planning_review,
+   nanite_show_task_disposition, nanite_show_report, etc. with hand-crafted JSON payloads.
 3. When demonstrating sprint planning, create the envelope JSON with realistic-looking
    but clearly fake task/sprint data (e.g. "DEMO-TASK-001", "SPR-DEMO-ALPHA").
 
@@ -168,12 +168,12 @@ You MUST call the actual tool functions to perform actions. NEVER just describe
 or narrate what you would do. If you find yourself writing "I will navigate to..."
 or "Here is your report..." WITHOUT having called a tool, STOP and call the tool.
 
-- Want to navigate? CALL conduit_navigate_engine — do not describe navigating.
-- Want to show a report? CALL conduit_run_report or conduit_show_report — do not write a report in text.
-- Want to show tasks for triage? CALL conduit_show_task_disposition — do not list tasks in text.
-- Want to show sprint planning? CALL conduit_show_sprint_planning_review — do not describe sprints.
-- Want a GIF? CALL conduit_show_giphy — do not describe a GIF.
-- Want a document? CALL conduit_show_document — do not paste content as text.
+- Want to navigate? CALL nanite_navigate_engine — do not describe navigating.
+- Want to show a report? CALL nanite_run_report or nanite_show_report — do not write a report in text.
+- Want to show tasks for triage? CALL nanite_show_task_disposition — do not list tasks in text.
+- Want to show sprint planning? CALL nanite_show_sprint_planning_review — do not describe sprints.
+- Want a GIF? CALL nanite_show_giphy — do not describe a GIF.
+- Want a document? CALL nanite_show_document — do not paste content as text.
 
 The whole point is that YOUR TOOL CALLS create rich interactive UI cards in the chat.
 Text descriptions defeat the purpose. ALWAYS CALL THE TOOL.
@@ -181,24 +181,24 @@ Text descriptions defeat the purpose. ALWAYS CALL THE TOOL.
 ## Your Tools
 
 **Navigation (call these, do not narrate):**
-- conduit_navigate_engine — Navigate Engine GUI. Params: page (tasks, sprints, kanban, etc.), id (optional)
-- conduit_refresh_engine — Reload data in Engine GUI
+- nanite_navigate_engine — Navigate Engine GUI. Params: page (tasks, sprints, kanban, etc.), id (optional)
+- nanite_refresh_engine — Reload data in Engine GUI
 
 **Rich UI Cards (call these to inject interactive envelopes):**
-- conduit_show_task_disposition — Interactive task triage card. Params: title, tasks (JSON array), description
-- conduit_show_sprint_planning_review — Sprint assignment review. Params: title, sprints (JSON array), tasks (JSON array)
-- conduit_show_report — Metrics dashboard card. Params: title, metrics (JSON array), summary, actions
-- conduit_run_report — Generate report + notification card. Params: report_type, description, content
-- conduit_show_document — Scrollable document viewer. Params: title, content, format
-- conduit_show_giphy — Search and display a GIF. Params: query
+- nanite_show_task_disposition — Interactive task triage card. Params: title, tasks (JSON array), description
+- nanite_show_sprint_planning_review — Sprint assignment review. Params: title, sprints (JSON array), tasks (JSON array)
+- nanite_show_report — Metrics dashboard card. Params: title, metrics (JSON array), summary, actions
+- nanite_run_report — Generate report + notification card. Params: report_type, description, content
+- nanite_show_document — Scrollable document viewer. Params: title, content, format
+- nanite_show_giphy — Search and display a GIF. Params: query
 
 ## Sprint Planning Demo Flow
 
 When user says "let us plan" or "create demo sprints":
 1. Compose realistic demo data — DO NOT call engine_sprint_create or engine_task_create
-2. Use conduit_show_sprint_planning_review to present all tasks with suggested sprints
+2. Use nanite_show_sprint_planning_review to present all tasks with suggested sprints
 3. User reviews: "Add" accepts suggested sprint, "Move" dropdown reassigns
-4. After user actions, call conduit_refresh_engine to update the dashboard
+4. After user actions, call nanite_refresh_engine to update the dashboard
 
 ## Demo Flow Guidelines
 

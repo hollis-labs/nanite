@@ -1,14 +1,14 @@
-# Conduit Plugin System Architecture
+# Nanite Plugin System Architecture
 
 > Created: 2026-03-13 | Updated: 2026-03-19 | Status: Implemented (core), Evolving | Related: ADR-013, ADR-029
 
 ## 1. Overview
 
-The Conduit plugin system allows extensions to add CRUD endpoints, event hooks, UI envelope components, and MCP tool servers to Conduit without modifying core application code. Plugins are Go structs that implement the `plugin.Plugin` interface, are loaded at startup by the plugin Host, and declaratively describe their capabilities in a `plugin.yaml` file.
+The Nanite plugin system allows extensions to add CRUD endpoints, event hooks, UI envelope components, and MCP tool servers to Nanite without modifying core application code. Plugins are Go structs that implement the `plugin.Plugin` interface, are loaded at startup by the plugin Host, and declaratively describe their capabilities in a `plugin.yaml` file.
 
 **Current state:** The core plugin infrastructure (Host, CRUD auto-wiring, event system, UI component registration, MCP server injection) is implemented and working. Two plugins exist: the **IT Support** plugin (full-featured demo) and the **session-stats** plugin (reference/skeleton). Frontend envelope rendering is hardcoded in `EnvelopeRenderer.tsx` rather than dynamically loaded. The `plugin.yaml` files are declarative documentation -- they are not parsed by the loader today.
 
-**Why it exists:** Conduit is an agent-agnostic chat harness. Plugins let domain-specific functionality (IT support, sprint planning, analytics) live outside core, following ADR-029's component autonomy principle. The IT Support plugin was the first real proof that the architecture works end-to-end.
+**Why it exists:** Nanite is an agent-agnostic chat harness. Plugins let domain-specific functionality (IT support, sprint planning, analytics) live outside core, following ADR-029's component autonomy principle. The IT Support plugin was the first real proof that the architecture works end-to-end.
 
 ## 2. Architecture
 
@@ -25,7 +25,7 @@ The Conduit plugin system allows extensions to add CRUD endpoints, event hooks, 
              |
              v
 +---------------------------+     +-----------------------+
-|     Conduit Host          |---->| HTTP Router (ServeMux)|
+|     Nanite Host           |---->| HTTP Router (ServeMux)|
 | (internal/plugin/host.go) |     +-----------------------+
 |                           |        |
 |  .RegisterCRUDHandler()   |------->| /api/plugins/{type}/*
@@ -109,7 +109,7 @@ type Host interface {
 
 ### Available Services
 
-Registered in `conduit/cmd/conduit/main.go` (lines 263-267):
+Registered in `nanite/cmd/nanite/main.go` (lines 263-267):
 
 | Service Name | Type | What It Provides |
 |-------------|------|-----------------|
@@ -145,7 +145,7 @@ type Logger interface {
 }
 ```
 
-Conduit's implementation (`conduit/internal/plugin/logger.go`) wraps Go's `log` package with level prefixes and key-value formatting.
+Nanite's implementation (`nanite/internal/plugin/logger.go`) wraps Go's `log` package with level prefixes and key-value formatting.
 
 ## 5. CRUD Handlers
 
@@ -165,7 +165,7 @@ type CRUDHandler interface {
 
 ### Auto-Wiring to HTTP Routes
 
-When a plugin calls `host.RegisterCRUDHandler("tickets", handler)`, the Host (`conduit/internal/plugin/host.go` lines 61-101) automatically creates five HTTP endpoints:
+When a plugin calls `host.RegisterCRUDHandler("tickets", handler)`, the Host (`nanite/internal/plugin/host.go` lines 61-101) automatically creates five HTTP endpoints:
 
 | HTTP Method | Path | Handler Method |
 |------------|------|---------------|
@@ -177,7 +177,7 @@ When a plugin calls `host.RegisterCRUDHandler("tickets", handler)`, the Host (`c
 
 ### Error Mapping
 
-The CRUD handler (`conduit/internal/plugin/crud.go`) maps errors to HTTP status codes:
+The CRUD handler (`nanite/internal/plugin/crud.go`) maps errors to HTTP status codes:
 
 - Error message contains `"not found"` -> `404 Not Found`
 - JSON decode failure -> `400 Bad Request`
@@ -198,7 +198,7 @@ For `List()`, query parameters are auto-parsed with type inference (lines 14-30 
 
 ### Event Catalog
 
-Defined in `conduit/internal/plugin/events.go`:
+Defined in `nanite/internal/plugin/events.go`:
 
 | Category | Event Constant | String Value | When Emitted |
 |----------|---------------|-------------|-------------|
@@ -236,7 +236,7 @@ type Event struct {
 
 ### EventData Helper
 
-`conduit/internal/plugin/events.go` defines `EventData` -- a structured type with fields for all event categories. The `NewEvent()` function converts it to the generic `map[string]interface{}` used by `plugin.Event`.
+`nanite/internal/plugin/events.go` defines `EventData` -- a structured type with fields for all event categories. The `NewEvent()` function converts it to the generic `map[string]interface{}` used by `plugin.Event`.
 
 ### Hook Interface
 
@@ -314,7 +314,7 @@ If a `UIComponent` has a non-nil `Handler`, the Host registers it at `/api/plugi
 
 ### Frontend Rendering Pipeline
 
-Currently, frontend envelope rendering is **hardcoded** in `conduit/ui/src/components/chat/envelopes/EnvelopeRenderer.tsx`:
+Currently, frontend envelope rendering is **hardcoded** in `nanite/ui/src/components/chat/envelopes/EnvelopeRenderer.tsx`:
 
 ```tsx
 if (envelope.type === 'kb-result' && envelope.data) {
@@ -343,7 +343,7 @@ Returns all registered UI components as JSON. This could be used by a future dyn
 During `Load()`, a plugin can obtain the MCP Manager and add a server:
 
 ```go
-// From conduit/plugins/support/plugin.go lines 74-79
+// From nanite/plugins/support/plugin.go lines 74-79
 mcpSvc, mcpErr := host.GetService("mcp")
 if mcpErr == nil {
     if mgr, ok := mcpSvc.(*mcp.Manager); ok {
@@ -375,7 +375,7 @@ The Tool Broker checks these permissions. The direct MCP discovery fallback (`en
 
 ## 9. Agent Profiles
 
-Plugins can seed agent profiles into the database during `Load()`. The IT Support plugin does this in `conduit/plugins/support/seed.go`:
+Plugins can seed agent profiles into the database during `Load()`. The IT Support plugin does this in `nanite/plugins/support/seed.go`:
 
 ```go
 agent := &store.AgentProfile{
@@ -398,7 +398,7 @@ The IT Support agent's system prompt (`seed.go` line 58) follows a specific patt
 
 1. **Role statement** -- "You are an IT Support specialist"
 2. **Workflow steps** -- Numbered sequence: search KB, present results, offer ticket creation
-3. **Envelope syntax** -- Exact JSON format for the `ticket-form` envelope in a `conduit-envelope` code fence
+3. **Envelope syntax** -- Exact JSON format for the `ticket-form` envelope in a `nanite-envelope` code fence
 4. **Rules** -- Constraints like "search once per message", "never fabricate KB articles"
 
 The "search once" pattern is critical: it prevents the LLM from making multiple KB search calls per user message, which would create duplicate envelope injections.
@@ -413,7 +413,7 @@ When the LLM calls `search_kb`, it receives search results as text. We want the 
 
 ### The Solution: Three-Layer Pipeline
 
-**Layer 1: KB tool embeds metadata** (`conduit/plugins/support/kb.go` lines 196-201)
+**Layer 1: KB tool embeds metadata** (`nanite/plugins/support/kb.go` lines 196-201)
 
 The `search_kb` tool returns a response with three parts:
 1. Compact JSON summary (no article body -- small enough for the LLM context)
@@ -428,25 +428,25 @@ The `search_kb` tool returns a response with three parts:
 <!--ENVELOPE_DATA:{"results":[...with bodies...],"query":"..."}:ENVELOPE_DATA-->
 ```
 
-**Layer 2: Chat engine extracts and collects** (`conduit/internal/chat/engine.go` lines 550-561)
+**Layer 2: Chat engine extracts and collects** (`nanite/internal/chat/engine.go` lines 550-561)
 
 During tool result processing, if a tool name ends with `__search_kb`, the engine:
 1. Looks for `<!--ENVELOPE_DATA:` markers
 2. Extracts the full JSON between the markers
-3. Calls `buildKBEnvelope()` to wrap it as a `conduit-envelope`
+3. Calls `buildKBEnvelope()` to wrap it as a `nanite-envelope`
 4. Appends it to `pendingEnvelopes`
 
 **Layer 3: Post-response injection** (`engine.go` lines 682-688)
 
 After the LLM finishes responding, all pending envelopes are:
-1. Wrapped in `` ```conduit-envelope `` fences
+1. Wrapped in `` ```nanite-envelope `` fences
 2. Appended to the response content
 3. Streamed to the client as delta events
 4. Parsed by `ParseEnvelopes()` and stored with the message
 
 ### Backtick Sanitization
 
-`buildKBEnvelope()` (`conduit/internal/chat/envelope.go` lines 45-84) replaces triple backticks in KB article bodies with `~~~` to prevent them from breaking the `conduit-envelope` code fence delimiter.
+`buildKBEnvelope()` (`nanite/internal/chat/envelope.go` lines 45-84) replaces triple backticks in KB article bodies with `~~~` to prevent them from breaking the `nanite-envelope` code fence delimiter.
 
 ### Compact vs Full Results
 
@@ -456,7 +456,7 @@ The LLM sees **compact** results (no body, just ID/title/category/severity/confi
 
 ### Load Order
 
-The load sequence in `conduit/cmd/conduit/main.go` (lines 259-288):
+The load sequence in `nanite/cmd/nanite/main.go` (lines 259-288):
 
 1. **Create plugin host** with `nil` router -- `NewHost(nil, logger)` (line 261)
 2. **Register services** -- store, engine, mcp, toolclient (lines 264-267)
@@ -549,7 +549,7 @@ api_endpoints:                   # HTTP endpoints the plugin creates
 - `requires.mcp_servers` -- not validated at load time
 - `database.tables` -- schema auto-creation not implemented
 
-The session-stats plugin's `plugin.yaml` (`conduit/plugins/session-stats/plugin.yaml`) shows the full aspirational spec including `widgets`, `database.tables`, and multi-event hooks.
+The session-stats plugin's `plugin.yaml` (`nanite/plugins/session-stats/plugin.yaml`) shows the full aspirational spec including `widgets`, `database.tables`, and multi-event hooks.
 
 ## 13. Known Limitations & Gaps
 
@@ -567,7 +567,7 @@ Plugins are manually instantiated and loaded in `main.go`. There is no directory
 
 ### No Plugin Isolation
 
-Plugins run in the same process with full access to all services. A misbehaving plugin can crash Conduit. No sandboxing or resource limits exist.
+Plugins run in the same process with full access to all services. A misbehaving plugin can crash Nanite. No sandboxing or resource limits exist.
 
 ### No Widget/Slot System
 
@@ -591,7 +591,7 @@ Plugins cannot declare configuration (API keys, database URLs, etc.). The KB tra
 
 ### Library vs Host Duplication
 
-Both `libs/plugin/registry.go` and `conduit/internal/plugin/host.go` implement similar functionality. The library registry is a generic implementation; the Host is Conduit-specific. The library registry is not currently used by Conduit -- it uses the Host directly.
+Both `libs/plugin/registry.go` and `nanite/internal/plugin/host.go` implement similar functionality. The library registry is a generic implementation; the Host is Nanite-specific. The library registry is not currently used by Nanite -- it uses the Host directly.
 
 ### Unload Does Not Clean Up Routes
 

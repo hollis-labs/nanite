@@ -146,7 +146,7 @@ const WELCOME_CARDS = [
   {
     icon: Puzzle,
     title: "Explore plugins",
-    description: "Browse available plugins to extend Conduit with new tools and capabilities.",
+    description: "Browse available plugins to extend Nanite with new tools and capabilities.",
     action: "settings-plugins" as const,
   },
   {
@@ -175,7 +175,7 @@ function WelcomeScreen() {
   return (
     <main className="flex-1 flex flex-col items-center justify-center min-w-0 bg-bg px-8">
       <div className="max-w-lg w-full text-center mb-10">
-        <h1 className="text-2xl font-semibold text-fg mb-2">Welcome to Conduit</h1>
+        <h1 className="text-2xl font-semibold text-fg mb-2">Welcome to Nanite</h1>
         <p className="text-sm text-fg-muted">
           Multi-agent chat harness for Fragments Engine. Get started by picking an action below.
         </p>

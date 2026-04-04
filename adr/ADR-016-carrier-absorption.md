@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-03-13
 **Deciders:** chrispian, Mentat
-**Relates to:** ADR-013 (Conduit Separation), ADR-010 (Stream Hint Reactive Capture)
+**Relates to:** ADR-013 (Nanite Separation), ADR-010 (Stream Hint Reactive Capture)
 
 ## Context
 
@@ -33,14 +33,14 @@ Absorb Carrier into Fragments Engine as three components:
   - Boot profile defining its persona, domain, and skills
   - Skills for blueprint execution, opportunity extraction, lens application
   - Access to shared ingest library for artifact retrieval
-  - Runs inside Conduit (GUI) or via CLI (agentrc boot profile)
+  - Runs inside Nanite (GUI) or via CLI (agentrc boot profile)
 - Keeps the "Carrier" brand as the agent name
 - Passive capture (`:carrier` stream hints, ADR-010) remains unchanged
 
-### 3. Conduit Plugins
-- Blueprint management → Conduit plugin
-- Opportunity inbox → Conduit plugin
-- Output review → Conduit plugin
+### 3. Nanite Plugins
+- Blueprint management → Nanite plugin
+- Opportunity inbox → Nanite plugin
+- Output review → Nanite plugin
 - These replace the standalone React UI
 
 ### Scheduling
@@ -53,7 +53,7 @@ Absorb Carrier into Fragments Engine as three components:
 - One fewer app to build, test, deploy, and maintain
 - Eliminates the Python/Go split in the portfolio
 - Ingestion sources become available to any agent, not just Carrier
-- Conduit becomes the single UI entry point
+- Nanite becomes the single UI entry point
 - Carrier's 260 tests become integration tests for the ingest library
 - Simpler mental model: 6 projects → 5 projects + 1 shared lib
 
@@ -64,11 +64,11 @@ Absorb Carrier into Fragments Engine as three components:
 
 ### Risks
 - Ingest library scope creep — keep it focused on artifact normalization, not content generation
-- Agent behavior may be harder to test outside of a Conduit session — ensure CLI-mode testing works
+- Agent behavior may be harder to test outside of a Nanite session — ensure CLI-mode testing works
 
 ## Migration Path
 
 1. **Phase 1**: Extract shared ingest library (artifact types, source interfaces, dedup, sessionization)
 2. **Phase 2**: Create Carrier Special Agent boot profile and skills
-3. **Phase 3**: Build Conduit plugins for blueprint/opportunity/output management
+3. **Phase 3**: Build Nanite plugins for blueprint/opportunity/output management
 4. **Phase 4**: Retire standalone Carrier app, redirect to Fragments Engine

@@ -54,7 +54,14 @@ COMPLETED: Phase 7 — Slash Commands & Polish (2026-04-04)
 - Fixed TestAuthMiddlewareEnabled (rebrand env var leftover)
 - 18 new tests (commands + skill service), go test zero failures
 
-MVP PHASES 0-7 COMPLETE. Next: post-MVP backlog (docs/vnext-backlog.md)
+MVP PHASES 0-7 COMPLETE.
+
+POST-MVP PLAN (decided 2026-04-04):
+Phase A (parallel): MCP Import/Export + Token Breakdown
+Phase B (parallel): Plugin/Event Enhancements + Multi-Agent Orchestration
+Phase C (after B1): Memory & Continuity
+Phase D (after B1): Claude Code Integration
+See docs/post-mvp-plan.md for full details and decisions.
 
 PRINCIPLES:
 - Consult before architecture decisions

@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func (a *API) handleListArtifacts(w http.ResponseWriter, r *http.Request) {

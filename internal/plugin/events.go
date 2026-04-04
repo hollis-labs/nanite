@@ -5,11 +5,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/plugin"
 )
 
-// Conduit Event Catalog
-// These are the standard events that Conduit emits for plugins to listen to.
+// Event Catalog
+// These are the standard events emitted for plugins to listen to.
 const (
 	// Session Events
 	EventSessionStart = "session.start"
@@ -110,7 +111,7 @@ type EventData struct {
 	WorkflowData interface{} `json:"workflow_data,omitempty"`
 }
 
-// NewEvent creates a new plugin event with Conduit-specific data
+// NewEvent creates a new plugin event with Nanite-specific data
 func NewEvent(eventType, source string, data EventData) plugin.Event {
 	// Convert EventData to map[string]interface{} for the plugin.Event
 	eventMap := make(map[string]interface{})
@@ -214,7 +215,7 @@ func NewEvent(eventType, source string, data EventData) plugin.Event {
 
 // EmitSessionStart emits a session.start event
 func (h *Host) EmitSessionStart(sessionID, agentID, mode string) {
-	event := NewEvent(EventSessionStart, "conduit", EventData{
+	event := NewEvent(EventSessionStart, brand.ID, EventData{
 		SessionID: sessionID,
 		AgentID:   agentID,
 		Mode:      mode,
@@ -224,7 +225,7 @@ func (h *Host) EmitSessionStart(sessionID, agentID, mode string) {
 
 // EmitSessionEnd emits a session.end event
 func (h *Host) EmitSessionEnd(sessionID string) {
-	event := NewEvent(EventSessionEnd, "conduit", EventData{
+	event := NewEvent(EventSessionEnd, brand.ID, EventData{
 		SessionID: sessionID,
 	})
 	h.EmitEvent(event)
@@ -232,7 +233,7 @@ func (h *Host) EmitSessionEnd(sessionID string) {
 
 // EmitAgentSwitched emits an agent.switched event
 func (h *Host) EmitAgentSwitched(sessionID, previousAgentID, newAgentID string) {
-	event := NewEvent(EventAgentSwitched, "conduit", EventData{
+	event := NewEvent(EventAgentSwitched, brand.ID, EventData{
 		SessionID:       sessionID,
 		AgentID:         newAgentID,
 		PreviousAgentID: previousAgentID,
@@ -242,7 +243,7 @@ func (h *Host) EmitAgentSwitched(sessionID, previousAgentID, newAgentID string) 
 
 // EmitMessageSent emits a message.sent event
 func (h *Host) EmitMessageSent(sessionID, messageID, content, role string, tokensUsed int) {
-	event := NewEvent(EventMessageSent, "conduit", EventData{
+	event := NewEvent(EventMessageSent, brand.ID, EventData{
 		SessionID:  sessionID,
 		MessageID:  messageID,
 		Content:    content,
@@ -254,7 +255,7 @@ func (h *Host) EmitMessageSent(sessionID, messageID, content, role string, token
 
 // EmitMessageReceived emits a message.received event
 func (h *Host) EmitMessageReceived(sessionID, messageID, content string, responseTime int64) {
-	event := NewEvent(EventMessageReceived, "conduit", EventData{
+	event := NewEvent(EventMessageReceived, brand.ID, EventData{
 		SessionID:    sessionID,
 		MessageID:    messageID,
 		Content:      content,
@@ -266,7 +267,7 @@ func (h *Host) EmitMessageReceived(sessionID, messageID, content string, respons
 
 // EmitModeChanged emits a mode.changed event
 func (h *Host) EmitModeChanged(sessionID, previousMode, newMode string) {
-	event := NewEvent(EventModeChanged, "conduit", EventData{
+	event := NewEvent(EventModeChanged, brand.ID, EventData{
 		SessionID:    sessionID,
 		PreviousMode: previousMode,
 		NewMode:      newMode,
@@ -276,7 +277,7 @@ func (h *Host) EmitModeChanged(sessionID, previousMode, newMode string) {
 
 // EmitToolCalled emits a tool.called event
 func (h *Host) EmitToolCalled(sessionID, toolName string, args, result interface{}) {
-	event := NewEvent(EventToolCalled, "conduit", EventData{
+	event := NewEvent(EventToolCalled, brand.ID, EventData{
 		SessionID:  sessionID,
 		ToolName:   toolName,
 		ToolArgs:   args,
@@ -287,7 +288,7 @@ func (h *Host) EmitToolCalled(sessionID, toolName string, args, result interface
 
 // EmitToolFailed emits a tool.failed event
 func (h *Host) EmitToolFailed(sessionID, toolName string, args interface{}, err string) {
-	event := NewEvent(EventToolFailed, "conduit", EventData{
+	event := NewEvent(EventToolFailed, brand.ID, EventData{
 		SessionID: sessionID,
 		ToolName:  toolName,
 		ToolArgs:  args,
@@ -298,7 +299,7 @@ func (h *Host) EmitToolFailed(sessionID, toolName string, args interface{}, err 
 
 // EmitEnvelopeRendered emits an envelope.rendered event
 func (h *Host) EmitEnvelopeRendered(sessionID, envelopeType string, data interface{}) {
-	event := NewEvent(EventEnvelopeRendered, "conduit", EventData{
+	event := NewEvent(EventEnvelopeRendered, brand.ID, EventData{
 		SessionID:    sessionID,
 		EnvelopeType: envelopeType,
 		EnvelopeData: data,
@@ -308,7 +309,7 @@ func (h *Host) EmitEnvelopeRendered(sessionID, envelopeType string, data interfa
 
 // EmitActionTriggered emits an action.triggered event
 func (h *Host) EmitActionTriggered(sessionID, actionID string, actionData interface{}) {
-	event := NewEvent(EventActionTriggered, "conduit", EventData{
+	event := NewEvent(EventActionTriggered, brand.ID, EventData{
 		SessionID:  sessionID,
 		ActionID:   actionID,
 		ActionData: actionData,
@@ -318,7 +319,7 @@ func (h *Host) EmitActionTriggered(sessionID, actionID string, actionData interf
 
 // EmitConfigChanged emits a config.changed event when plugin or user settings change.
 func (h *Host) EmitConfigChanged(pluginID, key, value string) {
-	event := NewEvent(EventConfigChanged, "conduit", EventData{})
+	event := NewEvent(EventConfigChanged, brand.ID, EventData{})
 	event.Data["plugin_id"] = pluginID
 	event.Data["key"] = key
 	event.Data["value"] = value
@@ -327,7 +328,7 @@ func (h *Host) EmitConfigChanged(pluginID, key, value string) {
 
 // EmitPluginInstalled emits a plugin.installed event.
 func (h *Host) EmitPluginInstalled(pluginID, pluginName, version string) {
-	event := NewEvent(EventPluginInstalled, "conduit", EventData{})
+	event := NewEvent(EventPluginInstalled, brand.ID, EventData{})
 	event.Data["plugin_id"] = pluginID
 	event.Data["plugin_name"] = pluginName
 	event.Data["version"] = version
@@ -336,14 +337,14 @@ func (h *Host) EmitPluginInstalled(pluginID, pluginName, version string) {
 
 // EmitPluginUninstalled emits a plugin.uninstalled event.
 func (h *Host) EmitPluginUninstalled(pluginID string) {
-	event := NewEvent(EventPluginUninstalled, "conduit", EventData{})
+	event := NewEvent(EventPluginUninstalled, brand.ID, EventData{})
 	event.Data["plugin_id"] = pluginID
 	h.EmitEvent(event)
 }
 
 // EmitSessionArchived emits a session.archived event.
 func (h *Host) EmitSessionArchived(sessionID string) {
-	event := NewEvent(EventSessionArchived, "conduit", EventData{
+	event := NewEvent(EventSessionArchived, brand.ID, EventData{
 		SessionID: sessionID,
 	})
 	h.EmitEvent(event)
@@ -351,7 +352,7 @@ func (h *Host) EmitSessionArchived(sessionID string) {
 
 // EmitProviderError emits a provider.error event when an LLM call fails.
 func (h *Host) EmitProviderError(sessionID, providerName, model, errMsg string) {
-	event := NewEvent(EventProviderError, "conduit", EventData{
+	event := NewEvent(EventProviderError, brand.ID, EventData{
 		SessionID: sessionID,
 		Error:     errMsg,
 	})
@@ -362,7 +363,7 @@ func (h *Host) EmitProviderError(sessionID, providerName, model, errMsg string) 
 
 // EmitProviderFallback emits a provider.fallback event when the engine falls through the chain.
 func (h *Host) EmitProviderFallback(sessionID, fromProvider, toProvider string) {
-	event := NewEvent(EventProviderFallback, "conduit", EventData{
+	event := NewEvent(EventProviderFallback, brand.ID, EventData{
 		SessionID: sessionID,
 	})
 	event.Data["from_provider"] = fromProvider
@@ -380,7 +381,7 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 
 	event := plugin.Event{
 		Type:      eventType,
-		Source:    "conduit",
+		Source:    brand.ID,
 		Timestamp: time.Now(),
 		Data:      data,
 		SessionID: sessionID,

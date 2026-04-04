@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 const testYAMLShell = `
@@ -186,7 +186,7 @@ func TestParseYAMLToolBytes_Errors(t *testing.T) {
 func TestLoadYAMLTools_Directory(t *testing.T) {
 	// Create a temp directory with tool YAML files.
 	tmpDir := t.TempDir()
-	toolsDir := filepath.Join(tmpDir, ".conduit", "tools")
+	toolsDir := filepath.Join(tmpDir, ".nanite", "tools")
 	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

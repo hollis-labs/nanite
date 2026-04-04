@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // NewPromptTemplateBuilder returns a Builder that creates PromptTemplate records.

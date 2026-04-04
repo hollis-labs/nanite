@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	pluginsdk "github.com/hollis-labs/fragments-engine/plugin"
+	pluginsdk "github.com/hollis-labs/plugin"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // testConnector is a minimal Connector implementation for testing.
@@ -82,7 +82,7 @@ func TestTriggerDispatch_BasicFlow(t *testing.T) {
 	}
 
 	// Emit the event.
-	event := NewEvent("session.end", "conduit", EventData{SessionID: "s1"})
+	event := NewEvent("session.end", "nanite", EventData{SessionID: "s1"})
 	h.triggers.Dispatch(event)
 	waitForSend(t, conn, 1, 2*time.Second)
 
@@ -109,14 +109,14 @@ func TestTriggerDispatch_FilterExpr(t *testing.T) {
 	}
 
 	// Event that doesn't match the filter.
-	noMatch := NewEvent("tool.called", "conduit", EventData{ToolName: "grep"})
+	noMatch := NewEvent("tool.called", "nanite", EventData{ToolName: "grep"})
 	h.triggers.Dispatch(noMatch)
 	if conn.sendCount.Load() != 0 {
 		t.Error("expected no send for non-matching filter")
 	}
 
 	// Event that matches the filter.
-	matches := NewEvent("tool.called", "conduit", EventData{ToolName: "web_fetch"})
+	matches := NewEvent("tool.called", "nanite", EventData{ToolName: "web_fetch"})
 	h.triggers.Dispatch(matches)
 	waitForSend(t, conn, 1, 2*time.Second)
 	if conn.sendCount.Load() != 1 {
@@ -141,7 +141,7 @@ func TestTriggerDispatch_PayloadTemplate(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 
-	event := NewEvent("session.end", "conduit", EventData{SessionID: "abc-123"})
+	event := NewEvent("session.end", "nanite", EventData{SessionID: "abc-123"})
 	h.triggers.Dispatch(event)
 	waitForSend(t, conn, 1, 2*time.Second)
 
@@ -173,7 +173,7 @@ func TestTriggerDispatch_EmptyTemplate(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 
-	event := NewEvent("session.start", "conduit", EventData{SessionID: "s1", AgentID: "a1"})
+	event := NewEvent("session.start", "nanite", EventData{SessionID: "s1", AgentID: "a1"})
 	h.triggers.Dispatch(event)
 	waitForSend(t, conn, 1, 2*time.Second)
 
@@ -202,7 +202,7 @@ func TestTriggerDispatch_DisabledRule(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 
-	event := NewEvent("session.end", "conduit", EventData{SessionID: "s1"})
+	event := NewEvent("session.end", "nanite", EventData{SessionID: "s1"})
 	h.triggers.Dispatch(event)
 
 	if conn.sendCount.Load() != 0 {
@@ -225,7 +225,7 @@ func TestTriggerDispatch_UnknownConnector(t *testing.T) {
 	}
 
 	// Should not panic.
-	event := NewEvent("session.end", "conduit", EventData{SessionID: "s1"})
+	event := NewEvent("session.end", "nanite", EventData{SessionID: "s1"})
 	h.triggers.Dispatch(event)
 }
 
@@ -253,7 +253,7 @@ func TestTriggerDispatch_RetryOnFailure(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 
-	event := NewEvent("session.end", "conduit", EventData{SessionID: "s1"})
+	event := NewEvent("session.end", "nanite", EventData{SessionID: "s1"})
 	h.triggers.Dispatch(event)
 	waitForSend(t, conn, 3, 5*time.Second)
 

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/chat"
+	"github.com/hollis-labs/nanite/internal/chat"
 )
 
 func TestLoopState_ResolvedMaxTurns(t *testing.T) {

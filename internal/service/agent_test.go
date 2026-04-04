@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // --- test doubles ---

@@ -2,7 +2,7 @@
 
 **Created:** 2026-03-29
 **Status:** Phase 1 + 2a + 3a + 5a + 5b(backend) + 6 + 8a + 8b complete (2026-03-29)
-**Goal:** Make Conduit an agnostic chat client where all non-core functionality lives in plugins.
+**Goal:** Make Nanite an agnostic chat client where all non-core functionality lives in plugins.
 
 ---
 
@@ -18,7 +18,7 @@ The plugin system has a solid foundation: clean SDK interfaces, a working host r
 - Slash commands: fully dynamic on frontend (fetched from API, plugin badge, POST execute)
 - Envelope + widget registries: codegen pattern works, just empty of plugin entries
 - Plugin lifecycle UI: install, uninstall, enable, disable in Settings
-- Scaffold tool: `conduit plugin new` generates boilerplate
+- Scaffold tool: `nanite plugin new` generates boilerplate
 
 ### What's Broken
 - **Pre-hook cancel bug** — `EmitPreHook` passes event by value; hooks can't set cancel flag
@@ -255,7 +255,7 @@ Recommendation: **Subprocess + JSON-RPC** for backend logic, **URL-loaded ESM mo
 - Replace static `repos.yaml` with a remote catalog API
 - Catalog entries: name, description, version, author, download URL, signature, compatibility range
 - `GET /api/plugins/catalog` proxies to the remote catalog (or reads local cache)
-- Version resolution: semver matching against Conduit version
+- Version resolution: semver matching against Nanite version
 
 ### 7c. Plugin marketplace UI
 - Browse/search available plugins in PluginManager

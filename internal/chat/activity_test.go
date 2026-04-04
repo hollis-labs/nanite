@@ -99,8 +99,8 @@ func TestActivityEmitter_SendsToEngine(t *testing.T) {
 		if ev.EventType != expectedTypes[i] {
 			t.Errorf("event %d: expected type %q, got %q", i, expectedTypes[i], ev.EventType)
 		}
-		if ev.ProjectID != "conduit" {
-			t.Errorf("event %d: expected project_id 'conduit', got %q", i, ev.ProjectID)
+		if ev.ProjectID != "nanite" {
+			t.Errorf("event %d: expected project_id 'nanite', got %q", i, ev.ProjectID)
 		}
 	}
 }

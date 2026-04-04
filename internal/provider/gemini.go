@@ -88,7 +88,7 @@ func (g *Gemini) StreamChat(ctx context.Context, systemPrompt string, messages [
 	return ch, nil
 }
 
-// buildRequest converts Conduit messages to Gemini API format.
+// buildRequest converts Nanite messages to Gemini API format.
 func (g *Gemini) buildRequest(systemPrompt string, messages []ChatMessage) geminiRequest {
 	req := geminiRequest{
 		GenerationConfig: &geminiGenerationConfig{

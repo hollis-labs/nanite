@@ -1,4 +1,4 @@
-# Conduit — mise task runner configuration
+# Nanite — mise task runner configuration
 # https://mise.jdx.dev/
 
 [tools]
@@ -7,7 +7,7 @@ node = "22"
 
 [tasks.build]
 description = "Build Go binary (embeds UI if ui/dist exists)"
-run = "go build -o conduit ./cmd/conduit"
+run = "go build -o nanite ./cmd/nanite"
 
 [tasks.test]
 description = "Run all Go tests"
@@ -18,9 +18,9 @@ description = "Run go vet on all packages"
 run = "go vet ./..."
 
 [tasks.serve]
-description = "Run conduit in dev mode on port 8090"
+description = "Run nanite in dev mode on port 8090"
 depends = ["build"]
-run = "./conduit serve --port 8090 -dev"
+run = "./nanite serve --port 8090 -dev"
 
 [tasks.ui-install]
 description = "Install frontend dependencies"
@@ -41,7 +41,7 @@ run = "cd ui && npm run lint"
 [tasks.clean]
 description = "Remove build artifacts"
 run = """
-rm -f conduit
+rm -f nanite
 rm -rf ui/dist
 """
 

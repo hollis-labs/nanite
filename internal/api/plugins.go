@@ -14,10 +14,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	conduitplugin "github.com/hollis-labs/conduit/internal/plugin"
-	"github.com/hollis-labs/conduit/internal/plugin/subprocess"
-	"github.com/hollis-labs/conduit/internal/store"
-	fplugin "github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/nanite/internal/brand"
+	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
+	"github.com/hollis-labs/nanite/internal/store"
+	fplugin "github.com/hollis-labs/plugin"
 )
 
 // PluginInfo is the JSON representation of a plugin in the management API.
@@ -38,11 +39,11 @@ type pluginManagerState struct {
 	pluginsDir string
 	reposPath  string
 	store      *store.Store
-	pluginHost *conduitplugin.Host
+	pluginHost *naniteplugin.Host
 }
 
 // RegisterPluginManagementRoutes adds plugin management endpoints to the mux.
-func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *store.Store, host *conduitplugin.Host) {
+func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *store.Store, host *naniteplugin.Host) {
 	pms := &pluginManagerState{
 		pluginsDir: pluginsDir,
 		reposPath:  filepath.Join(pluginsDir, "repos.yaml"),
@@ -103,7 +104,7 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 			continue
 		}
 		name := entry.Name()
-		status := conduitplugin.PluginStatus(pms.pluginsDir, name)
+		status := naniteplugin.PluginStatus(pms.pluginsDir, name)
 		if status == "not-installed" {
 			continue
 		}
@@ -113,7 +114,7 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 		if status == "disabled" {
 			manifestPath = filepath.Join(pms.pluginsDir, name, "plugin.yaml.disabled")
 		}
-		manifest, err := conduitplugin.ParseManifest(manifestPath)
+		manifest, err := naniteplugin.ParseManifest(manifestPath)
 		if err != nil {
 			continue
 		}
@@ -157,7 +158,7 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 	}
 
 	// 3. Load repos.yaml to get type info and find uninstalled plugins.
-	repos, err := conduitplugin.LoadRepos(pms.reposPath)
+	repos, err := naniteplugin.LoadRepos(pms.reposPath)
 	if err == nil {
 		// Update type for installed plugins that are in repos.
 		for i, info := range result {
@@ -215,7 +216,7 @@ func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Requ
 
 	// Determine repo URL — check repos.yaml first, fall back to default org.
 	repoURL := fmt.Sprintf("git@github.com:hollis-labs/%s.git", req.Name)
-	if repos, err := conduitplugin.LoadRepos(pms.reposPath); err == nil {
+	if repos, err := naniteplugin.LoadRepos(pms.reposPath); err == nil {
 		for _, repo := range repos {
 			if repo.Name == req.Name {
 				repoURL = fmt.Sprintf("git@github.com:%s.git", repo.Repo)
@@ -275,7 +276,7 @@ func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http
 		return
 	}
 
-	manifest, err := conduitplugin.ParseManifest(srcManifest)
+	manifest, err := naniteplugin.ParseManifest(srcManifest)
 	if err != nil {
 		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin.yaml: %v", err))
 		return
@@ -327,7 +328,7 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 	defer file.Close()
 
 	// Write to a temp file so we can seek (needed for zip).
-	tmpFile, err := os.CreateTemp("", "conduit-plugin-*")
+	tmpFile, err := os.CreateTemp("", "nanite-plugin-*")
 	if err != nil {
 		pms.errorResp(w, http.StatusInternalServerError, "failed to create temp file")
 		return
@@ -343,7 +344,7 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 	tmpFile.Close()
 
 	// Extract to a temp directory first, then validate.
-	extractDir, err := os.MkdirTemp("", "conduit-plugin-extract-*")
+	extractDir, err := os.MkdirTemp("", "nanite-plugin-extract-*")
 	if err != nil {
 		pms.errorResp(w, http.StatusInternalServerError, "failed to create temp dir")
 		return
@@ -386,7 +387,7 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 		return
 	}
 
-	manifest, err := conduitplugin.ParseManifest(filepath.Join(pluginRoot, "plugin.yaml"))
+	manifest, err := naniteplugin.ParseManifest(filepath.Join(pluginRoot, "plugin.yaml"))
 	if err != nil {
 		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin.yaml: %v", err))
 		return
@@ -425,7 +426,7 @@ func (pms *pluginManagerState) handleUninstall(w http.ResponseWriter, r *http.Re
 	}
 
 	// Check repo type — core plugins cannot be uninstalled via API.
-	if repos, err := conduitplugin.LoadRepos(pms.reposPath); err == nil {
+	if repos, err := naniteplugin.LoadRepos(pms.reposPath); err == nil {
 		for _, repo := range repos {
 			if repo.Name == req.Name && repo.Type == "core" {
 				pms.errorResp(w, http.StatusForbidden,
@@ -463,7 +464,7 @@ func (pms *pluginManagerState) handleUninstall(w http.ResponseWriter, r *http.Re
 	pms.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "uninstalled",
 		"plugin":  req.Name,
-		"message": fmt.Sprintf("Plugin %q uninstalled. Restart Conduit to apply.", req.Name),
+		"message": fmt.Sprintf("Plugin %q uninstalled. Restart %s to apply.", req.Name, brand.Name),
 	})
 
 	// No auto-restart — server can't restart itself safely.
@@ -481,7 +482,7 @@ func (pms *pluginManagerState) handleDisable(w http.ResponseWriter, r *http.Requ
 	pms.runPluginUninstallCleanup(manifestPath)
 	pms.unloadPluginFromHost(manifestPath)
 
-	if err := conduitplugin.DisablePlugin(pms.pluginsDir, req.Name); err != nil {
+	if err := naniteplugin.DisablePlugin(pms.pluginsDir, req.Name); err != nil {
 		pms.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -500,7 +501,7 @@ func (pms *pluginManagerState) handleEnable(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := conduitplugin.EnablePlugin(pms.pluginsDir, req.Name); err != nil {
+	if err := naniteplugin.EnablePlugin(pms.pluginsDir, req.Name); err != nil {
 		pms.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -525,18 +526,18 @@ func fileExists(path string) bool {
 // runPluginUninstallCleanup runs the plugin's Uninstall() method to clean up
 // DB artifacts (agent profiles, etc.) so changes are visible immediately.
 func (pms *pluginManagerState) runPluginUninstallCleanup(manifestPath string) {
-	manifest, err := conduitplugin.ParseManifest(manifestPath)
+	manifest, err := naniteplugin.ParseManifest(manifestPath)
 	if err != nil {
 		return
 	}
-	constructor, ok := conduitplugin.LookupConstructor(manifest.Name)
+	constructor, ok := naniteplugin.LookupConstructor(manifest.Name)
 	if !ok {
 		return
 	}
 	p := constructor()
 	if u, ok := p.(fplugin.Uninstallable); ok {
 		// Use a minimal host backed by the live store
-		host := conduitplugin.NewHostWithStore(pms.store)
+		host := naniteplugin.NewHostWithStore(pms.store)
 		if err := u.Uninstall(host); err != nil {
 			log.Printf("plugin-api: uninstall cleanup for %s: %v", manifest.Name, err)
 		}
@@ -549,7 +550,7 @@ func (pms *pluginManagerState) unloadPluginFromHost(manifestPath string) {
 	if pms.pluginHost == nil {
 		return
 	}
-	manifest, err := conduitplugin.ParseManifest(manifestPath)
+	manifest, err := naniteplugin.ParseManifest(manifestPath)
 	if err != nil {
 		return
 	}
@@ -565,13 +566,13 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 	if pms.pluginHost == nil {
 		return
 	}
-	manifest, err := conduitplugin.ParseManifest(manifestPath)
+	manifest, err := naniteplugin.ParseManifest(manifestPath)
 	if err != nil {
 		return
 	}
 
 	// Build config.
-	cfg, err := conduitplugin.NewPluginConfig(manifest.Name, pluginDir)
+	cfg, err := naniteplugin.NewPluginConfig(manifest.Name, pluginDir)
 	if err != nil {
 		log.Printf("plugin-api: config for %s: %v", manifest.Name, err)
 		return
@@ -616,7 +617,7 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 		p = subprocess.NewSubprocessPlugin(pluginDir, resolvedConfig, mgrCfg)
 	} else {
 		// Builtin plugin: use compiled-in constructor.
-		constructor, ok := conduitplugin.LookupConstructor(manifest.Name)
+		constructor, ok := naniteplugin.LookupConstructor(manifest.Name)
 		if !ok {
 			log.Printf("plugin-api: no constructor for %s (not compiled in)", manifest.Name)
 			return

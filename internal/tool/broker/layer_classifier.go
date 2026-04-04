@@ -3,7 +3,7 @@ package broker
 import (
 	"strings"
 
-	"github.com/hollis-labs/conduit/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 // classifierMode is an inferred operating mode from signal scoring.

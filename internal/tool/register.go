@@ -1,7 +1,7 @@
 package tool
 
 import (
-	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/nanite/internal/provider"
 )
 
 // devToolNames are the known dev (core-io + search) tools.
@@ -30,14 +30,14 @@ var generalToolCategories = map[string]string{
 
 // selfToolCategories maps self-service tools to categories.
 var selfToolCategories = map[string]string{
-	"conduit_create_skill":    CategorySession,
-	"conduit_list_skills":     CategorySession,
-	"conduit_update_skill":    CategorySession,
-	"conduit_delete_skill":    CategorySession,
-	"conduit_create_agent":    CategoryAgent,
-	"conduit_list_agents":     CategoryAgent,
-	"conduit_update_agent":    CategoryAgent,
-	"conduit_navigate_engine": CategoryAgent,
+	"nanite_create_skill":    CategorySession,
+	"nanite_list_skills":     CategorySession,
+	"nanite_update_skill":    CategorySession,
+	"nanite_delete_skill":    CategorySession,
+	"nanite_create_agent":    CategoryAgent,
+	"nanite_list_agents":     CategoryAgent,
+	"nanite_update_agent":    CategoryAgent,
+	"nanite_navigate_engine": CategoryAgent,
 }
 
 // WrapExistingTools converts a slice of provider.ToolDefinition from the

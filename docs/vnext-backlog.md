@@ -1,4 +1,4 @@
-# Conduit vNext — Post-MVP Backlog
+# Nanite vNext — Post-MVP Backlog
 
 **Created:** 2026-04-02
 **Status:** Reference
@@ -27,12 +27,12 @@ The Token Usage widget correctly tracks cumulative input/output/cache tokens (An
 ### Memory & Continuity (§16)
 **Decision status:** Mostly decided. Q16.3 (dream process) deferred.
 
-Conduit owns memory lifecycle (extraction, classification, injection). Cortex owns storage. The Memory slot (§4, built in MVP Phase 2) gets populated from Cortex using context-aware views (mode-dependent: chat, code, plan, research, task).
+Nanite owns memory lifecycle (extraction, classification, injection). Cortex owns storage. The Memory slot (§4, built in MVP Phase 2) gets populated from Cortex using context-aware views (mode-dependent: chat, code, plan, research, task).
 
 **Work items:**
 - Add `memory/*` content types to Cortex type registry (6 types: user, feedback, project, reference, chat, agent)
 - Add memory views to Cortex view registry (memory_chat, memory_code, memory_plan, memory_task)
-- Implement `MemoryService` interface in Conduit (`Save`, `Query`, `AssembleSlot`, `Extract`)
+- Implement `MemoryService` interface in Nanite (`Save`, `Query`, `AssembleSlot`, `Extract`)
 - Populate Memory slot from Cortex in `ContextWindow` assembly (MVP Phase 2 foundation)
 - Wire `PostCompact` hook for memory extraction (MVP Phase 2 foundation)
 - Add `memory_read` / `memory_write` tools to tool catalog
@@ -44,11 +44,11 @@ Conduit owns memory lifecycle (extraction, classification, injection). Cortex ow
 ### MCP Config Import/Export
 **Decision status:** Deferred to post-MVP (decided 2026-04-02).
 
-Import `.mcp.json` (Claude Code format) into Conduit's DB-based MCP server config. Export Conduit config as `.mcp.json` for Claude Code compatibility.
+Import `.mcp.json` (Claude Code format) into Nanite's DB-based MCP server config. Export Nanite config as `.mcp.json` for Claude Code compatibility.
 
 **Work items:**
-- `conduit mcp import ~/.mcp.json` — reads Claude Code MCP config, creates DB records via existing `CreateMCPServer` store methods
-- `conduit mcp export` — generates `.mcp.json` from DB records
+- `nanite mcp import ~/.mcp.json` — reads Claude Code MCP config, creates DB records via existing `CreateMCPServer` store methods
+- `nanite mcp export` — generates `.mcp.json` from DB records
 - GUI import button (upload or path)
 
 **Dependencies:** None (DB-based MCP config already complete with full CRUD API)
@@ -56,17 +56,17 @@ Import `.mcp.json` (Claude Code format) into Conduit's DB-based MCP server confi
 ### Claude Code Integration (§13)
 **Decision status:** Decided.
 
-Conduit as a Channel plugin (MCP SSE with `claude/channel` capability). Permission prompt relay. CLI launch helpers.
+Nanite as a Channel plugin (MCP SSE with `claude/channel` capability). Permission prompt relay. CLI launch helpers.
 
 **Work items:**
-- MCP SSE transport for Conduit's MCP server (alongside existing stdio)
+- MCP SSE transport for Nanite's MCP server (alongside existing stdio)
 - `claude/channel` capability declaration + `notifications/claude/channel` event format
-- Reply tool for Claude Code → Conduit commands
-- `--permission-prompt-tool` — Conduit exposes MCP tool for Claude Code approval prompts
+- Reply tool for Claude Code → Nanite commands
+- `--permission-prompt-tool` — Nanite exposes MCP tool for Claude Code approval prompts
 - `--append-system-prompt` compact context pointer generation
-- `conduit claude-launch` convenience command (wraps all flags)
-- `conduit claude-agents` — generates `--agents` JSON from Conduit agent config
-- `conduit claude-config` — generates `.mcp.json` for Claude Code
+- `nanite claude-launch` convenience command (wraps all flags)
+- `nanite claude-agents` — generates `--agents` JSON from Nanite agent config
+- `nanite claude-config` — generates `.mcp.json` for Claude Code
 - HTTP hook server: PreToolUse, PostToolUse, SessionStart/End, Notification
 
 **Dependencies:** MVP Phase 3 (permission system), MCP SSE transport
@@ -106,13 +106,13 @@ Align hooks with Claude Code lifecycle. HTTP hooks for external services. Per-to
 **Decision status:** Open. Q10.1-Q10.3 undecided.
 
 **Open questions:**
-- Build A2A into Conduit core or keep in Engine + access via MCP?
+- Build A2A into Nanite core or keep in Engine + access via MCP?
 - Remote federation auth model (API keys? OAuth? mTLS?)
 - Remote agent discovery (registry? manual config? mDNS?)
 
 **Work items (once decided):**
 - Local A2A: Nexus-style typed messages between sessions/agents, SSE delivery, inbox per agent
-- Remote A2A: MCP-based (connect remote Conduit as MCP server), SSE subscription, HTTP hooks
+- Remote A2A: MCP-based (connect remote Nanite as MCP server), SSE subscription, HTTP hooks
 - CLI agent integration: Channels for Claude Code, MCP stdio for others, wrapper translators
 
 **Dependencies:** MCP SSE transport, Claude Code integration
@@ -120,7 +120,7 @@ Align hooks with Claude Code lifecycle. HTTP hooks for external services. Per-to
 ### Session Lifecycle — Pull-In/Pop-Out (§11)
 **Decision status:** Decided as post-MVP.
 
-- **Pull-in:** Read Claude Code transcript files (`~/.claude/projects/{project}/{sessionId}/`), reconstruct into StructuredMessage format. `conduit session import --claude-session {id}`. Also support `--output-format stream-json` file import for non-Claude CLIs.
+- **Pull-in:** Read Claude Code transcript files (`~/.claude/projects/{project}/{sessionId}/`), reconstruct into StructuredMessage format. `nanite session import --claude-session {id}`. Also support `--output-format stream-json` file import for non-Claude CLIs.
 - **Pop-out:** Export session, launch `claude --resume {id}` in configured terminal (macOS Terminal, iTerm2, tmux).
 - **Idle timeout:** Default 15min, configurable per session/agent/project. Suspend → serialize state → resume transparently.
 - **Claude Agent SDK:** Evaluate for programmatic session management.
@@ -145,7 +145,7 @@ Align hooks with Claude Code lifecycle. HTTP hooks for external services. Per-to
 - Execution backend: subprocess? Goroutine? Remote (Engine)?
 - Status checking: `/tasks` command? Sidebar panel? A2A inbox?
 
-**Concept:** User requests sideloaded task → Conduit spawns isolated execution context → main chat continues → completion notified via SSE/A2A/inbox.
+**Concept:** User requests sideloaded task → Nanite spawns isolated execution context → main chat continues → completion notified via SSE/A2A/inbox.
 
 **Dependencies:** Multi-agent orchestration, A2A messaging
 
@@ -173,17 +173,17 @@ Align hooks with Claude Code lifecycle. HTTP hooks for external services. Per-to
 **Dependencies:** Multi-agent orchestration, Engine scheduler integration
 
 ### Engine Backlog (§20)
-Items for Engine, informed by Conduit vNext decisions:
+Items for Engine, informed by Nanite vNext decisions:
 
-| ID | Item | Conduit Dependency |
+| ID | Item | Nanite Dependency |
 |----|------|--------------------|
-| E1 | Engine MCP SSE transport | MCP SSE in Conduit |
+| E1 | Engine MCP SSE transport | MCP SSE in Nanite |
 | E2 | Runtime permission enforcement | Permission rule engine (MVP §3) |
 | E3 | Slot-based task context | Slot architecture (MVP §2) |
-| E4 | Nexus ↔ Conduit A2A bridge | A2A messaging |
+| E4 | Nexus ↔ Nanite A2A bridge | A2A messaging |
 | E5 | Scheduler wakes sleeping agents | Sleeping agents |
 | E6 | Bootstrap → slot architecture | Slot architecture (MVP §2) |
-| E7 | Quality gates as Conduit plugin | Plugin system |
+| E7 | Quality gates as Nanite plugin | Plugin system |
 | E8 | Run records → Cortex memory | Memory system |
 | E9 | Shared tool spec + permission libs | Tool system (MVP §1), Permissions (MVP §3) |
 | E10 | Cost budget gating | Provider abstraction |
@@ -204,7 +204,7 @@ These are technical debt items best addressed incrementally rather than as a ded
 
 ### agentrc Integration Review (§6b from backend TODO)
 - May be superseded by the MD-based agent system (MVP Phase 5)
-- Review after Phase 5: does the agentrc ecosystem add value beyond what `.conduit/agents/` provides?
+- Review after Phase 5: does the agentrc ecosystem add value beyond what `.nanite/agents/` provides?
 - Options: import agentrc configs, full config loader integration, or AgentSource adapter layer
 - Agent framework adapters (CrewAI, AutoGen, LangGraph) — evaluate demand
 
@@ -224,11 +224,11 @@ These are technical debt items best addressed incrementally rather than as a ded
 
 From the decisions doc appendix — existing Engine tasks related to this work:
 
-**Conduit (selected):**
+**Nanite (selected):**
 - `TASK-20260320-018` — Tiered structured message format
 - `TASK-20260320-087` — Migrate ToolBroker into Nexus
 - `TASK-20260320-088` — Migrate ContextBroker into Nexus
-- `TASK-20260315-017` — Conduit standalone agent memory
+- `TASK-20260315-017` — Nanite standalone agent memory
 - `TASK-20260315-001` — Plugin loader + registry
 - `TASK-20260320-116` — Middleware pipeline executor in plugin host
 - `TASK-20260315-013` — A2A inbox plugin

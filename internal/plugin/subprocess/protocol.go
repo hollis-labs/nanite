@@ -3,7 +3,7 @@ package subprocess
 import (
 	"encoding/json"
 
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/plugin"
 )
 
 // JSON-RPC protocol for subprocess plugins.
@@ -84,7 +84,7 @@ type InitParams struct {
 
 // HostInfo describes the host environment to the plugin.
 type HostInfo struct {
-	Version  string `json:"version"`  // conduit version
+	Version  string `json:"version"`  // nanite version
 	Protocol int    `json:"protocol"` // protocol version (1)
 }
 

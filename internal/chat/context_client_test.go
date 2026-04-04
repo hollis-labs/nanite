@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func newTestBroker(t *testing.T) (*ContextClient, *store.Store) {

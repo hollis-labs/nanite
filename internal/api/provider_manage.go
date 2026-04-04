@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/secrets"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/secrets"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func (a *API) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {

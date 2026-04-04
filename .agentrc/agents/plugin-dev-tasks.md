@@ -1,6 +1,6 @@
-# Conduit Plugin Dev — Task Context
+# Nanite Plugin Dev — Task Context
 
-Boot `conduit-plugin-dev` and load this file for task context.
+Boot `nanite-plugin-dev` and load this file for task context.
 
 ---
 

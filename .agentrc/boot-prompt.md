@@ -3,23 +3,29 @@
 ## Backend Agent
 
 ```
-Boot conduit-backend
+Boot nanite-backend
 
-vNext MVP in progress. Phases 0-4 complete 2026-04-02.
+Rebrand from Conduit → Nanite complete (all 5 waves, 2026-04-03).
+vNext MVP Phases 0-4 complete prior to rebrand.
+Cerberus service live: nanite-api (port 8090), nanite-frontend (port 5176).
 
 KEY DOCS:
+- Rebrand plan: docs/rebrand-plan.md (all 5 waves complete)
+- Brand package: internal/brand/brand.go (single source of truth for app identity)
 - MVP plan: docs/vnext-mvp.md (8 phases, selected work)
 - Post-MVP backlog: docs/vnext-backlog.md
-- Phase 4 plan: ~/.claude/plans/quirky-cooking-blum.md
-- Architecture decisions: /Users/chrispian/Projects-apps/agent-workspaces/exploration/conduit-vnext-decisions.md
 
-COMPLETED:
-- Service layer decomposition (Waves 0-4): internal/service/ with Container, all domain services
-- Phase 0 cleanup: exports.go deleted, helpers consolidated, setupMCPServers deleted (DB-only now), version constant added (internal/version/)
-- Phase 1 — Tool System & Broker vNext: internal/tool/ (Tool interface, builder, YAML loader), internal/tool/broker/ (3-layer progressive resolution, decision logging), migration adapters
-- Phase 2 — Context Window & Compaction: internal/context/ (slot architecture, cache keys, compaction pipeline), provider ModelSelector, ContextService.AssembleSlots(), compaction events
-- Phase 3 — Permission & Approval: internal/permission/ (rule engine, 4 modes, approval flow with SSE + timeout), API endpoints, wired into chat loop
-- Phase 4 — Chat Loop Hardening: loopState struct (chat_loop_state.go), 7 named continuation sites, parallel tool execution (chat_tool_executor.go with WaitGroup), 5-layer iteration control (shouldStop), turn snapshots (debug mode → execution_metrics), AgentConstraints extended (MaxTurns/HardCeiling/ConsecutiveFailCap/IdleTimeout/DebugMode), ToolMetaInfo extended (IsConcurrencySafe/MaxIterations)
+REBRAND STATUS:
+- Wave 0: Old Nanite → Nil, plugin contract → ~/Projects-apps/plugin/, new repo cloned
+- Wave 1: Brand package, Go module (github.com/hollis-labs/nanite), 107 files rewritten, cmd/nanite/
+- Wave 2: Env vars (NANITE_*), config/nanite.yaml, Makefile, Docker, Cerberus (nanite-api)
+- Wave 3: Frontend UI strings — DONE
+- Wave 4: Docs/ADRs/agentrc — DONE
+
+COMPLETED (pre-rebrand):
+- Service layer decomposition (Waves 0-4): internal/service/ with Container
+- Phase 0-4 of vNext: tool system, context window, permissions, chat loop hardening
+- Plugin system: SDK, discovery, events, config, connectors, scaffold, generator
 
 CURRENT: Phase 5 — Agent System (decisions doc §8)
 - MD-based agent definitions, file discovery (6 locations), seed.go cleanup, worktree isolation
@@ -29,10 +35,8 @@ PRINCIPLES:
 - Greenfield modules alongside old code, migrate when ready
 - go build + go vet + go test clean after every task
 - Always use cerberus_rebuild for deployment, not go build directly
-- Quality over speed. We are building polished software, not rushing to check boxes.
-- Favor flexible, maintainable patterns (Adapter, Pipeline, etc.) that make future changes cheap. This is an established project convention.
-- Tech debt: fix it now, or explicitly log it for deferral. Never silently ignore it.
-- Do it right the first time. Shortcuts only with clear, justified rationale.
+- Quality over speed. Polished software, maintainable patterns.
+- Brand package: use brand.* constants, never hardcode app name/identity
 
 Pre-existing test failures (not blockers):
 - server.TestAuthMiddlewareEnabled: returns 200 instead of 401
@@ -41,127 +45,29 @@ Pre-existing test failures (not blockers):
 ## Frontend Agent
 
 ```
-Boot conduit-frontend
+Boot nanite-frontend
 
-All Beta Release TODO (§1-9), Plugin Evolution (Phases 1-8, except 7), and all 6 anti-patterns resolved.
-vNext Phases 0-4 frontend components completed 2026-04-03.
-Working on feature/vnext-phases-0-4 branch.
-
-CRITICAL — Read these before touching any code:
-- memory: feedback_ui_design_patterns.md — THE design system reference
-- .agentrc/agents/frontend.md — full project context (includes Beta TODO + anti-patterns)
-- CLAUDE.md — envelope system warnings
-
-COMPLETED (vNext frontend, 2026-04-03):
-- P0 — Permission Approval: ApprovalCard (inline chat card with Allow Once/Session + Deny + 60s countdown + auto-deny), approval_request SSE wired into useChat + useChatStore, permission mode selector in PreferencesPanel (4 modes), yolo toggle in ChatComposer
-- P1 — Broker Decision Inspector: BrokerDecisionsPanel (collapsible debug panel, layer badges, expand-on-click for tools + signals)
-- P2 — Context & Compaction: CompactionDivider (inline in transcript), SlotInspectorPanel (context slot table with usage bar)
-- P3 — Chat Loop Debug: TurnSnapshotPanel (per-turn execution data), IterationLimitWarning banner
-- Debug panels live in ui/src/components/chat/debug/, visible in RightRail "Debug" tab (developer_mode only)
-- Agent debug mode toggle on AgentDetailView Overview tab (writes agent.settings JSON)
-- Tool call drawer: session-scoped retention (Map<sessionId, {calls, lastActivity}>), 15min prune, 50-call cap, empty state, tool detail field, themed scrollbar, tab-attached-to-drawer UX
-
-New types added: PermissionMode, ApprovalRequest, PendingApproval, BrokerDecision, TurnSnapshot, EnvelopeApprovalRequest (renamed from envelope's ApprovalRequest)
-New API endpoints wired: respondToApproval, getPermissionMode, setPermissionMode, getBrokerDecisions, getExecutionMetrics
-New hook: usePermissionMode (shared by PreferencesPanel + ChatComposer)
-
-All 6 anti-patterns resolved:
-1. Loose TypeScript (as any) — removed
-2. Duplicate API — unified listAgents returns AgentProfile[]
-3. Long deps (17→2) — store actions via getState()
-4. Map mutations — immutable copies
-5. Magic event strings — SSE constants
-6. Global errorCounter — removed
-
-Remaining future work:
-- Phase 7: Dynamic plugin loading (subprocess + JSON-RPC backend, URL ESM frontend)
-- Additional envelope card designs as new plugins are built
-- UI/UX polish passes (chat sidebar simplification next)
-
-shadcn components available (23 total):
-  alert-dialog, avatar, badge, button, card, command, context-menu,
-  dialog, dropdown-menu, empty, input, kbd, popover, scroll-area,
-  select, separator, sheet, skeleton, spinner, switch, tabs, textarea, tooltip
-```
-
-## Phase 7 — Backend Session Prompt
-
-```
-Boot conduit-backend
-
-TASK: Phase 7 backend — Dynamic Plugin Loading via subprocess + JSON-RPC
-
-This is the backend half of Phase 7 from the plugin evolution plan.
-See docs/architecture/plugin-evolution-plan.md for full context.
-
-CURRENT STATE:
-- Phases 1-6, 8 complete. Plugins are Go code compiled into the binary.
-- Plugin host interface: internal/chat/plugin.go (Host interface, PluginManager)
-- Plugin SDK: internal/plugin/sdk/ (RegisterCommand, RegisterEnvelope, RegisterSlot, etc.)
-- Builtin plugins: internal/plugin/builtin/ (bookmarks, giphy, sprint-planning, etc.)
-- Plugin management API: internal/api/plugins.go (install/uninstall/enable/disable)
-- Plugin manifests: plugins/*/plugin.yaml
-
-GOAL: Allow plugins to run as separate processes communicating via JSON-RPC.
-- Plugin subprocess launcher in internal/plugin/subprocess/
-- JSON-RPC protocol (stdin/stdout or unix socket) for Host ↔ Plugin communication
-- Plugin lifecycle: start, health check, restart on crash, graceful shutdown
-- The Host interface methods (RegisterCommand, RegisterEnvelope, EmitEvent, etc.)
-  must be callable over JSON-RPC so external plugins can use the same SDK
-- Security: process isolation, resource limits, timeout enforcement
-
-DESIGN CONSTRAINTS:
-- Must be backward-compatible — existing compiled-in plugins keep working unchanged
-- JSON-RPC transport should be swappable (stdio initially, unix socket later)
-- Plugin process receives its config via JSON-RPC init handshake
-- Events from host to plugin: JSON-RPC notifications (no response expected)
-- Plugin manifest (plugin.yaml) gains a `runtime: subprocess` field
-
-DO NOT touch frontend code. Backend only.
-Always use cerberus_rebuild for deployment, not go build directly.
-```
-
-## Phase 7 — Frontend Session Prompt
-
-```
-Boot conduit-frontend
-
-TASK: Phase 7 frontend — Dynamic Plugin UI Loading via URL ESM
-
-This is the frontend half of Phase 7 from the plugin evolution plan.
-See docs/architecture/plugin-evolution-plan.md for full context.
-
-CURRENT STATE:
-- All plugin UI is baked in at build time via generated registries:
-  - ui/src/generated/plugin-envelopes.ts — lazy(() => import()) for envelope cards
-  - ui/src/generated/plugin-widgets.ts — lazy(() => import()) for widgets
-  - ui/src/generated/plugin-slot-components.ts — lazy(() => import()) for slot views
-  - ui/src/generated/plugin-config-components.ts — custom config field overrides
-- ADR-002: single registry with source field (core vs plugin)
-- Scripts: scripts/generate-plugin-imports.mjs regenerates plugin entries at build time
-- Envelope/widget components live in ui/src/components/chat/envelopes/ and ui/src/components/plugins/
-
-GOAL: Allow plugins to provide UI components loaded at runtime (not build time).
-- URL-based ESM loading — dynamically import() plugin UI modules from a URL
-- Backend will serve plugin UI bundles (e.g., GET /api/plugins/{name}/ui/bundle.js)
-- Runtime component registry — register envelope/widget components from loaded ESM
-- Plugin dev server integration — hot-reload plugin UI during development
-- Fallback: if dynamic load fails, fall back to build-time registry entry if one exists
-
-DESIGN CONSTRAINTS:
-- Must be backward-compatible — existing build-time registries keep working
-- Dynamic imports happen AFTER the plugin list loads (api.listPlugins)
-- Each plugin ESM module exports a register() function that receives a registry API
-- The registry API lets plugins call: registerEnvelope(type, component),
-  registerWidget(id, component), registerSlotComponent(name, component)
-- Security: CSP-safe loading, no eval(), modules served from same origin only
-- Error boundary per dynamically loaded component (don't crash the app)
-- Recover mode skips all dynamic loads (core-only)
+Rebrand from Conduit → Nanite — backend complete, frontend Wave 3 in progress.
 
 CRITICAL — Read these before touching any code:
 - memory: feedback_ui_design_patterns.md — THE design system reference
 - .agentrc/agents/frontend.md — full project context
-- CLAUDE.md — envelope system warnings (registries are NOT auto-generated despite header)
+- CLAUDE.md — envelope system warnings
 
-DO NOT touch backend Go code. Frontend only.
+REBRAND CONTEXT:
+- Backend fully rebranded: module github.com/hollis-labs/nanite
+- Envelope protocol renamed: nanite-envelope (was conduit-envelope)
+- Tool names renamed: nanite_* (was conduit_*)
+- Env vars renamed: NANITE_* (was CONDUIT_*)
+- Brand package at internal/brand/brand.go — frontend should mirror with ui/src/brand.ts
+
+COMPLETED (vNext frontend, 2026-04-03):
+- P0-P3 debug panels, approval cards, broker inspector, compaction divider
+- Tool call drawer with session-scoped retention
+- All 6 anti-patterns resolved
+- 23 shadcn components installed
+
+Remaining future work:
+- Phase 7: Dynamic plugin loading (subprocess + JSON-RPC backend, URL ESM frontend)
+- Additional envelope card designs as new plugins are built
 ```

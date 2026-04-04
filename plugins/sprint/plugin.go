@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/mcp"
-	hostplugin "github.com/hollis-labs/conduit/internal/plugin"
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/mcp"
+	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/plugin"
 )
 
 func init() {
@@ -16,7 +16,7 @@ func init() {
 }
 
 // SprintPlugin provides sprint planning, backlog management, and Volon
-// integration as a self-contained Conduit plugin.
+// integration as a self-contained Nanite plugin.
 type SprintPlugin struct {
 	host       plugin.Host
 	mcpManager *mcp.Manager

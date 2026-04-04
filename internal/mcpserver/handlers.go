@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	condmcp "github.com/hollis-labs/conduit/internal/mcp"
+	condmcp "github.com/hollis-labs/nanite/internal/mcp"
 )
 
 // extractText concatenates all text content blocks from a ToolResult.
@@ -25,7 +25,7 @@ func extractText(result *condmcp.ToolResult) string {
 }
 
 // convertEnvelopeMarkers replaces <!--ENVELOPE_DATA:{...}:ENVELOPE_DATA-->
-// markers with ```conduit-envelope fenced blocks so the engine's
+// markers with ```nanite-envelope fenced blocks so the engine's
 // ParseEnvelopes() can extract them from streamed PTY output.
 func convertEnvelopeMarkers(text string) string {
 	const startTag = "<!--ENVELOPE_DATA:"
@@ -42,7 +42,7 @@ func convertEnvelopeMarkers(text string) string {
 			break
 		}
 		payload := tail[:end]
-		replacement := "\n\n```conduit-envelope\n" + payload + "\n```"
+		replacement := "\n\n```nanite-envelope\n" + payload + "\n```"
 		text = text[:start] + replacement + tail[end+len(endTag):]
 	}
 	return text

@@ -35,7 +35,7 @@ let historyIndex = -1
 // Load persisted history from localStorage once (guarded for non-browser contexts)
 if (typeof window !== 'undefined') {
   try {
-    const stored = localStorage.getItem('conduit:command-history')
+    const stored = localStorage.getItem('nanite:command-history')
     if (stored) commandHistory = JSON.parse(stored)
   } catch { /* ignore */ }
 }
@@ -47,7 +47,7 @@ function pushHistory(text: string) {
   if (commandHistory.length > MAX_HISTORY) commandHistory.length = MAX_HISTORY
   historyIndex = -1
   try {
-    localStorage.setItem('conduit:command-history', JSON.stringify(commandHistory))
+    localStorage.setItem('nanite:command-history', JSON.stringify(commandHistory))
   } catch { /* ignore */ }
 }
 
@@ -172,7 +172,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         listItem: false,
       }),
       Placeholder.configure({
-        placeholder: 'Message Conduit... (Enter to send, / for commands, @ for files)',
+        placeholder: 'Message Nanite... (Enter to send, / for commands, @ for files)',
       }),
       SlashCommandExtension.configure({
         suggestion: {
@@ -356,7 +356,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         />
       </div>
       <p className="text-center text-[11px] text-fg-faint mt-2">
-        Conduit may produce inaccurate information.
+        Nanite may produce inaccurate information.
       </p>
     </div>
   )

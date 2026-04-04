@@ -1,9 +1,9 @@
-# ADR-019: Volon GUI Chat Deprecation — Converge on Conduit
+# ADR-019: Volon GUI Chat Deprecation — Converge on Nanite
 
 **Status:** Accepted
 **Date:** 2026-03-14
 **Deciders:** chrispian, Mentat
-**Relates to:** ADR-013 (Conduit Separation), ADR-016 (Carrier Absorption)
+**Relates to:** ADR-013 (Nanite Separation), ADR-016 (Carrier Absorption)
 
 ## Context
 
@@ -11,11 +11,11 @@ During a portfolio-wide sweep, we identified that two chat systems are being bui
 
 1. **Volon GUI Server** — 67 HTTP endpoints including multi-provider chat (Anthropic, OpenAI, OpenRouter, OpenZen), SSE streaming, agent profiles, prompt templates, voice profiles, workflows, and scheduler control.
 
-2. **Conduit (Mentat)** — Multi-provider chat (Anthropic, OpenAI, Ollama), SSE streaming, MCP tool integration, progressive tool discovery, context brokering, and workflow engine.
+2. **Nanite (Mentat)** — Multi-provider chat (Anthropic, OpenAI, Ollama), SSE streaming, MCP tool integration, progressive tool discovery, context brokering, and workflow engine.
 
 Both implement: provider abstractions with retry/circuit-breaker, streaming SSE, agent profiles with modes, prompt template composition, and workflow execution. This is a significant duplication of effort.
 
-ADR-013 established that Conduit is the chat harness. But Volon GUI's chat surface continues to grow.
+ADR-013 established that Nanite is the chat harness. But Volon GUI's chat surface continues to grow.
 
 ## Decision
 
@@ -29,34 +29,34 @@ Volon GUI Server retains:
 - Administrative operations (audit, prune, migrate)
 
 Volon GUI Server sheds:
-- Multi-provider chat (LLM calls) → Conduit
-- Prompt template composition → Conduit (or shared lib)
-- Voice profiles → Conduit (or shared lib)
-- Workflow execution → Conduit
+- Multi-provider chat (LLM calls) → Nanite
+- Prompt template composition → Nanite (or shared lib)
+- Voice profiles → Nanite (or shared lib)
+- Workflow execution → Nanite
 
 ### Extract shared capabilities
 
 Before removing from Volon, extract to `fe-core` or standalone packages:
 - **Provider abstraction** (Anthropic, OpenAI + circuit breaker, retry, rate tracking) → `fe-core/providers`
-- **Voice profiles** (schema, validation, exemplars, rules) → `fe-core/voiceprofile` or Conduit internal
-- **Prompt template composition** → Conduit internal (or shared if Hadron needs it)
+- **Voice profiles** (schema, validation, exemplars, rules) → `fe-core/voiceprofile` or Nanite internal
+- **Prompt template composition** → Nanite internal (or shared if Hadron needs it)
 
-### Volon GUI embeds Conduit (optional future)
+### Volon GUI embeds Nanite (optional future)
 
-If Volon GUI needs chat capabilities for OPS workflows, it can embed Conduit as an iframe/component rather than maintaining its own chat engine.
+If Volon GUI needs chat capabilities for OPS workflows, it can embed Nanite as an iframe/component rather than maintaining its own chat engine.
 
 ## Consequences
 
 ### Positive
 - Single chat engine to maintain and improve
-- Voice profiles, provider resilience, and prompt templates benefit from Conduit's richer context (MCP, tool broker)
+- Voice profiles, provider resilience, and prompt templates benefit from Nanite's richer context (MCP, tool broker)
 - Volon GUI becomes focused and lean (OPS control plane)
-- Clear ownership: Conduit = conversation, Volon = orchestration
+- Clear ownership: Nanite = conversation, Volon = orchestration
 
 ### Negative
 - Migration effort to extract providers and voice profiles
-- Volon GUI loses self-contained demo capability (needs Conduit running for chat)
-- Users currently using Volon GUI chat need to switch to Conduit
+- Volon GUI loses self-contained demo capability (needs Nanite running for chat)
+- Users currently using Volon GUI chat need to switch to Nanite
 
 ### Risks
 - Provider abstraction may have Volon-specific assumptions that don't generalize cleanly
@@ -65,6 +65,6 @@ If Volon GUI needs chat capabilities for OPS workflows, it can embed Conduit as 
 ## Migration Path
 
 1. **Phase 1**: Extract provider abstraction to fe-core (both consume it)
-2. **Phase 2**: Migrate voice profiles to Conduit (or fe-core)
+2. **Phase 2**: Migrate voice profiles to Nanite (or fe-core)
 3. **Phase 3**: Remove chat endpoints from Volon GUI
-4. **Phase 4**: Optional — embed Conduit in Volon GUI for OPS chat needs
+4. **Phase 4**: Optional — embed Nanite in Volon GUI for OPS chat needs

@@ -3,7 +3,7 @@ package broker
 import (
 	"sort"
 
-	"github.com/hollis-labs/conduit/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 // layerRules is Layer 2: deterministic, zero-cost rule-based resolution.

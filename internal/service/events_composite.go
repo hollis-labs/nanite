@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/chat"
+	"github.com/hollis-labs/nanite/internal/chat"
 )
 
 // CompositeEmitter fans out events to ActivityEmitter (Volon GUI) and

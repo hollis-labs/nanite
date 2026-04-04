@@ -13,22 +13,22 @@ import (
 	"strings"
 	"time"
 
-	conduitplugin "github.com/hollis-labs/conduit/internal/plugin"
-	"github.com/hollis-labs/conduit/internal/store"
+	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // catalogState holds dependencies for catalog API handlers.
 type catalogState struct {
 	store      *store.Store
-	fetcher    *conduitplugin.CatalogFetcher
+	fetcher    *naniteplugin.CatalogFetcher
 	pluginsDir string
-	pluginHost *conduitplugin.Host
+	pluginHost *naniteplugin.Host
 }
 
 // RegisterCatalogRoutes adds catalog management endpoints to the mux.
-func RegisterCatalogRoutes(mux *http.ServeMux, s *store.Store, pluginsDir string, host *conduitplugin.Host) *conduitplugin.CatalogFetcher {
+func RegisterCatalogRoutes(mux *http.ServeMux, s *store.Store, pluginsDir string, host *naniteplugin.Host) *naniteplugin.CatalogFetcher {
 	cacheDir := filepath.Join(pluginsDir, ".cache")
-	fetcher := conduitplugin.NewCatalogFetcher(5*time.Minute, cacheDir)
+	fetcher := naniteplugin.NewCatalogFetcher(5*time.Minute, cacheDir)
 
 	cs := &catalogState{
 		store:      s,
@@ -192,7 +192,7 @@ func (cs *catalogState) handleSetSourceKey(w http.ResponseWriter, r *http.Reques
 
 // catalogBrowseEntry extends the merged catalog entry with install status.
 type catalogBrowseEntry struct {
-	conduitplugin.MergedCatalogEntry
+	naniteplugin.MergedCatalogEntry
 	Installed        bool   `json:"installed"`
 	InstalledVersion string `json:"installed_version,omitempty"`
 	UpdateAvailable  bool   `json:"update_available,omitempty"`
@@ -206,9 +206,9 @@ func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Convert store model to fetcher model.
-	fetcherSources := make([]conduitplugin.CatalogSource, len(sources))
+	fetcherSources := make([]naniteplugin.CatalogSource, len(sources))
 	for i, s := range sources {
-		fetcherSources[i] = conduitplugin.CatalogSource{
+		fetcherSources[i] = naniteplugin.CatalogSource{
 			ID: s.ID, Name: s.Name, URL: s.URL, Priority: s.Priority, Enabled: s.Enabled, PublicKey: s.PublicKey,
 		}
 	}
@@ -228,7 +228,7 @@ func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Reque
 		manifestPath := filepath.Join(cs.pluginsDir, entry.Name, "plugin.yaml")
 		if fileExists(manifestPath) {
 			be.Installed = true
-			if m, err := conduitplugin.ParseManifest(manifestPath); err == nil {
+			if m, err := naniteplugin.ParseManifest(manifestPath); err == nil {
 				be.InstalledVersion = m.Version
 				if m.Version != entry.Version {
 					be.UpdateAvailable = true
@@ -264,9 +264,9 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	fetcherSources := make([]conduitplugin.CatalogSource, len(sources))
+	fetcherSources := make([]naniteplugin.CatalogSource, len(sources))
 	for i, s := range sources {
-		fetcherSources[i] = conduitplugin.CatalogSource{
+		fetcherSources[i] = naniteplugin.CatalogSource{
 			ID: s.ID, Name: s.Name, URL: s.URL, Priority: s.Priority, Enabled: s.Enabled, PublicKey: s.PublicKey,
 		}
 	}
@@ -277,7 +277,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var entry *conduitplugin.MergedCatalogEntry
+	var entry *naniteplugin.MergedCatalogEntry
 	for _, e := range entries {
 		if e.Name == req.Name {
 			entry = &e
@@ -302,7 +302,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Download the archive.
-	tmpFile, err := os.CreateTemp("", "conduit-catalog-*.tar.gz")
+	tmpFile, err := os.CreateTemp("", "nanite-catalog-*.tar.gz")
 	if err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, "failed to create temp file")
 		return
@@ -341,7 +341,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	tmpFile.Close()
 
 	// Verify checksum if present.
-	if err := conduitplugin.VerifyChecksum(tmpPath, entry.Checksum); err != nil {
+	if err := naniteplugin.VerifyChecksum(tmpPath, entry.Checksum); err != nil {
 		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("checksum verification failed: %v", err))
 		return
 	}
@@ -349,7 +349,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	// Verify signature if the source has a trusted public key.
 	sourcePublicKey := findSourcePublicKey(sources, entry.SourceID)
 	if sourcePublicKey != "" && entry.Signature != "" {
-		if err := conduitplugin.VerifySignature(tmpPath, sourcePublicKey, entry.Signature); err != nil {
+		if err := naniteplugin.VerifySignature(tmpPath, sourcePublicKey, entry.Signature); err != nil {
 			cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("signature verification failed: %v", err))
 			return
 		}
@@ -359,7 +359,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Extract the archive.
-	extractDir, err := os.MkdirTemp("", "conduit-catalog-extract-*")
+	extractDir, err := os.MkdirTemp("", "nanite-catalog-extract-*")
 	if err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, "failed to create extract dir")
 		return

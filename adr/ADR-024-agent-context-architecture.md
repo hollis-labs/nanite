@@ -90,6 +90,6 @@ Negative:
 
 - ADR-022: Special Agent Integration Architecture (native/MCP/CLI layers)
 - ADR-015: Central Agent Filesystem
-- ADR-013: Conduit Separation (Mentat = agent, Conduit = harness)
+- ADR-013: Nanite Separation (Mentat = agent, Nanite = harness)
 - Claude Code memory system: `autoMemoryDirectory`, `CLAUDE_CODE_REMOTE_MEMORY_DIR`
 - Existing skills: /reorient, /session-handoff, /adr

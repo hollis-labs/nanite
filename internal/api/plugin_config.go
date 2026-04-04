@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/hollis-labs/conduit/internal/secrets"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/secrets"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // pluginSecretKeyName returns the keychain key for a plugin's secret field.

@@ -421,7 +421,7 @@ export function PluginManager() {
             <p className="text-fg-secondary text-sm mb-6">
               Are you sure you want to uninstall{' '}
               <span className="font-medium text-fg">{confirmUninstall}</span>?
-              This will remove the plugin and restart Conduit.
+              This will remove the plugin and restart Nanite.
             </p>
             <div className="flex gap-3">
               <Button

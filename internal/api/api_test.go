@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/service"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func newTestAPI(t *testing.T) (*API, *http.ServeMux) {

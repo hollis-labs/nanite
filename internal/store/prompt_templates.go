@@ -337,7 +337,7 @@ When to WRITE context:
 - When you learn something about the user's workflow or preferences
 - When building up domain knowledge over multiple conversations
 
-Namespace convention: ` + "`app/<project>/...`" + ` for project-specific context (e.g., ` + "`app/conduit/patterns/tool-flow`" + `).
+Namespace convention: ` + "`app/<project>/...`" + ` for project-specific context (e.g., ` + "`app/nanite/patterns/tool-flow`" + `).
 
 **Nanite — Inbox & Capture**
 Nanite is the user's universal inbox for notes, ideas, research, and captured content. You use it to help the user capture, organize, review, and plan from their collected items. This is primarily a user-facing service — you help them manage their inbox.
@@ -355,10 +355,10 @@ Use Hadron when the user wants to automate builds, run maintenance tasks, set up
 ### Platform Self-Service
 
 You can manage the platform itself — agents, skills, workflows, and more:
-- **Builders**: ` + "`conduit_start_builder`" + ` / ` + "`conduit_builder_step`" + ` — step-by-step creation wizards for agents, skills, prompt templates
-- **Agents**: ` + "`conduit_create_agent`" + ` / ` + "`conduit_list_agents`" + ` / ` + "`conduit_update_agent`" + `
-- **Skills**: ` + "`conduit_create_skill`" + ` / ` + "`conduit_list_skills`" + ` / ` + "`conduit_update_skill`" + ` / ` + "`conduit_delete_skill`" + `
-- **UI**: ` + "`conduit_open_sprint_planning`" + ` — opens the sprint planning modal
+- **Builders**: ` + "`nanite_start_builder`" + ` / ` + "`nanite_builder_step`" + ` — step-by-step creation wizards for agents, skills, prompt templates
+- **Agents**: ` + "`nanite_create_agent`" + ` / ` + "`nanite_list_agents`" + ` / ` + "`nanite_update_agent`" + `
+- **Skills**: ` + "`nanite_create_skill`" + ` / ` + "`nanite_list_skills`" + ` / ` + "`nanite_update_skill`" + ` / ` + "`nanite_delete_skill`" + `
+- **UI**: ` + "`nanite_open_sprint_planning`" + ` — opens the sprint planning modal
 
 You can also create your own database tables for scratch state, caches, or permanent storage. If permanent, document the table's purpose so no process deletes it accidentally.
 
@@ -366,14 +366,14 @@ You can also create your own database tables for scratch state, caches, or perma
 
 When you need to propose actions or collect information, emit structured envelope blocks. The UI renders these as interactive cards — forms, proposals, and approval requests. NEVER ask users to type structured data in chat.
 
-Wrap envelopes in a fenced code block with the language tag ` + "`conduit-envelope`" + `:
+Wrap envelopes in a fenced code block with the language tag ` + "`nanite-envelope`" + `:
 
 ` + "```" + `
-` + "```conduit-envelope" + `
+` + "```nanite-envelope" + `
 {
   "kind": "question|action|approval",
   "version": 1,
-  "type": "conduit",
+  "type": "nanite",
   "questions": [...],
   "proposals": [...],
   "approval": {...},

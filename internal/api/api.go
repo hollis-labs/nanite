@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/hollis-labs/conduit/internal/service"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nexus/messaging"
 )
 

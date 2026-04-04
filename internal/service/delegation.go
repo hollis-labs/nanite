@@ -11,17 +11,17 @@ import (
 	feotel "github.com/hollis-labs/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // DelegateTask implements ChatService. It spawns a worker session, sends the
 // task, waits for completion, and returns the result.
 func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationRequest) (*chat.DelegationResult, error) {
-	ctx, span := feotel.StartSpan(ctx, "conduit.delegateTask")
+	ctx, span := feotel.StartSpan(ctx, "nanite.delegateTask")
 	span.SetAttributes(
-		attribute.String("conduit.delegation.parent_session", req.ParentSessionID),
-		attribute.String("conduit.delegation.title", req.Title),
+		attribute.String("nanite.delegation.parent_session", req.ParentSessionID),
+		attribute.String("nanite.delegation.title", req.Title),
 	)
 	defer span.End()
 

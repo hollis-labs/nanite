@@ -28,8 +28,8 @@ See [TRADEMARK.md](./TRADEMARK.md) for details.
 ## Quick Start
 
 ```bash
-go build ./cmd/conduit/
-./conduit serve -port 8090 -db ./conduit.db -dev
+go build ./cmd/nanite/
+./nanite serve -port 8090 -db ./nanite.db -dev
 ```
 
 See `docs/` for architecture and demo script.

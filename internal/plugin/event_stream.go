@@ -1,7 +1,7 @@
 package plugin
 
 import (
-	pluginsdk "github.com/hollis-labs/fragments-engine/plugin"
+	pluginsdk "github.com/hollis-labs/plugin"
 )
 
 // SubscribeEvents creates a buffered channel that receives all emitted events.

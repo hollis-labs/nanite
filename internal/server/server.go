@@ -7,25 +7,25 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/api"
-	"github.com/hollis-labs/conduit/internal/version"
-	conduitplugin "github.com/hollis-labs/conduit/internal/plugin"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/api"
+	"github.com/hollis-labs/nanite/internal/version"
+	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// Server is the HTTP server for Conduit Chat.
+// Server is the HTTP server for Nanite Chat.
 type Server struct {
 	store      *store.Store
 	port       int
 	dev        bool
 	mux        *http.ServeMux
 	api        *api.API
-	pluginHost *conduitplugin.Host
+	pluginHost *naniteplugin.Host
 	pluginsDir string
 }
 
 // New creates a new Server wired to the given store and API.
-func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *conduitplugin.Host) *Server {
+func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugin.Host) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
 		store:      s,
@@ -59,7 +59,7 @@ func (s *Server) SetPluginsDir(dir string) {
 func (s *Server) ListenAndServe() error {
 	handler := s.recoverMiddleware(s.loggingMiddleware(basicAuthMiddleware(s.corsMiddleware(s.mux))))
 	addr := fmt.Sprintf(":%d", s.port)
-	log.Printf("conduit listening on %s (dev=%v)", addr, s.dev)
+	log.Printf("nanite listening on %s (dev=%v)", addr, s.dev)
 	return http.ListenAndServe(addr, handler)
 }
 
@@ -205,7 +205,7 @@ func (s *Server) handleEmitEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	event := conduitplugin.NewEvent(req.EventType, req.Source, conduitplugin.EventData{
+	event := naniteplugin.NewEvent(req.EventType, req.Source, naniteplugin.EventData{
 		SessionID: req.SessionID,
 	})
 

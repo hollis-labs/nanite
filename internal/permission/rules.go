@@ -23,7 +23,7 @@ type RuleSet struct {
 	Rules []Rule `yaml:"rules"`
 }
 
-// PermissionsFile is the YAML structure for .conduit/permissions.yaml.
+// PermissionsFile is the YAML structure for .nanite/permissions.yaml.
 type PermissionsFile struct {
 	Permissions RuleSet `yaml:"permissions"`
 }

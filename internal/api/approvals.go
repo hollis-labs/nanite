@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/hollis-labs/conduit/internal/permission"
+	"github.com/hollis-labs/nanite/internal/permission"
 )
 
 // handleRespondApproval handles POST /api/sessions/{id}/approvals/{requestId}.

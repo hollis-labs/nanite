@@ -38,7 +38,7 @@ type yamlExecute struct {
 }
 
 // LoadYAMLTools discovers and loads YAML tool definitions from the standard
-// locations: .conduit/tools/*.yaml (project) and ~/.conduit/tools/*.yaml (user).
+// locations: .nanite/tools/*.yaml (project) and ~/.nanite/tools/*.yaml (user).
 // workingDir is the project root; if empty, the current directory is used.
 func LoadYAMLTools(workingDir string) []Tool {
 	if workingDir == "" {
@@ -48,13 +48,13 @@ func LoadYAMLTools(workingDir string) []Tool {
 	var tools []Tool
 
 	// Project-level tools.
-	projectDir := filepath.Join(workingDir, ".conduit", "tools")
+	projectDir := filepath.Join(workingDir, ".nanite", "tools")
 	tools = append(tools, loadYAMLDir(projectDir)...)
 
 	// User-level tools.
 	home, err := os.UserHomeDir()
 	if err == nil {
-		userDir := filepath.Join(home, ".conduit", "tools")
+		userDir := filepath.Join(home, ".nanite", "tools")
 		tools = append(tools, loadYAMLDir(userDir)...)
 	}
 

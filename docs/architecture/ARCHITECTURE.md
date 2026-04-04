@@ -1,10 +1,10 @@
-# CONDUIT — Architecture Document
+# NANITE — Architecture Document
 
 **Version:** 2.0
 **Date:** 2026-03-15
 **Status:** Active
 
-> CONDUIT is the agent-agnostic chat harness. Mentat is a Special Agent that runs inside it. See ADR-013 for the separation rationale.
+> NANITE is the agent-agnostic chat harness. Mentat is a Special Agent that runs inside it. See ADR-013 for the separation rationale.
 
 ---
 
@@ -12,7 +12,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     CONDUIT Binary                          │
+│                     NANITE Binary                           │
 │                                                             │
 │  ┌──────────────────────┐  ┌─────────────────────────────┐  │
 │  │   Go API Server      │  │   Embedded React SPA        │  │
@@ -40,7 +40,7 @@
 │             │                                               │
 │  ┌──────────┴───────────┐                                   │
 │  │   SQLite (modernc)   │                                   │
-│  │   mentat.db     │                                   │
+│  │   nanite.db     │                                   │
 │  └──────────────────────┘                                   │
 └─────────────┬───────────────────────────────────────────────┘
               │
@@ -56,20 +56,20 @@
 
 ## 1.1 Agent Profiles
 
-Special Agent profiles are defined as YAML files in `config/agents/*.yaml`. Each file declares the agent's identity, capabilities, modes, MCP server bindings, and tool permissions. CONDUIT loads these at startup and seeds them into the `agent_profiles` and `agent_modes` tables.
+Special Agent profiles are defined as YAML files in `config/agents/*.yaml`. Each file declares the agent's identity, capabilities, modes, MCP server bindings, and tool permissions. NANITE loads these at startup and seeds them into the `agent_profiles` and `agent_modes` tables.
 
 Current profiles:
 - **mentat.yaml** — Cognitive partner. `can_execute: false`. Delegates to workers. Has access to Volon, Cortex, Hadron, Cerberus MCP servers.
 - **worker.yaml** — General execution agent. `can_execute: true`. Full tool access. Spawned by lead agents for task scopes.
 
-Per ADR-013, Mentat transitions from being the application to being an agent that runs inside CONDUIT. The YAML profiles are the canonical source; the SQLite seed data (`internal/store/seed.go`) provides backward-compatible defaults but will converge on loading from these files.
+Per ADR-013, Mentat transitions from being the application to being an agent that runs inside NANITE. The YAML profiles are the canonical source; the SQLite seed data (`internal/store/seed.go`) provides backward-compatible defaults but will converge on loading from these files.
 
 ## 2. Go Backend Architecture
 
 ### 2.1 Package Layout
 
 ```
-cmd/conduit/
+cmd/nanite/
   main.go                    -- entry point, flag parsing, server start
 
 internal/
@@ -155,7 +155,7 @@ The chat engine orchestrates a single turn:
    → Emit stream_end event
 ```
 
-**Key design: The primary agent (e.g., Mentat) never executes tools directly.** When it needs work done, it creates a delegation envelope that the chat engine routes to a worker agent session. CONDUIT handles the routing — the agent profile determines the behavior.
+**Key design: The primary agent (e.g., Mentat) never executes tools directly.** When it needs work done, it creates a delegation envelope that the chat engine routes to a worker agent session. NANITE handles the routing — the agent profile determines the behavior.
 
 ### 2.3 Context Broker
 
@@ -571,10 +571,10 @@ cd ui && npm run dev
 cd ui && npm run build
 
 # Embed in Go binary
-go build -o conduit ./cmd/conduit
+go build -o nanite ./cmd/nanite
 
 # Single binary serves both API and SPA
-./conduit serve --port 8090
+./nanite serve --port 8090
 ```
 
 ### 6.3 Docker (VPS)
@@ -582,9 +582,9 @@ go build -o conduit ./cmd/conduit
 FROM golang:1.25 AS builder
 # ... build steps ...
 FROM gcr.io/distroless/static
-COPY --from=builder /app/conduit /conduit
+COPY --from=builder /app/nanite /nanite
 EXPOSE 8090
-ENTRYPOINT ["/conduit", "serve"]
+ENTRYPOINT ["/nanite", "serve"]
 ```
 
 ## 7. Security Considerations

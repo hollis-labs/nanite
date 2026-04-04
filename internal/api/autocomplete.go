@@ -160,7 +160,7 @@ func resolveRoot(a *API, sessionID string) string {
 		}
 	}
 
-	// Fallback: cwd (where conduit was launched).
+	// Fallback: cwd (where nanite was launched).
 	cwd, err := os.Getwd()
 	if err != nil {
 		return ""

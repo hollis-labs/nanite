@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func newTestStore(t *testing.T) *store.Store {
@@ -36,15 +36,15 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"conduit_create_skill":          false,
-		"conduit_list_skills":           false,
-		"conduit_update_skill":          false,
-		"conduit_delete_skill":          false,
-		"conduit_create_agent":          false,
-		"conduit_list_agents":           false,
-		"conduit_update_agent":          false,
-		"conduit_start_builder":         false,
-		"conduit_builder_step":          false,
+		"nanite_create_skill":          false,
+		"nanite_list_skills":           false,
+		"nanite_update_skill":          false,
+		"nanite_delete_skill":          false,
+		"nanite_create_agent":          false,
+		"nanite_list_agents":           false,
+		"nanite_update_agent":          false,
+		"nanite_start_builder":         false,
+		"nanite_builder_step":          false,
 	}
 
 	for _, tool := range tools {
@@ -70,7 +70,7 @@ func TestSelfToolsTransport_CreateSkill(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a skill.
-	result, err := st.CallTool(ctx, "conduit_create_skill", map[string]any{
+	result, err := st.CallTool(ctx, "nanite_create_skill", map[string]any{
 		"name":        "Test Skill",
 		"slug":        "test-skill",
 		"description": "A test skill for unit testing",
@@ -87,7 +87,7 @@ func TestSelfToolsTransport_CreateSkill(t *testing.T) {
 	}
 
 	// List skills and verify it appears.
-	listResult, err := st.CallTool(ctx, "conduit_list_skills", map[string]any{
+	listResult, err := st.CallTool(ctx, "nanite_list_skills", map[string]any{
 		"category": "testing",
 	})
 	if err != nil {
@@ -110,21 +110,21 @@ func TestSelfToolsTransport_ListSkills(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two skills in different categories.
-	st.CallTool(ctx, "conduit_create_skill", map[string]any{
+	st.CallTool(ctx, "nanite_create_skill", map[string]any{
 		"name": "Skill A", "slug": "skill-a", "description": "cat-x skill", "category": "cat-x",
 	})
-	st.CallTool(ctx, "conduit_create_skill", map[string]any{
+	st.CallTool(ctx, "nanite_create_skill", map[string]any{
 		"name": "Skill B", "slug": "skill-b", "description": "cat-y skill", "category": "cat-y",
 	})
 
 	// List all.
-	allResult, _ := st.CallTool(ctx, "conduit_list_skills", map[string]any{})
+	allResult, _ := st.CallTool(ctx, "nanite_list_skills", map[string]any{})
 	if !strings.Contains(allResult.Content[0].Text, "Skill A") || !strings.Contains(allResult.Content[0].Text, "Skill B") {
 		t.Errorf("expected both skills, got: %s", allResult.Content[0].Text)
 	}
 
 	// Filter by cat-x.
-	filteredResult, _ := st.CallTool(ctx, "conduit_list_skills", map[string]any{"category": "cat-x"})
+	filteredResult, _ := st.CallTool(ctx, "nanite_list_skills", map[string]any{"category": "cat-x"})
 	if !strings.Contains(filteredResult.Content[0].Text, "Skill A") {
 		t.Errorf("expected Skill A, got: %s", filteredResult.Content[0].Text)
 	}
@@ -138,7 +138,7 @@ func TestSelfToolsTransport_CreateAgent(t *testing.T) {
 	st := newSelfTools(t)
 	ctx := context.Background()
 
-	result, err := st.CallTool(ctx, "conduit_create_agent", map[string]any{
+	result, err := st.CallTool(ctx, "nanite_create_agent", map[string]any{
 		"name":          "Test Agent",
 		"slug":          "test-agent",
 		"system_prompt": "You are a helpful test agent.",
@@ -156,7 +156,7 @@ func TestSelfToolsTransport_CreateAgent(t *testing.T) {
 	}
 
 	// List agents and verify.
-	listResult, err := st.CallTool(ctx, "conduit_list_agents", map[string]any{})
+	listResult, err := st.CallTool(ctx, "nanite_list_agents", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestSelfToolsTransport_CreateSkill_MissingFields(t *testing.T) {
 	st := newSelfTools(t)
 	ctx := context.Background()
 
-	result, _ := st.CallTool(ctx, "conduit_create_skill", map[string]any{
+	result, _ := st.CallTool(ctx, "nanite_create_skill", map[string]any{
 		"name": "Only Name",
 	})
 	if !result.IsError {
@@ -190,7 +190,7 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a skill first.
-	createResult, _ := st.CallTool(ctx, "conduit_create_skill", map[string]any{
+	createResult, _ := st.CallTool(ctx, "nanite_create_skill", map[string]any{
 		"name": "To Delete", "slug": "to-delete", "description": "Will be deleted",
 	})
 	if createResult.IsError {
@@ -211,7 +211,7 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	}
 
 	// Delete it.
-	delResult, _ := st.CallTool(ctx, "conduit_delete_skill", map[string]any{"id": skillID})
+	delResult, _ := st.CallTool(ctx, "nanite_delete_skill", map[string]any{"id": skillID})
 	if delResult.IsError {
 		t.Fatalf("delete failed: %s", delResult.Content[0].Text)
 	}

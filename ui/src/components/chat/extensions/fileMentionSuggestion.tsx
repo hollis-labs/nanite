@@ -23,7 +23,7 @@ async function fetchFiles(query: string, sessionId: string): Promise<FileResult[
 function getActiveSessionId(): string {
   try {
     // Access Zustand store directly — it's a module singleton
-    const storeState = JSON.parse(localStorage.getItem('conduit-app') || '{}')
+    const storeState = JSON.parse(localStorage.getItem('nanite-app') || '{}')
     return storeState?.state?.activeSessionId || ''
   } catch {
     return ''

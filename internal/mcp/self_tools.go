@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/hollis-labs/conduit/internal/provider"
+import "github.com/hollis-labs/nanite/internal/provider"
 
 // SelfToolProviderDefinitions returns all self-service tool definitions
 // in provider.ToolDefinition format, suitable for registering as built-ins.
@@ -21,7 +21,7 @@ func SelfToolProviderDefinitions() []provider.ToolDefinition {
 func selfToolDefinitions() []Tool {
 	return []Tool{
 		{
-			Name:        "conduit_create_skill",
+			Name:        "nanite_create_skill",
 			Description: "Create a new skill. Skills bind tool names to a category and description.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -37,7 +37,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_list_skills",
+			Name:        "nanite_list_skills",
 			Description: "List all skills. Returns name, slug, category, and description for each.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -47,7 +47,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_update_skill",
+			Name:        "nanite_update_skill",
 			Description: "Update an existing skill by ID. Only provided fields are changed.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -64,7 +64,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_delete_skill",
+			Name:        "nanite_delete_skill",
 			Description: "Delete a skill by ID. Only non-builtin skills can be deleted.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -75,7 +75,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_create_agent",
+			Name:        "nanite_create_agent",
 			Description: "Create a new agent profile with a name, slug, system prompt, and optional default model.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -90,7 +90,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_list_agents",
+			Name:        "nanite_list_agents",
 			Description: "List all agent profiles. Returns name, slug, description, and default model.",
 			InputSchema: map[string]any{
 				"type":       "object",
@@ -98,7 +98,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_update_agent",
+			Name:        "nanite_update_agent",
 			Description: "Update an existing agent profile by ID. Only provided fields are changed.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -115,7 +115,7 @@ func selfToolDefinitions() []Tool {
 		},
 		// Cross-app navigation tools — control Engine GUI via SSE
 		{
-			Name:        "conduit_navigate_engine",
+			Name:        "nanite_navigate_engine",
 			Description: "Navigate the Engine GUI to a specific page with optional filters. Use when the user asks to see tasks, sprints, kanban, or any Engine view. The Engine GUI will navigate in real-time via SSE. You can apply filters like project, status, priority, and sort order.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -130,7 +130,7 @@ func selfToolDefinitions() []Tool {
 					},
 					"project_id": map[string]any{
 						"type":        "string",
-						"description": "Filter by project ID (e.g. 'conduit', 'engine', 'cortex'). Optional.",
+						"description": "Filter by project ID (e.g. 'nanite', 'engine', 'cortex'). Optional.",
 					},
 					"status": map[string]any{
 						"type":        "string",
@@ -149,7 +149,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_refresh_engine",
+			Name:        "nanite_refresh_engine",
 			Description: "Trigger a data refresh in the Engine GUI. Use after making changes (task transitions, sprint updates) so the GUI reflects the latest state.",
 			InputSchema: map[string]any{
 				"type":       "object",
@@ -157,7 +157,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_show_giphy",
+			Name:        "nanite_show_giphy",
 			Description: "Search Giphy for an animated GIF and display it in chat as a rich card. Use for fun, celebration, or to lighten the mood.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -168,7 +168,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_run_report",
+			Name:        "nanite_run_report",
 			Description: "Run a background report and notify the user when it's done. The report generates asynchronously; the user will see a notification card when complete and can click to view the full output.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -190,7 +190,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_show_document",
+			Name:        "nanite_show_document",
 			Description: "Display a document in chat as a rich scrollable viewer. Use for executive summaries, reports, meeting notes, or any long-form content the user should read.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -205,7 +205,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_show_report",
+			Name:        "nanite_show_report",
 			Description: "Display a metrics report card in chat with labeled values, progress bars, and action buttons. Use for sprint progress, portfolio health, or status summaries.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -219,7 +219,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_show_task_disposition",
+			Name:        "nanite_show_task_disposition",
 			Description: "Display an interactive task triage card in chat. Users can set a disposition (Approve, Archive, Pause, Done, Skip) for each task via dropdowns. On submit, a structured message is sent back for you to process.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -234,8 +234,8 @@ func selfToolDefinitions() []Tool {
 		},
 		// Builder tools — interactive step-by-step creation flows
 		{
-			Name:        "conduit_start_builder",
-			Description: "Start a step-by-step creation wizard for agents, skills, or prompt templates. NOT for asking arbitrary questions — only for creating new entities. You MUST provide builder_name (agent, skill, or prompt_template). After starting, use conduit_builder_step for each subsequent step.",
+			Name:        "nanite_start_builder",
+			Description: "Start a step-by-step creation wizard for agents, skills, or prompt templates. NOT for asking arbitrary questions — only for creating new entities. You MUST provide builder_name (agent, skill, or prompt_template). After starting, use nanite_builder_step for each subsequent step.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -244,7 +244,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "conduit_builder_step",
+			Name:        "nanite_builder_step",
 			Description: "Submit a value for the current step in an active builder flow. Returns the next step prompt or the final result.",
 			InputSchema: map[string]any{
 				"type": "object",

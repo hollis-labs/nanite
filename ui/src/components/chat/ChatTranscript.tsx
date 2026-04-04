@@ -235,7 +235,7 @@ export function ChatTranscript({
         <div className="text-center">
           <Bot className="w-16 h-16 text-fg-faint mx-auto mb-4" />
           <h2 className="text-lg font-medium text-fg-secondary mb-1">
-            Start a conversation with Conduit
+            Start a conversation with Nanite
           </h2>
           <p className="text-xs text-fg-faint mt-1">Type a message below to begin</p>
         </div>
@@ -330,7 +330,7 @@ export function ChatTranscript({
               <Bot className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-fg-muted mb-1">Conduit</div>
+              <div className="text-xs font-medium text-fg-muted mb-1">Nanite</div>
               <MessageContent content={streamingContent} role="assistant" />
               {streamStalled && <ThinkingIndicator />}
             </div>
@@ -346,7 +346,7 @@ export function ChatTranscript({
               <Bot className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-fg-muted mb-1">Conduit</div>
+              <div className="text-xs font-medium text-fg-muted mb-1">Nanite</div>
               <ThinkingIndicator />
             </div>
           </div>

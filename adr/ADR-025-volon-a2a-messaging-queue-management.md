@@ -6,7 +6,7 @@
 
 ## Context
 
-Fragments Engine has a working CLI-based A2A messaging system (file-based inbox in `.agentrc/inbox/`), but the GUI side — Conduit and Volon — has no equivalent. To demonstrate the system effectively and enable real-time human-agent collaboration through the GUI, we need A2A messaging as a Volon-native primitive.
+Fragments Engine has a working CLI-based A2A messaging system (file-based inbox in `.agentrc/inbox/`), but the GUI side — Nanite and Volon — has no equivalent. To demonstrate the system effectively and enable real-time human-agent collaboration through the GUI, we need A2A messaging as a Volon-native primitive.
 
 Current Volon comments are flat: `id, entity_type, entity_id, author (string), body, created_at`. No sender typing, no routing, no message state, no read tracking. The existing file-based inbox works for CLI agents but can't drive a GUI experience.
 
@@ -88,13 +88,13 @@ Behavior: Updates `status` and `read_at`/`updated_at`. If the message was a `que
 
 `volon_comment_add` and `volon_comments_list` continue to work unchanged. New columns have defaults, so old callers produce valid records (type=`user`, message_type=`comment`, status=`open`).
 
-### Phase 2: Conduit GUI integration
+### Phase 2: Nanite GUI integration
 
 **Task comment stream**: Render the comment thread on each task as a conversation view. Messages show sender identity, type badge, and read/unread state.
 
 **Inbox view**: New dashboard component — "Tasks waiting on you." Queries `volon_inbox_list` for the current user/agent, groups by task, shows unread count and latest message preview. Clicking a task opens its comment stream.
 
-**Post-as-identity**: When Conduit's chat engine or a user posts a comment, tag it with the session's agent hash or user ID. The identity is determined at the API layer, not by the caller.
+**Post-as-identity**: When Nanite's chat engine or a user posts a comment, tag it with the session's agent hash or user ID. The identity is determined at the API layer, not by the caller.
 
 ### Phase 3: Queue orchestration
 
@@ -149,14 +149,14 @@ The comment extensions are a stepping stone, not a dead end.
 
 ### Risks
 - Comment volume on busy tasks could grow large — may need pagination or archival strategy
-- Identity hashing scheme must be consistent across Conduit sessions and agent instances
+- Identity hashing scheme must be consistent across Nanite sessions and agent instances
 - Queue Controller is a single point of failure for automated routing — needs health monitoring
 
 ## Alternatives considered
 
 1. **Build full ADR-009 streams first** — Rejected. Too much upfront work before we can demo anything. The comment extension gives us 80% of the value immediately.
 2. **Port file-based inbox to Volon** — Rejected for this scope. CLI agents work fine with files. GUI needs a different primitive (database-backed, queryable, renderable).
-3. **Use Conduit's own SQLite for messaging** — Rejected. Messages belong in Volon (the system of record for tasks). Conduit is the harness, not the data owner.
+3. **Use Nanite's own SQLite for messaging** — Rejected. Messages belong in Volon (the system of record for tasks). Nanite is the harness, not the data owner.
 4. **Add a separate `messages` table now** — Considered. But extending comments is simpler, keeps one table, and the migration to streams is the same effort either way.
 
 ## References

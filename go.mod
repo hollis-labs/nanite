@@ -1,10 +1,10 @@
-module github.com/hollis-labs/conduit
+module github.com/hollis-labs/nanite
 
 go 1.26.1
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/hollis-labs/fragments-engine/plugin v0.0.0
+	github.com/hollis-labs/plugin v0.0.0
 	github.com/hollis-labs/nexus v0.0.0
 	github.com/hollis-labs/otel v0.0.0
 	github.com/hollis-labs/tool-broker v0.0.0
@@ -15,13 +15,13 @@ require (
 	modernc.org/sqlite v1.46.1
 )
 
-replace github.com/hollis-labs/otel => ../libs/otel
+replace github.com/hollis-labs/otel => ../fragments-engine/libs/otel
 
-replace github.com/hollis-labs/tool-broker => ../libs/toolbroker
+replace github.com/hollis-labs/tool-broker => ../fragments-engine/libs/toolbroker
 
-replace github.com/hollis-labs/fragments-engine/plugin => ../libs/plugin
+replace github.com/hollis-labs/plugin => ../plugin
 
-replace github.com/hollis-labs/nexus => ../../nexus
+replace github.com/hollis-labs/nexus => ../nexus
 
 require (
 	cloud.google.com/go/auth v0.18.2 // indirect

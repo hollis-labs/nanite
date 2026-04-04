@@ -1,6 +1,6 @@
-# Conduit Demo Script
+# Nanite Demo Script
 
-Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
+Repeatable walkthrough of key Nanite features. Target: under 15 minutes.
 
 ## Prerequisites
 
@@ -12,10 +12,10 @@ Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
 
 2. **Build & start**:
    ```bash
-   cd ~/Projects-apps/fragments-engine/conduit
+   cd ~/Projects-apps/nanite
    cd ui && npm install && npm run build && cd ..
-   go build ./cmd/conduit/
-   ./conduit serve -port 8090 -dev  # -dev skips embedded SPA, uses Vite proxy
+   go build ./cmd/nanite/
+   ./nanite serve -port 8090 -dev  # -dev skips embedded SPA, uses Vite proxy
    ```
    Or with Docker:
    ```bash
@@ -30,9 +30,9 @@ Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
 
 ### 1. Launch & Chat (2 min)
 
-**Goal**: Show Conduit starts, connects to providers, and handles basic chat.
+**Goal**: Show Nanite starts, connects to providers, and handles basic chat.
 
-1. Open the Conduit UI in browser
+1. Open the Nanite UI in browser
 2. Create a new session (click "New Chat")
 3. Send a simple message: "What is Fragments Engine?"
 4. Watch the streaming response appear
@@ -43,7 +43,7 @@ Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
 - Session persistence (SQLite)
 - Auto-titling and auto-tagging
 
-**Fallback**: If no API key, Conduit shows a clear error banner. Switch to Ollama (local, no key needed).
+**Fallback**: If no API key, Nanite shows a clear error banner. Switch to Ollama (local, no key needed).
 
 ### 2. Agent Modes (2 min)
 
@@ -64,7 +64,7 @@ Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
 
 ### 3. Tool Use via MCP (3 min)
 
-**Goal**: Show Conduit calling external tools through MCP.
+**Goal**: Show Nanite calling external tools through MCP.
 
 1. Send: "List the active sprints in the mentat project"
 2. Watch the tool_call event appear (volon_sprints_list)
@@ -91,7 +91,7 @@ Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
 
 **Talking points**:
 - Envelope system: structured proposals extracted from LLM responses
-- Volon proxy: Conduit proxies task CRUD to Volon's MCP
+- Volon proxy: Nanite proxies task CRUD to Volon's MCP
 - Bi-directional: create tasks from chat, view tasks in UI
 
 **Fallback**: Use the API directly: `POST /api/volon/backlog`
@@ -116,7 +116,7 @@ Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
    curl -X POST http://localhost:8090/api/sessions/{SESSION_ID}/delegate-aggregate \
      -H 'Content-Type: application/json' \
      -d '{
-       "message": "Compare the architecture of three chat applications: Conduit, ChatGPT, and Claude.ai. For each, analyze the backend, frontend, and plugin system."
+       "message": "Compare the architecture of three chat applications: Nanite, ChatGPT, and Claude.ai. For each, analyze the backend, frontend, and plugin system."
      }'
    ```
 5. Show the decomposed sub-tasks and aggregated result
@@ -150,7 +150,7 @@ Repeatable walkthrough of key Conduit features. Target: under 15 minutes.
 ### 7. Wrap-up (1 min)
 
 **Summary points**:
-- Conduit is the chat harness for Fragments Engine
+- Nanite is the chat harness for Fragments Engine
 - Provider-agnostic (Anthropic, OpenAI, Ollama)
 - MCP-native: tools from any MCP server
 - Agent/mode system for different interaction styles

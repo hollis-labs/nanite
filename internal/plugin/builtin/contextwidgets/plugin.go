@@ -3,8 +3,8 @@ package contextwidgets
 import (
 	"time"
 
-	hostplugin "github.com/hollis-labs/conduit/internal/plugin"
-	"github.com/hollis-labs/fragments-engine/plugin"
+	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/plugin"
 )
 
 func init() {

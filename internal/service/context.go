@@ -4,10 +4,10 @@ import (
 	"context"
 	"log"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	ctxpkg "github.com/hollis-labs/conduit/internal/context"
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/chat"
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // ContextService assembles system prompts, message history, and performs

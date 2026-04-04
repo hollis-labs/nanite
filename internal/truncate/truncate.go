@@ -51,7 +51,7 @@ type Result struct {
 // outputDir returns the directory for saved tool outputs, creating it if needed.
 func outputDir() string {
 	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".conduit", "tool-output")
+	dir := filepath.Join(home, ".nanite", "tool-output")
 	os.MkdirAll(dir, 0755)
 	return dir
 }

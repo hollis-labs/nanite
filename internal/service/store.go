@@ -1,6 +1,6 @@
 package service
 
-import "github.com/hollis-labs/conduit/internal/store"
+import "github.com/hollis-labs/nanite/internal/store"
 
 // Domain-scoped sub-interfaces carved from store.Store's methods.
 // Each service depends only on the slice it needs. The concrete

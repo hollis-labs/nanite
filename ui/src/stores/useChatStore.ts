@@ -193,25 +193,25 @@ export const useChatStore = create<ChatState>((set) => ({
 
   // Tool call display mode — per-session override stored in localStorage
   toolCallDisplayMode: (typeof window !== 'undefined'
-    ? localStorage.getItem('conduit:toolCallDisplayMode') as ToolCallDisplayMode
+    ? localStorage.getItem('nanite:toolCallDisplayMode') as ToolCallDisplayMode
     : null) || 'minimal',
   setToolCallDisplayMode: (mode: ToolCallDisplayMode) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('conduit:toolCallDisplayMode', mode)
+      localStorage.setItem('nanite:toolCallDisplayMode', mode)
     }
     set({ toolCallDisplayMode: mode })
   },
   loadToolCallDisplayMode: (sessionId: string | null) => {
     if (!sessionId || typeof window === 'undefined') return
-    const sessionMode = localStorage.getItem(`conduit:tcMode:${sessionId}`) as ToolCallDisplayMode | null
-    const globalMode = localStorage.getItem('conduit:toolCallDisplayMode') as ToolCallDisplayMode | null
+    const sessionMode = localStorage.getItem(`nanite:tcMode:${sessionId}`) as ToolCallDisplayMode | null
+    const globalMode = localStorage.getItem('nanite:toolCallDisplayMode') as ToolCallDisplayMode | null
     set({ toolCallDisplayMode: sessionMode || globalMode || 'minimal' })
   },
   saveToolCallDisplayMode: (sessionId: string | null, mode: ToolCallDisplayMode) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('conduit:toolCallDisplayMode', mode)
+      localStorage.setItem('nanite:toolCallDisplayMode', mode)
       if (sessionId) {
-        localStorage.setItem(`conduit:tcMode:${sessionId}`, mode)
+        localStorage.setItem(`nanite:tcMode:${sessionId}`, mode)
       }
     }
     set({ toolCallDisplayMode: mode })

@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-The IT Support plugin is a proof-of-concept that demonstrates Conduit's plugin system end-to-end. It provides employee self-service IT support through a dedicated agent that searches a knowledge base, displays articles as rich cards, and creates support tickets with auto-routing -- all integrated into the Conduit chat UI.
+The IT Support plugin is a proof-of-concept that demonstrates Nanite's plugin system end-to-end. It provides employee self-service IT support through a dedicated agent that searches a knowledge base, displays articles as rich cards, and creates support tickets with auto-routing -- all integrated into the Nanite chat UI.
 
 **Demo use case:** An employee asks "My VPN keeps disconnecting." The IT Support agent searches the KB, displays matching articles as interactive cards, and if the KB doesn't help, presents a ticket creation form. The created ticket includes auto-routing (e.g., "Network Operations -- VPN/Remote Access") and can be downloaded as a formatted HTML page. In production, the ticket creation step would be replaced by an API call to BMC Helix ITSM.
 
@@ -82,33 +82,33 @@ Agent emits ticket-form envelope
 
 | File | Purpose | Key Functions/Types |
 |------|---------|-------------------|
-| `conduit/plugins/support/plugin.go` | Plugin entry point | `SupportPlugin` struct, `New()`, `Load()`, `Unload()` |
-| `conduit/plugins/support/tickets.go` | Ticket CRUD handler + in-memory store | `TicketStore`, `TicketHandler`, `Ticket` struct, `routingForCategory()` |
-| `conduit/plugins/support/download.go` | HTML ticket download page | `DownloadHandler.ServeHTTP()`, `ticketTemplate` |
-| `conduit/plugins/support/kb.go` | KB search MCP transport | `KBTransport`, `ListTools()`, `CallTool()`, `searchKB()`, `getKBArticle()` |
-| `conduit/plugins/support/seed.go` | Agent profile seeding | `seedAgent()`, `itSupportSystemPrompt` const |
-| `conduit/plugins/support/plugin.yaml` | Declarative spec (not parsed) | Envelope types, hooks, API endpoints |
+| `nanite/plugins/support/plugin.go` | Plugin entry point | `SupportPlugin` struct, `New()`, `Load()`, `Unload()` |
+| `nanite/plugins/support/tickets.go` | Ticket CRUD handler + in-memory store | `TicketStore`, `TicketHandler`, `Ticket` struct, `routingForCategory()` |
+| `nanite/plugins/support/download.go` | HTML ticket download page | `DownloadHandler.ServeHTTP()`, `ticketTemplate` |
+| `nanite/plugins/support/kb.go` | KB search MCP transport | `KBTransport`, `ListTools()`, `CallTool()`, `searchKB()`, `getKBArticle()` |
+| `nanite/plugins/support/seed.go` | Agent profile seeding | `seedAgent()`, `itSupportSystemPrompt` const |
+| `nanite/plugins/support/plugin.yaml` | Declarative spec (not parsed) | Envelope types, hooks, API endpoints |
 
 ### Frontend (React/TypeScript)
 
 | File | Purpose | Key Components |
 |------|---------|---------------|
-| `conduit/ui/src/components/chat/envelopes/KBResultCard.tsx` | KB search result display | `KBResultCard`, `ArticleCard` |
-| `conduit/ui/src/components/chat/envelopes/TicketFormCard.tsx` | Ticket creation form | `TicketFormCard` |
-| `conduit/ui/src/components/chat/envelopes/TicketConfirmationCard.tsx` | Ticket confirmation display | `TicketConfirmationCard` |
-| `conduit/ui/src/components/chat/envelopes/ResolutionCaptureCard.tsx` | Resolution capture form | `ResolutionCaptureCard` |
-| `conduit/ui/src/components/chat/envelopes/EnvelopeRenderer.tsx` | Dispatch to correct card | Type-checks `envelope.type` and renders |
+| `nanite/ui/src/components/chat/envelopes/KBResultCard.tsx` | KB search result display | `KBResultCard`, `ArticleCard` |
+| `nanite/ui/src/components/chat/envelopes/TicketFormCard.tsx` | Ticket creation form | `TicketFormCard` |
+| `nanite/ui/src/components/chat/envelopes/TicketConfirmationCard.tsx` | Ticket confirmation display | `TicketConfirmationCard` |
+| `nanite/ui/src/components/chat/envelopes/ResolutionCaptureCard.tsx` | Resolution capture form | `ResolutionCaptureCard` |
+| `nanite/ui/src/components/chat/envelopes/EnvelopeRenderer.tsx` | Dispatch to correct card | Type-checks `envelope.type` and renders |
 
 ### Integration Points
 
 | File | Lines | What It Does |
 |------|-------|-------------|
-| `conduit/cmd/conduit/main.go` | 259-288 | Creates plugin host, registers services, loads support plugin, re-runs MCP discovery |
-| `conduit/internal/chat/engine.go` | 550-561 | Extracts `ENVELOPE_DATA` from search_kb results into `pendingEnvelopes` |
-| `conduit/internal/chat/engine.go` | 682-688 | Injects pending envelopes after LLM response |
-| `conduit/internal/chat/engine.go` | 977-1000 | Falls back to direct MCP discovery for plugin-registered servers |
-| `conduit/internal/chat/envelope.go` | 42-84 | `buildKBEnvelope()` -- sanitizes bodies, wraps as envelope JSON |
-| `conduit/internal/server/server.go` | 59-63 | Registers plugin management routes |
+| `nanite/cmd/nanite/main.go` | 259-288 | Creates plugin host, registers services, loads support plugin, re-runs MCP discovery |
+| `nanite/internal/chat/engine.go` | 550-561 | Extracts `ENVELOPE_DATA` from search_kb results into `pendingEnvelopes` |
+| `nanite/internal/chat/engine.go` | 682-688 | Injects pending envelopes after LLM response |
+| `nanite/internal/chat/engine.go` | 977-1000 | Falls back to direct MCP discovery for plugin-registered servers |
+| `nanite/internal/chat/envelope.go` | 42-84 | `buildKBEnvelope()` -- sanitizes bodies, wraps as envelope JSON |
+| `nanite/internal/server/server.go` | 59-63 | Registers plugin management routes |
 
 ## 4. Data Flow: KB Search
 
@@ -183,7 +183,7 @@ After the LLM finishes, `pendingEnvelopes` are injected (`engine.go` lines 682-6
 
 ```go
 for _, env := range pendingEnvelopes {
-    envelopeBlock := "\n\n```conduit-envelope\n" + env + "\n```"
+    envelopeBlock := "\n\n```nanite-envelope\n" + env + "\n```"
     responseContent += envelopeBlock
     ch <- StreamEvent{Type: "delta", Content: envelopeBlock}
 }
@@ -210,7 +210,7 @@ User: "Those articles didn't help, can you create a ticket?"
 The system prompt instructs the LLM to emit:
 
 ````
-```conduit-envelope
+```nanite-envelope
 {"kind":"envelope","version":1,"type":"ticket-form","data":{"categories":["network","access","vpn",...],"prefilled":{"title":"VPN disconnecting on network switch","description":"...","category":"vpn"}}}
 ```
 ````
@@ -341,7 +341,7 @@ The agent calls `search_kb` exactly once per user message with the user's raw te
 The agent is explicitly forbidden from inventing KB article IDs, titles, or resolution steps. It presents only what the tool returns.
 
 **3. Escalate via envelope.**
-When the KB doesn't help, the agent emits a `ticket-form` envelope with the exact JSON structure. The system prompt includes the literal envelope syntax with `conduit-envelope` fence.
+When the KB doesn't help, the agent emits a `ticket-form` envelope with the exact JSON structure. The system prompt includes the literal envelope syntax with `nanite-envelope` fence.
 
 ### Why "search once" matters
 
@@ -356,7 +356,7 @@ The `[SYSTEM: ...]` instruction in the search results reinforces this: "Do NOT c
 
 ### KBResultCard
 
-**File:** `conduit/ui/src/components/chat/envelopes/KBResultCard.tsx`
+**File:** `nanite/ui/src/components/chat/envelopes/KBResultCard.tsx`
 
 **Props:** `{ data: { results?: KBArticle[], articles?: KBArticle[], query: string } }`
 
@@ -386,7 +386,7 @@ interface KBArticle {
 
 ### TicketFormCard
 
-**File:** `conduit/ui/src/components/chat/envelopes/TicketFormCard.tsx`
+**File:** `nanite/ui/src/components/chat/envelopes/TicketFormCard.tsx`
 
 **Props:** `{ data: { prefilled?: {...}, categories: string[] }, onSendMessage?: (content: string) => void }`
 
@@ -400,7 +400,7 @@ interface KBArticle {
 
 ### TicketConfirmationCard
 
-**File:** `conduit/ui/src/components/chat/envelopes/TicketConfirmationCard.tsx`
+**File:** `nanite/ui/src/components/chat/envelopes/TicketConfirmationCard.tsx`
 
 **Props:** `{ data: { ticket: { id, title, description, category, priority, status, requester, routing, created_at } } }`
 
@@ -408,7 +408,7 @@ Read-only card showing created ticket details. Includes download button and BMC 
 
 ### ResolutionCaptureCard
 
-**File:** `conduit/ui/src/components/chat/envelopes/ResolutionCaptureCard.tsx`
+**File:** `nanite/ui/src/components/chat/envelopes/ResolutionCaptureCard.tsx`
 
 **Props:** `{ data: { ticket_id?: string, issue_summary?: string, categories: string[] }, onSendMessage?: (content: string) => void }`
 
@@ -508,7 +508,7 @@ agents:
     system_prompt_file: prompts/it-support.md
 ```
 
-### What Would Need to Change in Conduit's Plugin Loader
+### What Would Need to Change in Nanite's Plugin Loader
 
 **YAML-driven registration:**
 The loader should parse `plugin.yaml` and call the appropriate Host methods automatically:
@@ -529,10 +529,10 @@ If a plugin fails to load, log the error and continue. Currently a WARNING is lo
 Replace the manual plugin instantiation in `main.go` with directory scanning:
 
 ```
-conduit/plugins/
+nanite/plugins/
   support/
     plugin.yaml          # Parsed by loader
-    plugin.go            # Compiled into conduit binary (for now)
+    plugin.go            # Compiled into nanite binary (for now)
     ...
   session-stats/
     plugin.yaml
@@ -540,9 +540,9 @@ conduit/plugins/
     ...
 ```
 
-**Phase 1 (compiled):** All plugins in `conduit/plugins/` are compiled into the binary. The loader reads `plugin.yaml` from each directory, validates, and calls the Go plugin's `New()` and `Load()` in dependency order. A plugin registry maps YAML name to Go constructor.
+**Phase 1 (compiled):** All plugins in `nanite/plugins/` are compiled into the binary. The loader reads `plugin.yaml` from each directory, validates, and calls the Go plugin's `New()` and `Load()` in dependency order. A plugin registry maps YAML name to Go constructor.
 
-**Phase 2 (dynamic):** Use Go's `plugin` package or HashiCorp's `go-plugin` for dynamic loading. Each plugin compiles to a `.so` file. The loader scans a directory (e.g., `~/.conduit/plugins/`), loads `.so` files, and calls the exported `New()` function.
+**Phase 2 (dynamic):** Use Go's `plugin` package or HashiCorp's `go-plugin` for dynamic loading. Each plugin compiles to a `.so` file. The loader scans a directory (e.g., `~/.nanite/plugins/`), loads `.so` files, and calls the exported `New()` function.
 
 ### Frontend Component Loading
 
@@ -603,28 +603,28 @@ my-plugin/
 ### Plugin Configuration
 
 Configuration should flow from multiple sources (in priority order):
-1. Environment variables: `CONDUIT_PLUGIN_SUPPORT_KB_DATABASE_URL`
-2. Config file: `~/.conduit/plugins/support/config.yaml`
+1. Environment variables: `NANITE_PLUGIN_SUPPORT_KB_DATABASE_URL`
+2. Config file: `~/.nanite/plugins/support/config.yaml`
 3. Plugin defaults from `plugin.yaml`
 
 The Host should provide a `GetConfig(key string) (string, error)` method that resolves through these layers.
 
 ### Plugin Marketplace/Registry Concept
 
-**Near-term:** A curated list of plugins in a GitHub repository. Each entry points to a Git repo + tag. Users clone into `~/.conduit/plugins/` and rebuild.
+**Near-term:** A curated list of plugins in a GitHub repository. Each entry points to a Git repo + tag. Users clone into `~/.nanite/plugins/` and rebuild.
 
-**Mid-term:** A simple registry API that returns plugin metadata (name, version, description, compatibility, download URL). A CLI command `conduit plugin install support@0.1.0` fetches and installs.
+**Mid-term:** A simple registry API that returns plugin metadata (name, version, description, compatibility, download URL). A CLI command `nanite plugin install support@0.1.0` fetches and installs.
 
-**Long-term:** A web UI for browsing, installing, configuring, and updating plugins. Version compatibility checks against the running Conduit version.
+**Long-term:** A web UI for browsing, installing, configuring, and updating plugins. Version compatibility checks against the running Nanite version.
 
 ### Versioning and Dependency Management
 
 **Plugin versioning:**
 - Plugins declare their version in `plugin.yaml` (semver)
-- Plugins declare the minimum Conduit version they require:
+- Plugins declare the minimum Nanite version they require:
   ```yaml
   requires:
-    conduit: ">=0.2.0"
+    nanite: ">=0.2.0"
   ```
 
 **API stability:**

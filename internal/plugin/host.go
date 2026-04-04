@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/secrets"
-	"github.com/hollis-labs/conduit/internal/store"
-	"github.com/hollis-labs/fragments-engine/plugin"
+	"github.com/hollis-labs/nanite/internal/secrets"
+	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/plugin"
 )
 
 // validComponentID matches alphanumeric + hyphens, 2-64 chars, no leading/trailing hyphens.
@@ -50,7 +50,7 @@ type ConnectorStatus struct {
 	ConsecutiveFailures int      `json:"consecutive_failures"`
 }
 
-// Host implements the plugin.Host interface for Conduit.
+// Host implements the plugin.Host interface for Nanite.
 // It provides the runtime environment and services for plugins.
 type Host struct {
 	mu            sync.RWMutex
@@ -79,7 +79,7 @@ type Host struct {
 	ctxCancel     context.CancelFunc
 }
 
-// NewHost creates a new plugin host for Conduit.
+// NewHost creates a new plugin host for Nanite.
 func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{
@@ -106,7 +106,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 }
 
 // NewHostWithStore creates a minimal plugin host with just a store service.
-// Used by CLI commands (e.g. conduit plugin uninstall) that need to run
+// Used by CLI commands (e.g. nanite plugin uninstall) that need to run
 // plugin lifecycle methods without a full server.
 func NewHostWithStore(store interface{}) *Host {
 	ctx, cancel := context.WithCancel(context.Background())

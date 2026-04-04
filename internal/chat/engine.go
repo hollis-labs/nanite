@@ -15,14 +15,14 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/conduit/internal/config"
-	"github.com/hollis-labs/conduit/internal/filter"
-	"github.com/hollis-labs/conduit/internal/mcp"
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/sandbox"
-	"github.com/hollis-labs/conduit/internal/store"
-	"github.com/hollis-labs/conduit/internal/toolclient"
-	"github.com/hollis-labs/conduit/internal/truncate"
+	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/filter"
+	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/sandbox"
+	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/toolclient"
+	"github.com/hollis-labs/nanite/internal/truncate"
 )
 
 // PluginEventEmitter is the subset of plugin.Host used by the chat engine
@@ -421,10 +421,10 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	ctx, cancel := context.WithTimeout(ctx, generateResponseTimeout)
 	defer cancel()
 
-	ctx, span := feotel.StartSpan(ctx, "conduit.generateResponse")
+	ctx, span := feotel.StartSpan(ctx, "nanite.generateResponse")
 	span.SetAttributes(
-		attribute.String("conduit.session.id", sessionID),
-		attribute.String("conduit.message.id", assistantMsgID),
+		attribute.String("nanite.session.id", sessionID),
+		attribute.String("nanite.message.id", assistantMsgID),
 	)
 	defer span.End()
 
@@ -693,14 +693,14 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 		}
 
 		// Call provider with or without tools.
-		provCtx, provSpan := feotel.StartSpan(ctx, "conduit.provider.call")
+		provCtx, provSpan := feotel.StartSpan(ctx, "nanite.provider.call")
 		provSpan.SetAttributes(
-			attribute.String("conduit.model", model),
-			attribute.Int("conduit.iteration", iteration),
-			attribute.Int("conduit.tools.count", len(tools)),
-			attribute.Int("conduit.messages.count", len(chatMessages)),
-			attribute.Int("conduit.tokens.total", breakdown.Total),
-			attribute.Int("conduit.tokens.ceiling", breakdown.Ceiling),
+			attribute.String("nanite.model", model),
+			attribute.Int("nanite.iteration", iteration),
+			attribute.Int("nanite.tools.count", len(tools)),
+			attribute.Int("nanite.messages.count", len(chatMessages)),
+			attribute.Int("nanite.tokens.total", breakdown.Total),
+			attribute.Int("nanite.tokens.ceiling", breakdown.Ceiling),
 		)
 		// CLI sessions (PTY or subprocess): set up sandbox directory and resume context.
 		if IsCLIProvider(providerName) {
@@ -1083,7 +1083,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				} else {
 					resultText = result
-					toolSpan.SetAttributes(attribute.Int("conduit.tool.result_len", len(result)))
+					toolSpan.SetAttributes(attribute.Int("nanite.tool.result_len", len(result)))
 					e.Store.LogEvent(sessionID, "tool_call", "tool",
 						tu.Name, fmt.Sprintf(`{"result_len":%d,"agent_id":%q}`, len(result), agentID))
 					if e.Activity != nil {
@@ -1129,7 +1129,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 					}
 				} else {
 					resultText = result
-					toolSpan.SetAttributes(attribute.Int("conduit.tool.result_len", len(result)))
+					toolSpan.SetAttributes(attribute.Int("nanite.tool.result_len", len(result)))
 					e.Store.LogEvent(sessionID, "tool_call", "tool",
 						tu.Name, fmt.Sprintf(`{"result_len":%d}`, len(result)))
 					if e.Activity != nil {
@@ -1318,7 +1318,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Inject pending KB envelopes — deterministic injection from tool results.
 	for _, env := range pendingEnvelopes {
-		envelopeBlock := "\n\n```conduit-envelope\n" + env + "\n```"
+		envelopeBlock := "\n\n```nanite-envelope\n" + env + "\n```"
 		responseContent += envelopeBlock
 		ch <- StreamEvent{Type: "delta", Content: envelopeBlock}
 	}
@@ -1334,7 +1334,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 			ticketJSON := tail[:tEnd]
 			env := BuildTicketConfirmationEnvelope(ticketJSON)
 			if env != "" {
-				envelopeBlock := "\n\n```conduit-envelope\n" + env + "\n```"
+				envelopeBlock := "\n\n```nanite-envelope\n" + env + "\n```"
 				responseContent += envelopeBlock
 				ch <- StreamEvent{Type: "delta", Content: envelopeBlock}
 			}
@@ -1552,7 +1552,7 @@ func (e *Engine) retryEnvelopeCorrection(
 		"Your previous response contained a malformed envelope block that could not be parsed.\n\n"+
 			"Raw content:\n```\n%s\n```\n\n"+
 			"Error: %s\n\n"+
-			"Please re-emit the envelope as a valid JSON object inside a ```conduit-envelope fenced block "+
+			"Please re-emit the envelope as a valid JSON object inside a ```nanite-envelope fenced block "+
 			"with kind, version (1), and type fields.",
 		TruncateStr(errDetail.Raw, 1000), errDetail.Reason,
 	)
@@ -1774,8 +1774,8 @@ func (e *Engine) recordUtilityMetrics(sessionID, callType string, duration time.
 }
 
 func (e *Engine) autoTitle(sessionID, userContent string) {
-	ctx, span := feotel.StartSpan(context.Background(), "conduit.autoTitle")
-	span.SetAttributes(attribute.String("conduit.session.id", sessionID))
+	ctx, span := feotel.StartSpan(context.Background(), "nanite.autoTitle")
+	span.SetAttributes(attribute.String("nanite.session.id", sessionID))
 	defer span.End()
 	_ = ctx
 

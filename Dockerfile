@@ -15,15 +15,15 @@ RUN go mod download
 COPY . .
 # Copy built UI into the embed directory
 COPY --from=ui-build /app/ui/dist ./internal/server/ui_dist/
-RUN CGO_ENABLED=0 go build -o conduit ./cmd/conduit
+RUN CGO_ENABLED=0 go build -o nanite ./cmd/nanite
 
 # Stage 3: Minimal runtime image
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
-RUN adduser -D -u 1000 conduit
+RUN adduser -D -u 1000 nanite
 WORKDIR /app
-COPY --from=go-build /app/conduit .
-RUN mkdir -p /data && chown conduit:conduit /data
-USER conduit
+COPY --from=go-build /app/nanite .
+RUN mkdir -p /data && chown nanite:nanite /data
+USER nanite
 EXPOSE 8090
-ENTRYPOINT ["./conduit", "serve", "-db", "/data/conduit.db"]
+ENTRYPOINT ["./nanite", "serve", "-db", "/data/nanite.db"]

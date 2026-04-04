@@ -51,7 +51,7 @@ interface PersistedErrorState {
 }
 
 function storageKey(sessionId: string) {
-  return `conduit:errorState:${sessionId}`;
+  return `nanite:errorState:${sessionId}`;
 }
 
 function persistErrorState(sessionId: string, state: PersistedErrorState) {
@@ -250,7 +250,7 @@ export function useChat(sessionId: string | null) {
             });
 
             // UI-trigger tools: open frontend modals/panels when the agent calls them.
-            if (data.tool === "conduit_open_sprint_planning") {
+            if (data.tool === "nanite_open_sprint_planning") {
               useSprintPlanningStore.getState().openSprintPlanning();
             }
           }

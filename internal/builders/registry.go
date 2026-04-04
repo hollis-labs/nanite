@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // Registry holds named builders and provides lookup and enumeration.

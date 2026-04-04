@@ -5,15 +5,15 @@ import (
 	"log"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/config"
-	"github.com/hollis-labs/conduit/internal/filter"
-	"github.com/hollis-labs/conduit/internal/mcp"
-	"github.com/hollis-labs/conduit/internal/permission"
-	"github.com/hollis-labs/conduit/internal/plugin"
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/store"
-	"github.com/hollis-labs/conduit/internal/toolclient"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/filter"
+	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // Container holds all service instances and shared subsystems. It is the

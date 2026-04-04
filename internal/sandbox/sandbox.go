@@ -7,10 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
-const baseDirName = ".conduit/sandboxes"
+var baseDirName = "." + brand.ID + "/sandboxes"
 const sandboxSubDir = ".sandbox"
 
 // Dir returns the sandbox directory path for a session, creating it and
@@ -30,8 +31,8 @@ func Dir(sessionID string) (string, error) {
 
 // PopulateOpts contains optional parameters for sandbox population.
 type PopulateOpts struct {
-	SessionID string // Conduit session ID (for MCP server args)
-	DBPath    string // Absolute path to Conduit's SQLite database
+	SessionID string // Nanite session ID (for MCP server args)
+	DBPath    string // Absolute path to Nanite's SQLite database
 }
 
 // Populate writes all sandbox files: a compact CLAUDE.md with rules and
@@ -53,7 +54,7 @@ func Populate(dir string, agent *store.AgentProfile, mode *store.AgentMode, opts
 		return err
 	}
 
-	// Write .mcp.json so the CLI discovers Conduit's MCP server.
+	// Write .mcp.json so the CLI discovers Nanite's MCP server.
 	if opts.DBPath != "" {
 		if err := writeMCPJSON(dir, opts); err != nil {
 			return err
@@ -63,7 +64,7 @@ func Populate(dir string, agent *store.AgentProfile, mode *store.AgentMode, opts
 	return nil
 }
 
-// writeMCPJSON generates a .mcp.json pointing the CLI at the conduit mcp
+// writeMCPJSON generates a .mcp.json pointing the CLI at the nanite mcp
 // subcommand with session-specific arguments.
 func writeMCPJSON(dir string, opts PopulateOpts) error {
 	binPath, err := os.Executable()
@@ -83,7 +84,7 @@ func writeMCPJSON(dir string, opts PopulateOpts) error {
 
 	mcpConfig := map[string]any{
 		"mcpServers": map[string]any{
-			"conduit": map[string]any{
+			brand.ID: map[string]any{
 				"command": binPath,
 				"args":    args,
 				"env":     map[string]any{},
@@ -114,7 +115,7 @@ func writeFile(dir, name, content string) error {
 func buildCLAUDEMD(agentName, agentDescription string) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# Conduit Agent — %s\n\n", agentName)
+	fmt.Fprintf(&b, "# Nanite Agent — %s\n\n", agentName)
 	if agentDescription != "" {
 		fmt.Fprintf(&b, "%s\n\n", agentDescription)
 	}
@@ -125,7 +126,7 @@ func buildCLAUDEMD(agentName, agentDescription string) string {
 
 const claudeMDBody = `## Envelope Format
 
-Emit structured envelopes as fenced code blocks with the ` + "`conduit-envelope`" + ` language tag.
+Emit structured envelopes as fenced code blocks with the ` + "`nanite-envelope`" + ` language tag.
 ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
 
 Registered types: task-disposition, giphy-modal, document-viewer, report-card,
@@ -152,20 +153,20 @@ For full schema, field reference, and examples per type, read ` + "`.sandbox/env
 // .sandbox/envelope-schema.md — full envelope spec (loaded on demand by CLI)
 // ---------------------------------------------------------------------------
 
-const envelopeSchemaContent = `# Conduit Envelope Schema
+const envelopeSchemaContent = `# Nanite Envelope Schema
 
 ## Format
 
-Wrap envelopes in a fenced code block with the ` + "`conduit-envelope`" + ` language tag.
+Wrap envelopes in a fenced code block with the ` + "`nanite-envelope`" + ` language tag.
 
 There are two envelope patterns:
 
 ### Interactive envelopes (user input)
-` + "```" + `conduit-envelope
+` + "```" + `nanite-envelope
 {
   "kind": "question|action|approval",
   "version": 1,
-  "type": "conduit",
+  "type": "nanite",
   "questions": [...],
   "proposals": [...],
   "approval": {...},
@@ -174,7 +175,7 @@ There are two envelope patterns:
 ` + "```" + `
 
 ### Plugin/display envelopes (rich UI cards)
-` + "```" + `conduit-envelope
+` + "```" + `nanite-envelope
 {
   "kind": "envelope",
   "version": 1,
@@ -192,7 +193,7 @@ Use kind="envelope" with a registered type for display cards (kb-result, giphy-m
 |-------|------|----------|-------------|
 | kind | string | yes | "question", "action", "approval", or "envelope" |
 | version | number | yes | Always 1 |
-| type | string | yes | "conduit" for interactive envelopes; a registered type name for display envelopes |
+| type | string | yes | "nanite" for interactive envelopes; a registered type name for display envelopes |
 | data | object | conditional | Required when kind="envelope" — card-specific payload |
 | questions | array | conditional | Required when kind="question" |
 | proposals | array | conditional | Required when kind="action" |
@@ -243,11 +244,11 @@ causes the envelope to be silently dropped — no error, no warning.
 ## Examples
 
 ### Question envelope
-` + "```" + `conduit-envelope
+` + "```" + `nanite-envelope
 {
   "kind": "question",
   "version": 1,
-  "type": "conduit",
+  "type": "nanite",
   "questions": [
     {
       "prompt": "What priority should this task have?",
@@ -262,11 +263,11 @@ causes the envelope to be silently dropped — no error, no warning.
 ` + "```" + `
 
 ### Action envelope (proposal)
-` + "```" + `conduit-envelope
+` + "```" + `nanite-envelope
 {
   "kind": "action",
   "version": 1,
-  "type": "conduit",
+  "type": "nanite",
   "proposals": [
     {
       "type": "create_task",
@@ -286,11 +287,11 @@ causes the envelope to be silently dropped — no error, no warning.
 ` + "```" + `
 
 ### Approval envelope
-` + "```" + `conduit-envelope
+` + "```" + `nanite-envelope
 {
   "kind": "approval",
   "version": 1,
-  "type": "conduit",
+  "type": "nanite",
   "approval": {
     "action": "Archive 12 completed tasks from Sprint 4",
     "risk": "medium",

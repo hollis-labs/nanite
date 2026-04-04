@@ -274,10 +274,10 @@ export function PreferencesPanel() {
 
   useEffect(() => {
     if (!settings) return
-    const stored = localStorage.getItem('conduit:toolCallDisplayMode')
+    const stored = localStorage.getItem('nanite:toolCallDisplayMode')
     if (stored && !settings.tool_call_display_mode) {
       mutation.mutate({ tool_call_display_mode: stored as ToolCallDisplayMode })
-      localStorage.removeItem('conduit:toolCallDisplayMode')
+      localStorage.removeItem('nanite:toolCallDisplayMode')
     }
   }, [settings]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -407,7 +407,7 @@ export function PreferencesPanel() {
         </SettingsRow>
       </SettingsCard>
 
-      <SettingsCard title="Provider Fallback Chain" description="When a provider is unavailable, Conduit tries the next one. Drag to reorder.">
+      <SettingsCard title="Provider Fallback Chain" description="When a provider is unavailable, Nanite tries the next one. Drag to reorder.">
         <FallbackChain
           chain={settings?.provider_fallback_chain ?? []}
           providers={providerOptions}

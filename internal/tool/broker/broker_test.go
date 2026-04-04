@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/tool"
-	"github.com/hollis-labs/conduit/internal/tool/broker"
+	"github.com/hollis-labs/nanite/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool/broker"
 )
 
 // testTool creates a simple tool for testing.
@@ -408,8 +408,8 @@ func TestMatchPattern(t *testing.T) {
 
 func TestLoadRules(t *testing.T) {
 	tmpDir := t.TempDir()
-	conduitDir := filepath.Join(tmpDir, ".conduit")
-	if err := os.MkdirAll(conduitDir, 0o755); err != nil {
+	naniteDir := filepath.Join(tmpDir, ".nanite")
+	if err := os.MkdirAll(naniteDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -428,7 +428,7 @@ func TestLoadRules(t *testing.T) {
       tools: [web_fetch, web_search, dev_read]
   always_available: [shell, send_message]
 `
-	if err := os.WriteFile(filepath.Join(conduitDir, "broker.yaml"), []byte(yamlContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(naniteDir, "broker.yaml"), []byte(yamlContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

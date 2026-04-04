@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/hollis-labs/conduit/internal/agentvalidation"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/agentvalidation"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {

@@ -95,7 +95,7 @@ export const useLayoutStore = create<LayoutState>()(
       },
     }),
     {
-      name: 'conduit-layout',
+      name: 'nanite-layout',
       onRehydrateStorage: () => (state) => {
         if (state?.theme) {
           applyThemeClass(state.theme)

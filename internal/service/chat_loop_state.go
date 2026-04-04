@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/chat"
+	"github.com/hollis-labs/nanite/internal/chat"
 )
 
 // ContinueSite identifies why the chat loop continues for another iteration.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	fplugin "github.com/hollis-labs/fragments-engine/plugin"
+	fplugin "github.com/hollis-labs/plugin"
 )
 
 // PluginConstructor creates a new plugin instance.

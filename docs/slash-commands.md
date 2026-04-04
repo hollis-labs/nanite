@@ -1,6 +1,6 @@
 # Slash Commands
 
-Conduit provides a slash command system accessible from the chat composer. Type `/` to see available commands, or `@` to reference files.
+Nanite provides a slash command system accessible from the chat composer. Type `/` to see available commands, or `@` to reference files.
 
 ## Built-in Commands
 

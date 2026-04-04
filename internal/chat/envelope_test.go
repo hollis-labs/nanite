@@ -43,9 +43,9 @@ func TestParseEnvelopes(t *testing.T) {
 	}
 }
 
-func TestParseEnvelopesConduitTag(t *testing.T) {
-	input := "```conduit-envelope\n" +
-		`{"kind":"question","version":1,"type":"conduit","questions":[{"prompt":"Choose one","type":"select","options":["a","b"],"required":true}]}` +
+func TestParseEnvelopesNaniteTag(t *testing.T) {
+	input := "```nanite-envelope\n" +
+		`{"kind":"question","version":1,"type":"nanite","questions":[{"prompt":"Choose one","type":"select","options":["a","b"],"required":true}]}` +
 		"\n```"
 
 	envelopes, _, _ := ParseEnvelopes(input)
@@ -100,7 +100,7 @@ func TestParseEnvelopesMultiple(t *testing.T) {
 }
 
 func TestParseEnvelopes_InvalidJSON(t *testing.T) {
-	input := "```conduit-envelope\n{not valid json}\n```"
+	input := "```nanite-envelope\n{not valid json}\n```"
 	envelopes, _, errors := ParseEnvelopes(input)
 
 	if len(envelopes) != 0 {
@@ -115,8 +115,8 @@ func TestParseEnvelopes_InvalidJSON(t *testing.T) {
 }
 
 func TestParseEnvelopes_MissingKind(t *testing.T) {
-	input := "```conduit-envelope\n" +
-		`{"version":1,"type":"conduit"}` +
+	input := "```nanite-envelope\n" +
+		`{"version":1,"type":"nanite"}` +
 		"\n```"
 	envelopes, _, errors := ParseEnvelopes(input)
 
@@ -133,8 +133,8 @@ func TestParseEnvelopes_MissingKind(t *testing.T) {
 }
 
 func TestParseEnvelopes_MissingVersion(t *testing.T) {
-	input := "```conduit-envelope\n" +
-		`{"kind":"action","type":"conduit"}` +
+	input := "```nanite-envelope\n" +
+		`{"kind":"action","type":"nanite"}` +
 		"\n```"
 	_, _, errors := ParseEnvelopes(input)
 
@@ -147,7 +147,7 @@ func TestParseEnvelopes_MissingVersion(t *testing.T) {
 }
 
 func TestParseEnvelopes_UnregisteredType(t *testing.T) {
-	input := "```conduit-envelope\n" +
+	input := "```nanite-envelope\n" +
 		`{"kind":"action","version":1,"type":"invented-type"}` +
 		"\n```"
 	envelopes, _, errors := ParseEnvelopes(input)
@@ -165,7 +165,7 @@ func TestParseEnvelopes_UnregisteredType(t *testing.T) {
 }
 
 func TestParseEnvelopes_ValidNoErrors(t *testing.T) {
-	input := "```conduit-envelope\n" +
+	input := "```nanite-envelope\n" +
 		`{"kind":"action","version":1,"type":"kb-result","data":{"query":"test"}}` +
 		"\n```"
 	envelopes, _, errors := ParseEnvelopes(input)
@@ -186,8 +186,8 @@ func TestValidateEnvelope(t *testing.T) {
 	}{
 		{"valid", Envelope{Kind: "action", Version: 1, Type: "kb-result"}, ""},
 		{"valid_standard", Envelope{Kind: "question", Version: 1, Type: "standard"}, "unregistered_type"},
-		{"missing_kind", Envelope{Version: 1, Type: "conduit"}, "missing_kind"},
-		{"missing_version", Envelope{Kind: "action", Type: "conduit"}, "missing_version"},
+		{"missing_kind", Envelope{Version: 1, Type: "nanite"}, "missing_kind"},
+		{"missing_version", Envelope{Kind: "action", Type: "nanite"}, "missing_version"},
 		{"unregistered", Envelope{Kind: "action", Version: 1, Type: "nonexistent"}, "unregistered_type"},
 		{"no_type_ok", Envelope{Kind: "action", Version: 1}, ""},
 	}

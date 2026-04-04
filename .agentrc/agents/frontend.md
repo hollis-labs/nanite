@@ -1,7 +1,7 @@
-# Frontend Context — Conduit (React SPA)
+# Frontend Context — Nanite (React SPA)
 
 > Project-specific frontend conventions. Loaded by the frontend agent role when working in this project.
-> Lives at `conduit/.agentrc/agents/frontend.md`.
+> Lives at `nanite/.agentrc/agents/frontend.md`.
 
 ## Stack
 
@@ -121,7 +121,7 @@ ui/src/
 - `activeStreams`, `pendingTools` — Maps for presence tracking
 - `toolCallDisplayMode` — persisted to localStorage
 
-### useLayoutStore (persisted as `conduit-layout`)
+### useLayoutStore (persisted as `nanite-layout`)
 - `leftSidebarOpen`, `rightRailOpen`, `artifactsDrawerOpen`, `workflowPanelOpen`, `taskThreadOpen`, `inboxPanelOpen`
 - `currentPage: 'chat' | 'settings'`
 
@@ -243,8 +243,8 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 - Path alias: `@/` maps to `src/` (configured in vite.config.ts and tsconfig)
 - React Query `staleTime`: 1 minute default, 1 retry
-- Layout state persisted to localStorage as `conduit-layout`
-- Tool call display mode persisted separately as `conduit:toolCallDisplayMode`
+- Layout state persisted to localStorage as `nanite-layout`
+- Tool call display mode persisted separately as `nanite:toolCallDisplayMode`
 - No env vars — all config hardcoded; production uses embedded defaults
 - Plugin system: plugins provide envelope components registered at build time
 - A2A messaging: agent-to-agent collaboration via inbox + task threads

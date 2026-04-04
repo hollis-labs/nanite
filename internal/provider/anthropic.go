@@ -273,12 +273,12 @@ func (a *Anthropic) StreamChatWithTools(ctx context.Context, systemPrompt string
 
 // streamChatInternal is the shared implementation for StreamChat and StreamChatWithTools.
 func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	ctx, span := feotel.StartSpan(ctx, "conduit.provider.anthropic.stream")
+	ctx, span := feotel.StartSpan(ctx, "nanite.provider.anthropic.stream")
 	span.SetAttributes(
-		attribute.String("conduit.provider", "anthropic"),
-		attribute.String("conduit.model", model),
-		attribute.Int("conduit.messages.count", len(messages)),
-		attribute.Int("conduit.tools.count", len(tools)),
+		attribute.String("nanite.provider", "anthropic"),
+		attribute.String("nanite.model", model),
+		attribute.Int("nanite.messages.count", len(messages)),
+		attribute.Int("nanite.tools.count", len(tools)),
 	)
 
 	if a.apiKey == "" {
@@ -386,7 +386,7 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 			}
 			span.RecordError(apiErr)
 			span.SetStatus(codes.Error, apiErr.Error())
-			span.SetAttributes(attribute.Int("conduit.http.status", resp.StatusCode))
+			span.SetAttributes(attribute.Int("nanite.http.status", resp.StatusCode))
 			span.End()
 			return nil, apiErr
 		}
@@ -412,8 +412,8 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 	_ = lastErr
 
 	span.SetAttributes(
-		attribute.Int64("conduit.provider.latency_ms", time.Since(requestStart).Milliseconds()),
-		attribute.Int("conduit.http.status", resp.StatusCode),
+		attribute.Int64("nanite.provider.latency_ms", time.Since(requestStart).Milliseconds()),
+		attribute.Int("nanite.http.status", resp.StatusCode),
 	)
 
 	ch := make(chan StreamEvent, 64)
@@ -452,8 +452,8 @@ func (a *Anthropic) readSSEWithTracking(ctx context.Context, body io.ReadCloser,
 		close(ch)
 		if span != nil {
 			span.SetAttributes(
-				attribute.Int("conduit.provider.input_tokens", totalInput),
-				attribute.Int("conduit.provider.output_tokens", totalOutput),
+				attribute.Int("nanite.provider.input_tokens", totalInput),
+				attribute.Int("nanite.provider.output_tokens", totalOutput),
 			)
 			span.End()
 		}
@@ -661,12 +661,12 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 
 // Complete makes a non-streaming completion call.
 func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
-	ctx, span := feotel.StartSpan(ctx, "conduit.provider.anthropic.complete")
+	ctx, span := feotel.StartSpan(ctx, "nanite.provider.anthropic.complete")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("conduit.provider", "anthropic"),
-		attribute.String("conduit.model", model),
-		attribute.Int("conduit.messages.count", len(messages)),
+		attribute.String("nanite.provider", "anthropic"),
+		attribute.String("nanite.model", model),
+		attribute.Int("nanite.messages.count", len(messages)),
 	)
 
 	if a.apiKey == "" {

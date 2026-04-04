@@ -7,12 +7,13 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	condmcp "github.com/hollis-labs/conduit/internal/mcp"
-	"github.com/hollis-labs/conduit/internal/store"
-	"github.com/hollis-labs/conduit/internal/version"
+	"github.com/hollis-labs/nanite/internal/brand"
+	condmcp "github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/version"
 )
 
-// Server is a Conduit MCP server that exposes self-service tools
+// Server is a Nanite MCP server that exposes self-service tools
 // (skills, agents, workflows, envelope helpers) to external processes
 // like Claude CLI via the MCP stdio protocol.
 type Server struct {
@@ -20,7 +21,7 @@ type Server struct {
 	sessionID string
 }
 
-// New creates a Conduit MCP server backed by the given store.
+// New creates a Nanite MCP server backed by the given store.
 func New(s *store.Store, sessionID string) *Server {
 	return &Server{
 		self:      condmcp.NewSelfToolsTransport(s),
@@ -32,7 +33,7 @@ func New(s *store.Store, sessionID string) *Server {
 // client disconnects or ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
 	srv := server.NewMCPServer(
-		"conduit",
+		brand.ID,
 		version.Version,
 		server.WithToolCapabilities(true),
 	)
@@ -58,7 +59,7 @@ func (s *Server) registerTools(srv *server.MCPServer) {
 	log.Printf("mcpserver: registered %d tools", len(tools))
 }
 
-// buildMCPTool converts a Conduit Tool definition to a mcp-go Tool.
+// buildMCPTool converts a Nanite Tool definition to a mcp-go Tool.
 func buildMCPTool(t condmcp.Tool) mcp.Tool {
 	return mcp.NewToolWithRawSchema(t.Name, t.Description, mustMarshalSchema(t.InputSchema))
 }

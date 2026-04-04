@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/tool-broker/broker"
 )
 
@@ -106,7 +106,7 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 
 // DiscoverTools queries all registered servers for their tools.
 func (m *Manager) DiscoverTools(ctx context.Context) error {
-	ctx, span := feotel.StartSpan(ctx, "conduit.mcp.discoverTools")
+	ctx, span := feotel.StartSpan(ctx, "nanite.mcp.discoverTools")
 	defer span.End()
 
 	m.mu.Lock()
@@ -147,8 +147,8 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	}
 
 	span.SetAttributes(
-		attribute.Int("conduit.mcp.tools.total", totalTools),
-		attribute.Int("conduit.mcp.servers.count", len(m.servers)),
+		attribute.Int("nanite.mcp.tools.total", totalTools),
+		attribute.Int("nanite.mcp.servers.count", len(m.servers)),
 	)
 
 	log.Printf("mcp: total %d tools from %d servers", totalTools, len(m.servers))
@@ -226,8 +226,8 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 	}
 
 	span.SetAttributes(
-		attribute.String("conduit.mcp.server", serverName),
-		attribute.String("conduit.mcp.tool", toolName),
+		attribute.String("nanite.mcp.server", serverName),
+		attribute.String("nanite.mcp.tool", toolName),
 	)
 
 	m.mu.RLock()
@@ -267,7 +267,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		return "", err
 	}
 
-	span.SetAttributes(attribute.Int("conduit.mcp.result_len", sb.Len()))
+	span.SetAttributes(attribute.Int("nanite.mcp.result_len", sb.Len()))
 	return sb.String(), nil
 }
 

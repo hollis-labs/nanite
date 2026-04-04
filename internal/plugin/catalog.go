@@ -21,7 +21,7 @@ type CatalogEntry struct {
 	Version     string `yaml:"version"     json:"version"`
 	Description string `yaml:"description" json:"description"`
 	Author      string `yaml:"author"      json:"author,omitempty"`
-	Repo        string `yaml:"repo"        json:"repo,omitempty"`        // e.g. "hollis-labs/conduit-plugin-git"
+	Repo        string `yaml:"repo"        json:"repo,omitempty"`        // e.g. "hollis-labs/nanite-plugin-git"
 	ArchiveURL  string `yaml:"archive_url" json:"archive_url"`           // download URL for .tar.gz
 	Checksum    string `yaml:"checksum"    json:"checksum,omitempty"`    // "sha256:hex..."
 	Signature   string `yaml:"signature"   json:"signature,omitempty"`  // hex-encoded Ed25519 signature over the archive

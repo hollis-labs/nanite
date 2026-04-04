@@ -9,7 +9,7 @@ interface WidgetProps {
 }
 
 export function Widget({ id, title, icon: Icon, children }: WidgetProps) {
-  const storageKey = `conduit-widget-${id}`
+  const storageKey = `nanite-widget-${id}`
 
   const [minimized, setMinimized] = useState(() => {
     try {

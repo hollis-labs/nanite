@@ -4,6 +4,8 @@
 **Date:** 2026-03-13
 **Context:** Mentat identity crisis
 
+**Note:** The chat application was subsequently rebranded from Conduit to Nanite (2026-04-03). The decision to separate the chat harness from the Mentat agent still stands. All references to "Conduit" in this ADR reflect the original naming at decision time.
+
 ## Problem
 
 "Mentat" currently means 6 different things:
@@ -25,7 +27,7 @@ This creates confusion for users ("is Mentat the chat app or the agent?"), for a
 - Conduit is a provider-agnostic, multi-agent chat harness
 - It is infrastructure — it doesn't think, agents think
 - Any Special Agent can run inside it (Mentat, project-specific agents, etc.)
-- Repo: `hollis-labs/conduit`, binary: `conduit`, directory: `~/Projects-apps/conduit/`
+- Repo: `hollis-labs/nanite`, binary: `nanite`, directory: `~/Projects-apps/nanite/`
 
 ### Mentat (the Special Agent)
 - Mentat becomes a defined Special Agent with: role, responsibilities, domain, capabilities

@@ -6,12 +6,12 @@ import (
 	"log"
 
 	"github.com/google/uuid"
-	"github.com/hollis-labs/conduit/internal/chat"
-	"github.com/hollis-labs/conduit/internal/config"
-	"github.com/hollis-labs/conduit/internal/filter"
-	"github.com/hollis-labs/conduit/internal/permission"
-	"github.com/hollis-labs/conduit/internal/provider"
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/filter"
+	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // ChatService is the top-level orchestrator for message handling. It composes

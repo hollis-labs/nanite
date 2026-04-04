@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/hollis-labs/conduit/internal/chat"
+	"github.com/hollis-labs/nanite/internal/chat"
 )
 
 // StreamManager owns the concurrent state for message streams, SSE

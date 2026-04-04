@@ -1,6 +1,6 @@
 # Go
-/conduit
-/cmd/conduit/conduit
+/nanite
+/cmd/nanite/nanite
 *.exe
 *.test
 *.out
@@ -46,4 +46,4 @@ Thumbs.db
 .agentrc/state/
 .agentrc/.session-unclean.flag
 .claude/worktrees/
-conduit
+nanite

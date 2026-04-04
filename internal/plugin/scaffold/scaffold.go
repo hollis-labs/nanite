@@ -1,6 +1,6 @@
-// Package scaffold provides plugin scaffolding for the `conduit plugin new` command.
+// Package scaffold provides plugin scaffolding for the `nanite plugin new` command.
 // It uses embedded Go templates to generate plugin boilerplate that matches
-// the patterns used by existing Conduit plugins (e.g., support-ticket).
+// the patterns used by existing Nanite plugins (e.g., support-ticket).
 package scaffold
 
 import (
@@ -51,7 +51,7 @@ func Run(opts Options) error {
 		return fmt.Errorf("plugin name is required")
 	}
 	if opts.Description == "" {
-		opts.Description = "A Conduit plugin"
+		opts.Description = "A Nanite plugin"
 	}
 	if opts.OutputDir == "" {
 		opts.OutputDir = filepath.Join("plugins", opts.Name)

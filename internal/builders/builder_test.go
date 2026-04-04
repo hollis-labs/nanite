@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/store"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func newTestStore(t *testing.T) *store.Store {
@@ -453,7 +453,7 @@ func TestBuilderStep_NoActiveSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no session active")
 	}
-	if !strings.Contains(err.Error(), "conduit_start_builder") {
-		t.Errorf("expected error to mention conduit_start_builder, got: %v", err)
+	if !strings.Contains(err.Error(), "nanite_start_builder") {
+		t.Errorf("expected error to mention nanite_start_builder, got: %v", err)
 	}
 }

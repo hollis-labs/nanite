@@ -23,9 +23,9 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 
 ## Issue 2: Wrong plugin loaded — builtin copy instead of submodule — DONE
 
-**What broke:** `internal/plugin/allplugins/allplugins.go` was importing `github.com/hollis-labs/conduit/internal/plugin/builtin/supportticket` (a compiled-in copy) instead of `github.com/hollis-labs/conduit/plugins/support-ticket` (the live submodule). Changes to the submodule had no effect.
+**What broke:** `internal/plugin/allplugins/allplugins.go` was importing `github.com/hollis-labs/nanite/internal/plugin/builtin/supportticket` (a compiled-in copy) instead of `github.com/hollis-labs/nanite/plugins/support-ticket` (the live submodule). Changes to the submodule had no effect.
 
-**Root cause:** `allplugins.go` was not updated when setting up the work machine. Both the builtin copy and the submodule call `RegisterPlugin("support", ...)` in their `init()` — importing both would panic. The submodule has no separate `go.mod` (it is part of the conduit module), so the correct import path is `github.com/hollis-labs/conduit/plugins/support-ticket`.
+**Root cause:** `allplugins.go` was not updated when setting up the work machine. Both the builtin copy and the submodule call `RegisterPlugin("support", ...)` in their `init()` — importing both would panic. The submodule has no separate `go.mod` (it is part of the nanite module), so the correct import path is `github.com/hollis-labs/nanite/plugins/support-ticket`.
 
 **Fix applied:** Changed the import in `allplugins.go` from the builtin path to the submodule path.
 
@@ -40,7 +40,7 @@ Four issues surfaced during demo-prep on the work machine. All were fixed well e
 
 **What broke:** After submitting a ticket via the `TicketFormCard` UI component, the `ticket-confirmation` envelope (rich card with Download button) did not appear in the agent response. This worked on the home machine.
 
-**Root cause:** The submodule was bumped from commit `ff8c92f` to `c2456d8` ("feat: IT Support plugin — standalone Conduit plugin using FE plugin SDK"). That rewrite of `TicketFormCard.tsx` dropped the `<!--TICKET_DATA:{...}:TICKET_DATA-->` marker from the `onSendMessage` call. The engine at `internal/chat/engine.go:1013` parses this marker from the user message to inject the `ticket-confirmation` envelope. Without the marker the engine never receives the ticket data and no confirmation card is produced. `TicketInitFlow.tsx` (the quick-action path) still included the marker; only `TicketFormCard` (the agent-emitted `ticket-form` envelope path) was missing it.
+**Root cause:** The submodule was bumped from commit `ff8c92f` to `c2456d8` ("feat: IT Support plugin — standalone Nanite plugin using FE plugin SDK"). That rewrite of `TicketFormCard.tsx` dropped the `<!--TICKET_DATA:{...}:TICKET_DATA-->` marker from the `onSendMessage` call. The engine at `internal/chat/engine.go:1013` parses this marker from the user message to inject the `ticket-confirmation` envelope. Without the marker the engine never receives the ticket data and no confirmation card is produced. `TicketInitFlow.tsx` (the quick-action path) still included the marker; only `TicketFormCard` (the agent-emitted `ticket-form` envelope path) was missing it.
 
 **Fix applied:** Added the `TICKET_DATA` marker back to `TicketFormCard.onSendMessage`, building the ticket JSON from the API response fields: `id`, `title`, `description`, `category`, `priority`, `status`, `requester`, `routing`, `created_at`.
 

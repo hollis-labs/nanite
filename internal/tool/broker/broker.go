@@ -1,4 +1,4 @@
-// Package broker implements progressive tool resolution for Conduit.
+// Package broker implements progressive tool resolution for Nanite.
 //
 // Selection flows through three layers in order:
 //   - Layer 1 (Explicit): caller-specified tools, skill bindings, agent config
@@ -16,7 +16,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/hollis-labs/conduit/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 // Broker performs progressive tool resolution across three layers.

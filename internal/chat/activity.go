@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/brand"
 )
 
 // Activity event type constants for the Engine activity feed.
@@ -60,7 +62,7 @@ func NewActivityEmitter(url string) *ActivityEmitter {
 	return &ActivityEmitter{
 		baseURL:   url,
 		client:    &http.Client{Timeout: 5 * time.Second},
-		projectID: "conduit",
+		projectID: brand.ID,
 		disabled:  disabled,
 	}
 }
@@ -75,7 +77,7 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 		ev.ProjectID = e.projectID
 	}
 	if ev.Actor == "" {
-		ev.Actor = "conduit"
+		ev.Actor = brand.ID
 	}
 
 	body, err := json.Marshal(ev)

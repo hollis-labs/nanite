@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/hollis-labs/conduit/internal/chat"
+	"github.com/hollis-labs/nanite/internal/chat"
 )
 
 func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/conduit/internal/provider"
+	"github.com/hollis-labs/nanite/internal/provider"
 )
 
 // mockSummarizer returns a canned summary.

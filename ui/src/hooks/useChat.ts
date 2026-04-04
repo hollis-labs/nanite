@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSprintPlanningStore } from "@/components/plugins/sprint/useSprintPlanningStore";
 import { api } from "@/lib/api";
-import type { ApprovalRequest, ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning } from "@/lib/types";
+import type { ApprovalRequest, ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning, UserSettings } from "@/lib/types";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 
@@ -182,7 +182,8 @@ export function useChat(sessionId: string | null) {
   useEffect(() => {
     void loadMessages();
     // Load retained tool calls for this session (prunes stale entries)
-    store().loadSessionToolCalls(sessionId);
+    const retention = queryClient.getQueryData<UserSettings>(['settings'])?.tool_drawer_retention ?? 15
+    store().loadSessionToolCalls(sessionId, retention);
     // Close the tool drawer on session switch — user opens as needed
     useLayoutStore.getState().setToolDrawerState('closed');
     // Clear text-only mode on session switch — it will be re-set if the new

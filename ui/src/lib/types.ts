@@ -327,6 +327,8 @@ export interface UserSettings {
   utility_provider: string;
   utility_model: string;
   tool_call_display_mode: ToolCallDisplayMode;
+  tool_stream_behavior: ToolStreamBehavior;
+  tool_drawer_retention: number;
   provider_fallback_chain: string[];
   developer_mode: boolean;
   recover_mode: boolean;
@@ -549,6 +551,7 @@ export interface Artifact {
 // --- Tool Call Display ---
 
 export type ToolCallDisplayMode = "indicator" | "minimal" | "compact" | "full";
+export type ToolStreamBehavior = "streaming" | "persist" | "hidden";
 
 // --- Tool Calls ---
 

@@ -84,6 +84,18 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if v, ok := raw["tool_stream_behavior"]; ok {
+		if err := json.Unmarshal(v, &existing.ToolStreamBehavior); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'tool_stream_behavior'")
+			return
+		}
+	}
+	if v, ok := raw["tool_drawer_retention"]; ok {
+		if err := json.Unmarshal(v, &existing.ToolDrawerRetention); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'tool_drawer_retention'")
+			return
+		}
+	}
 	if v, ok := raw["ext_settings"]; ok {
 		var ext map[string]any
 		if err := json.Unmarshal(v, &ext); err != nil {

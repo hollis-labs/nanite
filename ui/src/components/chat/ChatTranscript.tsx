@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { AgentMode, Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
+import { useSettings } from "@/hooks/useSettings";
 import { ApprovalCard } from "./ApprovalCard";
 import { ChatMessage } from "./ChatMessage";
 import { CompactionDivider } from "./CompactionDivider";
@@ -51,6 +52,8 @@ export function ChatTranscript({
   const saveToolCallDisplayMode = useChatStore((s) => s.saveToolCallDisplayMode);
   const loadToolCallDisplayMode = useChatStore((s) => s.loadToolCallDisplayMode);
   const pendingApprovals = useChatStore((s) => s.pendingApprovals);
+  const { data: userSettings } = useSettings();
+  const toolStreamBehavior = userSettings?.tool_stream_behavior ?? 'streaming';
   const chatErrors = useChatStore((s) => s.chatErrors);
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
@@ -292,8 +295,8 @@ export function ChatTranscript({
           );
         })}
 
-        {/* Tool call indicators during streaming */}
-        {isStreaming && toolCalls.length > 0 && (
+        {/* Tool call indicators — visibility controlled by tool_stream_behavior setting */}
+        {toolStreamBehavior !== 'hidden' && toolCalls.length > 0 && (toolStreamBehavior === 'persist' || isStreaming) && (
           <div className="flex gap-3">
             <div
               className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}

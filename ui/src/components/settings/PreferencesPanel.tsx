@@ -4,7 +4,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { usePermissionMode } from '@/hooks/usePermissionMode'
 import { useSettings, useSettingsMutation, useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
-import type { PermissionMode, ToolCallDisplayMode } from '@/lib/types'
+import type { PermissionMode, ToolCallDisplayMode, ToolStreamBehavior } from '@/lib/types'
 
 const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; description: string }[] = [
   { value: 'default', label: 'Default', description: 'Prompt for destructive/write operations' },
@@ -18,6 +18,20 @@ const TOOL_DISPLAY_OPTIONS: { value: ToolCallDisplayMode; label: string }[] = [
   { value: 'minimal', label: 'Minimal' },
   { value: 'compact', label: 'Compact' },
   { value: 'full', label: 'Full' },
+]
+
+const TOOL_STREAM_OPTIONS: { value: ToolStreamBehavior; label: string }[] = [
+  { value: 'streaming', label: 'While Running' },
+  { value: 'persist', label: 'Always' },
+  { value: 'hidden', label: 'Hidden' },
+]
+
+const DRAWER_RETENTION_OPTIONS: { value: string; label: string }[] = [
+  { value: '5', label: '5 minutes' },
+  { value: '15', label: '15 minutes' },
+  { value: '30', label: '30 minutes' },
+  { value: '60', label: '1 hour' },
+  { value: '-1', label: 'Until refresh' },
 ]
 
 // --- Shared components ---
@@ -71,11 +85,13 @@ function SettingsSelect({
   options,
   onChange,
   disabled,
+  allowNone = true,
 }: {
   value: string
   options: { value: string; label: string }[]
   onChange: (value: string) => void
   disabled?: boolean
+  allowNone?: boolean
 }) {
   return (
     <div className="relative">
@@ -85,7 +101,7 @@ function SettingsSelect({
         disabled={disabled}
         className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
       >
-        <option value="">None</option>
+        {allowNone && <option value="">None</option>}
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
@@ -366,11 +382,27 @@ export function PreferencesPanel() {
       </SettingsCard>
 
       <SettingsCard title="Display">
-        <SettingsRow label="Tool Call Display" description="How tool calls appear in chat">
+        <SettingsRow label="Tool Call Style" description="How tool calls appear in chat">
           <SettingsSelect
             value={settings?.tool_call_display_mode ?? 'minimal'}
             options={TOOL_DISPLAY_OPTIONS}
             onChange={(v) => handleChange('tool_call_display_mode', v)}
+          />
+        </SettingsRow>
+        <SettingsRow label="Tool Call Visibility" description="When tool calls are visible in the chat stream">
+          <SettingsSelect
+            value={settings?.tool_stream_behavior ?? 'streaming'}
+            options={TOOL_STREAM_OPTIONS}
+            onChange={(v) => handleChange('tool_stream_behavior', v)}
+            allowNone={false}
+          />
+        </SettingsRow>
+        <SettingsRow label="Drawer Retention" description="How long tool call history stays in the drawer">
+          <SettingsSelect
+            value={String(settings?.tool_drawer_retention ?? 15)}
+            options={DRAWER_RETENTION_OPTIONS}
+            onChange={(v) => mutation.mutate({ tool_drawer_retention: Number(v) })}
+            allowNone={false}
           />
         </SettingsRow>
       </SettingsCard>

@@ -45,7 +45,7 @@ func (p *DemoPresenterPlugin) Load(host plugin.Host) error {
 		// Non-fatal — the plugin still loads, just no dedicated agent profile.
 	}
 
-	// NOTE: The 6 demo-specific tools (nanite_navigate_engine, nanite_refresh_engine,
+	// NOTE: The 8 demo-specific tools (nanite_navigate_engine, nanite_refresh_engine,
 	// nanite_show_report, nanite_show_document, nanite_show_task_disposition,
 	// nanite_show_sprint_planning_review, nanite_show_giphy, nanite_run_report)
 	// are registered globally in internal/mcp/self_tools.go. They are available to

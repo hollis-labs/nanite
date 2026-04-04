@@ -274,10 +274,11 @@ export function PreferencesPanel() {
 
   useEffect(() => {
     if (!settings) return
-    const stored = localStorage.getItem('nanite:toolCallDisplayMode')
+    const stored = localStorage.getItem('nanite:toolCallDisplayMode') ?? localStorage.getItem('conduit:toolCallDisplayMode')
     if (stored && !settings.tool_call_display_mode) {
       mutation.mutate({ tool_call_display_mode: stored as ToolCallDisplayMode })
       localStorage.removeItem('nanite:toolCallDisplayMode')
+      localStorage.removeItem('conduit:toolCallDisplayMode')
     }
   }, [settings]) // eslint-disable-line react-hooks/exhaustive-deps
 

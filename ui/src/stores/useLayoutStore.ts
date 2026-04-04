@@ -96,6 +96,14 @@ export const useLayoutStore = create<LayoutState>()(
     }),
     {
       name: 'nanite-layout',
+      migrate: () => {
+        // One-time migration from conduit-layout to nanite-layout
+        const old = localStorage.getItem('conduit-layout')
+        if (old && !localStorage.getItem('nanite-layout')) {
+          localStorage.setItem('nanite-layout', old)
+          localStorage.removeItem('conduit-layout')
+        }
+      },
       onRehydrateStorage: () => (state) => {
         if (state?.theme) {
           applyThemeClass(state.theme)

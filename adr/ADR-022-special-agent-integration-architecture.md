@@ -7,7 +7,7 @@
 
 ## Context
 
-Fragments Engine has five core services (Nanite, Cortex, Volon, Hadron, Nanite), each with an associated Special Agent. As the agent tier matures, communication patterns between agents and services have accumulated inconsistently — some agents use MCP, some call HTTP APIs directly, and some shell out to CLI tools. This creates:
+Fragments Engine has five core services (Nanite, Cortex, Volon, Hadron, Beacon), each with an associated Special Agent. As the agent tier matures, communication patterns between agents and services have accumulated inconsistently — some agents use MCP, some call HTTP APIs directly, and some shell out to CLI tools. This creates:
 
 - Performance overhead from unnecessary MCP round-trips when an agent operates on its own service
 - No clear protocol boundary for cross-service communication

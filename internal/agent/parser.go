@@ -56,9 +56,9 @@ type ModeDefinition struct {
 
 // AgentConstraints configures iteration and time limits for the agent.
 type AgentConstraints struct {
-	MaxIterations  int `yaml:"maxIterations"`
-	MaxTimeSeconds int `yaml:"maxTimeSeconds"`
-	RetryBudget    int `yaml:"retryBudget"`
+	MaxIterations  int `yaml:"maxIterations" json:"maxIterations,omitempty"`
+	MaxTimeSeconds int `yaml:"maxTimeSeconds" json:"maxTimeSeconds,omitempty"`
+	RetryBudget    int `yaml:"retryBudget" json:"retryBudget,omitempty"`
 }
 
 var frontmatterDelim = []byte("---")
@@ -84,7 +84,7 @@ func ParseMD(data []byte) (*Definition, error) {
 	}
 
 	if def.Slug == "" {
-		return nil, fmt.Errorf("agent: slug is required in frontmatter")
+		return nil, fmt.Errorf("agent: slug is required in frontmatter (or use ParseMDFile for filename fallback)")
 	}
 
 	def.SystemPrompt = strings.TrimSpace(string(body))
@@ -102,6 +102,11 @@ func ParseMDFile(path string) (*Definition, error) {
 	def, err := ParseMD(data)
 	if err != nil {
 		return nil, fmt.Errorf("agent: parse %s: %w", path, err)
+	}
+
+	// Fall back to filename-derived slug when frontmatter omits it.
+	if def.Slug == "" {
+		def.Slug = SlugFromFilename(path)
 	}
 
 	def.SourceRef = path
@@ -132,8 +137,8 @@ func splitFrontmatter(data []byte) (frontmatter, body []byte, err error) {
 		return nil, nil, fmt.Errorf("agent: no content after opening --- delimiter")
 	}
 
-	// Find the closing delimiter.
-	before, after, found := bytes.Cut(rest, frontmatterDelim)
+	// Find the closing delimiter — must appear at the start of a line.
+	before, after, found := bytes.Cut(rest, append([]byte("\n"), frontmatterDelim...))
 	if !found {
 		return nil, nil, fmt.Errorf("agent: missing closing --- delimiter")
 	}

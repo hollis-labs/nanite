@@ -40,8 +40,12 @@ export function WidgetManager() {
   // Widget detail view state.
   const [detailWidgetId, setDetailWidgetId] = useState<string | null>(null)
 
-  // Drag state.
+  // Drag state — track visually via local state, persist only on drop.
   const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null)
+
+  // Use drag-in-progress order for rendering when actively dragging.
+  const effectiveDisplayIds = dragOrder ?? displayIds
 
   const isVisible = (id: string) => visibility[id] !== false
 
@@ -62,27 +66,35 @@ export function WidgetManager() {
     savePreferences(next, orderedIds)
   }
 
+  /** Reconstruct full order preserving hidden widgets in their original slots. */
+  const mergeDisplayOrder = (reordered: string[]): string[] => {
+    const displayIdSet = new Set(displayIds)
+    let reorderedIdx = 0
+    return orderedIds.map((id) => (displayIdSet.has(id) ? reordered[reorderedIdx++] : id))
+  }
+
   const handleDragStart = (idx: number) => {
     setDragIdx(idx)
+    setDragOrder(null)
   }
 
   const handleDragOver = (e: React.DragEvent, idx: number) => {
     e.preventDefault()
     if (dragIdx === null || dragIdx === idx) return
-    // Reorder displayIds, then reconstruct full order preserving hidden widgets
-    const reordered = [...displayIds]
+    const base = dragOrder ?? displayIds
+    const reordered = [...base]
     const [moved] = reordered.splice(dragIdx, 1)
     reordered.splice(idx, 0, moved)
-    // Merge back: hidden (filtered-out) widgets keep their relative positions,
-    // visible widgets use the new order.
-    const hiddenIds = orderedIds.filter((id) => !displayIds.includes(id))
-    const fullOrder = [...reordered, ...hiddenIds]
     setDragIdx(idx)
-    savePreferences(visibility, fullOrder)
+    setDragOrder(reordered)
   }
 
   const handleDragEnd = () => {
+    if (dragOrder) {
+      savePreferences(visibility, mergeDisplayOrder(dragOrder))
+    }
     setDragIdx(null)
+    setDragOrder(null)
   }
 
   // Show widget detail view when a widget is selected.
@@ -132,7 +144,7 @@ export function WidgetManager() {
         <p className="text-xs text-fg-muted">Drag to reorder. Toggle visibility with the eye icon.</p>
       </div>
 
-      {displayIds.length === 0 ? (
+      {effectiveDisplayIds.length === 0 ? (
         <Empty className="py-12">
           <EmptyHeader>
             <EmptyMedia variant="icon"><LayoutGrid /></EmptyMedia>
@@ -142,7 +154,7 @@ export function WidgetManager() {
         </Empty>
       ) : (
         <div className="grid gap-3 grid-cols-2">
-          {displayIds.map((id, idx) => {
+          {effectiveDisplayIds.map((id, idx) => {
             if (!isValidWidgetId(id)) return null
             const meta = widgetMap.get(id)
             const visible = isVisible(id)

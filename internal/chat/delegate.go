@@ -29,6 +29,7 @@ type DelegationRequest struct {
 // DelegationResult holds the outcome of a delegated task.
 type DelegationResult struct {
 	WorkerSessionID string `json:"worker_session_id"`
+	TaskID          string `json:"task_id,omitempty"`
 	Content         string `json:"content"`
 	TokensUsed      int    `json:"tokens_used"`
 	Success         bool   `json:"success"`

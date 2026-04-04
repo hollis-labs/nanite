@@ -11,6 +11,12 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Upload,
+  Download,
+  CheckCircle2,
+  SlidersHorizontal,
+  ToggleLeft,
+  ToggleRight,
 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
@@ -19,7 +25,7 @@ import { Button } from '@/components/ui/button'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
-import type { ToolDefinition, DiscoveryDiff, ToolSelection, ServerInfo, MCPServerConfig } from '@/lib/types'
+import type { ToolDefinition, DiscoveryDiff, ToolSelection, ServerInfo, MCPServerConfig, ToolLoadItem } from '@/lib/types'
 
 // --- Server Form Types ---
 
@@ -122,6 +128,18 @@ export function ToolDashboard({}: ToolDashboardProps) {
     queryFn: api.fetchTools,
   })
 
+  const { data: allToolsWithLoad = [] as ToolLoadItem[], isLoading: loadPrefsLoading } = useQuery({
+    queryKey: ['tools-with-load-type'],
+    queryFn: api.fetchAllToolsWithLoadType,
+  })
+
+  const loadPrefMutation = useMutation({
+    mutationFn: (updates: Record<string, string>) => api.updateToolLoadPreferences(updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tools-with-load-type'] })
+    },
+  })
+
   // Build a lookup of user-managed server names
   const managedServerNames = new Set(mcpConfigs.map(c => c.name))
 
@@ -172,6 +190,71 @@ export function ToolDashboard({}: ToolDashboardProps) {
       setDeletingServer(null)
     },
   })
+
+  // Import/Export state
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importText, setImportText] = useState('')
+  const [importError, setImportError] = useState<string | null>(null)
+  const [importResult, setImportResult] = useState<{ created: string[]; skipped: string[] } | null>(null)
+
+  const importMutation = useMutation({
+    mutationFn: (json: string) => api.importMCPServers(json),
+    onSuccess: (result) => {
+      setImportResult(result)
+      setImportError(null)
+      queryClient.invalidateQueries({ queryKey: ['mcp-servers'] })
+      queryClient.invalidateQueries({ queryKey: ['tool-servers'] })
+      queryClient.invalidateQueries({ queryKey: ['tools'] })
+    },
+    onError: (err: Error) => {
+      setImportError(err.message)
+    },
+  })
+
+  const handleImportSubmit = () => {
+    setImportError(null)
+    setImportResult(null)
+    if (!importText.trim()) {
+      setImportError('Paste or upload a .mcp.json file')
+      return
+    }
+    importMutation.mutate(importText)
+  }
+
+  const closeImportDialog = () => {
+    setShowImportDialog(false)
+    setImportText('')
+    setImportError(null)
+    setImportResult(null)
+  }
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setImportText(reader.result as string)
+      setImportError(null)
+      setImportResult(null)
+    }
+    reader.readAsText(file)
+    e.target.value = '' // reset so same file can be re-selected
+  }
+
+  const handleExport = async () => {
+    try {
+      const json = await api.exportMCPServers()
+      const blob = new Blob([json], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = '.mcp.json'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      // silent — unlikely to fail
+    }
+  }
 
   const intentTestMutation = useMutation<ToolSelection[], Error, string>({
     mutationFn: api.selectTools,
@@ -247,8 +330,9 @@ export function ToolDashboard({}: ToolDashboardProps) {
     ? tools.filter(tool => tool.name.includes(filterServer))
     : tools
 
-  const [activeTab, setActiveTab] = useState<'servers' | 'tools'>('servers')
+  const [activeTab, setActiveTab] = useState<'servers' | 'tools' | 'loading'>('servers')
   const [toolSearch, setToolSearch] = useState('')
+  const [loadSearch, setLoadSearch] = useState('')
 
   const searchedTools = toolSearch
     ? filteredTools.filter(t => t.name.toLowerCase().includes(toolSearch.toLowerCase()) || t.description?.toLowerCase().includes(toolSearch.toLowerCase()))
@@ -284,6 +368,17 @@ export function ToolDashboard({}: ToolDashboardProps) {
             Tools
             <span className="text-[11px] text-fg-faint tabular-nums">{tools.length}</span>
           </button>
+          <button
+            onClick={() => setActiveTab('loading')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'loading'
+                ? 'bg-bg-elevated text-fg shadow-sm'
+                : 'text-fg-muted hover:text-fg-secondary'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            Load Preferences
+          </button>
         </div>
 
         {/* Refresh */}
@@ -312,14 +407,49 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
         {/* Tab-specific controls */}
         {activeTab === 'servers' && (
-          <Button
-            size="sm"
-            onClick={openAddForm}
-            className="gap-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Server
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowImportDialog(true)}
+              className="gap-1.5 text-xs text-fg-secondary hover:text-fg"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Import
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleExport}
+              className="gap-1.5 text-xs text-fg-secondary hover:text-fg"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export
+            </Button>
+            <Button
+              size="sm"
+              onClick={openAddForm}
+              className="gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Server
+            </Button>
+          </div>
+        )}
+
+        {activeTab === 'loading' && (
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
+              <input
+                type="text"
+                value={loadSearch}
+                onChange={(e) => setLoadSearch(e.target.value)}
+                placeholder="Filter tools..."
+                className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+          </div>
         )}
 
         {activeTab === 'tools' && (
@@ -537,6 +667,118 @@ export function ToolDashboard({}: ToolDashboardProps) {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Load Preferences tab */}
+      {activeTab === 'loading' && (
+        <div className="space-y-3">
+          <p className="text-xs text-fg-muted">
+            Control which tools load automatically vs. on-demand. <strong className="text-fg-secondary">Auto</strong> tools are available in every request. <strong className="text-fg-secondary">Opt-in</strong> tools are only loaded when explicitly needed.
+          </p>
+
+          {loadPrefsLoading && (
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-lg" />
+              ))}
+            </div>
+          )}
+
+          {!loadPrefsLoading && allToolsWithLoad.length === 0 && (
+            <Empty className="py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon"><SlidersHorizontal /></EmptyMedia>
+                <EmptyTitle className="text-sm">No tools discovered</EmptyTitle>
+                <EmptyDescription className="text-xs">Connect a server and refresh to see tools here.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
+
+          {!loadPrefsLoading && allToolsWithLoad.length > 0 && (() => {
+            const searched = loadSearch
+              ? allToolsWithLoad.filter(t =>
+                  t.name.toLowerCase().includes(loadSearch.toLowerCase()) ||
+                  t.description?.toLowerCase().includes(loadSearch.toLowerCase())
+                )
+              : allToolsWithLoad
+
+            // Group by server
+            const grouped = new Map<string, ToolLoadItem[]>()
+            for (const tool of searched) {
+              const server = tool.name.includes('__') ? tool.name.split('__')[1] : '_builtin'
+              const list = grouped.get(server) || []
+              list.push(tool)
+              grouped.set(server, list)
+            }
+
+            return (
+              <div className="space-y-4">
+                {Array.from(grouped.entries()).map(([server, serverTools]) => (
+                  <div key={server}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Server className="w-3 h-3 text-fg-faint" />
+                      <span className="text-xs font-medium text-fg-secondary">{server === '_builtin' ? 'Built-in' : server}</span>
+                      <span className="text-[10px] text-fg-faint tabular-nums">{serverTools.length}</span>
+                    </div>
+                    <div className="rounded-lg border border-border-subtle overflow-hidden divide-y divide-border/50">
+                      {serverTools.map(tool => {
+                        const shortName = tool.name.split('__').pop() || tool.name
+                        const isAuto = tool.load_type === 'auto'
+                        const hasUserOverride = tool.load_type_source === 'user'
+                        return (
+                          <div
+                            key={tool.name}
+                            className="flex items-center gap-3 px-3.5 py-2.5 bg-bg-elevated/60 hover:bg-bg-elevated transition-colors"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-fg truncate">{shortName}</span>
+                                {hasUserOverride && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 leading-none">override</span>
+                                )}
+                              </div>
+                              {tool.description && (
+                                <p className="text-[11px] text-fg-muted truncate mt-0.5">{tool.description}</p>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => {
+                                const newType = isAuto ? 'opt-in' : 'auto'
+                                loadPrefMutation.mutate({ [tool.name]: newType })
+                              }}
+                              disabled={loadPrefMutation.isPending}
+                              className="flex items-center gap-1.5 shrink-0 group"
+                              title={isAuto ? 'Click to set opt-in' : 'Click to set auto'}
+                            >
+                              {isAuto ? (
+                                <ToggleRight className="w-5 h-5 text-emerald-400 group-hover:text-emerald-300 transition-colors" />
+                              ) : (
+                                <ToggleLeft className="w-5 h-5 text-fg-faint group-hover:text-fg-muted transition-colors" />
+                              )}
+                              <span className={`text-[11px] font-medium w-10 ${isAuto ? 'text-emerald-400' : 'text-fg-faint'}`}>
+                                {isAuto ? 'Auto' : 'Opt-in'}
+                              </span>
+                            </button>
+                            {hasUserOverride && (
+                              <button
+                                onClick={() => loadPrefMutation.mutate({ [tool.name]: '' })}
+                                disabled={loadPrefMutation.isPending}
+                                className="text-[10px] text-fg-faint hover:text-fg-muted transition-colors"
+                                title="Remove override (use default)"
+                              >
+                                reset
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
         </div>
       )}
 
@@ -811,6 +1053,93 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 'Delete'
               )}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import MCP Config Modal */}
+      <Dialog open={showImportDialog} onOpenChange={() => closeImportDialog()}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+          <DialogHeader className="px-5 pt-5">
+            <div className="flex items-center gap-2">
+              <Upload className="w-5 h-5 text-fg-secondary" />
+              <DialogTitle>Import .mcp.json</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-fg-muted mt-1">
+              Paste a Claude Code <code className="font-mono">.mcp.json</code> config or upload a file. Existing servers with the same name will be skipped.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto px-5 py-4 space-y-4">
+            {/* File upload */}
+            <div>
+              <label className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-fg-secondary bg-bg-elevated border border-border-subtle rounded-lg cursor-pointer hover:bg-surface transition-colors">
+                <Upload className="w-3.5 h-3.5" />
+                Choose file
+                <input
+                  type="file"
+                  accept=".json,.mcp.json"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {/* Text area */}
+            <textarea
+              value={importText}
+              onChange={(e) => { setImportText(e.target.value); setImportError(null); setImportResult(null) }}
+              placeholder={'{\n  "mcpServers": {\n    "my-server": {\n      "command": "/path/to/binary",\n      "args": ["--flag"],\n      "env": { "KEY": "value" }\n    }\n  }\n}'}
+              rows={10}
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent font-mono text-xs leading-relaxed"
+            />
+
+            {/* Error */}
+            {importError && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-red-900/30 border border-red-700/50 text-sm text-red-300">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{importError}</span>
+              </div>
+            )}
+
+            {/* Success */}
+            {importResult && (
+              <div className="px-3 py-2 rounded-md bg-green-900/30 border border-green-700/50 text-sm text-green-300 space-y-1">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>{importResult.created?.length ?? 0} created, {importResult.skipped?.length ?? 0} skipped</span>
+                </div>
+                {(importResult.created?.length ?? 0) > 0 && (
+                  <div className="text-xs text-green-400/80 pl-6">
+                    {importResult.created.map(n => <div key={n}>+ {n}</div>)}
+                  </div>
+                )}
+                {(importResult.skipped?.length ?? 0) > 0 && (
+                  <div className="text-xs text-fg-muted pl-6">
+                    {importResult.skipped.map(n => <div key={n}>~ {n} (exists)</div>)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="px-5 pb-5 border-t border-border-subtle pt-4 flex gap-3">
+            <Button onClick={closeImportDialog} variant="outline" className="flex-1">
+              {importResult ? 'Done' : 'Cancel'}
+            </Button>
+            {!importResult && (
+              <Button
+                onClick={handleImportSubmit}
+                disabled={importMutation.isPending || !importText.trim()}
+                className="flex-1"
+              >
+                {importMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Import'
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

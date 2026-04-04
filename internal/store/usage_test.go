@@ -14,7 +14,7 @@ func TestRecordUsage(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0)
+	err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("RecordUsage: %v", err)
 	}
@@ -54,10 +54,10 @@ func TestGetSessionUsage(t *testing.T) {
 	}
 
 	// Record multiple usage entries.
-	if err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0); err != nil {
+	if err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0); err != nil {
 		t.Fatalf("RecordUsage 1: %v", err)
 	}
-	if err := s.RecordUsage(sess.ID, "msg-2", "claude-sonnet-4-20250514", 2000, 800, 0, 0); err != nil {
+	if err := s.RecordUsage(sess.ID, "msg-2", "claude-sonnet-4-20250514", 2000, 800, 200, 0, 0); err != nil {
 		t.Fatalf("RecordUsage 2: %v", err)
 	}
 
@@ -74,6 +74,9 @@ func TestGetSessionUsage(t *testing.T) {
 	}
 	if summary.TotalTokens != 4300 {
 		t.Errorf("expected total_tokens=4300, got %d", summary.TotalTokens)
+	}
+	if summary.ToolInputTokens != 200 {
+		t.Errorf("expected tool_input_tokens=200, got %d", summary.ToolInputTokens)
 	}
 	if summary.MessageCount != 2 {
 		t.Errorf("expected message_count=2, got %d", summary.MessageCount)
@@ -103,10 +106,10 @@ func TestGetUsageSummary(t *testing.T) {
 	}
 
 	// Record usage for two different models.
-	if err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0); err != nil {
+	if err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0); err != nil {
 		t.Fatalf("RecordUsage 1: %v", err)
 	}
-	if err := s.RecordUsage(sess.ID, "msg-2", "claude-opus-4-20250514", 500, 200, 0, 0); err != nil {
+	if err := s.RecordUsage(sess.ID, "msg-2", "claude-opus-4-20250514", 500, 200, 0, 0, 0); err != nil {
 		t.Fatalf("RecordUsage 2: %v", err)
 	}
 

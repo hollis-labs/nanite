@@ -198,6 +198,7 @@ export interface SessionUsageSummary {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  tool_input_tokens: number;
   cache_creation_tokens: number;
   cache_read_tokens: number;
   estimated_cost_usd: number;
@@ -609,6 +610,18 @@ export interface MCPServerConfig {
   created_at: string;
   updated_at: string;
 }
+
+// --- Tool Load Preferences ---
+
+export interface ToolLoadItem {
+  name: string;
+  description: string;
+  load_type: "auto" | "opt-in";
+  load_type_source: string;
+  enabled: boolean;
+}
+
+export type ToolLoadPreferences = Record<string, string>;
 
 // --- Volon (Sprint Planning) ---
 

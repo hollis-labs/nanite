@@ -608,8 +608,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Record token usage.
 	if finalUsage != nil && (finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0) {
+		toolInputTokens := 0
+		if breakdown != nil {
+			toolInputTokens = breakdown.Tools
+		}
 		if err := s.store.RecordUsage(sessionID, assistantMsgID, model,
-			finalUsage.InputTokens, finalUsage.OutputTokens,
+			finalUsage.InputTokens, finalUsage.OutputTokens, toolInputTokens,
 			finalUsage.CacheCreationTokens, finalUsage.CacheReadTokens); err != nil {
 			log.Printf("chat-service: failed to record token usage: %v", err)
 		}

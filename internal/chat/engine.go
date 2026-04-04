@@ -1424,7 +1424,11 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 
 	// Record token usage.
 	if finalUsage != nil && (finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0) {
-		if err := e.Store.RecordUsage(sessionID, assistantMsgID, model, finalUsage.InputTokens, finalUsage.OutputTokens, finalUsage.CacheCreationTokens, finalUsage.CacheReadTokens); err != nil {
+		toolInputTokens := 0
+		if breakdown != nil {
+			toolInputTokens = breakdown.Tools
+		}
+		if err := e.Store.RecordUsage(sessionID, assistantMsgID, model, finalUsage.InputTokens, finalUsage.OutputTokens, toolInputTokens, finalUsage.CacheCreationTokens, finalUsage.CacheReadTokens); err != nil {
 			log.Printf("chat: failed to record token usage: %v", err)
 		}
 	}

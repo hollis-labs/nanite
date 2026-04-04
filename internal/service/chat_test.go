@@ -179,7 +179,7 @@ func (stubToolStore) SetCatalogSourcePublicKey(string, string) error            
 func (stubToolStore) DeleteCatalogSource(string) error                                      { return nil }
 
 type stubUsageStore struct{}
-func (stubUsageStore) RecordUsage(string, string, string, int, int, int, int) error         { return nil }
+func (stubUsageStore) RecordUsage(string, string, string, int, int, int, int, int) error    { return nil }
 func (stubUsageStore) GetSessionUsage(string) (*store.SessionUsageSummary, error)           { return nil, nil }
 func (stubUsageStore) GetUsageSummary() (*store.UsageSummary, error)                        { return nil, nil }
 func (stubUsageStore) RecordExecutionMetrics(*store.ExecutionMetrics) error                  { return nil }

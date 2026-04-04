@@ -57,11 +57,42 @@ COMPLETED: Phase 7 — Slash Commands & Polish (2026-04-04)
 MVP PHASES 0-7 COMPLETE.
 
 POST-MVP PLAN (decided 2026-04-04):
-Phase A (parallel): MCP Import/Export + Token Breakdown
-Phase B (parallel): Plugin/Event Enhancements + Multi-Agent Orchestration
+Phase A (parallel): MCP Import/Export + Token Breakdown — DONE
+Phase B (parallel): Plugin/Event Enhancements + Multi-Agent Orchestration — DONE
 Phase C (after B1): Memory & Continuity
 Phase D (after B1): Claude Code Integration
 See docs/post-mvp-plan.md for full details and decisions.
+
+COMPLETED: Phase A1 — MCP Config Import/Export (2026-04-04)
+- nanite mcp import/export CLI commands in cmd/nanite/main.go
+- internal/mcpconfig/ package: ParseMCPJSON, ExportMCPJSON
+- GUI import via POST /api/mcp-servers/import
+
+COMPLETED: Phase A2 — Token Breakdown (2026-04-04)
+- tool_input_tokens column (migration 025), per-block parsing from Anthropic responses
+- Updated RecordUsage, SessionUsageSummary, TokenUsageWidget frontend
+
+COMPLETED: Phase B1 — Plugin/Event Enhancements (2026-04-04)
+- Claude Code hook aliases (NormalizeEventType), loadType system (auto/opt-in)
+- LoadTypeResolver: session > project > agent > manifest override chain
+- User tool load preferences (migration 026), API endpoints, MCP filtering
+
+COMPLETED: Phase B2 — Multi-Agent Orchestration (2026-04-04)
+- Badger KV coordination store: internal/coordination/ (store, keys, badger, noop)
+- Task tracking: internal/task/ (service, snapshot, task types), migration 027
+- Worker manager: internal/worker/ (manager, worker — full + lightweight modes)
+- Worktree isolation: internal/worktree/ (manager, noop — git worktree lifecycle)
+- Container wired: Coord, Tasks, Workers, Worktrees fields
+- API endpoints: /api/tasks/*, /api/workers/*
+
+CURRENT: Phase C — Memory & Continuity
+- Check Cortex for type/view registry changes needed
+- MemoryService, extraction (PostCompact + per-turn), memory tools (opt-out)
+
+FRONTEND TODOs (accumulated):
+- Tool load preferences UI (GET/PUT /api/tools/load-preferences + GET /api/tools/all)
+- Task tracking UI (GET/POST /api/tasks/*)
+- Worker status UI (GET /api/workers/*)
 
 PRINCIPLES:
 - Consult before architecture decisions

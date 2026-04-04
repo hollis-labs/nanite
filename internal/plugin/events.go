@@ -63,6 +63,31 @@ const (
 	EventToolExecuting  = "tool.executing"  // before tool is executed
 )
 
+// Claude Code hook name aliases.
+// Plugins may register hooks using either Nanite names (e.g. "tool.executing")
+// or Claude Code names (e.g. "PreToolUse"). Both resolve to the same internal
+// event type. The mapping is one-way: aliases are normalized to Nanite names on
+// registration; events are always emitted under their Nanite names.
+var hookAliases = map[string]string{
+	"PreToolUse":   EventToolExecuting,
+	"PostToolUse":  EventToolComplete,
+	"Notification": EventMessageReceived,
+	"SessionStart": EventSessionStart,
+	"SessionEnd":   EventSessionEnd,
+	"Stop":         EventSessionEnd,
+}
+
+// NormalizeEventType resolves a hook name to its canonical Nanite event type.
+// If the name is already a Nanite event type it is returned unchanged. If it
+// matches a Claude Code alias the corresponding Nanite name is returned.
+// Unknown names are returned as-is so callers can decide how to handle them.
+func NormalizeEventType(name string) string {
+	if canonical, ok := hookAliases[name]; ok {
+		return canonical
+	}
+	return name
+}
+
 // EventData provides structured data for common event types
 type EventData struct {
 	// Common fields

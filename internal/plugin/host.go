@@ -233,15 +233,19 @@ func (h *Host) RegisterCRUDHandler(resourceType string, handler plugin.CRUDHandl
 }
 
 // RegisterEventHook registers an event hook for specific event types.
+// Event types are normalized so plugins may use either Nanite names
+// (e.g. "tool.executing") or Claude Code hook names (e.g. "PreToolUse").
 func (h *Host) RegisterEventHook(eventTypes []string, hook plugin.EventHook) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	for _, eventType := range eventTypes {
-		h.eventHooks[eventType] = append(h.eventHooks[eventType], hook)
+	normalized := make([]string, len(eventTypes))
+	for i, eventType := range eventTypes {
+		normalized[i] = NormalizeEventType(eventType)
+		h.eventHooks[normalized[i]] = append(h.eventHooks[normalized[i]], hook)
 	}
 
-	h.logger.Info("registered event hook", "eventTypes", eventTypes, "hookTypes", hook.EventTypes())
+	h.logger.Info("registered event hook", "eventTypes", normalized, "hookTypes", hook.EventTypes())
 	return nil
 }
 

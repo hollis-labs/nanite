@@ -21,9 +21,9 @@ Additional:
 
 ---
 
-## Phase A — Quick Wins (parallel, no dependencies)
+## Phase A — Quick Wins ✅ (parallel, no dependencies)
 
-### A1: MCP Config Import/Export
+### A1: MCP Config Import/Export ✅
 **Scope:** Import `.mcp.json` (Claude Code format) into Nanite's DB-based MCP server config. Export Nanite config as `.mcp.json`.
 
 **Work items:**
@@ -33,7 +33,7 @@ Additional:
 
 **Effort:** 1 session
 
-### A2: Token Breakdown
+### A2: Token Breakdown ✅
 **Scope:** Distinguish tool call tokens vs user content in usage tracking.
 
 **Work items:**
@@ -48,9 +48,9 @@ Additional:
 
 ---
 
-## Phase B — Infrastructure (parallel pair)
+## Phase B — Infrastructure ✅ (parallel pair)
 
-### B1: Plugin/Event Enhancements
+### B1: Plugin/Event Enhancements ✅
 **Scope:** Align hooks with Claude Code lifecycle, per-tool loadType.
 
 **Decisions (2026-04-04):**
@@ -67,7 +67,7 @@ Additional:
 
 **Effort:** 1 session
 
-### B2: Multi-Agent Orchestration
+### B2: Multi-Agent Orchestration ✅
 **Scope:** Worker spawning, coordination state, task tracking, worktree isolation.
 
 **Decisions (2026-04-04):**

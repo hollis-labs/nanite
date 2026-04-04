@@ -22,12 +22,20 @@ type MCPTransport interface {
 	CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolResult, error)
 }
 
+// ToolLoadChecker determines whether a tool should be included based on
+// loadType configuration. This is set by the plugin host after building
+// the override chain.
+type ToolLoadChecker interface {
+	IsToolEnabled(toolName string) bool
+}
+
 // Manager holds multiple MCP server connections and provides unified tool access.
 type Manager struct {
-	servers map[string]MCPTransport // name -> transport
-	tools   []toolEntry          // all discovered tools with server association
-	Broker  *broker.LocalBroker  // intent-aware tool broker
-	mu      sync.RWMutex
+	servers     map[string]MCPTransport // name -> transport
+	tools       []toolEntry            // all discovered tools with server association
+	Broker      *broker.LocalBroker    // intent-aware tool broker
+	LoadChecker ToolLoadChecker        // optional loadType filter
+	mu          sync.RWMutex
 }
 
 // toolEntry associates a tool with its originating server.
@@ -192,15 +200,35 @@ func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.To
 	return defs
 }
 
-// GetAllTools returns ALL tools unfiltered. Used for diagnostics.
+// GetAllTools returns all enabled tools. Opt-in tools excluded unless enabled.
 func (m *Manager) GetAllTools() []provider.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.getAllToolsLocked()
 }
 
-// getAllToolsLocked returns all tools without filtering. Caller must hold mu.RLock.
+// getAllToolsLocked returns all enabled tools. Opt-in tools are excluded
+// unless the LoadChecker says they are enabled. Caller must hold mu.RLock.
 func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
+	defs := make([]provider.ToolDefinition, 0, len(m.tools))
+	for _, entry := range m.tools {
+		if m.LoadChecker != nil && !m.LoadChecker.IsToolEnabled(entry.tool.Name) {
+			continue
+		}
+		defs = append(defs, provider.ToolDefinition{
+			Name:        fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name),
+			Description: entry.tool.Description,
+			InputSchema: entry.tool.InputSchema,
+		})
+	}
+	return defs
+}
+
+// GetAllToolsUnfiltered returns every discovered tool regardless of loadType.
+// Used for diagnostics and the tool load preferences UI.
+func (m *Manager) GetAllToolsUnfiltered() []provider.ToolDefinition {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	defs := make([]provider.ToolDefinition, 0, len(m.tools))
 	for _, entry := range m.tools {
 		defs = append(defs, provider.ToolDefinition{

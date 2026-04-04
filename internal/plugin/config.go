@@ -8,6 +8,33 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// LoadType controls whether a plugin's tools are available automatically or
+// require explicit opt-in. The zero value ("") is treated as LoadTypeAuto.
+type LoadType string
+
+const (
+	LoadTypeAuto  LoadType = "auto"   // tools available by default
+	LoadTypeOptIn LoadType = "opt-in" // tools hidden until explicitly enabled
+)
+
+// IsOptIn returns true if the load type requires explicit enablement.
+func (lt LoadType) IsOptIn() bool {
+	return lt == LoadTypeOptIn
+}
+
+// Effective returns the canonical value, treating the zero value as auto.
+func (lt LoadType) Effective() LoadType {
+	if lt == "" {
+		return LoadTypeAuto
+	}
+	return lt
+}
+
+// ToolLoadOverride allows per-tool loadType in the plugin manifest.
+type ToolLoadOverride struct {
+	LoadType LoadType `yaml:"load_type" json:"load_type"`
+}
+
 // PluginManifest represents the parsed plugin.yaml file.
 type PluginManifest struct {
 	Name         string                   `yaml:"name"`
@@ -29,6 +56,24 @@ type PluginManifest struct {
 	// Relative paths are resolved from the plugin directory.
 	// Example: "./my-plugin" or "python3 plugin.py"
 	Entrypoint string `yaml:"entrypoint"`
+
+	// LoadType sets the default tool loading behavior for this plugin.
+	// "auto" (default): all tools available immediately.
+	// "opt-in": tools hidden until enabled by user/agent/project/session config.
+	LoadType LoadType `yaml:"load_type"`
+
+	// ToolOverrides allows per-tool loadType that overrides the plugin default.
+	// Keys are bare tool names (not prefixed).
+	ToolOverrides map[string]ToolLoadOverride `yaml:"tool_overrides"`
+}
+
+// EffectiveLoadType returns the resolved loadType for a specific tool.
+// Per-tool override takes priority over the plugin-level default.
+func (pm *PluginManifest) EffectiveLoadType(toolName string) LoadType {
+	if override, ok := pm.ToolOverrides[toolName]; ok {
+		return override.LoadType.Effective()
+	}
+	return pm.LoadType.Effective()
 }
 
 // ConfigEntry describes a single configuration value in plugin.yaml.

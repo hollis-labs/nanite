@@ -13,6 +13,8 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/task"
+	"github.com/hollis-labs/nanite/internal/worker"
 )
 
 // DelegateTask implements ChatService. It spawns a worker session, sends the
@@ -79,6 +81,24 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 	log.Printf("delegation: created worker session %s (agent=%s, mode=%s) for %q",
 		workerSession.ShortCode, agentID, mode, req.Title)
 
+	// Track task lifecycle if task service is available.
+	var trackedTask *task.Task
+	if s.tasks != nil {
+		trackedTask = &task.Task{
+			SessionID:       req.ParentSessionID,
+			WorkerSessionID: workerSession.ID,
+			Title:           req.Title,
+			Description:     req.Description,
+			AssigneeAgentID: agentID,
+		}
+		if err := s.tasks.Create(ctx, trackedTask); err != nil {
+			log.Printf("delegation: failed to create task: %v", err)
+			trackedTask = nil
+		} else {
+			_ = s.tasks.Transition(ctx, trackedTask.ID, task.StatusInProgress)
+		}
+	}
+
 	// Send the task as a user message in the worker session.
 	taskContent := fmt.Sprintf("## Delegated Task: %s\n\n%s\n\n"+
 		"Complete this task and provide your findings. Be thorough but concise.",
@@ -107,6 +127,9 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		WorkerSessionID: workerSession.ID,
 		Success:         true,
 	}
+	if trackedTask != nil {
+		result.TaskID = trackedTask.ID
+	}
 
 	var content strings.Builder
 	timeout := time.After(5 * time.Minute)
@@ -123,6 +146,20 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 				}
 				log.Printf("delegation: worker %s completed — %d chars",
 					workerSession.ShortCode, len(result.Content))
+
+				// Update task tracking.
+				if trackedTask != nil && s.tasks != nil {
+					if result.Success {
+						trackedTask.Result = result.Content
+						trackedTask.TokensUsed = result.TokensUsed
+						_ = s.tasks.Update(ctx, trackedTask)
+						_ = s.tasks.Transition(ctx, trackedTask.ID, task.StatusCompleted)
+					} else {
+						trackedTask.Error = result.Error
+						_ = s.tasks.Update(ctx, trackedTask)
+						_ = s.tasks.Transition(ctx, trackedTask.ID, task.StatusFailed)
+					}
+				}
 
 				// Archive the worker session after completion.
 				_ = s.sessions.Archive(ctx, workerSession.ID)
@@ -149,12 +186,20 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 			result.Success = false
 			result.Error = "delegation timed out after 5 minutes"
 			log.Printf("delegation: worker %s timed out", workerSession.ShortCode)
+			if trackedTask != nil && s.tasks != nil {
+				trackedTask.Error = result.Error
+				_ = s.tasks.Update(ctx, trackedTask)
+				_ = s.tasks.Transition(ctx, trackedTask.ID, task.StatusFailed)
+			}
 			return result, nil
 
 		case <-ctx.Done():
 			result.Content = content.String()
 			result.Success = false
 			result.Error = "delegation cancelled"
+			if trackedTask != nil && s.tasks != nil {
+				_ = s.tasks.Cancel(ctx, trackedTask.ID)
+			}
 			return result, nil
 		}
 	}
@@ -178,6 +223,22 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 
 	log.Printf("delegation: decomposed into %d sub-tasks", len(decomposition.SubTasks))
 
+	// Create parent task for orchestration tracking.
+	var parentTask *task.Task
+	if s.tasks != nil {
+		parentTask = &task.Task{
+			SessionID:   parentSessionID,
+			Title:       "Orchestration: " + userMessage[:min(60, len(userMessage))],
+			Description: userMessage,
+		}
+		if err := s.tasks.Create(ctx, parentTask); err != nil {
+			log.Printf("delegation: failed to create parent task: %v", err)
+			parentTask = nil
+		} else {
+			_ = s.tasks.Transition(ctx, parentTask.ID, task.StatusInProgress)
+		}
+	}
+
 	// Build orchestration plan.
 	parentSession, err := s.sessions.Get(ctx, parentSessionID)
 	if err != nil {
@@ -188,39 +249,91 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 		return nil, fmt.Errorf("build plan: %w", err)
 	}
 
-	// Execute each sub-task via delegation.
+	// Execute sub-tasks. Use worker manager for concurrent execution when
+	// available, fall back to sequential delegation otherwise.
 	var results []chat.SubTaskResult
-	for i, st := range decomposition.SubTasks {
-		log.Printf("delegation: executing sub-task %d/%d: %s", i+1, len(decomposition.SubTasks), st.Title)
+	if s.workers != nil {
+		// Concurrent execution via worker manager.
+		type indexedResult struct {
+			idx    int
+			result chat.SubTaskResult
+		}
+		ch := make(chan indexedResult, len(decomposition.SubTasks))
 
-		delegResult, delegErr := s.DelegateTask(ctx, chat.DelegationRequest{
-			ParentSessionID: parentSessionID,
-			Title:           st.Title,
-			Description:     st.Description,
-			Model:           model,
-		})
-		if delegErr != nil {
-			results = append(results, chat.SubTaskResult{
-				Title: st.Title,
-				Error: delegErr.Error(),
+		for i, st := range decomposition.SubTasks {
+			go func(idx int, st chat.SubTask) {
+				log.Printf("delegation: spawning worker %d/%d: %s", idx+1, len(decomposition.SubTasks), st.Title)
+				wr, err := s.workers.SpawnFull(ctx, worker.SpawnRequest{
+					ParentSessionID: parentSessionID,
+					Title:           st.Title,
+					Description:     st.Description,
+					Model:           model,
+				})
+				r := chat.SubTaskResult{Title: st.Title}
+				if err != nil {
+					r.Error = err.Error()
+				} else {
+					r.Output = wr.Content
+					if !wr.Success {
+						r.Error = wr.Error
+					}
+				}
+				ch <- indexedResult{idx: idx, result: r}
+			}(i, st)
+		}
+
+		// Collect results in order.
+		results = make([]chat.SubTaskResult, len(decomposition.SubTasks))
+		for range decomposition.SubTasks {
+			ir := <-ch
+			results[ir.idx] = ir.result
+		}
+	} else {
+		// Sequential fallback via direct delegation.
+		for i, st := range decomposition.SubTasks {
+			log.Printf("delegation: executing sub-task %d/%d: %s", i+1, len(decomposition.SubTasks), st.Title)
+
+			delegResult, delegErr := s.DelegateTask(ctx, chat.DelegationRequest{
+				ParentSessionID: parentSessionID,
+				Title:           st.Title,
+				Description:     st.Description,
+				Model:           model,
 			})
-			continue
-		}
+			if delegErr != nil {
+				results = append(results, chat.SubTaskResult{
+					Title: st.Title,
+					Error: delegErr.Error(),
+				})
+				continue
+			}
 
-		result := chat.SubTaskResult{
-			Title:  st.Title,
-			Output: delegResult.Content,
+			result := chat.SubTaskResult{
+				Title:  st.Title,
+				Output: delegResult.Content,
+			}
+			if !delegResult.Success {
+				result.Error = delegResult.Error
+			}
+			results = append(results, result)
 		}
-		if !delegResult.Success {
-			result.Error = delegResult.Error
-		}
-		results = append(results, result)
 	}
 
 	// Aggregate results.
 	orchResult, err := s.orchestrator.Aggregate(ctx, plan, results, model)
 	if err != nil {
+		if parentTask != nil && s.tasks != nil {
+			parentTask.Error = err.Error()
+			_ = s.tasks.Update(ctx, parentTask)
+			_ = s.tasks.Transition(ctx, parentTask.ID, task.StatusFailed)
+		}
 		return nil, fmt.Errorf("aggregation failed: %w", err)
+	}
+
+	// Mark parent task as completed.
+	if parentTask != nil && s.tasks != nil {
+		parentTask.Result = orchResult.FinalOutput
+		_ = s.tasks.Update(ctx, parentTask)
+		_ = s.tasks.Transition(ctx, parentTask.ID, task.StatusCompleted)
 	}
 
 	return orchResult, nil

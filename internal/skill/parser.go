@@ -51,9 +51,8 @@ func ParseMD(data []byte) (*Definition, error) {
 		return nil, fmt.Errorf("skill: invalid YAML frontmatter: %w", err)
 	}
 
-	if def.Slug == "" {
-		return nil, fmt.Errorf("skill: slug is required in frontmatter (or use ParseMDFile for filename fallback)")
-	}
+	// Slug is validated in ParseMDFile after filename fallback.
+	// ParseMD callers that don't use ParseMDFile must ensure slug is set.
 
 	def.Prompt = strings.TrimSpace(string(body))
 
@@ -81,6 +80,9 @@ func ParseMDFile(path string) (*Definition, error) {
 	// Fall back to filename-derived slug when frontmatter omits it.
 	if def.Slug == "" {
 		def.Slug = SlugFromFilename(path)
+	}
+	if def.Slug == "" {
+		return nil, fmt.Errorf("skill: %s has no slug in frontmatter and none could be derived from filename", path)
 	}
 
 	def.SourceRef = path

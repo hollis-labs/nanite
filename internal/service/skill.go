@@ -114,6 +114,9 @@ func (s *skillServiceImpl) Create(_ context.Context, sk *store.Skill) error {
 }
 
 func (s *skillServiceImpl) Update(_ context.Context, sk *store.Skill) error {
+	if skill.IsFileBasedID(sk.ID) {
+		return fmt.Errorf("cannot update file-based skill %q — edit the .md file instead", sk.ID)
+	}
 	return s.skills.UpdateSkill(sk)
 }
 

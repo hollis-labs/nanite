@@ -83,11 +83,7 @@ func (m *gitManager) Create(sessionID string) (string, error) {
 		return wt.Path, nil
 	}
 
-	short := sessionID
-	if len(short) > 8 {
-		short = short[:8]
-	}
-	branch := "worker-" + short
+	branch := "worker-" + sessionID
 	wtPath := filepath.Join(m.baseDir, sessionID)
 
 	// Create the worktree with a new branch.

@@ -89,9 +89,14 @@ description: Missing slug
 ---
 Body.
 `)
-	_, err := ParseMD(data)
-	if err == nil {
-		t.Fatal("expected error for missing slug")
+	// ParseMD no longer rejects empty slug — that's deferred to ParseMDFile
+	// so the filename fallback can work.
+	def, err := ParseMD(data)
+	if err != nil {
+		t.Fatalf("ParseMD should allow empty slug: %v", err)
+	}
+	if def.Slug != "" {
+		t.Errorf("Slug = %q, want empty", def.Slug)
 	}
 }
 

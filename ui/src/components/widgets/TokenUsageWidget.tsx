@@ -61,7 +61,7 @@ export function TokenUsageWidget() {
   const output = sessionUsage?.output_tokens ?? 0
   const total = sessionUsage?.total_tokens ?? 0
   const toolInput = sessionUsage?.tool_input_tokens ?? 0
-  const contentInput = input - toolInput
+  const contentInput = Math.max(0, input - toolInput)
   const cost = sessionUsage?.estimated_cost_usd ?? 0
   const messages = sessionUsage?.message_count ?? 0
 

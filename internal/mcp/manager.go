@@ -212,11 +212,12 @@ func (m *Manager) GetAllTools() []provider.ToolDefinition {
 func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
 	defs := make([]provider.ToolDefinition, 0, len(m.tools))
 	for _, entry := range m.tools {
-		if m.LoadChecker != nil && !m.LoadChecker.IsToolEnabled(entry.tool.Name) {
+		qualifiedName := fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name)
+		if m.LoadChecker != nil && !m.LoadChecker.IsToolEnabled(qualifiedName) {
 			continue
 		}
 		defs = append(defs, provider.ToolDefinition{
-			Name:        fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name),
+			Name:        qualifiedName,
 			Description: entry.tool.Description,
 			InputSchema: entry.tool.InputSchema,
 		})

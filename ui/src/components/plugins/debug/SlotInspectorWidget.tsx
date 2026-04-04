@@ -1,7 +1,7 @@
 import { Columns3 } from 'lucide-react'
-import { Widget } from './Widget'
+import { Widget } from '@/components/widgets/Widget'
 import { useAppStore } from '@/stores/useAppStore'
-import { SlotInspectorContent } from '@/components/chat/debug/SlotInspectorPanel'
+import { SlotInspectorContent } from './SlotInspectorPanel'
 
 export function SlotInspectorWidget() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)

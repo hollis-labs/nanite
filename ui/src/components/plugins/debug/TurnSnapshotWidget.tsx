@@ -1,7 +1,7 @@
 import { Activity } from 'lucide-react'
-import { Widget } from './Widget'
+import { Widget } from '@/components/widgets/Widget'
 import { useAppStore } from '@/stores/useAppStore'
-import { TurnSnapshotContent } from '@/components/chat/debug/TurnSnapshotPanel'
+import { TurnSnapshotContent } from './TurnSnapshotPanel'
 
 export function TurnSnapshotWidget() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)

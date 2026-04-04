@@ -44,13 +44,26 @@ Pre-existing test failures (not blockers):
 Boot conduit-frontend
 
 All Beta Release TODO (§1-9), Plugin Evolution (Phases 1-8, except 7), and all 6 anti-patterns resolved.
-Composer menus (model picker, slash commands, file mentions) polished 2026-03-29.
-Working on feature/plugin-evolution-profile-polish branch.
+vNext Phases 0-4 frontend components completed 2026-04-03.
+Working on feature/vnext-phases-0-4 branch.
 
 CRITICAL — Read these before touching any code:
 - memory: feedback_ui_design_patterns.md — THE design system reference
 - .agentrc/agents/frontend.md — full project context (includes Beta TODO + anti-patterns)
 - CLAUDE.md — envelope system warnings
+
+COMPLETED (vNext frontend, 2026-04-03):
+- P0 — Permission Approval: ApprovalCard (inline chat card with Allow Once/Session + Deny + 60s countdown + auto-deny), approval_request SSE wired into useChat + useChatStore, permission mode selector in PreferencesPanel (4 modes), yolo toggle in ChatComposer
+- P1 — Broker Decision Inspector: BrokerDecisionsPanel (collapsible debug panel, layer badges, expand-on-click for tools + signals)
+- P2 — Context & Compaction: CompactionDivider (inline in transcript), SlotInspectorPanel (context slot table with usage bar)
+- P3 — Chat Loop Debug: TurnSnapshotPanel (per-turn execution data), IterationLimitWarning banner
+- Debug panels live in ui/src/components/chat/debug/, visible in RightRail "Debug" tab (developer_mode only)
+- Agent debug mode toggle on AgentDetailView Overview tab (writes agent.settings JSON)
+- Tool call drawer: session-scoped retention (Map<sessionId, {calls, lastActivity}>), 15min prune, 50-call cap, empty state, tool detail field, themed scrollbar, tab-attached-to-drawer UX
+
+New types added: PermissionMode, ApprovalRequest, PendingApproval, BrokerDecision, TurnSnapshot, EnvelopeApprovalRequest (renamed from envelope's ApprovalRequest)
+New API endpoints wired: respondToApproval, getPermissionMode, setPermissionMode, getBrokerDecisions, getExecutionMetrics
+New hook: usePermissionMode (shared by PreferencesPanel + ChatComposer)
 
 All 6 anti-patterns resolved:
 1. Loose TypeScript (as any) — removed
@@ -63,6 +76,7 @@ All 6 anti-patterns resolved:
 Remaining future work:
 - Phase 7: Dynamic plugin loading (subprocess + JSON-RPC backend, URL ESM frontend)
 - Additional envelope card designs as new plugins are built
+- UI/UX polish passes (chat sidebar simplification next)
 
 shadcn components available (23 total):
   alert-dialog, avatar, badge, button, card, command, context-menu,

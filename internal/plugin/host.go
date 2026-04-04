@@ -342,6 +342,31 @@ func (h *Host) RegisterService(name string, service interface{}) {
 	h.logger.Info("registered service", "name", name)
 }
 
+// taskBackendRegistrar is the subset of task.Service needed to register backends.
+// Defined here to avoid importing the task package.
+type taskBackendRegistrar interface {
+	RegisterBackend(name string, backend interface{})
+}
+
+// RegisterTaskBackend registers a named task backend via the task service.
+// The backend must implement task.TaskBackend (checked at runtime by the task service).
+// The task service must have been registered via RegisterService("tasks", ...) first.
+func (h *Host) RegisterTaskBackend(name string, backend interface{}) error {
+	h.mu.RLock()
+	svc, ok := h.services["tasks"]
+	h.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("register task backend %q: task service not available", name)
+	}
+	reg, ok := svc.(taskBackendRegistrar)
+	if !ok {
+		return fmt.Errorf("register task backend %q: task service does not support backend registration", name)
+	}
+	reg.RegisterBackend(name, backend)
+	h.logger.Info("registered task backend", "name", name)
+	return nil
+}
+
 // Logger provides a logger instance for the plugin.
 func (h *Host) Logger() plugin.Logger {
 	return h.logger

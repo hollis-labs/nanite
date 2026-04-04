@@ -2,12 +2,9 @@ package task
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
-
-	"github.com/google/uuid"
-	"github.com/hollis-labs/nanite/internal/coordination"
+	"log/slog"
+	"sync"
 )
 
 // Service manages task lifecycle for multi-agent orchestration.
@@ -23,6 +20,11 @@ type Service interface {
 	Cancel(ctx context.Context, id string) error
 	Snapshot(ctx context.Context) error
 	Restore(ctx context.Context) error
+
+	// RegisterBackend adds a named TaskBackend. The "local" backend is always
+	// registered at construction time. The backend must implement TaskBackend.
+	// Accepts interface{} so the plugin host can call it without importing this package.
+	RegisterBackend(name string, backend interface{})
 }
 
 // SnapshotStore is the subset of the SQLite store needed for task snapshots.
@@ -31,171 +33,147 @@ type SnapshotStore interface {
 	ListTasks(filter TaskFilter) ([]*Task, error)
 }
 
-// TaskFilter controls which tasks to retrieve from the snapshot store.
+// TaskFilter controls which tasks to retrieve.
 type TaskFilter struct {
 	SessionID string
 	ParentID  string
 	Status    Status
 }
 
+// SettingsFunc returns the user's configured task_backend name.
+// If it returns "" or an error, the service falls back to "local".
+type SettingsFunc func() string
+
 // ServiceConfig holds dependencies for the task service.
 type ServiceConfig struct {
-	Coord coordination.CoordStore
-	DB    SnapshotStore
+	Local    *LocalBackend
+	Settings SettingsFunc
 }
 
 type serviceImpl struct {
-	coord coordination.CoordStore
-	db    SnapshotStore
+	mu       sync.RWMutex
+	backends map[string]TaskBackend
+	local    *LocalBackend
+	settings SettingsFunc
 }
 
-// NewService creates a new task service backed by the coordination store
-// with SQLite snapshots for persistence.
+// NewService creates a task service with the local backend pre-registered.
 func NewService(cfg ServiceConfig) Service {
-	return &serviceImpl{
-		coord: cfg.Coord,
-		db:    cfg.DB,
+	s := &serviceImpl{
+		backends: make(map[string]TaskBackend),
+		local:    cfg.Local,
+		settings: cfg.Settings,
 	}
+	if s.settings == nil {
+		s.settings = func() string { return BackendLocal }
+	}
+	if cfg.Local != nil {
+		s.backends[BackendLocal] = cfg.Local
+	}
+	return s
+}
+
+func (s *serviceImpl) RegisterBackend(name string, backend interface{}) {
+	tb, ok := backend.(TaskBackend)
+	if !ok {
+		slog.Error("task backend registration failed: does not implement TaskBackend", "name", name)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.backends[name] = tb
+	slog.Info("task backend registered", "name", name)
+}
+
+// active resolves the current backend. Falls back to local with a warning
+// if the configured backend is unavailable.
+func (s *serviceImpl) active() TaskBackend {
+	name := s.settings()
+	if name == "" {
+		name = BackendLocal
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if b, ok := s.backends[name]; ok {
+		return b
+	}
+	if name != BackendLocal {
+		slog.Warn("configured task backend unavailable, falling back to local", "backend", name)
+	}
+	return s.local
 }
 
 func (s *serviceImpl) Create(ctx context.Context, t *Task) error {
-	if t.ID == "" {
-		t.ID = uuid.NewString()
-	}
-	now := time.Now().UTC()
-	t.CreatedAt = now
-	t.UpdatedAt = now
-	if t.Status == "" {
-		t.Status = StatusPending
-	}
-	if t.Metadata == nil {
-		t.Metadata = make(map[string]string)
-	}
-	return s.put(t)
+	return s.active().Create(ctx, t)
 }
 
 func (s *serviceImpl) Get(ctx context.Context, id string) (*Task, error) {
-	data, err := s.coord.Get(coordination.PrefixTask + id)
-	if err != nil {
-		return nil, fmt.Errorf("get task %s: %w", id, err)
-	}
-	var t Task
-	if err := json.Unmarshal(data, &t); err != nil {
-		return nil, fmt.Errorf("unmarshal task %s: %w", id, err)
-	}
-	return &t, nil
+	return s.active().Get(ctx, id)
 }
 
 func (s *serviceImpl) Update(ctx context.Context, t *Task) error {
-	t.UpdatedAt = time.Now().UTC()
-	return s.put(t)
+	return s.active().Update(ctx, t)
 }
 
 func (s *serviceImpl) Transition(ctx context.Context, id string, to Status) error {
-	t, err := s.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	if err := ValidateTransition(t.Status, to); err != nil {
-		return err
-	}
-	t.Status = to
-	t.UpdatedAt = time.Now().UTC()
-	if to == StatusCompleted || to == StatusFailed || to == StatusCancelled {
-		now := time.Now().UTC()
-		t.CompletedAt = &now
-	}
-	return s.put(t)
+	return s.active().Transition(ctx, id, to)
 }
 
 func (s *serviceImpl) Assign(ctx context.Context, id, agentID, workerSessionID string) error {
-	t, err := s.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	t.AssigneeAgentID = agentID
-	t.WorkerSessionID = workerSessionID
-	t.UpdatedAt = time.Now().UTC()
-	return s.put(t)
+	return s.active().Assign(ctx, id, agentID, workerSessionID)
 }
 
 func (s *serviceImpl) ListBySession(ctx context.Context, sessionID string) ([]*Task, error) {
-	return s.listFiltered(func(t *Task) bool { return t.SessionID == sessionID })
+	return s.active().List(ctx, TaskFilter{SessionID: sessionID})
 }
 
 func (s *serviceImpl) ListByParent(ctx context.Context, parentID string) ([]*Task, error) {
-	return s.listFiltered(func(t *Task) bool { return t.ParentID == parentID })
+	return s.active().List(ctx, TaskFilter{ParentID: parentID})
 }
 
 func (s *serviceImpl) ListAll(ctx context.Context) ([]*Task, error) {
-	return s.listFiltered(func(t *Task) bool { return true })
+	return s.active().List(ctx, TaskFilter{})
 }
 
 func (s *serviceImpl) Cancel(ctx context.Context, id string) error {
 	return s.Transition(ctx, id, StatusCancelled)
 }
 
+// Snapshot delegates to the local backend only (other backends manage their own persistence).
 func (s *serviceImpl) Snapshot(ctx context.Context) error {
-	if s.db == nil {
+	if s.local == nil {
 		return nil
 	}
-	entries, err := s.coord.List(coordination.PrefixTask)
-	if err != nil {
-		return fmt.Errorf("list tasks for snapshot: %w", err)
-	}
-	for _, e := range entries {
-		var t Task
-		if err := json.Unmarshal(e.Value, &t); err != nil {
-			continue
-		}
-		if err := s.db.UpsertTask(&t); err != nil {
-			return fmt.Errorf("snapshot task %s: %w", t.ID, err)
-		}
-	}
-	return nil
+	return s.local.Snapshot(ctx)
 }
 
+// Restore delegates to the local backend only.
 func (s *serviceImpl) Restore(ctx context.Context) error {
-	if s.db == nil || !s.coord.Available() {
+	if s.local == nil {
 		return nil
 	}
-	tasks, err := s.db.ListTasks(TaskFilter{})
-	if err != nil {
-		return fmt.Errorf("restore tasks: %w", err)
-	}
-	for _, t := range tasks {
-		if t.IsTerminal() {
-			continue
-		}
-		if err := s.put(t); err != nil {
-			return fmt.Errorf("restore task %s: %w", t.ID, err)
-		}
-	}
-	return nil
+	return s.local.Restore(ctx)
 }
 
-func (s *serviceImpl) put(t *Task) error {
-	data, err := json.Marshal(t)
-	if err != nil {
-		return fmt.Errorf("marshal task: %w", err)
-	}
-	return s.coord.Put(coordination.PrefixTask+t.ID, data, 0)
+// Delete removes a task by ID from the active backend.
+func (s *serviceImpl) Delete(ctx context.Context, id string) error {
+	return s.active().Delete(ctx, id)
 }
 
-func (s *serviceImpl) listFiltered(pred func(*Task) bool) ([]*Task, error) {
-	entries, err := s.coord.List(coordination.PrefixTask)
-	if err != nil {
-		return nil, fmt.Errorf("list tasks: %w", err)
-	}
-	var tasks []*Task
-	for _, e := range entries {
-		var t Task
-		if err := json.Unmarshal(e.Value, &t); err != nil {
-			continue
+// ActiveBackendName returns the name of the currently active backend (for diagnostics).
+func ActiveBackendName(svc Service) string {
+	if si, ok := svc.(*serviceImpl); ok {
+		name := si.settings()
+		if name == "" {
+			return BackendLocal
 		}
-		if pred(&t) {
-			tasks = append(tasks, &t)
+		si.mu.RLock()
+		_, found := si.backends[name]
+		si.mu.RUnlock()
+		if found {
+			return name
 		}
+		return fmt.Sprintf("%s (unavailable, using local)", name)
 	}
-	return tasks, nil
+	return "unknown"
 }

@@ -47,15 +47,42 @@ COMPLETED: Migration Squash (2026-04-04)
 
 CURRENT: Plugin Extraction (docs/plugin-extraction-plan.md)
 - Phase 1 (cleanup): DONE
-- Phase 2: Fragments Engine plugin extraction (Volon proxy, sprint, engine tasks)
-- Phase 3: Debug widget plugin extraction
-- Phase 4: TaskBackend abstraction (interface + multiple implementations)
+- Phase 2 (Fragments Engine): DONE
+- Phase 3 (debug widgets): DONE — builtin debugwidgets plugin, frontend in plugins/debug/
+- Phase 4 (TaskBackend): DONE — TaskBackend interface, LocalBackend, registry, Host.RegisterTaskBackend, migration 002
 - Phase 5: Connector plugins (linear, slack, github, email)
 - Phase 6: Remaining extractions (email/teams/documents envelopes, bookmarks, actions)
 
 CURRENT: Phase C — Memory & Continuity
 - Check Cortex for type/view registry changes needed
 - MemoryService, extraction (PostCompact + per-turn), memory tools (opt-out)
+
+UPCOMING: User Shell (core feature, not plugin)
+Two tasks, build in order:
+
+  Task 1: ! Shell Exec
+  - Parse `!` prefix in chat composer (frontend) and internal/chat/commands.go (backend)
+  - Convention matches Claude Code's `!` prefix — standard, not custom
+  - Backend: execute command via os/exec, capture stdout+stderr, inject as user message visible to LLM
+  - Agent sees command + output, can comment on errors, suggest corrections
+  - Working directory: project root (from session/config), fallback $HOME
+  - Output truncation via internal/truncate/ pipeline
+  - Default denylist (internal/shell/denylist.go): destructive commands blocked unless YOLO
+  - YOLO lightning icon becomes 3-state toggle: Ask (confirm each) → Session (auto-approve, denylist active) → YOLO (no restrictions)
+  - Frontend: `!` keystroke triggers info drawer (2-line slide-up from composer top):
+    [lock-icon] ~/Projects-apps/nanite  ·  main  ·  clean
+    Lock icon toggles denylist on/off per session. Admin user setting controls default.
+  - Drawer disappears on submit or backspace out of `!` mode
+
+  Task 2: Interactive Shell Tab (PTY) — depends on Task 1
+  - Shell icon in composer toolbar (between YOLO toggle and paperclip), keyboard shortcut TBD
+  - Backend: PTY session manager — spawn user's default shell, scoped to chat session lifetime
+  - Transport: WebSocket (new endpoint, SSE insufficient for bidirectional)
+  - Frontend: xterm.js terminal embed, replaces composer area when toggled
+  - Output is NOT in LLM context by default — user can select+send snippets to conversation
+  - Requires shell_mode enabled (dev mode)
+  - Shell process killed on session archive
+  - Same info drawer chrome (path + git + denylist toggle) applies
 
 PHASE D (future): Claude Code Integration
 

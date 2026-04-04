@@ -21,7 +21,7 @@ interface ChatState {
   addToolCall: (tc: ToolCall, sessionId?: string) => void
   updateToolCall: (id: string, update: Partial<ToolCall>, sessionId?: string) => void
   clearToolCalls: () => void
-  loadSessionToolCalls: (sessionId: string | null) => void
+  loadSessionToolCalls: (sessionId: string | null, retentionMinutes?: number) => void
 
   // Tool warnings
   toolWarnings: ToolWarning[]
@@ -131,14 +131,16 @@ export const useChatStore = create<ChatState>((set) => ({
       }
       return { toolCalls: [] }
     }),
-  loadSessionToolCalls: (sessionId) =>
+  loadSessionToolCalls: (sessionId, retentionMinutes = 15) =>
     set((state) => {
       if (!sessionId) return { toolCalls: [] }
-      // Prune stale entries (>15 min inactive)
-      const cutoff = Date.now() - 15 * 60 * 1000
       const next = new Map(state.toolCallsBySession)
-      for (const [id, entry] of next) {
-        if (entry.lastActivity < cutoff) next.delete(id)
+      // Prune stale entries only when retention is non-negative; negative values keep until refresh
+      if (retentionMinutes >= 0) {
+        const cutoff = Date.now() - retentionMinutes * 60 * 1000
+        for (const [id, entry] of next) {
+          if (entry.lastActivity < cutoff) next.delete(id)
+        }
       }
       const entry = next.get(sessionId)
       return {

@@ -2,9 +2,18 @@ import { useCallback, useRef, useEffect } from 'react'
 import { Wrench, Loader2 } from 'lucide-react'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useChatStore } from '@/stores/useChatStore'
+import { useSettings } from '@/hooks/useSettings'
 import { ToolCallItem } from './ToolCallItem'
 
+function formatRetention(minutes: number): string {
+  if (minutes < 0) return 'kept until page refresh'
+  if (minutes >= 60) return `clears after ${minutes / 60} hour${minutes > 60 ? 's' : ''} of inactivity`
+  return `clears after ${minutes} minutes of inactivity`
+}
+
 export function ToolCallDrawer() {
+  const { data: settings } = useSettings()
+  const retention = settings?.tool_drawer_retention ?? 15
   const drawerState = useLayoutStore((s) => s.toolDrawerState)
   const drawerHeight = useLayoutStore((s) => s.toolDrawerHeight)
   const setDrawerState = useLayoutStore((s) => s.setToolDrawerState)
@@ -86,7 +95,7 @@ export function ToolCallDrawer() {
               <div className="flex flex-col items-center justify-center h-full text-center px-6">
                 <Wrench className="w-8 h-8 text-fg-faint mb-3" />
                 <p className="text-xs text-fg-secondary">Tool calls will appear here as the agent uses tools.</p>
-                <p className="text-[10px] text-fg-faint mt-1">Tool call history is kept per session and clears after 15 minutes of inactivity.</p>
+                <p className="text-[10px] text-fg-faint mt-1">Tool call history is kept per session and {formatRetention(retention)}.</p>
               </div>
             )}
           </div>

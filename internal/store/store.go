@@ -88,6 +88,7 @@ func (s *Store) migrate() error {
 		"migrations/021_catalog_sources.sql",
 		"migrations/022_broker_decisions.sql",
 		"migrations/023_add_debug_snapshots.sql",
+		"migrations/024_add_tool_settings.sql",
 	}
 
 	for _, f := range files {

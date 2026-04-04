@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSprintPlanningStore } from "@/components/plugins/sprint/useSprintPlanningStore";
 import { api } from "@/lib/api";
-import type { ApprovalRequest, ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning } from "@/lib/types";
+import type { ApprovalRequest, ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning, UserSettings } from "@/lib/types";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 
@@ -181,8 +181,12 @@ export function useChat(sessionId: string | null) {
   // Load messages when sessionId changes
   useEffect(() => {
     void loadMessages();
-    // Load retained tool calls for this session (prunes stale entries)
-    store().loadSessionToolCalls(sessionId);
+    // Load retained tool calls — skip prune if settings not yet cached (avoids
+    // pruning with wrong default when user configured -1). Re-runs when settings load
+    // via the separate effect below.
+    const settings = queryClient.getQueryData<UserSettings>(['settings'])
+    const retention = settings ? settings.tool_drawer_retention : -1
+    store().loadSessionToolCalls(sessionId, retention);
     // Close the tool drawer on session switch — user opens as needed
     useLayoutStore.getState().setToolDrawerState('closed');
     // Clear text-only mode on session switch — it will be re-set if the new

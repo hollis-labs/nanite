@@ -1,4 +1,4 @@
-import { Bot, User, BookmarkCheck, Terminal } from 'lucide-react'
+import { Bot, User, BookmarkCheck } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import type { Message, AgentMode, Envelope } from '@/lib/types'
 import { MessageContent } from './MessageContent'
@@ -116,9 +116,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
   const isShellExec = shellMeta !== null
   const isUser = message.role === 'user'
   const avatarStyle = isUser
-    ? isShellExec
-      ? { bg: 'bg-[#1a1b26]', text: 'text-green-400' }
-      : { bg: 'bg-surface', text: 'text-fg-secondary' }
+    ? { bg: 'bg-surface', text: 'text-fg-secondary' }
     : MODE_AVATAR_STYLES[activeMode]
 
   // Parse envelope — from saved envelope field or from streaming content.
@@ -163,6 +161,25 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
     return null
   }, [message.envelope, message.content])
 
+  // Shell exec messages get a distinct full-width layout — no avatar, centered to match composer width
+  if (isShellExec && shellMeta) {
+    return (
+      <div
+        className="w-full group"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        data-message-id={message.id}
+      >
+        <div className="flex justify-end mb-1">
+          <span className="text-xs text-fg-faint">
+            You{hovered && ` · ${formatRelativeTime(message.created_at)}`}
+          </span>
+        </div>
+        <ShellMessage content={displayText} meta={shellMeta} />
+      </div>
+    )
+  }
+
   return (
     <div
       className={`flex gap-3 group ${isUser ? 'flex-row-reverse' : ''}`}
@@ -178,7 +195,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             : ''
         }`}
       >
-        {isShellExec ? <Terminal className="w-4 h-4" /> : isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+        {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
 
       {/* Content */}
@@ -207,11 +224,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             <BookmarkCheck className="w-3.5 h-3.5 text-amber-500" />
           )}
         </div>
-        {isShellExec && shellMeta ? (
-          <div className="max-w-[90%]">
-            <ShellMessage content={displayText} meta={shellMeta} />
-          </div>
-        ) : (
+        {(
           <div
             className={`${
               isUser

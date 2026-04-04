@@ -6,6 +6,7 @@ import {
   FileText,
   Keyboard,
   LayoutGrid,
+  Palette,
   Puzzle,
   SlidersHorizontal,
   Sparkles,
@@ -14,7 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -28,6 +29,10 @@ import { getSlotComponent } from "@/generated/plugin-slot-components";
 import { useNavigationStore } from "@/stores/useNavigationStore";
 import { ActionsPanel } from "./ActionsPanel";
 import { AgentProfileManager } from "./AgentProfileManager";
+
+const AppearancePanel = lazy(() =>
+  import("./appearance/AppearancePanel").then((m) => ({ default: m.AppearancePanel })),
+);
 import { ObservabilityDashboard } from "./observability/ObservabilityDashboard";
 import { PluginManager } from "./PluginManager";
 import { PreferencesPanel } from "./PreferencesPanel";
@@ -43,6 +48,7 @@ import { ProfilePanel } from "./ProfilePanel";
 const CORE_SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "Profile", icon: User },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
+  { id: "appearance", label: "Appearance", icon: Palette },
   { id: "providers", label: "Providers", icon: Cpu },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { id: "actions", label: "Actions", icon: Zap },
@@ -96,6 +102,12 @@ export default function SettingsPage() {
         return <ProfilePanel />;
       case "preferences":
         return <PreferencesPanel />;
+      case "appearance":
+        return (
+          <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+            <AppearancePanel />
+          </Suspense>
+        );
       case "providers":
         return <ProviderManager />;
       case "shortcuts":

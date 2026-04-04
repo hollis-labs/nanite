@@ -2,14 +2,15 @@ import { useEffect, useCallback, useState, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { Paperclip, Zap } from 'lucide-react'
+import { Paperclip, Lock, Unlock, Zap } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ComposerToolbar } from './ComposerToolbar'
+import { ShellInfoDrawer } from './ShellInfoDrawer'
 import { SlashCommandExtension, type SlashCommand } from './extensions/SlashCommandExtension'
 import { slashCommandSuggestion } from './extensions/slashCommandSuggestion'
 import { FileMentionExtension, type FileResult } from './extensions/FileMentionExtension'
 import { fileMentionSuggestion } from './extensions/fileMentionSuggestion'
-import { usePermissionMode } from '@/hooks/usePermissionMode'
+import { useShellMode } from '@/hooks/useShellMode'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import type { SlashCommandDef } from '@/lib/types'
@@ -56,8 +57,9 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const queryClient = useQueryClient()
-  const { mode: permissionMode, setMode: setPermissionMode } = usePermissionMode()
-  const isYolo = permissionMode === 'yolo'
+  const { mode: shellMode, cycleMode: cycleShellMode, setMode: setShellMode } = useShellMode(activeSessionId)
+  const [isShellInput, setIsShellInput] = useState(false)
+  const [shellRunning, setShellRunning] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
@@ -273,6 +275,17 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     content: '',
   })
 
+  // Detect ! prefix for shell mode info drawer
+  useEffect(() => {
+    if (!editor) return
+    const handler = () => {
+      const text = editor.getText()
+      setIsShellInput(text.startsWith('!') && text.length >= 1)
+    }
+    editor.on('update', handler)
+    return () => { editor.off('update', handler) }
+  }, [editor])
+
   useEffect(() => {
     if (editor && onEditorReady) {
       onEditorReady(() => {
@@ -281,14 +294,40 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     }
   }, [editor, onEditorReady])
 
+  // Shell command execution — intercepts ! prefix
+  const handleShellExec = useCallback(async (command: string) => {
+    if (!activeSessionId) return
+    setShellRunning(true)
+    try {
+      await api.shellExec(activeSessionId, command)
+      reloadMessages?.()
+    } catch (err) {
+      console.error('Shell exec failed:', err)
+    } finally {
+      setShellRunning(false)
+      setIsShellInput(false)
+    }
+  }, [activeSessionId, reloadMessages])
+
   const handleSend = useCallback(() => {
     if (!editor) return
     const text = editor.getText().trim()
     if (!text) return
     pushHistory(text)
+
+    // Detect ! prefix — route to shell exec
+    if (text.startsWith('!') && text.length > 1) {
+      const command = text.slice(1).trim()
+      if (command) {
+        editor.commands.clearContent()
+        void handleShellExec(command)
+        return
+      }
+    }
+
     onSend(text)
     editor.commands.clearContent()
-  }, [editor, onSend])
+  }, [editor, onSend, handleShellExec])
 
   handleSendRef.current = handleSend
 
@@ -305,9 +344,22 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => void handleDrop(e)}
       >
+        {/* Shell info drawer — appears when user types ! */}
+        {isShellInput && activeSessionId && (
+          <ShellInfoDrawer
+            sessionId={activeSessionId}
+            shellMode={shellMode}
+            onToggleDenylist={() => setShellMode(shellMode === 'yolo' ? 'session' : 'yolo')}
+          />
+        )}
         {dragOver && (
           <div className="px-3 py-1.5 text-xs text-accent text-center border-b border-accent/30">
             Drop files to attach
+          </div>
+        )}
+        {shellRunning && (
+          <div className="px-3 py-1.5 text-xs text-fg-muted text-center border-b border-border-subtle bg-bg-elevated/50 animate-pulse">
+            Running command...
           </div>
         )}
         <div className="relative px-3 py-2 bg-white dark:bg-bg-elevated">
@@ -319,16 +371,31 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             onChange={(e) => void handleFileUpload(e.target.files)}
           />
           <div className="absolute top-2 right-2 flex items-center gap-0.5">
+            {/* Shell mode 3-state toggle: Ask (lock) → Session (unlock) → YOLO (zap) */}
             <button
               className={`p-1.5 rounded-md transition-colors ${
-                isYolo
-                  ? 'text-toggle-on bg-toggle-on/10 hover:bg-toggle-on/20'
-                  : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
+                shellMode === 'yolo'
+                  ? 'text-amber-400 bg-amber-400/10 hover:bg-amber-400/20'
+                  : shellMode === 'session'
+                    ? 'text-accent bg-accent-muted hover:bg-accent/20'
+                    : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
               }`}
-              title={isYolo ? 'Yolo mode active — click to reset' : 'Enable Yolo mode'}
-              onClick={() => setPermissionMode(isYolo ? 'default' : 'yolo')}
+              title={
+                shellMode === 'yolo'
+                  ? 'Shell: YOLO — no restrictions'
+                  : shellMode === 'session'
+                    ? 'Shell: Session — auto-approve, denylist active'
+                    : 'Shell: Ask — confirm each command'
+              }
+              onClick={cycleShellMode}
             >
-              <Zap className={`w-4 h-4 ${isYolo ? 'fill-current' : ''}`} />
+              {shellMode === 'yolo' ? (
+                <Zap className="w-4 h-4 fill-current" />
+              ) : shellMode === 'session' ? (
+                <Unlock className="w-4 h-4" />
+              ) : (
+                <Lock className="w-4 h-4" />
+              )}
             </button>
             <button
               className={`p-1.5 rounded-md transition-colors ${

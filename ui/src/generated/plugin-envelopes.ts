@@ -164,7 +164,14 @@ const PLUGIN_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
 // --- AUTO-GENERATED PLUGIN ENTRIES (safe to overwrite below this line) ---
 // @PLUGIN_ENTRIES_START
 const PLUGIN_ENVELOPE_ENTRIES: Record<string, LazyEnvelopeComponent> = {
-
+  'task-disposition': lazy(() => import('@/components/plugins/fragments-engine/TaskDispositionCard').then(m => ({ default: m.TaskDispositionCard }))),
+  'task-complete-notification': lazy(() => import('@/components/plugins/fragments-engine/TaskCompleteNotificationCard').then(m => ({ default: m.TaskCompleteNotificationCard }))),
+  'giphy-modal': lazy(() => import('@/components/chat/envelopes/GiphyModalCard').then(m => ({ default: m.GiphyModalCard }))),
+  'oembed-card': lazy(() => import('@/components/chat/envelopes/OEmbedCard').then(m => ({ default: m.OEmbedCard }))),
+  'kb-result': lazy(() => import('@/components/chat/envelopes/KBResultCard').then(m => ({ default: m.KBResultCard }))),
+  'ticket-form': lazy(() => import('@/components/chat/envelopes/TicketFormCard').then(m => ({ default: m.TicketFormCard }))),
+  'ticket-confirmation': lazy(() => import('@/components/chat/envelopes/TicketConfirmationCard').then(m => ({ default: m.TicketConfirmationCard }))),
+  'resolution-capture': lazy(() => import('@/components/chat/envelopes/ResolutionCaptureCard').then(m => ({ default: m.ResolutionCaptureCard }))),
 };
 // @PLUGIN_ENTRIES_END
 

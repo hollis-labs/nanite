@@ -58,16 +58,27 @@ Extract all Volon/Engine-specific functionality into `plugin-fragments-engine`.
 
 ## Phase 3 — Debug Widget Plugin
 
+**Status: DONE (2026-04-04)**
+
 Extract debug/developer widgets into `plugin-debug` (bundled, default-on when `developer_mode` is true).
 
-### What moves:
+- [x] Created `internal/plugin/builtin/debugwidgets/plugin.go` — registers 3 widgets
+- [x] Registered in `allplugins.go`
+- [x] Moved frontend widgets + panels to `ui/src/components/plugins/debug/`
+- [x] Updated `plugin-widgets.ts` — 3 widgets moved from CORE_ENTRIES to PLUGIN_ENTRIES (source: "debug")
+- [x] Backend API endpoints stay in core (Option B — handlers are thin DB reads)
+- [x] All imports updated, no broken references
+- [x] go build + go vet + go test clean, frontend builds, Cerberus deploy
+
+### What moved:
 - `BrokerDecisionsWidget.tsx` + `BrokerDecisionsPanel.tsx`
 - `SlotInspectorWidget.tsx` + `SlotInspectorPanel.tsx`
 - `TurnSnapshotWidget.tsx` + `TurnSnapshotPanel.tsx`
 - `DebugPanel.tsx` + `DebugPanelsContainer.tsx`
-- Backend: `/api/broker/decisions`, `/api/debug/slots` endpoints
 
 ### What stays in core:
+- Backend: `/api/broker/decisions`, `/api/debug/slots` endpoints (Option B)
+- `broker_decisions` table and store methods
 - `ObservabilityWidget.tsx` — useful for all users, not just debug
 - `session-info`, `context-budget`, `token-usage`, `agent-status`, `tools` widgets
 

@@ -1327,6 +1327,66 @@ export const api = {
     return res.json();
   },
 
+  // --- Shell Execution ---
+
+  getShellMode: async (sessionId: string): Promise<{ mode: string }> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-mode`);
+    if (!res.ok) throw new Error(`Failed to get shell mode: ${res.status}`);
+    return res.json();
+  },
+
+  setShellMode: async (sessionId: string, mode: string): Promise<{ mode: string }> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    if (!res.ok) throw new Error(`Failed to set shell mode: ${res.status}`);
+    return res.json();
+  },
+
+  shellExec: async (
+    sessionId: string,
+    command: string,
+  ): Promise<{
+    message_id: string;
+    command: string;
+    output: string;
+    exit_code: number;
+    duration_ms: number;
+    truncated: boolean;
+  }> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || `Shell exec failed: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  shellCheck: async (
+    sessionId: string,
+    command: string,
+  ): Promise<{ allowed: boolean; reason: string; mode: string }> => {
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/shell-check?command=${encodeURIComponent(command)}`,
+    );
+    if (!res.ok) throw new Error(`Failed to check shell command: ${res.status}`);
+    return res.json();
+  },
+
+  getShellInfo: async (
+    sessionId: string,
+  ): Promise<{ work_dir: string; git_branch?: string; git_status?: string }> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-info`);
+    if (!res.ok) throw new Error(`Failed to get shell info: ${res.status}`);
+    return res.json();
+  },
+
   // --- vNext: Broker Decisions ---
 
   getBrokerDecisions: async (sessionId: string, limit = 50): Promise<BrokerDecision[]> => {

@@ -387,6 +387,8 @@ export interface SessionAgent {
 
 export type PermissionMode = "default" | "accept-edits" | "plan" | "yolo";
 
+export type ShellMode = "ask" | "session" | "yolo";
+
 export type ApprovalDecision = "allow" | "deny";
 export type ApprovalScope = "once" | "session";
 

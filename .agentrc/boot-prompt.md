@@ -54,8 +54,41 @@ CURRENT: Plugin Extraction (docs/plugin-extraction-plan.md)
 - Phase 6: Remaining extractions (email/teams/documents envelopes, bookmarks, actions)
 
 CURRENT: Phase C — Memory & Continuity
-- Check Cortex for type/view registry changes needed
-- MemoryService, extraction (PostCompact + per-turn), memory tools (opt-out)
+- Cortex investigation DONE → docs/phase-c-cortex-investigation.md
+  - No memory type/view exists in Cortex yet (15 types, 4 views, none memory-oriented)
+  - Semantic search blocked: no embedding provider configured in Cortex
+  - Recommended: single `memory` type with subtype metadata, `memory_recall` view
+  - Namespace strategy: app/nanite/{user|project|session}/{id} for isolation
+  - 13 open questions documented (embedding provider, namespace dynamics, budget allocation)
+- NEXT: MemoryService implementation, extraction (PostCompact + per-turn), memory tools (opt-out)
+
+UPCOMING: Plugin Hooks, Events & Filters (docs/plugin-hooks-events-filters.md)
+Four tasks, build in order:
+
+  Task 1: Wire Dead Events + Pre-Hooks (backend)
+  - Add Emit*() calls for 21 defined-but-never-emitted events at correct code points
+  - Wire EmitPreHook("message.sending") in engine.go before LLM call
+  - Wire EmitPreHook("tool.executing") in engine.go before tool execution
+  - Add new event constants: shell (exec/error/blocked), context (compacted/assembled),
+    artifact (created/deleted), api (request/response)
+  - ~15 files touched, no architecture changes
+
+  Task 2: Filter System (backend, NEW architecture)
+  - Create internal/plugin/filter.go: FilterFunc, FilterContext, priority-ordered chain
+  - Synchronous pipeline: each handler receives output of previous, ordered by priority (lower=earlier)
+  - Host methods: RegisterFilter(name, priority, fn), ApplyFilter(name, data, ctx)
+  - Wire 6 filter points: system_prompt, user_message, tool_result, assistant_response,
+    context_window, envelope_data (shell filters deferred to shell feature task)
+  - Tests: chain ordering, error propagation, empty chain passthrough
+
+  Task 3: New UI Slots (frontend)
+  - composer-above (HIGH — needed for shell feature info drawer)
+  - message-actions (HIGH — per-message plugin buttons)
+  - message-header, composer-below, session-sidebar, modal
+
+  Task 4: Wire Unconsumed Slots (frontend)
+  - context-menu:message, context-menu:session — add right-click rendering
+  - command-palette — wire into Cmd+K palette
 
 UPCOMING: User Shell (core feature, not plugin)
 Two tasks, build in order:

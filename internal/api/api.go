@@ -247,6 +247,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{id}/assign", a.handleAssignTask)
 	mux.HandleFunc("GET /api/sessions/{id}/tasks", a.handleListSessionTasks)
 
+	// Shell Execution
+	mux.HandleFunc("GET /api/sessions/{id}/shell-mode", a.handleGetShellMode)
+	mux.HandleFunc("PUT /api/sessions/{id}/shell-mode", a.handleSetShellMode)
+	mux.HandleFunc("POST /api/sessions/{id}/shell-exec", a.handleShellExec)
+	mux.HandleFunc("GET /api/sessions/{id}/shell-check", a.handleShellCheck)
+	mux.HandleFunc("GET /api/sessions/{id}/shell-info", a.handleShellInfo)
+
 	// Debug
 	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 

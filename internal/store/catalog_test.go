@@ -11,7 +11,11 @@ func TestCatalogSourceCRUD(t *testing.T) {
 	}
 	defer s.Close()
 
-	// The migration seeds the official source.
+	if err := s.Seed(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Seed() inserts the official source.
 	sources, err := s.ListCatalogSources()
 	if err != nil {
 		t.Fatalf("list: %v", err)

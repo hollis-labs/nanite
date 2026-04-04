@@ -15,9 +15,9 @@ import (
 type OrchestrationPlan struct {
 	SubTasks      []SubTask `json:"sub_tasks"`
 	Aggregation   string    `json:"aggregation"`
-	SprintID      string    `json:"sprint_id,omitempty"`       // Volon sprint ID if created
-	TaskIDs       []string  `json:"task_ids,omitempty"`        // Volon task IDs if created
-	HasVolon      bool      `json:"has_volon"`                 // whether Volon integration is available
+	SprintID      string    `json:"sprint_id,omitempty"`       // Engine sprint ID if created
+	TaskIDs       []string  `json:"task_ids,omitempty"`        // Engine task IDs if created
+	HasEngine     bool      `json:"has_engine"`                // whether Fragments Engine integration is available
 	HasCortex     bool      `json:"has_cortex"`                // whether Cortex is available for knowledge
 	PlanOnly      bool      `json:"plan_only"`                 // true if no MCP services available to execute
 }
@@ -27,7 +27,7 @@ type SubTaskResult struct {
 	Title   string `json:"title"`
 	Output  string `json:"output"`
 	Error   string `json:"error,omitempty"`
-	TaskID  string `json:"task_id,omitempty"` // Volon task ID if tracked
+	TaskID  string `json:"task_id,omitempty"` // Engine task ID if tracked
 }
 
 // OrchestrationResult holds the final aggregated output.
@@ -59,12 +59,12 @@ func (o *Orchestrator) HasDecomposer() bool {
 }
 
 // BuildPlan creates an orchestration plan from a decomposition result.
-// It checks for Volon/Cortex availability and optionally creates a sprint.
+// It checks for Engine/Cortex availability and optionally creates a sprint.
 func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *DecompositionResult, projectID string) (*OrchestrationPlan, error) {
 	plan := &OrchestrationPlan{
 		SubTasks:    decomposition.SubTasks,
 		Aggregation: decomposition.Aggregation,
-		HasVolon:    o.hasToolPrefix("engine"),
+		HasEngine:   o.hasToolPrefix("engine"),
 		HasCortex:   o.hasToolPrefix("cortex"),
 	}
 
@@ -80,15 +80,15 @@ func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *Decompositi
 		log.Printf("orchestrator: cortex available — sub-tasks can leverage agent knowledge")
 	}
 
-	// Create Volon sprint + tasks if available.
-	if plan.HasVolon && projectID != "" {
-		sprintID, taskIDs, err := o.createVolonSprint(ctx, projectID, decomposition)
+	// Create Engine sprint + tasks if available.
+	if plan.HasEngine && projectID != "" {
+		sprintID, taskIDs, err := o.createEngineSprint(ctx, projectID, decomposition)
 		if err != nil {
-			log.Printf("orchestrator: failed to create Volon sprint: %v (continuing without tracking)", err)
+			log.Printf("orchestrator: failed to create Engine sprint: %v (continuing without tracking)", err)
 		} else {
 			plan.SprintID = sprintID
 			plan.TaskIDs = taskIDs
-			log.Printf("orchestrator: created Volon sprint %s with %d tasks", sprintID, len(taskIDs))
+			log.Printf("orchestrator: created Engine sprint %s with %d tasks", sprintID, len(taskIDs))
 		}
 	}
 
@@ -159,8 +159,8 @@ func (o *Orchestrator) hasToolPrefix(prefix string) bool {
 	return false
 }
 
-// createVolonSprint creates a Volon sprint with one task per sub-task.
-func (o *Orchestrator) createVolonSprint(ctx context.Context, projectID string, decomposition *DecompositionResult) (string, []string, error) {
+// createEngineSprint creates a Fragments Engine sprint with one task per sub-task.
+func (o *Orchestrator) createEngineSprint(ctx context.Context, projectID string, decomposition *DecompositionResult) (string, []string, error) {
 	if o.MCPManager == nil {
 		return "", nil, fmt.Errorf("no MCP manager")
 	}
@@ -194,7 +194,7 @@ func (o *Orchestrator) createVolonSprint(ctx context.Context, projectID string, 
 			"description": st.Description,
 		})
 		if err != nil {
-			log.Printf("orchestrator: failed to create Volon task for %q: %v", st.Title, err)
+			log.Printf("orchestrator: failed to create Engine task for %q: %v", st.Title, err)
 			continue
 		}
 

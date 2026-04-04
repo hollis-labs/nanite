@@ -10,7 +10,7 @@ requires:
 registers:
   envelopes:
     - type: oembed-card
-      component: ui/OEmbedCard
+      component: components/chat/envelopes/OEmbedCard
       export: OEmbedCard
 
   hooks:

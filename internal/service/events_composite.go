@@ -7,7 +7,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
-// CompositeEmitter fans out events to ActivityEmitter (Volon GUI) and
+// CompositeEmitter fans out events to ActivityEmitter (Engine GUI) and
 // PluginEventSink (plugin hooks). Both sinks are nil-safe — a nil sub-emitter
 // is silently skipped. All emissions run in goroutines so the caller never blocks.
 type CompositeEmitter struct {

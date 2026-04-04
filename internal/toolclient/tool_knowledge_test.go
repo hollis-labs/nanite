@@ -62,7 +62,7 @@ func TestForIntent_MatchesRelevantTools(t *testing.T) {
 	}{
 		{
 			intent:  "create task sprint",
-			wantAny: []string{"volon_task_create", "volon_sprint_create"},
+			wantAny: []string{"engine_task_create", "engine_sprint_create"},
 		},
 		{
 			intent:  "build pipeline deploy",
@@ -75,7 +75,7 @@ func TestForIntent_MatchesRelevantTools(t *testing.T) {
 		{
 			intent:   "service logs debug",
 			wantAny:  []string{"cerberus_logs"},
-			wantNone: []string{"volon_task_create"},
+			wantNone: []string{"engine_task_create"},
 		},
 		{
 			intent: "",

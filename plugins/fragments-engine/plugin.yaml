@@ -1,0 +1,45 @@
+name: fragments-engine
+version: 0.1.0
+description: Fragments Engine integration — sprint planning, backlog, task management via Engine MCP
+
+requires:
+  mcp_servers: [engine]
+
+registers:
+  envelopes:
+    - type: sprint-planning-review
+      component: components/plugins/fragments-engine/SprintPlanningReviewCard
+      export: SprintPlanningReviewCard
+    - type: task-disposition
+      component: components/plugins/fragments-engine/TaskDispositionCard
+      export: TaskDispositionCard
+    - type: task-complete-notification
+      component: components/plugins/fragments-engine/TaskCompleteNotificationCard
+      export: TaskCompleteNotificationCard
+
+  hooks:
+    - event: workflow.completed
+      handler: onWorkflowCompleted
+
+api_endpoints:
+  - path: /api/plugins/engine/backlog
+    method: POST
+    handler: createBacklog
+  - path: /api/plugins/engine/backlog
+    method: GET
+    handler: listBacklog
+  - path: /api/plugins/engine/backlog/{id}/promote
+    method: POST
+    handler: promoteBacklog
+  - path: /api/plugins/engine/sprints
+    method: GET
+    handler: listSprints
+  - path: /api/plugins/engine/tasks
+    method: GET
+    handler: listTasks
+  - path: /api/plugins/engine/tasks/{id}/transition
+    method: POST
+    handler: transitionTask
+  - path: /api/plugins/engine/tasks/{id}
+    method: DELETE
+    handler: deleteTask

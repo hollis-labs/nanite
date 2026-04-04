@@ -15,16 +15,22 @@ type EnvelopeError struct {
 // registeredTypes is the set of envelope types the frontend can render.
 // Unregistered types are silently dropped by the UI.
 var registeredTypes = map[string]bool{
-	"task-disposition":          true,
-	"giphy-modal":              true,
-	"document-viewer":          true,
-	"report-card":              true,
-	"task-complete-notification": true,
-	"kb-result":                true,
-	"ticket-confirmation":      true,
-	"ticket-form":              true,
-	"resolution-capture":       true,
-	"error-report":             true,
+	// Core primitives
+	"session-task":               true,
+	"document-viewer":            true,
+	"report-card":                true,
+	"error-report":               true,
+	"approval-card":              true,
+	"proposal-card":              true,
+	"question-form":              true,
+	// Plugin-owned (registered at runtime via RegisterEnvelopeType; listed here for validation fallback)
+	"giphy-modal":                true,
+	"oembed-card":                true,
+	"kb-result":                  true,
+	"ticket-form":                true,
+	"ticket-confirmation":        true,
+	"resolution-capture":         true,
+	// fragments-engine plugin registers: task-disposition, task-complete-notification, sprint-planning-review
 }
 
 // RegisterEnvelopeType adds a new envelope type to the registry at runtime.

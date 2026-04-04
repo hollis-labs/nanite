@@ -77,26 +77,10 @@ const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
     ),
     source: "core",
   },
-  "broker-decisions": {
+  "worker-status": {
     component: lazy(() =>
-      import("@/components/widgets/BrokerDecisionsWidget").then((m) => ({
-        default: m.BrokerDecisionsWidget,
-      })),
-    ),
-    source: "core",
-  },
-  "slot-inspector": {
-    component: lazy(() =>
-      import("@/components/widgets/SlotInspectorWidget").then((m) => ({
-        default: m.SlotInspectorWidget,
-      })),
-    ),
-    source: "core",
-  },
-  "turn-snapshots": {
-    component: lazy(() =>
-      import("@/components/widgets/TurnSnapshotWidget").then((m) => ({
-        default: m.TurnSnapshotWidget,
+      import("@/components/widgets/WorkerStatusWidget").then((m) => ({
+        default: m.WorkerStatusWidget,
       })),
     ),
     source: "core",
@@ -105,7 +89,32 @@ const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
 
 // --- PLUGIN ENTRIES (auto-generated, safe to overwrite below this line) ---
 // @PLUGIN_WIDGET_ENTRIES_START
-const PLUGIN_ENTRIES: Record<string, WidgetRegistryEntry> = {};
+const PLUGIN_ENTRIES: Record<string, WidgetRegistryEntry> = {
+  "broker-decisions": {
+    component: lazy(() =>
+      import("@/components/plugins/debug/BrokerDecisionsWidget").then((m) => ({
+        default: m.BrokerDecisionsWidget,
+      })),
+    ),
+    source: "debug",
+  },
+  "slot-inspector": {
+    component: lazy(() =>
+      import("@/components/plugins/debug/SlotInspectorWidget").then((m) => ({
+        default: m.SlotInspectorWidget,
+      })),
+    ),
+    source: "debug",
+  },
+  "turn-snapshots": {
+    component: lazy(() =>
+      import("@/components/plugins/debug/TurnSnapshotWidget").then((m) => ({
+        default: m.TurnSnapshotWidget,
+      })),
+    ),
+    source: "debug",
+  },
+};
 // @PLUGIN_WIDGET_ENTRIES_END
 
 // Single merged registry — core takes precedence on ID collision.

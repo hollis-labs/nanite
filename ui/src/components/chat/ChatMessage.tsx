@@ -1,7 +1,8 @@
-import { Bot, User, BookmarkCheck } from 'lucide-react'
+import { Bot, User, BookmarkCheck, Terminal } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import type { Message, AgentMode, Envelope } from '@/lib/types'
 import { MessageContent } from './MessageContent'
+import { ShellMessage } from './ShellMessage'
 import { EnvelopeRenderer } from './envelopes/EnvelopeRenderer'
 import { ContentActions } from './ContentActions'
 import { useChatStore } from '@/stores/useChatStore'
@@ -98,9 +99,26 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
     [message.content]
   )
 
+  // Detect shell_exec messages from metadata
+  const shellMeta = useMemo(() => {
+    if (message.role !== 'user' || !message.metadata) return null
+    try {
+      const meta = typeof message.metadata === 'string'
+        ? JSON.parse(message.metadata)
+        : message.metadata
+      if (meta?.type === 'shell_exec' && meta.shell_exec) {
+        return meta.shell_exec as { command: string; exit_code: number; duration_ms: number; truncated: boolean }
+      }
+    } catch { /* not JSON */ }
+    return null
+  }, [message.role, message.metadata])
+
+  const isShellExec = shellMeta !== null
   const isUser = message.role === 'user'
   const avatarStyle = isUser
-    ? { bg: 'bg-surface', text: 'text-fg-secondary' }
+    ? isShellExec
+      ? { bg: 'bg-[#1a1b26]', text: 'text-green-400' }
+      : { bg: 'bg-surface', text: 'text-fg-secondary' }
     : MODE_AVATAR_STYLES[activeMode]
 
   // Parse envelope — from saved envelope field or from streaming content.
@@ -131,7 +149,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
 
     // 2. During streaming, extract from content (envelope field not set yet).
     if (message.content) {
-      const pattern = /```(?:volon-envelope|nanite-envelope)\s*\n([\s\S]*?)```/g
+      const pattern = /```(?:volon-envelope|nanite-envelope|fragments-envelope)\s*\n([\s\S]*?)```/g
       const envelopes: Envelope[] = []
       let match
       while ((match = pattern.exec(message.content)) !== null) {
@@ -160,7 +178,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             : ''
         }`}
       >
-        {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+        {isShellExec ? <Terminal className="w-4 h-4" /> : isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
 
       {/* Content */}
@@ -189,15 +207,21 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             <BookmarkCheck className="w-3.5 h-3.5 text-amber-500" />
           )}
         </div>
-        <div
-          className={`${
-            isUser
-              ? 'bg-surface rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%]'
-              : 'max-w-full'
-          }`}
-        >
-          <MessageContent content={displayText} role={message.role} />
-        </div>
+        {isShellExec && shellMeta ? (
+          <div className="max-w-[90%]">
+            <ShellMessage content={displayText} meta={shellMeta} />
+          </div>
+        ) : (
+          <div
+            className={`${
+              isUser
+                ? 'bg-surface rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%]'
+                : 'max-w-full'
+            }`}
+          >
+            <MessageContent content={displayText} role={message.role} />
+          </div>
+        )}
 
         {/* Truncation banner for structured messages */}
         {structured?.flags?.truncated && (

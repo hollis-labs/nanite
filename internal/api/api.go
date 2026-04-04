@@ -168,15 +168,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/{id}/assigned-modes", a.handleAssignModeToAgent)
 	mux.HandleFunc("DELETE /api/agents/{id}/assigned-modes/{modeId}", a.handleUnassignModeFromAgent)
 
-	// Volon proxy
-	mux.HandleFunc("POST /api/volon/backlog", a.handleCreateVolonBacklog)
-	mux.HandleFunc("GET /api/volon/backlog", a.handleVolonListBacklog)
-	mux.HandleFunc("GET /api/volon/sprints", a.handleVolonListSprints)
-	mux.HandleFunc("GET /api/volon/tasks", a.handleVolonListTasks)
-	mux.HandleFunc("POST /api/volon/tasks/{id}/transition", a.handleVolonTransitionTask)
-	mux.HandleFunc("POST /api/volon/backlog/{id}/promote", a.handleVolonPromoteBacklog)
-	mux.HandleFunc("DELETE /api/volon/tasks/{id}", a.handleVolonDeleteTask)
-
 	// MCP Servers (user-managed)
 	mux.HandleFunc("GET /api/mcp-servers", a.handleListMCPServers)
 	mux.HandleFunc("POST /api/mcp-servers", a.handleCreateMCPServer)
@@ -255,6 +246,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{id}/transition", a.handleTransitionTask)
 	mux.HandleFunc("POST /api/tasks/{id}/assign", a.handleAssignTask)
 	mux.HandleFunc("GET /api/sessions/{id}/tasks", a.handleListSessionTasks)
+
+	// Shell Execution
+	mux.HandleFunc("GET /api/sessions/{id}/shell-mode", a.handleGetShellMode)
+	mux.HandleFunc("PUT /api/sessions/{id}/shell-mode", a.handleSetShellMode)
+	mux.HandleFunc("POST /api/sessions/{id}/shell-exec", a.handleShellExec)
+	mux.HandleFunc("GET /api/sessions/{id}/shell-check", a.handleShellCheck)
+	mux.HandleFunc("GET /api/sessions/{id}/shell-info", a.handleShellInfo)
 
 	// Debug
 	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)

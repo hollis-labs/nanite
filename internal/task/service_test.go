@@ -46,9 +46,9 @@ func setupTestService(t *testing.T) (Service, *sql.DB) {
 		t.Fatalf("create table: %v", err)
 	}
 
+	local := NewLocalBackend(coord, &SQLiteSnapshot{DB: db})
 	svc := NewService(ServiceConfig{
-		Coord: coord,
-		DB:    &SQLiteSnapshot{DB: db},
+		Local: local,
 	})
 	return svc, db
 }
@@ -230,9 +230,9 @@ func TestSnapshotAndRestore(t *testing.T) {
 	coord2, _ := coordination.NewBadgerStore(t.TempDir())
 	t.Cleanup(func() { coord2.Close() })
 
+	local2 := NewLocalBackend(coord2, &SQLiteSnapshot{DB: db})
 	svc2 := NewService(ServiceConfig{
-		Coord: coord2,
-		DB:    &SQLiteSnapshot{DB: db},
+		Local: local2,
 	})
 
 	if err := svc2.Restore(ctx); err != nil {

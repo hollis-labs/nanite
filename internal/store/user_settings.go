@@ -21,6 +21,7 @@ type UserSettings struct {
 	RecoverMode           bool              `json:"recover_mode"`
 	ExtSettings           map[string]any    `json:"ext_settings,omitempty"`
 	ToolLoadPreferences   map[string]string `json:"tool_load_preferences,omitempty"`
+	TaskBackend           string            `json:"task_backend"`
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -31,16 +32,17 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var toolDrawerRetention int
 	var devMode, recoverMode bool
 	var toolLoadPrefsJSON string
+	var taskBackend string
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
 		        developer_mode, recover_mode, tool_stream_behavior, tool_drawer_retention,
-		        tool_load_preferences
+		        tool_load_preferences, task_backend
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
 		&devMode, &recoverMode, &toolStreamBehavior, &toolDrawerRetention,
-		&toolLoadPrefsJSON)
+		&toolLoadPrefsJSON, &taskBackend)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -56,6 +58,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		ToolDrawerRetention: toolDrawerRetention,
 		DeveloperMode:       devMode,
 		RecoverMode:         recoverMode,
+		TaskBackend:         taskBackend,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -102,6 +105,10 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	taskBackend := us.TaskBackend
+	if taskBackend == "" {
+		taskBackend = "local"
+	}
 	_, err = s.DB.Exec(
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
@@ -117,12 +124,14 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			tool_stream_behavior = ?,
 			tool_drawer_retention = ?,
 			tool_load_preferences = ?,
+			task_backend = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
 		us.DefaultAgent, us.UtilityProvider, us.UtilityModel, us.ToolCallDisplayMode,
 		string(extJSON), us.DeveloperMode, us.RecoverMode,
-		us.ToolStreamBehavior, us.ToolDrawerRetention, string(toolPrefsJSON), now,
+		us.ToolStreamBehavior, us.ToolDrawerRetention, string(toolPrefsJSON),
+		taskBackend, now,
 	)
 	if err != nil {
 		return fmt.Errorf("update user settings: %w", err)

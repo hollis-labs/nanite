@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// EventEmitter unifies activity events (Volon GUI), plugin events, and
+// EventEmitter unifies activity events (Engine GUI), plugin events, and
 // presence broadcasts into a single interface. Services call one method
 // instead of nil-checking three separate emitters with go-routine wrappers.
 //

@@ -173,9 +173,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Task tracking service — requires coordination store.
 	var tasks task.Service
 	if cfg.CoordStore != nil && cfg.CoordStore.Available() {
+		local := task.NewLocalBackend(cfg.CoordStore, &task.SQLiteSnapshot{DB: cfg.Store.DB})
 		tasks = task.NewService(task.ServiceConfig{
-			Coord: cfg.CoordStore,
-			DB:    &task.SQLiteSnapshot{DB: cfg.Store.DB},
+			Local: local,
+			Settings: func() string {
+				us, err := cfg.Store.GetUserSettings()
+				if err != nil {
+					return task.BackendLocal
+				}
+				return us.TaskBackend
+			},
 		})
 		log.Println("service container: task tracking enabled (badger-backed)")
 	} else {

@@ -231,6 +231,22 @@ func (s *Store) Seed() error {
 		return fmt.Errorf("insert azure gpt-4o model: %w", err)
 	}
 
+	// --- User settings singleton ---
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
+		return fmt.Errorf("insert user_settings: %w", err)
+	}
+
+	// --- Catalog sources ---
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO catalog_sources (id, name, url, type, priority)
+		 VALUES (?, ?, ?, ?, ?)`,
+		"official", "Hollis Labs",
+		"https://raw.githubusercontent.com/hollis-labs/nanite-plugins/main/catalog.yaml",
+		"official", 100,
+	); err != nil {
+		return fmt.Errorf("insert catalog source: %w", err)
+	}
+
 	return tx.Commit()
 }
 

@@ -161,6 +161,14 @@ func (h *Host) registerRoute(pattern string, handler http.Handler) {
 	h.logger.Info("queued route (router not yet available)", "pattern", pattern)
 }
 
+// RegisterHTTPHandler registers a custom HTTP route on the plugin host's
+// router. Use this for non-CRUD endpoints that don't fit the standard
+// CRUD handler pattern. Pattern follows net/http method routing syntax
+// (e.g., "GET /api/plugins/engine/sprints").
+func (h *Host) RegisterHTTPHandler(pattern string, handler http.Handler) {
+	h.registerRoute(pattern, handler)
+}
+
 // GetPlugin retrieves another loaded plugin by ID.
 func (h *Host) GetPlugin(id string) (plugin.Plugin, bool) {
 	h.mu.RLock()
@@ -332,6 +340,31 @@ func (h *Host) RegisterService(name string, service interface{}) {
 	defer h.mu.Unlock()
 	h.services[name] = service
 	h.logger.Info("registered service", "name", name)
+}
+
+// taskBackendRegistrar is the subset of task.Service needed to register backends.
+// Defined here to avoid importing the task package.
+type taskBackendRegistrar interface {
+	RegisterBackend(name string, backend interface{})
+}
+
+// RegisterTaskBackend registers a named task backend via the task service.
+// The backend must implement task.TaskBackend (checked at runtime by the task service).
+// The task service must have been registered via RegisterService("tasks", ...) first.
+func (h *Host) RegisterTaskBackend(name string, backend interface{}) error {
+	h.mu.RLock()
+	svc, ok := h.services["tasks"]
+	h.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("register task backend %q: task service not available", name)
+	}
+	reg, ok := svc.(taskBackendRegistrar)
+	if !ok {
+		return fmt.Errorf("register task backend %q: task service does not support backend registration", name)
+	}
+	reg.RegisterBackend(name, backend)
+	h.logger.Info("registered task backend", "name", name)
+	return nil
 }
 
 // Logger provides a logger instance for the plugin.

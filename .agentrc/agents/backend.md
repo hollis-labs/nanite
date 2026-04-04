@@ -182,7 +182,7 @@ ui/                          # React SPA (see frontend.md)
 
 - **God object: `Engine` struct** (1760 lines) -- `internal/chat/engine.go` contains the chat engine, streaming, tool-use loop, context assembly, session management, presence tracking, and utility helpers all in one file. 12 fields on the struct, 6 `sync.Map` fields for concurrent state. Should be split into focused subsystems. *File: `internal/chat/engine.go:130-148`*
 
-- **Manual migration ordering** -- Migration files are listed explicitly as a string slice in `store.go:67-77` rather than using directory listing or a migration framework. Adding a migration requires editing both the file AND the Go source. The embedded FS has 11 files but the code only lists 9. *File: `internal/store/store.go:67-77` vs `internal/store/migrations/` (11 files)*
+- **~~Manual migration ordering~~** -- RESOLVED: Migrations auto-discovered via `fs.ReadDir()` (Phase 7). Schema squashed to single `001_schema.sql` (2026-04-04). Rule: migrations = DDL only, seed.go = data only.
 
 - **Hardcoded MCP server paths** -- `setupMCPServers()` in `main.go` hardcodes absolute paths like `home + "/go/bin/engine"` and `home + "/Projects-apps/hadron/bin/hadrond"`. These are developer-machine-specific and will break for other contributors. *File: `cmd/nanite/main.go:377-419`*
 
@@ -212,10 +212,12 @@ ui/                          # React SPA (see frontend.md)
 
 ## Pre-Existing Issues (logged for follow-up)
 
-- **Broken connector imports in `plugin.go`:** `github.com/hollis-labs/fragments-engine/connectors/gmail` and `connectors/webhook` — modules don't exist. Compiles today because the file is likely behind a build tag or not reached, but will fail if those paths are resolved. Spotted 2026-03-27.
-- **mcp.TestSelfToolsTransport_ListTools:** expects 12 tools, gets 20. Test count is stale after tools were added. Spotted 2026-03-27.
 - **server.TestAuthMiddlewareEnabled:** auth middleware not enforcing in test. Returns 200 instead of 401. Spotted 2026-03-27.
-- **Seed/migration overlap:** migrations 010/011 and Seed() both insert PTY provider rows. Fixed with INSERT OR IGNORE in seed.go but the duplication pattern is fragile.
+
+### Resolved (2026-04-04)
+- ~~Broken connector imports~~ — cleaned up during rebrand, no broken imports exist.
+- ~~mcp.TestSelfToolsTransport_ListTools~~ — test uses `>=` comparison, passes with all 16 tools.
+- ~~Seed/migration overlap~~ — migrations squashed to DDL-only `001_schema.sql`, all seed data consolidated in `seed.go`.
 
 ---
 

@@ -364,6 +364,9 @@ if err := s.SeedBuiltinPromptTemplates(); err != nil {
 	// Wire plugin host command registry from the container.
 	pluginHost.SetCommandRegistry(container.Commands)
 	pluginHost.RegisterService("container", container)
+	if container.Tasks != nil {
+		pluginHost.RegisterService("tasks", container.Tasks)
+	}
 	plugin.RegisterAutoTriggerHandler(pluginHost)
 
 	// Create API layer.

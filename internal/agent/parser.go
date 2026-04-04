@@ -56,9 +56,9 @@ type ModeDefinition struct {
 
 // AgentConstraints configures iteration and time limits for the agent.
 type AgentConstraints struct {
-	MaxIterations  int `yaml:"maxIterations" json:"maxIterations,omitempty"`
-	MaxTimeSeconds int `yaml:"maxTimeSeconds" json:"maxTimeSeconds,omitempty"`
-	RetryBudget    int `yaml:"retryBudget" json:"retryBudget,omitempty"`
+	MaxIterations  int `yaml:"maxIterations" json:"max_iterations,omitempty"`
+	MaxTimeSeconds int `yaml:"maxTimeSeconds" json:"max_time_seconds,omitempty"`
+	RetryBudget    int `yaml:"retryBudget" json:"retry_budget,omitempty"`
 }
 
 var frontmatterDelim = []byte("---")

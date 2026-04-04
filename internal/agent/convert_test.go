@@ -101,8 +101,8 @@ func TestDefinition_ToProfile(t *testing.T) {
 	if err := json.Unmarshal([]byte(p.Constraints), &constraints); err != nil {
 		t.Fatalf("Constraints JSON: %v", err)
 	}
-	if constraints["maxIterations"] != float64(50) {
-		t.Errorf("Constraints.MaxIterations = %v", constraints["maxIterations"])
+	if constraints["max_iterations"] != float64(50) {
+		t.Errorf("Constraints.max_iterations = %v", constraints["max_iterations"])
 	}
 
 	// Check tool permissions derived from tools.

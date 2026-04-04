@@ -295,11 +295,18 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   }, [editor, onEditorReady])
 
   // Shell command execution — intercepts ! prefix
-  const handleShellExec = useCallback(async (command: string) => {
+  const [pendingShellCommand, setPendingShellCommand] = useState<string | null>(null)
+
+  const executeShellCommand = useCallback(async (command: string, approved: boolean) => {
     if (!activeSessionId) return
     setShellRunning(true)
     try {
-      await api.shellExec(activeSessionId, command)
+      const result = await api.shellExec(activeSessionId, command, approved)
+      if (result.requires_approval) {
+        setPendingShellCommand(command)
+        return
+      }
+      setPendingShellCommand(null)
       reloadMessages?.()
     } catch (err) {
       console.error('Shell exec failed:', err)
@@ -308,6 +315,20 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       setIsShellInput(false)
     }
   }, [activeSessionId, reloadMessages])
+
+  const handleShellExec = useCallback(async (command: string) => {
+    await executeShellCommand(command, shellMode !== 'ask')
+  }, [executeShellCommand, shellMode])
+
+  const handleShellApprove = useCallback(() => {
+    if (pendingShellCommand) {
+      void executeShellCommand(pendingShellCommand, true)
+    }
+  }, [pendingShellCommand, executeShellCommand])
+
+  const handleShellDeny = useCallback(() => {
+    setPendingShellCommand(null)
+  }, [])
 
   const handleSend = useCallback(() => {
     if (!editor) return
@@ -360,6 +381,13 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         {shellRunning && (
           <div className="px-3 py-1.5 text-xs text-fg-muted text-center border-b border-border-subtle bg-bg-elevated/50 animate-pulse">
             Running command...
+          </div>
+        )}
+        {pendingShellCommand && (
+          <div className="px-3 py-1.5 text-xs text-center border-b border-amber-500/30 bg-amber-500/10 flex items-center justify-center gap-3">
+            <span className="text-fg-muted">Run <code className="font-mono px-1 bg-bg-elevated rounded">{pendingShellCommand}</code>?</span>
+            <button type="button" onClick={handleShellApprove} className="px-2 py-0.5 text-xs bg-accent text-white rounded hover:bg-accent/80">Allow</button>
+            <button type="button" onClick={handleShellDeny} className="px-2 py-0.5 text-xs bg-zinc-600 text-white rounded hover:bg-zinc-500">Deny</button>
           </div>
         )}
         <div className="relative px-3 py-2 bg-white dark:bg-bg-elevated">

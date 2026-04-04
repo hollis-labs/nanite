@@ -8,7 +8,7 @@ requires:
 registers:
   envelopes:
     - type: sprint-planning-review
-      component: components/plugins/sprint/SprintPlanningReviewCard
+      component: components/plugins/fragments-engine/SprintPlanningReviewCard
       export: SprintPlanningReviewCard
     - type: task-disposition
       component: components/plugins/fragments-engine/TaskDispositionCard

@@ -846,7 +846,7 @@ export const api = {
     projectId?: string,
   ): Promise<{ items: FragmentsBacklogItem[]; count: number }> => {
     const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-    const res = await fetch(`${API_BASE}/volon/backlog${params}`);
+    const res = await fetch(`${API_BASE}/plugins/engine/backlog${params}`);
     if (!res.ok) throw new Error(`Failed to list backlog: ${res.status}`);
     return res.json();
   },
@@ -1329,13 +1329,13 @@ export const api = {
 
   // --- Shell Execution ---
 
-  getShellMode: async (sessionId: string): Promise<{ mode: string }> => {
+  getShellMode: async (sessionId: string): Promise<{ mode: import("./types").ShellMode }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-mode`);
     if (!res.ok) throw new Error(`Failed to get shell mode: ${res.status}`);
     return res.json();
   },
 
-  setShellMode: async (sessionId: string, mode: string): Promise<{ mode: string }> => {
+  setShellMode: async (sessionId: string, mode: import("./types").ShellMode): Promise<{ mode: import("./types").ShellMode }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-mode`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1348,18 +1348,21 @@ export const api = {
   shellExec: async (
     sessionId: string,
     command: string,
+    approved = false,
   ): Promise<{
-    message_id: string;
+    message_id?: string;
     command: string;
-    output: string;
-    exit_code: number;
-    duration_ms: number;
-    truncated: boolean;
+    output?: string;
+    exit_code?: number;
+    duration_ms?: number;
+    truncated?: boolean;
+    requires_approval?: boolean;
+    mode?: string;
   }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-exec`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command }),
+      body: JSON.stringify({ command, approved }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));

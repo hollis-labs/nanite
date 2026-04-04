@@ -14,31 +14,43 @@ export function Tooltip({ content, side = "right", children }: TooltipProps) {
 
   React.useEffect(() => {
     if (!visible || !triggerRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    const gap = 8
-    let top: number
-    let left: number
 
-    switch (side) {
-      case "top":
-        top = rect.top - gap
-        left = rect.left + rect.width / 2
-        break
-      case "bottom":
-        top = rect.bottom + gap
-        left = rect.left + rect.width / 2
-        break
-      case "left":
-        top = rect.top + rect.height / 2
-        left = rect.left - gap
-        break
-      case "right":
-      default:
-        top = rect.top + rect.height / 2
-        left = rect.right + gap
-        break
+    const update = () => {
+      if (!triggerRef.current) return
+      const rect = triggerRef.current.getBoundingClientRect()
+      const gap = 8
+      let top: number
+      let left: number
+
+      switch (side) {
+        case "top":
+          top = rect.top - gap
+          left = rect.left + rect.width / 2
+          break
+        case "bottom":
+          top = rect.bottom + gap
+          left = rect.left + rect.width / 2
+          break
+        case "left":
+          top = rect.top + rect.height / 2
+          left = rect.left - gap
+          break
+        case "right":
+        default:
+          top = rect.top + rect.height / 2
+          left = rect.right + gap
+          break
+      }
+      setStyle({ top, left })
     }
-    setStyle({ top, left })
+
+    update()
+    window.addEventListener("scroll", update, true)
+    window.addEventListener("resize", update)
+    return () => {
+      window.removeEventListener("scroll", update, true)
+      window.removeEventListener("resize", update)
+    }
   }, [visible, side])
 
   const transformMap: Record<string, string> = {

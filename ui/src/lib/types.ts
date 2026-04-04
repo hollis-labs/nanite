@@ -664,7 +664,7 @@ export interface FragmentsBacklogItem {
 
 // --- Session Tasks (agent session todos) ---
 
-export type SessionTaskStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+export type SessionTaskStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
 
 export interface SessionTask {
   id: string;
@@ -686,8 +686,8 @@ export interface SessionTask {
 
 // --- Workers (background orchestration) ---
 
-export type WorkerType = "full" | "light"
-export type WorkerStatus = "spawning" | "running" | "completed" | "failed" | "cancelled"
+export type WorkerType = "full" | "light";
+export type WorkerStatus = "spawning" | "running" | "completed" | "failed" | "cancelled";
 
 export interface Worker {
   id: string;

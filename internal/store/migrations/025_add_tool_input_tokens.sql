@@ -1,0 +1,1 @@
+ALTER TABLE token_usage ADD COLUMN tool_input_tokens INTEGER NOT NULL DEFAULT 0;

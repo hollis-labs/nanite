@@ -60,6 +60,8 @@ export function TokenUsageWidget() {
   const input = sessionUsage?.input_tokens ?? 0
   const output = sessionUsage?.output_tokens ?? 0
   const total = sessionUsage?.total_tokens ?? 0
+  const toolInput = sessionUsage?.tool_input_tokens ?? 0
+  const contentInput = Math.max(0, input - toolInput)
   const cost = sessionUsage?.estimated_cost_usd ?? 0
   const messages = sessionUsage?.message_count ?? 0
 
@@ -77,6 +79,20 @@ export function TokenUsageWidget() {
               value={formatTokens(input)}
               colorClass="text-blue-400"
             />
+            {toolInput > 0 && (
+              <>
+                <TokenRow
+                  label="  Content"
+                  value={formatTokens(contentInput)}
+                  colorClass="text-blue-300"
+                />
+                <TokenRow
+                  label="  Tools"
+                  value={formatTokens(toolInput)}
+                  colorClass="text-purple-400"
+                />
+              </>
+            )}
             <TokenRow
               label="Output"
               value={formatTokens(output)}

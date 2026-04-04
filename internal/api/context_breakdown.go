@@ -82,17 +82,27 @@ func (a *API) handleGetContextBreakdown(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Count tool calls from the event log (tool results aren't stored as messages).
-	toolCallCount := a.Services.Store.CountSessionToolCalls(sessionID)
+	// Get actual tool token costs from execution metrics when available,
+	// falling back to the event-log count with a 50-token estimate.
 	toolDetails := make([]ToolTokenDetail, 0)
 	toolTokensTotal := 0
-	if toolCallCount > 0 {
-		// Estimate ~50 tokens per tool call for input/output overhead.
-		toolTokensTotal = toolCallCount * 50
+	toolSummary, err := a.Services.Store.GetSessionToolTokenSummary(sessionID)
+	if err == nil && toolSummary.TotalToolCalls > 0 {
+		toolTokensTotal = toolSummary.TotalInputTokens + toolSummary.TotalOutputTokens
 		toolDetails = append(toolDetails, ToolTokenDetail{
-			Name:   fmt.Sprintf("%d tool calls", toolCallCount),
+			Name:   fmt.Sprintf("%d tool calls (actual)", toolSummary.TotalToolCalls),
 			Tokens: toolTokensTotal,
 		})
+	} else {
+		// Fallback: count from event log with rough estimate.
+		toolCallCount := a.Services.Store.CountSessionToolCalls(sessionID)
+		if toolCallCount > 0 {
+			toolTokensTotal = toolCallCount * 50
+			toolDetails = append(toolDetails, ToolTokenDetail{
+				Name:   fmt.Sprintf("%d tool calls (estimated)", toolCallCount),
+				Tokens: toolTokensTotal,
+			})
+		}
 	}
 
 	// Total available tools (for display, not context cost).

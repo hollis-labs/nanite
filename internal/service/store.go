@@ -83,7 +83,7 @@ type ToolStore interface {
 
 // UsageStore provides access to token usage, execution metrics, and event logs.
 type UsageStore interface {
-	RecordUsage(sessionID, messageID, model string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int) error
+	RecordUsage(sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int) error
 	GetSessionUsage(sessionID string) (*store.SessionUsageSummary, error)
 	GetUsageSummary() (*store.UsageSummary, error)
 	RecordExecutionMetrics(m *store.ExecutionMetrics) error

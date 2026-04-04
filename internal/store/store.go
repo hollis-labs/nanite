@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -64,31 +66,22 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	files := []string{
-		"migrations/001_initial.sql",
-		"migrations/002_add_session_tags.sql",
-		"migrations/003_add_templates.sql",
-		"migrations/004_add_skills.sql",
-		"migrations/005_add_prompt_templates.sql",
-		"migrations/006_add_modes.sql",
-		"migrations/007_add_mcp_servers.sql",
-		"migrations/008_add_cache_tokens.sql",
-		"migrations/009_add_a2a_messages.sql",
-		"migrations/010_add_pty_provider.sql",
-		"migrations/011_add_codex_gemini_providers.sql",
-		"migrations/012_add_user_settings.sql",
-		"migrations/013_add_execution_metrics.sql",
-		"migrations/014_add_plugin_settings.sql",
-		"migrations/015_extend_artifacts.sql",
-		"migrations/016_add_settings_mode_flags.sql",
-		"migrations/017_agent_schema_v2.sql",
-		"migrations/018_frontend_unblock.sql",
-		"migrations/019_connector_triggers.sql",
-		"migrations/020_custom_actions.sql",
-		"migrations/021_catalog_sources.sql",
-		"migrations/022_broker_decisions.sql",
-		"migrations/023_add_debug_snapshots.sql",
-		"migrations/024_add_tool_settings.sql",
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("read migrations dir: %w", err)
+	}
+
+	// Sort alphabetically so numbered prefixes determine order.
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
+
+	var files []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		files = append(files, "migrations/"+e.Name())
 	}
 
 	for _, f := range files {

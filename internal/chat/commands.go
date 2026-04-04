@@ -70,6 +70,7 @@ func NewCommandRegistry() *CommandRegistry {
 		{SlashCommand{Name: "compact", Description: "Compact session context", Category: "session", Source: "builtin"}, nil},
 		{SlashCommand{Name: "agent", Description: "Switch primary agent", Category: "agent", Source: "builtin"}, nil},
 		{SlashCommand{Name: "model", Description: "Switch model", Category: "config", Source: "builtin"}, nil},
+		{SlashCommand{Name: "mode", Description: "Switch agent mode", Category: "agent", Source: "builtin"}, nil},
 		{SlashCommand{Name: "help", Description: "Show available commands", Category: "help", Source: "builtin"}, r.handleHelp},
 	}
 
@@ -155,6 +156,35 @@ func (r *CommandRegistry) RegisterPluginCommand(cmd plugin.SlashCommandDef, sour
 		Args:        cmdArgs,
 		Permission:  cmd.Permission,
 	}, h)
+}
+
+// RegisterSkillCommand registers a file-based skill as a slash command.
+// Skills are server-side commands with category "skill".
+func (r *CommandRegistry) RegisterSkillCommand(slug, name, description, argumentHint string) {
+	cmd := SlashCommand{
+		Name:        slug,
+		Description: description,
+		Category:    "skill",
+		Source:      "file",
+	}
+	if argumentHint != "" {
+		cmd.Args = []CommandArg{{
+			Name:        "args",
+			Description: argumentHint,
+			Required:    false,
+			Type:        "string",
+		}}
+	}
+
+	// Skill commands use a "client" action — the frontend sends the skill
+	// slug + args back via the normal message flow where the chat service
+	// resolves and executes the skill.
+	r.Register(cmd, func(_ context.Context, sessionID, args string) (*CommandResult, error) {
+		return &CommandResult{
+			Action:  "skill",
+			Content: fmt.Sprintf("%s %s", slug, args),
+		}, nil
+	})
 }
 
 // List returns all registered commands.

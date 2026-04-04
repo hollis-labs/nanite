@@ -123,6 +123,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Tools (Tool Broker)
 	mux.HandleFunc("GET /api/tools", a.handleListTools)
 	mux.HandleFunc("GET /api/tools/servers", a.handleListToolServers)
+	mux.HandleFunc("GET /api/tools/all", a.handleListToolsWithLoadType)
+	mux.HandleFunc("GET /api/tools/load-preferences", a.handleGetToolLoadPreferences)
+	mux.HandleFunc("PUT /api/tools/load-preferences", a.handleUpdateToolLoadPreferences)
 	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
 	mux.HandleFunc("POST /api/tools/refresh", a.handleRefreshTools)
 	mux.HandleFunc("GET /api/broker/decisions", a.handleListBrokerDecisions)
@@ -179,6 +182,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mcp-servers", a.handleCreateMCPServer)
 	mux.HandleFunc("PUT /api/mcp-servers/{name}", a.handleUpdateMCPServer)
 	mux.HandleFunc("DELETE /api/mcp-servers/{name}", a.handleDeleteMCPServer)
+	mux.HandleFunc("POST /api/mcp-servers/import", a.handleImportMCPServers)
+	mux.HandleFunc("GET /api/mcp-servers/export", a.handleExportMCPServers)
 
 	// A2A Messaging
 	mux.HandleFunc("GET /api/a2a/inbox", a.handleA2AInbox)
@@ -237,6 +242,22 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/actions/{id}", a.handleUpdateAction)
 	mux.HandleFunc("DELETE /api/actions/{id}", a.handleDeleteAction)
 	mux.HandleFunc("POST /api/actions/{id}/execute", a.handleExecuteAction)
+
+	// Workers (multi-agent orchestration)
+	mux.HandleFunc("GET /api/workers", a.handleListWorkers)
+	mux.HandleFunc("POST /api/workers/{id}/cancel", a.handleCancelWorker)
+
+	// Tasks (multi-agent orchestration)
+	mux.HandleFunc("GET /api/tasks", a.handleListTasks)
+	mux.HandleFunc("POST /api/tasks", a.handleCreateTask)
+	mux.HandleFunc("GET /api/tasks/{id}", a.handleGetTask)
+	mux.HandleFunc("PUT /api/tasks/{id}", a.handleUpdateTask)
+	mux.HandleFunc("POST /api/tasks/{id}/transition", a.handleTransitionTask)
+	mux.HandleFunc("POST /api/tasks/{id}/assign", a.handleAssignTask)
+	mux.HandleFunc("GET /api/sessions/{id}/tasks", a.handleListSessionTasks)
+
+	// Debug
+	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 
 	// Execution Metrics
 	mux.HandleFunc("GET /api/sessions/{id}/metrics", a.handleGetSessionExecutionMetrics)

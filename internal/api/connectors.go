@@ -8,7 +8,11 @@ import (
 // If ?check=true is passed, it probes Health() on each connector first.
 func (a *API) handleListConnectors(w http.ResponseWriter, r *http.Request) {
 	if a.Services.Plugins == nil {
-		a.errorResp(w, http.StatusServiceUnavailable, "plugin system not initialized")
+		a.jsonResp(w, http.StatusOK, map[string]any{
+			"connectors": []any{},
+			"count":      0,
+			"checked":    false,
+		})
 		return
 	}
 

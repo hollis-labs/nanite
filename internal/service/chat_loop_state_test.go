@@ -250,8 +250,8 @@ func TestLoopState_CaptureSnapshot_DebugMode(t *testing.T) {
 func TestLoopState_CaptureSnapshotWithTools(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{}, nil, true)
 	tools := []ToolCallSnapshot{
-		{Name: "dev_read", Duration: 50 * time.Millisecond, Success: true},
-		{Name: "dev_write", Duration: 120 * time.Millisecond, Success: false},
+		{Name: "dev_read", DurationMs: 50, Success: true},
+		{Name: "dev_write", DurationMs: 120, Success: false},
 	}
 	ls.captureSnapshotWithTools(ContinueToolResults, "2 tools", 2000, 10, tools)
 	if len(ls.snapshots) != 1 {

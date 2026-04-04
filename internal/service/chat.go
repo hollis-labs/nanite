@@ -12,6 +12,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/task"
+	"github.com/hollis-labs/nanite/internal/worker"
 )
 
 // ChatService is the top-level orchestrator for message handling. It composes
@@ -73,6 +75,9 @@ type ChatServiceConfig struct {
 
 	// Permissions engine — nil-safe (permissions disabled).
 	Permissions *permission.Engine
+
+	// Task tracking service — nil-safe (task tracking disabled).
+	Tasks task.Service
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -92,6 +97,8 @@ type chatServiceImpl struct {
 	commands       *chat.CommandRegistry
 	pluginHost     PluginEventSink
 	processTracker *chat.ProcessTracker
+	tasks          task.Service
+	workers        *worker.Manager
 
 	utilityProvider string
 	utilityModel    string
@@ -123,6 +130,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		commands:       cfg.Commands,
 		pluginHost:     cfg.PluginHost,
 		processTracker: cfg.ProcessTracker,
+		tasks:          cfg.Tasks,
 		utilityProvider: up,
 		utilityModel:    um,
 		permissions:    cfg.Permissions,
@@ -276,6 +284,12 @@ func (s *chatServiceImpl) Shutdown() {
 	if s.processTracker != nil {
 		s.processTracker.KillAll()
 	}
+}
+
+// SetWorkers injects the worker manager after construction to break the
+// circular dependency (ChatService <-> WorkerManager).
+func (s *chatServiceImpl) SetWorkers(w *worker.Manager) {
+	s.workers = w
 }
 
 // ---------------------------------------------------------------------------

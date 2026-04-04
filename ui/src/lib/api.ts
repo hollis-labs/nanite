@@ -769,6 +769,53 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to delete MCP server: ${res.status}`);
   },
 
+  importMCPServers: async (json: string): Promise<{ created: string[]; skipped: string[] }> => {
+    const res = await fetch(`${API_BASE}/mcp-servers/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: json,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to import MCP servers: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  // Tool Load Preferences
+  fetchAllToolsWithLoadType: async (): Promise<import("./types").ToolLoadItem[]> => {
+    const res = await fetch(`${API_BASE}/tools/all`);
+    if (!res.ok) throw new Error(`Failed to fetch tools: ${res.status}`);
+    return res.json();
+  },
+
+  fetchToolLoadPreferences: async (): Promise<import("./types").ToolLoadPreferences> => {
+    const res = await fetch(`${API_BASE}/tools/load-preferences`);
+    if (!res.ok) throw new Error(`Failed to fetch load preferences: ${res.status}`);
+    return res.json();
+  },
+
+  updateToolLoadPreferences: async (
+    updates: import("./types").ToolLoadPreferences,
+  ): Promise<import("./types").ToolLoadPreferences> => {
+    const res = await fetch(`${API_BASE}/tools/load-preferences`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update load preferences: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  exportMCPServers: async (): Promise<string> => {
+    const res = await fetch(`${API_BASE}/mcp-servers/export`);
+    if (!res.ok) throw new Error(`Failed to export MCP servers: ${res.status}`);
+    return res.text();
+  },
+
   // Volon (Sprint Planning)
   getVolonSprints: async (projectId?: string): Promise<{ items: VolonSprint[]; count: number }> => {
     const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";

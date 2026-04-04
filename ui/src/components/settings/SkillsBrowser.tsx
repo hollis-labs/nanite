@@ -6,7 +6,8 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { SourceBadge, SOURCE_LABELS } from "@/components/agents/SourceBadge";
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -37,6 +38,15 @@ function parseToolBindings(s: string): { server: string; tool: string }[] {
   }
 }
 
+function parseSource(settings: string): string {
+  try {
+    const parsed = JSON.parse(settings);
+    return parsed?.source ?? "db";
+  } catch {
+    return "db";
+  }
+}
+
 type SkillsBrowserProps = {};
 
 const SKILL_CATEGORIES = [
@@ -54,6 +64,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const queryClient = useQueryClient();
 
   const { data: skills = [], isLoading } = useQuery({
@@ -115,17 +126,31 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
     [selectedSkill, updateMutation],
   );
 
-  // Filter skills based on category
-  const filteredSkills = skills.filter(
-    (skill) => categoryFilter === "all" || skill.category === categoryFilter,
-  );
+  // Source counts for pill badges.
+  const sourceCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of skills) {
+      const src = parseSource(s.settings);
+      counts[src] = (counts[src] || 0) + 1;
+    }
+    return counts;
+  }, [skills]);
+
+  // Filter skills based on category and source.
+  const filteredSkills = useMemo(() => {
+    return skills.filter((skill) => {
+      if (categoryFilter !== "all" && skill.category !== categoryFilter) return false;
+      if (sourceFilter !== "all" && parseSource(skill.settings) !== sourceFilter) return false;
+      return true;
+    });
+  }, [skills, categoryFilter, sourceFilter]);
 
   // List View
   if (!selectedSkill && !showCreateForm) {
     return (
       <div className="space-y-4">
         {/* Toolbar */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Filter className="w-3.5 h-3.5 text-fg-muted" />
             <select
@@ -141,11 +166,30 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               ))}
             </select>
           </div>
-          <div className="flex-1" />
           <Button size="sm" onClick={() => setShowCreateForm(true)} className="gap-1.5">
             <Plus className="w-3.5 h-3.5" />
             Create Skill
           </Button>
+        </div>
+
+        {/* Source filter pills */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {["all", ...Object.keys(sourceCounts)].map((s) => (
+            <button
+              key={s}
+              onClick={() => setSourceFilter(s)}
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                sourceFilter === s
+                  ? "bg-accent text-white"
+                  : "bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover"
+              }`}
+            >
+              {s === "all" ? "All" : (SOURCE_LABELS[s] ?? s)}
+              {s !== "all" && (
+                <span className="ml-1 text-[10px] opacity-70">{sourceCounts[s]}</span>
+              )}
+            </button>
+          ))}
         </div>
 
         {isLoading ? (
@@ -177,12 +221,12 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               <EmptyTitle className="text-sm">
                 {skills.length === 0
                   ? "No skills found"
-                  : `No skills found in "${categoryFilter}" category`}
+                  : "No skills match the current filters"}
               </EmptyTitle>
               <EmptyDescription className="text-xs">
                 {skills.length === 0
                   ? "Create your first skill to get started."
-                  : "Try selecting a different category."}
+                  : "Try adjusting your filters to see more results."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -190,6 +234,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
           <div className="grid gap-3 grid-cols-2">
             {filteredSkills.map((skill) => {
               const toolCount = parseToolBindings(skill.tool_bindings).length;
+              const source = parseSource(skill.settings);
               return (
                 <ContextMenu key={skill.id}>
                   <ContextMenuTrigger asChild>
@@ -211,9 +256,12 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                               <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
                             )}
                           </div>
-                          <span className="text-[11px] text-fg-muted font-mono truncate block">
-                            {skill.slug}
-                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[11px] text-fg-muted font-mono truncate">
+                              {skill.slug}
+                            </span>
+                            <SourceBadge source={source} />
+                          </div>
                         </div>
                       </div>
 

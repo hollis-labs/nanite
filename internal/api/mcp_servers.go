@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/mcpconfig"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -128,6 +130,58 @@ func (a *API) handleDeleteMCPServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleImportMCPServers imports MCP server configs from a .mcp.json payload.
+// POST /api/mcp-servers/import
+func (a *API) handleImportMCPServers(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+
+	result, err := mcpconfig.Import(a.Services.Store, body)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Register newly created servers with the MCP manager.
+	for _, name := range result.Created {
+		cfg, _ := a.Services.Store.GetMCPServer(name)
+		if cfg != nil {
+			a.registerMCPTransport(cfg)
+		}
+	}
+
+	// Run discovery for new tools.
+	if a.Services.MCP != nil && len(result.Created) > 0 {
+		a.Services.MCP.AutoDiscover(context.Background(), a.Services.Store)
+	}
+
+	a.jsonResp(w, http.StatusOK, result)
+}
+
+// handleExportMCPServers exports all MCP server configs as a .mcp.json payload.
+// GET /api/mcp-servers/export
+func (a *API) handleExportMCPServers(w http.ResponseWriter, r *http.Request) {
+	cfg, err := mcpconfig.Export(a.Services.Store)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	data, err := mcpconfig.Marshal(cfg)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename=".mcp.json"`)
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
 }
 
 // registerMCPTransport registers the transport for a server config with the MCP manager.

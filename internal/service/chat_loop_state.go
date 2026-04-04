@@ -32,22 +32,24 @@ const (
 
 // TurnSnapshot captures diagnostic state at a continuation point.
 type TurnSnapshot struct {
-	ContinueSite ContinueSite     `json:"continue_site"`
-	Reason       string           `json:"reason"`
-	Iteration    int              `json:"iteration"`
+	ContinueSite ContinueSite       `json:"site"`
+	Reason       string             `json:"reason"`
+	Iteration    int                `json:"iteration"`
+	MaxTurns     int                `json:"max_turns"`
 	ToolCalls    []ToolCallSnapshot `json:"tool_calls,omitempty"`
-	TokensUsed   int              `json:"tokens_used"`
-	MessageCount int              `json:"message_count"`
-	Timestamp    time.Time        `json:"timestamp"`
+	TokensUsed   int               `json:"tokens_used"`
+	MessageCount int               `json:"message_count"`
+	Timestamp    time.Time          `json:"timestamp"`
 }
 
 // ToolCallSnapshot captures a single tool call's outcome for debugging.
 type ToolCallSnapshot struct {
-	Name     string        `json:"name"`
-	Input    map[string]any `json:"input,omitempty"`
-	Output   string        `json:"output,omitempty"`
-	Duration time.Duration `json:"duration_ns"`
-	Success  bool          `json:"success"`
+	Name       string         `json:"name"`
+	Input      map[string]any `json:"input,omitempty"`
+	Output     string         `json:"output,omitempty"`
+	DurationMs float64        `json:"duration_ms"`
+	Success    bool           `json:"success"`
+	Parallel   bool           `json:"parallel"`
 }
 
 // iterationLimits holds the resolved limits for a loop invocation.
@@ -268,6 +270,7 @@ func (ls *loopState) captureSnapshot(site ContinueSite, reason string, tokensUse
 		ContinueSite: site,
 		Reason:       reason,
 		Iteration:    ls.iteration,
+		MaxTurns:     ls.resolvedMaxTurns(),
 		TokensUsed:   tokensUsed,
 		MessageCount: messageCount,
 		Timestamp:    time.Now(),
@@ -283,6 +286,7 @@ func (ls *loopState) captureSnapshotWithTools(site ContinueSite, reason string, 
 		ContinueSite: site,
 		Reason:       reason,
 		Iteration:    ls.iteration,
+		MaxTurns:     ls.resolvedMaxTurns(),
 		ToolCalls:    toolCalls,
 		TokensUsed:   tokensUsed,
 		MessageCount: messageCount,

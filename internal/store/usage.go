@@ -51,6 +51,7 @@ type TokenUsage struct {
 	InputTokens         int     `json:"input_tokens"`
 	OutputTokens        int     `json:"output_tokens"`
 	TotalTokens         int     `json:"total_tokens"`
+	ToolInputTokens     int     `json:"tool_input_tokens"`
 	CacheCreationTokens int     `json:"cache_creation_tokens"`
 	CacheReadTokens     int     `json:"cache_read_tokens"`
 	EstimatedCostUSD    float64 `json:"estimated_cost_usd"`
@@ -62,6 +63,7 @@ type SessionUsageSummary struct {
 	InputTokens         int     `json:"input_tokens"`
 	OutputTokens        int     `json:"output_tokens"`
 	TotalTokens         int     `json:"total_tokens"`
+	ToolInputTokens     int     `json:"tool_input_tokens"`
 	CacheCreationTokens int     `json:"cache_creation_tokens"`
 	CacheReadTokens     int     `json:"cache_read_tokens"`
 	EstimatedCostUSD    float64 `json:"estimated_cost_usd"`
@@ -87,14 +89,14 @@ type UsageSummary struct {
 }
 
 // RecordUsage inserts a token usage record for a completed response.
-func (s *Store) RecordUsage(sessionID, messageID, model string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int) error {
+func (s *Store) RecordUsage(sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int) error {
 	totalTokens := inputTokens + outputTokens
 	cost := estimateCost(model, inputTokens, outputTokens)
 
 	_, err := s.DB.Exec(
-		`INSERT INTO token_usage (session_id, message_id, model, input_tokens, output_tokens, total_tokens, cache_creation_tokens, cache_read_tokens, estimated_cost_usd)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sessionID, messageID, model, inputTokens, outputTokens, totalTokens, cacheCreationTokens, cacheReadTokens, cost,
+		`INSERT INTO token_usage (session_id, message_id, model, input_tokens, output_tokens, total_tokens, tool_input_tokens, cache_creation_tokens, cache_read_tokens, estimated_cost_usd)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sessionID, messageID, model, inputTokens, outputTokens, totalTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens, cost,
 	)
 	if err != nil {
 		return fmt.Errorf("record usage: %w", err)
@@ -107,13 +109,13 @@ func (s *Store) GetSessionUsage(sessionID string) (*SessionUsageSummary, error) 
 	var summary SessionUsageSummary
 	err := s.DB.QueryRow(
 		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-		        COALESCE(SUM(total_tokens),0), COALESCE(SUM(cache_creation_tokens),0),
-		        COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(estimated_cost_usd),0),
-		        COUNT(*)
+		        COALESCE(SUM(total_tokens),0), COALESCE(SUM(tool_input_tokens),0),
+		        COALESCE(SUM(cache_creation_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+		        COALESCE(SUM(estimated_cost_usd),0), COUNT(*)
 		 FROM token_usage WHERE session_id = ?`,
 		sessionID,
 	).Scan(&summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens,
-		&summary.CacheCreationTokens, &summary.CacheReadTokens,
+		&summary.ToolInputTokens, &summary.CacheCreationTokens, &summary.CacheReadTokens,
 		&summary.EstimatedCostUSD, &summary.MessageCount)
 	if err != nil {
 		return nil, fmt.Errorf("get session usage %s: %w", sessionID, err)

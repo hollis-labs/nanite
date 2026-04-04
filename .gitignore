@@ -42,8 +42,11 @@ Thumbs.db
 # Plugins
 /plugins/
 
+# Badger coordination store (runtime data)
+/coordination/
+
 # Agent state (managed by services)
 .agentrc/state/
 .agentrc/.session-unclean.flag
 .claude/worktrees/
-nanite
+/nanite

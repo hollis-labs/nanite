@@ -473,9 +473,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			var snapshotTools []ToolCallSnapshot
 			for _, r := range execResults {
 				snapshotTools = append(snapshotTools, ToolCallSnapshot{
-					Name:     r.ref.Name,
-					Duration: r.duration,
-					Success:  !r.isError,
+					Name:       r.ref.Name,
+					DurationMs: float64(r.duration.Milliseconds()),
+					Success:    !r.isError,
 				})
 			}
 			tokensUsed := 0
@@ -608,8 +608,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Record token usage.
 	if finalUsage != nil && (finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0) {
+		toolInputTokens := 0
+		if breakdown != nil {
+			toolInputTokens = breakdown.Tools
+		}
 		if err := s.store.RecordUsage(sessionID, assistantMsgID, model,
-			finalUsage.InputTokens, finalUsage.OutputTokens,
+			finalUsage.InputTokens, finalUsage.OutputTokens, toolInputTokens,
 			finalUsage.CacheCreationTokens, finalUsage.CacheReadTokens); err != nil {
 			log.Printf("chat-service: failed to record token usage: %v", err)
 		}

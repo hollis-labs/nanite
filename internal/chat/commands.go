@@ -157,6 +157,35 @@ func (r *CommandRegistry) RegisterPluginCommand(cmd plugin.SlashCommandDef, sour
 	}, h)
 }
 
+// RegisterSkillCommand registers a file-based skill as a slash command.
+// Skills are server-side commands with category "skill".
+func (r *CommandRegistry) RegisterSkillCommand(slug, name, description, argumentHint string) {
+	cmd := SlashCommand{
+		Name:        slug,
+		Description: description,
+		Category:    "skill",
+		Source:      "file",
+	}
+	if argumentHint != "" {
+		cmd.Args = []CommandArg{{
+			Name:        "args",
+			Description: argumentHint,
+			Required:    false,
+			Type:        "string",
+		}}
+	}
+
+	// Skill commands use a "client" action — the frontend sends the skill
+	// slug + args back via the normal message flow where the chat service
+	// resolves and executes the skill.
+	r.Register(cmd, func(_ context.Context, sessionID, args string) (*CommandResult, error) {
+		return &CommandResult{
+			Action:  "skill",
+			Content: fmt.Sprintf("%s %s", slug, args),
+		}, nil
+	})
+}
+
 // List returns all registered commands.
 func (r *CommandRegistry) List() []SlashCommand {
 	r.mu.RLock()

@@ -8,6 +8,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/skill"
+	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -23,6 +25,7 @@ import (
 type Container struct {
 	Sessions  SessionService
 	Agents    AgentService
+	Skills    SkillService
 	Tools     ToolService
 	Chat      ChatService
 	Context   ContextService
@@ -126,6 +129,27 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		FileAgents: agentDefs,
 	})
 
+	// Discover file-based skill definitions from all 5 priority locations.
+	skillDefs, err := skill.Discover(skill.DiscoverOptions{
+		WorkingDir: ".",
+		PluginsDir: "plugins",
+	})
+	if err != nil {
+		log.Printf("service container: skill discovery: %v", err)
+	}
+	// Append built-in skills as lowest priority.
+	if builtinDefs, bErr := skillbuiltin.BuiltinSkills(); bErr == nil {
+		skillDefs = append(skillDefs, builtinDefs...)
+	} else {
+		log.Printf("service container: built-in skills: %v", bErr)
+	}
+	log.Printf("service container: discovered %d file-based skills", len(skillDefs))
+
+	skills := NewSkillService(SkillServiceConfig{
+		Skills:     cfg.Store,
+		FileSkills: skillDefs,
+	})
+
 	var agentReader AgentReader = cfg.Store
 	tools := NewToolService(cfg.ToolClient, cfg.MCP, agentReader)
 	if impl, ok := tools.(*toolServiceImpl); ok {
@@ -145,6 +169,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Command registry.
 	commands := chat.NewCommandRegistry()
 	commands.RegisterServerCommands(cfg.Store, cfg.Providers)
+
+	// Register file-based skills as slash commands.
+	RegisterSkillCommands(commands, skills)
 
 	// Process tracker.
 	processTracker := chat.NewProcessTracker()
@@ -186,6 +213,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	return &Container{
 		Sessions:        sessions,
 		Agents:          agents,
+		Skills:          skills,
 		Tools:           tools,
 		Chat:            chatSvc,
 		Context:         ctxService,

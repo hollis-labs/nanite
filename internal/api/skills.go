@@ -7,7 +7,14 @@ import (
 )
 
 func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
-	skills, err := a.Services.Store.ListSkills()
+	var skills []store.Skill
+	var err error
+
+	if source := r.URL.Query().Get("source"); source != "" {
+		skills, err = a.Services.Skills.ListBySource(r.Context(), source)
+	} else {
+		skills, err = a.Services.Skills.List(r.Context())
+	}
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -45,7 +52,7 @@ func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 		Settings:     req.Settings,
 		Icon:         req.Icon,
 	}
-	if err := a.Services.Store.CreateSkill(sk); err != nil {
+	if err := a.Services.Skills.Create(r.Context(), sk); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -54,7 +61,7 @@ func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sk, err := a.Services.Store.GetSkill(id)
+	sk, err := a.Services.Skills.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -69,7 +76,7 @@ func (a *API) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Services.Store.GetSkill(id)
+	existing, err := a.Services.Skills.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -119,7 +126,7 @@ func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 		existing.Icon = *req.Icon
 	}
 
-	if err := a.Services.Store.UpdateSkill(existing); err != nil {
+	if err := a.Services.Skills.Update(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -128,7 +135,7 @@ func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteSkill(id); err != nil {
+	if err := a.Services.Skills.Delete(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -162,12 +169,12 @@ func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify agent exists.
-	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
+	if _, err := a.Services.Agents.Get(r.Context(), agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 	// Verify skill exists.
-	sk, err := a.Services.Store.GetSkill(req.SkillID)
+	sk, err := a.Services.Skills.Get(r.Context(), req.SkillID)
 	if err != nil || sk == nil {
 		a.errorResp(w, http.StatusNotFound, "skill not found")
 		return

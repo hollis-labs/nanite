@@ -7,6 +7,12 @@ export const SOURCE_LABELS: Record<string, string> = {
   seed: 'system',
   api: 'api',
   agentrc: 'agentrc',
+  builtin: 'built-in',
+  project: 'project',
+  user: 'user',
+  plugin: 'plugin',
+  claude: 'claude',
+  db: 'custom',
 }
 
 export function SourceBadge({ source, className = '' }: SourceBadgeProps) {

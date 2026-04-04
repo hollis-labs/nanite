@@ -34,8 +34,18 @@ COMPLETED: Phase 5 — Agent System (2026-04-03)
 - AgentService: file-based agents primary, DB fallback, fallback → file-default
 - Worktree isolation deferred
 
-CURRENT: Phase 6 — Skill System (decisions doc §9)
-- Agent Skills spec compatible, file-based discovery, slash command integration
+COMPLETED: Phase 6 — Skill System (2026-04-03)
+- internal/skill/ package: parser, discovery (5 locations), convert, dynamic context
+- Skills now file-based (MD + YAML frontmatter), DB stores runtime state only
+- 8 built-in skills as embedded .md files (internal/skill/builtin/)
+- SkillService: file-based primary, DB fallback, source filtering
+- Slash commands: skills auto-registered as /slug [args]
+- SeedBuiltinSkills() removed from main.go
+- Frontend: source filter pills + SourceBadge (matches agent UI pattern)
+- Runtime execution wiring (inline/fork) deferred to Phase 7
+
+CURRENT: Phase 7 — Slash Commands & Polish (decisions doc §3a)
+- New commands, anti-pattern fixes, test coverage, skill execution wiring
 
 PRINCIPLES:
 - Consult before architecture decisions

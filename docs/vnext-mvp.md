@@ -303,37 +303,58 @@ These items from the decisions doc and backend TODO are already done:
 
 ---
 
-## Phase 6 — Skill System
+## Phase 6 — Skill System ✅
 
 **Depends on:** Phase 5 (agent definitions reference skills)
 **Decisions doc:** §9 (Skill System)
 **Goal:** Implement Agent Skills spec compatible skills with discovery, execution, and broker integration.
+**Completed:** 2026-04-03
 
-### 6.1 Skill file format
-- Agent Skills spec (agentskills.io) compatible
-- YAML frontmatter: `name`, `description`, `argument-hint`, `allowed-tools`, `model`, `effort`, `context` (inline or fork), `tags`, `broker-hints` (Nanite extension)
-- Markdown body with optional `` !`command` `` dynamic context injection
+### 6.1 Skill file format — DONE
+- `internal/skill/parser.go`: `Definition` struct with YAML frontmatter + markdown prompt body
+- Fields: `name`, `slug`, `description`, `argument-hint`, `allowed-tools`, `model`, `effort`, `context` (inline/fork), `tags`, `broker-hints`
+- Cross-compatible with Agent Skills spec (agentskills.io)
+- `ParseMD()` / `ParseMDFile()` with frontmatter delimiter parsing
 
-### 6.2 Skill loader & discovery
-- Discovery chain (priority): `.nanite/skills/` → `~/.nanite/skills/` → `.agentrc/skills/` → `.claude/skills/` → plugin `skills/`
-- Parse YAML frontmatter, register in SkillService
-- Dynamic context: shell commands run at skill load time via subprocess, output injected
+### 6.2 Skill loader & discovery — DONE
+- `internal/skill/discovery.go`: `Discover()` scans 5 locations (first slug wins):
+  1. `.nanite/skills/` (project)
+  2. `~/.nanite/skills/` (user)
+  3. `.agentrc/skills/` (agentrc ecosystem)
+  4. `.claude/skills/` (Claude Code ecosystem)
+  5. `plugins/{name}/skills/` (plugin-provided)
+- `internal/skill/context.go`: `ResolveDynamicContext()` replaces `` !`command` `` markers with subprocess output
+- Silent fallback on missing directories, warnings on parse errors
 
-### 6.3 Skill execution
-- Inline (default): Skill prompt injected into current session context
-- Fork (`context: fork`): New isolated session, skill prompt as system context
-- Skill-tool bindings: `allowed-tools` constrains which tools the LLM can use during skill execution
-- Broker hints: `broker-hints` feeds into broker Layer 2 rules during skill execution
+### 6.3 Skill execution — PARTIAL
+- Inline/fork execution mode stored in definition (`context: "inline"` or `"fork"`)
+- Skill-tool bindings via `allowed-tools` field
+- Broker hints via `broker-hints` field
+- **Deferred:** Runtime execution wiring (injecting skill prompt into session context, fork session creation) — needs chat loop integration in Phase 7
 
-### 6.4 Slash command integration
-- Skills discoverable via `/` autocomplete
-- `/skillname [args]` triggers skill execution
-- Plugin-registered skills appear alongside file-based skills
-- **Verify:** Skill execution works inline and forked, tools constrained correctly
+### 6.4 Slash command integration — DONE
+- `chat.CommandRegistry.RegisterSkillCommand()`: skills registered as `/slug [args]` commands
+- Category "skill", source "file", argument hint wired
+- All file-based skills auto-registered at container startup via `RegisterSkillCommands()`
 
-### Frontend (Phase 6)
-- Skill browser (list available skills with source, description)
-- Skill argument prompt (when skill has `argument-hint`)
+### 6.5 Service layer & seed cleanup — DONE
+- `internal/service/skill.go`: `SkillService` interface (Get, GetBySlug, List, ListBySource, Create, Update, Delete, GetDefinition, ListDefinitions)
+- File-based primary, DB fallback (same pattern as AgentService)
+- Deterministic IDs: `file-{slug}` via `internal/skill/convert.go`
+- `SeedBuiltinSkills()` removed from `main.go`
+- 8 built-in skills as embedded `.md` files via `internal/skill/builtin/embed.go`
+- API handlers routed through SkillService
+- `?source=` query param on `GET /api/skills`
+
+### 6.6 Tests — DONE
+- 18 tests: parser (5), discovery (4), convert (4), dynamic context (4), slug helpers (1)
+- `go build` + `go vet` + `go test` clean (pre-existing `TestAuthMiddlewareEnabled` only)
+
+### Frontend (Phase 6) — DONE
+- Skill browser with source filter pills (matches agent UI pattern)
+- `SourceBadge` component reused from agents, labels extended for file-based sources
+- Category dropdown + source pills, combined filtering
+- Source badge on each skill card
 
 ---
 

@@ -155,9 +155,11 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 	validSources := map[string]bool{
 		"": true, "system": true, "seed": true, "api": true, "agentrc": true,
 		"crewai": true, "autogen": true, "import": true,
+		"builtin": true, "file": true, "cli": true, "project": true,
+		"user": true, "plugin": true, "claude": true,
 	}
 	if !validSources[agent.Source] {
-		result.Errors = append(result.Errors, fmt.Sprintf("source must be one of system/api/agentrc/crewai/autogen/import, got %q", agent.Source))
+		result.Errors = append(result.Errors, fmt.Sprintf("invalid agent source %q", agent.Source))
 	}
 
 	return result

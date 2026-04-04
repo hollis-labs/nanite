@@ -244,54 +244,57 @@ These items from the decisions doc and backend TODO are already done:
 
 ---
 
-## Phase 5 — Agent System
+## Phase 5 — Agent System ✅
 
 **Depends on:** Phase 1 (tool bindings), Phase 3 (permission modes per agent)
 **Decisions doc:** §8 (Agent System)
 **Goal:** Move agent definitions from DB-only to MD-based file format as source of truth. DB stores runtime state only.
+**Completed:** 2026-04-03
+**Plan:** `~/.claude/plans/spicy-munching-pillow.md`
 
-### 5.1 Agent file format
-- YAML frontmatter + markdown system prompt body
-- Fields: `name`, `description`, `model` (or `inherit`), `tools` (allowlist), `permissionMode`, `maxTurns`, `skills`, `mcpServers`, `memory`, `effort`, `isolation` (optional: `worktree`), `tags`
+### 5.1 Agent file format — DONE
+- `internal/agent/parser.go`: `Definition` struct with YAML frontmatter + markdown system prompt body
+- Fields: `name`, `slug`, `description`, `model`, `tools` (allowlist), `permissionMode`, `maxTurns`, `skills`, `mcpServers`, `memory`, `effort`, `isolation`, `tags`, `icon`, `avatar`, `directories`, `constraints`, inline `modes`
 - Cross-compatible with Claude Code agent format where fields overlap
+- `ParseMD()` / `ParseMDFile()` with frontmatter delimiter parsing
 
-### 5.2 Agent loader & discovery
-- Discovers MD files from 6 locations (priority order):
+### 5.2 Agent loader & discovery — DONE
+- `internal/agent/discovery.go`: `Discover()` scans 6 locations (first slug wins):
   1. CLI `--agent` flag
   2. `.nanite/agents/` (project)
   3. `~/.nanite/agents/` (user)
   4. `plugins/{name}/agents/` (plugin-provided)
   5. `.agentrc/agents/` (agentrc ecosystem)
   6. `.claude/agents/` (Claude Code ecosystem)
-- Parses YAML frontmatter, registers as agent definitions
+- Silent fallback on missing directories, warnings on parse errors
 - DB stores only session-agent bindings and runtime overrides
 
-### 5.3 Built-in minimal agents
-- Ship as MD files, not seed.go code:
-  - Default chat agent (no special tools, general purpose)
-  - Code agent (dev tools, file access)
-  - Research agent (web tools, read-only)
-  - Task agent (Engine tools, sprint/task management)
-- These replace the current seeded agents (Mentat, Developer, Researcher, Orchestrator)
-- Demo Presenter stays as a separate concern (plugin-provided or config-driven)
+### 5.3 Built-in default agent — DONE
+- `internal/agent/builtin/default.md` + `embed.go`: one embedded "Default" agent via `go:embed`
+- Minimal: no tool restrictions, no modes, no MCP servers
+- Appended as lowest priority (any user/project/plugin agent overrides it)
+- **Decision:** Ship 1 built-in agent only. Example agents (code, research, task) deferred to a future "setup" phase.
 
-### 5.4 Seed.go cleanup
-- Extract agent definitions from `Seed()` — agents now come from MD files
-- Extract provider/model data into a YAML data file loaded at seed time
-- Eliminate duplication between `Seed()` and `SeedProviders()`
-- `SeedAgentSkillBindings()` becomes unnecessary once agents declare skills in their MD files
-- **Verify:** Fresh DB seeds correctly from files, existing DBs unaffected
+### 5.4 Seed.go cleanup — DONE
+- Removed all 5 agent definitions from `Seed()` (Mentat, Developer, Researcher, Orchestrator, Demo Presenter)
+- Removed `SeedAgentSkillBindings()` and its call from `main.go`
+- Removed agent mode seeding
+- Kept `SeedProviders()` / `SeedWorkspace()` / `SeedBuiltinSkills()` / `SeedBuiltinPromptTemplates()` as-is
+- Provider/model YAML extraction deferred (works fine as-is)
 
-### 5.5 Worktree isolation
-- `isolation: worktree` in agent definition → create git worktree for session
-- Clean up on session end
-- **Verify:** Agent session operates in worktree, cleanup is clean
+### 5.5 Worktree isolation — DEFERRED
+- `isolation: worktree` accepted in frontmatter but not yet implemented at runtime
+- Deferred to a future phase
 
-### 5.6 AgentService migration
-- `AgentService.Get/List` reads from file-based loader (primary) + DB overrides
-- `AgentService.ResolveForSession` unchanged (already in service layer)
-- GUI agent list shows file-based agents
-- **Verify:** All agent flows work with file-based definitions
+### 5.6 AgentService migration — DONE
+- `internal/agent/convert.go`: `ToProfile()` / `ToModes()` convert file definitions to `store.AgentProfile`
+- Deterministic IDs: `file-{slug}` (stable across restarts, no UUID collision)
+- `AgentService.List()`: file-based agents first, then DB agents (slug dedup)
+- `AgentService.Get()` / `GetBySlug()`: check file defs first, fall back to DB
+- `AgentService.ResolveForSession()`: fallback changed from `mentat-001` → `file-default`
+- `internal/service/container.go`: wires `agent.Discover()` + `builtin.DefaultAgent()` into service
+- API handlers `handleListAgents` / `handleGetAgent` routed through service layer
+- Added file-based source values to `agentvalidation` valid sources
 
 ### Frontend (Phase 5)
 - Agent file editor (read/write MD files via API)

@@ -27,8 +27,15 @@ COMPLETED (pre-rebrand):
 - Phase 0-4 of vNext: tool system, context window, permissions, chat loop hardening
 - Plugin system: SDK, discovery, events, config, connectors, scaffold, generator
 
-CURRENT: Phase 5 — Agent System (decisions doc §8)
-- MD-based agent definitions, file discovery (6 locations), seed.go cleanup, worktree isolation
+COMPLETED: Phase 5 — Agent System (2026-04-03)
+- internal/agent/ package: parser, discovery (6 locations), convert, builtin default
+- Agents now file-based (MD + YAML frontmatter), DB stores runtime state only
+- Seed.go: removed all agent seeding + SeedAgentSkillBindings
+- AgentService: file-based agents primary, DB fallback, fallback → file-default
+- Worktree isolation deferred
+
+CURRENT: Phase 6 — Skill System (decisions doc §9)
+- Agent Skills spec compatible, file-based discovery, slash command integration
 
 PRINCIPLES:
 - Consult before architecture decisions

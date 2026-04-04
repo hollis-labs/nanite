@@ -9,7 +9,7 @@ import (
 )
 
 func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
-	agents, err := a.Services.Store.ListAgents()
+	agents, err := a.Services.Agents.List(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -97,20 +97,20 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	agent, err := a.Services.Store.GetAgent(id)
+	ag, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	modes, err := a.Services.Store.ListAgentModes(id)
+	modes, err := a.Services.Agents.ListModes(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
-		"agent": agent,
+		"agent": ag,
 		"modes": modes,
 	})
 }

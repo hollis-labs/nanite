@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/filter"
@@ -100,11 +102,28 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Events:   events,
 	})
 
+	// Discover file-based agent definitions from all 6 priority locations.
+	agentDefs, err := agent.Discover(agent.DiscoverOptions{
+		WorkingDir: ".",
+		PluginsDir: "plugins",
+	})
+	if err != nil {
+		log.Printf("service container: agent discovery: %v", err)
+	}
+	// Append built-in default agent as lowest priority.
+	if defaultDef, defErr := builtin.DefaultAgent(); defErr == nil {
+		agentDefs = append(agentDefs, defaultDef)
+	} else {
+		log.Printf("service container: built-in default agent: %v", defErr)
+	}
+	log.Printf("service container: discovered %d file-based agents", len(agentDefs))
+
 	agents := NewAgentService(AgentServiceConfig{
-		Agents:   cfg.Store,
-		Writers:  cfg.Store,
-		Settings: cfg.Store,
-		Events:   events,
+		Agents:     cfg.Store,
+		Writers:    cfg.Store,
+		Settings:   cfg.Store,
+		Events:     events,
+		FileAgents: agentDefs,
 	})
 
 	var agentReader AgentReader = cfg.Store

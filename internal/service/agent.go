@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -22,27 +23,30 @@ type AgentService interface {
 }
 
 // defaultFallbackAgent is the agent ID used when no session-agent binding
-// or user-settings default exists. Matches the existing hardcoded "mentat-001".
-const defaultFallbackAgent = "mentat-001"
+// or user-settings default exists. Points to the file-based default agent.
+const defaultFallbackAgent = "file-default"
 
 // defaultFallbackSlug is the slug-based fallback when neither the session
-// agent nor the default agent ID can be found. Matches existing behavior.
-const defaultFallbackSlug = "mentat"
+// agent nor the default agent ID can be found.
+const defaultFallbackSlug = "default"
 
-// agentServiceImpl implements AgentService backed by the store sub-interfaces.
+// agentServiceImpl implements AgentService backed by file-based definitions
+// (primary) with DB fallback for user-created agents.
 type agentServiceImpl struct {
 	agents   AgentReader
 	writers  AgentWriter
 	settings SettingsStore
 	events   EventEmitter
+	fileDefs []*agent.Definition // file-based agent definitions, priority-ordered
 }
 
 // AgentServiceConfig holds dependencies for constructing an AgentService.
 type AgentServiceConfig struct {
-	Agents   AgentReader
-	Writers  AgentWriter
-	Settings SettingsStore
-	Events   EventEmitter
+	Agents     AgentReader
+	Writers    AgentWriter
+	Settings   SettingsStore
+	Events     EventEmitter
+	FileAgents []*agent.Definition // from agent.Discover() + builtin
 }
 
 // NewAgentService creates an AgentService from its required dependencies.
@@ -52,19 +56,54 @@ func NewAgentService(cfg AgentServiceConfig) AgentService {
 		writers:  cfg.Writers,
 		settings: cfg.Settings,
 		events:   cfg.Events,
+		fileDefs: cfg.FileAgents,
 	}
 }
 
 func (s *agentServiceImpl) Get(_ context.Context, id string) (*store.AgentProfile, error) {
+	// Check file-based agents first.
+	if agent.IsFileBasedID(id) {
+		slug := agent.SlugFromFileID(id)
+		for _, d := range s.fileDefs {
+			if d.Slug == slug {
+				p := d.ToProfile()
+				return p, nil
+			}
+		}
+	}
 	return s.agents.GetAgent(id)
 }
 
 func (s *agentServiceImpl) GetBySlug(_ context.Context, slug string) (*store.AgentProfile, error) {
+	// File-based agents take priority.
+	for _, d := range s.fileDefs {
+		if d.Slug == slug {
+			return d.ToProfile(), nil
+		}
+	}
 	return s.agents.GetAgentBySlug(slug)
 }
 
 func (s *agentServiceImpl) List(_ context.Context) ([]store.AgentProfile, error) {
-	return s.agents.ListAgents()
+	// Start with file-based agents.
+	seen := make(map[string]bool, len(s.fileDefs))
+	var result []store.AgentProfile
+	for _, d := range s.fileDefs {
+		result = append(result, *d.ToProfile())
+		seen[d.Slug] = true
+	}
+
+	// Append DB agents whose slug is not already present.
+	dbAgents, err := s.agents.ListAgents()
+	if err != nil {
+		return result, err // return file-based agents even if DB fails
+	}
+	for _, a := range dbAgents {
+		if !seen[a.Slug] {
+			result = append(result, a)
+		}
+	}
+	return result, nil
 }
 
 func (s *agentServiceImpl) Create(_ context.Context, agent *store.AgentProfile) error {
@@ -80,6 +119,14 @@ func (s *agentServiceImpl) Delete(_ context.Context, id string) error {
 }
 
 func (s *agentServiceImpl) ListModes(_ context.Context, agentID string) ([]store.AgentMode, error) {
+	if agent.IsFileBasedID(agentID) {
+		slug := agent.SlugFromFileID(agentID)
+		for _, d := range s.fileDefs {
+			if d.Slug == slug {
+				return d.ToModes(), nil
+			}
+		}
+	}
 	return s.agents.ListAgentModes(agentID)
 }
 
@@ -96,37 +143,37 @@ func (s *agentServiceImpl) ListModes(_ context.Context, agentID string) ([]store
 func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID string) (*store.AgentProfile, *store.AgentMode, error) {
 	agentID, modeName, autoAssigned := s.resolveBinding(sessionID)
 
-	// Load the agent profile. Fall back to slug lookup for compat.
-	agent, err := s.agents.GetAgent(agentID)
+	// Load the agent profile. Check file-based agents first, then DB.
+	resolved, err := s.Get(ctx, agentID)
 	if err != nil {
-		agent, err = s.agents.GetAgentBySlug(defaultFallbackSlug)
+		resolved, err = s.GetBySlug(ctx, defaultFallbackSlug)
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
 		}
 	}
 
-	if agent.Status == "disabled" {
-		return nil, nil, fmt.Errorf("agent %q is disabled", agent.Name)
+	if resolved.Status == "disabled" {
+		return nil, nil, fmt.Errorf("agent %q is disabled", resolved.Name)
 	}
 
 	// Auto-assign to session if we had to fall back.
 	if autoAssigned {
-		if err := s.writers.EnsureSessionAgent(sessionID, agent.ID, modeName, true); err != nil {
-			log.Printf("agent-service: failed to auto-assign agent %s to session %s: %v", agent.ID, sessionID, err)
+		if err := s.writers.EnsureSessionAgent(sessionID, resolved.ID, modeName, true); err != nil {
+			log.Printf("agent-service: failed to auto-assign agent %s to session %s: %v", resolved.ID, sessionID, err)
 		}
 		if s.events != nil {
-			s.events.EmitAgentAssigned(ctx, sessionID, agent.ID, modeName)
+			s.events.EmitAgentAssigned(ctx, sessionID, resolved.ID, modeName)
 		}
 	}
 
-	// Load mode — fall back to empty mode on miss.
-	mode, err := s.agents.GetAgentMode(agent.ID, modeName)
+	// Load mode — check file-based modes first, then DB.
+	mode, err := s.resolveMode(ctx, resolved.ID, modeName)
 	if err != nil {
-		log.Printf("agent-service: could not load mode %s/%s: %v (using base prompt)", agent.ID, modeName, err)
+		log.Printf("agent-service: could not load mode %s/%s: %v (using base prompt)", resolved.ID, modeName, err)
 		mode = &store.AgentMode{}
 	}
 
-	return agent, mode, nil
+	return resolved, mode, nil
 }
 
 // resolveBinding determines the agent ID and mode for a session.
@@ -148,4 +195,22 @@ func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName s
 	// Ultimate fallback.
 	log.Printf("agent-service: no primary agent for session %s, falling back to %s", sessionID, defaultFallbackAgent)
 	return defaultFallbackAgent, "default", true
+}
+
+// resolveMode loads a mode for an agent, checking file-based definitions first.
+func (s *agentServiceImpl) resolveMode(_ context.Context, agentID, modeName string) (*store.AgentMode, error) {
+	if agent.IsFileBasedID(agentID) {
+		slug := agent.SlugFromFileID(agentID)
+		for _, d := range s.fileDefs {
+			if d.Slug == slug {
+				for _, m := range d.ToModes() {
+					if m.Slug == modeName {
+						return &m, nil
+					}
+				}
+				return nil, fmt.Errorf("mode %q not found for file agent %q", modeName, slug)
+			}
+		}
+	}
+	return s.agents.GetAgentMode(agentID, modeName)
 }

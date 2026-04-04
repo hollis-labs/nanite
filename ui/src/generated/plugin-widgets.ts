@@ -77,6 +77,14 @@ const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
     ),
     source: "core",
   },
+  "worker-status": {
+    component: lazy(() =>
+      import("@/components/widgets/WorkerStatusWidget").then((m) => ({
+        default: m.WorkerStatusWidget,
+      })),
+    ),
+    source: "core",
+  },
   "broker-decisions": {
     component: lazy(() =>
       import("@/components/widgets/BrokerDecisionsWidget").then((m) => ({

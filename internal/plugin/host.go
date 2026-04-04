@@ -161,6 +161,14 @@ func (h *Host) registerRoute(pattern string, handler http.Handler) {
 	h.logger.Info("queued route (router not yet available)", "pattern", pattern)
 }
 
+// RegisterHTTPHandler registers a custom HTTP route on the plugin host's
+// router. Use this for non-CRUD endpoints that don't fit the standard
+// CRUD handler pattern. Pattern follows net/http method routing syntax
+// (e.g., "GET /api/plugins/engine/sprints").
+func (h *Host) RegisterHTTPHandler(pattern string, handler http.Handler) {
+	h.registerRoute(pattern, handler)
+}
+
 // GetPlugin retrieves another loaded plugin by ID.
 func (h *Host) GetPlugin(id string) (plugin.Plugin, bool) {
 	h.mu.RLock()

@@ -90,12 +90,12 @@ export function ToolCallItem({ toolCall, variant, index = 0, total = 1, defaultE
           {toolCall.status === 'running' && !toolCall.detail && (
             <span className="text-fg-faint italic shrink-0">running...</span>
           )}
-          {hasSummary && !hovered && (
-            <ChevronRight className={`w-3 h-3 text-fg-faint shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-          )}
-          {hasSummary && hovered && (
-            <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
-              <ContentActions content={toolCall.summary!} visible={true} />
+          {hasSummary && (
+            <span className="relative shrink-0 flex items-center">
+              <ChevronRight className={`w-3 h-3 text-fg-faint transition-transform ${hovered ? 'invisible' : ''} ${expanded ? 'rotate-90' : ''}`} />
+              <span className={`absolute right-0 ${hovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={(e) => e.stopPropagation()}>
+                <ContentActions content={toolCall.summary!} visible={true} />
+              </span>
             </span>
           )}
         </div>
@@ -128,9 +128,9 @@ export function ToolCallItem({ toolCall, variant, index = 0, total = 1, defaultE
         {hasSummary && (
           <ChevronRight className={`w-3 h-3 text-fg-faint transition-transform ${expanded ? 'rotate-90' : ''}`} />
         )}
-        {hasSummary && hovered && (
+        {hasSummary && (
           <span className="ml-auto" onClick={(e) => e.stopPropagation()}>
-            <ContentActions content={toolCall.summary!} visible={true} />
+            <ContentActions content={toolCall.summary!} visible={hovered} />
           </span>
         )}
       </div>

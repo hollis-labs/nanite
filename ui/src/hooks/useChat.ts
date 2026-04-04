@@ -1,6 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSprintPlanningStore } from "@/components/plugins/sprint/useSprintPlanningStore";
 import { api } from "@/lib/api";
 import type { ApprovalRequest, ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning, UserSettings } from "@/lib/types";
 import { useChatStore } from "@/stores/useChatStore";
@@ -251,7 +250,7 @@ export function useChat(sessionId: string | null) {
 
             // UI-trigger tools: open frontend modals/panels when the agent calls them.
             if (data.tool === "nanite_open_sprint_planning") {
-              useSprintPlanningStore.getState().openSprintPlanning();
+              window.dispatchEvent(new CustomEvent('plugin-action', { detail: { id: 'sprint-planning' } }));
             }
           }
         });

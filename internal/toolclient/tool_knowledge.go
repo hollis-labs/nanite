@@ -12,7 +12,7 @@ type ToolEntry struct {
 	Name             string   `json:"name"`
 	Category         string   `json:"category"`
 	ShortDescription string   `json:"short_description"` // max 80 chars
-	Server           string   `json:"server"`             // MCP server name (volon, hadron, cortex, etc.)
+	Server           string   `json:"server"`             // MCP server name (engine, hadron, cortex, etc.)
 	UseCases         []string `json:"use_cases"`          // 2-3 brief use-case phrases
 }
 
@@ -115,87 +115,87 @@ func containsStr(slice []string, s string) bool {
 }
 
 // DefaultToolKnowledge returns the curated tool catalog covering all known
-// MCP servers (Volon, Hadron, Cortex) plus built-in developer and general tools.
+// MCP servers (Engine, Hadron, Cortex) plus built-in developer and general tools.
 func DefaultToolKnowledge() *ToolKnowledge {
 	return &ToolKnowledge{
 		Categories: map[string][]ToolEntry{
-			// ── Project Management (Volon) ─────────────────────────
+			// ── Project Management (Fragments Engine) ──────────────
 			"project-management": {
 				{
-					Name:             "volon_task_create",
+					Name:             "engine_task_create",
 					Category:         "project-management",
 					ShortDescription: "Create a new task in a sprint",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"user asks to create a task or ticket", "breaking work into subtasks", "capturing a TODO"},
 				},
 				{
-					Name:             "volon_task_get",
+					Name:             "engine_task_get",
 					Category:         "project-management",
 					ShortDescription: "Retrieve details of a specific task",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"looking up task status", "reading task description", "checking acceptance criteria"},
 				},
 				{
-					Name:             "volon_task_update",
+					Name:             "engine_task_update",
 					Category:         "project-management",
 					ShortDescription: "Update a task's fields (title, description, etc.)",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"editing task details", "adding notes to a task", "changing priority"},
 				},
 				{
-					Name:             "volon_task_transition",
+					Name:             "engine_task_transition",
 					Category:         "project-management",
 					ShortDescription: "Move a task between workflow states",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"marking a task done", "moving task to in-progress", "transitioning task status"},
 				},
 				{
-					Name:             "volon_tasks_list",
+					Name:             "engine_tasks_list",
 					Category:         "project-management",
 					ShortDescription: "List tasks, optionally filtered by sprint or status",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"viewing sprint backlog", "finding open tasks", "listing work items"},
 				},
 				{
-					Name:             "volon_sprint_create",
+					Name:             "engine_sprint_create",
 					Category:         "project-management",
 					ShortDescription: "Create a new sprint",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"starting a new iteration", "planning sprint work", "sprint setup"},
 				},
 				{
-					Name:             "volon_sprint_get",
+					Name:             "engine_sprint_get",
 					Category:         "project-management",
 					ShortDescription: "Get sprint details and progress",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"checking sprint status", "reviewing sprint goals", "sprint progress report"},
 				},
 				{
-					Name:             "volon_sprints_list",
+					Name:             "engine_sprints_list",
 					Category:         "project-management",
 					ShortDescription: "List all sprints for a project",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"viewing sprint history", "finding active sprint", "project timeline"},
 				},
 				{
-					Name:             "volon_backlog_capture",
+					Name:             "engine_backlog_capture",
 					Category:         "project-management",
 					ShortDescription: "Capture an idea into the backlog",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"saving an idea for later", "adding to product backlog", "capturing feature request"},
 				},
 				{
-					Name:             "volon_backlog_list",
+					Name:             "engine_backlog_list",
 					Category:         "project-management",
 					ShortDescription: "List backlog items",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"reviewing backlog", "prioritizing upcoming work", "grooming session"},
 				},
 				{
-					Name:             "volon_projects_list",
+					Name:             "engine_projects_list",
 					Category:         "project-management",
 					ShortDescription: "List all projects",
-					Server:           "volon",
+					Server:           "engine",
 					UseCases:         []string{"finding a project", "switching context between projects"},
 				},
 			},
@@ -404,10 +404,10 @@ func DefaultToolKnowledge() *ToolKnowledge {
 			// ── General / Utility ──────────────────────────────────
 			"general": {
 				{
-					Name:             "volon_health",
+					Name:             "engine_health",
 					Category:         "general",
-					ShortDescription: "Check Volon project management service health",
-					Server:           "volon",
+					ShortDescription: "Check Fragments Engine project management service health",
+					Server:           "engine",
 					UseCases:         []string{"service health check", "connectivity test"},
 				},
 				{

@@ -216,7 +216,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
   // (during streaming, envelopes haven't been extracted yet).
   const displayContent = useMemo(() =>
     content
-      .replace(/```(?:volon-envelope|nanite-envelope)\s*\n[\s\S]*?```/g, '')
+      .replace(/```(?:volon-envelope|nanite-envelope|fragments-envelope)\s*\n[\s\S]*?```/g, '')
       .replace(/<!--TICKET_DATA:[\s\S]*?:TICKET_DATA-->/g, '')
       .replace(/<!--ENVELOPE_DATA:[\s\S]*?:ENVELOPE_DATA-->/g, '')
       .trim(),

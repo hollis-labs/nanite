@@ -3,7 +3,7 @@ import { X, Loader2, ListTodo, CheckSquare, ArrowUp, Trash2, Send, Pause, AlertC
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
-import type { VolonSprint, VolonTask, VolonBacklogItem } from '@/lib/types'
+import type { FragmentsSprint, FragmentsTask, FragmentsBacklogItem } from '@/lib/types'
 
 // --- Pending action types for batch apply ---
 
@@ -38,9 +38,9 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
   const [activeTab, setActiveTab] = useState<'tasks' | 'backlog'>('tasks')
 
   // Data
-  const [sprints, setSprints] = useState<VolonSprint[]>([])
-  const [tasks, setTasks] = useState<VolonTask[]>([])
-  const [backlog, setBacklog] = useState<VolonBacklogItem[]>([])
+  const [sprints, setSprints] = useState<FragmentsSprint[]>([])
+  const [tasks, setTasks] = useState<FragmentsTask[]>([])
+  const [backlog, setBacklog] = useState<FragmentsBacklogItem[]>([])
 
   // Selection
   const [selectedSprint, setSelectedSprint] = useState<string>('')
@@ -64,7 +64,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
       try {
         setLoading(true)
         setError(null)
-        const sprintData = await api.getVolonSprints(projectId)
+        const sprintData = await api.getFragmentsSprints(projectId)
         if (cancelled) return
         const items = sprintData.items ?? []
         setSprints(items)
@@ -74,7 +74,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to connect to Volon')
+          setError(err instanceof Error ? err.message : 'Failed to connect to Fragments Engine')
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -90,7 +90,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
     let cancelled = false
     async function load() {
       try {
-        const taskData = await api.getVolonTasks(selectedSprint, undefined, projectId)
+        const taskData = await api.getFragmentsTasks(selectedSprint, undefined, projectId)
         if (!cancelled) setTasks(taskData.items ?? [])
       } catch {
         // Non-fatal: tasks just show empty
@@ -107,7 +107,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
     let cancelled = false
     async function load() {
       try {
-        const data = await api.getVolonBacklog(projectId)
+        const data = await api.getFragmentsBacklog(projectId)
         if (!cancelled) setBacklog(data.items ?? [])
       } catch {
         if (!cancelled) setBacklog([])
@@ -181,7 +181,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
   const queueBacklogDelete = useCallback(() => {
     // Backlog items don't have a direct delete via our proxy, but we can
     // promote them and then delete. For now, we show a note.
-    // Actually the task says "Delete" on backlog tab too, but Volon may not
+    // Actually the task says "Delete" on backlog tab too, but Fragments Engine may not
     // have a backlog_delete. We'll skip this gracefully.
     setSelectedBacklogIds(new Set())
   }, [])
@@ -196,10 +196,10 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
       for (const action of pendingActions) {
         switch (action.type) {
           case 'transition':
-            await api.transitionVolonTask(action.taskId, action.status)
+            await api.transitionFragmentsTask(action.taskId, action.status)
             break
           case 'delete':
-            await api.deleteVolonTask(action.taskId)
+            await api.deleteFragmentsTask(action.taskId)
             break
           case 'promote':
             await api.promoteBacklogItem(action.backlogId, action.sprintId)
@@ -213,11 +213,11 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
 
       // Refresh tasks
       if (selectedSprint) {
-        const taskData = await api.getVolonTasks(selectedSprint, undefined, projectId)
+        const taskData = await api.getFragmentsTasks(selectedSprint, undefined, projectId)
         setTasks(taskData.items ?? [])
       }
       // Refresh backlog
-      const backlogData = await api.getVolonBacklog(projectId)
+      const backlogData = await api.getFragmentsBacklog(projectId)
       setBacklog(backlogData.items ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply changes')

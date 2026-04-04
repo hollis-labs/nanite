@@ -12,12 +12,10 @@ import (
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/agentwidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/bookmarkswidget"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/contextwidgets"
-	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/demopresenter"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/giphy"
-	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/marvel"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/observabilitywidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/oembed"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/sessionstats"
-	_ "github.com/hollis-labs/nanite/plugins/sprint"
+	_ "github.com/hollis-labs/nanite/plugins/fragments-engine"
 	_ "github.com/hollis-labs/nanite/plugins/support-ticket"
 )

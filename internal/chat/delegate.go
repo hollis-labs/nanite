@@ -201,7 +201,7 @@ func (e *Engine) DelegateAndAggregate(ctx context.Context, parentSessionID, user
 
 	log.Printf("delegation: decomposed into %d sub-tasks", len(decomposition.SubTasks))
 
-	// Build orchestration plan (creates Volon tasks if available).
+	// Build orchestration plan (creates Engine tasks if available).
 	parentSession, err := e.Store.GetSession(parentSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("load parent session: %w", err)

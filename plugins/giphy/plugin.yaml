@@ -14,9 +14,9 @@ requires:
 
 registers:
   envelopes:
-    - type: giphy-card
-      component: ui/GiphyCard
-      export: GiphyCard
+    - type: giphy-modal
+      component: components/chat/envelopes/GiphyModalCard
+      export: GiphyModalCard
 
   hooks:
     - event: message.sent

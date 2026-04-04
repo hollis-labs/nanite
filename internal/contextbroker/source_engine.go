@@ -8,24 +8,24 @@ import (
 	"strings"
 )
 
-// VolonSource retrieves context from Engine via MCP tools.
+// EngineSource retrieves context from Engine via MCP tools.
 // It fetches current task/sprint/epic state for the active project.
-type VolonSource struct {
+type EngineSource struct {
 	MCP        MCPCaller
 	ServerName string // MCP server name (default: "engine")
 }
 
-// NewVolonSource creates a VolonSource with the given MCP caller.
-func NewVolonSource(mcp MCPCaller) *VolonSource {
-	return &VolonSource{
+// NewEngineSource creates a EngineSource with the given MCP caller.
+func NewEngineSource(mcp MCPCaller) *EngineSource {
+	return &EngineSource{
 		MCP:        mcp,
 		ServerName: "engine",
 	}
 }
 
-func (s *VolonSource) Name() string { return "engine" }
+func (s *EngineSource) Name() string { return "engine" }
 
-func (s *VolonSource) Fetch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error) {
+func (s *EngineSource) Fetch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error) {
 	if s.MCP == nil {
 		return nil, fmt.Errorf("engine source: no MCP caller configured")
 	}
@@ -69,7 +69,7 @@ func (s *VolonSource) Fetch(ctx context.Context, intent Intent, budget int) ([]C
 }
 
 // fetchTasks retrieves tasks from Engine for a project.
-func (s *VolonSource) fetchTasks(ctx context.Context, projectID string, budget int) ([]ContextItem, error) {
+func (s *EngineSource) fetchTasks(ctx context.Context, projectID string, budget int) ([]ContextItem, error) {
 	toolName := fmt.Sprintf("mcp__%s__engine_tasks_list", s.ServerName)
 	input := map[string]any{
 		"project_id": projectID,
@@ -85,7 +85,7 @@ func (s *VolonSource) fetchTasks(ctx context.Context, projectID string, budget i
 }
 
 // fetchSprints retrieves active sprints from Engine.
-func (s *VolonSource) fetchSprints(ctx context.Context, projectID string, budget int) ([]ContextItem, error) {
+func (s *EngineSource) fetchSprints(ctx context.Context, projectID string, budget int) ([]ContextItem, error) {
 	toolName := fmt.Sprintf("mcp__%s__engine_sprints_list", s.ServerName)
 	input := map[string]any{
 		"project_id": projectID,
@@ -100,7 +100,7 @@ func (s *VolonSource) fetchSprints(ctx context.Context, projectID string, budget
 }
 
 // parseTasks converts Engine task list response into ContextItems.
-func (s *VolonSource) parseTasks(raw string, budget int, baseRelevance float64) ([]ContextItem, error) {
+func (s *EngineSource) parseTasks(raw string, budget int, baseRelevance float64) ([]ContextItem, error) {
 	var response struct {
 		Tasks []struct {
 			ID          string `json:"id"`
@@ -169,7 +169,7 @@ func (s *VolonSource) parseTasks(raw string, budget int, baseRelevance float64) 
 }
 
 // parseSprints converts Engine sprint list response into ContextItems.
-func (s *VolonSource) parseSprints(raw string, budget int) ([]ContextItem, error) {
+func (s *EngineSource) parseSprints(raw string, budget int) ([]ContextItem, error) {
 	var response struct {
 		Sprints []struct {
 			ID     string `json:"id"`

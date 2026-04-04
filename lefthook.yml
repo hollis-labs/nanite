@@ -35,6 +35,18 @@ pre-commit:
       skip_empty: true
       run: go vet ./...
 
+    migration-purity:
+      # Migrations must be DDL only — seed data belongs in seed.go.
+      glob: "internal/store/migrations/*.sql"
+      skip_empty: true
+      run: |
+        if grep -qiE '^\s*(INSERT|UPDATE|DELETE)\b' {staged_files}; then
+          echo "ERROR: Migrations must be DDL only (CREATE/ALTER/DROP)."
+          echo "Move INSERT/UPDATE/DELETE statements to seed.go."
+          grep -nHiE '^\s*(INSERT|UPDATE|DELETE)\b' {staged_files}
+          exit 1
+        fi
+
     # ── Frontend parallel group (optional) ────────────────────────────
     # Runs only when a ui/, web/, or frontend/ directory exists.
     # Safe to leave in Go-only repos — skip conditions prevent errors.

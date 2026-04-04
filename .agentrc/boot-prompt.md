@@ -6,93 +6,58 @@
 Boot nanite-backend
 
 Rebrand from Conduit → Nanite complete (all 5 waves, 2026-04-03).
-vNext MVP Phases 0-4 complete prior to rebrand.
+vNext MVP Phases 0-7 complete. Post-MVP Phases A+B complete.
 Cerberus service live: nanite-api (port 8090), nanite-frontend (port 5176).
 
 KEY DOCS:
-- Rebrand plan: docs/rebrand-plan.md (all 5 waves complete)
 - Brand package: internal/brand/brand.go (single source of truth for app identity)
-- MVP plan: docs/vnext-mvp.md (8 phases, selected work)
+- MVP plan: docs/vnext-mvp.md (8 phases, all complete)
 - Post-MVP backlog: docs/vnext-backlog.md
+- Plugin extraction plan: docs/plugin-extraction-plan.md (6 phases)
 
-REBRAND STATUS:
-- Wave 0: Old Nanite → Nil, plugin contract → ~/Projects-apps/plugin/, new repo cloned
-- Wave 1: Brand package, Go module (github.com/hollis-labs/nanite), 107 files rewritten, cmd/nanite/
-- Wave 2: Env vars (NANITE_*), config/nanite.yaml, Makefile, Docker, Cerberus (nanite-api)
-- Wave 3: Frontend UI strings — DONE
-- Wave 4: Docs/ADRs/agentrc — DONE
+ARCHITECTURE:
+- Migrations: single 001_schema.sql (DDL only). All seed data in seed.go.
+- Agents/skills: file-based (MD + YAML frontmatter), DB stores runtime state only
+- Plugins: YAML manifest + Go/subprocess, event hooks, connectors, UI components
+- Providers: 8 HTTP API + 8 CLI adapters via PTY bridge
 
 COMPLETED (pre-rebrand):
-- Service layer decomposition (Waves 0-4): internal/service/ with Container
-- Phase 0-4 of vNext: tool system, context window, permissions, chat loop hardening
+- Service layer decomposition: internal/service/ with Container
+- Phase 0-4: tool system, context window, permissions, chat loop hardening
 - Plugin system: SDK, discovery, events, config, connectors, scaffold, generator
 
-COMPLETED: Phase 5 — Agent System (2026-04-03)
-- internal/agent/ package: parser, discovery (6 locations), convert, builtin default
-- Agents now file-based (MD + YAML frontmatter), DB stores runtime state only
-- Seed.go: removed all agent seeding + SeedAgentSkillBindings
-- AgentService: file-based agents primary, DB fallback, fallback → file-default
-- Worktree isolation deferred
+COMPLETED: Phases 5-7 — Agent System, Skill System, Slash Commands & Polish
+- File-based agents + skills with builtin defaults
+- Slash commands auto-registered from skills
+- Migration auto-discovery via fs.ReadDir()
+- Envelope sync test, nil check consistency, real tool token costs
+- 18 tests (commands + skill service), full suite green
 
-COMPLETED: Phase 6 — Skill System (2026-04-03)
-- internal/skill/ package: parser, discovery (5 locations), convert, dynamic context
-- Skills now file-based (MD + YAML frontmatter), DB stores runtime state only
-- 8 built-in skills as embedded .md files (internal/skill/builtin/)
-- SkillService: file-based primary, DB fallback, source filtering
-- Slash commands: skills auto-registered as /slug [args]
-- SeedBuiltinSkills() removed from main.go
-- Frontend: source filter pills + SourceBadge (matches agent UI pattern)
-- Runtime execution wiring (inline/fork) deferred to Phase 7
+COMPLETED: Post-MVP Phases A+B
+- A1: MCP Config Import/Export (CLI + GUI)
+- A2: Token Breakdown (tool_input_tokens, per-block parsing)
+- B1: Plugin/Event Enhancements (hook aliases, loadType system, preferences)
+- B2: Multi-Agent Orchestration (Badger KV, task tracking, workers, worktrees)
 
-COMPLETED: Phase 7 — Slash Commands & Polish (2026-04-04)
-- /mode command added (client-side), /status /providers /export /search already existed
-- Migration ordering: auto-discovery via fs.ReadDir() (no more manual file list)
-- Envelope sync: TestEnvelopeRegistrySync validates backend↔frontend alignment
-- Nil check consistency: list endpoints return empty, action endpoints return errors
-- Real tool token costs from execution_metrics, slot inspector debug endpoint
-- Snapshot field alignment: site, duration_ms, max_turns, parallel
-- Fixed TestAuthMiddlewareEnabled (rebrand env var leftover)
-- 18 new tests (commands + skill service), go test zero failures
+COMPLETED: Migration Squash (2026-04-04)
+- 27 migrations → single 001_schema.sql (DDL only)
+- Seed data consolidated in seed.go (providers, models, user_settings, catalog)
+- Stale conduit-plugins catalog URL fixed → nanite-plugins
+- CI enforcement: grep for INSERT in .sql files (planned)
 
-MVP PHASES 0-7 COMPLETE.
-
-POST-MVP PLAN (decided 2026-04-04):
-Phase A (parallel): MCP Import/Export + Token Breakdown — DONE
-Phase B (parallel): Plugin/Event Enhancements + Multi-Agent Orchestration — DONE
-Phase C (after B1): Memory & Continuity
-Phase D (after B1): Claude Code Integration
-See docs/post-mvp-plan.md for full details and decisions.
-
-COMPLETED: Phase A1 — MCP Config Import/Export (2026-04-04)
-- nanite mcp import/export CLI commands in cmd/nanite/main.go
-- internal/mcpconfig/ package: ParseMCPJSON, ExportMCPJSON
-- GUI import via POST /api/mcp-servers/import
-
-COMPLETED: Phase A2 — Token Breakdown (2026-04-04)
-- tool_input_tokens column (migration 025), per-block parsing from Anthropic responses
-- Updated RecordUsage, SessionUsageSummary, TokenUsageWidget frontend
-
-COMPLETED: Phase B1 — Plugin/Event Enhancements (2026-04-04)
-- Claude Code hook aliases (NormalizeEventType), loadType system (auto/opt-in)
-- LoadTypeResolver: session > project > agent > manifest override chain
-- User tool load preferences (migration 026), API endpoints, MCP filtering
-
-COMPLETED: Phase B2 — Multi-Agent Orchestration (2026-04-04)
-- Badger KV coordination store: internal/coordination/ (store, keys, badger, noop)
-- Task tracking: internal/task/ (service, snapshot, task types), migration 027
-- Worker manager: internal/worker/ (manager, worker — full + lightweight modes)
-- Worktree isolation: internal/worktree/ (manager, noop — git worktree lifecycle)
-- Container wired: Coord, Tasks, Workers, Worktrees fields
-- API endpoints: /api/tasks/*, /api/workers/*
+CURRENT: Plugin Extraction (docs/plugin-extraction-plan.md)
+- Phase 1 (cleanup): DONE
+- Phase 2: Fragments Engine plugin extraction (Volon proxy, sprint, engine tasks)
+- Phase 3: Debug widget plugin extraction
+- Phase 4: TaskBackend abstraction (interface + multiple implementations)
+- Phase 5: Connector plugins (linear, slack, github, email)
+- Phase 6: Remaining extractions (email/teams/documents envelopes, bookmarks, actions)
 
 CURRENT: Phase C — Memory & Continuity
 - Check Cortex for type/view registry changes needed
 - MemoryService, extraction (PostCompact + per-turn), memory tools (opt-out)
 
-FRONTEND TODOs (accumulated):
-- Tool load preferences UI (GET/PUT /api/tools/load-preferences + GET /api/tools/all)
-- Task tracking UI (GET/POST /api/tasks/*)
-- Worker status UI (GET /api/workers/*)
+PHASE D (future): Claude Code Integration
 
 PRINCIPLES:
 - Consult before architecture decisions
@@ -101,6 +66,8 @@ PRINCIPLES:
 - Always use cerberus_rebuild for deployment, not go build directly
 - Quality over speed. Polished software, maintainable patterns.
 - Brand package: use brand.* constants, never hardcode app name/identity
+- Migrations = DDL only. seed.go = data only.
+- Connectors are standalone plugins, feature plugins consume them.
 
 Test suite: all passing (zero failures)
 ```
@@ -110,19 +77,19 @@ Test suite: all passing (zero failures)
 ```
 Boot nanite-frontend
 
-Rebrand from Conduit → Nanite — backend complete, frontend Wave 3 in progress.
+Rebrand from Conduit → Nanite ��� all waves complete.
 
 CRITICAL — Read these before touching any code:
 - memory: feedback_ui_design_patterns.md — THE design system reference
 - .agentrc/agents/frontend.md — full project context
 - CLAUDE.md — envelope system warnings
 
-REBRAND CONTEXT:
+ARCHITECTURE:
 - Backend fully rebranded: module github.com/hollis-labs/nanite
-- Envelope protocol renamed: nanite-envelope (was conduit-envelope)
-- Tool names renamed: nanite_* (was conduit_*)
-- Env vars renamed: NANITE_* (was CONDUIT_*)
-- Brand package at internal/brand/brand.go — frontend should mirror with ui/src/brand.ts
+- Envelope protocol: nanite-envelope
+- Tool names: nanite_*
+- Env vars: NANITE_*
+- Brand package at internal/brand/brand.go — frontend mirrors with ui/src/brand.ts
 
 COMPLETED (vNext frontend, 2026-04-03):
 - P0-P3 debug panels, approval cards, broker inspector, compaction divider
@@ -130,7 +97,30 @@ COMPLETED (vNext frontend, 2026-04-03):
 - All 6 anti-patterns resolved
 - 23 shadcn components installed
 
-Remaining future work:
-- Phase 7: Dynamic plugin loading (subprocess + JSON-RPC backend, URL ESM frontend)
-- Additional envelope card designs as new plugins are built
+PENDING FRONTEND TASKS:
+
+1. Tool Load Preferences UI (priority: high)
+   - Backend APIs ready: GET/PUT /api/tools/load-preferences, GET /api/tools/all
+   - Settings panel where users toggle tool load types (auto/opt-in/disabled) per tool
+   - Follow patterns in ToolsWidget.tsx
+
+2. Task Tracking UI (priority: high)
+   - Backend APIs ready: GET/POST /api/tasks, GET/PUT/DELETE /api/tasks/{id}
+   - POST /api/sessions/{id}/tasks/{id}/transition
+   - Tasks have status (pending/in_progress/completed/failed), belong to sessions
+   - Need: task list widget, create/edit form, status transition buttons
+   - Existing envelopes: TaskDispositionCard.tsx, TaskCompleteNotificationCard.tsx
+
+3. Worker Status UI (priority: medium)
+   - Backend APIs ready: GET /api/workers, POST /api/workers/{id}/cancel
+   - Workers are background multi-agent orchestration processes
+   - Need: worker list widget showing active workers, status, cancel button
+
+4. Volon Backlog Button Polish (priority: low)
+   - VolonBacklogButton.tsx exists, verify it works with POST /api/volon/backlog
+
+Future (plugin extraction related):
+- Debug widgets will move to plugin-debug (Phase 3 of extraction plan)
+- Engine/sprint UI will move to plugin-fragments-engine (Phase 2)
+- See docs/plugin-extraction-plan.md for full details
 ```

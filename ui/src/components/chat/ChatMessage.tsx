@@ -131,7 +131,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
 
     // 2. During streaming, extract from content (envelope field not set yet).
     if (message.content) {
-      const pattern = /```(?:volon-envelope|nanite-envelope)\s*\n([\s\S]*?)```/g
+      const pattern = /```(?:volon-envelope|nanite-envelope|fragments-envelope)\s*\n([\s\S]*?)```/g
       const envelopes: Envelope[] = []
       let match
       while ((match = pattern.exec(message.content)) !== null) {

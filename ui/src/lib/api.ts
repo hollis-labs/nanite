@@ -42,9 +42,12 @@ import type {
   UISlotEntry,
   UserSettings,
   UtilityCallSummary,
-  VolonBacklogItem,
-  VolonSprint,
-  VolonTask,
+  FragmentsBacklogItem,
+  FragmentsSprint,
+  FragmentsTask,
+  SessionTask,
+  SessionTaskStatus,
+  Worker,
   Workspace,
 } from "./types";
 
@@ -673,15 +676,15 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to remove template from agent: ${res.status}`);
   },
 
-  // Volon Backlog
-  createVolonBacklogItem: async (data: {
+  // Fragments Engine Backlog
+  createFragmentsBacklogItem: async (data: {
     title: string;
     body: string;
     priority: string;
     tags?: string[];
     project_id?: string;
   }): Promise<Record<string, unknown>> => {
-    const res = await fetch(`${API_BASE}/volon/backlog`, {
+    const res = await fetch(`${API_BASE}/plugins/engine/backlog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -816,40 +819,40 @@ export const api = {
     return res.text();
   },
 
-  // Volon (Sprint Planning)
-  getVolonSprints: async (projectId?: string): Promise<{ items: VolonSprint[]; count: number }> => {
+  // Fragments Engine (Sprint Planning)
+  getFragmentsSprints: async (projectId?: string): Promise<{ items: FragmentsSprint[]; count: number }> => {
     const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-    const res = await fetch(`${API_BASE}/volon/sprints${params}`);
+    const res = await fetch(`${API_BASE}/plugins/engine/sprints${params}`);
     if (!res.ok) throw new Error(`Failed to list sprints: ${res.status}`);
     return res.json();
   },
 
-  getVolonTasks: async (
+  getFragmentsTasks: async (
     sprintId?: string,
     status?: string,
     projectId?: string,
-  ): Promise<{ items: VolonTask[]; count: number }> => {
+  ): Promise<{ items: FragmentsTask[]; count: number }> => {
     const params = new URLSearchParams();
     if (sprintId) params.set("sprint_id", sprintId);
     if (status) params.set("status", status);
     if (projectId) params.set("project_id", projectId);
     const qs = params.toString();
-    const res = await fetch(`${API_BASE}/volon/tasks${qs ? `?${qs}` : ""}`);
+    const res = await fetch(`${API_BASE}/plugins/engine/tasks${qs ? `?${qs}` : ""}`);
     if (!res.ok) throw new Error(`Failed to list tasks: ${res.status}`);
     return res.json();
   },
 
-  getVolonBacklog: async (
+  getFragmentsBacklog: async (
     projectId?: string,
-  ): Promise<{ items: VolonBacklogItem[]; count: number }> => {
+  ): Promise<{ items: FragmentsBacklogItem[]; count: number }> => {
     const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
     const res = await fetch(`${API_BASE}/volon/backlog${params}`);
     if (!res.ok) throw new Error(`Failed to list backlog: ${res.status}`);
     return res.json();
   },
 
-  transitionVolonTask: async (id: string, status: string): Promise<unknown> => {
-    const res = await fetch(`${API_BASE}/volon/tasks/${encodeURIComponent(id)}/transition`, {
+  transitionFragmentsTask: async (id: string, status: string): Promise<unknown> => {
+    const res = await fetch(`${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}/transition`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
@@ -868,11 +871,76 @@ export const api = {
     return res.json();
   },
 
-  deleteVolonTask: async (id: string): Promise<unknown> => {
-    const res = await fetch(`${API_BASE}/volon/tasks/${encodeURIComponent(id)}`, {
+  deleteFragmentsTask: async (id: string): Promise<unknown> => {
+    const res = await fetch(`${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
     if (!res.ok) throw new Error(`Failed to delete task: ${res.status}`);
+    return res.json();
+  },
+
+  // Session Tasks
+  listSessionTasks: async (sessionId: string): Promise<SessionTask[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/tasks`);
+    if (!res.ok) throw new Error(`Failed to list session tasks: ${res.status}`);
+    return res.json();
+  },
+
+  createSessionTask: async (data: {
+    title: string;
+    session_id: string;
+    description?: string;
+  }): Promise<SessionTask> => {
+    const res = await fetch(`${API_BASE}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to create task: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  updateSessionTask: async (
+    id: string,
+    data: Partial<Pick<SessionTask, "title" | "description" | "result" | "metadata">>,
+  ): Promise<SessionTask> => {
+    const res = await fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to update task: ${res.status}`);
+    return res.json();
+  },
+
+  transitionSessionTask: async (id: string, status: SessionTaskStatus): Promise<SessionTask> => {
+    const res = await fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/transition`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to transition task: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  // Workers
+  listWorkers: async (): Promise<Worker[]> => {
+    const res = await fetch(`${API_BASE}/workers`);
+    if (!res.ok) throw new Error(`Failed to list workers: ${res.status}`);
+    return res.json();
+  },
+
+  cancelWorker: async (id: string): Promise<{ status: string }> => {
+    const res = await fetch(`${API_BASE}/workers/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error(`Failed to cancel worker: ${res.status}`);
     return res.json();
   },
 

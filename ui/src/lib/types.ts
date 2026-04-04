@@ -623,9 +623,9 @@ export interface ToolLoadItem {
 
 export type ToolLoadPreferences = Record<string, string>;
 
-// --- Volon (Sprint Planning) ---
+// --- Fragments Engine (Sprint Planning) ---
 
-export interface VolonSprint {
+export interface FragmentsSprint {
   id: string;
   project_id: string;
   name: string;
@@ -637,7 +637,7 @@ export interface VolonSprint {
   updated_at: string;
 }
 
-export interface VolonTask {
+export interface FragmentsTask {
   id: string;
   sprint_id: string;
   project_id: string;
@@ -650,13 +650,52 @@ export interface VolonTask {
   updated_at: string;
 }
 
-export interface VolonBacklogItem {
+export interface FragmentsBacklogItem {
   id: string;
   project_id: string;
   title: string;
   body: string;
   priority: string;
   tags: string[];
+  created_at: string;
+}
+
+// --- Session Tasks (agent session todos) ---
+
+export type SessionTaskStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+
+export interface SessionTask {
+  id: string;
+  parent_id?: string;
+  session_id: string;
+  worker_session_id?: string;
+  title: string;
+  description?: string;
+  status: SessionTaskStatus;
+  assignee_agent_id?: string;
+  result?: string;
+  error?: string;
+  tokens_used: number;
+  metadata?: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+}
+
+// --- Workers (background orchestration) ---
+
+export type WorkerType = "full" | "light"
+export type WorkerStatus = "spawning" | "running" | "completed" | "failed" | "cancelled"
+
+export interface Worker {
+  id: string;
+  type: WorkerType;
+  parent_session_id: string;
+  session_id?: string;
+  task_id?: string;
+  agent_id: string;
+  status: WorkerStatus;
+  worktree_path?: string;
   created_at: string;
 }
 

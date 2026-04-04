@@ -18,24 +18,18 @@ export interface EnvelopeRegistryEntry {
   source: string; // "core" | pluginId
 }
 
-// --- CORE ENVELOPES (do not remove — these are NOT plugins) ---
+// --- CORE ENVELOPES (primitives + fundamental system cards) ---
 const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
-  "task-disposition": {
+  // Task system (core)
+  "session-task": {
     component: lazy(() =>
-      import("@/components/chat/envelopes/TaskDispositionCard").then((m) => ({
-        default: m.TaskDispositionCard,
+      import("@/components/chat/envelopes/SessionTaskCard").then((m) => ({
+        default: m.SessionTaskCard,
       })),
     ),
     source: "core",
   },
-  "giphy-modal": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/GiphyModalCard").then((m) => ({
-        default: m.GiphyModalCard,
-      })),
-    ),
-    source: "core",
-  },
+  // Generic primitives — reusable by any plugin
   "document-viewer": {
     component: lazy(() =>
       import("@/components/chat/envelopes/DocumentViewerCard").then((m) => ({
@@ -52,46 +46,6 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     ),
     source: "core",
   },
-  "task-complete-notification": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/TaskCompleteNotificationCard").then((m) => ({
-        default: m.TaskCompleteNotificationCard,
-      })),
-    ),
-    source: "core",
-  },
-  "kb-result": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/KBResultCard").then((m) => ({
-        default: m.KBResultCard,
-      })),
-    ),
-    source: "core",
-  },
-  "ticket-confirmation": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/TicketConfirmationCard").then((m) => ({
-        default: m.TicketConfirmationCard,
-      })),
-    ),
-    source: "core",
-  },
-  "ticket-form": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/TicketFormCard").then((m) => ({
-        default: m.TicketFormCard,
-      })),
-    ),
-    source: "core",
-  },
-  "resolution-capture": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/ResolutionCaptureCard").then((m) => ({
-        default: m.ResolutionCaptureCard,
-      })),
-    ),
-    source: "core",
-  },
   "error-report": {
     component: lazy(() =>
       import("@/components/chat/envelopes/ErrorCard").then((m) => ({
@@ -100,18 +54,114 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     ),
     source: "core",
   },
-  // Sprint planning envelope — registered as plugin so recover mode hides it
-  "sprint-planning-review": {
+  "approval-card": {
     component: lazy(() =>
-      import("@/components/plugins/sprint/SprintPlanningReviewCard").then((m) => ({
-        default: m.SprintPlanningReviewCard,
+      import("@/components/chat/envelopes/ApprovalCard").then((m) => ({
+        default: m.ApprovalCard,
       })),
     ),
-    source: "sprint-planning",
+    source: "core",
+  },
+  "proposal-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/ProposalCard").then((m) => ({
+        default: m.ProposalCard,
+      })),
+    ),
+    source: "core",
+  },
+  "question-form": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/QuestionForm").then((m) => ({
+        default: m.QuestionForm,
+      })),
+    ),
+    source: "core",
   },
 };
 
-// --- PLUGIN ENTRIES (auto-generated, safe to overwrite below this line) ---
+// --- PLUGIN ENVELOPES (owned by their respective plugins) ---
+const PLUGIN_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
+  // giphy plugin
+  "giphy-modal": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/GiphyModalCard").then((m) => ({
+        default: m.GiphyModalCard,
+      })),
+    ),
+    source: "giphy",
+  },
+  // oembed plugin
+  "oembed-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/OEmbedCard").then((m) => ({
+        default: m.OEmbedCard,
+      })),
+    ),
+    source: "oembed",
+  },
+  // support-ticket plugin
+  "kb-result": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/KBResultCard").then((m) => ({
+        default: m.KBResultCard,
+      })),
+    ),
+    source: "support-ticket",
+  },
+  "ticket-form": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/TicketFormCard").then((m) => ({
+        default: m.TicketFormCard,
+      })),
+    ),
+    source: "support-ticket",
+  },
+  "ticket-confirmation": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/TicketConfirmationCard").then((m) => ({
+        default: m.TicketConfirmationCard,
+      })),
+    ),
+    source: "support-ticket",
+  },
+  "resolution-capture": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/ResolutionCaptureCard").then((m) => ({
+        default: m.ResolutionCaptureCard,
+      })),
+    ),
+    source: "support-ticket",
+  },
+  // Fragments Engine — task cards
+  "task-disposition": {
+    component: lazy(() =>
+      import("@/components/plugins/fragments-engine/TaskDispositionCard").then((m) => ({
+        default: m.TaskDispositionCard,
+      })),
+    ),
+    source: "fragments-engine",
+  },
+  "task-complete-notification": {
+    component: lazy(() =>
+      import("@/components/plugins/fragments-engine/TaskCompleteNotificationCard").then((m) => ({
+        default: m.TaskCompleteNotificationCard,
+      })),
+    ),
+    source: "fragments-engine",
+  },
+  // Fragments Engine — sprint planning
+  "sprint-planning-review": {
+    component: lazy(() =>
+      import("@/components/plugins/fragments-engine/SprintPlanningReviewCard").then((m) => ({
+        default: m.SprintPlanningReviewCard,
+      })),
+    ),
+    source: "fragments-engine",
+  },
+};
+
+// --- AUTO-GENERATED PLUGIN ENTRIES (safe to overwrite below this line) ---
 // @PLUGIN_ENTRIES_START
 const PLUGIN_ENVELOPE_ENTRIES: Record<string, LazyEnvelopeComponent> = {
 
@@ -119,14 +169,17 @@ const PLUGIN_ENVELOPE_ENTRIES: Record<string, LazyEnvelopeComponent> = {
 // @PLUGIN_ENTRIES_END
 
 // Single merged registry — core takes precedence on name collision.
-// Note: PLUGIN_ENVELOPE_ENTRIES is named by the codegen script — do not rename.
 export const ENVELOPE_REGISTRY: Record<string, EnvelopeRegistryEntry> = {
+  // Auto-generated entries (lowest priority)
   ...Object.fromEntries(
     Object.entries(PLUGIN_ENVELOPE_ENTRIES).map(([k, v]) => [
       k,
       { component: v, source: "plugin" } as EnvelopeRegistryEntry,
     ]),
   ),
+  // Plugin entries (middle priority)
+  ...PLUGIN_ENTRIES,
+  // Core entries (highest priority)
   ...CORE_ENTRIES,
 };
 

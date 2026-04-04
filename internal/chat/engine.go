@@ -569,7 +569,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	e.activePresence.Store(sessionID, presenceStart)
 	e.broadcastPresence(presenceStart)
 
-	// Notify Volon that this chat session is active.
+	// Notify Engine that this chat session is active.
 	if e.Activity != nil {
 		go e.Activity.EmitSessionStart(ctx, sessionID, agent.ID, model)
 	}
@@ -1472,7 +1472,7 @@ func (e *Engine) generateResponse(ctx context.Context, sessionID, assistantMsgID
 	// Emit stream_end with envelope data so the frontend can render immediately.
 	ch <- StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: finalUsage, AgentID: agent.ID, Envelope: envelopeJSON}
 
-	// Notify Volon that the response is complete.
+	// Notify Engine that the response is complete.
 	if e.Activity != nil && finalUsage != nil {
 		go e.Activity.EmitResponseComplete(ctx, sessionID, agent.ID, model, finalUsage.InputTokens, finalUsage.OutputTokens)
 	}

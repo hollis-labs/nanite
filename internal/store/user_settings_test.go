@@ -5,12 +5,21 @@ import (
 	"testing"
 )
 
-func TestGetUserSettings_Default(t *testing.T) {
+func newSeededStore(t *testing.T) *Store {
+	t.Helper()
 	s, err := New(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	if err := s.Seed(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+func TestGetUserSettings_Default(t *testing.T) {
+	s := newSeededStore(t)
 
 	us, err := s.GetUserSettings()
 	if err != nil {
@@ -28,11 +37,7 @@ func TestGetUserSettings_Default(t *testing.T) {
 }
 
 func TestUpdateUserSettings(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := newSeededStore(t)
 
 	us := &UserSettings{
 		ProviderFallbackChain: []string{"anthropic", "ollama", "pty-claude"},
@@ -65,11 +70,7 @@ func TestUpdateUserSettings(t *testing.T) {
 }
 
 func TestUpdateUserSettings_EmptyChain(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	s := newSeededStore(t)
 
 	// Set a chain, then clear it.
 	us := &UserSettings{

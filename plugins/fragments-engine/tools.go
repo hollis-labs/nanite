@@ -1,4 +1,4 @@
-package sprint
+package fragmentsengine
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 )
 
 // SprintToolsTransport implements mcp.MCPTransport and exposes sprint planning
-// tools that were previously hardcoded in the core self-tools.
+// tools via the Engine MCP integration.
 type SprintToolsTransport struct {
 	mcpManager *mcp.Manager
 }
@@ -55,7 +55,7 @@ func (t *SprintToolsTransport) CallTool(ctx context.Context, name string, args m
 	case "nanite_show_sprint_planning_review":
 		return t.callShowSprintPlanningReview(args)
 	default:
-		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
+		return mcpErrorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
 }
 
@@ -64,16 +64,16 @@ func (t *SprintToolsTransport) callShowSprintPlanningReview(args map[string]any)
 	sprintsStr, _ := args["sprints"].(string)
 	tasksStr, _ := args["tasks"].(string)
 	if title == "" || sprintsStr == "" || tasksStr == "" {
-		return errorResult("title, sprints, and tasks are required"), nil
+		return mcpErrorResult("title, sprints, and tasks are required"), nil
 	}
 
 	var sprints []any
 	if err := json.Unmarshal([]byte(sprintsStr), &sprints); err != nil {
-		return errorResult(fmt.Sprintf("invalid sprints JSON: %v", err)), nil
+		return mcpErrorResult(fmt.Sprintf("invalid sprints JSON: %v", err)), nil
 	}
 	var tasks []any
 	if err := json.Unmarshal([]byte(tasksStr), &tasks); err != nil {
-		return errorResult(fmt.Sprintf("invalid tasks JSON: %v", err)), nil
+		return mcpErrorResult(fmt.Sprintf("invalid tasks JSON: %v", err)), nil
 	}
 
 	envData := map[string]any{
@@ -106,7 +106,7 @@ func textResult(text string) *mcp.ToolResult {
 	}
 }
 
-func errorResult(msg string) *mcp.ToolResult {
+func mcpErrorResult(msg string) *mcp.ToolResult {
 	return &mcp.ToolResult{
 		Content: []mcp.ToolContent{{Type: "text", Text: msg}},
 		IsError: true,

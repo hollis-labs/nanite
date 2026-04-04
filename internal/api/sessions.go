@@ -70,7 +70,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = err
 	}
 
-	// Emit session creation event to Volon (fire-and-forget).
+	// Emit session creation event (fire-and-forget).
 	if a.Services.Activity != nil {
 		go a.Services.Activity.EmitSessionCreated(r.Context(), sess.ID, sess.WorkspaceID)
 	}
@@ -201,7 +201,7 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	// Broadcast session archived presence so UI updates immediately.
 	a.Services.Streams.BroadcastSessionArchived(id)
 
-	// Emit session ended event to Volon (fire-and-forget).
+	// Emit session ended event (fire-and-forget).
 	if a.Services.Activity != nil {
 		go a.Services.Activity.EmitSessionEnded(r.Context(), id)
 	}

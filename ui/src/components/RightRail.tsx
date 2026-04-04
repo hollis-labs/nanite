@@ -1,5 +1,5 @@
 import { Suspense, useState, useCallback } from 'react'
-import { LayoutGrid, Mail, Package, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
+import { LayoutGrid, Mail, Package, ListTodo, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useQuery } from '@tanstack/react-query'
@@ -15,11 +15,13 @@ import { DEVELOPER_ONLY_WIDGETS } from '@/generated/plugin-widgets'
 import { buildWidgetOrder, filterVisibleWidgets } from '@/lib/widget-order'
 import { ArtifactsContent } from './drawers/ArtifactsContent'
 import { InboxContent } from './a2a/InboxContent'
+import { SessionTasksTab } from './tasks/SessionTasksTab'
 import { api } from '@/lib/api'
 import type { PluginUIComponent } from '@/lib/types'
 
 const CORE_TABS = [
   { id: 'widgets' as const, icon: LayoutGrid, label: 'Widgets' },
+  { id: 'tasks' as const, icon: ListTodo, label: 'Tasks' },
   { id: 'inbox' as const, icon: Mail, label: 'Inbox' },
   { id: 'artifacts' as const, icon: Package, label: 'Artifacts' },
 ]
@@ -185,6 +187,10 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
           </ScrollArea>
         )}
 
+        {activeTab === 'tasks' && (
+          <SessionTasksTab />
+        )}
+
         {activeTab === 'artifacts' && (
           <ArtifactsContent onTitleChange={handleArtifactsTitleChange} />
         )}
@@ -194,7 +200,7 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
         )}
 
         {/* Plugin-registered right rail tab content */}
-        {!['widgets', 'artifacts', 'inbox'].includes(activeTab) && (() => {
+        {!['widgets', 'tasks', 'artifacts', 'inbox'].includes(activeTab) && (() => {
           const pluginEntry = pluginTabs.find((e) => e.id === activeTab)
           if (!pluginEntry?.component) return null
           const PluginComponent = getSlotComponent(pluginEntry.component)

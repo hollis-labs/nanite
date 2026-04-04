@@ -148,7 +148,7 @@ func (p ToolPermissions) CheckPermission(toolName string) bool {
 // MatchPattern checks if a tool name matches a glob pattern.
 // Supports path.Match syntax plus simple prefix matching with trailing *.
 func MatchPattern(pattern, name string) bool {
-	// Handle prefix glob: "mcp__volon__*" matches "mcp__volon__task_create"
+	// Handle prefix glob: "mcp__engine__*" matches "mcp__engine__engine_task_create"
 	if strings.HasSuffix(pattern, "*") {
 		return strings.HasPrefix(name, strings.TrimSuffix(pattern, "*"))
 	}

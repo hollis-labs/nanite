@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 type Priority = 'A' | 'B' | 'C'
 type FormStatus = 'idle' | 'submitting' | 'success' | 'error'
 
-interface VolonBacklogButtonProps {
+interface FragmentsBacklogButtonProps {
   /** Extra context to include in the body (e.g. from context inspector). */
   contextBody?: string
   /** Override the default project ID. */
@@ -17,7 +17,7 @@ interface VolonBacklogButtonProps {
   className?: string
 }
 
-export function VolonBacklogButton({ contextBody, projectId, className }: VolonBacklogButtonProps) {
+export function FragmentsBacklogButton({ contextBody, projectId, className }: FragmentsBacklogButtonProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
 
   const { data: session } = useQuery({
@@ -59,7 +59,7 @@ export function VolonBacklogButton({ contextBody, projectId, className }: VolonB
     setErrorMsg('')
 
     try {
-      await api.createVolonBacklogItem({
+      await api.createFragmentsBacklogItem({
         title: title.trim(),
         body: notes.trim(),
         priority,

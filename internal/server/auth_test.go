@@ -14,8 +14,8 @@ var dummyHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request)
 
 func TestAuthMiddlewareDisabled(t *testing.T) {
 	// Ensure env vars are unset.
-	t.Setenv("MENTAT_AUTH_USER", "")
-	t.Setenv("MENTAT_AUTH_PASSWORD", "")
+	t.Setenv("NANITE_AUTH_USER", "")
+	t.Setenv("NANITE_AUTH_PASSWORD", "")
 
 	handler := basicAuthMiddleware(dummyHandler)
 
@@ -29,8 +29,8 @@ func TestAuthMiddlewareDisabled(t *testing.T) {
 }
 
 func TestAuthMiddlewareEnabled(t *testing.T) {
-	t.Setenv("MENTAT_AUTH_USER", "admin")
-	t.Setenv("MENTAT_AUTH_PASSWORD", "secret")
+	t.Setenv("NANITE_AUTH_USER", "admin")
+	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
 
 	handler := basicAuthMiddleware(dummyHandler)
 
@@ -65,8 +65,8 @@ func TestAuthMiddlewareEnabled(t *testing.T) {
 }
 
 func TestAuthMiddlewareHealthExempt(t *testing.T) {
-	t.Setenv("MENTAT_AUTH_USER", "admin")
-	t.Setenv("MENTAT_AUTH_PASSWORD", "secret")
+	t.Setenv("NANITE_AUTH_USER", "admin")
+	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
 
 	handler := basicAuthMiddleware(dummyHandler)
 

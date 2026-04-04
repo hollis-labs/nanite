@@ -44,8 +44,17 @@ COMPLETED: Phase 6 — Skill System (2026-04-03)
 - Frontend: source filter pills + SourceBadge (matches agent UI pattern)
 - Runtime execution wiring (inline/fork) deferred to Phase 7
 
-CURRENT: Phase 7 — Slash Commands & Polish (decisions doc §3a)
-- New commands, anti-pattern fixes, test coverage, skill execution wiring
+COMPLETED: Phase 7 — Slash Commands & Polish (2026-04-04)
+- /mode command added (client-side), /status /providers /export /search already existed
+- Migration ordering: auto-discovery via fs.ReadDir() (no more manual file list)
+- Envelope sync: TestEnvelopeRegistrySync validates backend↔frontend alignment
+- Nil check consistency: list endpoints return empty, action endpoints return errors
+- Real tool token costs from execution_metrics, slot inspector debug endpoint
+- Snapshot field alignment: site, duration_ms, max_turns, parallel
+- Fixed TestAuthMiddlewareEnabled (rebrand env var leftover)
+- 18 new tests (commands + skill service), go test zero failures
+
+MVP PHASES 0-7 COMPLETE. Next: post-MVP backlog (docs/vnext-backlog.md)
 
 PRINCIPLES:
 - Consult before architecture decisions
@@ -55,8 +64,7 @@ PRINCIPLES:
 - Quality over speed. Polished software, maintainable patterns.
 - Brand package: use brand.* constants, never hardcode app name/identity
 
-Pre-existing test failures (not blockers):
-- server.TestAuthMiddlewareEnabled: returns 200 instead of 401
+Test suite: all passing (zero failures)
 ```
 
 ## Frontend Agent

@@ -170,6 +170,29 @@ func (s *Store) GetUtilityCallSummary() ([]UtilityCallSummary, error) {
 	return out, rows.Err()
 }
 
+// SessionToolTokenSummary holds aggregated tool token data from execution metrics.
+type SessionToolTokenSummary struct {
+	TotalInputTokens  int // sum of input_tokens across tool-bearing calls
+	TotalOutputTokens int // sum of output_tokens across tool-bearing calls
+	TotalToolCalls    int // sum of tool_calls
+}
+
+// GetSessionToolTokenSummary returns aggregated token data from execution metrics
+// for LLM calls that included tool calls, giving actual token costs instead of estimates.
+func (s *Store) GetSessionToolTokenSummary(sessionID string) (*SessionToolTokenSummary, error) {
+	var summary SessionToolTokenSummary
+	err := s.DB.QueryRow(
+		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(tool_calls),0)
+		 FROM execution_metrics
+		 WHERE session_id = ? AND tool_calls > 0 AND is_utility = FALSE`,
+		sessionID,
+	).Scan(&summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalToolCalls)
+	if err != nil {
+		return nil, fmt.Errorf("get session tool token summary: %w", err)
+	}
+	return &summary, nil
+}
+
 // GetUtilityCallLog returns recent individual utility call records.
 func (s *Store) GetUtilityCallLog(limit int) ([]ExecutionMetrics, error) {
 	if limit <= 0 {

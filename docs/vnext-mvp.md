@@ -358,38 +358,40 @@ These items from the decisions doc and backend TODO are already done:
 
 ---
 
-## Phase 7 — Slash Commands & Polish
+## Phase 7 — Slash Commands & Polish ✅
 
 **Depends on:** Phase 5 (agent system), Phase 6 (skills as commands)
 **Decisions doc:** §3a (Slash Commands from backend TODO)
 **Goal:** Round out the command system, fix remaining anti-patterns, final polish pass.
+**Completed:** 2026-04-04
 
-### 7.1 New slash commands
-- `/status` — Session info: agent, model, provider, message count, token usage, active mode
-- `/providers` — List registered providers and their status (available/unavailable, API key configured)
-- `/export` — Export session (format TBD: markdown transcript, JSON)
-- Review Fragments v1 commands for anything else worth porting
+### 7.1 Slash commands — DONE
+- `/status`, `/providers`, `/export`, `/search` — server-side handlers in `commands_builtin.go`
+- `/mode` — client-side command (agent category), added alongside `/agent` and `/model`
+- 12 builtin commands + N skill-based commands registered at startup
+- Fragments v1 port reviewed: `/clear`, `/import`, `/undo` skipped (not needed for beta)
 
-### 7.2 Remaining anti-patterns
-- **Migration ordering** — Evaluate: switch from explicit file list to directory listing, or add a migration framework. Low risk since we're pre-release.
-- **Envelope sync fragility** — Consider a build-time check that validates all backend envelope types have frontend registry entries. Doesn't need to be auto-generated, just validated.
-- **Inconsistent nil checks for optional deps** — Establish a pattern (e.g., service methods return typed errors for unavailable deps) and apply it to the handlers touched during this phase.
+### 7.2 Anti-pattern fixes — DONE
+- **Migration ordering** — Replaced hardcoded file list with `fs.ReadDir()` on embedded FS. New `.sql` files auto-discovered.
+- **Envelope sync validation** — `TestEnvelopeRegistrySync` reads frontend registry, fails if backend types are missing. Skips gracefully without UI tree.
+- **Nil check consistency** — List endpoints (`handleListConnectors`, `handleVolonListSprints/Tasks/Backlog`) return empty results when deps nil. Action endpoints return "not configured" errors.
 
-### 7.3 Context & debug panel polish
-- **Context widget: real tool token costs** — Replace the hardcoded 50-token-per-tool-call estimate in `context_breakdown.go` with actual token costs from the provider's usage response. Wire tool_use block token consumption into the context breakdown so the inspector shows accurate numbers, not event-log-count × flat estimate.
-- **Slot inspector endpoint** — Expose per-slot context window data (slot names, token counts, cache hit/miss) via a new debug API endpoint. The frontend `SlotInspectorPanel` is built and waiting for this data.
-- **Turn snapshot field alignment** — Ensure backend snapshot JSON field names match frontend types (already partially fixed: `continue_site` → `site`, `duration_ns` → `duration_ms`). Consider normalizing at the backend to avoid frontend mapping.
+### 7.3 Context & debug polish — DONE
+- **Real tool token costs** — `context_breakdown.go` queries `execution_metrics` for actual tool token usage via `GetSessionToolTokenSummary()`. Falls back to 50-token estimate when no metrics exist.
+- **Slot inspector endpoint** — `GET /api/debug/slots?session_id=X` in `debug_slots.go`. Returns slot names, token counts, cache status from debug snapshots.
+- **Snapshot field alignment** — Fixed `continue_site` → `site`, `Duration` → `DurationMs` (float64), added `MaxTurns` and `Parallel` fields. Updated `chat_generate.go` and tests.
 
-### 7.4 Test coverage audit
-- Run coverage report, identify gaps in critical paths (chat loop, tool execution, permission checks)
-- Add tests for any untested Phase 0-6 work
-- Fix pre-existing test failures: `TestAuthMiddlewareEnabled`, stale MCP tool count test
-- **Verify:** `go test ./...` fully clean, no skipped or known-broken tests
+### 7.4 Test coverage audit — DONE
+- **Fixed `TestAuthMiddlewareEnabled`** — rebrand leftover: tests used `MENTAT_AUTH_*` env vars, middleware reads `NANITE_AUTH_*`.
+- **MCP tool count test** — already resilient (at-least semantics), no change needed.
+- **18 new tests**: 8 command tests (`commands_test.go`), 10 skill service tests (`skill_test.go`)
+- **`go test ./...` — zero failures**
 
-### Frontend (Phase 7)
-- Slash command autocomplete updates (new commands, skill commands)
-- Polish pass on all new Phase 0-6 UI (debug panels, permission approval, agent editor, skill browser)
-- Envelope sync validation (build-time check)
+### Frontend (Phase 7) — PARTIAL
+- Skill commands auto-registered in slash command autocomplete
+- Source filter pills on skill browser (done in Phase 6)
+- Envelope sync validated via test (not build-time, but equivalent coverage)
+- Full UI polish pass deferred to post-MVP
 
 ---
 
@@ -404,7 +406,7 @@ These items from the decisions doc and backend TODO are already done:
 | 4 | Chat Loop Hardening | §7 | Continuation sites, parallel tools, iteration limits |
 | 5 | Agent System | §8 | MD-based agents, file discovery, seed cleanup |
 | 6 | Skill System | §9 | Agent Skills spec, discovery, broker integration |
-| 7 | Slash Commands & Polish | §3a, misc | New commands, anti-pattern fixes, test coverage |
+| 7 | Slash Commands & Polish ✅ | §3a, misc | New commands, anti-pattern fixes, test coverage |
 
 ### Dependency Graph
 

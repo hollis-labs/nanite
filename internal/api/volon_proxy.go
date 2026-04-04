@@ -75,7 +75,7 @@ func (a *API) handleCreateVolonBacklog(w http.ResponseWriter, r *http.Request) {
 // GET /api/volon/sprints?project_id=X
 func (a *API) handleVolonListSprints(w http.ResponseWriter, r *http.Request) {
 	if a.Services.MCP == nil {
-		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
+		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 
@@ -97,7 +97,7 @@ func (a *API) handleVolonListSprints(w http.ResponseWriter, r *http.Request) {
 // GET /api/volon/tasks?sprint_id=X&status=Y&project_id=Z
 func (a *API) handleVolonListTasks(w http.ResponseWriter, r *http.Request) {
 	if a.Services.MCP == nil {
-		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
+		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 
@@ -125,7 +125,7 @@ func (a *API) handleVolonListTasks(w http.ResponseWriter, r *http.Request) {
 // GET /api/volon/backlog?project_id=X
 func (a *API) handleVolonListBacklog(w http.ResponseWriter, r *http.Request) {
 	if a.Services.MCP == nil {
-		a.errorResp(w, http.StatusServiceUnavailable, "MCP manager not configured")
+		a.jsonResp(w, http.StatusOK, []any{})
 		return
 	}
 

@@ -473,9 +473,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			var snapshotTools []ToolCallSnapshot
 			for _, r := range execResults {
 				snapshotTools = append(snapshotTools, ToolCallSnapshot{
-					Name:     r.ref.Name,
-					Duration: r.duration,
-					Success:  !r.isError,
+					Name:       r.ref.Name,
+					DurationMs: float64(r.duration.Milliseconds()),
+					Success:    !r.isError,
 				})
 			}
 			tokensUsed := 0

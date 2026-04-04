@@ -238,6 +238,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/actions/{id}", a.handleDeleteAction)
 	mux.HandleFunc("POST /api/actions/{id}/execute", a.handleExecuteAction)
 
+	// Debug
+	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
+
 	// Execution Metrics
 	mux.HandleFunc("GET /api/sessions/{id}/metrics", a.handleGetSessionExecutionMetrics)
 	mux.HandleFunc("GET /api/metrics/executions", a.handleGetRecentExecutionMetrics)

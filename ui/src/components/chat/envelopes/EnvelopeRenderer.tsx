@@ -22,14 +22,14 @@ class EnvelopeErrorBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div className="rounded-sm border border-red-900/50 bg-red-950/20 p-3">
+        <div className="rounded-sm border border-danger/50 bg-danger/10 p-3">
           <div className="flex items-center gap-2 mb-1">
-            <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-            <span className="text-xs font-medium text-red-300">
+            <AlertTriangle className="w-3.5 h-3.5 text-danger shrink-0" />
+            <span className="text-xs font-medium text-danger">
               Envelope failed: {this.props.type}
             </span>
           </div>
-          <p className="text-[11px] text-red-400/70 leading-relaxed">
+          <p className="text-[11px] text-danger/70 leading-relaxed">
             {this.state.error.message}
           </p>
         </div>

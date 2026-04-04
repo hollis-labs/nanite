@@ -106,7 +106,7 @@ export function SkillCreateWizard({
   );
 
   const inputClass =
-    "w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:border-accent transition-colors";
+    "w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:border-primary transition-colors";
 
   return (
     <div className="space-y-5" onKeyDown={handleKeyDown}>
@@ -127,7 +127,7 @@ export function SkillCreateWizard({
           <div key={i} className="flex-1">
             <div
               className={`h-1 rounded-full transition-colors ${
-                i <= stepIndex ? "bg-accent" : "bg-surface"
+                i <= stepIndex ? "bg-primary" : "bg-surface"
               }`}
             />
           </div>

@@ -6,11 +6,11 @@ import { api } from '@/lib/api'
 import type { Worker } from '@/lib/types'
 
 const STATUS_DOT: Record<string, string> = {
-  spawning: 'bg-amber-400 animate-pulse',
-  running: 'bg-blue-400',
+  spawning: 'bg-warning animate-pulse',
+  running: 'bg-info',
   completed: 'bg-success',
-  failed: 'bg-red-400',
-  cancelled: 'bg-zinc-500',
+  failed: 'bg-danger',
+  cancelled: 'bg-fg-muted',
 }
 
 export function WorkerStatusWidget() {
@@ -55,7 +55,7 @@ export function WorkerStatusWidget() {
                 <button
                   onClick={() => cancelMutation.mutate(worker.id)}
                   disabled={cancelMutation.isPending}
-                  className="p-1 rounded text-fg-faint hover:text-red-400 hover:bg-surface transition-colors"
+                  className="p-1 rounded text-fg-faint hover:text-danger hover:bg-surface transition-colors"
                 >
                   <X className="w-3 h-3" />
                 </button>

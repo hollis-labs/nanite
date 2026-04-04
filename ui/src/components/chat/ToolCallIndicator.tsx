@@ -11,13 +11,13 @@ export function ToolCallIndicator({ toolCall }: ToolCallIndicatorProps) {
   return (
     <div className="flex items-center gap-2 py-1 px-2 rounded-md bg-surface/50 border border-border-subtle/50 text-xs">
       {status === 'running' && (
-        <Loader2 className="w-3.5 h-3.5 text-accent animate-spin shrink-0" />
+        <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
       )}
       {status === 'done' && (
-        <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
+        <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
       )}
       {status === 'error' && (
-        <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+        <XCircle className="w-3.5 h-3.5 text-danger shrink-0" />
       )}
       <Wrench className="w-3 h-3 text-fg-muted shrink-0" />
       <span className="text-fg-secondary font-medium">{tool}</span>

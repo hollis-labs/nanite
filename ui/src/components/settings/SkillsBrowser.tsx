@@ -156,7 +156,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
+              className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
             >
               <option value="all">All Categories</option>
               {SKILL_CATEGORIES.map((category) => (
@@ -180,7 +180,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               onClick={() => setSourceFilter(s)}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                 sourceFilter === s
-                  ? "bg-accent text-white"
+                  ? "bg-primary text-white"
                   : "bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover"
               }`}
             >
@@ -244,7 +244,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                     >
                       {/* Header */}
                       <div className="flex items-center gap-2.5 px-3.5 py-3">
-                        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
+                        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-surface-hover text-fg-secondary shrink-0">
                           <DynamicIcon name={skill.icon} className="w-4 h-4" fallback={Wrench} />
                         </span>
                         <div className="flex-1 min-w-0">
@@ -297,7 +297,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                       <>
                         <ContextMenuSeparator />
                         <ContextMenuItem
-                          className="gap-2 text-xs text-accent"
+                          className="gap-2 text-xs text-primary"
                           onClick={() => {
                             setSelectedSkill(skill.id);
                           }}

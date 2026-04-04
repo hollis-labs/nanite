@@ -16,11 +16,11 @@ interface SessionTaskCardProps {
 }
 
 const STATUS_DOT: Record<SessionTaskStatus, string> = {
-  pending: 'bg-zinc-400',
-  in_progress: 'bg-blue-400 animate-pulse',
+  pending: 'bg-fg-faint',
+  in_progress: 'bg-info animate-pulse',
   completed: 'bg-success',
-  failed: 'bg-red-400',
-  cancelled: 'bg-zinc-500',
+  failed: 'bg-danger',
+  cancelled: 'bg-fg-muted',
 }
 
 const STATUS_LABEL: Record<SessionTaskStatus, string> = {
@@ -62,7 +62,7 @@ export function SessionTaskCard({ data }: SessionTaskCardProps) {
             {status === 'pending' && (
               <button
                 onClick={() => handleTransition('in_progress')}
-                className="p-1 rounded text-fg-faint hover:text-blue-400 transition-colors"
+                className="p-1 rounded text-fg-faint hover:text-info transition-colors"
                 title="Start"
               >
                 <Play className="w-3 h-3" />
@@ -80,7 +80,7 @@ export function SessionTaskCard({ data }: SessionTaskCardProps) {
             {(status === 'pending' || status === 'in_progress') && (
               <button
                 onClick={() => handleTransition('cancelled')}
-                className="p-1 rounded text-fg-faint hover:text-red-400 transition-colors"
+                className="p-1 rounded text-fg-faint hover:text-danger transition-colors"
                 title="Cancel"
               >
                 <X className="w-3 h-3" />

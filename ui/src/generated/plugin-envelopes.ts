@@ -164,6 +164,7 @@ const PLUGIN_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
 // --- AUTO-GENERATED PLUGIN ENTRIES (safe to overwrite below this line) ---
 // @PLUGIN_ENTRIES_START
 const PLUGIN_ENVELOPE_ENTRIES: Record<string, LazyEnvelopeComponent> = {
+  'sprint-planning-review': lazy(() => import('@/components/plugins/fragments-engine/SprintPlanningReviewCard').then(m => ({ default: m.SprintPlanningReviewCard }))),
   'task-disposition': lazy(() => import('@/components/plugins/fragments-engine/TaskDispositionCard').then(m => ({ default: m.TaskDispositionCard }))),
   'task-complete-notification': lazy(() => import('@/components/plugins/fragments-engine/TaskCompleteNotificationCard').then(m => ({ default: m.TaskCompleteNotificationCard }))),
   'giphy-modal': lazy(() => import('@/components/chat/envelopes/GiphyModalCard').then(m => ({ default: m.GiphyModalCard }))),

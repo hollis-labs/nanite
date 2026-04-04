@@ -160,7 +160,7 @@ export default function SettingsPage() {
                       : "text-fg-secondary hover:text-fg hover:bg-surface/50"
                   }`}
                 >
-                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-accent" : ""}`} />
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
                   {section.label}
                 </button>
               );

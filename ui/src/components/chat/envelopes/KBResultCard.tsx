@@ -30,9 +30,9 @@ interface KBResultCardProps {
 
 const SEVERITY_DOT: Record<string, string> = {
   low: 'bg-success',
-  medium: 'bg-amber-400',
-  high: 'bg-accent',
-  critical: 'bg-accent',
+  medium: 'bg-warning',
+  high: 'bg-primary',
+  critical: 'bg-primary',
 }
 
 function SourceBadge({ source }: { source: string | undefined }) {
@@ -76,7 +76,7 @@ function ArticleCard({ article, defaultExpanded }: { article: KBArticle; default
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-block rounded bg-blue-500/20 px-1.5 py-0.5 text-xs font-medium text-blue-400 border border-blue-500/25">
+            <span className="inline-block rounded bg-info/15 px-1.5 py-0.5 text-xs font-medium text-info border border-info/30">
               {article.id}
             </span>
             <SourceBadge source={article.source} />

@@ -15,10 +15,10 @@ interface ErrorCardProps {
 }
 
 const CODE_LABELS: Record<string, { label: string; color: string }> = {
-  rate_limit: { label: 'RATE_LIMIT', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-  tool_error: { label: 'TOOL_ERROR', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
-  provider_error: { label: 'PROVIDER_ERROR', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
-  internal_error: { label: 'INTERNAL_ERROR', color: 'bg-red-500/20 text-red-300 border-red-500/30' },
+  rate_limit: { label: 'RATE_LIMIT', color: 'bg-warning/20 text-warning border-warning/30' },
+  tool_error: { label: 'TOOL_ERROR', color: 'bg-warning/20 text-warning border-warning/30' },
+  provider_error: { label: 'PROVIDER_ERROR', color: 'bg-danger/20 text-danger border-danger/30' },
+  internal_error: { label: 'INTERNAL_ERROR', color: 'bg-danger/20 text-danger border-danger/30' },
 }
 
 // Giphy API search URL builder. Uses the GIPHY_API_KEY env var via the backend,
@@ -86,7 +86,7 @@ export function ErrorCard({ data }: ErrorCardProps) {
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="rounded-sm border border-red-500/30 bg-bg-elevated/80 overflow-hidden max-w-lg">
+      <div className="rounded-sm border border-danger/30 bg-bg-elevated/80 overflow-hidden max-w-lg">
         <div className="flex">
           {/* Left side: Giphy image (30%) */}
           <div className="w-[30%] shrink-0 bg-bg/50 flex items-center justify-center p-2">
@@ -109,7 +109,7 @@ export function ErrorCard({ data }: ErrorCardProps) {
               </div>
             ) : (
               <div className="w-full aspect-square rounded-md bg-surface/50 flex items-center justify-center">
-                <AlertTriangle className="h-8 w-8 text-red-500/40" />
+                <AlertTriangle className="h-8 w-8 text-danger/40" />
               </div>
             )}
           </div>

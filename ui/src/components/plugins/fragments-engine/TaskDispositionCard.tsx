@@ -24,15 +24,15 @@ interface TaskDispositionCardProps {
 const DEFAULT_ACTIONS = ['Approve', 'Done', 'Request Changes', 'Defer', 'Skip']
 
 const PRIORITY_COLOR: Record<string, string> = {
-  P1: 'bg-accent/20 text-accent border-accent/25',
-  P2: 'bg-amber-500/20 text-amber-400 border-amber-500/25',
+  P1: 'bg-primary/20 text-primary border-primary/25',
+  P2: 'bg-warning/20 text-warning border-warning/25',
   P3: 'bg-success/20 text-success border-success/25',
 }
 
 const STATUS_COLOR: Record<string, string> = {
   todo: 'bg-surface/50 text-fg-secondary',
   doing: 'bg-success/20 text-success',
-  blocked: 'bg-accent/20 text-accent',
+  blocked: 'bg-primary/20 text-primary',
   done: 'bg-success/10 text-success',
   queued: 'bg-violet-500/20 text-violet-400',
 }
@@ -145,13 +145,13 @@ export function TaskDispositionCard({ data, onSendMessage }: TaskDispositionCard
               {/* Comment input for Request Changes */}
               {showComment && !submitted && (
                 <div className="mt-2 ml-0 flex items-start gap-2">
-                  <MessageSquare className="h-3.5 w-3.5 text-amber-400 mt-1.5 shrink-0" />
+                  <MessageSquare className="h-3.5 w-3.5 text-warning mt-1.5 shrink-0" />
                   <input
                     type="text"
                     placeholder="What changes are needed?"
                     value={comments[task.id] || ''}
                     onChange={e => setComments(prev => ({ ...prev, [task.id]: e.target.value }))}
-                    className="flex-1 rounded-md border border-amber-500/30 bg-surface/50 px-2.5 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:border-amber-500/50 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                    className="flex-1 rounded-md border border-warning/30 bg-surface/50 px-2.5 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:border-warning/50 focus:outline-none focus:ring-1 focus:ring-warning/30"
                   />
                 </div>
               )}

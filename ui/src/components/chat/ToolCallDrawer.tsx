@@ -143,7 +143,7 @@ export function ToolCallDrawer() {
         >
           <Wrench className="size-3" />
           <span className="tabular-nums">{toolCalls.length}</span>
-          {hasRunning && <Loader2 className="size-3 animate-spin text-accent" />}
+          {hasRunning && <Loader2 className="size-3 animate-spin text-primary" />}
         </button>
       </div>
     </div>

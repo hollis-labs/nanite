@@ -21,9 +21,9 @@ interface TicketConfirmationCardProps {
 
 const PRIORITY_STYLES: Record<string, { bg: string; text: string; border: string }> = {
   low: { bg: 'bg-success/15', text: 'text-success', border: 'border-success/25' },
-  medium: { bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/25' },
-  high: { bg: 'bg-accent/15', text: 'text-accent', border: 'border-accent/25' },
-  critical: { bg: 'bg-accent/20', text: 'text-accent', border: 'border-accent/30' },
+  medium: { bg: 'bg-warning/15', text: 'text-warning', border: 'border-warning/25' },
+  high: { bg: 'bg-primary/15', text: 'text-primary', border: 'border-primary/25' },
+  critical: { bg: 'bg-primary/20', text: 'text-primary', border: 'border-primary/30' },
 }
 
 export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {

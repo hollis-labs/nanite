@@ -119,7 +119,7 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
                   activeTab !== 'widgets'
                     ? 'text-fg-faint/30 cursor-default'
                     : editMode
-                      ? 'text-accent bg-accent/10'
+                      ? 'text-primary bg-primary/10'
                       : 'text-fg-faint hover:text-fg-secondary hover:bg-surface/50'
                 }`}
               >

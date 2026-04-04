@@ -15,18 +15,18 @@ type PendingAction =
 // --- Priority badge colors ---
 
 const priorityColors: Record<string, string> = {
-  A: 'bg-red-500/20 text-red-400 border-red-500/30',
-  B: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  C: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  D: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+  A: 'bg-danger/20 text-danger border-danger/30',
+  B: 'bg-warning/20 text-warning border-warning/30',
+  C: 'bg-info/15 text-info border-info/30',
+  D: 'bg-fg-muted/20 text-fg-secondary border-border-subtle/30',
 }
 
 const statusColors: Record<string, string> = {
-  todo: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
-  doing: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  done: 'bg-green-500/20 text-green-400 border-green-500/30',
-  paused: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  blocked: 'bg-red-500/20 text-red-400 border-red-500/30',
+  todo: 'bg-fg-muted/20 text-fg-secondary border-border-subtle/30',
+  doing: 'bg-info/15 text-info border-info/30',
+  done: 'bg-success/20 text-success border-success/30',
+  paused: 'bg-warning/20 text-warning border-warning/30',
+  blocked: 'bg-danger/20 text-danger border-danger/30',
 }
 
 interface SprintPlanningModalProps {
@@ -243,35 +243,35 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
       {/* Dialog */}
-      <div className="relative w-full max-w-2xl max-h-[85vh] bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-2xl max-h-[85vh] bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
-            <ListTodo className="w-4 h-4 text-accent" />
-            <h2 className="text-sm font-semibold text-zinc-100">Sprint Planning</h2>
+            <ListTodo className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-semibold text-fg">Sprint Planning</h2>
             {pendingActions.length > 0 && (
-              <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-accent-muted text-accent-hover rounded">
+              <span className="ml-2 px-1.5 py-0.5 text-[10px] font-medium bg-primary/10 text-primary-hover rounded">
                 {pendingActions.length} pending
               </span>
             )}
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded text-fg-muted hover:text-fg-secondary hover:bg-surface transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-zinc-800">
+        <div className="flex border-b border-border">
           <button
             onClick={() => setActiveTab('tasks')}
             className={cn(
               'flex-1 px-4 py-2.5 text-xs font-medium transition-colors',
               activeTab === 'tasks'
-                ? 'text-accent border-b-2 border-accent'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'text-primary border-b-2 border-primary'
+                : 'text-fg-muted hover:text-fg-secondary'
             )}
           >
             Sprint Tasks
@@ -281,8 +281,8 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
             className={cn(
               'flex-1 px-4 py-2.5 text-xs font-medium transition-colors',
               activeTab === 'backlog'
-                ? 'text-accent border-b-2 border-accent'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'text-primary border-b-2 border-primary'
+                : 'text-fg-muted hover:text-fg-secondary'
             )}
           >
             Backlog
@@ -293,14 +293,14 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
-              <span className="ml-2 text-sm text-zinc-500">Loading from Engine...</span>
+              <Loader2 className="w-5 h-5 animate-spin text-fg-muted" />
+              <span className="ml-2 text-sm text-fg-muted">Loading from Engine...</span>
             </div>
           ) : error && sprints.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <AlertCircle className="w-8 h-8 text-red-400 mb-2" />
-              <p className="text-sm text-red-400 mb-1">Could not connect to Engine</p>
-              <p className="text-xs text-zinc-500">{error}</p>
+              <AlertCircle className="w-8 h-8 text-danger mb-2" />
+              <p className="text-sm text-danger mb-1">Could not connect to Engine</p>
+              <p className="text-xs text-fg-muted">{error}</p>
             </div>
           ) : (
             <>
@@ -309,11 +309,11 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                 <div className="space-y-3">
                   {/* Sprint selector */}
                   <div className="flex items-center gap-2">
-                    <label className="text-xs text-zinc-500">Sprint:</label>
+                    <label className="text-xs text-fg-muted">Sprint:</label>
                     <select
                       value={selectedSprint}
                       onChange={(e) => setSelectedSprint(e.target.value)}
-                      className="flex-1 px-2 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 outline-none focus:border-accent transition-colors"
+                      className="flex-1 px-2 py-1.5 text-xs bg-surface border border-border-subtle rounded-md text-fg outline-none focus:border-primary transition-colors"
                     >
                       {sprints.map(s => (
                         <option key={s.id} value={s.id}>{s.name} ({s.status})</option>
@@ -323,13 +323,13 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
 
                   {/* Actions bar */}
                   {selectedTaskIds.size > 0 && (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
-                      <span className="text-xs text-zinc-400">{selectedTaskIds.size} selected</span>
+                    <div className="flex items-center gap-2 px-3 py-2 bg-surface/50 rounded-lg border border-border-subtle/50">
+                      <span className="text-xs text-fg-secondary">{selectedTaskIds.size} selected</span>
                       <div className="flex-1" />
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1 text-green-400 hover:text-green-300"
+                        className="gap-1 text-success hover:text-success"
                         onClick={() => queueTaskAction('transition', 'done')}
                       >
                         <CheckSquare className="w-3 h-3" />
@@ -338,7 +338,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1 text-amber-400 hover:text-amber-300"
+                        className="gap-1 text-warning hover:text-warning"
                         onClick={() => queueTaskAction('transition', 'paused')}
                       >
                         <Pause className="w-3 h-3" />
@@ -347,7 +347,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1 text-red-400 hover:text-red-300"
+                        className="gap-1 text-danger hover:text-danger"
                         onClick={() => queueTaskAction('delete')}
                       >
                         <Trash2 className="w-3 h-3" />
@@ -358,7 +358,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
 
                   {/* Task list */}
                   {tasks.length === 0 ? (
-                    <p className="text-xs text-zinc-500 text-center py-6">No tasks in this sprint.</p>
+                    <p className="text-xs text-fg-muted text-center py-6">No tasks in this sprint.</p>
                   ) : (
                     <div className="space-y-1">
                       {tasks.map(task => {
@@ -368,7 +368,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                             key={task.id}
                             className={cn(
                               'flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
-                              selectedTaskIds.has(task.id) ? 'bg-accent-muted border border-accent/20' : 'hover:bg-zinc-800/50 border border-transparent',
+                              selectedTaskIds.has(task.id) ? 'bg-primary/10 border border-primary/20' : 'hover:bg-surface/50 border border-transparent',
                               pending && 'opacity-60'
                             )}
                           >
@@ -376,13 +376,13 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                               type="checkbox"
                               checked={selectedTaskIds.has(task.id)}
                               onChange={() => toggleTask(task.id)}
-                              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-accent focus:ring-accent focus:ring-offset-0 shrink-0"
+                              className="w-3.5 h-3.5 rounded border-border-subtle bg-surface text-primary focus:ring-primary focus:ring-offset-0 shrink-0"
                             />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm text-zinc-200 truncate">{task.title}</span>
+                                <span className="text-sm text-fg truncate">{task.title}</span>
                                 {pending && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-muted text-accent-hover shrink-0">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary-hover shrink-0">
                                     {pending.type === 'delete' ? 'will delete' : `will ${(pending as { status: string }).status}`}
                                   </span>
                                 )}
@@ -407,11 +407,11 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                 <div className="space-y-3">
                   {/* Promotion target */}
                   <div className="flex items-center gap-2">
-                    <label className="text-xs text-zinc-500">Promote to:</label>
+                    <label className="text-xs text-fg-muted">Promote to:</label>
                     <select
                       value={promotionSprintId}
                       onChange={(e) => setPromotionSprintId(e.target.value)}
-                      className="flex-1 px-2 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 outline-none focus:border-accent transition-colors"
+                      className="flex-1 px-2 py-1.5 text-xs bg-surface border border-border-subtle rounded-md text-fg outline-none focus:border-primary transition-colors"
                     >
                       {sprints.map(s => (
                         <option key={s.id} value={s.id}>{s.name}</option>
@@ -421,13 +421,13 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
 
                   {/* Actions bar */}
                   {selectedBacklogIds.size > 0 && (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
-                      <span className="text-xs text-zinc-400">{selectedBacklogIds.size} selected</span>
+                    <div className="flex items-center gap-2 px-3 py-2 bg-surface/50 rounded-lg border border-border-subtle/50">
+                      <span className="text-xs text-fg-secondary">{selectedBacklogIds.size} selected</span>
                       <div className="flex-1" />
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1 text-accent hover:text-accent-hover"
+                        className="gap-1 text-primary hover:text-primary-hover"
                         onClick={queuePromote}
                         disabled={!promotionSprintId}
                       >
@@ -437,7 +437,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1 text-red-400 hover:text-red-300"
+                        className="gap-1 text-danger hover:text-danger"
                         onClick={queueBacklogDelete}
                       >
                         <Trash2 className="w-3 h-3" />
@@ -448,7 +448,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
 
                   {/* Backlog list */}
                   {backlog.length === 0 ? (
-                    <p className="text-xs text-zinc-500 text-center py-6">Backlog is empty.</p>
+                    <p className="text-xs text-fg-muted text-center py-6">Backlog is empty.</p>
                   ) : (
                     <div className="space-y-1">
                       {backlog.map(item => {
@@ -458,7 +458,7 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                             key={item.id}
                             className={cn(
                               'flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
-                              selectedBacklogIds.has(item.id) ? 'bg-accent-muted border border-accent/20' : 'hover:bg-zinc-800/50 border border-transparent',
+                              selectedBacklogIds.has(item.id) ? 'bg-primary/10 border border-primary/20' : 'hover:bg-surface/50 border border-transparent',
                               pending && 'opacity-60'
                             )}
                           >
@@ -466,19 +466,19 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
                               type="checkbox"
                               checked={selectedBacklogIds.has(item.id)}
                               onChange={() => toggleBacklog(item.id)}
-                              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-accent focus:ring-accent focus:ring-offset-0 shrink-0"
+                              className="w-3.5 h-3.5 rounded border-border-subtle bg-surface text-primary focus:ring-primary focus:ring-offset-0 shrink-0"
                             />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm text-zinc-200 truncate">{item.title}</span>
+                                <span className="text-sm text-fg truncate">{item.title}</span>
                                 {pending && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-muted text-accent-hover shrink-0">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary-hover shrink-0">
                                     will promote
                                   </span>
                                 )}
                               </div>
                               {item.body && (
-                                <p className="text-xs text-zinc-500 truncate mt-0.5">{item.body}</p>
+                                <p className="text-xs text-fg-muted truncate mt-0.5">{item.body}</p>
                               )}
                             </div>
                             <span className={cn('text-[10px] px-1.5 py-0.5 rounded border shrink-0', priorityColors[item.priority] ?? priorityColors.D)}>
@@ -496,26 +496,26 @@ export function SprintPlanningModal({ projectId, onClose }: SprintPlanningModalP
 
           {/* Error banner */}
           {error && sprints.length > 0 && (
-            <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+            <div className="mt-3 p-3 rounded-lg bg-danger/10 border border-danger/20 text-sm text-danger">
               {error}
             </div>
           )}
         </div>
 
         {/* Notes input */}
-        <div className="px-4 py-2 border-t border-zinc-800">
+        <div className="px-4 py-2 border-t border-border">
           <input
             type="text"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Notes or context..."
-            className="w-full px-3 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-md text-zinc-200 placeholder-zinc-600 outline-none focus:border-accent transition-colors"
+            className="w-full px-3 py-1.5 text-xs bg-surface border border-border-subtle rounded-md text-fg placeholder:text-fg-faint outline-none focus:border-primary transition-colors"
           />
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-800">
-          <span className="text-xs text-zinc-500">
+        <div className="flex items-center justify-between px-5 py-3 border-t border-border">
+          <span className="text-xs text-fg-muted">
             {pendingActions.length === 0 ? 'No changes queued' : `${pendingActions.length} action${pendingActions.length > 1 ? 's' : ''} queued`}
           </span>
           <div className="flex items-center gap-2">

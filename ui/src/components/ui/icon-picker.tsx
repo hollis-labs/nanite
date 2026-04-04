@@ -159,7 +159,7 @@ export function IconPicker({ value, onChange, disabled }: IconPickerProps) {
             placeholder="Search icons..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-surface/50 border border-border rounded-md px-2.5 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent/50"
+            className="w-full bg-surface/50 border border-border rounded-md px-2.5 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary/50"
             autoFocus
           />
         </div>
@@ -176,7 +176,7 @@ export function IconPicker({ value, onChange, disabled }: IconPickerProps) {
                   onClick={() => handleSelect(name)}
                   className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors ${
                     isSelected
-                      ? "bg-accent/15 text-accent ring-1 ring-accent/30"
+                      ? "bg-primary/15 text-primary ring-1 ring-primary/30"
                       : "text-fg-secondary hover:bg-surface-hover hover:text-fg"
                   }`}
                   title={name}

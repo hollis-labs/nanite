@@ -39,8 +39,8 @@ export function ShellMessage({ content, meta }: ShellMessageProps) {
         <span
           className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
             exitOk
-              ? 'bg-green-500/15 text-green-400'
-              : 'bg-red-500/15 text-red-400'
+              ? 'bg-success/15 text-success'
+              : 'bg-danger/15 text-danger'
           }`}
         >
           {meta.exit_code}
@@ -61,7 +61,7 @@ export function ShellMessage({ content, meta }: ShellMessageProps) {
           {isLong && !expanded && (
             <button
               onClick={() => setExpanded(true)}
-              className="flex items-center gap-1 mt-1.5 text-xs text-accent hover:text-accent/80 transition-colors"
+              className="flex items-center gap-1 mt-1.5 text-xs text-primary hover:text-primary/80 transition-colors"
             >
               <ChevronDown className="w-3 h-3" />
               Show {hiddenCount} more lines
@@ -70,7 +70,7 @@ export function ShellMessage({ content, meta }: ShellMessageProps) {
           {isLong && expanded && (
             <button
               onClick={() => setExpanded(false)}
-              className="flex items-center gap-1 mt-1.5 text-xs text-accent hover:text-accent/80 transition-colors"
+              className="flex items-center gap-1 mt-1.5 text-xs text-primary hover:text-primary/80 transition-colors"
             >
               <ChevronRight className="w-3 h-3" />
               Collapse
@@ -81,7 +81,7 @@ export function ShellMessage({ content, meta }: ShellMessageProps) {
 
       {/* Truncation notice */}
       {meta.truncated && (
-        <div className="px-3 py-1 text-[10px] text-amber-400 border-t border-border-subtle bg-amber-900/10">
+        <div className="px-3 py-1 text-[10px] text-warning border-t border-border-subtle bg-warning/10">
           Output truncated — full output saved on server
         </div>
       )}

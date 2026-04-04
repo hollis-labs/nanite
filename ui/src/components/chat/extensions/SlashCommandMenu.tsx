@@ -43,7 +43,7 @@ function ArgHints({ args }: { args: SlashCommandArg[] }) {
           key={arg.name}
           className={`text-[10px] font-mono px-1 py-0.5 rounded leading-none ${
             arg.required
-              ? 'text-blue-400/80 bg-blue-500/5 border border-blue-500/15'
+              ? 'text-info/80 bg-info/15 border border-info/30'
               : 'text-fg-faint bg-surface/50'
           }`}
           title={arg.description || `${arg.type ?? 'string'}${arg.options ? `: ${arg.options.join('|')}` : ''}`}
@@ -124,7 +124,7 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenu
             <div key={group.category}>
               <div className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-fg-muted uppercase tracking-wider">
                 <span className="w-4 h-4 rounded bg-surface-hover flex items-center justify-center shrink-0">
-                  <Terminal className="w-2.5 h-2.5 text-blue-400" />
+                  <Terminal className="w-2.5 h-2.5 text-info" />
                 </span>
                 {group.category}
               </div>
@@ -151,8 +151,8 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuRef, SlashCommandMenu
                       {item.source !== 'builtin' && (
                         <span className={`text-[9px] px-1 py-px rounded font-medium leading-none ml-auto shrink-0 ${
                           item.source.startsWith('custom-action:')
-                            ? 'bg-amber-500/15 text-amber-400 border border-amber-500/20'
-                            : 'bg-blue-500/15 text-blue-400 border border-blue-500/20'
+                            ? 'bg-warning/15 text-warning border border-warning/20'
+                            : 'bg-info/15 text-info border border-info/30'
                         }`}>
                           {item.source.startsWith('custom-action:') ? 'action' : 'plugin'}
                         </span>

@@ -106,7 +106,7 @@ export function NavRail() {
             onClick={() => setWorkspaceDropdownOpen((o) => !o)}
             className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-semibold transition-colors relative group ${
               workspaceDropdownOpen
-                ? 'bg-surface-hover text-fg ring-2 ring-accent/40'
+                ? 'bg-surface-hover text-fg ring-2 ring-primary/40'
                 : 'bg-surface hover:bg-surface-hover text-fg'
             }`}
           >
@@ -126,7 +126,7 @@ export function NavRail() {
 
         {/* Dropdown */}
         {workspaceDropdownOpen && (
-          <div className="absolute left-full top-0 ml-2 w-52 bg-white dark:bg-bg-elevated border border-border-subtle rounded-lg shadow-xl z-50 py-1">
+          <div className="absolute left-full top-0 ml-2 w-52 bg-bg-elevated border border-border-subtle rounded-lg shadow-xl z-50 py-1">
             <div className="px-3 py-1.5 text-xs font-medium text-fg-muted uppercase tracking-wider">
               Workspaces
             </div>
@@ -175,7 +175,7 @@ export function NavRail() {
                 size="icon"
                 className={`w-10 h-10 rounded-lg ${
                   isActive
-                    ? 'bg-surface text-accent'
+                    ? 'bg-surface text-primary'
                     : 'text-fg-secondary hover:text-fg'
                 }`}
                 onClick={() => {
@@ -211,7 +211,7 @@ export function NavRail() {
                 size="icon"
                 className={`w-10 h-10 rounded-lg ${
                   isActive
-                    ? 'bg-surface text-accent'
+                    ? 'bg-surface text-primary'
                     : 'text-fg-secondary hover:text-fg'
                 }`}
                 onClick={() => {

@@ -125,7 +125,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-accent hover:text-accent-hover underline underline-offset-2"
+          className="text-primary hover:text-primary-hover underline underline-offset-2"
           {...props}
         >
           {children}
@@ -164,7 +164,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
     blockquote({ children, ...props }) {
       return (
         <blockquote
-          className="border-l-2 border-accent/50 bg-bg-elevated/50 pl-4 py-2 my-3 text-fg-secondary italic"
+          className="border-l-2 border-primary/50 bg-bg-elevated/50 pl-4 py-2 my-3 text-fg-secondary italic"
           {...props}
         >
           {children}

@@ -18,7 +18,7 @@ export function IterationLimitWarning({ current, max }: IterationLimitWarningPro
   return (
     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs ${
       critical
-        ? 'bg-accent/10 border-accent/30 text-accent'
+        ? 'bg-primary/10 border-primary/30 text-primary'
         : 'bg-surface border-border-subtle text-fg-secondary'
     }`}>
       <AlertTriangle className="w-3.5 h-3.5 shrink-0" />

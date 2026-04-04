@@ -33,8 +33,8 @@ interface SprintPlanningReviewCardProps {
 }
 
 const PRIORITY_DOT: Record<string, string> = {
-  P1: 'bg-accent',
-  P2: 'bg-amber-400',
+  P1: 'bg-primary',
+  P2: 'bg-warning',
   P3: 'bg-success',
 }
 
@@ -230,7 +230,7 @@ export function SprintPlanningReviewCard({ data, onSendMessage }: SprintPlanning
                         className={`h-7 px-2.5 text-xs ${
                           isOriginal
                             ? 'bg-success hover:bg-success/80 text-white'
-                            : 'bg-amber-600 hover:bg-amber-500 text-white'
+                            : 'bg-warning hover:bg-amber-500 text-white'
                         }`}
                       >
                         {isOriginal ? (

@@ -90,8 +90,8 @@ export function UtilityLogTable({ data }: UtilityLogTableProps) {
               <td className="py-1.5 pr-3 text-fg-secondary">{row.provider}</td>
               <td className="py-1.5 pr-3 font-mono text-fg-secondary whitespace-nowrap">{row.model}</td>
               <td className="py-1.5 pr-3 text-fg-secondary">{row.mode}</td>
-              <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-blue-400">{formatDuration(row.duration_ms)}</td>
-              <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-amber-400">{formatCost(row.estimated_cost_usd)}</td>
+              <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-info">{formatDuration(row.duration_ms)}</td>
+              <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-warning">{formatCost(row.estimated_cost_usd)}</td>
               <td className="py-1.5 text-center">
                 <span className={`inline-block w-2 h-2 rounded-full ${row.error ? 'bg-red-500' : 'bg-emerald-500'}`} />
               </td>

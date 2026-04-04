@@ -40,8 +40,8 @@ function ProviderIcon({ providerType, active }: { providerType: string; active: 
   return (
     <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-xs font-bold shrink-0 ${
       active
-        ? 'bg-zinc-700 text-zinc-300'
-        : 'bg-zinc-300 text-zinc-500'
+        ? 'bg-surface-hover text-fg-secondary'
+        : 'bg-surface text-fg-muted'
     }`}>
       {initial}
     </span>
@@ -173,7 +173,7 @@ function APIKeyField({ provider }: { provider: ProviderStatus }) {
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSave() }}
               placeholder="sk-..."
-              className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg pr-10 focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+              className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg pr-10 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
               autoFocus
             />
             <button
@@ -198,7 +198,7 @@ function APIKeyField({ provider }: { provider: ProviderStatus }) {
             </div>
           )}
           {testResult === 'error' && (
-            <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 px-3 py-2 rounded-md">
+            <div className="flex items-center gap-2 text-sm text-danger bg-danger/10 px-3 py-2 rounded-md">
               <AlertTriangle className="w-4 h-4" />
               {testError || 'Connection failed'}
             </div>
@@ -211,7 +211,7 @@ function APIKeyField({ provider }: { provider: ProviderStatus }) {
             {testResult !== 'success' && (
               <Button
                 size="sm"
-                className="bg-accent hover:bg-accent-hover text-white"
+                className="bg-primary hover:bg-primary-hover text-white"
                 onClick={handleSave}
                 disabled={!value.trim() || mutation.isPending || testResult === 'testing'}
               >
@@ -285,14 +285,14 @@ function CLIPathField({
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') mutation.mutate(value) }}
             placeholder="/usr/local/bin/claude"
-            className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:ring-1 focus:ring-accent"
+            className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:ring-1 focus:ring-primary"
             autoFocus
           />
           <div className="flex items-center justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button
               size="sm"
-              className="bg-accent hover:bg-accent-hover text-white"
+              className="bg-primary hover:bg-primary-hover text-white"
               onClick={() => mutation.mutate(value)}
               disabled={mutation.isPending}
             >
@@ -343,14 +343,14 @@ function BaseURLField({ providerId, providerType, currentURL }: { providerId: st
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') mutation.mutate(value) }}
             placeholder={defaultURL || 'https://api.example.com'}
-            className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:ring-1 focus:ring-accent"
+            className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:ring-1 focus:ring-primary"
             autoFocus
           />
           <div className="flex items-center justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button
               size="sm"
-              className="bg-accent hover:bg-accent-hover text-white"
+              className="bg-primary hover:bg-primary-hover text-white"
               onClick={() => mutation.mutate(value)}
               disabled={mutation.isPending}
             >
@@ -410,7 +410,7 @@ function ProviderCard({
               {provider.name}
             </span>
             {isActive && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
-            {!canActivate && <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />}
+            {!canActivate && <AlertTriangle className="w-3 h-3 text-warning shrink-0" />}
           </div>
         </div>
         <button
@@ -420,7 +420,7 @@ function ProviderCard({
             isActive
               ? 'bg-toggle-on'
               : canActivate
-                ? 'bg-zinc-700 hover:bg-surface-hover'
+                ? 'bg-surface-hover hover:bg-surface-hover'
                 : 'bg-surface cursor-not-allowed'
           }`}
         >
@@ -653,7 +653,7 @@ export function ProviderManager() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Filter..."
-            className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+            className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
           />
         </div>
 
@@ -726,7 +726,7 @@ export function ProviderManager() {
             {(search || statusFilter !== 'all') && (
               <button
                 onClick={() => { setSearch(''); setStatusFilter('all') }}
-                className="text-xs text-accent hover:text-accent-hover mt-2 transition-colors"
+                className="text-xs text-primary hover:text-primary-hover mt-2 transition-colors"
               >
                 Clear filters
               </button>

@@ -305,7 +305,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                 onClick={() => setSourceFilter(s)}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                   sourceFilter === s
-                    ? "bg-accent text-white"
+                    ? "bg-primary text-white"
                     : "bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover"
                 }`}
               >
@@ -321,7 +321,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
               type="checkbox"
               checked={showDisabled}
               onChange={(e) => setShowDisabled(e.target.checked)}
-              className="rounded border-border-subtle bg-surface text-accent focus:ring-accent focus:ring-offset-bg-elevated"
+              className="rounded border-border-subtle bg-surface text-primary focus:ring-primary focus:ring-offset-bg-elevated"
             />
             Show disabled
           </label>
@@ -384,7 +384,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                       <div className="flex items-center gap-2.5 px-3.5 py-3">
                         <span
                           className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-sm shrink-0 ${
-                            isActive ? "bg-zinc-700 text-zinc-300" : "bg-zinc-300 text-zinc-500"
+                            isActive ? "bg-surface-hover text-fg-secondary" : "bg-surface text-fg-muted"
                           }`}
                         >
                           {agent.icon ? (
@@ -440,7 +440,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                           Edit
                         </ContextMenuItem>
                         <ContextMenuSeparator />
-                        <ContextMenuItem className="gap-2 text-xs text-accent" disabled>
+                        <ContextMenuItem className="gap-2 text-xs text-primary" disabled>
                           <Trash2 className="w-3.5 h-3.5" />
                           Delete
                         </ContextMenuItem>

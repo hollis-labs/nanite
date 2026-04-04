@@ -174,8 +174,8 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
 
       {/* Error state */}
       {isError && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-start gap-3">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-danger/30 bg-danger/5 p-4 flex items-start gap-3">
+          <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-medium text-fg">Failed to load catalog</p>
             <p className="text-xs text-fg-muted mt-1">
@@ -244,7 +244,7 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
               key={toast.id}
               className={`px-4 py-3 border rounded-lg shadow-xl text-sm max-w-sm animate-in fade-in slide-in-from-bottom-2 ${
                 toast.variant === 'error'
-                  ? 'bg-red-950/80 border-red-500/30 text-red-200'
+                  ? 'bg-danger/20 border-danger/30 text-danger'
                   : toast.variant === 'success'
                     ? 'bg-success/5 border-success/30 text-fg'
                     : 'bg-surface border-border-subtle text-fg'
@@ -283,7 +283,7 @@ function CatalogEntryCard({
     >
       {/* Header */}
       <div className="flex items-center gap-2.5 px-3.5 py-3">
-        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 bg-zinc-700 text-zinc-300">
+        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 bg-surface-hover text-fg-secondary">
           <Package className="w-4 h-4" />
         </span>
         <div className="flex-1 min-w-0">
@@ -293,7 +293,7 @@ function CatalogEntryCard({
               <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
             )}
             {hasUpdate && (
-              <ArrowUpCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <ArrowUpCircle className="w-3.5 h-3.5 text-warning shrink-0" />
             )}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
@@ -317,7 +317,7 @@ function CatalogEntryCard({
             </span>
           )}
           {hasUpdate && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 leading-none">
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-warning/10 border border-warning/30 text-warning leading-none">
               v{entry.installed_version} &rarr; v{entry.version}
             </span>
           )}
@@ -325,7 +325,7 @@ function CatalogEntryCard({
             <button
               onClick={onInstall}
               disabled={installing}
-              className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-40"
+              className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-white bg-primary hover:bg-primary-hover rounded-md transition-colors disabled:opacity-40"
             >
               {installing ? (
                 <Loader2 className="w-3 h-3 animate-spin" />

@@ -278,7 +278,7 @@ export function ChatHeader() {
                 </span>
               )}
               {activeMode && activeMode !== 'default' && (
-                <span className="px-1 py-0 rounded text-[10px] text-amber-400 bg-amber-500/10 leading-relaxed">
+                <span className="px-1 py-0 rounded text-[10px] text-warning bg-warning/10 leading-relaxed">
                   {activeMode}
                 </span>
               )}

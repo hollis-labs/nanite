@@ -72,7 +72,7 @@ export function WidgetDetailView({
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <span
             className={`inline-flex items-center justify-center w-12 h-12 rounded-lg shrink-0 ${
-              visible ? "bg-zinc-700 text-zinc-300" : "bg-zinc-300 text-zinc-500"
+              visible ? "bg-surface-hover text-fg-secondary" : "bg-surface text-fg-muted"
             }`}
           >
             <LayoutGrid className="w-6 h-6" />
@@ -179,7 +179,7 @@ export function WidgetDetailView({
               onClick={() => onConfigurePlugin(widget.plugin_id!)}
               className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-surface/40 transition-colors w-full text-left"
             >
-              <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
+              <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-surface-hover text-fg-secondary shrink-0">
                 <Package className="w-4 h-4" />
               </span>
               <div className="flex-1 min-w-0">

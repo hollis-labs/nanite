@@ -6,13 +6,13 @@ interface TagPillsProps {
 
 // Deterministic color from tag string — consistent across renders
 const TAG_COLORS = [
-  { bg: 'bg-blue-500/10', border: 'border-blue-500/20', text: 'text-blue-400' },
+  { bg: 'bg-info/15', border: 'border-info/30', text: 'text-info' },
   { bg: 'bg-purple-500/10', border: 'border-purple-500/20', text: 'text-purple-400' },
-  { bg: 'bg-amber-500/10', border: 'border-amber-500/20', text: 'text-amber-400' },
+  { bg: 'bg-warning/10', border: 'border-warning/20', text: 'text-warning' },
   { bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', text: 'text-cyan-400' },
   { bg: 'bg-pink-500/10', border: 'border-pink-500/20', text: 'text-pink-400' },
-  { bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', text: 'text-emerald-400' },
-  { bg: 'bg-orange-500/10', border: 'border-orange-500/20', text: 'text-orange-400' },
+  { bg: 'bg-success/10', border: 'border-success/20', text: 'text-success' },
+  { bg: 'bg-warning/10', border: 'border-orange-500/20', text: 'text-warning' },
   { bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', text: 'text-indigo-400' },
 ]
 

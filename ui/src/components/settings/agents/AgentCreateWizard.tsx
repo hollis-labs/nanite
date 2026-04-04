@@ -154,7 +154,7 @@ export function AgentCreateWizard({
           <div key={s} className="flex items-center gap-2 flex-1">
             <div
               className={`h-1 flex-1 rounded-full transition-colors ${
-                i <= stepIndex ? "bg-accent" : "bg-surface"
+                i <= stepIndex ? "bg-primary" : "bg-surface"
               }`}
             />
           </div>
@@ -269,7 +269,7 @@ function IdentityStep({
   nameRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const inputClass =
-    "w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:border-accent transition-colors";
+    "w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-sm focus:outline-none focus:border-primary transition-colors";
 
   return (
     <Card>
@@ -430,7 +430,7 @@ function InstructionsStep({
             onChange={(e) => onSystemPromptChange(e.target.value)}
             rows={14}
             placeholder={"You are a helpful assistant that...\n\nYour responsibilities:\n- ...\n- ...\n\nRules:\n- ..."}
-            className="w-full px-3 py-2.5 bg-bg-elevated border border-border-subtle rounded-lg text-sm text-fg font-mono leading-relaxed focus:outline-none focus:border-accent resize-y min-h-[280px] placeholder:text-fg-faint/50 transition-colors"
+            className="w-full px-3 py-2.5 bg-bg-elevated border border-border-subtle rounded-lg text-sm text-fg font-mono leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[280px] placeholder:text-fg-faint/50 transition-colors"
           />
           <p className="text-[10px] text-fg-faint">
             You can refine this later. Advanced config (tools, directories, MCP servers) is available after creation.

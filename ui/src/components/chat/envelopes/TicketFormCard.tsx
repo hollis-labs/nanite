@@ -137,7 +137,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
   }
 
   const inputCls =
-    'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent placeholder:text-fg-faint'
+    'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary placeholder:text-fg-faint'
 
   return (
     <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
@@ -151,7 +151,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
         {/* Issue Summary */}
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-secondary">
-            Issue Summary <span className="text-red-400">*</span>
+            Issue Summary <span className="text-danger">*</span>
           </label>
           <input
             type="text"
@@ -166,7 +166,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
         {/* Category */}
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-secondary">
-            Category <span className="text-red-400">*</span>
+            Category <span className="text-danger">*</span>
           </label>
           <select
             className={inputCls}
@@ -206,7 +206,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
         {/* Description */}
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-secondary">
-            Description <span className="text-red-400">*</span>
+            Description <span className="text-danger">*</span>
           </label>
           <textarea
             className={`${inputCls} min-h-[80px] resize-y`}
@@ -234,9 +234,9 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
 
         {/* Error message */}
         {formState === 'error' && (
-          <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2">
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-            <span className="text-xs text-red-400">{errorMsg}</span>
+          <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger/5 px-3 py-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-danger" />
+            <span className="text-xs text-danger">{errorMsg}</span>
           </div>
         )}
 
@@ -244,7 +244,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
         <Button
           type="submit"
           size="sm"
-          className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-8"
+          className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-8"
           disabled={formState === 'submitting' || !title.trim() || !category || !description.trim()}
         >
           {formState === 'submitting' ? (

@@ -54,21 +54,21 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           loadingOlder={loadingOlder}
         />
         {sessionTakeover && (
-          <div className="mx-4 mb-2 rounded-lg border border-blue-500/30 bg-blue-500/10 p-4">
+          <div className="mx-4 mb-2 rounded-lg border border-info/30 bg-info/15 p-4">
             <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+              <AlertTriangle className="w-5 h-5 text-info mt-0.5 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-blue-200">
+                <p className="text-sm font-medium text-info">
                   This session is now active in another tab
                 </p>
-                <p className="text-xs text-blue-300/70 mt-1">
+                <p className="text-xs text-info/70 mt-1">
                   The streaming connection was moved to a newer tab. Reload this page to reconnect
                   here.
                 </p>
                 <div className="flex gap-2 mt-3">
                   <button
                     onClick={() => window.location.reload()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-blue-500/20 text-blue-200 hover:bg-blue-500/30 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-info/15 text-info hover:bg-info/30 transition-colors"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                     Reconnect
@@ -79,21 +79,21 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           </div>
         )}
         {circuitOpen && (
-          <div className="mx-4 mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+          <div className="mx-4 mb-2 rounded-lg border border-warning/30 bg-warning/10 p-4">
             <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+              <AlertTriangle className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-amber-200">
+                <p className="text-sm font-medium text-warning">
                   Provider rate limited after multiple retries
                 </p>
-                <p className="text-xs text-amber-300/70 mt-1">
+                <p className="text-xs text-warning/70 mt-1">
                   The API provider has been returning rate limit errors. You can retry or dismiss to
                   keep the partial response.
                 </p>
                 <div className="flex gap-2 mt-3">
                   <button
                     onClick={() => void retryStream()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-warning/20 text-warning hover:bg-warning/30 transition-colors"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                     Retry
@@ -111,7 +111,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           </div>
         )}
         {statusMessage && (
-          <div className="px-4 py-1.5 text-xs text-amber-400 bg-amber-950/30 border-t border-amber-900/40 animate-pulse">
+          <div className="px-4 py-1.5 text-xs text-warning bg-warning/10 border-t border-warning/30 animate-pulse">
             {statusMessage}
           </div>
         )}
@@ -188,7 +188,7 @@ function WelcomeScreen() {
             onClick={() => handleAction(card.action)}
             className="group text-left p-4 rounded-lg border border-border bg-bg-elevated/50 hover:border-border-subtle hover:bg-bg-elevated transition-all"
           >
-            <card.icon className="w-5 h-5 text-accent mb-3 group-hover:text-accent-hover transition-colors" />
+            <card.icon className="w-5 h-5 text-primary mb-3 group-hover:text-primary-hover transition-colors" />
             <h3 className="text-sm font-medium text-fg mb-1">{card.title}</h3>
             <p className="text-xs text-fg-muted leading-relaxed">{card.description}</p>
           </button>

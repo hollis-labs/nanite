@@ -57,7 +57,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
         <div key={i}>
           <label className="block text-sm font-medium text-fg-secondary mb-1.5">
             {q.prompt}
-            {q.required && <span className="text-red-400 ml-0.5">*</span>}
+            {q.required && <span className="text-danger ml-0.5">*</span>}
           </label>
 
           {q.type === 'textarea' && (
@@ -65,7 +65,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
               rows={3}
-              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent resize-none"
+              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary resize-none"
             />
           )}
 
@@ -74,7 +74,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
               type="text"
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
-              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
+              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary"
             />
           )}
 
@@ -82,7 +82,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
             <select
               value={String(answers[i] ?? '')}
               onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
-              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
+              className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary"
             >
               <option value="">Select...</option>
               {q.options.map((raw) => {
@@ -147,7 +147,7 @@ export function QuestionForm({ questions, onSubmit }: QuestionFormProps) {
 
       <Button
         size="sm"
-        className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-7"
+        className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-7"
         onClick={handleSubmit}
       >
         Submit Answers

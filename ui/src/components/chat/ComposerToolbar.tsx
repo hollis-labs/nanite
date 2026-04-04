@@ -178,7 +178,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
                     <span className={`ml-auto text-[9px] px-1 py-px rounded font-medium leading-none ${
                       group.isPty
                         ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/20'
-                        : 'bg-blue-500/15 text-blue-400 border border-blue-500/20'
+                        : 'bg-info/15 text-info border border-info/30'
                     }`}>
                       {group.isPty ? 'PTY' : 'API'}
                     </span>
@@ -232,7 +232,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
             <Button
               variant="ghost"
               size="icon"
-              className="w-7 h-7 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+              className="w-7 h-7 text-danger hover:text-danger hover:bg-danger/10 transition-colors"
               onClick={onStop}
             >
               <Square className="w-3.5 h-3.5" />
@@ -245,7 +245,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
               size="icon"
               className={`w-7 h-7 transition-colors ${
                 hasContent
-                  ? 'text-accent hover:text-accent-hover hover:bg-accent-hover/10'
+                  ? 'text-primary hover:text-primary-hover hover:bg-primary-hover/10'
                   : 'text-composer-fg-muted'
               }`}
               disabled={!hasContent}

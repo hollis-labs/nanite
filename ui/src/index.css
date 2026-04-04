@@ -17,7 +17,7 @@
   --color-zinc-900: #18181b;
   --color-zinc-950: #09090b;
 
-  /* Semantic tokens — Tailwind classes: bg-bg, text-fg, border-border, etc. */
+  /* Surfaces & text — bg-bg, text-fg, border-border, etc. */
   --color-bg: var(--c-bg);
   --color-bg-elevated: var(--c-bg-elevated);
   --color-surface: var(--c-surface);
@@ -30,27 +30,65 @@
   --color-fg-muted: var(--c-fg-muted);
   --color-fg-faint: var(--c-fg-faint);
 
-  /* Accent (fire engine red) */
-  --color-accent: var(--c-accent);
-  --color-accent-hover: var(--c-accent-hover);
-  --color-accent-active: var(--c-accent-active);
-  --color-accent-muted: var(--c-accent-muted);
-  --color-accent-fg: var(--c-accent-fg);
+  /* Brand — fire-engine red, rare identity moments only */
+  --color-brand: var(--c-brand);
+  --color-brand-hover: var(--c-brand-hover);
+  --color-brand-active: var(--c-brand-active);
+  --color-brand-muted: var(--c-brand-muted);
+  --color-brand-fg: var(--c-brand-fg);
 
-  /* Toggle on state (emerald green) */
-  --color-toggle-on: var(--c-toggle-on);
+  /* Primary — the workhorse highlight (sky blue) */
+  --color-primary-hover: var(--c-primary-hover);
+  --color-primary-active: var(--c-primary-active);
+  --color-primary-muted: var(--c-primary-muted);
 
-  /* Success (theme-adaptive blue) */
+  /* Danger — destructive actions, errors (red-700, separate from brand) */
+  --color-danger: var(--c-danger);
+  --color-danger-hover: var(--c-danger-hover);
+  --color-danger-muted: var(--c-danger-muted);
+  --color-danger-fg: var(--c-danger-fg);
+
+  /* Info — neutral informational (the old "success" blue) */
+  --color-info: var(--c-info);
+  --color-info-muted: var(--c-info-muted);
+
+  /* Success — real green for completion / healthy state */
   --color-success: var(--c-success);
   --color-success-muted: var(--c-success-muted);
+  --color-success-fg: var(--c-success-fg);
+
+  /* Warning — amber, for caution states */
+  --color-warning: var(--c-warning);
+  --color-warning-muted: var(--c-warning-muted);
+
+  /* Selection — neutral hover/focus surface (shadcn's "accent" semantic) */
+  --color-selection: var(--c-selection);
+  --color-selection-fg: var(--c-selection-fg);
+
+  /* Agent mode indicators — muted, non-competing hues */
+  --color-mode-default: var(--c-mode-default);
+  --color-mode-architect: var(--c-mode-architect);
+  --color-mode-planner: var(--c-mode-planner);
+  --color-mode-writer: var(--c-mode-writer);
 
   /* Widget status colors — muted, easy on the eyes */
   --color-status-ok: var(--c-status-ok);
   --color-status-warn: var(--c-status-warn);
   --color-status-danger: var(--c-status-danger);
 
-  /* Focus ring */
-  --color-ring: var(--c-ring);
+  /* Focus ring — uses primary */
+  --color-ring: var(--c-primary);
+
+  /* Toggle on state (kept for compat, uses primary) */
+  --color-toggle-on: var(--c-primary);
+
+  /* Legacy accent alias — kept during Phase 1 migration, maps to brand.
+     Phase 2–4 will migrate bg-accent/text-accent usages to bg-brand/bg-primary/bg-danger. */
+  --color-accent: var(--c-brand);
+  --color-accent-hover: var(--c-brand-hover);
+  --color-accent-active: var(--c-brand-active);
+  --color-accent-muted: var(--c-brand-muted);
+  --color-accent-fg: var(--c-brand-fg);
 
   /* shadcn standard tokens — mapped to our semantic theme */
   --color-popover: var(--c-bg-elevated);
@@ -59,11 +97,12 @@
   --color-muted-foreground: var(--c-fg-muted);
   --color-card: var(--c-bg-elevated);
   --color-card-foreground: var(--c-fg);
-  --color-primary: var(--c-accent);
-  --color-primary-foreground: var(--c-accent-fg);
+  --color-primary: var(--c-primary);
+  --color-primary-foreground: var(--c-primary-fg);
   --color-secondary: var(--c-surface);
   --color-secondary-foreground: var(--c-fg);
-  --color-destructive: var(--c-accent);
+  --color-destructive: var(--c-danger);
+  --color-destructive-foreground: var(--c-danger-fg);
   --color-input: var(--c-border-subtle);
   --color-background: var(--c-bg);
   --color-foreground: var(--c-fg);
@@ -93,18 +132,53 @@
   --c-fg-secondary: #a1a1aa;
   --c-fg-muted: #71717a;
   --c-fg-faint: #52525b;
-  --c-accent: #dc2626;
-  --c-accent-hover: #ef4444;
-  --c-accent-active: #b91c1c;
-  --c-accent-muted: rgba(220, 38, 38, 0.15);
-  --c-accent-fg: #ffffff;
-  --c-toggle-on: #3b82f6;
-  --c-success: #60a5fa;
-  --c-success-muted: rgba(59, 130, 246, 0.15);
+
+  /* Brand — fire-engine red #e11d2e */
+  --c-brand: #e11d2e;
+  --c-brand-hover: #f43f5e;
+  --c-brand-active: #be123c;
+  --c-brand-muted: rgba(225, 29, 46, 0.15);
+  --c-brand-fg: #ffffff;
+
+  /* Primary — sky-500 */
+  --c-primary: #0ea5e9;
+  --c-primary-hover: #38bdf8;
+  --c-primary-active: #0284c7;
+  --c-primary-muted: rgba(14, 165, 233, 0.15);
+  --c-primary-fg: #ffffff;
+
+  /* Danger — red-700 #b91c1c (darker than brand) */
+  --c-danger: #b91c1c;
+  --c-danger-hover: #dc2626;
+  --c-danger-muted: rgba(185, 28, 28, 0.15);
+  --c-danger-fg: #ffffff;
+
+  /* Info — blue (was old "success") */
+  --c-info: #3b82f6;
+  --c-info-muted: rgba(59, 130, 246, 0.15);
+
+  /* Success — emerald-500 (real green) */
+  --c-success: #10b981;
+  --c-success-muted: rgba(16, 185, 129, 0.15);
+  --c-success-fg: #ffffff;
+
+  /* Warning — amber-500 */
+  --c-warning: #f59e0b;
+  --c-warning-muted: rgba(245, 158, 11, 0.15);
+
+  /* Selection — neutral hover/focus (replaces shadcn's "accent") */
+  --c-selection: rgba(255, 255, 255, 0.08);
+  --c-selection-fg: var(--c-fg);
+
+  /* Agent modes — muted, non-competing */
+  --c-mode-default: #64748b;   /* slate-500 */
+  --c-mode-architect: #78716c; /* stone-500 */
+  --c-mode-planner: #7c7bd1;   /* muted violet */
+  --c-mode-writer: #a78b5e;    /* muted amber */
+
   --c-status-ok: #6b9e8a;
   --c-status-warn: #b09060;
   --c-status-danger: #c07070;
-  --c-ring: #dc2626;
 
   /* Composer — always dark */
   --c-composer: #18181b;
@@ -131,18 +205,53 @@
   --c-fg-secondary: #3f3f46;
   --c-fg-muted: #71717a;
   --c-fg-faint: #a1a1aa;
-  --c-accent: #dc2626;
-  --c-accent-hover: #b91c1c;
-  --c-accent-active: #991b1b;
-  --c-accent-muted: rgba(220, 38, 38, 0.10);
-  --c-accent-fg: #ffffff;
-  --c-toggle-on: #3b82f6;
-  --c-success: #2563eb;
-  --c-success-muted: rgba(59, 130, 246, 0.10);
+
+  /* Brand — same hue, slightly deeper for light mode contrast */
+  --c-brand: #e11d2e;
+  --c-brand-hover: #be123c;
+  --c-brand-active: #9f1239;
+  --c-brand-muted: rgba(225, 29, 46, 0.10);
+  --c-brand-fg: #ffffff;
+
+  /* Primary — sky-600 for better light-mode contrast */
+  --c-primary: #0284c7;
+  --c-primary-hover: #0369a1;
+  --c-primary-active: #075985;
+  --c-primary-muted: rgba(2, 132, 199, 0.10);
+  --c-primary-fg: #ffffff;
+
+  /* Danger — red-700 */
+  --c-danger: #b91c1c;
+  --c-danger-hover: #991b1b;
+  --c-danger-muted: rgba(185, 28, 28, 0.10);
+  --c-danger-fg: #ffffff;
+
+  /* Info — blue-600 */
+  --c-info: #2563eb;
+  --c-info-muted: rgba(37, 99, 235, 0.10);
+
+  /* Success — emerald-600 for light mode */
+  --c-success: #059669;
+  --c-success-muted: rgba(5, 150, 105, 0.10);
+  --c-success-fg: #ffffff;
+
+  /* Warning — amber-600 */
+  --c-warning: #d97706;
+  --c-warning-muted: rgba(217, 119, 6, 0.10);
+
+  /* Selection — neutral hover/focus */
+  --c-selection: rgba(0, 0, 0, 0.06);
+  --c-selection-fg: var(--c-fg);
+
+  /* Agent modes — muted, slightly darker for light mode */
+  --c-mode-default: #475569;   /* slate-600 */
+  --c-mode-architect: #57534e; /* stone-600 */
+  --c-mode-planner: #6366b8;   /* muted violet */
+  --c-mode-writer: #8a6d4a;    /* muted amber */
+
   --c-status-ok: #4a7a65;
   --c-status-warn: #8a6d3e;
   --c-status-danger: #a05050;
-  --c-ring: #dc2626;
 
   /* Composer — always dark (same as :root) */
   --c-composer: #18181b;

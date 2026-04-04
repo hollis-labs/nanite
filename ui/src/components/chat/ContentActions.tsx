@@ -47,7 +47,7 @@ export function ContentActions({
           onClick={handleBookmark}
           className={`p-1 rounded transition-colors ${
             isBookmarked
-              ? 'text-amber-500 hover:text-amber-400 hover:bg-surface'
+              ? 'text-warning hover:text-warning hover:bg-surface'
               : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
           }`}
           aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark'}

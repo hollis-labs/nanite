@@ -91,7 +91,7 @@ function SettingsInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="w-48 bg-bg-elevated border border-border-subtle rounded-lg px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+      className="w-48 bg-bg-elevated border border-border-subtle rounded-lg px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
     />
   )
 }
@@ -203,7 +203,7 @@ function AvatarUploader({
       />
       <button
         onClick={() => fileRef.current?.click()}
-        className="relative group size-16 rounded-xl bg-surface border border-border-subtle overflow-hidden flex items-center justify-center shrink-0 transition-all hover:ring-2 hover:ring-accent/40"
+        className="relative group size-16 rounded-xl bg-surface border border-border-subtle overflow-hidden flex items-center justify-center shrink-0 transition-all hover:ring-2 hover:ring-primary/40"
       >
         {avatarUrl ? (
           <img src={avatarUrl} alt="Avatar" className="size-full object-cover" />
@@ -219,7 +219,7 @@ function AvatarUploader({
       <div className="space-y-1">
         <button
           onClick={() => fileRef.current?.click()}
-          className="text-xs text-accent hover:text-accent-hover font-medium"
+          className="text-xs text-primary hover:text-primary-hover font-medium"
         >
           Upload photo
         </button>
@@ -379,7 +379,7 @@ export function ProfilePanel() {
             <select
               value={timezone}
               onChange={(e) => updateExt({ timezone: e.target.value })}
-              className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-8 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent cursor-pointer"
+              className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-8 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
             >
               {TIMEZONE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -396,7 +396,7 @@ export function ProfilePanel() {
             <select
               value={language}
               onChange={(e) => updateExt({ language: e.target.value })}
-              className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-8 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent cursor-pointer"
+              className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-8 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
             >
               {LANGUAGE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -431,7 +431,7 @@ export function ProfilePanel() {
             onChange={(e) => handleContextChange(e.target.value)}
             placeholder={"Example: I'm a senior engineer working on a Go + React chat platform. Currently focused on plugin architecture. I prefer concise answers and working code over long explanations. My timezone is US/Central."}
             rows={6}
-            className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-fg placeholder:text-fg-faint/60 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent resize-y min-h-[120px]"
+            className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-fg placeholder:text-fg-faint/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-y min-h-[120px]"
           />
           <p className="text-[10px] text-fg-faint mt-1">
             {(localContext ?? userContext).length} characters

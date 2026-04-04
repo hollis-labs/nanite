@@ -31,14 +31,14 @@ interface ReportCardProps {
 const METRIC_COLORS: Record<string, { bg: string; bar: string; text: string }> = {
   emerald: { bg: 'bg-success/10', bar: 'bg-success', text: 'text-success' },
   green:   { bg: 'bg-success/10', bar: 'bg-success', text: 'text-success' },
-  amber:   { bg: 'bg-amber-500/10',   bar: 'bg-amber-500',   text: 'text-amber-400' },
-  red:     { bg: 'bg-accent/10',      bar: 'bg-accent',      text: 'text-accent' },
+  amber:   { bg: 'bg-warning/10',   bar: 'bg-amber-500',   text: 'text-warning' },
+  red:     { bg: 'bg-primary/10',      bar: 'bg-primary',      text: 'text-primary' },
   blue:    { bg: 'bg-success/10',     bar: 'bg-success',     text: 'text-success' },
   violet:  { bg: 'bg-violet-500/10',  bar: 'bg-violet-500',  text: 'text-violet-400' },
 }
 
 function MetricCard({ metric }: { metric: Metric }) {
-  const fallback = { bg: 'bg-blue-500/10', bar: 'bg-blue-500', text: 'text-blue-400' }
+  const fallback = { bg: 'bg-info/15', bar: 'bg-blue-500', text: 'text-info' }
   const colors = METRIC_COLORS[metric.color || 'blue'] ?? fallback
 
   return (

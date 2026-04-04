@@ -82,7 +82,7 @@ export function ToolPermissionsEditor({ value, onChange }: ToolPermissionsEditor
         label="Deny"
         icon={ShieldOff}
         items={denyList}
-        accentClass="text-accent"
+        accentClass="text-primary"
         onAdd={(p) => handleAdd("deny", p)}
         onRemove={(i) => handleRemove("deny", i)}
       />
@@ -145,7 +145,7 @@ function PermissionSection({
 
       {items.map((item, index) => (
         <div key={`${item}-${index}`} className="group flex items-center gap-2 px-2 py-1 rounded-md hover:bg-surface/40 transition-colors">
-          <span className={`w-1.5 h-1.5 rounded-full ${accentClass === "text-success" ? "bg-success" : "bg-accent"} shrink-0`} />
+          <span className={`w-1.5 h-1.5 rounded-full ${accentClass === "text-success" ? "bg-success" : "bg-primary"} shrink-0`} />
           <span className="flex-1 text-xs font-mono text-fg-secondary truncate">
             {item === "*" ? (
               <span className="text-fg-muted italic">All tools</span>
@@ -155,7 +155,7 @@ function PermissionSection({
           </span>
           <button
             onClick={() => onRemove(index)}
-            className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-accent transition-all"
+            className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
           >
             <X className="w-3 h-3" />
           </button>
@@ -164,7 +164,7 @@ function PermissionSection({
 
       {isAdding && (
         <div className="flex items-center gap-2 px-2 py-1">
-          <span className={`w-1.5 h-1.5 rounded-full ${accentClass === "text-success" ? "bg-success" : "bg-accent"} shrink-0`} />
+          <span className={`w-1.5 h-1.5 rounded-full ${accentClass === "text-success" ? "bg-success" : "bg-primary"} shrink-0`} />
           <input
             ref={inputRef}
             type="text"
@@ -178,7 +178,7 @@ function PermissionSection({
               }
             }}
             placeholder="mcp__server__tool_name or *"
-            className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-accent py-0.5 placeholder:text-fg-faint"
+            className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-primary py-0.5 placeholder:text-fg-faint"
           />
           <Button
             variant="ghost"

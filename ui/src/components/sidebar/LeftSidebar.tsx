@@ -412,7 +412,7 @@ function PresenceDot({ variant }: { variant: "streaming" | "tool-pending" | "cli
   if (variant === "streaming") {
     return (
       <span
-        className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"
+        className="w-2 h-2 rounded-full bg-success shrink-0 animate-pulse"
         title="Streaming"
       />
     );
@@ -420,13 +420,13 @@ function PresenceDot({ variant }: { variant: "streaming" | "tool-pending" | "cli
   if (variant === "cli-active") {
     return (
       <span
-        className="w-2 h-2 rounded-full bg-cyan-500 shrink-0 animate-pulse"
+        className="w-2 h-2 rounded-full bg-info shrink-0 animate-pulse"
         title="CLI active"
       />
     );
   }
   return (
-    <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="Tool approval pending" />
+    <span className="w-2 h-2 rounded-full bg-warning shrink-0" title="Tool approval pending" />
   );
 }
 
@@ -538,7 +538,7 @@ function ChatItem({
         <ContextMenuSeparator />
         <ContextMenuItem
           onSelect={onDelete}
-          className="gap-2 text-xs text-accent focus:text-accent"
+          className="gap-2 text-xs text-danger focus:text-danger"
         >
           <Trash2 className="size-3.5" />
           Delete

@@ -78,7 +78,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
         {isAllowed ? (
           <ShieldCheck className="w-3.5 h-3.5 text-success shrink-0" />
         ) : (
-          <ShieldX className="w-3.5 h-3.5 text-accent shrink-0" />
+          <ShieldX className="w-3.5 h-3.5 text-primary shrink-0" />
         )}
         <span className="text-xs text-fg-secondary">
           <span className="font-medium text-fg">{approval.tool}</span>
@@ -93,14 +93,14 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
 
   // --- Pending state: full approval card ---
   const urgency = secondsLeft <= 15
-  const timerColor = urgency ? 'text-accent' : 'text-fg-muted'
+  const timerColor = urgency ? 'text-primary' : 'text-fg-muted'
 
   return (
     <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
-        <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center shrink-0">
-          <Shield className="w-4 h-4 text-amber-400" />
+        <div className="w-8 h-8 rounded-lg bg-warning/15 flex items-center justify-center shrink-0">
+          <Shield className="w-4 h-4 text-warning" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -154,7 +154,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
           size="sm"
           disabled={submitting}
           onClick={() => handleDecision('deny')}
-          className="text-[11px] h-6 px-2 text-accent hover:text-accent-hover hover:bg-accent/10"
+          className="text-[11px] h-6 px-2 text-primary hover:text-primary-hover hover:bg-primary/10"
         >
           Deny
         </Button>

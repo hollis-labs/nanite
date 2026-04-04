@@ -43,7 +43,7 @@ function getScopeBadgeColor(scope: string) {
     case "skill":
       return "bg-yellow-500";
     case "context":
-      return "bg-accent";
+      return "bg-primary";
     default:
       return "bg-gray-500";
   }
@@ -100,7 +100,7 @@ export function PromptDetailView({
   }, []);
 
   const inputClass =
-    "w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent";
+    "w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary";
 
   // ─── Inline editable row ──────────────────────────────────────────
 
@@ -205,7 +205,7 @@ export function PromptDetailView({
               <h2 className="text-xl font-semibold text-fg truncate">{template.name}</h2>
               <div className={`w-2.5 h-2.5 rounded-full ${getScopeBadgeColor(template.scope)}`} />
               {isBuiltin && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-400 leading-none">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-info/15 text-info leading-none">
                   builtin
                 </span>
               )}
@@ -219,7 +219,7 @@ export function PromptDetailView({
               onClick={() => setShowDeleteConfirm(true)}
               variant="ghost"
               size="icon"
-              className="text-fg-muted hover:text-accent"
+              className="text-fg-muted hover:text-primary"
             >
               <Trash2 className="w-4 h-4" />
             </Button>
@@ -312,7 +312,7 @@ export function PromptDetailView({
                     <div key={variable.name}>
                       <label className="block text-[11px] text-fg-secondary mb-1">
                         {variable.name}
-                        {variable.required && <span className="text-accent ml-0.5">*</span>}
+                        {variable.required && <span className="text-primary ml-0.5">*</span>}
                       </label>
                       {variable.type === "textarea" ? (
                         <textarea
@@ -324,7 +324,7 @@ export function PromptDetailView({
                               [variable.name]: e.target.value,
                             })
                           }
-                          className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                          className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                           placeholder={variable.description || `Enter ${variable.name}`}
                         />
                       ) : variable.type === "boolean" ? (
@@ -340,7 +340,7 @@ export function PromptDetailView({
                               [variable.name]: e.target.value === "true",
                             })
                           }
-                          className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                          className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                         >
                           <option value="true">true</option>
                           <option value="false">false</option>
@@ -354,7 +354,7 @@ export function PromptDetailView({
                               [variable.name]: e.target.value,
                             })
                           }
-                          className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                          className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                         >
                           {(variable.options || []).map((opt) => (
                             <option key={opt} value={opt}>
@@ -372,7 +372,7 @@ export function PromptDetailView({
                               [variable.name]: e.target.value,
                             })
                           }
-                          className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                          className="w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                           placeholder={variable.description || `Enter ${variable.name}`}
                         />
                       )}
@@ -401,7 +401,7 @@ export function PromptDetailView({
           <DialogContent className="sm:max-w-md">
             <DialogHeader className="px-5 pt-5">
               <div className="flex items-start gap-3">
-                <AlertCircle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
+                <AlertCircle className="w-6 h-6 text-danger shrink-0 mt-0.5" />
                 <div>
                   <DialogTitle>Delete Prompt</DialogTitle>
                   <DialogDescription className="sr-only">Confirm prompt deletion</DialogDescription>
@@ -452,17 +452,17 @@ const VARIABLE_TYPES = [
 function typeBadgeColor(type: string) {
   switch (type) {
     case "text":
-      return "bg-blue-500/10 text-blue-400";
+      return "bg-info/15 text-info";
     case "textarea":
-      return "bg-green-500/10 text-green-400";
+      return "bg-success/10 text-success";
     case "number":
       return "bg-yellow-500/10 text-yellow-400";
     case "boolean":
       return "bg-purple-500/10 text-purple-400";
     case "select":
-      return "bg-orange-500/10 text-orange-400";
+      return "bg-warning/10 text-warning";
     default:
-      return "bg-zinc-500/10 text-zinc-400";
+      return "bg-fg-muted/10 text-fg-secondary";
   }
 }
 
@@ -533,7 +533,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
           >
             {variable.type}
           </span>
-          {variable.required && <span className="text-accent text-[10px] font-bold">*</span>}
+          {variable.required && <span className="text-primary text-[10px] font-bold">*</span>}
           {variable.default !== undefined && variable.default !== "" && (
             <span className="text-[10px] text-fg-faint truncate max-w-[80px]">
               ={String(variable.default)}
@@ -542,7 +542,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
           {!readOnly && (
             <button
               onClick={() => removeVariable(index)}
-              className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-accent transition-all"
+              className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
             >
               <X className="w-3 h-3" />
             </button>
@@ -562,7 +562,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
                 value={newVar.name}
                 onChange={(e) => setNewVar((v) => ({ ...v, name: e.target.value }))}
                 placeholder="variable_name"
-                className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-accent"
+                className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-primary"
               />
             </div>
             <div className="space-y-1">
@@ -572,7 +572,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
                 onChange={(e) =>
                   setNewVar((v) => ({ ...v, type: e.target.value as TemplateVariable["type"] }))
                 }
-                className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-accent"
+                className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-primary"
               >
                 {VARIABLE_TYPES.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -590,7 +590,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
                 value={String(newVar.default ?? "")}
                 onChange={(e) => setNewVar((v) => ({ ...v, default: e.target.value }))}
                 placeholder="default value"
-                className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-accent"
+                className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-primary"
               />
             </div>
             <div className="space-y-1">
@@ -600,7 +600,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
                 onClick={() => setNewVar((v) => ({ ...v, required: !v.required }))}
                 className={`w-full px-2 py-1.5 border rounded-md text-xs text-left transition-colors ${
                   newVar.required
-                    ? "bg-accent/10 border-accent/30 text-accent"
+                    ? "bg-primary/10 border-primary/30 text-primary"
                     : "bg-bg-elevated border-border-subtle text-fg-muted"
                 }`}
               >
@@ -615,7 +615,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
               value={newVar.description ?? ""}
               onChange={(e) => setNewVar((v) => ({ ...v, description: e.target.value }))}
               placeholder="What this variable is for..."
-              className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-accent"
+              className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-primary"
             />
           </div>
           <div className="flex items-center gap-2 pt-1">

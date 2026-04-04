@@ -446,7 +446,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 value={loadSearch}
                 onChange={(e) => setLoadSearch(e.target.value)}
                 placeholder="Filter tools..."
-                className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent"
+                className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
           </div>
@@ -461,13 +461,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 value={toolSearch}
                 onChange={(e) => setToolSearch(e.target.value)}
                 placeholder="Search tools..."
-                className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent"
+                className="w-40 bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
             <select
               value={filterServer}
               onChange={(e) => setFilterServer(e.target.value)}
-              className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
+              className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
             >
               <option value="">All servers</option>
               {servers.map(server => (
@@ -531,7 +531,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 {/* Header */}
                 <div className="flex items-center gap-2.5 px-3.5 py-3">
                   <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                    server.connected ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
+                    server.connected ? 'bg-surface-hover text-fg-secondary' : 'bg-surface text-fg-muted'
                   }`}>
                     <Server className="w-4 h-4" />
                   </span>
@@ -557,7 +557,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); setDeletingServer(server.name) }}
-                        className="p-1.5 rounded text-fg-faint hover:text-red-400 hover:bg-surface transition-colors"
+                        className="p-1.5 rounded text-fg-faint hover:text-danger hover:bg-surface transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -628,7 +628,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 {(toolSearch || filterServer) && (
                   <button
                     onClick={() => { setToolSearch(''); setFilterServer('') }}
-                    className="text-xs text-accent hover:text-accent-hover mt-2 transition-colors"
+                    className="text-xs text-primary hover:text-primary-hover mt-2 transition-colors"
                   >
                     Clear filters
                   </button>
@@ -647,7 +647,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
               >
                 {/* Header */}
                 <div className="flex items-center gap-2.5 px-3.5 py-3">
-                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
+                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-surface-hover text-fg-secondary shrink-0">
                     <Wrench className="w-4 h-4" />
                   </span>
                   <div className="flex-1 min-w-0">
@@ -752,11 +752,11 @@ export function ToolDashboard({}: ToolDashboardProps) {
                               title={isAuto ? 'Click to set opt-in' : 'Click to set auto'}
                             >
                               {isAuto ? (
-                                <ToggleRight className="w-5 h-5 text-emerald-400 group-hover:text-emerald-300 transition-colors" />
+                                <ToggleRight className="w-5 h-5 text-success group-hover:text-success transition-colors" />
                               ) : (
                                 <ToggleLeft className="w-5 h-5 text-fg-faint group-hover:text-fg-muted transition-colors" />
                               )}
-                              <span className={`text-[11px] font-medium w-10 ${isAuto ? 'text-emerald-400' : 'text-fg-faint'}`}>
+                              <span className={`text-[11px] font-medium w-10 ${isAuto ? 'text-success' : 'text-fg-faint'}`}>
                                 {isAuto ? 'Auto' : 'Opt-in'}
                               </span>
                             </button>
@@ -791,7 +791,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
             value={intentQuery}
             onChange={(e) => setIntentQuery(e.target.value)}
             placeholder="Test tool selection by intent..."
-            className="w-full bg-surface/50 border border-border rounded-lg pl-3 pr-16 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent"
+            className="w-full bg-surface/50 border border-border rounded-lg pl-3 pr-16 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
             onKeyDown={(e) => { if (e.key === 'Enter') handleIntentTest() }}
           />
           <button
@@ -815,7 +815,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
       )}
 
       {intentTestMutation.error && (
-        <p className="text-xs text-red-400 flex items-center gap-1.5">
+        <p className="text-xs text-danger flex items-center gap-1.5">
           <AlertCircle className="w-3 h-3" />
           {intentTestMutation.error.message}
         </p>
@@ -911,7 +911,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 onChange={(e) => setServerForm(f => ({ ...f, name: e.target.value }))}
                 disabled={!!editingServer}
                 placeholder="my-server"
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
               />
               {editingServer && (
                 <p className="text-xs text-fg-muted mt-1">Name cannot be changed after creation.</p>
@@ -924,7 +924,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
               <select
                 value={serverForm.transport_type}
                 onChange={(e) => setServerForm(f => ({ ...f, transport_type: e.target.value as 'stdio' | 'sse' }))}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <option value="stdio">stdio (subprocess)</option>
                 <option value="sse">SSE / HTTP</option>
@@ -940,7 +940,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                   value={serverForm.command}
                   onChange={(e) => setServerForm(f => ({ ...f, command: e.target.value }))}
                   placeholder="/path/to/binary"
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
             )}
@@ -954,7 +954,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                   value={serverForm.url}
                   onChange={(e) => setServerForm(f => ({ ...f, url: e.target.value }))}
                   placeholder="http://localhost:8080"
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
             )}
@@ -968,7 +968,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                   value={serverForm.args}
                   onChange={(e) => setServerForm(f => ({ ...f, args: e.target.value }))}
                   placeholder="mcp, --flag, value"
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary"
                 />
                 <p className="text-xs text-fg-muted mt-1">Comma-separated list of arguments.</p>
               </div>
@@ -982,14 +982,14 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 onChange={(e) => setServerForm(f => ({ ...f, env: e.target.value }))}
                 placeholder={"KEY=value\nANOTHER_KEY=value"}
                 rows={3}
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono text-sm"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono text-sm"
               />
               <p className="text-xs text-fg-muted mt-1">One KEY=VALUE per line.</p>
             </div>
 
             {/* Error */}
             {serverFormError && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-red-900/30 border border-red-700/50 text-sm text-red-300">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-danger/20 border border-danger/50 text-sm text-danger">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{serverFormError}</span>
               </div>
@@ -1022,7 +1022,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader className="px-5 pt-5">
             <div className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-red-400" />
+              <AlertCircle className="w-5 h-5 text-danger" />
               <DialogTitle>Delete Server</DialogTitle>
             </div>
             <DialogDescription className="sr-only">Confirm server deletion</DialogDescription>
@@ -1091,12 +1091,12 @@ export function ToolDashboard({}: ToolDashboardProps) {
               onChange={(e) => { setImportText(e.target.value); setImportError(null); setImportResult(null) }}
               placeholder={'{\n  "mcpServers": {\n    "my-server": {\n      "command": "/path/to/binary",\n      "args": ["--flag"],\n      "env": { "KEY": "value" }\n    }\n  }\n}'}
               rows={10}
-              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent font-mono text-xs leading-relaxed"
+              className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary font-mono text-xs leading-relaxed"
             />
 
             {/* Error */}
             {importError && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-red-900/30 border border-red-700/50 text-sm text-red-300">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-danger/20 border border-danger/50 text-sm text-danger">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{importError}</span>
               </div>
@@ -1104,13 +1104,13 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
             {/* Success */}
             {importResult && (
-              <div className="px-3 py-2 rounded-md bg-green-900/30 border border-green-700/50 text-sm text-green-300 space-y-1">
+              <div className="px-3 py-2 rounded-md bg-success/20 border border-success/50 text-sm text-success space-y-1">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                   <span>{importResult.created?.length ?? 0} created, {importResult.skipped?.length ?? 0} skipped</span>
                 </div>
                 {(importResult.created?.length ?? 0) > 0 && (
-                  <div className="text-xs text-green-400/80 pl-6">
+                  <div className="text-xs text-success/80 pl-6">
                     {importResult.created.map(n => <div key={n}>+ {n}</div>)}
                   </div>
                 )}

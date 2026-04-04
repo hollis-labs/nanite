@@ -17,10 +17,10 @@ const TYPE_LABELS: Record<A2AMessageType, string> = {
 
 const TYPE_COLORS: Record<A2AMessageType, string> = {
   message: 'bg-surface text-fg-secondary',
-  help_request: 'bg-amber-900/60 text-amber-300',
-  directive: 'bg-accent-muted text-accent-hover',
+  help_request: 'bg-warning/30 text-warning',
+  directive: 'bg-primary/10 text-primary-hover',
   status_update: 'bg-success-muted text-success',
-  handoff: 'bg-accent-muted text-accent-hover',
+  handoff: 'bg-primary/10 text-primary-hover',
 }
 
 const STATUS_ICONS = {
@@ -275,7 +275,7 @@ export function InboxContent({ agentId }: InboxContentProps) {
                       <div className="flex items-center gap-2 min-w-0">
                         <StatusIcon
                           className={`w-3.5 h-3.5 shrink-0 ${
-                            isUnread ? 'text-accent' : 'text-fg-faint'
+                            isUnread ? 'text-primary' : 'text-fg-faint'
                           }`}
                         />
                         <span className="text-sm font-medium text-fg truncate">
@@ -306,11 +306,11 @@ export function InboxContent({ agentId }: InboxContentProps) {
                         {formatTime(msg.created_at)}
                       </span>
                       {msg.priority === 1 && (
-                        <AlertTriangle className="w-3 h-3 text-accent" />
+                        <AlertTriangle className="w-3 h-3 text-primary" />
                       )}
                       {msg.thread_id && msg.thread_id !== msg.id && !threadView && (
                         <button
-                          className="text-[11px] text-accent hover:text-accent-hover"
+                          className="text-[11px] text-primary hover:text-primary-hover"
                           onClick={(e) => {
                             e.stopPropagation()
                             setThreadView(msg.thread_id)
@@ -368,7 +368,7 @@ export function InboxContent({ agentId }: InboxContentProps) {
                       {replyTo === msg.id && (
                         <div className="mt-2 flex flex-col gap-2">
                           <textarea
-                            className="w-full bg-bg-elevated border border-border-subtle rounded px-3 py-2 text-xs text-fg resize-none focus:outline-none focus:border-accent"
+                            className="w-full bg-bg-elevated border border-border-subtle rounded px-3 py-2 text-xs text-fg resize-none focus:outline-none focus:border-primary"
                             rows={3}
                             placeholder="Type your reply..."
                             value={replyBody}

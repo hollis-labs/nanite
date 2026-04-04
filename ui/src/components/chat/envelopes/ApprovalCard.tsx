@@ -9,8 +9,8 @@ interface ApprovalCardProps {
 
 const RISK_STYLES = {
   low: { bg: 'bg-success/15', text: 'text-success', border: 'border-success/25', icon: ShieldCheck },
-  medium: { bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/25', icon: ShieldAlert },
-  high: { bg: 'bg-accent/15', text: 'text-accent', border: 'border-accent/25', icon: ShieldX },
+  medium: { bg: 'bg-warning/15', text: 'text-warning', border: 'border-warning/25', icon: ShieldAlert },
+  high: { bg: 'bg-primary/15', text: 'text-primary', border: 'border-primary/25', icon: ShieldX },
 }
 
 export function ApprovalCard({ approval }: ApprovalCardProps) {
@@ -43,10 +43,10 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
 
   if (decision === 'rejected') {
     return (
-      <div className="rounded-sm border border-accent/30 bg-accent/5 p-4">
+      <div className="rounded-sm border border-primary/30 bg-primary/5 p-4">
         <div className="flex items-center gap-2">
-          <ShieldX className="w-4 h-4 text-accent" />
-          <span className="text-sm text-accent">Rejected: {approval.description}</span>
+          <ShieldX className="w-4 h-4 text-primary" />
+          <span className="text-sm text-primary">Rejected: {approval.description}</span>
         </div>
       </div>
     )
@@ -80,7 +80,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
         </Button>
         <Button
           size="sm"
-          className="bg-accent hover:bg-accent-hover text-white text-xs px-3 py-1 h-7"
+          className="bg-primary hover:bg-primary-hover text-white text-xs px-3 py-1 h-7"
           onClick={handleReject}
         >
           Reject

@@ -91,8 +91,8 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
 
       {/* Error */}
       {isError && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-start gap-3">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-danger/30 bg-danger/5 p-4 flex items-start gap-3">
+          <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
           <p className="text-xs text-fg-muted">{(error as Error)?.message}</p>
         </div>
       )}
@@ -148,7 +148,7 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
               {/* Header */}
               <div className="flex items-center gap-2.5 px-3.5 py-3">
                 <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                  source.enabled ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
+                  source.enabled ? 'bg-surface-hover text-fg-secondary' : 'bg-surface text-fg-muted'
                 }`}>
                   <Globe className="w-4 h-4" />
                 </span>
@@ -170,7 +170,7 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
                     onClick={() => toggleMutation.mutate({ id: source.id, enabled: !source.enabled })}
                     disabled={toggleMutation.isPending}
                     className={`relative w-8 h-4.5 rounded-full transition-colors ${
-                      source.enabled ? 'bg-toggle-on' : 'bg-zinc-700 hover:bg-zinc-600'
+                      source.enabled ? 'bg-toggle-on' : 'bg-surface-hover hover:bg-surface-hover'
                     }`}
                   >
                     <span className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${
@@ -181,7 +181,7 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
                     <button
                       onClick={() => deleteMutation.mutate(source.id)}
                       disabled={deleteMutation.isPending}
-                      className="p-1.5 rounded text-fg-faint hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      className="p-1.5 rounded text-fg-faint hover:text-danger hover:bg-danger/10 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -293,7 +293,7 @@ function AddSourceForm({ onDone, onCancel }: { onDone: () => void; onCancel: () 
       </div>
       <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center justify-end gap-2">
         {addMutation.isError && (
-          <p className="text-[11px] text-red-400 mr-auto">
+          <p className="text-[11px] text-danger mr-auto">
             {(addMutation.error as Error)?.message}
           </p>
         )}
@@ -302,7 +302,7 @@ function AddSourceForm({ onDone, onCancel }: { onDone: () => void; onCancel: () 
         </Button>
         <Button
           size="sm"
-          className="text-xs bg-accent hover:bg-accent-hover text-white"
+          className="text-xs bg-primary hover:bg-primary-hover text-white"
           disabled={!name || !url || addMutation.isPending}
           onClick={() => addMutation.mutate()}
         >

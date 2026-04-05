@@ -359,7 +359,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       <div
         ref={dropRef}
         className={`border rounded-sm overflow-hidden transition-colors shadow-lg shadow-black/30 ${
-          dragOver ? 'border-accent bg-accent-muted' : 'border-border-subtle'
+          dragOver ? 'border-primary bg-primary/10' : 'border-border-subtle'
         }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
@@ -374,7 +374,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           />
         )}
         {dragOver && (
-          <div className="px-3 py-1.5 text-xs text-accent text-center border-b border-accent/30">
+          <div className="px-3 py-1.5 text-xs text-primary text-center border-b border-primary/30">
             Drop files to attach
           </div>
         )}
@@ -384,10 +384,10 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           </div>
         )}
         {pendingShellCommand && (
-          <div className="px-3 py-1.5 text-xs text-center border-b border-amber-500/30 bg-amber-500/10 flex items-center justify-center gap-3">
+          <div className="px-3 py-1.5 text-xs text-center border-b border-warning/30 bg-warning/10 flex items-center justify-center gap-3">
             <span className="text-fg-muted">Run <code className="font-mono px-1 bg-bg-elevated rounded">{pendingShellCommand}</code>?</span>
-            <button type="button" onClick={handleShellApprove} className="px-2 py-0.5 text-xs bg-accent text-white rounded hover:bg-accent/80">Allow</button>
-            <button type="button" onClick={handleShellDeny} className="px-2 py-0.5 text-xs bg-zinc-600 text-white rounded hover:bg-zinc-500">Deny</button>
+            <button type="button" onClick={handleShellApprove} className="px-2 py-0.5 text-xs bg-primary text-white rounded hover:bg-primary/80">Allow</button>
+            <button type="button" onClick={handleShellDeny} className="px-2 py-0.5 text-xs bg-surface-hover text-white rounded hover:bg-fg-muted">Deny</button>
           </div>
         )}
         <div className="relative px-3 py-2 bg-white dark:bg-bg-elevated">
@@ -403,9 +403,9 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             <button
               className={`p-1.5 rounded-md transition-colors ${
                 shellMode === 'yolo'
-                  ? 'text-amber-400 bg-amber-400/10 hover:bg-amber-400/20'
+                  ? 'text-warning bg-warning/10 hover:bg-warning/20'
                   : shellMode === 'session'
-                    ? 'text-accent bg-accent-muted hover:bg-accent/20'
+                    ? 'text-primary bg-primary/10 hover:bg-primary/20'
                     : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
               }`}
               title={
@@ -428,7 +428,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             <button
               className={`p-1.5 rounded-md transition-colors ${
                 uploading
-                  ? 'text-accent animate-pulse'
+                  ? 'text-primary animate-pulse'
                   : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
               }`}
               title={uploading ? 'Uploading...' : 'Attach file'}

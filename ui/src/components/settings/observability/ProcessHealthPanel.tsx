@@ -17,13 +17,13 @@ function ProcessRow({ proc }: { proc: ProcessHealthEntry }) {
     <tr className="border-b border-border/30 hover:bg-surface/20 transition-colors">
       <td className="py-1.5 pr-3 font-mono text-fg-secondary">{proc.pid}</td>
       <td className="py-1.5 pr-3 font-mono text-fg-secondary text-xs">{proc.session_id.slice(0, 8)}</td>
-      <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-blue-400">{formatDuration(proc.uptime)}</td>
+      <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-info">{formatDuration(proc.uptime)}</td>
       <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-fg-secondary">{formatDuration(proc.idle_duration)}</td>
       <td className="py-1.5 text-center">
         {proc.is_stale ? (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">stale</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/20 text-warning font-medium">stale</span>
         ) : (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium">healthy</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/20 text-success font-medium">healthy</span>
         )}
       </td>
     </tr>
@@ -49,7 +49,7 @@ export function ProcessHealthPanel() {
           <span>
             {processes.length} active process{processes.length !== 1 && 'es'}
             {staleCount > 0 && (
-              <span className="text-amber-400 ml-1">({staleCount} stale)</span>
+              <span className="text-warning ml-1">({staleCount} stale)</span>
             )}
           </span>
         </div>
@@ -58,7 +58,7 @@ export function ProcessHealthPanel() {
             type="button"
             onClick={() => killStale.mutate()}
             disabled={killStale.isPending}
-            className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded bg-danger/10 text-danger hover:bg-danger/20 transition-colors disabled:opacity-50"
           >
             <Skull className="w-3 h-3" />
             {killStale.isPending ? 'Killing...' : 'Kill Stale'}
@@ -67,7 +67,7 @@ export function ProcessHealthPanel() {
       </div>
 
       {killStale.isSuccess && (
-        <p className="text-[10px] text-emerald-400">
+        <p className="text-[10px] text-success">
           Killed {killStale.data.killed} stale process{killStale.data.killed !== 1 && 'es'}
         </p>
       )}

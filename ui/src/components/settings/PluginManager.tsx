@@ -237,8 +237,8 @@ export function PluginManager() {
 
           {/* Error state */}
           {isError && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-start gap-3">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <div className="rounded-xl border border-danger/30 bg-danger/5 p-4 flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-fg">Failed to load plugins</p>
                 <p className="text-xs text-fg-muted mt-1">
@@ -304,7 +304,7 @@ export function PluginManager() {
                     {/* Header */}
                     <div className="flex items-center gap-2.5 px-3.5 py-3">
                       <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                        isActive ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
+                        isActive ? 'bg-surface-hover text-fg-secondary' : 'bg-surface text-fg-muted'
                       }`}>
                         <Package className="w-4 h-4" />
                       </span>
@@ -366,7 +366,7 @@ export function PluginManager() {
                           <button
                             onClick={() => installMutation.mutate(plugin.name)}
                             disabled={isActionPending(plugin.name)}
-                            className="px-2 py-1 text-[11px] font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors disabled:opacity-40"
+                            className="px-2 py-1 text-[11px] font-medium text-white bg-primary hover:bg-primary-hover rounded-md transition-colors disabled:opacity-40"
                           >
                             {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Install'}
                           </button>
@@ -415,7 +415,7 @@ export function PluginManager() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-sm w-full p-6">
             <div className="flex items-center gap-2 mb-4">
-              <AlertCircle className="w-5 h-5 text-red-400" />
+              <AlertCircle className="w-5 h-5 text-danger" />
               <h3 className="text-lg font-medium text-fg">Uninstall Plugin</h3>
             </div>
             <p className="text-fg-secondary text-sm mb-6">
@@ -433,7 +433,7 @@ export function PluginManager() {
               </Button>
               <Button
                 onClick={handleUninstallConfirm}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                className="flex-1 bg-danger hover:bg-danger-hover text-white"
               >
                 Uninstall
               </Button>

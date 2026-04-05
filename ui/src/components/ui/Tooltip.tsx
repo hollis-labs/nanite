@@ -71,7 +71,7 @@ export function Tooltip({ content, side = "right", children }: TooltipProps) {
       {visible &&
         createPortal(
           <div
-            className="fixed z-50 px-2 py-1 text-xs font-medium text-zinc-100 bg-zinc-800 border border-zinc-700 rounded-md shadow-lg whitespace-nowrap pointer-events-none"
+            className="fixed z-50 px-2 py-1 text-xs font-medium text-fg bg-surface border border-border-subtle rounded-md shadow-lg whitespace-nowrap pointer-events-none"
             style={{ ...style, transform: transformMap[side] }}
           >
             {content}

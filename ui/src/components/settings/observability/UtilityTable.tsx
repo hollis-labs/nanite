@@ -46,13 +46,13 @@ export function UtilityTable({ data }: UtilityTableProps) {
               <td className="py-1.5 pr-3 font-mono text-fg-secondary">{row.model}</td>
               <td className="py-1.5 pr-3 text-fg-secondary">{row.call_type}</td>
               <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-fg-secondary">{row.call_count}</td>
-              <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-blue-400">{formatDuration(row.avg_duration_ms)}</td>
+              <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-info">{formatDuration(row.avg_duration_ms)}</td>
               <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-fg-muted">{formatDuration(row.min_duration_ms)}</td>
               <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-fg-muted">{formatDuration(row.max_duration_ms)}</td>
-              <td className={`py-1.5 pr-3 text-right font-mono tabular-nums ${row.error_count > 0 ? 'text-red-400' : 'text-fg-faint'}`}>
+              <td className={`py-1.5 pr-3 text-right font-mono tabular-nums ${row.error_count > 0 ? 'text-danger' : 'text-fg-faint'}`}>
                 {row.error_count}
               </td>
-              <td className="py-1.5 text-right font-mono tabular-nums text-amber-400">{formatCost(row.total_cost_usd)}</td>
+              <td className="py-1.5 text-right font-mono tabular-nums text-warning">{formatCost(row.total_cost_usd)}</td>
             </tr>
           ))}
         </tbody>

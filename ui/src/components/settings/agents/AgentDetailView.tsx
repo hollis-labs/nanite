@@ -137,7 +137,7 @@ export function AgentDetailView({
   }, []);
 
   const inputClass =
-    "w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent";
+    "w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary";
 
   // ─── Inline editable field ────────────────────────────────────────
 
@@ -306,7 +306,7 @@ export function AgentDetailView({
                     aria-checked={debugMode}
                     onClick={toggleDebugMode}
                     className={`relative shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                      debugMode ? 'bg-toggle-on' : 'bg-zinc-700'
+                      debugMode ? 'bg-toggle-on' : 'bg-surface-hover'
                     }`}
                   >
                     <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
@@ -406,7 +406,7 @@ export function AgentDetailView({
                     <span className="text-[10px] text-fg-faint tabular-nums">P{tmpl.priority}</span>
                     <button
                       onClick={() => onRemoveTemplate(tmpl.id)}
-                      className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-accent transition-all"
+                      className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -523,7 +523,7 @@ export function AgentDetailView({
                   )}
                   <button
                     onClick={() => onRemoveProject(project.id)}
-                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-accent transition-all"
+                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -640,7 +640,7 @@ export function AgentDetailView({
                   <span className="text-[10px] text-fg-faint bg-surface/60 rounded px-1.5 py-0.5">{skill.category}</span>
                   <button
                     onClick={() => onRemoveSkill(skill.id)}
-                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-accent transition-all"
+                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -702,7 +702,7 @@ function getScopeBadgeColor(scope: string) {
     case "system": return "bg-blue-500";
     case "mode": return "bg-green-500";
     case "skill": return "bg-yellow-500";
-    case "context": return "bg-accent";
+    case "context": return "bg-primary";
     default: return "bg-gray-500";
   }
 }
@@ -778,7 +778,7 @@ function ModeForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Mode name"
-            className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-accent"
+            className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-primary"
           />
         </div>
         <div className="space-y-1">
@@ -788,7 +788,7 @@ function ModeForm({
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder="mode-slug"
-            className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-accent"
+            className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-primary"
           />
         </div>
       </div>
@@ -799,7 +799,7 @@ function ModeForm({
           onChange={(e) => setPromptAddendum(e.target.value)}
           rows={3}
           placeholder="Additional instructions for this mode..."
-          className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-accent resize-y"
+          className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-primary resize-y"
         />
       </div>
       <div className="flex items-center gap-2 pt-1">

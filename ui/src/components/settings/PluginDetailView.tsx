@@ -156,7 +156,7 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <span
             className={`inline-flex items-center justify-center w-12 h-12 rounded-lg shrink-0 ${
-              isActive ? "bg-zinc-700 text-zinc-300" : "bg-zinc-300 text-zinc-500"
+              isActive ? "bg-surface-hover text-fg-secondary" : "bg-surface text-fg-muted"
             }`}
           >
             <Package className="w-6 h-6" />
@@ -403,7 +403,7 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
                               key={arg.name}
                               className={`text-[10px] font-mono px-1 py-0.5 rounded border leading-none ${
                                 arg.required
-                                  ? "border-accent/30 bg-accent/5 text-accent"
+                                  ? "border-primary/30 bg-primary/5 text-primary"
                                   : "border-border-subtle bg-bg-elevated text-fg-faint"
                               }`}
                             >

@@ -17,10 +17,10 @@ import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ToolWarningBanner } from "./ToolWarningBanner";
 
 const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
-  default: { bg: "bg-blue-500/15", text: "text-blue-400" },
-  architect: { bg: "bg-accent-muted", text: "text-accent" },
-  planner: { bg: "bg-violet-500/15", text: "text-violet-400" },
-  writer: { bg: "bg-amber-500/15", text: "text-amber-400" },
+  default: { bg: "bg-mode-default/15", text: "text-mode-default" },
+  architect: { bg: "bg-mode-architect/15", text: "text-mode-architect" },
+  planner: { bg: "bg-mode-planner/15", text: "text-mode-planner" },
+  writer: { bg: "bg-mode-writer/15", text: "text-mode-writer" },
 };
 
 interface ChatTranscriptProps {
@@ -366,7 +366,7 @@ export function ChatTranscript({
       {userHasScrolled && !isAtBottom && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 bg-accent hover:bg-accent-hover text-white rounded-full p-3 shadow-lg transition-all duration-200 hover:scale-105"
+          className="absolute bottom-4 right-4 bg-primary hover:bg-primary-hover text-primary-foreground rounded-full p-3 shadow-lg transition-all duration-200 hover:scale-105"
           aria-label="Scroll to bottom"
         >
           <ArrowDown className="w-5 h-5" />

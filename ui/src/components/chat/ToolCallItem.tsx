@@ -13,9 +13,9 @@ export function formatToolName(name: string): string {
 }
 
 export function StatusIcon({ status }: { status: ToolCall['status'] }) {
-  if (status === 'running') return <Loader2 className="w-3 h-3 animate-spin text-accent shrink-0" />
-  if (status === 'done') return <Check className="w-3 h-3 text-green-500 shrink-0" />
-  return <X className="w-3 h-3 text-red-400 shrink-0" />
+  if (status === 'running') return <Loader2 className="w-3 h-3 animate-spin text-primary shrink-0" />
+  if (status === 'done') return <Check className="w-3 h-3 text-success shrink-0" />
+  return <X className="w-3 h-3 text-danger shrink-0" />
 }
 
 export function TreeConnector({ index, total }: { index: number; total: number }) {

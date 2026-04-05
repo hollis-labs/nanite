@@ -126,7 +126,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
     }
   }
 
-  const inputCls = 'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent placeholder:text-fg-faint'
+  const inputCls = 'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary placeholder:text-fg-faint'
 
   // Step 1: Brief description
   if (step === 'describe') {
@@ -149,7 +149,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
         />
         <Button
           size="sm"
-          className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-7"
+          className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-7"
           onClick={handleDescribe}
           disabled={!description.trim()}
         >
@@ -172,7 +172,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
         <div className="space-y-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-secondary">
-              Issue Summary <span className="text-red-400">*</span>
+              Issue Summary <span className="text-danger">*</span>
             </label>
             <input type="text" className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
@@ -180,7 +180,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-fg-secondary">
-                Category <span className="text-red-400">*</span>
+                Category <span className="text-danger">*</span>
               </label>
               <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
                 <option value="">Select...</option>
@@ -205,7 +205,7 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
 
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-secondary">
-              Description <span className="text-red-400">*</span>
+              Description <span className="text-danger">*</span>
             </label>
             <textarea className={`${inputCls} min-h-[80px] resize-y`} value={fullDescription}
               onChange={(e) => setFullDescription(e.target.value)} rows={3} />
@@ -219,13 +219,13 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
           </div>
 
           {step === 'error' && (
-            <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2">
-              <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-              <span className="text-xs text-red-400">{errorMsg}</span>
+            <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger/5 px-3 py-2">
+              <AlertCircle className="h-4 w-4 shrink-0 text-danger" />
+              <span className="text-xs text-danger">{errorMsg}</span>
             </div>
           )}
 
-          <Button size="sm" className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-8"
+          <Button size="sm" className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-8"
             onClick={() => void handleSubmit()}
             disabled={!title.trim() || !category || !fullDescription.trim()}>
             Submit Ticket
@@ -238,10 +238,10 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
   // Step 2.5: Submitting
   if (step === 'submitting') {
     return (
-      <div className="rounded-sm border border-accent/30 bg-accent-muted p-4">
+      <div className="rounded-sm border border-primary/30 bg-primary/10 p-4">
         <div className="flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-accent" />
-          <span className="text-sm text-accent-hover">Submitting ticket...</span>
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <span className="text-sm text-primary-hover">Submitting ticket...</span>
         </div>
       </div>
     )

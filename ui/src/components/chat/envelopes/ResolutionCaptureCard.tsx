@@ -78,7 +78,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
   }
 
   const inputCls =
-    'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent placeholder:text-fg-faint'
+    'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary placeholder:text-fg-faint'
 
   return (
     <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
@@ -103,7 +103,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
         {/* What Fixed It */}
         <div>
           <label className="mb-1 block text-xs font-medium text-fg-secondary">
-            What Fixed It <span className="text-red-400">*</span>
+            What Fixed It <span className="text-danger">*</span>
           </label>
           <textarea
             className={`${inputCls} min-h-[80px] resize-y`}
@@ -187,7 +187,7 @@ export function ResolutionCaptureCard({ data, onSendMessage }: ResolutionCapture
           <Button
             type="submit"
             size="sm"
-            className="bg-accent hover:bg-accent-hover text-white text-xs px-4 py-1 h-8"
+            className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-8"
             disabled={!whatFixedIt.trim()}
           >
             Submit Resolution

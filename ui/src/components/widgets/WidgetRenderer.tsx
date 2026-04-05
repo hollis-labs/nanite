@@ -19,14 +19,14 @@ class WidgetErrorBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-3">
+        <div className="rounded-lg border border-danger/50 bg-danger/10 p-3">
           <div className="flex items-center gap-2 mb-1">
-            <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-            <span className="text-xs font-medium text-red-300">
+            <AlertTriangle className="w-3.5 h-3.5 text-danger shrink-0" />
+            <span className="text-xs font-medium text-danger">
               Widget failed: {this.props.widgetId}
             </span>
           </div>
-          <p className="text-[11px] text-red-400/70 leading-relaxed">
+          <p className="text-[11px] text-danger/70 leading-relaxed">
             {this.state.error.message}
           </p>
         </div>
@@ -52,7 +52,7 @@ function UnknownWidgetCard({ component }: { component: PluginUIComponent }) {
   return (
     <div className="rounded-lg border border-border bg-bg-elevated/50 p-3">
       <div className="flex items-center gap-2 mb-1">
-        <Puzzle className="w-3 h-3 text-accent shrink-0" />
+        <Puzzle className="w-3 h-3 text-primary shrink-0" />
         <span className="text-xs font-medium text-fg truncate">{component.name}</span>
         {component.plugin_id && (
           <span className="text-[10px] text-fg-faint ml-auto">{component.plugin_id}</span>

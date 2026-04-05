@@ -28,7 +28,7 @@ export function ShellInfoDrawer({ sessionId, shellMode, onToggleDenylist }: Shel
         className={`p-0.5 rounded transition-colors ${
           denylistActive
             ? 'text-fg-secondary hover:text-fg'
-            : 'text-amber-400 hover:text-amber-300'
+            : 'text-warning hover:text-warning'
         }`}
         title={denylistActive ? 'Denylist active — click to disable' : 'Denylist disabled — click to enable'}
       >
@@ -49,7 +49,7 @@ export function ShellInfoDrawer({ sessionId, shellMode, onToggleDenylist }: Shel
           {info.git_status && (
             <>
               <span className="text-fg-faint">·</span>
-              <span className={info.git_status === 'clean' ? 'text-green-400' : 'text-amber-400'}>
+              <span className={info.git_status === 'clean' ? 'text-success' : 'text-warning'}>
                 {info.git_status}
               </span>
             </>

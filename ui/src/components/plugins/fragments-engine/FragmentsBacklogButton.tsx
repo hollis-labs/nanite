@@ -150,7 +150,7 @@ export function FragmentsBacklogButton({ contextBody, projectId, className }: Fr
 
       {/* Status feedback */}
       {status === 'error' && (
-        <p className="text-xs text-red-400">{errorMsg}</p>
+        <p className="text-xs text-danger">{errorMsg}</p>
       )}
       {status === 'success' && (
         <p className="flex items-center gap-1 text-xs text-success">

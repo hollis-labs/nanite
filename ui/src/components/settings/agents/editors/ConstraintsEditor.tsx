@@ -93,7 +93,7 @@ export function ConstraintsEditor({ value, onChange }: ConstraintsEditorProps) {
                 value={constraints[key] ?? ""}
                 onChange={(e) => handleChange(key, e.target.value)}
                 placeholder={placeholder}
-                className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-accent tabular-nums placeholder:text-fg-faint"
+                className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-primary tabular-nums placeholder:text-fg-faint"
               />
               {suffix && (
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-fg-faint pointer-events-none">

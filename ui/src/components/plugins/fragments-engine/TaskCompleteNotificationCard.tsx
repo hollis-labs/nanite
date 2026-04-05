@@ -42,7 +42,7 @@ export function TaskCompleteNotificationCard({ data, onSendMessage }: TaskComple
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
       <div className={`rounded-sm border overflow-hidden ${
         isError
-          ? 'border-red-500/30 bg-red-500/5'
+          ? 'border-danger/30 bg-danger/5'
           : 'border-success/30 bg-success/5'
       }`}>
         <div className="px-4 py-3">
@@ -50,12 +50,12 @@ export function TaskCompleteNotificationCard({ data, onSendMessage }: TaskComple
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               {isError ? (
-                <XCircle className="h-5 w-5 text-red-400 shrink-0" />
+                <XCircle className="h-5 w-5 text-danger shrink-0" />
               ) : (
                 <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
               )}
               <div>
-                <p className={`text-sm font-medium ${isError ? 'text-red-300' : 'text-success'}`}>
+                <p className={`text-sm font-medium ${isError ? 'text-danger' : 'text-success'}`}>
                   {data.title}
                 </p>
                 {data.completed_at && (

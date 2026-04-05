@@ -62,7 +62,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
             <div key={key}>
               <label className="block text-xs font-medium text-fg-secondary mb-1">
                 {label}
-                {schema?.required && <span className="text-red-400 ml-0.5">*</span>}
+                {schema?.required && <span className="text-danger ml-0.5">*</span>}
               </label>
               {fieldType === 'textarea' ? (
                 <textarea
@@ -70,14 +70,14 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
                   rows={3}
-                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed resize-none"
+                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed resize-none"
                 />
               ) : fieldType === 'select' && schema?.options ? (
                 <select
                   value={String(value ?? '')}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
-                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {schema.options.map((opt) => (
                     <option key={opt} value={opt}>{opt}</option>
@@ -89,7 +89,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
                   value={String(value ?? '')}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
-                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               )}
             </div>

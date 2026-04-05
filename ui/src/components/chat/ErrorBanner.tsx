@@ -5,27 +5,27 @@ import { ErrorDetailModal } from './ErrorDetailModal'
 
 const ERROR_STYLES: Record<ChatErrorCode, { bg: string; border: string; icon: string; IconComponent: typeof AlertTriangle }> = {
   rate_limit: {
-    bg: 'bg-amber-500/10',
-    border: 'border-amber-500/30',
-    icon: 'text-amber-400',
+    bg: 'bg-warning/10',
+    border: 'border-warning/30',
+    icon: 'text-warning',
     IconComponent: AlertTriangle,
   },
   tool_error: {
-    bg: 'bg-red-500/10',
-    border: 'border-red-500/30',
-    icon: 'text-red-400',
+    bg: 'bg-danger/10',
+    border: 'border-danger/30',
+    icon: 'text-danger',
     IconComponent: XCircle,
   },
   provider_error: {
-    bg: 'bg-red-500/10',
-    border: 'border-red-500/30',
-    icon: 'text-red-400',
+    bg: 'bg-danger/10',
+    border: 'border-danger/30',
+    icon: 'text-danger',
     IconComponent: AlertCircle,
   },
   internal_error: {
-    bg: 'bg-orange-500/10',
-    border: 'border-orange-500/30',
-    icon: 'text-orange-400',
+    bg: 'bg-warning/10',
+    border: 'border-warning/30',
+    icon: 'text-warning',
     IconComponent: AlertCircle,
   },
 }

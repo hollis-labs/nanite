@@ -127,7 +127,7 @@ export function EditableStringList({
                   if (e.key === "Enter") handleEditSave(index);
                   if (e.key === "Escape") setEditingIndex(null);
                 }}
-                className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-accent py-0.5"
+                className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-primary py-0.5"
               />
             ) : (
               <span
@@ -139,7 +139,7 @@ export function EditableStringList({
             )}
             <button
               onClick={() => handleRemove(index)}
-              className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-accent transition-all"
+              className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
             >
               <X className="w-3 h-3" />
             </button>
@@ -164,7 +164,7 @@ export function EditableStringList({
               }
             }}
             placeholder={placeholder}
-            className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-accent py-0.5 placeholder:text-fg-faint"
+            className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-primary py-0.5 placeholder:text-fg-faint"
           />
           <div className="flex items-center gap-1">
             <Button

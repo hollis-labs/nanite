@@ -74,7 +74,7 @@ export function SystemPromptEditor({ value, onChange }: SystemPromptEditorProps)
             }
           }}
           rows={16}
-          className="w-full px-3 py-2.5 bg-bg-elevated border border-border-subtle rounded-lg text-xs text-fg font-mono leading-relaxed focus:outline-none focus:border-accent resize-y min-h-[200px]"
+          className="w-full px-3 py-2.5 bg-bg-elevated border border-border-subtle rounded-lg text-xs text-fg font-mono leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[200px]"
         />
         <p className="text-[10px] text-fg-faint">
           Cmd+S to save &middot; Escape to cancel

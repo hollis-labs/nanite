@@ -98,7 +98,7 @@ function ActionForm({
   const valid = form.name.trim() !== "" && form.command.trim() !== "";
 
   return (
-    <div className="rounded-xl border border-accent/40 bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-primary/40 bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-border/50 flex items-center justify-between">
         <span className="text-sm font-medium text-fg">
           {initial.name ? "Edit Action" : "New Action"}
@@ -121,7 +121,7 @@ function ActionForm({
           <div className="flex-1">
             <label className="text-[11px] text-fg-muted mb-1 block">Name *</label>
             <input
-              className="w-full bg-surface/50 border border-border rounded-md px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:border-accent/50"
+              className="w-full bg-surface/50 border border-border rounded-md px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:border-primary/50"
               value={form.name}
               onChange={(e) => update("name", e.target.value)}
               placeholder="My Action"
@@ -149,7 +149,7 @@ function ActionForm({
         <div>
           <label className="text-[11px] text-fg-muted mb-1 block">Description</label>
           <input
-            className="w-full bg-surface/50 border border-border rounded-md px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:border-accent/50"
+            className="w-full bg-surface/50 border border-border rounded-md px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:border-primary/50"
             value={form.description}
             onChange={(e) => update("description", e.target.value)}
             placeholder="What this action does"
@@ -160,7 +160,7 @@ function ActionForm({
         <div>
           <label className="text-[11px] text-fg-muted mb-1 block">Command *</label>
           <textarea
-            className="w-full bg-surface/50 border border-border rounded-md px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:border-accent/50 font-mono resize-none"
+            className="w-full bg-surface/50 border border-border rounded-md px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:border-primary/50 font-mono resize-none"
             rows={2}
             value={form.command}
             onChange={(e) => update("command", e.target.value)}
@@ -179,7 +179,7 @@ function ActionForm({
               onBlur={() => setCapturingKey(false)}
               className={`w-full bg-surface/50 border rounded-md px-3 py-1.5 text-sm cursor-pointer flex items-center gap-2 min-h-[34px] ${
                 capturingKey
-                  ? "border-accent/50 ring-1 ring-accent/20"
+                  ? "border-primary/50 ring-1 ring-primary/20"
                   : "border-border hover:border-border-subtle"
               }`}
             >
@@ -214,7 +214,7 @@ function ActionForm({
             <div className="flex items-center gap-0">
               <span className="text-sm text-fg-muted font-mono pl-1">/</span>
               <input
-                className="flex-1 bg-surface/50 border border-border rounded-md px-2 py-1.5 text-sm text-fg font-mono placeholder:text-fg-faint focus:outline-none focus:border-accent/50"
+                className="flex-1 bg-surface/50 border border-border rounded-md px-2 py-1.5 text-sm text-fg font-mono placeholder:text-fg-faint focus:outline-none focus:border-primary/50"
                 value={form.slash_command}
                 onChange={(e) =>
                   update("slash_command", e.target.value.replace(/[^a-z0-9_-]/gi, "").toLowerCase())
@@ -259,7 +259,7 @@ function ActionForm({
         </Button>
         <Button
           size="sm"
-          className="text-xs bg-accent hover:bg-accent-hover text-white"
+          className="text-xs bg-primary hover:bg-primary-hover text-white"
           disabled={!valid || saving}
           onClick={() => onSave(form)}
         >
@@ -294,7 +294,7 @@ function ActionCard({
     >
       {/* Header */}
       <div className="px-3.5 py-3 flex items-center gap-3">
-        <div className="w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 flex items-center justify-center shrink-0">
+        <div className="w-9 h-9 rounded-lg bg-surface-hover text-fg-secondary flex items-center justify-center shrink-0">
           <Zap className="w-4 h-4" />
         </div>
         <div className="flex-1 min-w-0">
@@ -318,7 +318,7 @@ function ActionCard({
           <Button
             variant="ghost"
             size="icon"
-            className="w-7 h-7 text-fg-faint hover:text-accent"
+            className="w-7 h-7 text-fg-faint hover:text-primary"
             onClick={onDelete}
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -350,7 +350,7 @@ function ActionCard({
           </KbdGroup>
         )}
         {action.slash_command && (
-          <span className="text-[10px] font-mono text-accent">/{action.slash_command}</span>
+          <span className="text-[10px] font-mono text-primary">/{action.slash_command}</span>
         )}
         {triggers.length > 0 &&
           triggers.map((t) => (
@@ -445,7 +445,7 @@ export function ActionsPanel() {
         </div>
         <Button
           size="sm"
-          className="text-xs bg-accent hover:bg-accent-hover text-white"
+          className="text-xs bg-primary hover:bg-primary-hover text-white"
           onClick={() => setEditing("new")}
           disabled={editing !== null}
         >

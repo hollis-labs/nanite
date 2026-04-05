@@ -35,7 +35,7 @@ function ConfigFieldInput({
             type="checkbox"
             checked={Boolean(value ?? field.default ?? false)}
             onChange={(e) => onChange(field.key, e.target.checked)}
-            className="w-4 h-4 rounded bg-surface border-border-subtle text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer"
+            className="w-4 h-4 rounded bg-surface border-border-subtle text-primary focus:ring-primary focus:ring-offset-0 cursor-pointer"
           />
           <span className="text-sm text-fg-secondary">{field.label}</span>
         </label>
@@ -47,7 +47,7 @@ function ConfigFieldInput({
           type="number"
           value={value !== undefined && value !== null ? String(value) : (field.default !== undefined ? String(field.default) : '')}
           onChange={(e) => onChange(field.key, e.target.value === '' ? undefined : Number(e.target.value))}
-          className="w-full px-3 py-1.5 rounded-md bg-surface border border-border-subtle text-sm text-fg focus:outline-none focus:border-accent transition-colors"
+          className="w-full px-3 py-1.5 rounded-md bg-surface border border-border-subtle text-sm text-fg focus:outline-none focus:border-primary transition-colors"
         />
       )
 
@@ -56,7 +56,7 @@ function ConfigFieldInput({
         <select
           value={String(value ?? field.default ?? '')}
           onChange={(e) => onChange(field.key, e.target.value)}
-          className="w-full px-3 py-1.5 rounded-md bg-surface border border-border-subtle text-sm text-fg focus:outline-none focus:border-accent transition-colors"
+          className="w-full px-3 py-1.5 rounded-md bg-surface border border-border-subtle text-sm text-fg focus:outline-none focus:border-primary transition-colors"
         >
           <option value="">Select...</option>
           {(field.options ?? []).map((opt) => (
@@ -73,7 +73,7 @@ function ConfigFieldInput({
             value={String(value ?? '')}
             onChange={(e) => onChange(field.key, e.target.value)}
             placeholder={field.default ? '••••••••' : 'Enter value'}
-            className="w-full px-3 py-1.5 pr-9 rounded-md bg-surface border border-border-subtle text-sm text-fg font-mono focus:outline-none focus:border-accent transition-colors"
+            className="w-full px-3 py-1.5 pr-9 rounded-md bg-surface border border-border-subtle text-sm text-fg font-mono focus:outline-none focus:border-primary transition-colors"
           />
           <button
             type="button"
@@ -91,7 +91,7 @@ function ConfigFieldInput({
           type="text"
           value={String(value ?? field.default ?? '')}
           onChange={(e) => onChange(field.key, e.target.value)}
-          className="w-full px-3 py-1.5 rounded-md bg-surface border border-border-subtle text-sm text-fg focus:outline-none focus:border-accent transition-colors"
+          className="w-full px-3 py-1.5 rounded-md bg-surface border border-border-subtle text-sm text-fg focus:outline-none focus:border-primary transition-colors"
         />
       )
   }
@@ -209,7 +209,7 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: Pl
                 <div className="flex items-baseline gap-2 mb-2">
                   <label className="text-sm font-medium text-fg">
                     {field.label}
-                    {field.required && <span className="text-red-400 ml-0.5">*</span>}
+                    {field.required && <span className="text-danger ml-0.5">*</span>}
                   </label>
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface text-fg-muted font-mono">
                     {field.type}
@@ -243,7 +243,7 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: Pl
             <Button
               onClick={handleSave}
               disabled={!dirty || saveMutation.isPending}
-              className="bg-accent hover:bg-accent-active text-white disabled:opacity-50"
+              className="bg-primary hover:bg-primary-active text-white disabled:opacity-50"
             >
               {saveMutation.isPending ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -253,10 +253,10 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: Pl
               Save Settings
             </Button>
             {saveMutation.isSuccess && !dirty && (
-              <span className="text-xs text-emerald-400">Saved</span>
+              <span className="text-xs text-success">Saved</span>
             )}
             {saveMutation.isError && (
-              <span className="text-xs text-red-400">
+              <span className="text-xs text-danger">
                 {(saveMutation.error as Error)?.message || 'Failed to save'}
               </span>
             )}

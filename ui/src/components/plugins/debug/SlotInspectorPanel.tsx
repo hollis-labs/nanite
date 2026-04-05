@@ -85,7 +85,7 @@ export function SlotInspectorContent({ sessionId }: SlotInspectorPanelProps) {
           <div className="h-1.5 rounded-full bg-surface overflow-hidden">
             <div
               className={`h-full rounded-full transition-all ${
-                usagePercent > 90 ? 'bg-accent' : 'bg-toggle-on'
+                usagePercent > 90 ? 'bg-primary' : 'bg-toggle-on'
               }`}
               style={{ width: `${Math.min(100, usagePercent)}%` }}
             />

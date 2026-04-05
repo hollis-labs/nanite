@@ -52,7 +52,7 @@ export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreatePr
               onChange={(e) => setName(e.target.value)}
               placeholder="Project name"
               autoFocus
-              className="w-full rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent"
+              className="w-full rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
               onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
               disabled={createMutation.isPending}
             />
@@ -65,13 +65,13 @@ export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreatePr
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What is this project about?"
               rows={3}
-              className="w-full rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent resize-none"
+              className="w-full rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary resize-none"
               disabled={createMutation.isPending}
             />
           </div>
 
           {createMutation.isError && (
-            <p className="text-xs text-red-400">
+            <p className="text-xs text-danger">
               {createMutation.error instanceof Error ? createMutation.error.message : 'Failed to create project'}
             </p>
           )}
@@ -85,7 +85,7 @@ export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreatePr
             size="sm"
             onClick={handleSubmit}
             disabled={!name.trim() || createMutation.isPending}
-            className="bg-accent hover:bg-accent-hover text-white"
+            className="bg-primary hover:bg-primary-hover text-white"
           >
             {createMutation.isPending ? 'Creating...' : 'Create Project'}
           </Button>

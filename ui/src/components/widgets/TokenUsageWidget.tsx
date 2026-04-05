@@ -77,14 +77,14 @@ export function TokenUsageWidget() {
             <TokenRow
               label="Input"
               value={formatTokens(input)}
-              colorClass="text-blue-400"
+              colorClass="text-info"
             />
             {toolInput > 0 && (
               <>
                 <TokenRow
                   label="  Content"
                   value={formatTokens(contentInput)}
-                  colorClass="text-blue-300"
+                  colorClass="text-info"
                 />
                 <TokenRow
                   label="  Tools"

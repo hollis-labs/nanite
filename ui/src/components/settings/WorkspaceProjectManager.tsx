@@ -202,7 +202,7 @@ export function WorkspaceProjectManager() {
                     <div
                       className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
                         isActive
-                          ? "border-accent/30 bg-accent/5"
+                          ? "border-primary/30 bg-primary/5"
                           : "border-border-subtle bg-white dark:bg-bg-elevated/60"
                       }`}
                       onClick={() => setActiveWorkspace(ws.id)}
@@ -210,7 +210,7 @@ export function WorkspaceProjectManager() {
                       <div className="flex items-center gap-2.5 px-3.5 py-3">
                         <span
                           className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-sm shrink-0 ${
-                            isActive ? "bg-accent/15 text-accent" : "bg-zinc-700 text-zinc-300"
+                            isActive ? "bg-primary/15 text-primary" : "bg-surface-hover text-fg-secondary"
                           }`}
                         >
                           <DynamicIcon name={ws.icon} className="w-4 h-4" fallback={Building2} />
@@ -244,7 +244,7 @@ export function WorkspaceProjectManager() {
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem
-                      className="gap-2 text-xs text-accent focus:text-accent"
+                      className="gap-2 text-xs text-primary focus:text-primary"
                       onSelect={() => setDeleteWorkspaceId(ws.id)}
                     >
                       <Trash2 className="size-3.5" />
@@ -312,7 +312,7 @@ export function WorkspaceProjectManager() {
                     key={project.id}
                     className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
                       isActive
-                        ? "border-accent/30 bg-accent/5"
+                        ? "border-primary/30 bg-primary/5"
                         : "border-border-subtle bg-white dark:bg-bg-elevated/60"
                     }`}
                     onClick={() => setActiveProject(isActive ? "" : project.id)}
@@ -320,7 +320,7 @@ export function WorkspaceProjectManager() {
                     <div className="flex items-center gap-2.5 px-3.5 py-3">
                       <span
                         className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-sm shrink-0 ${
-                          isActive ? "bg-accent/15 text-accent" : "bg-zinc-700 text-zinc-300"
+                          isActive ? "bg-primary/15 text-primary" : "bg-surface-hover text-fg-secondary"
                         }`}
                       >
                         <FolderKanban className="w-4 h-4" />
@@ -379,7 +379,7 @@ export function WorkspaceProjectManager() {
                 type="text"
                 required
                 autoFocus
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 placeholder="My Workspace"
               />
             </div>
@@ -390,7 +390,7 @@ export function WorkspaceProjectManager() {
               <input
                 name="description"
                 type="text"
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 placeholder="Optional description"
               />
             </div>
@@ -437,7 +437,7 @@ export function WorkspaceProjectManager() {
                   required
                   autoFocus
                   defaultValue={editingWorkspace.name}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 />
               </div>
               <div>
@@ -448,7 +448,7 @@ export function WorkspaceProjectManager() {
                   name="description"
                   type="text"
                   defaultValue={editingWorkspace.description}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -506,7 +506,7 @@ export function WorkspaceProjectManager() {
                 type="text"
                 required
                 autoFocus
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 placeholder="My Project"
               />
             </div>
@@ -517,7 +517,7 @@ export function WorkspaceProjectManager() {
               <input
                 name="description"
                 type="text"
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 placeholder="Optional description"
               />
             </div>

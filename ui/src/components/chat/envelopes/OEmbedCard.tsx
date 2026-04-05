@@ -122,8 +122,8 @@ function getProviderColor(name: string): { border: string; badge: string } {
 
   if (lower.includes('youtube')) {
     return {
-      border: 'border-red-500/20',
-      badge: 'bg-red-500/20 text-red-400 border-red-500/25',
+      border: 'border-danger/20',
+      badge: 'bg-danger/20 text-danger border-danger/25',
     }
   }
   if (lower.includes('spotify')) {
@@ -141,7 +141,7 @@ function getProviderColor(name: string): { border: string; badge: string } {
   if (lower.includes('soundcloud')) {
     return {
       border: 'border-orange-500/20',
-      badge: 'bg-orange-500/20 text-orange-400 border-orange-500/25',
+      badge: 'bg-warning/20 text-warning border-warning/25',
     }
   }
   return {

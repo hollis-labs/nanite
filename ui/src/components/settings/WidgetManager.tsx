@@ -170,12 +170,12 @@ export function WidgetManager() {
                   visible
                     ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
                     : 'border-border bg-white dark:bg-bg/30 opacity-45'
-                } ${dragIdx === idx ? 'ring-1 ring-accent/30 shadow-md' : ''}`}
+                } ${dragIdx === idx ? 'ring-1 ring-primary/30 shadow-md' : ''}`}
               >
                 {/* Header */}
                 <div className="flex items-center gap-2.5 px-3.5 py-3">
                   <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                    visible ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-300 text-zinc-500'
+                    visible ? 'bg-surface-hover text-fg-secondary' : 'bg-surface text-fg-muted'
                   }`}>
                     <GripVertical className="w-4 h-4" />
                   </span>

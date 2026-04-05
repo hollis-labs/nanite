@@ -1,4 +1,4 @@
-import { Bot, User, BookmarkCheck, Terminal } from 'lucide-react'
+import { Bot, User, BookmarkCheck } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import type { Message, AgentMode, Envelope } from '@/lib/types'
 import { MessageContent } from './MessageContent'
@@ -50,26 +50,27 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
-  default: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
-  architect: { bg: 'bg-accent-muted', text: 'text-accent' },
-  planner: { bg: 'bg-violet-500/15', text: 'text-violet-400' },
-  writer: { bg: 'bg-amber-500/15', text: 'text-amber-400' },
+  default: { bg: 'bg-mode-default/15', text: 'text-mode-default' },
+  architect: { bg: 'bg-mode-architect/15', text: 'text-mode-architect' },
+  planner: { bg: 'bg-mode-planner/15', text: 'text-mode-planner' },
+  writer: { bg: 'bg-mode-writer/15', text: 'text-mode-writer' },
 }
 
 const MODE_LABEL_STYLES: Record<AgentMode, string> = {
-  default: 'text-blue-400',
-  architect: 'text-accent',
-  planner: 'text-violet-400',
-  writer: 'text-amber-400',
+  default: 'text-mode-default',
+  architect: 'text-mode-architect',
+  planner: 'text-mode-planner',
+  writer: 'text-mode-writer',
 }
 
-// Agent colors for multi-agent sessions — deterministic by agent_id
+// Agent colors for multi-agent sessions — deterministic by agent_id.
+// These are identity markers (not semantic), so they stay as distinct hues.
 const AGENT_COLORS = [
-  { border: 'ring-accent', badge: 'bg-accent-muted text-accent' },
+  { border: 'ring-primary', badge: 'bg-primary/15 text-primary' },
   { border: 'ring-violet-500', badge: 'bg-violet-500/15 text-violet-400' },
-  { border: 'ring-orange-500', badge: 'bg-orange-500/15 text-orange-400' },
+  { border: 'ring-orange-500', badge: 'bg-orange-500/15 text-warning' },
   { border: 'ring-pink-500', badge: 'bg-pink-500/15 text-pink-400' },
-  { border: 'ring-blue-500', badge: 'bg-blue-500/15 text-blue-400' },
+  { border: 'ring-brand', badge: 'bg-brand-muted text-brand' },
 ]
 
 function agentColorIndex(agentId: string): number {
@@ -116,9 +117,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
   const isShellExec = shellMeta !== null
   const isUser = message.role === 'user'
   const avatarStyle = isUser
-    ? isShellExec
-      ? { bg: 'bg-[#1a1b26]', text: 'text-green-400' }
-      : { bg: 'bg-surface', text: 'text-fg-secondary' }
+    ? { bg: 'bg-surface', text: 'text-fg-secondary' }
     : MODE_AVATAR_STYLES[activeMode]
 
   // Parse envelope — from saved envelope field or from streaming content.
@@ -163,6 +162,25 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
     return null
   }, [message.envelope, message.content])
 
+  // Shell exec messages get a distinct full-width layout — no avatar, centered to match composer width
+  if (isShellExec && shellMeta) {
+    return (
+      <div
+        className="w-full group"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        data-message-id={message.id}
+      >
+        <div className="flex justify-end mb-1">
+          <span className="text-xs text-fg-faint">
+            You{hovered && ` · ${formatRelativeTime(message.created_at)}`}
+          </span>
+        </div>
+        <ShellMessage content={displayText} meta={shellMeta} />
+      </div>
+    )
+  }
+
   return (
     <div
       className={`flex gap-3 group ${isUser ? 'flex-row-reverse' : ''}`}
@@ -178,7 +196,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             : ''
         }`}
       >
-        {isShellExec ? <Terminal className="w-4 h-4" /> : isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+        {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
 
       {/* Content */}
@@ -204,14 +222,10 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
           )}
           {/* Persistent bookmark indicator */}
           {isBookmarked && !hovered && (
-            <BookmarkCheck className="w-3.5 h-3.5 text-amber-500" />
+            <BookmarkCheck className="w-3.5 h-3.5 text-warning" />
           )}
         </div>
-        {isShellExec && shellMeta ? (
-          <div className="max-w-[90%]">
-            <ShellMessage content={displayText} meta={shellMeta} />
-          </div>
-        ) : (
+        {(
           <div
             className={`${
               isUser
@@ -225,7 +239,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
 
         {/* Truncation banner for structured messages */}
         {structured?.flags?.truncated && (
-          <div className="mt-2 px-3 py-1.5 text-xs text-amber-400 border border-amber-700/50 rounded bg-amber-900/20">
+          <div className="mt-2 px-3 py-1.5 text-xs text-warning border border-warning/50 rounded bg-warning/10">
             Response was cut short due to length limits
           </div>
         )}

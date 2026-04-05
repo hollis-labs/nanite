@@ -4,7 +4,10 @@ interface TagPillsProps {
   className?: string
 }
 
-// Deterministic color from tag string — consistent across renders
+// Deterministic color from tag string — consistent across renders.
+// Identity palette (intentionally hardcoded, not themeable) so tag colors
+// stay stable regardless of the active theme. All entries use matching
+// bg/border/text from the same Tailwind family.
 const TAG_COLORS = [
   { bg: 'bg-blue-500/10', border: 'border-blue-500/20', text: 'text-blue-400' },
   { bg: 'bg-purple-500/10', border: 'border-purple-500/20', text: 'text-purple-400' },

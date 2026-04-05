@@ -65,7 +65,7 @@ export function SessionTasksTab() {
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
               placeholder="Add a task..."
-              className="w-full bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-accent"
+              className="w-full bg-surface/50 border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
               disabled={createMutation.isPending || !activeSessionId}
             />
             <Plus className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
@@ -149,7 +149,7 @@ function TaskRow({ task, onTransition }: TaskRowProps) {
             <Tooltip content="Start" side="bottom">
               <button
                 onClick={() => onTransition(task.id, 'in_progress')}
-                className="p-1 rounded text-fg-faint hover:text-blue-400 hover:bg-surface transition-colors"
+                className="p-1 rounded text-fg-faint hover:text-info hover:bg-surface transition-colors"
               >
                 <Play className="w-3.5 h-3.5" />
               </button>
@@ -157,7 +157,7 @@ function TaskRow({ task, onTransition }: TaskRowProps) {
             <Tooltip content="Cancel" side="bottom">
               <button
                 onClick={() => onTransition(task.id, 'cancelled')}
-                className="p-1 rounded text-fg-faint hover:text-red-400 hover:bg-surface transition-colors"
+                className="p-1 rounded text-fg-faint hover:text-danger hover:bg-surface transition-colors"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -177,7 +177,7 @@ function TaskRow({ task, onTransition }: TaskRowProps) {
             <Tooltip content="Cancel" side="bottom">
               <button
                 onClick={() => onTransition(task.id, 'cancelled')}
-                className="p-1 rounded text-fg-faint hover:text-red-400 hover:bg-surface transition-colors"
+                className="p-1 rounded text-fg-faint hover:text-danger hover:bg-surface transition-colors"
               >
                 <X className="w-3.5 h-3.5" />
               </button>

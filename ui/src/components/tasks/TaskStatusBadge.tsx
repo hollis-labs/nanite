@@ -2,11 +2,11 @@ import type { SessionTaskStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const STATUS_CONFIG: Record<SessionTaskStatus, { dot: string; label: string }> = {
-  pending: { dot: 'bg-zinc-400', label: 'Pending' },
-  in_progress: { dot: 'bg-blue-400 animate-pulse', label: 'In Progress' },
+  pending: { dot: 'bg-fg-faint', label: 'Pending' },
+  in_progress: { dot: 'bg-info animate-pulse', label: 'In Progress' },
   completed: { dot: 'bg-success', label: 'Done' },
-  failed: { dot: 'bg-red-400', label: 'Failed' },
-  cancelled: { dot: 'bg-zinc-500', label: 'Cancelled' },
+  failed: { dot: 'bg-danger', label: 'Failed' },
+  cancelled: { dot: 'bg-fg-muted', label: 'Cancelled' },
 }
 
 interface TaskStatusBadgeProps {

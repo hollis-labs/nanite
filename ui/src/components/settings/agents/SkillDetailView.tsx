@@ -134,7 +134,7 @@ function ToolBindingsList({
           {!readOnly && (
             <button
               onClick={() => handleRemove(index)}
-              className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-accent transition-all"
+              className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
             >
               <X className="w-3 h-3" />
             </button>
@@ -152,7 +152,7 @@ function ToolBindingsList({
             onChange={(e) => setNewServer(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="server"
-            className="w-28 px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent"
+            className="w-28 px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-primary"
           />
           <span className="text-xs text-fg-faint">/</span>
           <input
@@ -161,7 +161,7 @@ function ToolBindingsList({
             onChange={(e) => setNewTool(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="tool"
-            className="flex-1 px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent"
+            className="flex-1 px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-primary"
           />
           <Button
             size="sm"
@@ -260,7 +260,7 @@ export function SkillDetailView({
   }, []);
 
   const inputClass =
-    "w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent";
+    "w-full px-2 py-1 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary";
 
   // ─── Inline editable field ──────────────────────────────────────
 
@@ -371,7 +371,7 @@ export function SkillDetailView({
             onClick={() => setShowDeleteConfirm(true)}
             variant="ghost"
             size="icon"
-            className="text-red-400 hover:text-red-300"
+            className="text-danger hover:text-danger"
           >
             <Trash2 className="w-4 h-4" />
           </Button>

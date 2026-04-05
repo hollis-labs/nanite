@@ -39,20 +39,20 @@ export function KPIRow({ data }: KPIRowProps) {
         label="Avg Duration"
         value={formatDuration(avgDuration)}
         icon={Clock}
-        color="text-blue-400"
+        color="text-info"
       />
       <StatCard
         label="Total Cost"
         value={formatCost(totalCost)}
         icon={DollarSign}
-        color="text-amber-400"
+        color="text-warning"
       />
       <StatCard
         label="Error Rate"
         value={`${errorRate.toFixed(1)}%`}
         subValue={errorCount > 0 ? `${errorCount} errors` : undefined}
         icon={AlertTriangle}
-        color={errorRate > 5 ? 'text-red-400' : 'text-emerald-400'}
+        color={errorRate > 5 ? 'text-danger' : 'text-success'}
       />
     </div>
   )

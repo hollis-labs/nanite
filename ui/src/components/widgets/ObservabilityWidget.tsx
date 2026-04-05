@@ -46,7 +46,7 @@ export function ObservabilityWidget() {
         {last ? (
           <>
             <MetricRow label="Last exec" value={`${formatDuration(last.duration_ms)} · ${last.model}`} color="text-fg-secondary" />
-            <MetricRow label="Avg duration" value={formatDuration(avgDuration)} color="text-blue-400" />
+            <MetricRow label="Avg duration" value={formatDuration(avgDuration)} color="text-info" />
             <MetricRow label={`Cost (last ${total})`} value={formatCost(totalCost)} color="text-status-warn" />
             {errorCount > 0 && (
               <MetricRow label="Errors" value={String(errorCount)} color="text-status-danger" />

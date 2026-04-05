@@ -127,7 +127,7 @@ export const FileMentionMenu = forwardRef<FileMentionMenuRef, FileMentionMenuPro
           <>
             <div className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-fg-muted uppercase tracking-wider">
               <span className="w-4 h-4 rounded bg-surface-hover flex items-center justify-center shrink-0">
-                <Folder className="w-2.5 h-2.5 text-amber-400" />
+                <Folder className="w-2.5 h-2.5 text-warning" />
               </span>
               Directories
             </div>
@@ -143,7 +143,7 @@ export const FileMentionMenu = forwardRef<FileMentionMenuRef, FileMentionMenuPro
                       : 'text-fg-secondary hover:bg-surface/60 hover:text-fg'
                   }`}
                 >
-                  <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <Folder className="w-3.5 h-3.5 text-warning shrink-0" />
                   <span className="text-xs font-mono truncate flex-1">{item.path}</span>
                 </button>
             ))}

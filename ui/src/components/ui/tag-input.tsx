@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-// Reuse tag color palette from TagPills
+// Reuse tag color palette from TagPills — identity, not themeable.
 const TAG_COLORS = [
   { bg: "bg-blue-500/10", border: "border-blue-500/20", text: "text-blue-400" },
   { bg: "bg-purple-500/10", border: "border-purple-500/20", text: "text-purple-400" },
@@ -115,7 +115,7 @@ export function TagInput({
     <div ref={containerRef} className="relative">
       <div
         className={`flex flex-wrap items-center gap-1 px-2 py-1.5 min-h-[36px] rounded-lg border transition-colors ${
-          showSuggestions ? "border-accent/50 ring-1 ring-accent/20" : "border-border-subtle"
+          showSuggestions ? "border-primary/50 ring-1 ring-primary/20" : "border-border-subtle"
         } bg-bg-elevated`}
         onClick={() => inputRef.current?.focus()}
       >

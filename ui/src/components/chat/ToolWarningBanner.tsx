@@ -15,8 +15,8 @@ export function ToolWarningBanner({ warnings }: ToolWarningBannerProps) {
     <div
       className={`flex items-start gap-2 px-3 py-2 rounded-md text-sm ${
         hasCritical
-          ? 'bg-red-500/10 border border-red-500/20 text-red-400'
-          : 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
+          ? 'bg-danger/10 border border-danger/20 text-danger'
+          : 'bg-warning/10 border border-warning/20 text-warning'
       }`}
     >
       {hasCritical ? (

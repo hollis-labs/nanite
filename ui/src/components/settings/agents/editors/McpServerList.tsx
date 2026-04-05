@@ -112,7 +112,7 @@ export function McpServerList({ value, onChange }: McpServerListProps) {
                     e.stopPropagation();
                     handleRemove(index);
                   }}
-                  className="p-1 rounded text-fg-faint hover:text-accent transition-colors"
+                  className="p-1 rounded text-fg-faint hover:text-primary transition-colors"
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
@@ -199,7 +199,7 @@ function EditRow({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className={`flex-1 min-w-0 bg-transparent text-xs text-fg outline-none border-b border-border-subtle focus:border-accent py-0.5 placeholder:text-fg-faint ${mono ? "font-mono" : ""}`}
+          className={`flex-1 min-w-0 bg-transparent text-xs text-fg outline-none border-b border-border-subtle focus:border-primary py-0.5 placeholder:text-fg-faint ${mono ? "font-mono" : ""}`}
         />
       </div>
     </div>

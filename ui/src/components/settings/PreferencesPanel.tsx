@@ -99,7 +99,7 @@ function SettingsSelect({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
       >
         {allowNone && <option value="">None</option>}
         {options.map((opt) => (
@@ -131,9 +131,9 @@ function Toggle({
       className={`relative shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors ${
         checked
           ? variant === 'warning'
-            ? 'bg-amber-600'
+            ? 'bg-warning'
             : 'bg-toggle-on'
-          : 'bg-zinc-700'
+          : 'bg-surface-hover'
       }`}
     >
       <span
@@ -243,7 +243,7 @@ function FallbackChain({
               e.target.value = ''
             }}
             defaultValue=""
-            className="appearance-none w-full bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg-muted focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent cursor-pointer"
+            className="appearance-none w-full bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
           >
             <option value="" disabled>Add provider...</option>
             {available.map((p) => (

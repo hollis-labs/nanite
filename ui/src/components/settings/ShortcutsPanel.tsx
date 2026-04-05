@@ -91,7 +91,7 @@ function KeyBadge({ keys, active }: { keys: string[]; active?: boolean }) {
         <Kbd
           key={i}
           className={`min-w-7 h-7 px-2 text-xs font-mono ${
-            active ? "bg-accent/10 border-accent/30 text-accent" : ""
+            active ? "bg-primary/10 border-primary/30 text-primary" : ""
           }`}
         >
           {k}
@@ -165,7 +165,7 @@ function ShortcutCard({
       onClick={() => !isEditing && onEdit()}
       className={`rounded-xl border overflow-hidden transition-all cursor-pointer ${
         isEditing
-          ? "border-accent/40 shadow-sm ring-1 ring-accent/20"
+          ? "border-primary/40 shadow-sm ring-1 ring-primary/20"
           : "border-border-subtle bg-white dark:bg-bg-elevated/60 hover:border-border-subtle hover:shadow-sm"
       }`}
     >

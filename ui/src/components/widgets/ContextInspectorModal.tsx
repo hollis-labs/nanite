@@ -125,8 +125,8 @@ function AccordionSection({
 
 function MessageRow({ msg }: { msg: MessageTokenDetail }) {
   const roleColors: Record<string, string> = {
-    user: 'text-blue-400',
-    assistant: 'text-accent',
+    user: 'text-info',
+    assistant: 'text-primary',
     system: 'text-status-warn',
     tool: 'text-success',
   }
@@ -201,7 +201,7 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
           )}
 
           {error && (
-            <div className="text-sm text-red-400 text-center py-8">
+            <div className="text-sm text-danger text-center py-8">
               Failed to load context breakdown.
             </div>
           )}
@@ -260,7 +260,7 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
               {/* Messages */}
               <AccordionSection
                 title={`Messages (${breakdown.messages.length})`}
-                icon={<MessageSquare className="w-3.5 h-3.5 text-blue-400" />}
+                icon={<MessageSquare className="w-3.5 h-3.5 text-info" />}
                 tokens={breakdown.message_tokens_total}
                 totalCeiling={breakdown.ceiling}
                 defaultOpen={true}

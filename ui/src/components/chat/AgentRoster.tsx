@@ -21,7 +21,7 @@ interface AgentRosterProps {
 
 const STATUS_COLORS: Record<SessionAgent['status'], string> = {
   active: 'bg-success',
-  idle: 'bg-amber-400',
+  idle: 'bg-warning',
   offline: 'bg-fg-faint',
 }
 
@@ -100,7 +100,7 @@ export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-medium text-fg truncate">{agent.name}</span>
                           {agent.role === 'primary' && (
-                            <Crown className="size-3 text-amber-400 shrink-0" />
+                            <Crown className="size-3 text-warning shrink-0" />
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
@@ -134,7 +134,7 @@ export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
                       {agent.role === 'participant' && (
                         <button
                           onClick={() => removeMutation.mutate(agent.agent_id)}
-                          className="p-1 rounded text-fg-faint hover:text-accent hover:bg-surface transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                          className="p-1 rounded text-fg-faint hover:text-primary hover:bg-surface transition-colors opacity-0 group-hover:opacity-100 shrink-0"
                           aria-label={`Remove ${agent.name}`}
                         >
                           <X className="size-3.5" />

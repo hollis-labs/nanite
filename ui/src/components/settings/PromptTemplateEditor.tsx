@@ -135,7 +135,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
       case "skill":
         return "bg-yellow-500";
       case "context":
-        return "bg-accent";
+        return "bg-primary";
       default:
         return "bg-gray-500";
     }
@@ -207,7 +207,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                     >
                       {/* Header */}
                       <div className="flex items-center gap-2.5 px-3.5 py-3">
-                        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-700 text-zinc-300 shrink-0">
+                        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-surface-hover text-fg-secondary shrink-0">
                           <DynamicIcon
                             name={template.icon}
                             className="w-4 h-4"
@@ -267,7 +267,7 @@ export function PromptTemplateEditor({}: PromptTemplateEditorProps) {
                         </ContextMenuItem>
                         <ContextMenuSeparator />
                         <ContextMenuItem
-                          className="gap-2 text-xs text-accent focus:text-accent"
+                          className="gap-2 text-xs text-primary focus:text-primary"
                           onSelect={() => setSelectedTemplate(template.id)}
                         >
                           <Trash2 className="w-3.5 h-3.5" />

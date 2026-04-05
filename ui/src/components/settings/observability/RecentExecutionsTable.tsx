@@ -112,7 +112,7 @@ export function RecentExecutionsTable({ data }: RecentExecutionsTableProps) {
               <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-fg-secondary">{formatTokens(row.output_tokens)}</td>
               <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-warning">{formatCost(row.estimated_cost_usd)}</td>
               <td className="py-1.5 text-center">
-                <span className={`inline-block w-2 h-2 rounded-full ${row.error ? 'bg-red-500' : 'bg-emerald-500'}`} />
+                <span className={`inline-block w-2 h-2 rounded-full ${row.error ? 'bg-danger' : 'bg-success'}`} />
               </td>
             </tr>
           ))}

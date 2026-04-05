@@ -137,7 +137,7 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
           <button
             onClick={() => void handleSend()}
             disabled={!body.trim() || sending}
-            className="p-1.5 rounded-md bg-info hover:bg-info-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="p-1.5 rounded-md bg-info hover:bg-info/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             title="Send message"
           >
             <Send className="w-4 h-4 text-white" />

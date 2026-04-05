@@ -4,15 +4,18 @@ interface TagPillsProps {
   className?: string
 }
 
-// Deterministic color from tag string — consistent across renders
+// Deterministic color from tag string — consistent across renders.
+// Identity palette (intentionally hardcoded, not themeable) so tag colors
+// stay stable regardless of the active theme. All entries use matching
+// bg/border/text from the same Tailwind family.
 const TAG_COLORS = [
-  { bg: 'bg-info/15', border: 'border-info/30', text: 'text-info' },
+  { bg: 'bg-blue-500/10', border: 'border-blue-500/20', text: 'text-blue-400' },
   { bg: 'bg-purple-500/10', border: 'border-purple-500/20', text: 'text-purple-400' },
-  { bg: 'bg-warning/10', border: 'border-warning/20', text: 'text-warning' },
+  { bg: 'bg-amber-500/10', border: 'border-amber-500/20', text: 'text-amber-400' },
   { bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', text: 'text-cyan-400' },
   { bg: 'bg-pink-500/10', border: 'border-pink-500/20', text: 'text-pink-400' },
-  { bg: 'bg-success/10', border: 'border-success/20', text: 'text-success' },
-  { bg: 'bg-warning/10', border: 'border-orange-500/20', text: 'text-warning' },
+  { bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', text: 'text-emerald-400' },
+  { bg: 'bg-orange-500/10', border: 'border-orange-500/20', text: 'text-orange-400' },
   { bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', text: 'text-indigo-400' },
 ]
 

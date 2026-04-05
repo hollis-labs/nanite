@@ -1,5 +1,8 @@
 // Theme system types — a Theme is a complete set of token values for
-// both dark and light modes. Tokens match the --c-* CSS variables in index.css.
+// both dark and light modes. TokenKey covers the user-editable semantic
+// tokens (bg, fg, brand, primary, danger, modes, etc.). Non-editable
+// --c-* variables in index.css (composer chrome, status-ok/warn/danger
+// pair helpers) are intentionally excluded from the editor surface.
 
 export type TokenKey =
   // Surfaces

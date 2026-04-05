@@ -5,10 +5,10 @@ import { useModels } from '@/hooks/useSettings'
 import type { AgentMode } from '@/lib/types'
 
 const MODE_BADGE_STYLES: Record<AgentMode, { bg: string; text: string }> = {
-  default: { bg: 'bg-success/15', text: 'text-success' },
-  architect: { bg: 'bg-primary/10', text: 'text-primary' },
-  planner: { bg: 'bg-status-ok/15', text: 'text-status-ok' },
-  writer: { bg: 'bg-status-warn/15', text: 'text-status-warn' },
+  default: { bg: 'bg-mode-default/15', text: 'text-mode-default' },
+  architect: { bg: 'bg-mode-architect/15', text: 'text-mode-architect' },
+  planner: { bg: 'bg-mode-planner/15', text: 'text-mode-planner' },
+  writer: { bg: 'bg-mode-writer/15', text: 'text-mode-writer' },
 }
 
 function StatusIndicator({ isStreaming, hasToolCalls }: { isStreaming: boolean; hasToolCalls: boolean }) {

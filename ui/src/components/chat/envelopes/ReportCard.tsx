@@ -28,17 +28,19 @@ interface ReportCardProps {
   onSendMessage?: (content: string) => void
 }
 
+// Metric palette — backend can pick color names that map to semantic tokens.
+// `violet` stays as an identity hue since there's no semantic slot for it.
 const METRIC_COLORS: Record<string, { bg: string; bar: string; text: string }> = {
   emerald: { bg: 'bg-success/10', bar: 'bg-success', text: 'text-success' },
   green:   { bg: 'bg-success/10', bar: 'bg-success', text: 'text-success' },
-  amber:   { bg: 'bg-warning/10',   bar: 'bg-amber-500',   text: 'text-warning' },
-  red:     { bg: 'bg-primary/10',      bar: 'bg-primary',      text: 'text-primary' },
-  blue:    { bg: 'bg-success/10',     bar: 'bg-success',     text: 'text-success' },
-  violet:  { bg: 'bg-violet-500/10',  bar: 'bg-violet-500',  text: 'text-violet-400' },
+  amber:   { bg: 'bg-warning/10', bar: 'bg-warning', text: 'text-warning' },
+  red:     { bg: 'bg-danger/10',  bar: 'bg-danger',  text: 'text-danger' },
+  blue:    { bg: 'bg-info/10',    bar: 'bg-info',    text: 'text-info' },
+  violet:  { bg: 'bg-violet-500/10', bar: 'bg-violet-500', text: 'text-violet-400' },
 }
 
 function MetricCard({ metric }: { metric: Metric }) {
-  const fallback = { bg: 'bg-info/15', bar: 'bg-blue-500', text: 'text-info' }
+  const fallback = { bg: 'bg-info/10', bar: 'bg-info', text: 'text-info' }
   const colors = METRIC_COLORS[metric.color || 'blue'] ?? fallback
 
   return (

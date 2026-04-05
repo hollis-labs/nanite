@@ -1,6 +1,6 @@
 // Flattened Tailwind v4 default palette for the quick-pick swatch grid.
-// Exposes a small, curated subset of shades (400/500/600/700) per family,
-// matching the shades most commonly used for UI tokens.
+// Exposes the full 50–950 shade range per family so users can pick any
+// Tailwind color when authoring themes.
 
 export interface Swatch {
   family: string

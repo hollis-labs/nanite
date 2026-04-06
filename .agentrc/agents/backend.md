@@ -61,7 +61,10 @@ internal/
 │   ├── stdio_transport.go   # Stdio subprocess transport
 │   └── http_transport.go    # HTTP/SSE transport
 ├── mcpserver/               # Nanite's own MCP server (exposed via `nanite mcp`)
-├── plugin/                  # Plugin host, discovery, lifecycle, events
+├── plugin/                  # Plugin host, discovery, lifecycle, events, filters
+│   ├── events.go            # Event catalog (30+ events), Emit* methods, EmitPreHook
+│   ├── filter.go            # FilterRegistry: priority-ordered sync chains, 6 named filter points
+│   ├── host.go              # Host: RegisterFilter/ApplyFilter, RegisterEventHook, plugin lifecycle
 ├── provider/                # LLM provider adapters
 │   ├── provider.go          # Provider interface + core types
 │   ├── anthropic.go         # Anthropic adapter (771 lines)

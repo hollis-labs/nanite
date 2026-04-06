@@ -25,11 +25,19 @@ ARCHITECTURE:
 - TaskBackend: pluggable (LocalBackend default), registered via Host.RegisterTaskBackend.
 
 RECENTLY COMPLETED:
-- User Shell Task 1 — `!` exec with denylist, 3-mode approval (ask/session/yolo),
-  ShellInfoDrawer, full-width shell messages. PRs #4, #5.
+- Plugin Hooks, Events & Filters (PR #6, 2026-04-05) — all 4 tasks:
+  - Task 1: Pre-hooks (message.sending, tool.executing with cancellation),
+    11 new emitters, 10+ orphan emitters wired, new event constants.
+  - Task 2: FilterRegistry with priority-ordered synchronous chains,
+    6 filter points wired (system_prompt, user_message, tool_result,
+    assistant_response, context_window, envelope_data).
+  - Task 3: 6 new UI slots (composer-above/below, message-actions/header,
+    session-sidebar, modal), usePluginAction hook, global PluginModal.
+  - Task 4: context-menu:message/session (right-click), command-palette (Cmd+K).
+  - UnloadPlugin now cleans up filters, UI components, keybindings.
+- User Shell Task 1 — `!` exec with denylist, 3-mode approval. PRs #4, #5.
 - Theme editor + color system redesign (brand/primary/danger split, live preview).
-- Plugin extraction Phase 3 — debug widgets → plugin-debug.
-- Plugin extraction Phase 4 — TaskBackend interface + LocalBackend + registry.
+- Plugin extraction Phases 1-4 (cleanup, Fragments Engine, debug widgets, TaskBackend).
 - Phase C Cortex investigation — gap analysis, namespace strategy, 13 open questions.
 
 CURRENT: Plugin Extraction Phase 5 — Connectors (GitHub only)
@@ -47,23 +55,12 @@ UPCOMING (ordered):
    - Same info drawer chrome (path + git + denylist toggle).
    - Shell process killed on session archive. Requires shell_mode enabled.
 
-2. Plugin Hooks, Events & Filters (4 tasks, build in order)
-   - Task 1: Wire 21 dead events + EmitPreHook("message.sending") and
-     EmitPreHook("tool.executing") in engine.go. Add new event constants
-     (shell, context, artifact, api). ~15 files, no architecture changes.
-   - Task 2: Filter System — internal/plugin/filter.go, synchronous priority-
-     ordered chain. Host.RegisterFilter / ApplyFilter. Wire 6 filter points
-     (system_prompt, user_message, tool_result, assistant_response,
-     context_window, envelope_data).
-   - Task 3: New UI slots (frontend) — composer-above, message-actions, etc.
-   - Task 4: Wire unconsumed slots — context-menu:message/session, command-palette.
-
-3. Phase C — Memory & Continuity (implementation)
+2. Phase C — Memory & Continuity (implementation)
    - Resolve 13 open questions from investigation.
    - Likely blocked on Cortex: needs memory type + memory_recall view + embedding provider.
    - Then: MemoryService, extraction (PostCompact + per-turn), memory tools (opt-out).
 
-4. Phase D — Claude Code Integration (future, lower priority)
+3. Phase D — Claude Code Integration (future, lower priority)
 
 PRINCIPLES:
 - Consult before architecture decisions.
@@ -97,11 +94,16 @@ ARCHITECTURE:
 - Env vars: NANITE_*
 - Brand package at internal/brand/brand.go — frontend mirrors with ui/src/brand.ts
 
-COMPLETED (vNext frontend, 2026-04-03):
+COMPLETED (vNext frontend):
 - P0-P3 debug panels, approval cards, broker inspector, compaction divider
 - Tool call drawer with session-scoped retention
-- All 6 anti-patterns resolved
-- 23 shadcn components installed
+- All 6 anti-patterns resolved, 23 shadcn components installed
+- Plugin Hooks/Events/Filters Tasks 3+4 (PR #6, 2026-04-05):
+  - 6 new UI slots wired: composer-above/below, message-actions/header,
+    session-sidebar, modal — all using usePluginSlots()
+  - usePluginAction hook + global PluginModal in AppShell
+  - context-menu:message/session right-click menus with plugin items
+  - command-palette (Cmd+K) renders plugin-registered commands
 
 PENDING FRONTEND TASKS:
 
@@ -124,9 +126,4 @@ PENDING FRONTEND TASKS:
 
 4. Volon Backlog Button Polish (priority: low)
    - VolonBacklogButton.tsx exists, verify it works with POST /api/volon/backlog
-
-Future (plugin extraction related):
-- Debug widgets will move to plugin-debug (Phase 3 of extraction plan)
-- Engine/sprint UI will move to plugin-fragments-engine (Phase 2)
-- See docs/plugin-extraction-plan.md for full details
 ```

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/plugin"
@@ -30,7 +31,7 @@ var validComponentTypes = map[plugin.UIComponentType]bool{
 // unified registry. Implemented by chat.CommandRegistry. Defined here to
 // avoid importing the chat package.
 type CommandRegistrar interface {
-	RegisterPluginCommand(cmd plugin.SlashCommandDef, source string)
+	RegisterPluginCommand(cmd SlashCommandDef, source string)
 }
 
 // pendingRoute is an HTTP route registration deferred until the router is available.
@@ -63,9 +64,9 @@ type Host struct {
 	connectorOwners  map[string]string          // connector name → plugin ID
 	connectorHealth  map[string]*ConnectorStatus // connector name → health status
 	commands      CommandRegistrar // unified command registry (nil-safe)
-	keybindings   map[string]plugin.KeybindingDef   // keybinding ID → definition
+	keybindings   map[string]KeybindingDef   // keybinding ID → definition
 	kbOwners      map[string]string                 // keybinding ID → plugin ID
-	slots         map[plugin.UISlotName][]plugin.UISlotEntry // slot name → entries, sorted by priority
+	slots         map[UISlotName][]UISlotEntry // slot name → entries, sorted by priority
 	services      map[string]interface{}
 	configs       map[string]*PluginConfig // per-plugin config, keyed by plugin ID
 	activePlugin  string                   // ID of the plugin currently being loaded
@@ -92,9 +93,9 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		connectors:      make(map[string]plugin.Connector),
 		connectorOwners: make(map[string]string),
 		connectorHealth: make(map[string]*ConnectorStatus),
-		keybindings:     make(map[string]plugin.KeybindingDef),
+		keybindings:     make(map[string]KeybindingDef),
 		kbOwners:        make(map[string]string),
-		slots:           make(map[plugin.UISlotName][]plugin.UISlotEntry),
+		slots:           make(map[UISlotName][]UISlotEntry),
 		services:        make(map[string]interface{}),
 		configs:         make(map[string]*PluginConfig),
 		router:          router,
@@ -121,9 +122,9 @@ func NewHostWithStore(store interface{}) *Host {
 		connectors:      make(map[string]plugin.Connector),
 		connectorOwners: make(map[string]string),
 		connectorHealth: make(map[string]*ConnectorStatus),
-		keybindings:     make(map[string]plugin.KeybindingDef),
+		keybindings:     make(map[string]KeybindingDef),
 		kbOwners:        make(map[string]string),
-		slots:           make(map[plugin.UISlotName][]plugin.UISlotEntry),
+		slots:           make(map[UISlotName][]UISlotEntry),
 		services:        make(map[string]interface{}),
 		configs:         make(map[string]*PluginConfig),
 		router:          http.NewServeMux(),
@@ -702,7 +703,7 @@ func (h *Host) SetCommandRegistry(reg CommandRegistrar) {
 // RegisterCommand registers a slash command from a plugin into the unified
 // command registry (shared with built-in commands). Source is set to the
 // calling plugin's ID.
-func (h *Host) RegisterCommand(cmd plugin.SlashCommandDef) error {
+func (h *Host) RegisterCommand(cmd SlashCommandDef) error {
 	h.mu.RLock()
 	reg := h.commands
 	source := h.activePlugin
@@ -722,7 +723,7 @@ func (h *Host) RegisterCommand(cmd plugin.SlashCommandDef) error {
 
 // RegisterSlot registers a UI slot entry for a named mount point in the frontend.
 // Entries are stored sorted by priority (descending — higher priority first).
-func (h *Host) RegisterSlot(entry plugin.UISlotEntry) error {
+func (h *Host) RegisterSlot(entry UISlotEntry) error {
 	if entry.ID == "" {
 		return fmt.Errorf("slot entry ID is required")
 	}
@@ -766,22 +767,22 @@ func (h *Host) RegisterSlot(entry plugin.UISlotEntry) error {
 }
 
 // GetSlotEntries returns all registered entries for a given slot, sorted by priority.
-func (h *Host) GetSlotEntries(slot plugin.UISlotName) []plugin.UISlotEntry {
+func (h *Host) GetSlotEntries(slot UISlotName) []UISlotEntry {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	entries := h.slots[slot]
-	out := make([]plugin.UISlotEntry, len(entries))
+	out := make([]UISlotEntry, len(entries))
 	copy(out, entries)
 	return out
 }
 
 // GetAllSlots returns all slot entries grouped by slot name.
-func (h *Host) GetAllSlots() map[plugin.UISlotName][]plugin.UISlotEntry {
+func (h *Host) GetAllSlots() map[UISlotName][]UISlotEntry {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	out := make(map[plugin.UISlotName][]plugin.UISlotEntry, len(h.slots))
+	out := make(map[UISlotName][]UISlotEntry, len(h.slots))
 	for slot, entries := range h.slots {
-		cp := make([]plugin.UISlotEntry, len(entries))
+		cp := make([]UISlotEntry, len(entries))
 		copy(cp, entries)
 		out[slot] = cp
 	}
@@ -805,7 +806,7 @@ var coreKeybindings = map[string]bool{
 
 // RegisterKeybinding registers a keyboard shortcut from a plugin. The frontend
 // merges these with core bindings. Core bindings always win on collision.
-func (h *Host) RegisterKeybinding(kb plugin.KeybindingDef) error {
+func (h *Host) RegisterKeybinding(kb KeybindingDef) error {
 	if kb.ID == "" {
 		return fmt.Errorf("keybinding ID is required")
 	}
@@ -844,10 +845,10 @@ func (h *Host) RegisterKeybinding(kb plugin.KeybindingDef) error {
 }
 
 // GetKeybindings returns all plugin-registered keybindings.
-func (h *Host) GetKeybindings() []plugin.KeybindingDef {
+func (h *Host) GetKeybindings() []KeybindingDef {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	out := make([]plugin.KeybindingDef, 0, len(h.keybindings))
+	out := make([]KeybindingDef, 0, len(h.keybindings))
 	for _, kb := range h.keybindings {
 		out = append(out, kb)
 	}
@@ -908,6 +909,13 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 		return fmt.Errorf("failed to load plugin %q: %w", id, err)
 	}
 
+	// For subprocess plugins, register Nanite-specific capabilities
+	// (commands, slots, keybindings) that the subprocess can't register
+	// directly because it only sees the generic plugin.Host interface.
+	if sp, ok := p.(*subprocess.SubprocessPlugin); ok {
+		h.registerSubprocessExtensions(sp)
+	}
+
 	// Store the loaded plugin.
 	h.mu.Lock()
 	h.plugins[id] = p
@@ -918,6 +926,72 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 	// Emit plugin.installed event (fire-and-forget).
 	go h.EmitPluginInstalled(id, p.Name(), p.Version())
 	return nil
+}
+
+// registerSubprocessExtensions registers Nanite-specific capabilities from a
+// subprocess plugin's manifest. The subprocess only sees plugin.Host (SDK) so
+// it can't call RegisterCommand/Slot/Keybinding directly. We translate its
+// wire types to our local types here.
+func (h *Host) registerSubprocessExtensions(sp *subprocess.SubprocessPlugin) {
+	lr := sp.Manifest()
+	if lr == nil {
+		return
+	}
+
+	for _, cmd := range lr.Commands {
+		var args []CommandArg
+		for _, a := range cmd.Args {
+			args = append(args, CommandArg{
+				Name:        a.Name,
+				Description: a.Description,
+				Required:    a.Required,
+				Type:        a.Type,
+				Options:     a.Options,
+			})
+		}
+		def := SlashCommandDef{
+			Name:        cmd.Name,
+			Description: cmd.Description,
+			Category:    cmd.Category,
+			Args:        args,
+			Permission:  cmd.Permission,
+			Handler:     sp.MakeCommandHandler(cmd.Name),
+		}
+		if err := h.RegisterCommand(def); err != nil {
+			h.logger.Warn("failed to register subprocess command", "name", cmd.Name, "error", err)
+		}
+	}
+
+	for _, slot := range lr.Slots {
+		entry := UISlotEntry{
+			ID:        slot.ID,
+			PluginID:  slot.PluginID,
+			Slot:      UISlotName(slot.Slot),
+			Label:     slot.Label,
+			Icon:      slot.Icon,
+			Priority:  slot.Priority,
+			Component: slot.Component,
+			Action:    slot.Action,
+			Props:     slot.Props,
+		}
+		if err := h.RegisterSlot(entry); err != nil {
+			h.logger.Warn("failed to register subprocess slot", "id", slot.ID, "error", err)
+		}
+	}
+
+	for _, kb := range lr.Keybindings {
+		def := KeybindingDef{
+			ID:          kb.ID,
+			Key:         kb.Key,
+			Action:      kb.Action,
+			ActionValue: kb.ActionValue,
+			Label:       kb.Label,
+			Description: kb.Description,
+		}
+		if err := h.RegisterKeybinding(def); err != nil {
+			h.logger.Warn("failed to register subprocess keybinding", "id", kb.ID, "error", err)
+		}
+	}
 }
 
 // UnloadPlugin unloads a plugin from the host.

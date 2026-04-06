@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/plugin"
 )
 
+
 // SubprocessPlugin implements plugin.Plugin by proxying all operations over
 // JSON-RPC to a plugin running as a separate process. It is backward-compatible
 // with the existing plugin system — the Host sees it as a regular Plugin.
@@ -29,7 +30,8 @@ type SubprocessPlugin struct {
 	mgr    *Manager
 
 	// Registration manifest from the load handshake.
-	manifest *LoadResult
+	manifest  *LoadResult
+	transport *Transport // kept for parent package to build command handlers
 
 	// Config passed to the subprocess during init.
 	config map[string]string
@@ -144,6 +146,7 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 
 	sp.mu.Lock()
 	sp.manifest = loadResult
+	sp.transport = transport
 	sp.deps = loadResult.Dependencies
 	sp.mu.Unlock()
 
@@ -171,6 +174,9 @@ func (sp *SubprocessPlugin) Unload() error {
 }
 
 // registerManifest translates the LoadResult into host Register* calls.
+// Only registers generic SDK types (config, components, events, CRUD).
+// Nanite-specific registrations (commands, slots, keybindings) are handled
+// by the parent Host.LoadPlugin after this returns.
 func (sp *SubprocessPlugin) registerManifest(host plugin.Host, lr *LoadResult, transport *Transport) error {
 	logger := host.Logger()
 
@@ -178,28 +184,6 @@ func (sp *SubprocessPlugin) registerManifest(host plugin.Host, lr *LoadResult, t
 	if len(lr.ConfigSchema) > 0 {
 		if err := host.RegisterConfigSchema(lr.ConfigSchema); err != nil {
 			return fmt.Errorf("register config schema: %w", err)
-		}
-	}
-
-	// Register slash commands with proxy handlers.
-	for _, cmd := range lr.Commands {
-		def := plugin.SlashCommandDef{
-			Name:        cmd.Name,
-			Description: cmd.Description,
-			Category:    cmd.Category,
-			Args:        cmd.Args,
-			Permission:  cmd.Permission,
-			Handler:     sp.makeCommandHandler(cmd.Name, transport),
-		}
-		if err := host.RegisterCommand(def); err != nil {
-			logger.Warn("failed to register command", "name", cmd.Name, "error", err)
-		}
-	}
-
-	// Register UI slot entries.
-	for _, slot := range lr.Slots {
-		if err := host.RegisterSlot(slot); err != nil {
-			logger.Warn("failed to register slot", "id", slot.ID, "error", err)
 		}
 	}
 
@@ -215,13 +199,6 @@ func (sp *SubprocessPlugin) registerManifest(host plugin.Host, lr *LoadResult, t
 		}
 		if err := host.RegisterUIComponent(uiComp); err != nil {
 			logger.Warn("failed to register component", "id", comp.ID, "error", err)
-		}
-	}
-
-	// Register keybindings.
-	for _, kb := range lr.Keybindings {
-		if err := host.RegisterKeybinding(kb); err != nil {
-			logger.Warn("failed to register keybinding", "id", kb.ID, "error", err)
 		}
 	}
 
@@ -250,10 +227,17 @@ func (sp *SubprocessPlugin) registerManifest(host plugin.Host, lr *LoadResult, t
 	return nil
 }
 
-// makeCommandHandler creates a slash command handler that proxies to the subprocess.
-func (sp *SubprocessPlugin) makeCommandHandler(name string, transport *Transport) func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
+// Manifest returns the load manifest (nil if not loaded).
+func (sp *SubprocessPlugin) Manifest() *LoadResult {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	return sp.manifest
+}
+
+// MakeCommandHandler creates a slash command handler that proxies to the subprocess.
+func (sp *SubprocessPlugin) MakeCommandHandler(name string) func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
 	return func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
-		result, err := CallResult[CommandExecResult](transport, ctx, MethodCommandExecute, &CommandExecParams{
+		result, err := CallResult[CommandExecResult](sp.transport, ctx, MethodCommandExecute, &CommandExecParams{
 			Name:      name,
 			SessionID: sessionID,
 			Args:      args,

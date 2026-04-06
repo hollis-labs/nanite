@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hollis-labs/plugin"
+	nplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
 
 // CommandArg defines a single argument for a slash command (mirrors plugin.CommandArg).
@@ -122,7 +122,7 @@ func (r *CommandRegistry) Register(cmd SlashCommand, handler CommandHandler) {
 
 // RegisterPluginCommand registers a slash command from a plugin into the unified
 // registry. Satisfies the plugin.CommandRegistrar interface.
-func (r *CommandRegistry) RegisterPluginCommand(cmd plugin.SlashCommandDef, source string) {
+func (r *CommandRegistry) RegisterPluginCommand(cmd nplugin.SlashCommandDef, source string) {
 	var h CommandHandler
 	if cmd.Handler != nil {
 		h = func(ctx context.Context, sessionID, args string) (*CommandResult, error) {

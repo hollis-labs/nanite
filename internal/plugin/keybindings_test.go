@@ -3,14 +3,12 @@ package plugin
 import (
 	"net/http"
 	"testing"
-
-	pluginsdk "github.com/hollis-labs/plugin"
 )
 
 func TestRegisterKeybinding(t *testing.T) {
 	h := NewHost(http.NewServeMux(), NewLogger("test"))
 
-	kb := pluginsdk.KeybindingDef{
+	kb := KeybindingDef{
 		ID:          "git.commit",
 		Key:         "mod+shift+g",
 		Action:      "command",
@@ -38,7 +36,7 @@ func TestRegisterKeybinding(t *testing.T) {
 func TestRegisterKeybinding_CoreCollision(t *testing.T) {
 	h := NewHost(http.NewServeMux(), NewLogger("test"))
 
-	kb := pluginsdk.KeybindingDef{
+	kb := KeybindingDef{
 		ID:    "plugin.sidebar",
 		Key:   "mod+b", // core binding
 		Label: "Toggle Something",
@@ -53,7 +51,7 @@ func TestRegisterKeybinding_CoreCollision(t *testing.T) {
 func TestRegisterKeybinding_PluginCollision(t *testing.T) {
 	h := NewHost(http.NewServeMux(), NewLogger("test"))
 
-	kb1 := pluginsdk.KeybindingDef{
+	kb1 := KeybindingDef{
 		ID:    "plugin-a.action",
 		Key:   "mod+shift+x",
 		Label: "Plugin A Action",
@@ -63,7 +61,7 @@ func TestRegisterKeybinding_PluginCollision(t *testing.T) {
 	}
 
 	// Different ID, same key should fail.
-	kb2 := pluginsdk.KeybindingDef{
+	kb2 := KeybindingDef{
 		ID:    "plugin-b.action",
 		Key:   "mod+shift+x",
 		Label: "Plugin B Action",
@@ -77,7 +75,7 @@ func TestRegisterKeybinding_PluginCollision(t *testing.T) {
 func TestRegisterKeybinding_SameIDReplaces(t *testing.T) {
 	h := NewHost(http.NewServeMux(), NewLogger("test"))
 
-	kb := pluginsdk.KeybindingDef{
+	kb := KeybindingDef{
 		ID:    "my.binding",
 		Key:   "mod+shift+m",
 		Label: "Version 1",
@@ -103,11 +101,11 @@ func TestRegisterKeybinding_ValidationErrors(t *testing.T) {
 
 	tests := []struct {
 		name string
-		kb   pluginsdk.KeybindingDef
+		kb   KeybindingDef
 	}{
-		{"empty ID", pluginsdk.KeybindingDef{Key: "mod+x", Label: "X"}},
-		{"empty key", pluginsdk.KeybindingDef{ID: "test", Label: "X"}},
-		{"empty label", pluginsdk.KeybindingDef{ID: "test", Key: "mod+x"}},
+		{"empty ID", KeybindingDef{Key: "mod+x", Label: "X"}},
+		{"empty key", KeybindingDef{ID: "test", Label: "X"}},
+		{"empty label", KeybindingDef{ID: "test", Key: "mod+x"}},
 	}
 
 	for _, tt := range tests {

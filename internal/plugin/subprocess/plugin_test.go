@@ -11,14 +11,11 @@ import (
 
 // fakeHost implements plugin.Host for testing SubprocessPlugin.registerManifest.
 type fakeHost struct {
-	commands    []plugin.SlashCommandDef
-	slots       []plugin.UISlotEntry
-	components  []plugin.UIComponent
-	keybindings []plugin.KeybindingDef
-	eventHooks  []plugin.EventHook
-	crud        map[string]plugin.CRUDHandler
+	components   []plugin.UIComponent
+	eventHooks   []plugin.EventHook
+	crud         map[string]plugin.CRUDHandler
 	configSchema []plugin.ConfigFieldDef
-	logger      plugin.Logger
+	logger       plugin.Logger
 }
 
 func newFakeHost() *fakeHost {
@@ -51,18 +48,6 @@ func (h *fakeHost) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
 func (h *fakeHost) RegisterConnector(name string, c plugin.Connector) error { return nil }
 func (h *fakeHost) RegisterProvider(name string, p interface{}) error       { return nil }
 func (h *fakeHost) RegisterCLIAdapter(name string, a interface{}) error     { return nil }
-func (h *fakeHost) RegisterCommand(cmd plugin.SlashCommandDef) error {
-	h.commands = append(h.commands, cmd)
-	return nil
-}
-func (h *fakeHost) RegisterSlot(entry plugin.UISlotEntry) error {
-	h.slots = append(h.slots, entry)
-	return nil
-}
-func (h *fakeHost) RegisterKeybinding(kb plugin.KeybindingDef) error {
-	h.keybindings = append(h.keybindings, kb)
-	return nil
-}
 func (h *fakeHost) Logger() plugin.Logger        { return h.logger }
 func (h *fakeHost) Context() context.Context      { return context.Background() }
 
@@ -101,11 +86,11 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 						Category:    "test",
 					},
 				},
-				Slots: []plugin.UISlotEntry{
+				Slots: []UISlotEntry{
 					{
 						ID:       "test-slot",
 						PluginID: "test-plugin",
-						Slot:     plugin.SlotSettingsTab,
+						Slot:     "settings-tab",
 						Label:    "Test Settings",
 					},
 				},
@@ -116,7 +101,7 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 						Name: "Test Widget",
 					},
 				},
-				Keybindings: []plugin.KeybindingDef{
+				Keybindings: []KeybindingDef{
 					{
 						ID:          "test.action",
 						Key:         "mod+shift+t",
@@ -188,40 +173,20 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 	}
 
 	sp.manifest = loadResult
+	sp.transport = transport
 
-	// Register manifest with a fake host.
+	// Register manifest with a fake host (only generic SDK registrations).
 	host := newFakeHost()
 	if err := sp.registerManifest(host, loadResult, transport); err != nil {
 		t.Fatalf("registerManifest: %v", err)
 	}
 
-	// Verify registrations.
-	if len(host.commands) != 1 {
-		t.Fatalf("expected 1 command, got %d", len(host.commands))
-	}
-	if host.commands[0].Name != "test-cmd" {
-		t.Errorf("expected command 'test-cmd', got %q", host.commands[0].Name)
-	}
-
-	if len(host.slots) != 1 {
-		t.Fatalf("expected 1 slot, got %d", len(host.slots))
-	}
-	if host.slots[0].ID != "test-slot" {
-		t.Errorf("expected slot 'test-slot', got %q", host.slots[0].ID)
-	}
-
+	// Verify generic SDK registrations.
 	if len(host.components) != 1 {
 		t.Fatalf("expected 1 component, got %d", len(host.components))
 	}
 	if host.components[0].ID != "test-widget" {
 		t.Errorf("expected component 'test-widget', got %q", host.components[0].ID)
-	}
-
-	if len(host.keybindings) != 1 {
-		t.Fatalf("expected 1 keybinding, got %d", len(host.keybindings))
-	}
-	if host.keybindings[0].ID != "test.action" {
-		t.Errorf("expected keybinding 'test.action', got %q", host.keybindings[0].ID)
 	}
 
 	if len(host.eventHooks) != 1 {
@@ -236,8 +201,21 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 		t.Error("expected CRUD handler for 'test-items'")
 	}
 
-	// Test command execution through the proxy handler.
-	cmdResult, err := host.commands[0].Handler(ctx, "session-123", "foo bar")
+	// Verify Nanite-specific registrations are in the manifest (for parent to process).
+	manifest := sp.Manifest()
+	if len(manifest.Commands) != 1 || manifest.Commands[0].Name != "test-cmd" {
+		t.Errorf("expected command 'test-cmd' in manifest")
+	}
+	if len(manifest.Slots) != 1 || manifest.Slots[0].ID != "test-slot" {
+		t.Errorf("expected slot 'test-slot' in manifest")
+	}
+	if len(manifest.Keybindings) != 1 || manifest.Keybindings[0].ID != "test.action" {
+		t.Errorf("expected keybinding 'test.action' in manifest")
+	}
+
+	// Test command execution through MakeCommandHandler.
+	cmdHandler := sp.MakeCommandHandler("test-cmd")
+	cmdResult, err := cmdHandler(ctx, "session-123", "foo bar")
 	if err != nil {
 		t.Fatalf("command execute: %v", err)
 	}

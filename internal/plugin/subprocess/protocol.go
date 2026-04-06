@@ -107,9 +107,9 @@ type LoadParams struct{}
 type LoadResult struct {
 	Dependencies []string             `json:"dependencies,omitempty"`
 	Commands     []CommandRegistration `json:"commands,omitempty"`
-	Slots        []plugin.UISlotEntry  `json:"slots,omitempty"`
+	Slots        []UISlotEntry  `json:"slots,omitempty"`
 	Components   []ComponentRegistration `json:"components,omitempty"`
-	Keybindings  []plugin.KeybindingDef `json:"keybindings,omitempty"`
+	Keybindings  []KeybindingDef `json:"keybindings,omitempty"`
 	ConfigSchema []plugin.ConfigFieldDef `json:"config_schema,omitempty"`
 	EventSubscriptions []string         `json:"event_subscriptions,omitempty"`
 	CRUDResources      []string         `json:"crud_resources,omitempty"` // resource type names for CRUD
@@ -122,7 +122,7 @@ type CommandRegistration struct {
 	Name        string             `json:"name"`
 	Description string             `json:"description"`
 	Category    string             `json:"category"`
-	Args        []plugin.CommandArg `json:"args,omitempty"`
+	Args        []CommandArg `json:"args,omitempty"`
 	Permission  string             `json:"required_permission,omitempty"`
 }
 
@@ -135,6 +135,43 @@ type ComponentRegistration struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	Props       map[string]interface{} `json:"props,omitempty"`
+}
+
+// --- Wire types for Nanite-specific registrations ---
+// These mirror the types in internal/plugin/types.go but are defined here to
+// avoid an import cycle (subprocess is a sub-package of internal/plugin).
+// The parent package translates between these and the canonical types.
+
+// UISlotEntry is the wire representation of a UI slot registration.
+type UISlotEntry struct {
+	ID        string                 `json:"id"`
+	PluginID  string                 `json:"plugin_id"`
+	Slot      string                 `json:"slot"`
+	Label     string                 `json:"label"`
+	Icon      string                 `json:"icon,omitempty"`
+	Priority  int                    `json:"priority,omitempty"`
+	Component string                 `json:"component,omitempty"`
+	Action    string                 `json:"action,omitempty"`
+	Props     map[string]interface{} `json:"props,omitempty"`
+}
+
+// KeybindingDef is the wire representation of a keyboard shortcut registration.
+type KeybindingDef struct {
+	ID          string `json:"id"`
+	Key         string `json:"key"`
+	Action      string `json:"action"`
+	ActionValue string `json:"action_value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// CommandArg is the wire representation of a slash command argument.
+type CommandArg struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Options     []string `json:"options,omitempty"`
 }
 
 // --- Runtime request/response types ---

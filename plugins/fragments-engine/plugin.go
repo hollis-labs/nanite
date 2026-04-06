@@ -73,16 +73,18 @@ func (p *EnginePlugin) Load(host plugin.Host) error {
 	p.registerHTTPRoutes(host)
 
 	// Register sprint planning button in the chat header via slot system.
-	if err := host.RegisterSlot(plugin.UISlotEntry{
-		ID:        "sprint-planning",
-		Slot:      plugin.SlotChatHeaderAction,
-		Label:     "Sprint Planning",
-		Icon:      "clipboard-list",
-		Priority:  10,
-		Action:    "modal",
-		Component: "sprint-planning",
-	}); err != nil {
-		logger.Warn("failed to register sprint-planning slot", "error", fmt.Sprintf("%v", err))
+	if nh, ok := host.(*hostplugin.Host); ok {
+		if err := nh.RegisterSlot(hostplugin.UISlotEntry{
+			ID:        "sprint-planning",
+			Slot:      hostplugin.SlotChatHeaderAction,
+			Label:     "Sprint Planning",
+			Icon:      "clipboard-list",
+			Priority:  10,
+			Action:    "modal",
+			Component: "sprint-planning",
+		}); err != nil {
+			logger.Warn("failed to register sprint-planning slot", "error", fmt.Sprintf("%v", err))
+		}
 	}
 
 	// Register event hook for workflow events related to sprints.

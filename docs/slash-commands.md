@@ -35,7 +35,9 @@ Plugins can register slash commands via the `Host.RegisterCommand` method during
 
 ```go
 func (p *MyPlugin) Load(host plugin.Host) error {
-    return host.RegisterCommand(plugin.SlashCommandDef{
+    // Type-assert to Nanite's Host for command registration.
+    nh := host.(*nplugin.Host)
+    return nh.RegisterCommand(nplugin.SlashCommandDef{
         Name:        "mycommand",
         Description: "Does something useful",
         Category:    "custom",

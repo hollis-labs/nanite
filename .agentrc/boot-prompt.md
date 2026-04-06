@@ -39,11 +39,16 @@ RECENTLY COMPLETED:
 - Theme editor + color system redesign (brand/primary/danger split, live preview).
 - Plugin extraction Phases 1-4 (cleanup, Fragments Engine, debug widgets, TaskBackend).
 - Phase C Cortex investigation — gap analysis, namespace strategy, 13 open questions.
+- Plugin Extraction Phase 6 — Bookmarks extracted as builtin plugin.
+  Eliminated: email, teams, documents, actions, demo-presenter (removed or core).
+  bookmark events: message.bookmarked / message.unbookmarked wired.
+- Plugin Extraction Phase 7 — 8 envelope primitives built:
+  info-card, list-card, metric-card, progress-card, confirmation-card,
+  table-card, timeline-card, diff-card. All in ui/src/.../primitives/.
 
 CURRENT: Plugin Extraction Phase 5 — Connectors (GitHub only)
 - Scope narrowed: linear/slack/email dropped, github only.
 - Transport priority pattern: CLI > MCP > API with auto-detection.
-- Phases 6-7 (remaining extractions) planned, not started.
 
 UPCOMING (ordered):
 

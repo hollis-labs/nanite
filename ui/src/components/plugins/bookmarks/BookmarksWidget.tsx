@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Bookmark } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Widget } from './Widget'
+import { Widget } from '@/components/widgets/Widget'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 

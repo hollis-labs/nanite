@@ -186,7 +186,7 @@ The envelope system renders structured agent responses as interactive cards. `En
 
 **Core types:** ProposalCard, QuestionForm, ApprovalCard, TaskDispositionCard, TaskCompleteNotificationCard, SprintPlanningReviewCard, DocumentViewerCard, ReportCard, KBResultCard, ResolutionCaptureCard, ErrorCard.
 
-**Plugin types:** GiphyCard, MarvelCharacterCard, OEmbedCard, TeamsMessageCard, EmailComposeCard, TicketFormCard, TriviaQuestionCard, etc.
+**Plugin types:** GiphyCard, OEmbedCard, TicketFormCard, etc.
 
 Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (runs as prebuild/predev).
 

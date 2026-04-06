@@ -29,14 +29,6 @@ const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
     ),
     source: "core",
   },
-  bookmarks: {
-    component: lazy(() =>
-      import("@/components/widgets/BookmarksWidget").then((m) => ({
-        default: m.BookmarksWidget,
-      })),
-    ),
-    source: "core",
-  },
   "context-budget": {
     component: lazy(() =>
       import("@/components/widgets/ContextBudgetWidget").then((m) => ({
@@ -90,6 +82,14 @@ const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
 // --- PLUGIN ENTRIES (auto-generated, safe to overwrite below this line) ---
 // @PLUGIN_WIDGET_ENTRIES_START
 const PLUGIN_ENTRIES: Record<string, WidgetRegistryEntry> = {
+  bookmarks: {
+    component: lazy(() =>
+      import("@/components/plugins/bookmarks/BookmarksWidget").then((m) => ({
+        default: m.BookmarksWidget,
+      })),
+    ),
+    source: "bookmarks",
+  },
   "broker-decisions": {
     component: lazy(() =>
       import("@/components/plugins/debug/BrokerDecisionsWidget").then((m) => ({

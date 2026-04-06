@@ -114,7 +114,7 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 
 	// Emit artifact.created plugin event.
 	if a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitArtifactCreated(sessionID, artifact.ID, mimeType, "uploaded")
+		go a.Services.Plugins.EmitArtifactCreated(sessionID, artifact.ID, mimeType, store.ArtifactOriginUploaded)
 	}
 
 	a.jsonResp(w, http.StatusCreated, artifact)

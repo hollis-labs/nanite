@@ -29,7 +29,7 @@ export function usePluginAction() {
           break;
         case "handler":
           window.dispatchEvent(
-            new CustomEvent("plugin-action", { detail: entry }),
+            new CustomEvent("plugin-action", { detail: { id: entry.id, entry } }),
           );
           break;
         case "modal":

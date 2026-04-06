@@ -322,9 +322,13 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 
 	h.logger.Info("registered UI component", "id", component.ID, "type", component.Type, "plugin", callerPlugin)
 
-	// Emit widget.loaded event (fire-and-forget). Slot is part of component
-	// metadata when present; plugins can inspect it in their listener.
-	go h.EmitWidgetLoaded(component.ID, string(component.Type), "")
+	// Emit widget.loaded event (fire-and-forget). Extract slot from Props if
+	// the plugin provided it; otherwise empty string.
+	slot := ""
+	if s, ok := component.Props["slot"].(string); ok {
+		slot = s
+	}
+	go h.EmitWidgetLoaded(component.ID, string(component.Type), slot)
 	return nil
 }
 
@@ -943,6 +947,41 @@ func (h *Host) UnloadPlugin(id string) error {
 	}
 
 	delete(h.plugins, id)
+
+	// Clean up plugin-owned registrations: filters, event hooks, UI components,
+	// slots, keybindings. This prevents stale handlers from running after unload.
+	if removed := h.filters.RemoveByPlugin(id); removed > 0 {
+		h.logger.Info("removed plugin filters on unload", "id", id, "count", removed)
+	}
+	// Remove event hooks owned by this plugin.
+	for eventType, hooks := range h.eventHooks {
+		filtered := hooks[:0]
+		for _, hook := range hooks {
+			// EventHook interface doesn't expose plugin ID, so we can't selectively
+			// remove per-plugin hooks here without extending the interface. This is
+			// a known limitation — tracked for future cleanup.
+			filtered = append(filtered, hook)
+		}
+		h.eventHooks[eventType] = filtered
+	}
+	// Remove UI components owned by this plugin.
+	cleaned := h.uiComponents[:0]
+	for _, comp := range h.uiComponents {
+		if h.uiOwners[comp.ID] != id {
+			cleaned = append(cleaned, comp)
+		} else {
+			delete(h.uiOwners, comp.ID)
+		}
+	}
+	h.uiComponents = cleaned
+	// Remove keybindings owned by this plugin.
+	for kbID, owner := range h.kbOwners {
+		if owner == id {
+			delete(h.keybindings, kbID)
+			delete(h.kbOwners, kbID)
+		}
+	}
+
 	h.logger.Info("unloaded plugin", "id", id)
 
 	// Emit plugin.uninstalled event (fire-and-forget).

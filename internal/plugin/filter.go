@@ -102,6 +102,27 @@ func (r *FilterRegistry) Len(name string) int {
 	return len(r.chains[name])
 }
 
+// RemoveByPlugin removes all filter entries registered by the given plugin ID
+// across all chains. Returns the total number of entries removed.
+func (r *FilterRegistry) RemoveByPlugin(pluginID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	removed := 0
+	for name, chain := range r.chains {
+		filtered := chain[:0]
+		for _, entry := range chain {
+			if entry.PluginID == pluginID {
+				removed++
+			} else {
+				filtered = append(filtered, entry)
+			}
+		}
+		r.chains[name] = filtered
+	}
+	return removed
+}
+
 // Standard filter point names. Plugins reference these when registering filters.
 const (
 	FilterSystemPrompt     = "system_prompt"      // string → string

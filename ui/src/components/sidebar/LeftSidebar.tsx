@@ -526,10 +526,10 @@ function ChatItem({
                 {sidebarSlots.map((entry) => {
                   const PluginIcon = resolveIcon(entry.icon);
                   return (
-                    <span
+                    <button
+                      type="button"
                       key={entry.id}
-                      role="button"
-                      className="inline-flex items-center gap-0.5 px-1 py-px text-[10px] text-fg-faint hover:text-fg-muted rounded bg-surface-hover/40 transition-colors"
+                      className="appearance-none border-0 cursor-pointer inline-flex items-center gap-0.5 px-1 py-px text-[10px] text-fg-faint hover:text-fg-muted rounded bg-surface-hover/40 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         handlePluginAction(entry);
@@ -537,7 +537,7 @@ function ChatItem({
                       title={entry.label}
                     >
                       <PluginIcon className="w-2.5 h-2.5" />
-                    </span>
+                    </button>
                   );
                 })}
               </div>

@@ -111,11 +111,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context", map[string]interface{}{"raw": err.Error()})
 		return
 	}
-	// Emit context.assembled event (fire-and-forget).
-	if s.pluginHost != nil {
-		go s.pluginHost.EmitContextAssembled(sessionID, len(systemPrompt), len(chatMessages), 0)
-	}
-
 	// --- Resolve model ---
 	model := session.Model
 	if model == "" && agent.DefaultModel != "" {
@@ -201,6 +196,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		} else if fs, ok := filtered.(string); ok {
 			userContent = fs
 		}
+	}
+
+	// Emit context.assembled event after tool selection and filters are applied.
+	if s.pluginHost != nil {
+		go s.pluginHost.EmitContextAssembled(sessionID, len(systemPrompt), len(chatMessages), len(tools))
 	}
 
 	// --- Stream start ---

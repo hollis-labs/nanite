@@ -59,7 +59,7 @@ export function ComposerToolbar({ hasContent, isStreaming, onSend, onStop }: Com
         }
         break
       case 'handler':
-        window.dispatchEvent(new CustomEvent('plugin-action', { detail: entry }))
+        window.dispatchEvent(new CustomEvent('plugin-action', { detail: { id: entry.id, entry } }))
         break
       case 'modal':
         window.dispatchEvent(new CustomEvent('plugin-modal', { detail: entry }))

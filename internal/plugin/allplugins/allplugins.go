@@ -10,7 +10,7 @@ package allplugins
 import (
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/agentrc"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/agentwidgets"
-	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/bookmarkswidget"
+	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/bookmarks"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/contextwidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/debugwidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/giphy"

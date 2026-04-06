@@ -78,6 +78,71 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     ),
     source: "core",
   },
+  // Reusable primitives
+  "info-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/primitives/InfoCard").then((m) => ({
+        default: m.InfoCard,
+      })),
+    ),
+    source: "core",
+  },
+  "list-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/primitives/ListCard").then((m) => ({
+        default: m.ListCard,
+      })),
+    ),
+    source: "core",
+  },
+  "metric-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/primitives/MetricCard").then((m) => ({
+        default: m.MetricCard,
+      })),
+    ),
+    source: "core",
+  },
+  "progress-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/primitives/ProgressCard").then((m) => ({
+        default: m.ProgressCard,
+      })),
+    ),
+    source: "core",
+  },
+  "confirmation-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/primitives/ConfirmationCard").then((m) => ({
+        default: m.ConfirmationCard,
+      })),
+    ),
+    source: "core",
+  },
+  "table-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/primitives/TableCard").then((m) => ({
+        default: m.TableCard,
+      })),
+    ),
+    source: "core",
+  },
+  "timeline-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/primitives/TimelineCard").then((m) => ({
+        default: m.TimelineCard,
+      })),
+    ),
+    source: "core",
+  },
+  "diff-card": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/primitives/DiffCard").then((m) => ({
+        default: m.DiffCard,
+      })),
+    ),
+    source: "core",
+  },
 };
 
 // --- PLUGIN ENVELOPES (owned by their respective plugins) ---

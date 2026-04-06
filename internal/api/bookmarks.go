@@ -49,6 +49,12 @@ func (a *API) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Emit plugin event: message bookmarked.
+	if a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitMessageBookmarked(b.SessionID, b.MessageID, b.ID)
+	}
+
 	a.jsonResp(w, http.StatusCreated, b)
 }
 
@@ -77,6 +83,12 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
+		// Emit plugin event: message unbookmarked.
+		if a.Services.Plugins != nil {
+			go a.Services.Plugins.EmitMessageUnbookmarked(existing.SessionID, existing.MessageID, existing.ID)
+		}
+
 		a.jsonResp(w, http.StatusOK, map[string]any{
 			"action":   "removed",
 			"bookmark": existing,
@@ -99,6 +111,12 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Emit plugin event: message bookmarked.
+	if a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitMessageBookmarked(b.SessionID, b.MessageID, b.ID)
+	}
+
 	a.jsonResp(w, http.StatusCreated, map[string]any{
 		"action":   "created",
 		"bookmark": b,

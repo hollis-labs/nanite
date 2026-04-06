@@ -162,10 +162,8 @@ Consumed by: feature plugins that need GitHub access (e.g., code review, issue t
 ### Future connectors (build as-needed):
 - `plugin-connector-linear` — Linear API (issues, projects, teams)
 - `plugin-connector-slack` — Slack API (messages, channels)
-- `plugin-connector-email` — Email (IMAP/SMTP)
 
 ### Feature plugins that consume connectors:
-- `plugin-notifications` — uses slack, email connectors for outbound notifications
 - `plugin-tasks-linear` — uses linear connector for task backend
 
 ### Pattern:
@@ -179,24 +177,24 @@ requires:
 
 ## Phase 6 — Remaining Extractions
 
-Lower priority, do when natural.
+**Status: DONE (2026-04-05)**
 
-### Envelope plugins:
-- `plugin-email` — EmailInboxCard, EmailComposeCard, EmailPreviewCard (requires email connector)
-- `plugin-teams` — TeamsMessageCard (requires teams connector)
-- `plugin-documents` — ProposalCard, ReportCard, DocumentViewerCard (standalone, no connector needed)
+Reviewed all candidates. Three eliminated (email, teams, documents — already removed or core primitives). Two kept as core (actions = user settings, demo-presenter = already removed Phase 1). One extracted:
 
-### Feature plugins:
-- `plugin-bookmarks` — Bookmark CRUD + auto-title via LLM
-- `plugin-actions` — Custom actions + keybindings registry
-- `plugin-demo-presenter` — Demo mode (already partially a plugin)
+- [x] `plugin-bookmarks` — extracted as builtin plugin (`internal/plugin/builtin/bookmarks/`). Store + API stay in core (Option B). Widget moved to `ui/src/components/plugins/bookmarks/`. Added `message.bookmarked` / `message.unbookmarked` events.
+- ~~`plugin-actions`~~ — Dropped. Custom actions are core user settings (keybindings, slash commands, auto-triggers).
+- ~~`plugin-demo-presenter`~~ — Already removed in Phase 1.
+- ~~`plugin-email`~~ — Components already removed in Phase 1.
+- ~~`plugin-teams`~~ — Components already removed in Phase 1.
+- ~~`plugin-documents`~~ — ProposalCard, ReportCard, DocumentViewerCard are core primitives (Phase 7).
 
 ## Phase 7 — Primitive Envelope Library
 
-Define a set of reusable, well-designed envelope primitives that plugins can use out of the box
-instead of building custom cards from scratch. These are core-provided building blocks.
+**Status: DONE (2026-04-05)**
 
-### Current core primitives (Phase 1):
+Reusable envelope primitives that plugins can use out of the box. Located in `ui/src/components/chat/envelopes/primitives/`.
+
+### Core primitives (from Phase 1):
 - `document-viewer` — render markdown/text content
 - `report-card` — metrics visualization with bar charts and colored cards
 - `error-report` — structured error display
@@ -204,27 +202,21 @@ instead of building custom cards from scratch. These are core-provided building 
 - `proposal-card` — proposed action with accept/reject
 - `question-form` — interactive form with multiple input types
 
-### Planned additions:
-- `info-card` — simple title + body + optional icon, for informational messages
+### Primitives added (Phase 7):
+- `info-card` — title + body + optional icon, variant-colored (info/success/warning/danger)
 - `list-card` — ordered/unordered list with optional actions per item
-- `metric-card` — single KPI display (value, trend, label)
-- `progress-card` — progress bar with status text
-- `confirmation-card` — "are you sure?" with confirm/cancel actions
-- `table-card` — tabular data display with optional sorting
-- `timeline-card` — chronological event list
-- `diff-card` — before/after comparison view
+- `metric-card` — single KPI display (value, trend arrow, previous value)
+- `progress-card` — progress bar with status text + optional step checklist
+- `confirmation-card` — confirm/cancel with risk-colored buttons (low/medium/high)
+- `table-card` — tabular data display with client-side column sorting
+- `timeline-card` — vertical timeline with status-colored dots
+- `diff-card` — side-by-side before/after comparison (text or code format)
 
 ### Design principles:
-- Each primitive accepts a typed `data` payload (documented JSON schema)
-- Primitives are unstyled beyond the design system — they use shadcn components
-- Plugins declare which primitive type they want in their envelope `data.type` field
-- New primitives can be added without plugin changes — they're backwards compatible
-
-### Implementation:
-- Frontend: one React component per primitive in `ui/src/components/chat/envelopes/primitives/`
-- Backend: add type string to `registeredTypes` in `envelope.go`
-- Registry: add to CORE_ENTRIES in `plugin-envelopes.ts`
-- Test: envelope sync test catches mismatches automatically
+- Each primitive accepts a typed `data` payload (TypeScript interface)
+- Primitives use shadcn components, no custom styling beyond design system
+- All registered in `registeredTypes` (backend) and `CORE_ENTRIES` (frontend)
+- Envelope sync test catches mismatches automatically
 
 ## CI Enforcement
 

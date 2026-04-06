@@ -55,4 +55,10 @@ Envelopes are structured UI cards injected into chat messages. The system has tw
 3. Verify the `data` shape the backend sends matches what the component expects
 4. Test both the streaming path (SSE deltas) and the persisted path (page reload)
 
-**Known envelope types** (as of 2026-03-20): `task-disposition`, `giphy-modal`, `document-viewer`, `report-card`, `task-complete-notification`, `sprint-planning-review`, `kb-result`, `ticket-confirmation`, `ticket-form`, `resolution-capture`
+**Known envelope types** (as of 2026-04-05):
+- Core primitives: `session-task`, `document-viewer`, `report-card`, `error-report`, `approval-card`, `proposal-card`, `question-form`
+- Core primitives (Phase 7): `info-card`, `list-card`, `metric-card`, `progress-card`, `confirmation-card`, `table-card`, `timeline-card`, `diff-card`
+- Plugin (giphy): `giphy-modal`
+- Plugin (oembed): `oembed-card`
+- Plugin (support-ticket): `kb-result`, `ticket-form`, `ticket-confirmation`, `resolution-capture`
+- Plugin (fragments-engine): `task-disposition`, `task-complete-notification`, `sprint-planning-review`

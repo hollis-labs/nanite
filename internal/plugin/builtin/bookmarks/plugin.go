@@ -1,4 +1,4 @@
-package bookmarkswidget
+package bookmarks
 
 import (
 	"time"

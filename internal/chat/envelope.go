@@ -23,6 +23,15 @@ var registeredTypes = map[string]bool{
 	"approval-card":              true,
 	"proposal-card":              true,
 	"question-form":              true,
+	// Reusable primitives
+	"info-card":                  true,
+	"list-card":                  true,
+	"metric-card":                true,
+	"progress-card":              true,
+	"confirmation-card":          true,
+	"table-card":                 true,
+	"timeline-card":              true,
+	"diff-card":                  true,
 	// Plugin-owned (registered at runtime via RegisterEnvelopeType; listed here for validation fallback)
 	"giphy-modal":                true,
 	"oembed-card":                true,

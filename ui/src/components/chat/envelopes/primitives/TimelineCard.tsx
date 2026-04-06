@@ -22,14 +22,13 @@ const STATUS_DOT: Record<string, string> = {
 }
 
 function formatTimestamp(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleString('en-US', {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    })
-  } catch {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) {
     return iso
   }
+  return d.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
 }
 
 export function TimelineCard({ data }: TimelineCardProps) {

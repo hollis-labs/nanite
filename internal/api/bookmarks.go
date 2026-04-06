@@ -60,10 +60,24 @@ func (a *API) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+
+	// Look up bookmark before deleting so we can emit the event with context.
+	bookmark, err := a.Services.Store.GetBookmark(id)
+	if err != nil {
+		a.errorResp(w, http.StatusNotFound, err.Error())
+		return
+	}
+
 	if err := a.Services.Store.DeleteBookmark(id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Emit plugin event: message unbookmarked.
+	if a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitMessageUnbookmarked(bookmark.SessionID, bookmark.MessageID, bookmark.ID)
+	}
+
 	a.jsonResp(w, http.StatusOK, map[string]string{"deleted": id})
 }
 

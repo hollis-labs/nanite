@@ -3,7 +3,6 @@ import { Info, CheckCircle, AlertTriangle, XCircle, type LucideIcon } from 'luci
 interface InfoCardData {
   title: string
   body: string
-  icon?: string
   variant?: 'info' | 'success' | 'warning' | 'danger'
 }
 

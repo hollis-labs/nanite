@@ -10,7 +10,7 @@ interface TableColumn {
 interface TableCardData {
   title?: string
   columns: TableColumn[]
-  rows: Array<Record<string, unknown>>
+  rows: Array<Record<string, string | number | boolean | null>>
   caption?: string
 }
 
@@ -39,8 +39,10 @@ export function TableCard({ data }: TableCardProps) {
       if (av == null && bv == null) return 0
       if (av == null) return 1
       if (bv == null) return -1
-      if (av < bv) return sortAsc ? -1 : 1
-      if (av > bv) return sortAsc ? 1 : -1
+      const sa = String(av)
+      const sb = String(bv)
+      if (sa < sb) return sortAsc ? -1 : 1
+      if (sa > sb) return sortAsc ? 1 : -1
       return 0
     })
   }
@@ -59,19 +61,33 @@ export function TableCard({ data }: TableCardProps) {
               {data.columns.map((col) => (
                 <th
                   key={col.key}
-                  className={`px-4 py-2 text-left text-xs font-medium text-fg-muted ${
-                    col.sortable ? 'cursor-pointer select-none hover:text-fg-secondary' : ''
-                  }`}
-                  onClick={col.sortable ? () => handleSort(col.key) : undefined}
+                  className="px-4 py-2 text-left text-xs font-medium text-fg-muted"
+                  aria-sort={
+                    col.sortable
+                      ? sortKey === col.key
+                        ? (sortAsc ? 'ascending' : 'descending')
+                        : 'none'
+                      : undefined
+                  }
                 >
-                  <span className="inline-flex items-center gap-1">
-                    {col.label}
-                    {col.sortable && sortKey === col.key && (
-                      sortAsc
-                        ? <ArrowUp className="w-3 h-3" />
-                        : <ArrowDown className="w-3 h-3" />
-                    )}
-                  </span>
+                  {col.sortable ? (
+                    <button
+                      type="button"
+                      className="inline-flex w-full items-center gap-1 text-left select-none hover:text-fg-secondary"
+                      onClick={() => handleSort(col.key)}
+                    >
+                      <span>{col.label}</span>
+                      {sortKey === col.key && (
+                        sortAsc
+                          ? <ArrowUp className="w-3 h-3" />
+                          : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1">
+                      {col.label}
+                    </span>
+                  )}
                 </th>
               ))}
             </tr>

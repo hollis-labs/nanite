@@ -40,6 +40,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useSettings } from "@/hooks/useSettings";
+import { usePluginSlots } from "@/hooks/usePluginSlots";
+import { usePluginAction } from "@/hooks/usePluginAction";
+import { resolveIcon } from "@/lib/icons";
 import { api } from "@/lib/api";
 import type { Session } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
@@ -471,6 +474,9 @@ function ChatItem({
   const [hovered, setHovered] = useState(false);
   const displayTitle = session.custom_name || session.title || `Chat ${session.short_code}`;
   const isArchived = session.status === "archived";
+  const sidebarSlots = usePluginSlots("session-sidebar");
+  const sessionContextMenuSlots = usePluginSlots("context-menu:session");
+  const handlePluginAction = usePluginAction();
 
   return (
     <ContextMenu>
@@ -514,6 +520,28 @@ function ChatItem({
               </span>
             </div>
             <span className="block mt-px text-[11px] text-fg-faint font-mono leading-none">#{session.short_code}</span>
+            {/* session-sidebar slot — plugin badges */}
+            {sidebarSlots.length > 0 && (
+              <div className="flex items-center gap-0.5 mt-0.5">
+                {sidebarSlots.map((entry) => {
+                  const PluginIcon = resolveIcon(entry.icon);
+                  return (
+                    <button
+                      type="button"
+                      key={entry.id}
+                      className="appearance-none border-0 cursor-pointer inline-flex items-center gap-0.5 px-1 py-px text-[10px] text-fg-faint hover:text-fg-muted rounded bg-surface-hover/40 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePluginAction(entry);
+                      }}
+                      title={entry.label}
+                    >
+                      <PluginIcon className="w-2.5 h-2.5" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </button>
       </ContextMenuTrigger>
@@ -535,6 +563,25 @@ function ChatItem({
             </>
           )}
         </ContextMenuItem>
+        {/* context-menu:session slot — plugin items */}
+        {sessionContextMenuSlots.length > 0 && (
+          <>
+            <ContextMenuSeparator />
+            {sessionContextMenuSlots.map((entry) => {
+              const PluginIcon = resolveIcon(entry.icon);
+              return (
+                <ContextMenuItem
+                  key={entry.id}
+                  onSelect={() => handlePluginAction(entry)}
+                  className="gap-2 text-xs"
+                >
+                  <PluginIcon className="size-3.5" />
+                  {entry.label}
+                </ContextMenuItem>
+              );
+            })}
+          </>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem
           onSelect={onDelete}

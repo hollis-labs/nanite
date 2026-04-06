@@ -73,6 +73,7 @@ type Host struct {
 	router        *http.ServeMux
 	pendingRoutes []pendingRoute // routes queued before router was set
 	triggers      *TriggerDispatcher // event → connector dispatch
+	filters       *FilterRegistry    // named filter chains
 	eventSubs     []chan plugin.Event // SSE subscribers for event streaming
 	logger        plugin.Logger
 	ctx           context.Context
@@ -102,6 +103,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		ctxCancel:       cancel,
 	}
 	h.triggers = NewTriggerDispatcher(h)
+	h.filters = NewFilterRegistry()
 	return h
 }
 
@@ -130,6 +132,7 @@ func NewHostWithStore(store interface{}) *Host {
 		ctxCancel:       cancel,
 	}
 	h.triggers = NewTriggerDispatcher(h)
+	h.filters = NewFilterRegistry()
 	h.services["store"] = store
 	return h
 }
@@ -318,7 +321,40 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 	}
 
 	h.logger.Info("registered UI component", "id", component.ID, "type", component.Type, "plugin", callerPlugin)
+
+	// Emit widget.loaded event (fire-and-forget). Extract slot from Props if
+	// the plugin provided it; otherwise empty string.
+	slot := ""
+	if s, ok := component.Props["slot"].(string); ok {
+		slot = s
+	}
+	go h.EmitWidgetLoaded(component.ID, string(component.Type), slot)
 	return nil
+}
+
+// RegisterFilter adds a filter handler to the named filter chain at the given
+// priority. Lower priority values execute earlier in the chain. The calling
+// plugin is identified by the active plugin context during Load().
+func (h *Host) RegisterFilter(name string, priority int, fn FilterFunc) error {
+	h.mu.RLock()
+	pluginID := h.activePlugin
+	h.mu.RUnlock()
+
+	h.logger.Info("registering filter", "name", name, "priority", priority, "plugin", pluginID)
+	return h.filters.Register(name, pluginID, priority, fn)
+}
+
+// ApplyFilter runs the filter chain for the named filter point. Returns the
+// transformed data or an error if any handler in the chain fails (aborting
+// the rest of the chain). If no handlers are registered, data passes through
+// unchanged.
+func (h *Host) ApplyFilter(name string, data interface{}, ctx FilterContext) (interface{}, error) {
+	return h.filters.Apply(name, data, ctx)
+}
+
+// FilterChainLen returns the number of handlers registered for a named filter.
+func (h *Host) FilterChainLen(name string) int {
+	return h.filters.Len(name)
 }
 
 // GetService provides access to core services (MCP clients, databases, etc.).
@@ -445,7 +481,14 @@ func (h *Host) SetConfig(key string, value string) error {
 		settings = make(map[string]any)
 	}
 	settings[key] = value
-	return s.UpsertPluginSettings(id, settings)
+	if err := s.UpsertPluginSettings(id, settings); err != nil {
+		return err
+	}
+
+	// Emit config.changed event (fire-and-forget).
+	valStr := fmt.Sprintf("%v", value)
+	go h.EmitConfigChanged(id, key, valStr)
+	return nil
 }
 
 // RegisterConfigSchema registers config field definitions for the currently-loading plugin.
@@ -871,6 +914,9 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 	h.mu.Unlock()
 
 	h.logger.Info("loaded plugin", "id", id, "name", p.Name(), "version", p.Version())
+
+	// Emit plugin.installed event (fire-and-forget).
+	go h.EmitPluginInstalled(id, p.Name(), p.Version())
 	return nil
 }
 
@@ -901,7 +947,45 @@ func (h *Host) UnloadPlugin(id string) error {
 	}
 
 	delete(h.plugins, id)
+
+	// Clean up plugin-owned registrations: filters, event hooks, UI components,
+	// slots, keybindings. This prevents stale handlers from running after unload.
+	if removed := h.filters.RemoveByPlugin(id); removed > 0 {
+		h.logger.Info("removed plugin filters on unload", "id", id, "count", removed)
+	}
+	// Remove event hooks owned by this plugin.
+	for eventType, hooks := range h.eventHooks {
+		filtered := hooks[:0]
+		for _, hook := range hooks {
+			// EventHook interface doesn't expose plugin ID, so we can't selectively
+			// remove per-plugin hooks here without extending the interface. This is
+			// a known limitation — tracked for future cleanup.
+			filtered = append(filtered, hook)
+		}
+		h.eventHooks[eventType] = filtered
+	}
+	// Remove UI components owned by this plugin.
+	cleaned := h.uiComponents[:0]
+	for _, comp := range h.uiComponents {
+		if h.uiOwners[comp.ID] != id {
+			cleaned = append(cleaned, comp)
+		} else {
+			delete(h.uiOwners, comp.ID)
+		}
+	}
+	h.uiComponents = cleaned
+	// Remove keybindings owned by this plugin.
+	for kbID, owner := range h.kbOwners {
+		if owner == id {
+			delete(h.keybindings, kbID)
+			delete(h.kbOwners, kbID)
+		}
+	}
+
 	h.logger.Info("unloaded plugin", "id", id)
+
+	// Emit plugin.uninstalled event (fire-and-forget).
+	go h.EmitPluginUninstalled(id)
 	return nil
 }
 

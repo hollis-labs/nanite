@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/plugin"
 )
 
 // EventEmitter unifies activity events (Engine GUI), plugin events, and
@@ -39,5 +41,14 @@ type PluginEventSink interface {
 	EmitToolCalled(sessionID, toolName string, args, result any)
 	EmitToolFailed(sessionID, toolName string, args any, err string)
 	EmitModeChanged(sessionID, previousMode, newMode string)
+	EmitEnvelopeRendered(sessionID, envelopeType string, data interface{})
+	EmitProviderError(sessionID, providerName, model, errMsg string)
+	EmitProviderFallback(sessionID, fromProvider, toProvider string)
+	EmitAgentLoaded(sessionID, agentID, agentName, version string)
+	EmitContextAssembled(sessionID string, systemPromptLen, messageCount, toolCount int)
+	EmitContextCompacted(sessionID string, tokensSaved int, stagesApplied []string)
 	EmitPreHook(eventType, sessionID string, data map[string]any) bool
+
+	// Filter support — synchronous, returns transformed data or error.
+	ApplyFilter(name string, data interface{}, ctx plugin.FilterContext) (interface{}, error)
 }

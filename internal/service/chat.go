@@ -150,6 +150,11 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 		return "", fmt.Errorf("create user message: %w", err)
 	}
 
+	// Emit message.sent plugin event with the real user message ID.
+	if s.pluginHost != nil {
+		go s.pluginHost.EmitMessageSent(sessionID, userMsg.ID, content, "user", 0)
+	}
+
 	// Create assistant message ID and stream.
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)

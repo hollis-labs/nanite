@@ -129,9 +129,6 @@ func (c *CompositeEmitter) EmitPreCompact(ctx context.Context, sessionID string,
 func (c *CompositeEmitter) EmitPostCompact(ctx context.Context, sessionID string, tokensSaved int, stagesApplied []string) {
 	// Post-compact is informational — no pre-hook cancellation.
 	if c.plugin != nil {
-		go c.plugin.EmitToolCalled(sessionID, "context.compact", map[string]any{
-			"tokens_saved":    tokensSaved,
-			"stages_applied":  stagesApplied,
-		}, nil)
+		go c.plugin.EmitContextCompacted(sessionID, tokensSaved, stagesApplied)
 	}
 }

@@ -11,6 +11,9 @@ import { slashCommandSuggestion } from './extensions/slashCommandSuggestion'
 import { FileMentionExtension, type FileResult } from './extensions/FileMentionExtension'
 import { fileMentionSuggestion } from './extensions/fileMentionSuggestion'
 import { useShellMode } from '@/hooks/useShellMode'
+import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { usePluginAction } from '@/hooks/usePluginAction'
+import { resolveIcon } from '@/lib/icons'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import type { SlashCommandDef } from '@/lib/types'
@@ -354,8 +357,31 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
 
   const hasContent = editor ? editor.getText().trim().length > 0 : false
 
+  const composerAboveSlots = usePluginSlots('composer-above')
+  const composerBelowSlots = usePluginSlots('composer-below')
+  const handlePluginAction = usePluginAction()
+
   return (
     <div className="px-4 pb-4 pt-2 shrink-0">
+      {/* composer-above slot — plugin content above the composer */}
+      {composerAboveSlots.length > 0 && (
+        <div className="flex items-center gap-1 mb-1">
+          {composerAboveSlots.map((entry) => {
+            const PluginIcon = resolveIcon(entry.icon)
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                className="flex items-center gap-1 px-2 py-1 text-xs text-fg-muted hover:text-fg hover:bg-surface rounded transition-colors"
+                onClick={() => handlePluginAction(entry)}
+              >
+                <PluginIcon className="w-3.5 h-3.5" />
+                <span>{entry.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       <div
         ref={dropRef}
         className={`border rounded-sm overflow-hidden transition-colors shadow-lg shadow-black/30 ${
@@ -450,6 +476,25 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           onStop={onStop}
         />
       </div>
+      {/* composer-below slot — plugin content below the composer */}
+      {composerBelowSlots.length > 0 && (
+        <div className="flex items-center gap-1 mt-1">
+          {composerBelowSlots.map((entry) => {
+            const PluginIcon = resolveIcon(entry.icon)
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                className="flex items-center gap-1 px-2 py-1 text-xs text-fg-muted hover:text-fg hover:bg-surface rounded transition-colors"
+                onClick={() => handlePluginAction(entry)}
+              >
+                <PluginIcon className="w-3.5 h-3.5" />
+                <span>{entry.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       <p className="text-center text-[11px] text-fg-faint mt-2">
         Nanite may produce inaccurate information.
       </p>

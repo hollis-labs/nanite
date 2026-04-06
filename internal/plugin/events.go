@@ -61,6 +61,23 @@ const (
 	// Pre-hook Events (can signal cancellation via "cancel" key in event data)
 	EventMessageSending = "message.sending" // before message is sent to LLM
 	EventToolExecuting  = "tool.executing"  // before tool is executed
+
+	// Shell Events (User Shell feature — wired with Task 2 PTY shell tab)
+	EventShellExec    = "shell.exec"
+	EventShellError   = "shell.error"
+	EventShellBlocked = "shell.blocked"
+
+	// Context Events
+	EventContextCompacted = "context.compacted"
+	EventContextAssembled = "context.assembled"
+
+	// Artifact Events
+	EventArtifactCreated = "artifact.created"
+	EventArtifactDeleted = "artifact.deleted"
+
+	// API Events (constants only — wiring deferred; granularity concerns)
+	EventAPIRequest  = "api.request"
+	EventAPIResponse = "api.response"
 )
 
 // Claude Code hook name aliases.
@@ -393,6 +410,118 @@ func (h *Host) EmitProviderFallback(sessionID, fromProvider, toProvider string) 
 	})
 	event.Data["from_provider"] = fromProvider
 	event.Data["to_provider"] = toProvider
+	h.EmitEvent(event)
+}
+
+// EmitAgentLoaded emits an agent.loaded event at session initialization
+// when an agent profile is resolved and assigned.
+func (h *Host) EmitAgentLoaded(sessionID, agentID, agentName, version string) {
+	event := NewEvent(EventAgentLoaded, brand.ID, EventData{
+		SessionID:    sessionID,
+		AgentID:      agentID,
+		AgentName:    agentName,
+		AgentVersion: version,
+	})
+	h.EmitEvent(event)
+}
+
+// EmitMessageDeleted emits a message.deleted event after a message is removed.
+func (h *Host) EmitMessageDeleted(sessionID, messageID string) {
+	event := NewEvent(EventMessageDeleted, brand.ID, EventData{
+		SessionID: sessionID,
+		MessageID: messageID,
+	})
+	h.EmitEvent(event)
+}
+
+// EmitScopeChanged emits a scope.changed event when a scope guard updates.
+func (h *Host) EmitScopeChanged(sessionID, previousScope, newScope string) {
+	event := NewEvent(EventScopeChanged, brand.ID, EventData{
+		SessionID:     sessionID,
+		PreviousScope: previousScope,
+		NewScope:      newScope,
+	})
+	h.EmitEvent(event)
+}
+
+// EmitWidgetLoaded emits a widget.loaded event after a UI component is registered.
+func (h *Host) EmitWidgetLoaded(componentID, componentType, slot string) {
+	event := NewEvent(EventWidgetLoaded, brand.ID, EventData{
+		ComponentID:   componentID,
+		ComponentType: componentType,
+		WidgetSlot:    slot,
+	})
+	h.EmitEvent(event)
+}
+
+// EmitWorkflowStarted emits a workflow.started event.
+func (h *Host) EmitWorkflowStarted(sessionID, workflowName string, workflowData interface{}) {
+	event := NewEvent(EventWorkflowStarted, brand.ID, EventData{
+		SessionID:    sessionID,
+		WorkflowName: workflowName,
+		WorkflowData: workflowData,
+	})
+	h.EmitEvent(event)
+}
+
+// EmitWorkflowComplete emits a workflow.complete event.
+func (h *Host) EmitWorkflowComplete(sessionID, workflowName string, workflowData interface{}) {
+	event := NewEvent(EventWorkflowComplete, brand.ID, EventData{
+		SessionID:    sessionID,
+		WorkflowName: workflowName,
+		WorkflowData: workflowData,
+	})
+	h.EmitEvent(event)
+}
+
+// EmitWorkflowFailed emits a workflow.failed event.
+func (h *Host) EmitWorkflowFailed(sessionID, workflowName, errMsg string) {
+	event := NewEvent(EventWorkflowFailed, brand.ID, EventData{
+		SessionID:    sessionID,
+		WorkflowName: workflowName,
+		Error:        errMsg,
+	})
+	h.EmitEvent(event)
+}
+
+// EmitContextAssembled emits a context.assembled event after system prompt + context assembly.
+func (h *Host) EmitContextAssembled(sessionID string, systemPromptLen, messageCount, toolCount int) {
+	event := NewEvent(EventContextAssembled, brand.ID, EventData{
+		SessionID: sessionID,
+	})
+	event.Data["system_prompt_length"] = systemPromptLen
+	event.Data["message_count"] = messageCount
+	event.Data["tool_count"] = toolCount
+	h.EmitEvent(event)
+}
+
+// EmitContextCompacted emits a context.compacted event after context window compaction.
+func (h *Host) EmitContextCompacted(sessionID string, tokensSaved int, stagesApplied []string) {
+	event := NewEvent(EventContextCompacted, brand.ID, EventData{
+		SessionID: sessionID,
+	})
+	event.Data["tokens_saved"] = tokensSaved
+	event.Data["stages_applied"] = stagesApplied
+	h.EmitEvent(event)
+}
+
+// EmitArtifactCreated emits an artifact.created event.
+func (h *Host) EmitArtifactCreated(sessionID, artifactID, artifactType, origin string) {
+	event := NewEvent(EventArtifactCreated, brand.ID, EventData{
+		SessionID: sessionID,
+	})
+	event.Data["artifact_id"] = artifactID
+	event.Data["artifact_type"] = artifactType
+	event.Data["origin"] = origin
+	h.EmitEvent(event)
+}
+
+// EmitArtifactDeleted emits an artifact.deleted event.
+func (h *Host) EmitArtifactDeleted(sessionID, artifactID string) {
+	event := NewEvent(EventArtifactDeleted, brand.ID, EventData{
+		SessionID: sessionID,
+	})
+	event.Data["artifact_id"] = artifactID
 	h.EmitEvent(event)
 }
 

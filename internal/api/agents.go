@@ -271,9 +271,12 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	isPrimary := req.Role == "primary"
 	mode := "default"
 
-	// If setting a new primary, demote the current primary first.
+	// If setting a new primary, demote the current primary first and capture
+	// the previous agent ID so we can emit agent.switched.
+	var previousAgentID string
 	if isPrimary {
 		if cur, err := a.Services.Store.GetSessionPrimaryAgent(sessionID); err == nil {
+			previousAgentID = cur.AgentID
 			_ = a.Services.Store.EnsureSessionAgent(sessionID, cur.AgentID, cur.Mode, false)
 		}
 	}
@@ -281,6 +284,11 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	if err := a.Services.Store.EnsureSessionAgent(sessionID, req.AgentID, mode, isPrimary); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Emit agent.switched plugin event when primary changes to a different agent.
+	if isPrimary && previousAgentID != "" && previousAgentID != req.AgentID && a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitAgentSwitched(sessionID, previousAgentID, req.AgentID)
 	}
 
 	// Return the updated agents list.

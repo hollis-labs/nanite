@@ -760,6 +760,12 @@ export type UISlotName =
   | "right-rail-tab"
   | "composer-toolbar"
   | "chat-header-action"
+  | "composer-above"
+  | "composer-below"
+  | "message-actions"
+  | "message-header"
+  | "session-sidebar"
+  | "modal"
   | "context-menu:message"
   | "context-menu:session"
   | "command-palette";

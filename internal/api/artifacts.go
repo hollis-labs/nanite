@@ -112,6 +112,11 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Emit artifact.created plugin event.
+	if a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitArtifactCreated(sessionID, artifact.ID, mimeType, store.ArtifactOriginUploaded)
+	}
+
 	a.jsonResp(w, http.StatusCreated, artifact)
 }
 
@@ -164,6 +169,11 @@ func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
 	if err := a.Services.Store.CreateArtifact(artifact); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Emit artifact.created plugin event.
+	if a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitArtifactCreated(req.SessionID, artifact.ID, req.MimeType, string(store.ArtifactOriginPlaced))
 	}
 
 	a.jsonResp(w, http.StatusCreated, artifact)

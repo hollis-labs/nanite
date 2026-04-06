@@ -15,6 +15,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/permission"
+	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/truncate"
 )
@@ -181,6 +182,33 @@ func (s *chatServiceImpl) preCheckTools(
 			}
 		}
 
+		// --- Pre-hook: tool.executing ---
+		// Plugins observing "tool.executing" may cancel tool execution.
+		// Data shape: {session_id, tool_name, tool_input, tool_id}.
+		if s.pluginHost != nil {
+			cancelled := s.pluginHost.EmitPreHook("tool.executing", sessionID, map[string]any{
+				"tool_name":  tu.Name,
+				"tool_input": tu.Input,
+				"tool_id":    tu.ID,
+			})
+			if cancelled {
+				ls.recordToolCall(tu.Name, false)
+				blockMsg := fmt.Sprintf("BLOCKED: Tool %q was blocked by a plugin policy hook. Do NOT retry this tool call with the same input.", tu.Name)
+				log.Printf("chat-service: tool %s blocked by plugin pre-hook", tu.Name)
+				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockMsg}
+				block := provider.ContentBlock{
+					Type: "tool_result", ToolUseID: tu.ID, Content: blockMsg,
+				}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked"}
+				plan.status = toolPlanBlocked
+				plan.resultBlock = &block
+				plan.ref = &ref
+				plans = append(plans, plan)
+				continue
+			}
+		}
+
 		// Tool passed pre-check — determine concurrency safety.
 		plan.status = toolPlanReady
 		if toolInfo, ok := s.tools.GetToolMeta(tu.Name); ok {
@@ -277,6 +305,20 @@ func (s *chatServiceImpl) executeSingleTool(
 	result, _ := s.tools.Execute(toolCtx, agentID, tu.Name, tu.Input)
 	resultText := result.Output
 	toolIsError := result.IsError
+
+	// Filter: tool_result — summarize, redact secrets, reformat.
+	if s.pluginHost != nil && !toolIsError {
+		fctx := pluginpkg.FilterContext{
+			SessionID: sessionID,
+			AgentID:   agentID,
+			Metadata:  map[string]interface{}{"tool_name": tu.Name},
+		}
+		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterToolResult, resultText, fctx); err != nil {
+			log.Printf("chat-service: tool_result filter error for %s: %v", tu.Name, err)
+		} else if fs, ok := filtered.(string); ok {
+			resultText = fs
+		}
+	}
 
 	if toolIsError {
 		toolSpan.RecordError(fmt.Errorf("%s", resultText))

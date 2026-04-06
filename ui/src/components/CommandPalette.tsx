@@ -31,6 +31,9 @@ import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useNavigationStore } from '@/stores/useNavigationStore'
 import { updateSettingsHash } from '@/hooks/useHashRoute'
+import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { usePluginAction } from '@/hooks/usePluginAction'
+import { resolveIcon } from '@/lib/icons'
 import { api } from '@/lib/api'
 
 interface CommandPaletteProps {
@@ -63,6 +66,9 @@ export function CommandPalette({ open, onOpenChange, onNewSession }: CommandPale
     queryFn: api.listAgents,
     enabled: open && subPage === 'agents',
   })
+
+  const pluginCommands = usePluginSlots('command-palette')
+  const handlePluginAction = usePluginAction()
 
   const close = useCallback(() => {
     onOpenChange(false)
@@ -175,6 +181,30 @@ export function CommandPalette({ open, onOpenChange, onNewSession }: CommandPale
                 <span>Plugins</span>
               </CommandItem>
             </CommandGroup>
+
+            {/* command-palette slot — plugin-registered commands */}
+            {pluginCommands.length > 0 && (
+              <>
+                <CommandSeparator />
+                <CommandGroup heading="Plugins">
+                  {pluginCommands.map((entry) => {
+                    const PluginIcon = resolveIcon(entry.icon)
+                    return (
+                      <CommandItem
+                        key={entry.id}
+                        onSelect={() => {
+                          handlePluginAction(entry)
+                          close()
+                        }}
+                      >
+                        <PluginIcon />
+                        <span>{entry.label}</span>
+                      </CommandItem>
+                    )
+                  })}
+                </CommandGroup>
+              </>
+            )}
 
             <CommandSeparator />
 

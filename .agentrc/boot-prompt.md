@@ -5,131 +5,77 @@
 ```
 Boot nanite-backend
 
-Rebrand from Conduit → Nanite complete (all 5 waves, 2026-04-03).
-vNext MVP Phases 0-7 complete. Post-MVP Phases A+B complete.
-Cerberus service live: nanite-api (port 8090), nanite-frontend (port 5176).
+Rebrand Conduit → Nanite complete. vNext MVP 0-7 ✅, Post-MVP A+B ✅.
+Plugin Extraction Phases 1-4 ✅, User Shell Task 1 (! exec) ✅, Phase C investigation ✅.
+Cerberus services: nanite-api (8090), nanite-frontend (5176).
 
 KEY DOCS:
-- Brand package: internal/brand/brand.go (single source of truth for app identity)
-- MVP plan: docs/vnext-mvp.md (8 phases, all complete)
-- Post-MVP backlog: docs/vnext-backlog.md
-- Plugin extraction plan: docs/plugin-extraction-plan.md (6 phases)
+- Brand: internal/brand/brand.go (single source of truth)
+- Plugin extraction: docs/plugin-extraction-plan.md
+- Hooks/events/filters: docs/plugin-hooks-events-filters.md
+- Phase C memory: docs/phase-c-cortex-investigation.md
+- Backlog: docs/vnext-backlog.md
+- Post-MVP: docs/post-mvp-plan.md
 
 ARCHITECTURE:
-- Migrations: single 001_schema.sql (DDL only). All seed data in seed.go.
-- Agents/skills: file-based (MD + YAML frontmatter), DB stores runtime state only
-- Plugins: YAML manifest + Go/subprocess, event hooks, connectors, UI components
-- Providers: 8 HTTP API + 8 CLI adapters via PTY bridge
+- Migrations: single 001_schema.sql (DDL only). Seed data in seed.go.
+- Agents/skills: file-based (MD + YAML frontmatter), DB = runtime state only.
+- Plugins: YAML manifest + Go/subprocess, event hooks, connectors, UI components.
+- Providers: 8 HTTP API + 8 CLI adapters via PTY bridge.
+- TaskBackend: pluggable (LocalBackend default), registered via Host.RegisterTaskBackend.
 
-COMPLETED (pre-rebrand):
-- Service layer decomposition: internal/service/ with Container
-- Phase 0-4: tool system, context window, permissions, chat loop hardening
-- Plugin system: SDK, discovery, events, config, connectors, scaffold, generator
+RECENTLY COMPLETED:
+- User Shell Task 1 — `!` exec with denylist, 3-mode approval (ask/session/yolo),
+  ShellInfoDrawer, full-width shell messages. PRs #4, #5.
+- Theme editor + color system redesign (brand/primary/danger split, live preview).
+- Plugin extraction Phase 3 — debug widgets → plugin-debug.
+- Plugin extraction Phase 4 — TaskBackend interface + LocalBackend + registry.
+- Phase C Cortex investigation — gap analysis, namespace strategy, 13 open questions.
 
-COMPLETED: Phases 5-7 — Agent System, Skill System, Slash Commands & Polish
-- File-based agents + skills with builtin defaults
-- Slash commands auto-registered from skills
-- Migration auto-discovery via fs.ReadDir()
-- Envelope sync test, nil check consistency, real tool token costs
-- 18 tests (commands + skill service), full suite green
+CURRENT: Plugin Extraction Phase 5 — Connectors (GitHub only)
+- Scope narrowed: linear/slack/email dropped, github only.
+- Transport priority pattern: CLI > MCP > API with auto-detection.
+- Phases 6-7 (remaining extractions) planned, not started.
 
-COMPLETED: Post-MVP Phases A+B
-- A1: MCP Config Import/Export (CLI + GUI)
-- A2: Token Breakdown (tool_input_tokens, per-block parsing)
-- B1: Plugin/Event Enhancements (hook aliases, loadType system, preferences)
-- B2: Multi-Agent Orchestration (Badger KV, task tracking, workers, worktrees)
+UPCOMING (ordered):
 
-COMPLETED: Migration Squash (2026-04-04)
-- 27 migrations → single 001_schema.sql (DDL only)
-- Seed data consolidated in seed.go (providers, models, user_settings, catalog)
-- Stale conduit-plugins catalog URL fixed → nanite-plugins
-- CI enforcement: grep for INSERT in .sql files (planned)
+1. User Shell Task 2 — Interactive PTY Shell Tab
+   - Shell icon in composer toolbar; WebSocket endpoint (SSE insufficient).
+   - Backend PTY session manager scoped to chat session lifetime.
+   - Frontend xterm.js embed replacing composer area when toggled.
+   - Output NOT in LLM context by default — user selects snippets to send.
+   - Same info drawer chrome (path + git + denylist toggle).
+   - Shell process killed on session archive. Requires shell_mode enabled.
 
-CURRENT: Plugin Extraction (docs/plugin-extraction-plan.md)
-- Phase 1 (cleanup): DONE
-- Phase 2 (Fragments Engine): DONE
-- Phase 3 (debug widgets): DONE — builtin debugwidgets plugin, frontend in plugins/debug/
-- Phase 4 (TaskBackend): DONE — TaskBackend interface, LocalBackend, registry, Host.RegisterTaskBackend, migration 002
-- Phase 5: Connector plugins (linear, slack, github, email)
-- Phase 6: Remaining extractions (email/teams/documents envelopes, bookmarks, actions)
+2. Plugin Hooks, Events & Filters (4 tasks, build in order)
+   - Task 1: Wire 21 dead events + EmitPreHook("message.sending") and
+     EmitPreHook("tool.executing") in engine.go. Add new event constants
+     (shell, context, artifact, api). ~15 files, no architecture changes.
+   - Task 2: Filter System — internal/plugin/filter.go, synchronous priority-
+     ordered chain. Host.RegisterFilter / ApplyFilter. Wire 6 filter points
+     (system_prompt, user_message, tool_result, assistant_response,
+     context_window, envelope_data).
+   - Task 3: New UI slots (frontend) — composer-above, message-actions, etc.
+   - Task 4: Wire unconsumed slots — context-menu:message/session, command-palette.
 
-CURRENT: Phase C — Memory & Continuity
-- Cortex investigation DONE → docs/phase-c-cortex-investigation.md
-  - No memory type/view exists in Cortex yet (15 types, 4 views, none memory-oriented)
-  - Semantic search blocked: no embedding provider configured in Cortex
-  - Recommended: single `memory` type with subtype metadata, `memory_recall` view
-  - Namespace strategy: app/nanite/{user|project|session}/{id} for isolation
-  - 13 open questions documented (embedding provider, namespace dynamics, budget allocation)
-- NEXT: MemoryService implementation, extraction (PostCompact + per-turn), memory tools (opt-out)
+3. Phase C — Memory & Continuity (implementation)
+   - Resolve 13 open questions from investigation.
+   - Likely blocked on Cortex: needs memory type + memory_recall view + embedding provider.
+   - Then: MemoryService, extraction (PostCompact + per-turn), memory tools (opt-out).
 
-UPCOMING: Plugin Hooks, Events & Filters (docs/plugin-hooks-events-filters.md)
-Four tasks, build in order:
-
-  Task 1: Wire Dead Events + Pre-Hooks (backend)
-  - Add Emit*() calls for 21 defined-but-never-emitted events at correct code points
-  - Wire EmitPreHook("message.sending") in engine.go before LLM call
-  - Wire EmitPreHook("tool.executing") in engine.go before tool execution
-  - Add new event constants: shell (exec/error/blocked), context (compacted/assembled),
-    artifact (created/deleted), api (request/response)
-  - ~15 files touched, no architecture changes
-
-  Task 2: Filter System (backend, NEW architecture)
-  - Create internal/plugin/filter.go: FilterFunc, FilterContext, priority-ordered chain
-  - Synchronous pipeline: each handler receives output of previous, ordered by priority (lower=earlier)
-  - Host methods: RegisterFilter(name, priority, fn), ApplyFilter(name, data, ctx)
-  - Wire 6 filter points: system_prompt, user_message, tool_result, assistant_response,
-    context_window, envelope_data (shell filters deferred to shell feature task)
-  - Tests: chain ordering, error propagation, empty chain passthrough
-
-  Task 3: New UI Slots (frontend)
-  - composer-above (HIGH — needed for shell feature info drawer)
-  - message-actions (HIGH — per-message plugin buttons)
-  - message-header, composer-below, session-sidebar, modal
-
-  Task 4: Wire Unconsumed Slots (frontend)
-  - context-menu:message, context-menu:session — add right-click rendering
-  - command-palette — wire into Cmd+K palette
-
-UPCOMING: User Shell (core feature, not plugin)
-Two tasks, build in order:
-
-  Task 1: ! Shell Exec
-  - Parse `!` prefix in chat composer (frontend) and internal/chat/commands.go (backend)
-  - Convention matches Claude Code's `!` prefix — standard, not custom
-  - Backend: execute command via os/exec, capture stdout+stderr, inject as user message visible to LLM
-  - Agent sees command + output, can comment on errors, suggest corrections
-  - Working directory: project root (from session/config), fallback $HOME
-  - Output truncation via internal/truncate/ pipeline
-  - Default denylist (internal/shell/denylist.go): destructive commands blocked unless YOLO
-  - YOLO lightning icon becomes 3-state toggle: Ask (confirm each) → Session (auto-approve, denylist active) → YOLO (no restrictions)
-  - Frontend: `!` keystroke triggers info drawer (2-line slide-up from composer top):
-    [lock-icon] ~/Projects-apps/nanite  ·  main  ·  clean
-    Lock icon toggles denylist on/off per session. Admin user setting controls default.
-  - Drawer disappears on submit or backspace out of `!` mode
-
-  Task 2: Interactive Shell Tab (PTY) — depends on Task 1
-  - Shell icon in composer toolbar (between YOLO toggle and paperclip), keyboard shortcut TBD
-  - Backend: PTY session manager — spawn user's default shell, scoped to chat session lifetime
-  - Transport: WebSocket (new endpoint, SSE insufficient for bidirectional)
-  - Frontend: xterm.js terminal embed, replaces composer area when toggled
-  - Output is NOT in LLM context by default — user can select+send snippets to conversation
-  - Requires shell_mode enabled (dev mode)
-  - Shell process killed on session archive
-  - Same info drawer chrome (path + git + denylist toggle) applies
-
-PHASE D (future): Claude Code Integration
+4. Phase D — Claude Code Integration (future, lower priority)
 
 PRINCIPLES:
-- Consult before architecture decisions
-- Greenfield modules alongside old code, migrate when ready
-- go build + go vet + go test clean after every task
-- Always use cerberus_rebuild for deployment, not go build directly
-- Quality over speed. Polished software, maintainable patterns.
-- Brand package: use brand.* constants, never hardcode app name/identity
+- Consult before architecture decisions.
+- Greenfield modules alongside old code, migrate when ready.
+- go build + go vet + go test clean after every task.
+- Always cerberus_rebuild nanite-api for deployment — never raw go build.
+- Brand package: use brand.* constants, never hardcode identity.
 - Migrations = DDL only. seed.go = data only.
-- Connectors are standalone plugins, feature plugins consume them.
+- Envelope sync: backend envelope.go ↔ frontend plugin-envelopes.ts (manual, silent drop).
+- Quality over speed.
 
-Test suite: all passing (zero failures)
+Test suite: all passing.
 ```
 
 ## Frontend Agent

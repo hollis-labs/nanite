@@ -28,6 +28,14 @@ func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Emit message.sent plugin event (fire-and-forget). Note: HandleMessage
+	// creates its own user-message ID internally; msgID here is the assistant
+	// message ID for the response stream. Plugins wanting the precise user
+	// message ID can look it up via session history.
+	if a.Services.Plugins != nil {
+		go a.Services.Plugins.EmitMessageSent(req.SessionID, "", req.Content, "user", 0)
+	}
+
 	a.jsonResp(w, http.StatusAccepted, map[string]string{
 		"message_id": msgID,
 		"stream_url": fmt.Sprintf("/api/stream/%s", msgID),

@@ -1,0 +1,113 @@
+package plugin
+
+import (
+	"fmt"
+	"sort"
+	"sync"
+)
+
+// FilterFunc transforms data through a synchronous pipeline. Each handler
+// receives the output of the previous handler. Return an error to abort the
+// chain; the error propagates to the caller of ApplyFilter.
+type FilterFunc func(data interface{}, ctx FilterContext) (interface{}, error)
+
+// FilterContext provides metadata to filter handlers about the current
+// operation being filtered.
+type FilterContext struct {
+	SessionID string
+	AgentID   string
+	Metadata  map[string]interface{}
+}
+
+// filterEntry binds a filter handler to a named filter point with a priority.
+// Lower priority values execute earlier in the chain.
+type filterEntry struct {
+	PluginID string
+	Priority int
+	Fn       FilterFunc
+}
+
+// FilterRegistry manages named filter chains. Each filter name (e.g.
+// "system_prompt", "tool_result") has its own ordered chain of handlers.
+// Thread-safe for concurrent registration and application.
+type FilterRegistry struct {
+	mu     sync.RWMutex
+	chains map[string][]filterEntry
+}
+
+// NewFilterRegistry creates an empty filter registry.
+func NewFilterRegistry() *FilterRegistry {
+	return &FilterRegistry{
+		chains: make(map[string][]filterEntry),
+	}
+}
+
+// Register adds a filter handler to the named chain at the given priority.
+// Lower priority values execute earlier. If the same pluginID registers
+// multiple handlers on the same chain, all are kept (ordered by priority).
+func (r *FilterRegistry) Register(name, pluginID string, priority int, fn FilterFunc) error {
+	if name == "" {
+		return fmt.Errorf("filter name must not be empty")
+	}
+	if fn == nil {
+		return fmt.Errorf("filter function must not be nil")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry := filterEntry{PluginID: pluginID, Priority: priority, Fn: fn}
+	r.chains[name] = append(r.chains[name], entry)
+
+	// Re-sort by priority (stable so equal-priority entries keep insertion order).
+	sort.SliceStable(r.chains[name], func(i, j int) bool {
+		return r.chains[name][i].Priority < r.chains[name][j].Priority
+	})
+
+	return nil
+}
+
+// Apply runs all handlers registered for the named filter in priority order.
+// Each handler receives the output of the previous one. If no handlers are
+// registered, data is returned unchanged (passthrough). If any handler returns
+// an error, the chain aborts and the error is returned.
+func (r *FilterRegistry) Apply(name string, data interface{}, ctx FilterContext) (interface{}, error) {
+	r.mu.RLock()
+	chain, exists := r.chains[name]
+	if !exists || len(chain) == 0 {
+		r.mu.RUnlock()
+		return data, nil
+	}
+	// Copy the slice so we don't hold the lock during execution.
+	handlers := make([]filterEntry, len(chain))
+	copy(handlers, chain)
+	r.mu.RUnlock()
+
+	current := data
+	for _, entry := range handlers {
+		result, err := entry.Fn(current, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("filter %q (plugin %q, priority %d): %w",
+				name, entry.PluginID, entry.Priority, err)
+		}
+		current = result
+	}
+	return current, nil
+}
+
+// Len returns the number of handlers registered for the named filter.
+func (r *FilterRegistry) Len(name string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.chains[name])
+}
+
+// Standard filter point names. Plugins reference these when registering filters.
+const (
+	FilterSystemPrompt     = "system_prompt"      // string → string
+	FilterUserMessage      = "user_message"       // string → string
+	FilterToolResult       = "tool_result"         // string → string
+	FilterAssistantResponse = "assistant_response" // string → string
+	FilterContextWindow    = "context_window"      // []provider.ChatMessage → []provider.ChatMessage
+	FilterEnvelopeData     = "envelope_data"       // map[string]interface{} → map[string]interface{}
+)

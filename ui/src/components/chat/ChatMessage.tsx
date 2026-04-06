@@ -5,7 +5,16 @@ import { MessageContent } from './MessageContent'
 import { ShellMessage } from './ShellMessage'
 import { EnvelopeRenderer } from './envelopes/EnvelopeRenderer'
 import { ContentActions } from './ContentActions'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { useChatStore } from '@/stores/useChatStore'
+import { usePluginSlots } from '@/hooks/usePluginSlots'
+import { usePluginAction } from '@/hooks/usePluginAction'
+import { resolveIcon } from '@/lib/icons'
 
 interface StructuredMessage {
   v: number
@@ -93,6 +102,10 @@ interface ChatMessageProps {
 export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, onSendMessage, agentName, isMultiAgent = false }: ChatMessageProps) {
   const [hovered, setHovered] = useState(false)
   const activeMode = useChatStore((s) => s.activeMode)
+  const messageHeaderSlots = usePluginSlots('message-header')
+  const messageActionSlots = usePluginSlots('message-actions')
+  const contextMenuSlots = usePluginSlots('context-menu:message')
+  const handlePluginAction = usePluginAction()
 
   // Parse structured message format (v=1) or fall through to legacy raw text.
   const { text: displayText, structured } = useMemo(
@@ -181,7 +194,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
     )
   }
 
-  return (
+  const messageBody = (
     <div
       className={`flex gap-3 group ${isUser ? 'flex-row-reverse' : ''}`}
       onMouseEnter={() => setHovered(true)}
@@ -224,6 +237,21 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
           {isBookmarked && !hovered && (
             <BookmarkCheck className="w-3.5 h-3.5 text-warning" />
           )}
+          {/* message-header slot — plugin badges/tags */}
+          {messageHeaderSlots.length > 0 && messageHeaderSlots.map((entry) => {
+            const PluginIcon = resolveIcon(entry.icon)
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                className="flex items-center gap-0.5 px-1.5 py-0.5 text-[11px] text-fg-muted hover:text-fg rounded-full bg-surface-hover/50 hover:bg-surface-hover transition-colors"
+                onClick={() => handlePluginAction(entry)}
+              >
+                <PluginIcon className="w-3 h-3" />
+                <span>{entry.label}</span>
+              </button>
+            )
+          })}
         </div>
         {(
           <div
@@ -262,7 +290,53 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             className="mt-1"
           />
         )}
+        {/* message-actions slot — plugin action buttons per message */}
+        {messageActionSlots.length > 0 && (
+          <div className={`flex items-center gap-0.5 mt-0.5 transition-opacity ${hovered ? 'opacity-100' : 'opacity-0'}`}>
+            {messageActionSlots.map((entry) => {
+              const PluginIcon = resolveIcon(entry.icon)
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-fg-muted hover:text-fg hover:bg-surface rounded transition-colors"
+                  onClick={() => handlePluginAction(entry)}
+                  title={entry.label}
+                >
+                  <PluginIcon className="w-3.5 h-3.5" />
+                  <span>{entry.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
+  )
+
+  // Wrap in context menu if plugin items are registered
+  if (contextMenuSlots.length === 0) return messageBody
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        {messageBody}
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        {contextMenuSlots.map((entry) => {
+          const PluginIcon = resolveIcon(entry.icon)
+          return (
+            <ContextMenuItem
+              key={entry.id}
+              onSelect={() => handlePluginAction(entry)}
+              className="gap-2 text-xs"
+            >
+              <PluginIcon className="size-3.5" />
+              {entry.label}
+            </ContextMenuItem>
+          )
+        })}
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -110,6 +111,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context", map[string]interface{}{"raw": err.Error()})
 		return
 	}
+	// Emit context.assembled event (fire-and-forget).
+	if s.pluginHost != nil {
+		go s.pluginHost.EmitContextAssembled(sessionID, len(systemPrompt), len(chatMessages), 0)
+	}
 
 	// --- Resolve model ---
 	model := session.Model
@@ -177,6 +182,27 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	systemPrompt += nativeToolGuide
 
+	// --- Plugin filters ---
+	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
+
+	// Filter: system_prompt — plugins can inject persona rules, disclaimers, etc.
+	if s.pluginHost != nil {
+		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterSystemPrompt, systemPrompt, fctx); err != nil {
+			log.Printf("chat-service: system_prompt filter error: %v", err)
+		} else if fs, ok := filtered.(string); ok {
+			systemPrompt = fs
+		}
+	}
+
+	// Filter: user_message — PII redaction, input sanitization, expansion.
+	if s.pluginHost != nil && userContent != "" {
+		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterUserMessage, userContent, fctx); err != nil {
+			log.Printf("chat-service: user_message filter error: %v", err)
+		} else if fs, ok := filtered.(string); ok {
+			userContent = fs
+		}
+	}
+
 	// --- Stream start ---
 	ch <- chat.StreamEvent{Type: "stream_start", MessageID: assistantMsgID, AgentID: agent.ID}
 
@@ -191,6 +217,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	if s.events != nil {
 		s.events.EmitSessionStart(ctx, sessionID, agent.ID, model, mode.Slug)
+	}
+	// Emit agent.loaded plugin event (fire-and-forget).
+	if s.pluginHost != nil {
+		go s.pluginHost.EmitAgentLoaded(sessionID, agent.ID, agent.Name, fmt.Sprintf("%d", agent.Version))
 	}
 
 	// --- Loop state ---
@@ -270,6 +300,36 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			provCtx = s.setupCLIContext(provCtx, sessionID, session, agent, mode, ch)
 		}
 
+		// --- Pre-hook: message.sending ---
+		// Plugins observing "message.sending" may cancel the LLM call.
+		// Data shape: {session_id, agent_id, model, messages, system_prompt_length, iteration}.
+		if s.pluginHost != nil {
+			cancelled := s.pluginHost.EmitPreHook("message.sending", sessionID, map[string]any{
+				"agent_id":             agent.ID,
+				"model":                model,
+				"messages":             len(chatMessages),
+				"system_prompt_length": len(systemPrompt),
+				"iteration":            ls.iteration,
+			})
+			if cancelled {
+				provSpan.End()
+				log.Printf("chat-service: message.sending cancelled by plugin hook (session=%s iter=%d)", sessionID, ls.iteration)
+				blockMsg := "Message blocked by plugin policy."
+				ch <- chat.StreamEvent{Type: "delta", Content: blockMsg}
+				fullContent.WriteString(blockMsg)
+				break
+			}
+		}
+
+		// Filter: context_window — plugin prunes or injects context blocks.
+		if s.pluginHost != nil {
+			if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterContextWindow, chatMessages, fctx); err != nil {
+				log.Printf("chat-service: context_window filter error: %v", err)
+			} else if fm, ok := filtered.([]provider.ChatMessage); ok {
+				chatMessages = fm
+			}
+		}
+
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
 			log.Printf("chat-service: tool-use iteration %d — %d tools, %d messages, ~%d tokens (ceiling=%d)",
@@ -292,6 +352,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				if errCode == chat.ErrorCodeRateLimit {
 					s.events.EmitRateLimitHit(ctx, sessionID, "anthropic", 0)
 				}
+			}
+			// Emit provider.error plugin event.
+			if s.pluginHost != nil {
+				go s.pluginHost.EmitProviderError(sessionID, providerName, model, err.Error())
 			}
 			if ls.retryBudget > 0 {
 				ls.retryBudget--
@@ -514,6 +578,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	if s.outputFilter != nil && s.outputFilter.Len() > 0 {
 		responseContent = s.outputFilter.Apply(responseContent)
 	}
+	// Filter: assistant_response — tone filter, brand voice, compliance scrubbing.
+	if s.pluginHost != nil {
+		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterAssistantResponse, responseContent, fctx); err != nil {
+			log.Printf("chat-service: assistant_response filter error: %v", err)
+		} else if fs, ok := filtered.(string); ok {
+			responseContent = fs
+		}
+	}
 
 	// Inject pending envelopes.
 	for _, env := range ls.pendingEnvelopes {
@@ -567,9 +639,22 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	var envRefs []chat.EnvelopeRef
-	for _, env := range envelopes {
+	for i, env := range envelopes {
+		// Filter: envelope_data — enrich card data, add links, transform fields.
+		if s.pluginHost != nil && env.Data != nil {
+			if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterEnvelopeData, env.Data, fctx); err != nil {
+				log.Printf("chat-service: envelope_data filter error for %s: %v", env.Type, err)
+			} else if fd, ok := filtered.(map[string]interface{}); ok {
+				envelopes[i].Data = fd
+				env = envelopes[i]
+			}
+		}
 		innerData, _ := json.Marshal(env.Data)
 		envRefs = append(envRefs, chat.EnvelopeRef{Type: env.Type, Data: json.RawMessage(innerData)})
+		// Emit envelope.rendered plugin event for each envelope attached to the response.
+		if s.pluginHost != nil {
+			go s.pluginHost.EmitEnvelopeRendered(sessionID, env.Type, env.Data)
+		}
 	}
 
 	// Determine tier.

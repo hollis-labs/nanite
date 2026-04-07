@@ -49,7 +49,7 @@ internal/
 │   ├── commands.go          # Slash command handling
 │   └── activity.go          # Volon GUI activity events
 ├── config/                  # agentrc.yaml config loading (user + project merge)
-├── contextbroker/           # Universal context retrieval (Cortex, PCC, Engine, Session)
+├── contextbroker/           # Universal context retrieval (Conduit, PCC, Engine, Session)
 ├── crossapp/                # Cross-app engine client
 ├── filter/                  # Output filter chain (e.g., strip emoji)
 ├── mcp/                     # MCP client: Manager, transports, built-in tools
@@ -114,7 +114,7 @@ ui/                          # React SPA (see frontend.md)
 | api | `internal/api/` | HTTP handlers for all REST endpoints (100+ routes). One file per resource. Uses `http.ServeMux` method routing. |
 | chat | `internal/chat/` | Core chat engine: message handling, LLM streaming, tool-use loop, context assembly, session compaction, delegation, orchestration, slash commands, activity events. |
 | config | `internal/config/` | Loads and merges agentrc YAML from user-level (`~/.agentrc/agentrc.yaml`) and project-level (`./agentrc.yaml`). |
-| contextbroker | `internal/contextbroker/` | Universal context retrieval. Queries multiple sources (Cortex, PCC, Engine, Session) with token budget allocation and relevance ranking. |
+| contextbroker | `internal/contextbroker/` | Universal context retrieval. Queries multiple sources (Conduit, PCC, Engine, Session) with token budget allocation and relevance ranking. |
 | filter | `internal/filter/` | Composable output filter chain applied to LLM responses (e.g., `no_emoji`). |
 | mcp | `internal/mcp/` | MCP server manager: lifecycle management for stdio/HTTP transports, built-in dev/general/self-service tools, auto-discovery, tool broker integration. |
 | mcpserver | `internal/mcpserver/` | Nanite's own MCP server (JSON-RPC over stdio). Exposes nanite tools to external MCP clients (e.g., Claude CLI). |
@@ -189,7 +189,7 @@ ui/                          # React SPA (see frontend.md)
 
 - **Hardcoded MCP server paths** -- `setupMCPServers()` in `main.go` hardcodes absolute paths like `home + "/go/bin/engine"` and `home + "/Projects-apps/hadron/bin/hadrond"`. These are developer-machine-specific and will break for other contributors. *File: `cmd/nanite/main.go:377-419`*
 
-- **Hardcoded Cortex MCP token** -- A hex token is hardcoded as a fallback in `setupMCPServers()`. *File: `cmd/nanite/main.go:407-409`*
+- **Hardcoded Conduit MCP token** -- A hex token is hardcoded as a fallback in `setupMCPServers()`. *File: `cmd/nanite/main.go:407-409`*
 
 - **Hardcoded default model** -- `"claude-sonnet-4-20250514"` appears as a hardcoded default in `handleDelegateAndAggregate` and `Engine.UtilityModel`. Should be a constant or config value. *File: `internal/api/messages.go:128`, `internal/chat/engine.go:156`*
 

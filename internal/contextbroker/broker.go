@@ -1,5 +1,5 @@
 // Package contextbroker provides universal context retrieval for Mentat.
-// It aggregates context from multiple sources (Cortex, PCC, Engine, Session)
+// It aggregates context from multiple sources (Vanta Conduit, PCC, Engine, Session)
 // and returns a budget-bounded context packet for any consumer.
 //
 // This package will move to core/context during library consolidation.
@@ -29,7 +29,7 @@ type BudgetConfig struct {
 
 	// SourceWeights maps source names to relative weight (0.0–1.0).
 	// Sources not listed get equal share of remaining budget.
-	// Example: {"cortex": 0.4, "pcc": 0.3, "engine": 0.15, "session": 0.15}
+	// Example: {"conduit": 0.4, "pcc": 0.3, "engine": 0.15, "session": 0.15}
 	SourceWeights map[string]float64
 }
 
@@ -38,7 +38,8 @@ func DefaultBudget() BudgetConfig {
 	return BudgetConfig{
 		MaxTokens: 50000,
 		SourceWeights: map[string]float64{
-			"cortex":  0.40,
+			"conduit": 0.25,
+			"memory":  0.15,
 			"pcc":     0.30,
 			"engine":  0.15,
 			"session": 0.15,
@@ -48,7 +49,7 @@ func DefaultBudget() BudgetConfig {
 
 // ContextSource is the interface that all context adapters must implement.
 type ContextSource interface {
-	// Name returns the source identifier (e.g. "cortex", "pcc", "engine", "session").
+	// Name returns the source identifier (e.g. "conduit", "pcc", "engine", "session").
 	Name() string
 
 	// Fetch retrieves context items for the given intent within a token budget.

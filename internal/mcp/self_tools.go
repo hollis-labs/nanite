@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/hollis-labs/nanite/internal/provider"
+import "github.com/hollis-labs/go-providers/provider"
 
 // SelfToolProviderDefinitions returns all self-service tool definitions
 // in provider.ToolDefinition format, suitable for registering as built-ins.
@@ -130,7 +130,7 @@ func selfToolDefinitions() []Tool {
 					},
 					"project_id": map[string]any{
 						"type":        "string",
-						"description": "Filter by project ID (e.g. 'nanite', 'engine', 'cortex'). Optional.",
+						"description": "Filter by project ID (e.g. 'nanite', 'engine', 'conduit'). Optional.",
 					},
 					"status": map[string]any{
 						"type":        "string",
@@ -254,6 +254,83 @@ func selfToolDefinitions() []Tool {
 					"value":        map[string]any{"type": "string", "description": "The value for this step"},
 				},
 				"required": []string{"builder_name", "step_name"},
+			},
+		},
+		// --- Todo/Plan tools ---
+		{
+			Name:        "nanite_todo_create",
+			Description: "Create a todo item. Todos are scoped to workspace, project, or session. Use for tracking work items, action items, and tasks.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":       map[string]any{"type": "string", "description": "Todo title"},
+					"scope":       map[string]any{"type": "string", "description": "Scope: workspace, project, or session"},
+					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Empty for workspace scope."},
+					"priority":    map[string]any{"type": "string", "description": "Priority: low, medium, high, critical (default: medium)"},
+					"description": map[string]any{"type": "string", "description": "Detailed description (optional)"},
+					"parent_id":   map[string]any{"type": "string", "description": "Parent todo ID for nesting (optional)"},
+					"labels":      map[string]any{"type": "string", "description": "JSON array of label strings (optional)"},
+				},
+				"required": []string{"title", "scope"},
+			},
+		},
+		{
+			Name:        "nanite_todo_update",
+			Description: "Update a todo's status, priority, title, or description. Use to mark items done, change priority, or update details.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id":          map[string]any{"type": "string", "description": "Todo ID to update"},
+					"title":       map[string]any{"type": "string", "description": "New title (optional)"},
+					"description": map[string]any{"type": "string", "description": "New description (optional)"},
+					"status":      map[string]any{"type": "string", "description": "New status: pending, in_progress, done, blocked (optional)"},
+					"priority":    map[string]any{"type": "string", "description": "New priority: low, medium, high, critical (optional)"},
+					"labels":      map[string]any{"type": "string", "description": "New labels JSON array (optional)"},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			Name:        "nanite_todo_list",
+			Description: "List todos with optional filters. Returns todos matching the given scope, status, and/or priority.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"scope":    map[string]any{"type": "string", "description": "Filter by scope: workspace, project, or session (optional)"},
+					"scope_id": map[string]any{"type": "string", "description": "Filter by scope ID (optional)"},
+					"status":   map[string]any{"type": "string", "description": "Filter by status: pending, in_progress, done, blocked (optional)"},
+					"priority": map[string]any{"type": "string", "description": "Filter by priority: low, medium, high, critical (optional)"},
+				},
+			},
+		},
+		{
+			Name:        "nanite_plan_create",
+			Description: "Create a plan with ordered steps. Plans organize work into phases with dependencies and acceptance criteria.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":       map[string]any{"type": "string", "description": "Plan title"},
+					"scope":       map[string]any{"type": "string", "description": "Scope: workspace, project, or session"},
+					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Empty for workspace scope."},
+					"description": map[string]any{"type": "string", "description": "Plan description (optional)"},
+					"steps":       map[string]any{"type": "string", "description": "JSON array of step objects: [{id, title, status, depends_on, acceptance, notes}]"},
+				},
+				"required": []string{"title", "scope"},
+			},
+		},
+		{
+			Name:        "nanite_plan_update",
+			Description: "Update a plan or a specific step within a plan. Can update plan-level fields or transition a single step's status.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id":      map[string]any{"type": "string", "description": "Plan ID to update"},
+					"step_id": map[string]any{"type": "string", "description": "Step ID to update (optional — if provided, updates just that step)"},
+					"title":   map[string]any{"type": "string", "description": "New plan title (optional, ignored if step_id set)"},
+					"status":  map[string]any{"type": "string", "description": "New status. Plan: proposed/approved/in_progress/complete/abandoned. Step: pending/in_progress/done/skipped."},
+					"notes":   map[string]any{"type": "string", "description": "Notes for the step (optional, only with step_id)"},
+				},
+				"required": []string{"id"},
 			},
 		},
 	}

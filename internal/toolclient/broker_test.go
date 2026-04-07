@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/tool-broker/broker"
 )
 
@@ -23,7 +23,7 @@ func TestSelectTools_ReturnsTools(t *testing.T) {
 	tools := []broker.ToolDefinition{
 		{Name: "volon_task_create", Server: "volon", Description: "Create a task"},
 		{Name: "volon_task_list", Server: "volon", Description: "List tasks"},
-		{Name: "cortex_context_view", Server: "cortex", Description: "View context"},
+		{Name: "conduit_context_view", Server: "conduit", Description: "View context"},
 	}
 	tb.RegisterTools(tools)
 
@@ -252,7 +252,7 @@ func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 	tools := []provider.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
 		{Name: "volon_sprint_list", Description: "List all sprints"},
-		{Name: "cortex_context_view", Description: "View a context packet"},
+		{Name: "conduit_context_view", Description: "View a context packet"},
 		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
 	}
 	tb := newTestBrokerWithTools(tools)
@@ -295,7 +295,7 @@ func TestSelectByIntent_RespectsMaxTools(t *testing.T) {
 func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
 	tools := []provider.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a new task"},
-		{Name: "cortex_context_view", Description: "View a context packet"},
+		{Name: "conduit_context_view", Description: "View a context packet"},
 	}
 	tb := newTestBrokerWithTools(tools)
 

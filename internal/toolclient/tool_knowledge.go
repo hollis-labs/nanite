@@ -12,7 +12,7 @@ type ToolEntry struct {
 	Name             string   `json:"name"`
 	Category         string   `json:"category"`
 	ShortDescription string   `json:"short_description"` // max 80 chars
-	Server           string   `json:"server"`             // MCP server name (engine, hadron, cortex, etc.)
+	Server           string   `json:"server"`             // MCP server name (engine, hadron, conduit, etc.)
 	UseCases         []string `json:"use_cases"`          // 2-3 brief use-case phrases
 }
 
@@ -115,7 +115,7 @@ func containsStr(slice []string, s string) bool {
 }
 
 // DefaultToolKnowledge returns the curated tool catalog covering all known
-// MCP servers (Engine, Hadron, Cortex) plus built-in developer and general tools.
+// MCP servers (Engine, Hadron, Vanta Conduit) plus built-in developer and general tools.
 func DefaultToolKnowledge() *ToolKnowledge {
 	return &ToolKnowledge{
 		Categories: map[string][]ToolEntry{
@@ -267,83 +267,83 @@ func DefaultToolKnowledge() *ToolKnowledge {
 				},
 			},
 
-			// ── Context & Knowledge (Cortex) ───────────────────────
+			// ── Context & Knowledge (Vanta Conduit) ───────────────────────
 			"context": {
 				{
 					Name:             "context_write",
 					Category:         "context",
 					ShortDescription: "Write a context packet to the knowledge store",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"saving information for later", "storing research results", "persisting knowledge"},
 				},
 				{
 					Name:             "context_view",
 					Category:         "context",
 					ShortDescription: "Read a context packet by key",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"retrieving stored knowledge", "looking up saved context"},
 				},
 				{
 					Name:             "context_pack",
 					Category:         "context",
 					ShortDescription: "Bundle multiple context items into a pack",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"organizing related context", "creating knowledge bundles"},
 				},
 				{
 					Name:             "context_head",
 					Category:         "context",
 					ShortDescription: "Get the latest version of a context key",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"checking current state", "reading latest value"},
 				},
 				{
 					Name:             "context_history",
 					Category:         "context",
 					ShortDescription: "View version history for a context key",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"tracking changes over time", "auditing context edits"},
 				},
 				{
 					Name:             "context_namespaces_list",
 					Category:         "context",
 					ShortDescription: "List available context namespaces",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"discovering knowledge areas", "browsing stored context"},
 				},
 				{
 					Name:             "context_broker_plan",
 					Category:         "context",
 					ShortDescription: "Plan context assembly for a given intent",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"preparing context for a task", "optimizing context selection"},
 				},
 				{
 					Name:             "context_broker_fetch",
 					Category:         "context",
 					ShortDescription: "Fetch assembled context from a plan",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"loading planned context", "retrieving curated knowledge"},
 				},
 				{
 					Name:             "context_audit",
 					Category:         "context",
 					ShortDescription: "Audit context usage and freshness",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"checking stale context", "knowledge maintenance"},
 				},
 				{
 					Name:             "context_typed_write",
 					Category:         "context",
 					ShortDescription: "Write typed/structured context data",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"storing structured data", "writing typed records"},
 				},
 				{
 					Name:             "context_typed_view",
 					Category:         "context",
 					ShortDescription: "View typed/structured context data",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"reading structured records", "querying typed data"},
 				},
 			},
@@ -428,14 +428,14 @@ func DefaultToolKnowledge() *ToolKnowledge {
 					Name:             "context_status_promote",
 					Category:         "general",
 					ShortDescription: "Promote context status (draft -> active)",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"publishing draft context", "promoting knowledge to active"},
 				},
 				{
 					Name:             "context_promote_request",
 					Category:         "general",
 					ShortDescription: "Request promotion of context with review",
-					Server:           "cortex",
+					Server:           "conduit",
 					UseCases:         []string{"requesting context review", "promotion workflow"},
 				},
 				// ── UI Triggers ─────────────────────────────────────

@@ -11,8 +11,8 @@ func TestValidAgent(t *testing.T) {
 		Name:            "Test Agent",
 		Slug:            "test-agent",
 		SystemPrompt:    "You are a test agent.",
-		MCPServers:      `["cortex"]`,
-		ToolPermissions: `{"allow_list":["mcp__cortex__*"]}`,
+		MCPServers:      `["conduit"]`,
+		ToolPermissions: `{"allow_list":["mcp__conduit__*"]}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
@@ -44,7 +44,7 @@ func TestEmptyAllowList(t *testing.T) {
 		Name:            "Empty Allow",
 		Slug:            "empty-allow",
 		SystemPrompt:    "You are restricted.",
-		MCPServers:      `["cortex"]`,
+		MCPServers:      `["conduit"]`,
 		ToolPermissions: `{"allow_list":[]}`,
 	}
 	result := ValidateAgentConfig(agent)
@@ -93,8 +93,8 @@ func TestInvalidGlobPattern(t *testing.T) {
 		Name:            "Bad Glob",
 		Slug:            "bad-glob",
 		SystemPrompt:    "You have bad patterns.",
-		MCPServers:      `["cortex"]`,
-		ToolPermissions: `{"allow_list":["mcp__cortex__[invalid"]}`,
+		MCPServers:      `["conduit"]`,
+		ToolPermissions: `{"allow_list":["mcp__conduit__[invalid"]}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if result.OK() {
@@ -107,8 +107,8 @@ func TestValidAgentWithAllowAndMCPServers(t *testing.T) {
 		Name:            "Full Agent",
 		Slug:            "full-agent",
 		SystemPrompt:    "You are a full agent.",
-		MCPServers:      `["cortex","engine"]`,
-		ToolPermissions: `{"allow_list":["mcp__cortex__*","mcp__engine__*"],"max_calls_per_turn":10}`,
+		MCPServers:      `["conduit","engine"]`,
+		ToolPermissions: `{"allow_list":["mcp__conduit__*","mcp__engine__*"],"max_calls_per_turn":10}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
@@ -126,7 +126,7 @@ func TestEmptyPermissionsWithMCPServers(t *testing.T) {
 		Name:            "Permissive Agent",
 		Slug:            "permissive",
 		SystemPrompt:    "You are permissive.",
-		MCPServers:      `["cortex"]`,
+		MCPServers:      `["conduit"]`,
 		ToolPermissions: `{}`,
 	}
 	result := ValidateAgentConfig(agent)
@@ -146,7 +146,7 @@ func TestDenyListWithInvalidGlob(t *testing.T) {
 		Name:            "Bad Deny",
 		Slug:            "bad-deny",
 		SystemPrompt:    "You have bad deny.",
-		MCPServers:      `["cortex"]`,
+		MCPServers:      `["conduit"]`,
 		ToolPermissions: `{"deny_list":["mcp__[bad"]}`,
 	}
 	result := ValidateAgentConfig(agent)
@@ -161,8 +161,8 @@ func TestPrefixGlobIsValid(t *testing.T) {
 		Name:            "Prefix Glob",
 		Slug:            "prefix-glob",
 		SystemPrompt:    "You use prefix globs.",
-		MCPServers:      `["cortex"]`,
-		ToolPermissions: `{"allow_list":["mcp__cortex__*","mcp__engine__task_*"]}`,
+		MCPServers:      `["conduit"]`,
+		ToolPermissions: `{"allow_list":["mcp__conduit__*","mcp__engine__task_*"]}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {

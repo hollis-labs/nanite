@@ -6,66 +6,59 @@
 Boot nanite-backend
 
 Rebrand Conduit → Nanite complete. vNext MVP 0-7 ✅, Post-MVP A+B ✅.
-Plugin Extraction Phases 1-4 ✅, User Shell Task 1 (! exec) ✅, Phase C investigation ✅.
+Plugin Extraction Phases 1-4, 6, 7 ✅. User Shell Task 1 (! exec) ✅.
+Hardening Phase ✅ (2026-04-07). Provider lib extracted to hollis-labs/go-providers.
 Cerberus services: nanite-api (8090), nanite-frontend (5176).
 
 KEY DOCS:
 - Brand: internal/brand/brand.go (single source of truth)
+- Hardening plan: docs/hardening-phase-plan.md
 - Plugin extraction: docs/plugin-extraction-plan.md
 - Hooks/events/filters: docs/plugin-hooks-events-filters.md
 - Phase C memory: docs/phase-c-cortex-investigation.md
-- Backlog: docs/vnext-backlog.md
-- Post-MVP: docs/post-mvp-plan.md
+- Research: docs/research/ (alignment matrix, gaps & opportunities)
 
 ARCHITECTURE:
-- Migrations: single 001_schema.sql (DDL only). Seed data in seed.go.
+- Migrations: DDL only. Seed data in seed.go.
 - Agents/skills: file-based (MD + YAML frontmatter), DB = runtime state only.
 - Plugins: YAML manifest + Go/subprocess, event hooks, connectors, UI components.
-- Providers: 8 HTTP API + 8 CLI adapters via PTY bridge.
-- TaskBackend: pluggable (LocalBackend default), registered via Host.RegisterTaskBackend.
+- Providers: shared lib at hollis-labs/go-providers (8 HTTP API + 8 CLI adapters).
+- Service layer: internal/service/container.go wires all services.
+- engine.go: thin orchestrator (197 lines), delegates to service layer.
+- Sandboxing: AgentExec (full isolation) / UserExec (guardrails). macOS seatbelt Tier 2.
+- Envelope contracts: JSON schemas → Go test + TS codegen (automated sync).
+- Workflow engine: internal/workflow/ (DAG executor, 5 step handlers, YAML loader).
+- Todo/Plan system: internal/store/todos.go + plans.go, 3 scopes, 13 API routes, 5 agent tools.
+- Memory: internal/memory/ (Conduit-backed via MCP, per-turn + post-compact extraction).
+- Context broker: 4 sources (conduit 25%, memory 15%, pcc 30%, session 30%).
+- Filter chain: reasoning-blind view support (FilterViewReasoningBlind).
 
-RECENTLY COMPLETED:
-- Plugin Hooks, Events & Filters (PR #6, 2026-04-05) — all 4 tasks:
-  - Task 1: Pre-hooks (message.sending, tool.executing with cancellation),
-    11 new emitters, 10+ orphan emitters wired, new event constants.
-  - Task 2: FilterRegistry with priority-ordered synchronous chains,
-    6 filter points wired (system_prompt, user_message, tool_result,
-    assistant_response, context_window, envelope_data).
-  - Task 3: 6 new UI slots (composer-above/below, message-actions/header,
-    session-sidebar, modal), usePluginAction hook, global PluginModal.
-  - Task 4: context-menu:message/session (right-click), command-palette (Cmd+K).
-  - UnloadPlugin now cleans up filters, UI components, keybindings.
-- User Shell Task 1 — `!` exec with denylist, 3-mode approval. PRs #4, #5.
-- Theme editor + color system redesign (brand/primary/danger split, live preview).
-- Plugin extraction Phases 1-4 (cleanup, Fragments Engine, debug widgets, TaskBackend).
-- Phase C Cortex investigation — gap analysis, namespace strategy, 13 open questions.
-- Plugin Extraction Phase 6 — Bookmarks extracted as builtin plugin.
-  Eliminated: email, teams, documents, actions, demo-presenter (removed or core).
-  bookmark events: message.bookmarked / message.unbookmarked wired.
-- Plugin Extraction Phase 7 — 8 envelope primitives built:
-  info-card, list-card, metric-card, progress-card, confirmation-card,
-  table-card, timeline-card, diff-card. All in ui/src/.../primitives/.
+HARDENING PHASE — COMPLETED (2026-04-07):
+  ✅ Task 1 — God-object decomp (engine.go 2164→197 lines)
+  ✅ Task 2 — Sandboxing Tier 1+2 (AgentExec/UserExec, macOS seatbelt)
+  ✅ Task 3 — Envelope contracts (24 schemas, Go tests, TS codegen)
+  ✅ Task 4 — Memory system (Conduit-backed, extraction hooks, agent tools)
+  ✅ Task 5 — Todo/plan system (3 scopes, plans, 13 API routes, 5 agent tools)
+  ✅ Task 6 — Workflow engine v2 (DAG executor, 5 handlers, YAML loader)
+  ✅ Task 7 — Dead event audit (2 deleted, 1 wired, 6 planned-v2)
+  ✅ Task 8 — Progressive threshold (5→10, single source)
+  ✅ Task 9 — Code execution (nanite_code_execute, shell/python/js)
+  ✅ Think tool, Reasoning-blind filter view
+  ✅ Provider lib extraction (hollis-labs/go-providers)
 
-CURRENT: Plugin Extraction Phase 5 — Connectors (GitHub only)
-- Scope narrowed: linear/slack/email dropped, github only.
-- Transport priority pattern: CLI > MCP > API with auto-detection.
+REMAINING:
+- Memory: similarity ranking in Recall needs Conduit embedding provider.
+  Activation + chronological ranking work now. Once Conduit embeddings are
+  configured (Ollama nomic-embed-text or Anthropic API), enable similarity
+  ranking in memory/service.go RecallOpts and contextbroker/source_memory.go.
+- MemorySource not yet added to context_client.go broker — wire when broker
+  is activated (add NewMemorySource alongside NewConduitSource).
 
-UPCOMING (ordered):
-
-1. User Shell Task 2 — Interactive PTY Shell Tab
-   - Shell icon in composer toolbar; WebSocket endpoint (SSE insufficient).
-   - Backend PTY session manager scoped to chat session lifetime.
-   - Frontend xterm.js embed replacing composer area when toggled.
-   - Output NOT in LLM context by default — user selects snippets to send.
-   - Same info drawer chrome (path + git + denylist toggle).
-   - Shell process killed on session archive. Requires shell_mode enabled.
-
-2. Phase C — Memory & Continuity (implementation)
-   - Resolve 13 open questions from investigation.
-   - Likely blocked on Cortex: needs memory type + memory_recall view + embedding provider.
-   - Then: MemoryService, extraction (PostCompact + per-turn), memory tools (opt-out).
-
-3. Phase D — Claude Code Integration (future, lower priority)
+UPCOMING:
+- Plugin Extraction Phase 5 (Connectors) — paused for hardening, ready to resume
+- User Shell Task 2 (Interactive PTY) — sandboxing now ready
+- Phase D (Claude Code Integration) — future
+- Frontend: Todo/Plan UI, workflow progress panel, memory viewer
 
 PRINCIPLES:
 - Consult before architecture decisions.
@@ -74,7 +67,8 @@ PRINCIPLES:
 - Always cerberus_rebuild nanite-api for deployment — never raw go build.
 - Brand package: use brand.* constants, never hardcode identity.
 - Migrations = DDL only. seed.go = data only.
-- Envelope sync: backend envelope.go ↔ frontend plugin-envelopes.ts (manual, silent drop).
+- Envelope sync: JSON schemas are source of truth → Go test + TS codegen.
+- Shell exec trust: AgentExec = full isolation, UserExec = guardrails only.
 - Quality over speed.
 
 Test suite: all passing.
@@ -85,7 +79,7 @@ Test suite: all passing.
 ```
 Boot nanite-frontend
 
-Rebrand from Conduit → Nanite ��� all waves complete.
+Rebrand from Conduit → Nanite — all waves complete.
 
 CRITICAL — Read these before touching any code:
 - memory: feedback_ui_design_patterns.md — THE design system reference
@@ -95,6 +89,7 @@ CRITICAL — Read these before touching any code:
 ARCHITECTURE:
 - Backend fully rebranded: module github.com/hollis-labs/nanite
 - Envelope protocol: nanite-envelope
+- Envelope types: TS codegen from JSON schemas (ui/src/generated/envelope-types.generated.ts)
 - Tool names: nanite_*
 - Env vars: NANITE_*
 - Brand package at internal/brand/brand.go — frontend mirrors with ui/src/brand.ts
@@ -117,18 +112,26 @@ PENDING FRONTEND TASKS:
    - Settings panel where users toggle tool load types (auto/opt-in/disabled) per tool
    - Follow patterns in ToolsWidget.tsx
 
-2. Task Tracking UI (priority: high)
-   - Backend APIs ready: GET/POST /api/tasks, GET/PUT/DELETE /api/tasks/{id}
-   - POST /api/sessions/{id}/tasks/{id}/transition
-   - Tasks have status (pending/in_progress/completed/failed), belong to sessions
-   - Need: task list widget, create/edit form, status transition buttons
-   - Existing envelopes: TaskDispositionCard.tsx, TaskCompleteNotificationCard.tsx
+2. Internal Todo/Plan UI (priority: high, backend ready)
+   - Backend APIs: /api/todos/* (6 endpoints), /api/plans/* (7 endpoints)
+   - Todo panel in session sidebar
+   - Plan viewer for multi-step plans
+   - Three scopes: workspace, project, session
 
 3. Worker Status UI (priority: medium)
    - Backend APIs ready: GET /api/workers, POST /api/workers/{id}/cancel
    - Workers are background multi-agent orchestration processes
    - Need: worker list widget showing active workers, status, cancel button
 
-4. Volon Backlog Button Polish (priority: low)
-   - VolonBacklogButton.tsx exists, verify it works with POST /api/volon/backlog
+4. Envelope types (priority: medium, automated)
+   - TS types auto-generated from JSON schemas via scripts/generate-envelope-types.mjs
+   - Run `npm run generate:envelopes` or `make generate-envelopes`
+   - Staleness check: `npm run check:envelopes`
+
+5. Workflow progress panel (priority: low, future)
+   - Backend workflow engine ready (internal/workflow/)
+   - Show pipeline step status, progress, events
+
+6. Memory viewer (priority: low, future)
+   - Show recalled memories in context, extraction history
 ```

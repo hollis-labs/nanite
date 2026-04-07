@@ -14,36 +14,36 @@ type MCPCaller interface {
 	ExecuteTool(ctx context.Context, name string, input map[string]any) (string, error)
 }
 
-// CortexSource retrieves context from Cortex via MCP tools.
+// ConduitSource retrieves context from Vanta Conduit via MCP tools.
 // It calls context_broker_fetch (or context_search for keyword queries)
 // to get relevant context records.
-type CortexSource struct {
+type ConduitSource struct {
 	MCP        MCPCaller
-	ServerName string // MCP server name (default: "cortex")
+	ServerName string // MCP server name (default: "conduit")
 }
 
-// NewCortexSource creates a CortexSource with the given MCP caller.
-func NewCortexSource(mcp MCPCaller) *CortexSource {
-	return &CortexSource{
+// NewConduitSource creates a ConduitSource with the given MCP caller.
+func NewConduitSource(mcp MCPCaller) *ConduitSource {
+	return &ConduitSource{
 		MCP:        mcp,
-		ServerName: "cortex",
+		ServerName: "conduit",
 	}
 }
 
-func (s *CortexSource) Name() string { return "cortex" }
+func (s *ConduitSource) Name() string { return "conduit" }
 
-func (s *CortexSource) Fetch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error) {
+func (s *ConduitSource) Fetch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error) {
 	if s.MCP == nil {
-		return nil, fmt.Errorf("cortex source: no MCP caller configured")
+		return nil, fmt.Errorf("conduit source: no MCP caller configured")
 	}
 
-	// Map our intent to Cortex's plan intents where possible.
-	cortexIntent := mapToCortexIntent(intent.Type)
+	// Map our intent to Conduit's plan intents where possible.
+	conduitIntent := mapToConduitIntent(intent.Type)
 
 	// Try context_broker_fetch first for structured retrieval.
-	items, err := s.fetchViaBroker(ctx, cortexIntent, intent, budget)
+	items, err := s.fetchViaBroker(ctx, conduitIntent, intent, budget)
 	if err != nil {
-		log.Printf("contextbroker/cortex: broker_fetch failed: %v — falling back to search", err)
+		log.Printf("contextbroker/conduit: broker_fetch failed: %v — falling back to search", err)
 		// Fall back to keyword search.
 		return s.fetchViaSearch(ctx, intent, budget)
 	}
@@ -51,12 +51,12 @@ func (s *CortexSource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 	return items, nil
 }
 
-// fetchViaBroker calls Cortex's context_broker_fetch MCP tool.
-func (s *CortexSource) fetchViaBroker(ctx context.Context, cortexIntent string, intent Intent, budget int) ([]ContextItem, error) {
+// fetchViaBroker calls Vanta Conduit's context_broker_fetch MCP tool.
+func (s *ConduitSource) fetchViaBroker(ctx context.Context, conduitIntent string, intent Intent, budget int) ([]ContextItem, error) {
 	toolName := fmt.Sprintf("mcp__%s__context_broker_fetch", s.ServerName)
 
 	input := map[string]any{
-		"intent":     cortexIntent,
+		"intent":     conduitIntent,
 		"max_tokens": budget,
 	}
 	if intent.Scope != "" {
@@ -74,8 +74,8 @@ func (s *CortexSource) fetchViaBroker(ctx context.Context, cortexIntent string, 
 	return s.parseResult(result, budget)
 }
 
-// fetchViaSearch calls Cortex's context_search MCP tool for keyword-based retrieval.
-func (s *CortexSource) fetchViaSearch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error) {
+// fetchViaSearch calls Vanta Conduit's context_search MCP tool for keyword-based retrieval.
+func (s *ConduitSource) fetchViaSearch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error) {
 	if len(intent.Keywords) == 0 {
 		return nil, nil
 	}
@@ -97,9 +97,9 @@ func (s *CortexSource) fetchViaSearch(ctx context.Context, intent Intent, budget
 	return s.parseResult(result, budget)
 }
 
-// parseResult converts a Cortex MCP response into ContextItems.
-func (s *CortexSource) parseResult(raw string, budget int) ([]ContextItem, error) {
-	// Cortex returns JSON with records array.
+// parseResult converts a Vanta Conduit MCP response into ContextItems.
+func (s *ConduitSource) parseResult(raw string, budget int) ([]ContextItem, error) {
+	// Conduit returns JSON with records array.
 	var response struct {
 		Records []struct {
 			Namespace string `json:"namespace"`
@@ -122,7 +122,7 @@ func (s *CortexSource) parseResult(raw string, budget int) ([]ContextItem, error
 			raw = raw[:budget*4]
 		}
 		return []ContextItem{{
-			Source:        "cortex",
+			Source:        "conduit",
 			Key:           "raw",
 			Content:       raw,
 			TokenEstimate: EstimateTokens(raw),
@@ -151,11 +151,11 @@ func (s *CortexSource) parseResult(raw string, budget int) ([]ContextItem, error
 			break
 		}
 		items = append(items, ContextItem{
-			Source:        "cortex",
+			Source:        "conduit",
 			Key:           fmt.Sprintf("%s/%s", r.Namespace, r.Key),
 			Content:       r.Value,
 			TokenEstimate: tokens,
-			Relevance:     0.7, // Cortex results are pre-ranked
+			Relevance:     0.7, // Conduit results are pre-ranked
 			Metadata: map[string]string{
 				"namespace": r.Namespace,
 			},
@@ -166,8 +166,8 @@ func (s *CortexSource) parseResult(raw string, budget int) ([]ContextItem, error
 	return items, nil
 }
 
-// mapToCortexIntent maps ContextBroker intents to Cortex's 4 native intents.
-func mapToCortexIntent(intentType string) string {
+// mapToConduitIntent maps ContextBroker intents to Conduit's 4 native intents.
+func mapToConduitIntent(intentType string) string {
 	switch intentType {
 	case IntentResumeTask:
 		return "resume_task"

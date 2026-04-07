@@ -4,31 +4,31 @@ package contextbroker
 // These drive which sources are queried and how results are ranked.
 const (
 	// IntentResumeTask fetches context for resuming a previously started task.
-	// Sources: Engine (task state), Cortex (related records), Session (recent messages).
+	// Sources: Engine (task state), Vanta Conduit (related records), Session (recent messages).
 	IntentResumeTask = "resume_task"
 
 	// IntentBootProject fetches context for starting work on a project.
-	// Sources: PCC (project context), Cortex (project records), Engine (active tasks).
+	// Sources: PCC (project context), Vanta Conduit (project records), Engine (active tasks).
 	IntentBootProject = "boot_project"
 
 	// IntentReviewSession fetches context for reviewing a past session.
-	// Sources: Session (history), Cortex (related decisions).
+	// Sources: Session (history), Vanta Conduit (related decisions).
 	IntentReviewSession = "review_session"
 
 	// IntentWriteCode fetches context for writing or modifying code.
-	// Sources: PCC (conventions, architecture), Cortex (related implementations).
+	// Sources: PCC (conventions, architecture), Vanta Conduit (related implementations).
 	IntentWriteCode = "write_code"
 
 	// IntentDebugIssue fetches context for debugging a problem.
-	// Sources: Cortex (error context, known pitfalls), PCC (architecture).
+	// Sources: Vanta Conduit (error context, known pitfalls), PCC (architecture).
 	IntentDebugIssue = "debug_issue"
 
 	// IntentPlanFeature fetches context for planning a new feature.
-	// Sources: Engine (roadmap, epics), Cortex (ADRs), PCC (architecture).
+	// Sources: Engine (roadmap, epics), Vanta Conduit (ADRs), PCC (architecture).
 	IntentPlanFeature = "plan_feature"
 
 	// IntentRecallDecision fetches context for recalling why a decision was made.
-	// Sources: Cortex (ADRs, decisions), PCC (decisions file).
+	// Sources: Vanta Conduit (ADRs, decisions), PCC (decisions file).
 	IntentRecallDecision = "recall_decision"
 
 	// IntentCustom is a catch-all for intents that don't fit predefined categories.
@@ -38,14 +38,14 @@ const (
 // IntentSourcePriority maps intent types to source priority orderings.
 // Sources listed first get a larger share of the budget.
 var IntentSourcePriority = map[string][]string{
-	IntentResumeTask:     {"engine", "cortex", "session", "pcc"},
-	IntentBootProject:    {"pcc", "cortex", "engine", "session"},
-	IntentReviewSession:  {"session", "cortex", "pcc", "engine"},
-	IntentWriteCode:      {"pcc", "cortex", "session", "engine"},
-	IntentDebugIssue:     {"cortex", "pcc", "session", "engine"},
-	IntentPlanFeature:    {"engine", "cortex", "pcc", "session"},
-	IntentRecallDecision: {"cortex", "pcc", "session", "engine"},
-	IntentCustom:         {"cortex", "pcc", "engine", "session"},
+	IntentResumeTask:     {"engine", "conduit", "session", "pcc"},
+	IntentBootProject:    {"pcc", "conduit", "engine", "session"},
+	IntentReviewSession:  {"session", "conduit", "pcc", "engine"},
+	IntentWriteCode:      {"pcc", "conduit", "session", "engine"},
+	IntentDebugIssue:     {"conduit", "pcc", "session", "engine"},
+	IntentPlanFeature:    {"engine", "conduit", "pcc", "session"},
+	IntentRecallDecision: {"conduit", "pcc", "session", "engine"},
+	IntentCustom:         {"conduit", "pcc", "engine", "session"},
 }
 
 // BudgetForIntent returns a BudgetConfig with source weights tuned

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -104,7 +104,7 @@ func TestFilterToolsByAllowlist(t *testing.T) {
 	tools := []provider.ToolDefinition{
 		{Name: "mcp__engine__task_create"},
 		{Name: "mcp__engine__task_list"},
-		{Name: "mcp__cortex__search"},
+		{Name: "mcp__conduit__search"},
 		{Name: "dev_read"},
 	}
 
@@ -131,7 +131,7 @@ func TestCountMCPTools(t *testing.T) {
 	tools := []provider.ToolDefinition{
 		{Name: "mcp__engine__task_create"},
 		{Name: "dev_read"},
-		{Name: "mcp__cortex__search"},
+		{Name: "mcp__conduit__search"},
 		{Name: "request_tools"},
 	}
 	if got := countMCPTools(tools); got != 2 {

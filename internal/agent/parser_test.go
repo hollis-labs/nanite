@@ -68,7 +68,7 @@ tools: [read, write, bash]
 permissionMode: yolo
 maxTurns: 25
 skills: [go-build, go-test]
-mcpServers: [engine, cortex]
+mcpServers: [engine, conduit]
 memory: session
 effort: high
 isolation: worktree

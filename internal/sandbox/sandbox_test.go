@@ -69,7 +69,7 @@ func TestPopulate_CreatesAllFiles(t *testing.T) {
 		Name:        "Test Agent",
 		Description: "A test agent for unit testing.",
 		CanExecute:  true,
-		MCPServers:  `["engine","cortex"]`,
+		MCPServers:  `["engine","conduit"]`,
 	}
 	mode := &store.AgentMode{
 		Name:           "architect",
@@ -110,7 +110,7 @@ func TestPopulate_CreatesAllFiles(t *testing.T) {
 	assertContains(t, agentMD, "## Current Mode: architect", "mode name")
 	assertContains(t, agentMD, "Focus on system design", "mode addendum")
 	assertContains(t, agentMD, "- engine", "MCP server")
-	assertContains(t, agentMD, "- cortex", "MCP server")
+	assertContains(t, agentMD, "- conduit", "MCP server")
 
 	// Verify .mcp.json exists with correct structure.
 	mcpJSON := readFile(t, filepath.Join(dir, ".mcp.json"))

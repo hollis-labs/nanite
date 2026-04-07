@@ -95,10 +95,10 @@ func TestBrokerFetch_BudgetEnforcement(t *testing.T) {
 }
 
 func TestBrokerFetch_MultipleSources(t *testing.T) {
-	cortex := &mockSource{
-		name: "cortex",
+	conduit := &mockSource{
+		name: "conduit",
 		items: []ContextItem{
-			{Source: "cortex", Key: "c1", Content: "cortex data", TokenEstimate: 5, Relevance: 0.8},
+			{Source: "conduit", Key: "c1", Content: "conduit data", TokenEstimate: 5, Relevance: 0.8},
 		},
 	}
 	pcc := &mockSource{
@@ -108,7 +108,7 @@ func TestBrokerFetch_MultipleSources(t *testing.T) {
 		},
 	}
 
-	b := New(DefaultBudget(), cortex, pcc)
+	b := New(DefaultBudget(), conduit, pcc)
 	packet, err := b.Fetch(context.Background(), Intent{Type: IntentCustom})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -176,20 +176,20 @@ func TestBudgetForIntent(t *testing.T) {
 func TestFormatPacket(t *testing.T) {
 	packet := &ContextPacket{
 		Items: []ContextItem{
-			{Source: "cortex", Key: "app/test", Content: "test data"},
+			{Source: "conduit", Key: "app/test", Content: "test data"},
 			{Source: "pcc", Key: "mentat/00_project.md", Content: "project info"},
 		},
 	}
 
 	result := FormatPacket(packet)
-	if !strings.Contains(result, "cortex") {
-		t.Error("expected cortex section in formatted output")
+	if !strings.Contains(result, "conduit") {
+		t.Error("expected conduit section in formatted output")
 	}
 	if !strings.Contains(result, "pcc") {
 		t.Error("expected pcc section in formatted output")
 	}
 	if !strings.Contains(result, "test data") {
-		t.Error("expected cortex content in formatted output")
+		t.Error("expected conduit content in formatted output")
 	}
 }
 

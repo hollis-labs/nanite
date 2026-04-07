@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 // OrchestrationPlan represents the plan for executing decomposed sub-tasks.
@@ -18,7 +18,7 @@ type OrchestrationPlan struct {
 	SprintID      string    `json:"sprint_id,omitempty"`       // Engine sprint ID if created
 	TaskIDs       []string  `json:"task_ids,omitempty"`        // Engine task IDs if created
 	HasEngine     bool      `json:"has_engine"`                // whether Fragments Engine integration is available
-	HasCortex     bool      `json:"has_cortex"`                // whether Cortex is available for knowledge
+	HasCortex     bool      `json:"has_cortex"`                // whether Vanta Conduit is available for knowledge
 	PlanOnly      bool      `json:"plan_only"`                 // true if no MCP services available to execute
 }
 
@@ -59,13 +59,13 @@ func (o *Orchestrator) HasDecomposer() bool {
 }
 
 // BuildPlan creates an orchestration plan from a decomposition result.
-// It checks for Engine/Cortex availability and optionally creates a sprint.
+// It checks for Engine/Vanta Conduit availability and optionally creates a sprint.
 func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *DecompositionResult, projectID string) (*OrchestrationPlan, error) {
 	plan := &OrchestrationPlan{
 		SubTasks:    decomposition.SubTasks,
 		Aggregation: decomposition.Aggregation,
 		HasEngine:   o.hasToolPrefix("engine"),
-		HasCortex:   o.hasToolPrefix("cortex"),
+		HasCortex:   o.hasToolPrefix("conduit"),
 	}
 
 	// If no MCP manager, return plan only.
@@ -75,9 +75,9 @@ func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *Decompositi
 		return plan, nil
 	}
 
-	// Check Cortex for relevant knowledge before creating tasks.
+	// Check Vanta Conduit for relevant knowledge before creating tasks.
 	if plan.HasCortex {
-		log.Printf("orchestrator: cortex available — sub-tasks can leverage agent knowledge")
+		log.Printf("orchestrator: conduit available — sub-tasks can leverage agent knowledge")
 	}
 
 	// Create Engine sprint + tasks if available.

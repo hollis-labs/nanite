@@ -296,7 +296,7 @@ func TestToolMetaInfo_ConcurrencySafe(t *testing.T) {
 		{"read tool", "mcp__dev__dev_read", true},
 		{"grep tool", "mcp__dev__dev_grep", true},
 		{"glob tool", "mcp__dev__dev_glob", true},
-		{"search tool", "mcp__cortex__context_search", true},
+		{"search tool", "mcp__conduit__context_search", true},
 		{"web fetch", "mcp__general__web_fetch", true},
 		{"web search", "mcp__general__web_search", true},
 		{"write tool", "mcp__dev__dev_write", false},

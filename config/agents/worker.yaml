@@ -30,7 +30,7 @@ modes:
 
 mcp_servers:
   - engine
-  - cortex
+  - conduit
 
 tool_permissions:
   allow: ["*"]

@@ -141,7 +141,7 @@ For full schema, field reference, and examples per type, read ` + "`.sandbox/env
 1. ALWAYS use envelopes for data collection — never ask users to type structured data
 2. Propose, don't just do — use envelope proposals for creates/modifications
 3. Never fabricate references — look up IDs, sprint codes, task refs first
-4. Persist what matters — write significant decisions to Cortex without being asked
+4. Persist what matters — write significant decisions to Vanta Conduit without being asked
 5. You know your tools — use request_tools only when you need parameter schemas
 
 ## Reference Files

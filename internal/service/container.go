@@ -15,9 +15,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -40,6 +41,12 @@ type Container struct {
 	Commands  *chat.CommandRegistry
 	Plugins   *plugin.Host
 	MCP       *mcp.Manager
+
+	// Internal todo/plan system.
+	Todos TodoService
+
+	// Memory system (Conduit-backed).
+	Memory *memory.Service
 
 	// Multi-agent orchestration.
 	Coord     coordination.CoordStore
@@ -170,6 +177,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		FileSkills: skillDefs,
 	})
 
+	// Internal todo/plan service (SQLite-backed, always available).
+	todos := NewTodoService(TodoServiceConfig{
+		Todos: cfg.Store,
+		Plans: cfg.Store,
+	})
+	log.Println("service container: todo/plan service enabled")
+
 	// Task tracking service — requires coordination store.
 	var tasks task.Service
 	if cfg.CoordStore != nil && cfg.CoordStore.Available() {
@@ -187,6 +201,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		log.Println("service container: task tracking enabled (badger-backed)")
 	} else {
 		log.Println("service container: task tracking disabled (no coordination store)")
+	}
+
+	// Memory service — requires MCP manager (for Vanta Conduit memory tools).
+	var memorySvc *memory.Service
+	if cfg.MCP != nil {
+		memorySvc = memory.NewService(cfg.MCP)
+		log.Println("service container: memory service enabled (Conduit-backed)")
+	} else {
+		log.Println("service container: memory service disabled (no MCP manager)")
 	}
 
 	var agentReader AgentReader = cfg.Store
@@ -264,6 +287,50 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		log.Println("service container: worker manager disabled (no coordination store)")
 	}
 
+	// Memory extraction hooks + agent tools.
+	if memorySvc != nil && cfg.Plugins != nil {
+		// Build a utility call function for memory extraction.
+		utilityProvider := cfg.UtilityProvider
+		if utilityProvider == "" {
+			utilityProvider = "anthropic"
+		}
+		utilityModel := cfg.UtilityModel
+		if utilityModel == "" {
+			utilityModel = "claude-sonnet-4-20250514"
+		}
+
+		var utilityCall memory.UtilityCallFunc
+		if prov, ok := cfg.Providers.Get(utilityProvider); ok {
+			utilityCall = func(ctx context.Context, prompt string) (string, error) {
+				msgs := []provider.ChatMessage{{Role: "user", Content: prompt}}
+				return prov.Complete(ctx, "You are a memory extraction assistant. Follow instructions precisely.", msgs, utilityModel)
+			}
+		}
+
+		extractor := memory.NewExtractor(memorySvc, utilityCall)
+
+		// Register per-turn extraction hook (message.received).
+		perTurnHook := extractor.PerTurnHook()
+		if err := cfg.Plugins.RegisterEventHook(perTurnHook.EventTypes(), perTurnHook); err != nil {
+			log.Printf("service container: failed to register per-turn memory hook: %v", err)
+		}
+
+		// Register post-compaction extraction hook (context.compacted).
+		postCompactHook := extractor.PostCompactHook()
+		if err := cfg.Plugins.RegisterEventHook(postCompactHook.EventTypes(), postCompactHook); err != nil {
+			log.Printf("service container: failed to register post-compact memory hook: %v", err)
+		}
+
+		log.Println("service container: memory extraction hooks registered")
+	}
+
+	// Register memory tools as a built-in MCP transport.
+	if memorySvc != nil && cfg.MCP != nil {
+		memoryTransport := mcp.NewMemoryToolsTransport(memorySvc)
+		cfg.MCP.AddServer("nanite-memory", memoryTransport)
+		log.Println("service container: memory agent tools registered")
+	}
+
 	// Model selector for operation-specific model resolution (e.g., cheap model for summarization).
 	modelSelector := provider.NewStaticModelSelector(cfg.UtilityProvider, cfg.UtilityModel)
 
@@ -282,6 +349,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Commands:        commands,
 		Plugins:         cfg.Plugins,
 		MCP:             cfg.MCP,
+		Todos:           todos,
+		Memory:          memorySvc,
 		Coord:           cfg.CoordStore,
 		Tasks:           tasks,
 		Workers:         workers,

@@ -1,5 +1,10 @@
 import { useCallback, useState } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { MemoryBrowse } from "./MemoryBrowse";
 import { MemoryDetail } from "./MemoryDetail";
@@ -27,7 +32,9 @@ export function MemoryModal() {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent showCloseButton={false} className="!max-w-2xl h-[600px] !gap-0 !p-0 flex flex-col overflow-hidden !bg-bg !border-border-subtle">
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col p-0 overflow-hidden">
+        <DialogTitle className="sr-only">Memories</DialogTitle>
+        <DialogDescription className="sr-only">Browse and manage agent memories</DialogDescription>
         {view === "browse" && (
           <MemoryBrowse
             onSelect={(key) => {

@@ -1,6 +1,6 @@
+import { useState } from 'react'
 import { XCircle, Users } from 'lucide-react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { useWorkers, useCancelWorker } from '@/hooks/useObservability'
 import type { Worker, WorkerStatus, WorkerType } from '@/lib/types'
 
 function formatRelativeTime(iso: string): string {
@@ -97,15 +97,17 @@ function WorkerRow({
       </td>
       <td className="py-1.5 text-center">
         {isActive && (
-          <button
-            type="button"
-            onClick={() => onCancel(worker.id)}
-            disabled={isCancelling}
-            className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-danger/10 text-danger hover:bg-danger/20 transition-colors disabled:opacity-50"
-          >
-            <XCircle className="w-3 h-3" />
-            Cancel
-          </button>
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => onCancel(worker.id)}
+              disabled={isCancelling}
+              className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-danger/10 text-danger hover:bg-danger/20 transition-colors disabled:opacity-50"
+            >
+              <XCircle className="w-3 h-3" />
+              Cancel
+            </button>
+          </div>
         )}
       </td>
     </tr>
@@ -113,20 +115,23 @@ function WorkerRow({
 }
 
 export function WorkerStatusPanel() {
-  const queryClient = useQueryClient()
+  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set())
 
-  const { data: workers = [], isLoading } = useQuery({
-    queryKey: ['workers'],
-    queryFn: () => api.listWorkers(),
-    refetchInterval: 5000,
-  })
+  const { data: workers = [], isLoading } = useWorkers()
+  const cancel = useCancelWorker()
 
-  const cancel = useMutation({
-    mutationFn: (id: string) => api.cancelWorker(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workers'] })
-    },
-  })
+  function handleCancel(id: string) {
+    setCancellingIds((prev) => new Set(prev).add(id))
+    cancel.mutate(id, {
+      onSettled: () => {
+        setCancellingIds((prev) => {
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+      },
+    })
+  }
 
   const activeCount = workers.filter(
     (w) => w.status === 'spawning' || w.status === 'running'
@@ -169,8 +174,8 @@ export function WorkerStatusPanel() {
                 <WorkerRow
                   key={worker.id}
                   worker={worker}
-                  onCancel={(id) => cancel.mutate(id)}
-                  isCancelling={cancel.isPending}
+                  onCancel={handleCancel}
+                  isCancelling={cancellingIds.has(worker.id)}
                 />
               ))}
             </tbody>

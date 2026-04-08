@@ -54,3 +54,21 @@ export function useKillStaleProcesses() {
     },
   })
 }
+
+export function useWorkers() {
+  return useQuery({
+    queryKey: ['workers'],
+    queryFn: () => api.listWorkers(),
+    refetchInterval: 5_000,
+  })
+}
+
+export function useCancelWorker() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.cancelWorker(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workers'] })
+    },
+  })
+}

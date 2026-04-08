@@ -60,7 +60,7 @@ UPCOMING:
 - Plugin Extraction Phase 5 (Connectors) — paused for hardening, ready to resume
 - User Shell Task 2 (Interactive PTY) — backlogged (! exec sufficient)
 - Phase D (Claude Code Integration) — future
-- Frontend: Todo/Plan UI, workflow progress panel, memory viewer
+- Frontend: workflow progress panel, memory viewer
 - Slash commands: /status, /providers, plugin-registered commands
 - Agent model alignment (agentrc schema extensions)
 
@@ -109,6 +109,17 @@ COMPLETED (vNext frontend):
   - context-menu:message/session right-click menus with plugin items
   - command-palette (Cmd+K) renders plugin-registered commands
 
+COMPLETED (Todo/Plan UI — PR #9, 2026-04-08):
+  - "Work" tab replaces old "Tasks" tab in RightRail
+  - Collapsible Todos + Plans sections with scope switcher (Session/Project)
+  - Drag-and-drop reorder (@dnd-kit), checkbox toggle, undo-with-feedback
+  - "Send Changes" button with dirty tracking, auto-inject on next message
+  - Toast notification in composer chrome (auto-dismiss)
+  - Envelope cards: todo-list, plan-review (approve/edit steps/reject)
+  - Backend: POST /api/work/sync, SSE reactivity for real-time updates
+  - Old session-task code fully removed (SessionTasksTab, useSessionTasks, etc.)
+  - Spec: docs/superpowers/specs/2026-04-08-todo-plan-ui-design.md
+
 PENDING FRONTEND TASKS:
 
 1. Tool Load Preferences UI (priority: high)
@@ -116,26 +127,22 @@ PENDING FRONTEND TASKS:
    - Settings panel where users toggle tool load types (auto/opt-in/disabled) per tool
    - Follow patterns in ToolsWidget.tsx
 
-2. Internal Todo/Plan UI (priority: high, backend ready)
-   - Backend APIs: /api/todos/* (6 endpoints), /api/plans/* (7 endpoints)
-   - Todo panel in session sidebar
-   - Plan viewer for multi-step plans
-   - Three scopes: workspace, project, session
-
-3. Worker Status UI (priority: medium)
+2. Worker Status UI (priority: medium)
    - Backend APIs ready: GET /api/workers, POST /api/workers/{id}/cancel
    - Workers are background multi-agent orchestration processes
    - Need: worker list widget showing active workers, status, cancel button
 
-4. Envelope types (priority: medium, automated)
+3. Envelope types (priority: medium, automated)
    - TS types auto-generated from JSON schemas via scripts/generate-envelope-types.mjs
    - Run `npm run generate:envelopes` or `make generate-envelopes`
    - Staleness check: `npm run check:envelopes`
 
-5. Workflow progress panel (priority: low, future)
+4. Workflow progress panel (priority: low, future)
    - Backend workflow engine ready (internal/workflow/)
    - Show pipeline step status, progress, events
+   - Reserved: collapsible section in WorkTab (hidden when empty)
 
-6. Memory viewer (priority: low, future)
+5. Memory viewer (priority: low, future)
    - Show recalled memories in context, extraction history
+   - Reserved: future RightRail tab or widget
 ```

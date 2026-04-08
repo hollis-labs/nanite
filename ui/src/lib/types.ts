@@ -662,26 +662,77 @@ export interface FragmentsBacklogItem {
   created_at: string;
 }
 
-// --- Session Tasks (agent session todos) ---
+// --- Todos & Plans ---
 
-export type SessionTaskStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
+export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'blocked'
+export type TodoPriority = 'low' | 'medium' | 'high' | 'critical'
+export type PlanStatus = 'proposed' | 'approved' | 'in_progress' | 'complete' | 'abandoned'
+export type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 
-export interface SessionTask {
-  id: string;
-  parent_id?: string;
-  session_id: string;
-  worker_session_id?: string;
-  title: string;
-  description?: string;
-  status: SessionTaskStatus;
-  assignee_agent_id?: string;
-  result?: string;
-  error?: string;
-  tokens_used: number;
-  metadata?: Record<string, string>;
-  created_at: string;
-  updated_at: string;
-  completed_at?: string;
+export interface Todo {
+  id: string
+  scope: 'workspace' | 'project' | 'session'
+  scope_id: string
+  parent_id?: string
+  title: string
+  description: string
+  status: TodoStatus
+  priority: TodoPriority
+  labels: string[]
+  metadata: Record<string, unknown>
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface TodoFilter {
+  scope?: string
+  scope_id?: string
+  status?: TodoStatus
+  priority?: TodoPriority
+  parent_id?: string
+  labels?: string[]
+}
+
+export interface PlanStep {
+  id: string
+  title: string
+  status: PlanStepStatus
+  todo_id?: string
+  depends_on: string[]
+  acceptance?: string
+  notes?: string
+}
+
+export interface Plan {
+  id: string
+  scope: 'workspace' | 'project' | 'session'
+  scope_id: string
+  title: string
+  description: string
+  status: PlanStatus
+  steps: PlanStep[]
+  metadata: Record<string, unknown>
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PlanFilter {
+  scope?: string
+  scope_id?: string
+  status?: PlanStatus
+}
+
+export interface WorkDiff {
+  todos_checked: string[]
+  todos_unchecked: Array<{ id: string; reason?: string }>
+  todos_added: string[]
+  todos_reordered: boolean
+  plan_steps_checked: Array<{ plan_id: string; step_id: string }>
+  plan_steps_unchecked: Array<{ plan_id: string; step_id: string; reason?: string }>
+  plans_approved: string[]
+  plans_rejected: string[]
 }
 
 // --- Workers (background orchestration) ---

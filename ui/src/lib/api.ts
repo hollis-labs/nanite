@@ -45,8 +45,12 @@ import type {
   FragmentsBacklogItem,
   FragmentsSprint,
   FragmentsTask,
-  SessionTask,
-  SessionTaskStatus,
+  Todo,
+  TodoFilter,
+  Plan,
+  PlanFilter,
+  PlanStep,
+  WorkDiff,
   Worker,
   Workspace,
 } from "./types";
@@ -879,54 +883,171 @@ export const api = {
     return res.json();
   },
 
-  // Session Tasks
-  listSessionTasks: async (sessionId: string): Promise<SessionTask[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/tasks`);
-    if (!res.ok) throw new Error(`Failed to list session tasks: ${res.status}`);
-    return res.json();
+  // --- Todos ---
+
+  listTodos: async (filter?: TodoFilter): Promise<Todo[]> => {
+    const params = new URLSearchParams()
+    if (filter?.scope) params.set('scope', filter.scope)
+    if (filter?.scope_id) params.set('scope_id', filter.scope_id)
+    if (filter?.status) params.set('status', filter.status)
+    if (filter?.priority) params.set('priority', filter.priority)
+    if (filter?.parent_id) params.set('parent_id', filter.parent_id)
+    if (filter?.labels?.length) params.set('labels', filter.labels.join(','))
+    const qs = params.toString()
+    const res = await fetch(`${API_BASE}/todos${qs ? `?${qs}` : ''}`)
+    if (!res.ok) throw new Error(`Failed to list todos: ${res.status}`)
+    return res.json()
   },
 
-  createSessionTask: async (data: {
-    title: string;
-    session_id: string;
-    description?: string;
-  }): Promise<SessionTask> => {
-    const res = await fetch(`${API_BASE}/tasks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+  createTodo: async (data: {
+    title: string
+    scope: string
+    scope_id?: string
+    priority?: string
+    description?: string
+  }): Promise<Todo> => {
+    const res = await fetch(`${API_BASE}/todos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
-    });
+    })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to create task: ${res.status}`);
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to create todo: ${res.status}`)
     }
-    return res.json();
+    return res.json()
   },
 
-  updateSessionTask: async (
+  getTodo: async (id: string): Promise<Todo> => {
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`)
+    if (!res.ok) throw new Error(`Failed to get todo: ${res.status}`)
+    return res.json()
+  },
+
+  updateTodo: async (
     id: string,
-    data: Partial<Pick<SessionTask, "title" | "description" | "result" | "metadata">>,
-  ): Promise<SessionTask> => {
-    const res = await fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`Failed to update task: ${res.status}`);
-    return res.json();
+    updates: Partial<Pick<Todo, 'title' | 'description' | 'status' | 'priority' | 'labels' | 'metadata'>>,
+  ): Promise<Todo> => {
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+    if (!res.ok) throw new Error(`Failed to update todo: ${res.status}`)
+    return res.json()
   },
 
-  transitionSessionTask: async (id: string, status: SessionTaskStatus): Promise<SessionTask> => {
-    const res = await fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/transition`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
+  deleteTodo: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error(`Failed to delete todo: ${res.status}`)
+  },
+
+  listTodoChildren: async (id: string): Promise<Todo[]> => {
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/children`)
+    if (!res.ok) throw new Error(`Failed to list todo children: ${res.status}`)
+    return res.json()
+  },
+
+  // --- Plans ---
+
+  listPlans: async (filter?: PlanFilter): Promise<Plan[]> => {
+    const params = new URLSearchParams()
+    if (filter?.scope) params.set('scope', filter.scope)
+    if (filter?.scope_id) params.set('scope_id', filter.scope_id)
+    if (filter?.status) params.set('status', filter.status)
+    const qs = params.toString()
+    const res = await fetch(`${API_BASE}/plans${qs ? `?${qs}` : ''}`)
+    if (!res.ok) throw new Error(`Failed to list plans: ${res.status}`)
+    return res.json()
+  },
+
+  createPlan: async (data: {
+    title: string
+    scope: string
+    scope_id?: string
+    description?: string
+    steps?: PlanStep[]
+  }): Promise<Plan> => {
+    const res = await fetch(`${API_BASE}/plans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to transition task: ${res.status}`);
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to create plan: ${res.status}`)
     }
-    return res.json();
+    return res.json()
+  },
+
+  getPlan: async (id: string): Promise<Plan> => {
+    const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`)
+    if (!res.ok) throw new Error(`Failed to get plan: ${res.status}`)
+    return res.json()
+  },
+
+  updatePlan: async (
+    id: string,
+    updates: Partial<Pick<Plan, 'title' | 'description' | 'status' | 'steps' | 'metadata'>>,
+  ): Promise<Plan> => {
+    const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+    if (!res.ok) throw new Error(`Failed to update plan: ${res.status}`)
+    return res.json()
+  },
+
+  updatePlanStep: async (
+    planId: string,
+    stepId: string,
+    updates: Partial<Pick<PlanStep, 'title' | 'status' | 'notes'>>,
+  ): Promise<Plan> => {
+    const res = await fetch(
+      `${API_BASE}/plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      },
+    )
+    if (!res.ok) throw new Error(`Failed to update plan step: ${res.status}`)
+    return res.json()
+  },
+
+  deletePlan: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error(`Failed to delete plan: ${res.status}`)
+  },
+
+  approvePlan: async (id: string, createTodos = true): Promise<Plan> => {
+    const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ create_todos: createTodos }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to approve plan: ${res.status}`)
+    }
+    return res.json()
+  },
+
+  // --- Work Sync ---
+
+  syncWorkChanges: async (diff: WorkDiff): Promise<{ ok: boolean }> => {
+    const res = await fetch(`${API_BASE}/work/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(diff),
+    })
+    if (!res.ok) throw new Error(`Failed to sync work changes: ${res.status}`)
+    return res.json()
   },
 
   // Workers

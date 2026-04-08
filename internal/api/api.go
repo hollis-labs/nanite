@@ -280,6 +280,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Work sync (batched todo/plan changes from UI)
 	mux.HandleFunc("POST /api/work/sync", a.handleSyncWork)
 
+	// Memories
+	mux.HandleFunc("GET /api/memories", a.handleListMemories)
+	mux.HandleFunc("POST /api/memories", a.handleCreateMemory)
+	mux.HandleFunc("PUT /api/memories/{key}", a.handleUpdateMemory)
+	mux.HandleFunc("DELETE /api/memories/{key}", a.handleDeleteMemory)
+	mux.HandleFunc("PUT /api/memories/{key}/status", a.handleUpdateMemoryStatus)
+
 	// Debug
 	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 

@@ -1,127 +1,140 @@
-import { useState, useEffect, useCallback } from 'react'
-import { ArrowLeft, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { ArrowLeft, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
-} from '@/components/ui/dialog'
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
-  useMemories,
   useCreateMemory,
-  useUpdateMemory,
   useDeleteMemory,
+  useMemories,
+  useUpdateMemory,
   useUpdateMemoryStatus,
-} from '@/hooks/useMemories'
-import type { Memory, MemoryOrigin, MemoryScope, MemoryStatus } from '@/lib/types'
+} from "@/hooks/useMemories";
+import type { Memory, MemoryOrigin, MemoryScope, MemoryStatus } from "@/lib/types";
 
 interface MemoryDetailProps {
-  memoryKey: string | null
-  onBack: () => void
+  memoryKey: string | null;
+  onBack: () => void;
 }
 
-const ORIGIN_OPTIONS: MemoryOrigin[] = ['user', 'feedback', 'project', 'reference', 'observation']
-const SCOPE_OPTIONS: MemoryScope[] = ['session', 'project', 'user']
-const STATUS_OPTIONS: MemoryStatus[] = ['draft', 'reviewed', 'canonical', 'deprecated']
+const ORIGIN_OPTIONS: MemoryOrigin[] = ["user", "feedback", "project", "reference", "observation"];
+const SCOPE_OPTIONS: MemoryScope[] = ["session", "project", "user"];
+const STATUS_OPTIONS: MemoryStatus[] = ["draft", "reviewed", "canonical", "deprecated"];
 
 function statusPillClass(status: MemoryStatus, active: boolean): string {
-  if (!active) return 'bg-surface/40 text-fg-muted border border-transparent hover:border-border/50 cursor-pointer transition-colors'
+  if (!active)
+    return "bg-surface/40 text-fg-muted border border-transparent hover:border-border/50 cursor-pointer transition-colors";
   switch (status) {
-    case 'draft':
-      return 'bg-blue-500/20 text-blue-300 border border-blue-500/40 cursor-pointer transition-colors'
-    case 'reviewed':
-      return 'bg-purple-500/20 text-purple-300 border border-purple-500/40 cursor-pointer transition-colors'
-    case 'canonical':
-      return 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-pointer transition-colors'
-    case 'deprecated':
-      return 'bg-surface/60 text-fg-faint border border-border/50 cursor-pointer transition-colors'
+    case "draft":
+      return "bg-blue-500/20 text-blue-300 border border-blue-500/40 cursor-pointer transition-colors";
+    case "reviewed":
+      return "bg-purple-500/20 text-purple-300 border border-purple-500/40 cursor-pointer transition-colors";
+    case "canonical":
+      return "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-pointer transition-colors";
+    case "deprecated":
+      return "bg-surface/60 text-fg-faint border border-border/50 cursor-pointer transition-colors";
   }
 }
 
 const inputClass =
-  'w-full px-3 py-2 rounded-md border border-border/50 bg-surface/40 text-xs text-fg outline-none focus:border-indigo-500/50'
-const labelClass = 'text-[10px] uppercase tracking-wider text-fg-muted font-medium'
+  "w-full px-3 py-2 rounded-md border border-border/50 bg-surface/40 text-xs text-fg outline-none focus:border-indigo-500/50";
+const labelClass = "text-[10px] uppercase tracking-wider text-fg-muted font-medium";
 
 export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
-  const isCreate = memoryKey === null
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [tagInput, setTagInput] = useState('')
+  const isCreate = memoryKey === null;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [tagInput, setTagInput] = useState("");
 
   // Form state
-  const [summary, setSummary] = useState('')
-  const [body, setBody] = useState('')
-  const [origin, setOrigin] = useState<MemoryOrigin>('user')
-  const [confidence, setConfidence] = useState(0.8)
-  const [scope, setScope] = useState<MemoryScope>('user')
-  const [status, setStatus] = useState<MemoryStatus>('draft')
-  const [tags, setTags] = useState<string[]>([])
+  const [summary, setSummary] = useState("");
+  const [body, setBody] = useState("");
+  const [origin, setOrigin] = useState<MemoryOrigin>("user");
+  const [confidence, setConfidence] = useState(0.8);
+  const [scope, setScope] = useState<MemoryScope>("user");
+  const [status, setStatus] = useState<MemoryStatus>("draft");
+  const [tags, setTags] = useState<string[]>([]);
 
   // Fetch memories list to find the one being edited
-  const { data } = useMemories({ limit: 1000 })
-  const memory: Memory | undefined = data?.memories.find((m) => m.memory_key === memoryKey)
+  const { data } = useMemories({ limit: 1000 });
+  const memory: Memory | undefined = data?.memories.find((m) => m.memory_key === memoryKey);
 
   // Hydrate form when memory loads
   useEffect(() => {
-    if (!memory) return
-    setSummary(memory.summary)
-    setBody(memory.body ?? '')
-    setOrigin(memory.origin)
-    setConfidence(memory.confidence)
-    setScope(memory.scope)
-    setStatus(memory.status)
-    setTags(memory.tags ?? [])
-  }, [memory])
+    if (!memory) return;
+    setSummary(memory.summary);
+    setBody(memory.body ?? "");
+    setOrigin(memory.origin);
+    setConfidence(memory.confidence);
+    setScope(memory.scope);
+    setStatus(memory.status);
+    setTags(memory.tags ?? []);
+  }, [memory]);
 
-  const createMutation = useCreateMemory()
-  const updateMutation = useUpdateMemory()
-  const deleteMutation = useDeleteMemory()
-  const statusMutation = useUpdateMemoryStatus()
+  const createMutation = useCreateMemory();
+  const updateMutation = useUpdateMemory();
+  const deleteMutation = useDeleteMemory();
+  const statusMutation = useUpdateMemoryStatus();
 
   const handleSave = useCallback(() => {
-    const data = { summary, body: body || undefined, origin, confidence, tags }
+    const data = { summary, body: body || undefined, origin, confidence, tags };
     if (isCreate) {
-      createMutation.mutate(
-        { ...data, scope },
-        { onSuccess: onBack }
-      )
+      createMutation.mutate({ ...data, scope }, { onSuccess: onBack });
     } else if (memoryKey) {
-      updateMutation.mutate(
-        { key: memoryKey, data },
-        { onSuccess: onBack }
-      )
+      updateMutation.mutate({ key: memoryKey, data }, { onSuccess: onBack });
     }
-  }, [isCreate, memoryKey, summary, body, origin, confidence, scope, tags, createMutation, updateMutation, onBack])
+  }, [
+    isCreate,
+    memoryKey,
+    summary,
+    body,
+    origin,
+    confidence,
+    scope,
+    tags,
+    createMutation,
+    updateMutation,
+    onBack,
+  ]);
 
-  const handleStatusClick = useCallback((s: MemoryStatus) => {
-    if (!memoryKey) return
-    setStatus(s)
-    statusMutation.mutate({ key: memoryKey, status: s })
-  }, [memoryKey, statusMutation])
+  const handleStatusClick = useCallback(
+    (s: MemoryStatus) => {
+      if (!memoryKey) return;
+      setStatus(s);
+      statusMutation.mutate({ key: memoryKey, status: s });
+    },
+    [memoryKey, statusMutation],
+  );
 
   const handleDeleteConfirm = useCallback(() => {
-    if (!memoryKey) return
-    deleteMutation.mutate(memoryKey, { onSuccess: onBack })
-  }, [memoryKey, deleteMutation, onBack])
+    if (!memoryKey) return;
+    deleteMutation.mutate(memoryKey, { onSuccess: onBack });
+  }, [memoryKey, deleteMutation, onBack]);
 
-  const handleTagKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      const val = tagInput.trim()
-      if (val && !tags.includes(val)) {
-        setTags((prev) => [...prev, val])
+  const handleTagKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const val = tagInput.trim();
+        if (val && !tags.includes(val)) {
+          setTags((prev) => [...prev, val]);
+        }
+        setTagInput("");
       }
-      setTagInput('')
-    }
-  }, [tagInput, tags])
+    },
+    [tagInput, tags],
+  );
 
   const removeTag = useCallback((tag: string) => {
-    setTags((prev) => prev.filter((t) => t !== tag))
-  }, [])
+    setTags((prev) => prev.filter((t) => t !== tag));
+  }, []);
 
-  const isSaving = createMutation.isPending || updateMutation.isPending
+  const isSaving = createMutation.isPending || updateMutation.isPending;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -135,7 +148,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
           <ArrowLeft className="size-4" />
         </button>
         <span className="text-sm font-medium text-fg flex-1">
-          {isCreate ? 'New Memory' : 'Edit Memory'}
+          {isCreate ? "New Memory" : "Edit Memory"}
         </span>
         {!isCreate && (
           <button
@@ -153,7 +166,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
           disabled={isSaving || !summary.trim()}
           className="flex items-center gap-1 text-[11px] px-3 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 border border-indigo-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isSaving ? 'Saving…' : 'Save'}
+          {isSaving ? "Saving…" : "Save"}
         </button>
       </div>
 
@@ -324,11 +337,11 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
               onClick={handleDeleteConfirm}
               disabled={deleteMutation.isPending}
             >
-              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+              {deleteMutation.isPending ? "Deleting…" : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }

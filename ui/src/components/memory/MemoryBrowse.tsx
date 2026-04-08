@@ -1,54 +1,60 @@
-import { useState } from 'react'
-import { Brain, Search, Plus } from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
-import { useMemories } from '@/hooks/useMemories'
-import { MemoryCard } from './MemoryCard'
+import { Brain, Plus, Search } from "lucide-react";
+import { useState } from "react";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useMemories } from "@/hooks/useMemories";
+import { MemoryCard } from "./MemoryCard";
 
-type ScopeFilter = '' | 'session' | 'project' | 'user'
-type StatusFilter = '' | 'canonical' | 'draft' | 'reviewed' | 'deprecated'
+type ScopeFilter = "" | "session" | "project" | "user";
+type StatusFilter = "" | "canonical" | "draft" | "reviewed" | "deprecated";
 
 interface MemoryBrowseProps {
-  onSelect: (key: string) => void
-  onCreate: () => void
+  onSelect: (key: string) => void;
+  onCreate: () => void;
 }
 
 const SCOPE_OPTIONS: { label: string; value: ScopeFilter }[] = [
-  { label: 'All', value: '' },
-  { label: 'User', value: 'user' },
-  { label: 'Project', value: 'project' },
-  { label: 'Session', value: 'session' },
-]
+  { label: "All", value: "" },
+  { label: "User", value: "user" },
+  { label: "Project", value: "project" },
+  { label: "Session", value: "session" },
+];
 
 const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
-  { label: 'All', value: '' },
-  { label: 'Canonical', value: 'canonical' },
-  { label: 'Reviewed', value: 'reviewed' },
-  { label: 'Draft', value: 'draft' },
-  { label: 'Deprecated', value: 'deprecated' },
-]
+  { label: "All", value: "" },
+  { label: "Canonical", value: "canonical" },
+  { label: "Reviewed", value: "reviewed" },
+  { label: "Draft", value: "draft" },
+  { label: "Deprecated", value: "deprecated" },
+];
 
 function pillClass(active: boolean): string {
   return active
-    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-    : 'bg-surface/40 text-fg-muted hover:text-fg border border-transparent'
+    ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40"
+    : "bg-surface/40 text-fg-muted hover:text-fg border border-transparent";
 }
 
 export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
-  const [search, setSearch] = useState('')
-  const [scope, setScope] = useState<ScopeFilter>('')
-  const [status, setStatus] = useState<StatusFilter>('')
+  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState<ScopeFilter>("");
+  const [status, setStatus] = useState<StatusFilter>("");
 
   const filters = {
     q: search || undefined,
     scope: scope || undefined,
     status: status || undefined,
-  }
+  };
 
-  const { data, isLoading } = useMemories(filters)
-  const memories = data?.memories ?? []
-  const total = data?.total ?? 0
+  const { data, isLoading } = useMemories(filters);
+  const memories = data?.memories ?? [];
+  const total = data?.total ?? 0;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -129,8 +135,8 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
             <EmptyTitle className="text-sm">No memories found</EmptyTitle>
             <EmptyDescription className="text-xs">
               {search || scope || status
-                ? 'Try adjusting your filters'
-                : 'Memories will appear here as they are captured'}
+                ? "Try adjusting your filters"
+                : "Memories will appear here as they are captured"}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -148,5 +154,5 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
         </ScrollArea>
       )}
     </div>
-  )
+  );
 }

@@ -1,66 +1,66 @@
-import { useState } from 'react'
-import { XCircle, Users } from 'lucide-react'
-import { useWorkers, useCancelWorker } from '@/hooks/useObservability'
-import type { Worker, WorkerStatus, WorkerType } from '@/lib/types'
+import { Users, XCircle } from "lucide-react";
+import { useState } from "react";
+import { useCancelWorker, useWorkers } from "@/hooks/useObservability";
+import type { Worker, WorkerStatus, WorkerType } from "@/lib/types";
 
 function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const s = Math.floor(diff / 1000)
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 function TypeBadge({ type }: { type: WorkerType }) {
-  if (type === 'full') {
+  if (type === "full") {
     return (
       <span className="text-[10px] px-1.5 py-0.5 rounded bg-info/20 text-info font-medium">
         full
       </span>
-    )
+    );
   }
   return (
     <span className="text-[10px] px-1.5 py-0.5 rounded bg-fg-muted/20 text-fg-muted font-medium">
       light
     </span>
-  )
+  );
 }
 
 function StatusBadge({ status }: { status: WorkerStatus }) {
   switch (status) {
-    case 'spawning':
+    case "spawning":
       return (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/20 text-warning font-medium animate-pulse">
           spawning
         </span>
-      )
-    case 'running':
+      );
+    case "running":
       return (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-info/20 text-info font-medium">
           running
         </span>
-      )
-    case 'completed':
+      );
+    case "completed":
       return (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/20 text-success font-medium">
           completed
         </span>
-      )
-    case 'failed':
+      );
+    case "failed":
       return (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-danger/20 text-danger font-medium">
           failed
         </span>
-      )
-    case 'cancelled':
+      );
+    case "cancelled":
       return (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-fg-muted/20 text-fg-muted font-medium">
           cancelled
         </span>
-      )
+      );
   }
 }
 
@@ -69,11 +69,11 @@ function WorkerRow({
   onCancel,
   isCancelling,
 }: {
-  worker: Worker
-  onCancel: (id: string) => void
-  isCancelling: boolean
+  worker: Worker;
+  onCancel: (id: string) => void;
+  isCancelling: boolean;
 }) {
-  const isActive = worker.status === 'spawning' || worker.status === 'running'
+  const isActive = worker.status === "spawning" || worker.status === "running";
 
   return (
     <tr className="border-b border-border/30 hover:bg-surface/20 transition-colors">
@@ -93,7 +93,7 @@ function WorkerRow({
         {formatRelativeTime(worker.created_at)}
       </td>
       <td className="py-1.5 pr-3 font-mono text-fg-faint text-[10px] max-w-[160px] truncate">
-        {worker.worktree_path ?? '—'}
+        {worker.worktree_path ?? "—"}
       </td>
       <td className="py-1.5 text-center">
         {isActive && (
@@ -111,34 +111,34 @@ function WorkerRow({
         )}
       </td>
     </tr>
-  )
+  );
 }
 
 export function WorkerStatusPanel() {
-  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set())
+  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
 
-  const { data: workers = [], isLoading } = useWorkers()
-  const cancel = useCancelWorker()
+  const { data: workers = [], isLoading } = useWorkers();
+  const cancel = useCancelWorker();
 
   function handleCancel(id: string) {
-    setCancellingIds((prev) => new Set(prev).add(id))
+    setCancellingIds((prev) => new Set(prev).add(id));
     cancel.mutate(id, {
       onSettled: () => {
         setCancellingIds((prev) => {
-          const next = new Set(prev)
-          next.delete(id)
-          return next
-        })
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
       },
-    })
+    });
   }
 
   const activeCount = workers.filter(
-    (w) => w.status === 'spawning' || w.status === 'running'
-  ).length
+    (w) => w.status === "spawning" || w.status === "running",
+  ).length;
 
   if (isLoading) {
-    return <p className="text-xs text-fg-faint italic py-2">Loading workers...</p>
+    return <p className="text-xs text-fg-faint italic py-2">Loading workers...</p>;
   }
 
   return (
@@ -146,10 +146,8 @@ export function WorkerStatusPanel() {
       <div className="flex items-center gap-2 text-xs text-fg-secondary">
         <Users className="w-3.5 h-3.5" />
         <span>
-          {workers.length} worker{workers.length !== 1 && 's'}
-          {activeCount > 0 && (
-            <span className="text-info ml-1">({activeCount} active)</span>
-          )}
+          {workers.length} worker{workers.length !== 1 && "s"}
+          {activeCount > 0 && <span className="text-info ml-1">({activeCount} active)</span>}
         </span>
       </div>
 
@@ -183,5 +181,5 @@ export function WorkerStatusPanel() {
         </div>
       )}
     </div>
-  )
+  );
 }

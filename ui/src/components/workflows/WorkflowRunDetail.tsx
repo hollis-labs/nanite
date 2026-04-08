@@ -1,49 +1,49 @@
-import { ArrowLeft } from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import { useWorkflowRun, useCancelWorkflowRun } from '@/hooks/useWorkflows'
-import { WorkflowStepItem } from './WorkflowStepItem'
-import type { StepState } from '@/lib/types'
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useCancelWorkflowRun, useWorkflowRun } from "@/hooks/useWorkflows";
+import type { StepState } from "@/lib/types";
+import { WorkflowStepItem } from "./WorkflowStepItem";
 
 interface WorkflowRunDetailProps {
-  runId: string
-  onBack: () => void
+  runId: string;
+  onBack: () => void;
 }
 
 function statusBadgeClass(status: string): string {
   switch (status) {
-    case 'running':
-      return 'bg-success/20 text-success'
-    case 'completed':
-      return 'bg-success/20 text-success'
-    case 'failed':
-      return 'bg-danger/20 text-danger'
-    case 'cancelled':
-      return 'bg-fg-muted/10 text-fg-muted'
-    case 'pending':
-      return 'bg-warning/20 text-warning'
+    case "running":
+      return "bg-success/20 text-success";
+    case "completed":
+      return "bg-success/20 text-success";
+    case "failed":
+      return "bg-danger/20 text-danger";
+    case "cancelled":
+      return "bg-fg-muted/10 text-fg-muted";
+    case "pending":
+      return "bg-warning/20 text-warning";
     default:
-      return 'bg-surface/40 text-fg-faint'
+      return "bg-surface/40 text-fg-faint";
   }
 }
 
 function formatStarted(dateStr: string): string {
   try {
     return new Date(dateStr).toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   } catch {
-    return dateStr
+    return dateStr;
   }
 }
 
 export function WorkflowRunDetail({ runId, onBack }: WorkflowRunDetailProps) {
-  const { data: workflowRun, isLoading } = useWorkflowRun(runId)
-  const cancelMutation = useCancelWorkflowRun()
+  const { data: workflowRun, isLoading } = useWorkflowRun(runId);
+  const cancelMutation = useCancelWorkflowRun();
 
   if (isLoading) {
     return (
@@ -57,7 +57,7 @@ export function WorkflowRunDetail({ runId, onBack }: WorkflowRunDetailProps) {
           ))}
         </div>
       </div>
-    )
+    );
   }
 
   if (!workflowRun) {
@@ -75,20 +75,20 @@ export function WorkflowRunDetail({ runId, onBack }: WorkflowRunDetailProps) {
           <p className="text-xs text-fg-faint">Run not found.</p>
         </div>
       </div>
-    )
+    );
   }
 
-  const { pipeline, run } = workflowRun
-  const status = run.status
-  const isActive = status === 'running' || status === 'pending'
+  const { pipeline, run } = workflowRun;
+  const status = run.status;
+  const isActive = status === "running" || status === "pending";
 
   // Sort steps: started_at ascending, pending last
   const sortedSteps: StepState[] = Object.values(run.step_states ?? {}).sort((a, b) => {
-    if (!a.started_at && !b.started_at) return 0
-    if (!a.started_at) return 1
-    if (!b.started_at) return -1
-    return new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
-  })
+    if (!a.started_at && !b.started_at) return 0;
+    if (!a.started_at) return 1;
+    if (!b.started_at) return -1;
+    return new Date(a.started_at).getTime() - new Date(b.started_at).getTime();
+  });
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -104,7 +104,9 @@ export function WorkflowRunDetail({ runId, onBack }: WorkflowRunDetailProps) {
             <ArrowLeft className="w-3.5 h-3.5" />
           </button>
           <span className="text-xs font-semibold text-fg truncate flex-1">{pipeline.name}</span>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${statusBadgeClass(status)}`}>
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${statusBadgeClass(status)}`}
+          >
             {status}
           </span>
           {isActive && (
@@ -158,5 +160,5 @@ export function WorkflowRunDetail({ runId, onBack }: WorkflowRunDetailProps) {
         )}
       </ScrollArea>
     </div>
-  )
+  );
 }

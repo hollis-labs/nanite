@@ -1,31 +1,32 @@
-import { useState } from 'react'
-import { GitBranch } from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
-import { useWorkflowRuns, useWorkflowEvents } from '@/hooks/useWorkflows'
-import { WorkflowRunCard } from './WorkflowRunCard'
-import { WorkflowRunDetail } from './WorkflowRunDetail'
+import { GitBranch } from "lucide-react";
+import { useState } from "react";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useWorkflowEvents, useWorkflowRuns } from "@/hooks/useWorkflows";
+import { WorkflowRunCard } from "./WorkflowRunCard";
+import { WorkflowRunDetail } from "./WorkflowRunDetail";
 
-type Filter = 'all' | 'active'
+type Filter = "all" | "active";
 
 export function WorkflowTab() {
-  const [filter, setFilter] = useState<Filter>('active')
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [filter, setFilter] = useState<Filter>("active");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
-  const queryFilter = filter === 'active' ? { status: 'running' } : undefined
-  const { data: runs = [], isLoading } = useWorkflowRuns(queryFilter)
+  const queryFilter = filter === "active" ? { status: "running" } : undefined;
+  const { data: runs = [], isLoading } = useWorkflowRuns(queryFilter);
 
   // Subscribe to SSE events for live invalidation
-  useWorkflowEvents()
+  useWorkflowEvents();
 
   if (selectedRunId) {
-    return (
-      <WorkflowRunDetail
-        runId={selectedRunId}
-        onBack={() => setSelectedRunId(null)}
-      />
-    )
+    return <WorkflowRunDetail runId={selectedRunId} onBack={() => setSelectedRunId(null)} />;
   }
 
   return (
@@ -35,18 +36,18 @@ export function WorkflowTab() {
         <div className="flex bg-bg-elevated rounded p-0.5 gap-0.5 w-fit">
           <button
             type="button"
-            onClick={() => setFilter('active')}
+            onClick={() => setFilter("active")}
             className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
-              filter === 'active' ? 'bg-surface text-fg' : 'text-fg-faint hover:text-fg-muted'
+              filter === "active" ? "bg-surface text-fg" : "text-fg-faint hover:text-fg-muted"
             }`}
           >
             Active
           </button>
           <button
             type="button"
-            onClick={() => setFilter('all')}
+            onClick={() => setFilter("all")}
             className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
-              filter === 'all' ? 'bg-surface text-fg' : 'text-fg-faint hover:text-fg-muted'
+              filter === "all" ? "bg-surface text-fg" : "text-fg-faint hover:text-fg-muted"
             }`}
           >
             All
@@ -68,12 +69,12 @@ export function WorkflowTab() {
               <GitBranch />
             </EmptyMedia>
             <EmptyTitle className="text-sm">
-              {filter === 'active' ? 'No active runs' : 'No workflow runs'}
+              {filter === "active" ? "No active runs" : "No workflow runs"}
             </EmptyTitle>
             <EmptyDescription className="text-xs">
-              {filter === 'active'
-                ? 'Switch to All to see completed runs'
-                : 'Workflow runs will appear here when pipelines execute'}
+              {filter === "active"
+                ? "Switch to All to see completed runs"
+                : "Workflow runs will appear here when pipelines execute"}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -91,5 +92,5 @@ export function WorkflowTab() {
         </ScrollArea>
       )}
     </div>
-  )
+  );
 }

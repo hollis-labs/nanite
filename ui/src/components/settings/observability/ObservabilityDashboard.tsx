@@ -7,6 +7,7 @@ import { UtilityTable } from './UtilityTable'
 import { UtilityLogTable } from './UtilityLogTable'
 import { RecentExecutionsTable } from './RecentExecutionsTable'
 import { ProcessHealthPanel } from './ProcessHealthPanel'
+import { WorkerStatusPanel } from './WorkerStatusPanel'
 
 function Card({
   title,
@@ -47,6 +48,10 @@ export function ObservabilityDashboard() {
 
       <Card title="Process Health">
         <ProcessHealthPanel />
+      </Card>
+
+      <Card title="Worker Status">
+        <WorkerStatusPanel />
       </Card>
 
       <Card title="Utility Call Comparison">

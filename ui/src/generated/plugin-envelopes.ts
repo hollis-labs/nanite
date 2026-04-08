@@ -69,6 +69,23 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     ),
     source: "core",
   },
+  // Todo/Plan system (core)
+  "todo-list": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/TodoListCard").then((m) => ({
+        default: m.TodoListCard,
+      })),
+    ),
+    source: "core",
+  },
+  "plan-review": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/PlanReviewCard").then((m) => ({
+        default: m.PlanReviewCard,
+      })),
+    ),
+    source: "core",
+  },
   // Reusable primitives
   "info-card": {
     component: lazy(() =>

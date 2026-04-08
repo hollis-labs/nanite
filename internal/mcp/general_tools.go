@@ -422,7 +422,14 @@ func (g *GeneralToolsTransport) callMathEval(args map[string]any) (*ToolResult, 
 }
 
 func (g *GeneralToolsTransport) callThink(args map[string]any) (*ToolResult, error) {
-	thought, _ := args["thought"].(string)
+	raw, exists := args["thought"]
+	if !exists || raw == nil {
+		return errorResult("thought is required"), nil
+	}
+	thought, ok := raw.(string)
+	if !ok {
+		thought = fmt.Sprintf("%v", raw)
+	}
 	if thought == "" {
 		return errorResult("thought is required"), nil
 	}

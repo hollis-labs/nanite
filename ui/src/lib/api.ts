@@ -57,6 +57,20 @@ import type {
 
 const API_BASE = "/api";
 
+// The Go backend stores plan.steps and plan.metadata as JSON strings.
+// Parse them into their typed forms so components can use them directly.
+function hydratePlan(raw: Record<string, unknown>): Plan {
+  const plan = raw as unknown as Plan
+  if (typeof plan.steps === 'string') {
+    try { plan.steps = JSON.parse(plan.steps as unknown as string) } catch { plan.steps = [] }
+  }
+  if (!Array.isArray(plan.steps)) plan.steps = []
+  if (typeof plan.metadata === 'string') {
+    try { plan.metadata = JSON.parse(plan.metadata as unknown as string) } catch { plan.metadata = {} }
+  }
+  return plan
+}
+
 export const api = {
   // Sessions
   listSessions: async (workspaceId?: string): Promise<Session[]> => {
@@ -960,7 +974,8 @@ export const api = {
     const qs = params.toString()
     const res = await fetch(`${API_BASE}/plans${qs ? `?${qs}` : ''}`)
     if (!res.ok) throw new Error(`Failed to list plans: ${res.status}`)
-    return res.json()
+    const plans = await res.json()
+    return plans.map(hydratePlan)
   },
 
   createPlan: async (data: {
@@ -979,13 +994,13 @@ export const api = {
       const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
       throw new Error(err.error || `Failed to create plan: ${res.status}`)
     }
-    return res.json()
+    return hydratePlan(await res.json())
   },
 
   getPlan: async (id: string): Promise<Plan> => {
     const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`)
     if (!res.ok) throw new Error(`Failed to get plan: ${res.status}`)
-    return res.json()
+    return hydratePlan(await res.json())
   },
 
   updatePlan: async (
@@ -998,7 +1013,7 @@ export const api = {
       body: JSON.stringify(updates),
     })
     if (!res.ok) throw new Error(`Failed to update plan: ${res.status}`)
-    return res.json()
+    return hydratePlan(await res.json())
   },
 
   updatePlanStep: async (
@@ -1015,7 +1030,7 @@ export const api = {
       },
     )
     if (!res.ok) throw new Error(`Failed to update plan step: ${res.status}`)
-    return res.json()
+    return hydratePlan(await res.json())
   },
 
   deletePlan: async (id: string): Promise<void> => {
@@ -1035,7 +1050,7 @@ export const api = {
       const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
       throw new Error(err.error || `Failed to approve plan: ${res.status}`)
     }
-    return res.json()
+    return hydratePlan(await res.json())
   },
 
   // --- Work Sync ---

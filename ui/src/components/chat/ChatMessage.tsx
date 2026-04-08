@@ -272,9 +272,10 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
           </div>
         )}
 
-        {/* Envelope rendering */}
+        {/* Envelope rendering — stop pointer propagation so interactive envelope
+            elements (checkboxes, buttons) aren't swallowed by ContextMenuTrigger */}
         {envelope && !isUser && (
-          <div className="mt-3">
+          <div className="mt-3" onPointerDownCapture={(e) => e.stopPropagation()}>
             <EnvelopeRenderer envelope={envelope} onSendMessage={onSendMessage} />
           </div>
         )}

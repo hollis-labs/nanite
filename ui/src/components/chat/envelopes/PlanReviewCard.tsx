@@ -1,6 +1,9 @@
 import { useState } from 'react'
-import { useApprovePlan, useRejectPlan, useUpdatePlan } from '@/hooks/usePlans'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api'
+import { useApprovePlan, useRejectPlan, useTogglePlanStep } from '@/hooks/usePlans'
 import type { PlanStatus } from '@/lib/types'
+import { PlanStepItem } from '@/components/work/PlanStepItem'
 
 const STATUS_STYLE: Record<PlanStatus, string> = {
   proposed: 'text-warning bg-warning/10',
@@ -23,141 +26,79 @@ interface PlanReviewCardProps {
 }
 
 export function PlanReviewCard({ data }: PlanReviewCardProps) {
+  const { data: plan } = useQuery({
+    queryKey: ['plans', data.plan_id],
+    queryFn: () => api.getPlan(data.plan_id),
+    initialData: undefined,
+  })
   const approvePlan = useApprovePlan()
   const { reject } = useRejectPlan()
-  const updatePlan = useUpdatePlan()
+  const toggleStep = useTogglePlanStep()
   const [acted, setActed] = useState(false)
-  const [currentStatus, setCurrentStatus] = useState<PlanStatus>(data.status)
-  const [editing, setEditing] = useState(false)
-  const [editSteps, setEditSteps] = useState(data.steps)
-  const [newStepTitle, setNewStepTitle] = useState('')
+
+  const currentStatus = plan?.status ?? data.status
+  const steps = plan?.steps ?? data.steps.map((s) => ({ ...s, status: 'pending' as const, depends_on: [] as string[] }))
+  const doneCount = steps.filter((s) => s.status === 'done').length
+  const totalCount = steps.length
+  const progressPct = totalCount > 0 ? (doneCount / totalCount) * 100 : 0
 
   const handleApprove = () => {
-    if (editing) {
-      updatePlan.mutate(
-        {
-          id: data.plan_id,
-          updates: {
-            steps: editSteps.map((s) => ({
-              ...s,
-              status: 'pending' as const,
-              depends_on: [],
-            })),
-          },
-        },
-        {
-          onSuccess: () => {
-            approvePlan.mutate(
-              { id: data.plan_id, createTodos: true },
-              {
-                onSuccess: () => {
-                  setCurrentStatus('approved')
-                  setActed(true)
-                  setEditing(false)
-                },
-              },
-            )
-          },
-        },
-      )
-    } else {
-      approvePlan.mutate(
-        { id: data.plan_id, createTodos: true },
-        {
-          onSuccess: () => {
-            setCurrentStatus('approved')
-            setActed(true)
-          },
-        },
-      )
-    }
+    approvePlan.mutate(
+      { id: data.plan_id, createTodos: true },
+      { onSuccess: () => setActed(true) },
+    )
   }
 
   const handleReject = () => {
     reject(data.plan_id)
-    setCurrentStatus('abandoned')
     setActed(true)
-  }
-
-  const handleAddStep = () => {
-    const trimmed = newStepTitle.trim()
-    if (!trimmed) return
-    setEditSteps((prev) => [
-      ...prev,
-      { id: `new-${Date.now()}`, title: trimmed },
-    ])
-    setNewStepTitle('')
-  }
-
-  const handleRemoveStep = (stepId: string) => {
-    setEditSteps((prev) => prev.filter((s) => s.id !== stepId))
   }
 
   return (
     <div className="rounded-sm border border-border-subtle bg-bg-elevated/60 overflow-hidden my-2">
       <div className="px-3 py-2">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-sm font-semibold text-fg">{data.title}</span>
+          <span className="text-sm font-semibold text-fg">{plan?.title ?? data.title}</span>
           <span className={`text-[9px] px-1.5 py-0.5 rounded ${STATUS_STYLE[currentStatus]}`}>
             {currentStatus}
           </span>
         </div>
-        {data.description && (
-          <p className="text-[11px] text-fg-muted mb-2">{data.description}</p>
+        {(plan?.description || data.description) && (
+          <p className="text-[11px] text-fg-muted mb-2">{plan?.description || data.description}</p>
         )}
 
         <div className="border-l-2 border-border-subtle pl-2 ml-1 mb-2 space-y-0.5">
-          {(editing ? editSteps : data.steps).map((step, i) => (
-            <div key={step.id} className="flex items-center gap-1 text-[11px] text-fg-secondary py-0.5">
-              <span>{i + 1}. {step.title}</span>
-              {editing && (
-                <button
-                  type="button"
-                  onClick={() => handleRemoveStep(step.id)}
-                  className="text-danger/60 hover:text-danger ml-auto text-[10px]"
-                >
-                  remove
-                </button>
-              )}
-            </div>
+          {steps.map((step) => (
+            <PlanStepItem
+              key={step.id}
+              step={{ ...step, status: step.status || 'pending' }}
+              onCheck={(stepId) => toggleStep.check(data.plan_id, stepId)}
+              onUncheck={(stepId, reason) => toggleStep.uncheck(data.plan_id, stepId, reason)}
+            />
           ))}
-          {editing && (
-            <div className="flex gap-1 mt-1">
-              <input
-                type="text"
-                value={newStepTitle}
-                onChange={(e) => setNewStepTitle(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddStep() } }}
-                placeholder="Add step..."
-                className="flex-1 bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              <button
-                type="button"
-                onClick={handleAddStep}
-                className="px-1.5 py-0.5 bg-surface text-fg-muted text-[10px] rounded hover:bg-surface-hover"
-              >
-                Add
-              </button>
-            </div>
-          )}
         </div>
+
+        {totalCount > 0 && (
+          <div className="flex items-center gap-1.5 mb-2">
+            <div className="flex-1 h-1 bg-surface rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-300"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            <span className="text-[9px] text-fg-muted">{doneCount}/{totalCount}</span>
+          </div>
+        )}
 
         {!acted && currentStatus === 'proposed' && (
           <div className="flex gap-2">
             <button
               type="button"
               onClick={handleApprove}
-              disabled={approvePlan.isPending || updatePlan.isPending}
+              disabled={approvePlan.isPending}
               className="px-3 py-1 bg-primary text-white text-[11px] rounded hover:bg-primary/80 transition-colors disabled:opacity-50"
             >
               Approve
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditing((v) => !v)}
-              className="px-3 py-1 bg-surface text-fg-secondary text-[11px] rounded hover:bg-surface-hover transition-colors"
-            >
-              {editing ? 'Done Editing' : 'Edit Steps'}
             </button>
             <button
               type="button"

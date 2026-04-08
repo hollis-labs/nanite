@@ -509,7 +509,8 @@ export interface PresenceEvent {
     | "tool_pending"
     | "tool_resolved"
     | "cli_active"
-    | "session_archived";
+    | "session_archived"
+    | "work_changed";
   session_id: string;
   agent_id?: string;
   tool_name?: string;

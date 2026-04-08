@@ -22,12 +22,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/worker"
+	"github.com/hollis-labs/nanite/internal/workflow"
 	"github.com/hollis-labs/nanite/internal/worktree"
 )
 
@@ -77,6 +79,10 @@ type Container struct {
 
 	// Permissions is the per-invocation permission engine. nil = permissions disabled.
 	Permissions *permission.Engine
+
+	// Workflow run store and SSE broadcaster. nil = workflow system disabled.
+	RunStore            *workflow.RunStore
+	WorkflowBroadcaster *workflow.Broadcaster
 }
 
 // ContainerConfig holds all the external dependencies needed to construct
@@ -216,14 +222,18 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		homeDir, _ := os.UserHomeDir()
 		conduitRoot := filepath.Join(homeDir, ".conduit")
 
-		// Embedder selection: prefer OpenAI (higher quality) when API key is
-		// available, fall back to Ollama (local, free), or nil (disables similarity).
+		// Embedder selection: OS keychain → env var → Ollama → nil (disables similarity).
 		var embedder provider.Embedder
 		var embeddingModel string
 
-		if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
+		openaiKey := secrets.Get(secrets.ProviderKeyName("openai-001"))
+		if openaiKey == "" {
+			openaiKey = os.Getenv("OPENAI_API_KEY")
+		}
+
+		if openaiKey != "" {
 			oai := provider.NewOpenAI()
-			oai.SetAPIKey(apiKey)
+			oai.SetAPIKey(openaiKey)
 			embedder = oai
 			embeddingModel = "text-embedding-3-large"
 			log.Println("service container: OpenAI embedder (text-embedding-3-large) for Conduit")

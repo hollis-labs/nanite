@@ -234,6 +234,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/actions/{id}", a.handleDeleteAction)
 	mux.HandleFunc("POST /api/actions/{id}/execute", a.handleExecuteAction)
 
+	// Workflow runs + SSE event stream
+	mux.HandleFunc("GET /api/workflows/runs", a.handleListWorkflowRuns)
+	mux.HandleFunc("GET /api/workflows/runs/{runId}", a.handleGetWorkflowRun)
+	mux.HandleFunc("POST /api/workflows/runs/{runId}/cancel", a.handleCancelWorkflowRun)
+	mux.HandleFunc("GET /api/workflows/events", a.handleWorkflowEvents)
+
 	// Workers (multi-agent orchestration)
 	mux.HandleFunc("GET /api/workers", a.handleListWorkers)
 	mux.HandleFunc("POST /api/workers/{id}/cancel", a.handleCancelWorker)

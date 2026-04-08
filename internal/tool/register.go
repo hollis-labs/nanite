@@ -1,7 +1,7 @@
 package tool
 
 import (
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 // devToolNames are the known dev (core-io + search) tools.

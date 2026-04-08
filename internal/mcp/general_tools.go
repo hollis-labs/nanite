@@ -130,6 +130,17 @@ func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 				"required": []string{"expression"},
 			},
 		},
+		{
+			Name:        "think",
+			Description: "A scratchpad tool for organizing your reasoning. Use this to pause and think through your approach before acting. The thought content is the value — the tool simply acknowledges receipt.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"thought": map[string]any{"type": "string", "description": "Your internal reasoning, plan, or analysis"},
+				},
+				"required": []string{"thought"},
+			},
+		},
 	}, nil
 }
 
@@ -154,6 +165,8 @@ func (g *GeneralToolsTransport) CallTool(_ context.Context, name string, args ma
 		return g.callHash(args)
 	case "math_eval":
 		return g.callMathEval(args)
+	case "think":
+		return g.callThink(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -406,6 +419,14 @@ func (g *GeneralToolsTransport) callMathEval(args map[string]any) (*ToolResult, 
 		return textResult(strconv.FormatInt(int64(result), 10)), nil
 	}
 	return textResult(strconv.FormatFloat(result, 'g', -1, 64)), nil
+}
+
+func (g *GeneralToolsTransport) callThink(args map[string]any) (*ToolResult, error) {
+	thought, _ := args["thought"].(string)
+	if thought == "" {
+		return errorResult("thought is required"), nil
+	}
+	return textResult("Thought recorded."), nil
 }
 
 // --- math expression parser (recursive descent) ---

@@ -3,7 +3,7 @@ package toolclient
 import (
 	"sync"
 
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 // BuiltinToolRegistry holds built-in tool definitions that are always available

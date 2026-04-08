@@ -1,0 +1,48 @@
+{
+  "$id": "oembed-card",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OEmbed Card",
+  "description": "An oEmbed link preview card.",
+  "type": "object",
+  "required": ["title", "description", "thumbnail_url", "provider_name", "provider_url", "type", "url", "author_name", "html"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Content title."
+    },
+    "description": {
+      "type": "string",
+      "description": "Content description."
+    },
+    "thumbnail_url": {
+      "type": "string",
+      "description": "Thumbnail image URL."
+    },
+    "provider_name": {
+      "type": "string",
+      "description": "Provider name (e.g. YouTube, Spotify)."
+    },
+    "provider_url": {
+      "type": "string",
+      "description": "Provider website URL."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["video", "photo", "rich", "link"],
+      "description": "oEmbed content type."
+    },
+    "url": {
+      "type": "string",
+      "description": "The content URL."
+    },
+    "author_name": {
+      "type": "string",
+      "description": "Content author name."
+    },
+    "html": {
+      "type": "string",
+      "description": "Embeddable HTML."
+    }
+  },
+  "additionalProperties": false
+}

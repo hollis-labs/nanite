@@ -11,8 +11,10 @@
     "lint:eslint": "eslint .",
     "preview": "vite preview",
     "generate:plugins": "node ../scripts/generate-plugin-imports.mjs",
-    "prebuild": "node ../scripts/generate-plugin-imports.mjs",
-    "predev": "node ../scripts/generate-plugin-imports.mjs"
+    "generate:envelopes": "node ../scripts/generate-envelope-types.mjs",
+    "check:envelopes": "node ../scripts/generate-envelope-types.mjs --check",
+    "prebuild": "node ../scripts/generate-plugin-imports.mjs && node ../scripts/generate-envelope-types.mjs",
+    "predev": "node ../scripts/generate-plugin-imports.mjs && node ../scripts/generate-envelope-types.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",

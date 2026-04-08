@@ -4,7 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
+
+	conduit "github.com/hollis-labs/vanta-conduit"
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
@@ -13,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
@@ -45,8 +50,9 @@ type Container struct {
 	// Internal todo/plan system.
 	Todos TodoService
 
-	// Memory system (Conduit-backed).
-	Memory *memory.Service
+	// Memory system (embedded Conduit).
+	Conduit *conduit.Conduit
+	Memory  *memory.Service
 
 	// Multi-agent orchestration.
 	Coord     coordination.CoordStore
@@ -203,13 +209,52 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		log.Println("service container: task tracking disabled (no coordination store)")
 	}
 
-	// Memory service — requires MCP manager (for Vanta Conduit memory tools).
+	// Embedded Conduit instance for memory storage.
+	var conduitInstance *conduit.Conduit
 	var memorySvc *memory.Service
-	if cfg.MCP != nil {
-		memorySvc = memory.NewService(cfg.MCP)
-		log.Println("service container: memory service enabled (Conduit-backed)")
-	} else {
-		log.Println("service container: memory service disabled (no MCP manager)")
+	{
+		homeDir, _ := os.UserHomeDir()
+		conduitRoot := filepath.Join(homeDir, ".conduit")
+
+		// Embedder selection: prefer OpenAI (higher quality) when API key is
+		// available, fall back to Ollama (local, free), or nil (disables similarity).
+		var embedder provider.Embedder
+		var embeddingModel string
+
+		if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
+			oai := provider.NewOpenAI()
+			oai.SetAPIKey(apiKey)
+			embedder = oai
+			embeddingModel = "text-embedding-3-large"
+			log.Println("service container: OpenAI embedder (text-embedding-3-large) for Conduit")
+		} else {
+			ollamaProvider := provider.NewOllama()
+			if _, testErr := ollamaProvider.Embed(context.Background(), "test", "nomic-embed-text"); testErr == nil {
+				embedder = ollamaProvider
+				embeddingModel = "nomic-embed-text"
+				log.Println("service container: Ollama embedder (nomic-embed-text) for Conduit")
+			} else {
+				log.Printf("service container: no embedder available (set OPENAI_API_KEY or run Ollama), similarity ranking disabled")
+			}
+		}
+
+		var conduitOpts []conduit.Option
+		if embedder != nil {
+			conduitOpts = append(conduitOpts, conduit.WithEmbedder(embedder))
+			conduitOpts = append(conduitOpts, conduit.WithEmbeddingModel(embeddingModel))
+		}
+		conduitOpts = append(conduitOpts, conduit.WithLogger(log.Printf))
+
+		var conduitErr error
+		conduitInstance, conduitErr = conduit.Open(context.Background(), conduit.Config{
+			RootDir: conduitRoot,
+		}, conduitOpts...)
+		if conduitErr != nil {
+			log.Printf("service container: failed to open Conduit: %v", conduitErr)
+		} else {
+			memorySvc = memory.NewService(conduitInstance.MemoryStore())
+			log.Println("service container: memory service enabled (embedded Conduit)")
+		}
 	}
 
 	var agentReader AgentReader = cfg.Store
@@ -226,6 +271,47 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 
 	contextClient := chat.NewContextClient(cfg.Store)
+
+	// --- ContextBroker: universal context retrieval ---
+	{
+		var sources []contextbroker.ContextSource
+
+		// MemorySource — requires memory service (activation ranking by default).
+		if memorySvc != nil {
+			sources = append(sources, contextbroker.NewMemorySource(memorySvc))
+		}
+
+		// ConduitSource — requires MCP manager (calls Conduit tools).
+		if cfg.MCP != nil {
+			sources = append(sources, contextbroker.NewConduitSource(cfg.MCP))
+		}
+
+		// EngineSource — requires MCP manager (calls Engine tools).
+		if cfg.MCP != nil {
+			sources = append(sources, contextbroker.NewEngineSource(cfg.MCP))
+		}
+
+		// PCCSource — reads filesystem, always available.
+		sources = append(sources, contextbroker.NewPCCSource(".agentrc/pcc/global"))
+
+		// SessionSource — reads message history, always available.
+		sources = append(sources, contextbroker.NewSessionSource(func(sessionID string, limit int) ([]contextbroker.MessageSummary, error) {
+			msgs, err := cfg.Store.ListMessages(sessionID, limit)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]contextbroker.MessageSummary, len(msgs))
+			for i, m := range msgs {
+				out[i] = contextbroker.MessageSummary{Role: m.Role, Content: m.Content}
+			}
+			return out, nil
+		}))
+
+		broker := contextbroker.New(contextbroker.DefaultBudget(), sources...)
+		contextClient.ContextBroker = broker
+		log.Printf("service container: context broker enabled (%d sources)", len(sources))
+	}
+
 	ctxService := NewContextService(ContextServiceConfig{Client: contextClient})
 
 	// Command registry.
@@ -350,6 +436,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Plugins:         cfg.Plugins,
 		MCP:             cfg.MCP,
 		Todos:           todos,
+		Conduit:         conduitInstance,
 		Memory:          memorySvc,
 		Coord:           cfg.CoordStore,
 		Tasks:           tasks,
@@ -391,6 +478,11 @@ func (c *Container) Shutdown() {
 	}
 	if c.Coord != nil {
 		c.Coord.Close()
+	}
+	if c.Conduit != nil {
+		if err := c.Conduit.Close(); err != nil {
+			log.Printf("shutdown: conduit close: %v", err)
+		}
 	}
 	if c.MCP != nil {
 		c.MCP.Close()

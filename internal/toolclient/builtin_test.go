@@ -3,7 +3,7 @@ package toolclient
 import (
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 func TestRegisterBuiltins(t *testing.T) {

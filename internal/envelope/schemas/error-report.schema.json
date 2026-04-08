@@ -1,0 +1,32 @@
+{
+  "$id": "error-report",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Error Report",
+  "description": "An error card with code, message, details, and optional Giphy illustration.",
+  "type": "object",
+  "required": ["code", "message", "giphy_query", "timestamp"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "description": "Error code (e.g. rate_limit, tool_error, provider_error, internal_error)."
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable error message."
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Arbitrary error details."
+    },
+    "giphy_query": {
+      "type": "string",
+      "description": "Search query for the Giphy illustration."
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO 8601 timestamp of the error."
+    }
+  },
+  "additionalProperties": false
+}

@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 // CompactionMode determines how the summary prompt is shaped.

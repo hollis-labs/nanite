@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/nanite/internal/contextbroker"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

@@ -1,12 +1,20 @@
-.PHONY: build install dev clean test
+.PHONY: build install dev clean test generate-envelopes
 
 # Build React SPA then embed in Go binary
-build: build-ui
+build: generate-envelopes build-ui
 	go build -o nanite ./cmd/nanite
 
 # Install to ~/go/bin/ (used by MCP and Cerberus)
-install: build-ui
+install: generate-envelopes build-ui
 	go install ./cmd/nanite
+
+# Generate TypeScript types from envelope JSON schemas (source of truth)
+generate-envelopes:
+	node scripts/generate-envelope-types.mjs
+
+# Check that generated envelope types are not stale (CI use)
+check-envelopes:
+	node scripts/generate-envelope-types.mjs --check
 
 build-ui:
 	cd ui && npm run build

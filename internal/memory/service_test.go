@@ -2,41 +2,39 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
+
+	conduit "github.com/hollis-labs/vanta-conduit"
+	conduitMemory "github.com/hollis-labs/vanta-conduit/memory"
 )
 
-// mockMCPCaller records calls and returns configured responses.
-type mockMCPCaller struct {
-	calls    []mcpCall
-	response string
-	err      error
-}
-
-type mcpCall struct {
-	Name  string
-	Input map[string]any
-}
-
-func (m *mockMCPCaller) ExecuteTool(_ context.Context, name string, input map[string]any) (string, error) {
-	m.calls = append(m.calls, mcpCall{Name: name, Input: input})
-	return m.response, m.err
+// newTestConduit creates a real embedded Conduit instance backed by a temp dir.
+func newTestConduit(t *testing.T) (*conduit.Conduit, func()) {
+	t.Helper()
+	dir := t.TempDir()
+	c, err := conduit.Open(context.Background(), conduit.Config{RootDir: dir})
+	if err != nil {
+		t.Fatalf("conduit.Open: %v", err)
+	}
+	cleanup := func() { _ = c.Close() }
+	return c, cleanup
 }
 
 func TestMemoryStore(t *testing.T) {
-	mock := &mockMCPCaller{response: `{"ok": true}`}
-	svc := NewService(mock)
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
 
 	err := svc.Store(context.Background(), Memory{
-		Namespace:  "app/nanite/session/test-123",
+		Namespace:  "user/default/session/test-123/memory",
 		MemoryKey:  "prefers_terse_output",
 		Summary:    "User prefers terse output",
 		Body:       "When asked, user said they prefer concise responses.",
 		Origin:     "user",
 		Trigger:    "per_turn",
 		Confidence: 0.9,
-		Tags:       []string{"preferences", "output-style"},
+		Tags:       []string{"preferences", "output_style"},
 		SessionID:  "test-123",
 	})
 
@@ -44,145 +42,163 @@ func TestMemoryStore(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(mock.calls) != 1 {
-		t.Fatalf("expected 1 MCP call, got %d", len(mock.calls))
+	// Verify we can recall it.
+	memories, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{"user/default/session/test-123/memory"},
+		Ranking:    "activation",
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("recall error: %v", err)
 	}
-
-	call := mock.calls[0]
-	if call.Name != "mcp__conduit__memory_write" {
-		t.Errorf("expected tool name mcp__conduit__memory_write, got %s", call.Name)
+	if len(memories) != 1 {
+		t.Fatalf("expected 1 memory, got %d", len(memories))
 	}
-	if call.Input["namespace"] != "app/nanite/session/test-123" {
-		t.Errorf("expected namespace app/nanite/session/test-123, got %v", call.Input["namespace"])
+	if memories[0].Summary != "User prefers terse output" {
+		t.Errorf("unexpected summary: %s", memories[0].Summary)
 	}
-	if call.Input["memory_key"] != "prefers_terse_output" {
-		t.Errorf("expected memory_key prefers_terse_output, got %v", call.Input["memory_key"])
-	}
-	if call.Input["origin"] != "user" {
-		t.Errorf("expected origin user, got %v", call.Input["origin"])
-	}
-	if call.Input["trigger"] != "per_turn" {
-		t.Errorf("expected trigger per_turn, got %v", call.Input["trigger"])
-	}
-	if call.Input["confidence"] != 0.9 {
-		t.Errorf("expected confidence 0.9, got %v", call.Input["confidence"])
+	if memories[0].Origin != "user" {
+		t.Errorf("expected origin user, got %s", memories[0].Origin)
 	}
 }
 
-func TestMemoryStore_NilMCP(t *testing.T) {
+func TestMemoryStore_NilStore(t *testing.T) {
 	svc := NewService(nil)
 	err := svc.Store(context.Background(), Memory{Summary: "test"})
 	if err == nil {
-		t.Error("expected error for nil MCP caller")
-	}
-}
-
-func TestMemoryStore_MCPError(t *testing.T) {
-	mock := &mockMCPCaller{err: fmt.Errorf("connection refused")}
-	svc := NewService(mock)
-
-	err := svc.Store(context.Background(), Memory{
-		Namespace: "app/nanite/test",
-		MemoryKey: "test",
-		Summary:   "test",
-	})
-
-	if err == nil {
-		t.Error("expected error when MCP call fails")
+		t.Error("expected error for nil store")
 	}
 }
 
 func TestMemoryRecall(t *testing.T) {
-	memories := []Memory{
-		{
-			Namespace:  "app/nanite/user/chrispian",
-			MemoryKey:  "prefers_terse_output",
-			Summary:    "User prefers terse output",
-			Origin:     "user",
-			Confidence: 0.9,
-		},
-		{
-			Namespace:  "app/nanite/project/nanite",
-			MemoryKey:  "uses_sqlite",
-			Summary:    "Project uses SQLite for persistence",
-			Origin:     "project",
-			Confidence: 0.95,
-		},
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
+
+	// Store two memories in different namespaces.
+	err := svc.Store(context.Background(), Memory{
+		Namespace:  "user/chrispian/memory",
+		MemoryKey:  "prefers_terse_output",
+		Summary:    "User prefers terse output",
+		Origin:     "user",
+		Trigger:    "explicit",
+		Confidence: 0.9,
+		SessionID:  "test-1",
+	})
+	if err != nil {
+		t.Fatalf("store 1: %v", err)
 	}
 
-	responseJSON, _ := json.Marshal(memories)
-	mock := &mockMCPCaller{response: string(responseJSON)}
-	svc := NewService(mock)
+	err = svc.Store(context.Background(), Memory{
+		Namespace:  "user/chrispian/project/nanite/memory",
+		MemoryKey:  "uses_sqlite",
+		Summary:    "Project uses SQLite for persistence",
+		Origin:     "project",
+		Trigger:    "explicit",
+		Confidence: 0.95,
+		SessionID:  "test-2",
+	})
+	if err != nil {
+		t.Fatalf("store 2: %v", err)
+	}
 
+	// Recall from both namespaces.
 	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces:    []string{"app/nanite/user/chrispian", "app/nanite/project/nanite"},
+		Namespaces:    []string{"user/chrispian/memory", "user/chrispian/project/nanite/memory"},
 		Ranking:       "activation",
 		Limit:         10,
 		MinConfidence: 0.5,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
 	if len(results) != 2 {
 		t.Fatalf("expected 2 memories, got %d", len(results))
-	}
-
-	if results[0].Summary != "User prefers terse output" {
-		t.Errorf("unexpected first memory summary: %s", results[0].Summary)
-	}
-
-	// Verify MCP call parameters.
-	call := mock.calls[0]
-	if call.Name != "mcp__conduit__memory_recall" {
-		t.Errorf("expected tool name mcp__conduit__memory_recall, got %s", call.Name)
-	}
-	if call.Input["ranking"] != "activation" {
-		t.Errorf("expected ranking activation, got %v", call.Input["ranking"])
-	}
-	if call.Input["limit"] != 10 {
-		t.Errorf("expected limit 10, got %v", call.Input["limit"])
-	}
-}
-
-func TestMemoryRecall_WrappedFormat(t *testing.T) {
-	response := `{"memories": [{"namespace": "app/nanite/user/test", "memory_key": "test_key", "summary": "A test memory"}]}`
-	mock := &mockMCPCaller{response: response}
-	svc := NewService(mock)
-
-	results, err := svc.Recall(context.Background(), RecallOpts{
-		Namespaces: []string{"app/nanite/user/test"},
-	})
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 memory, got %d", len(results))
-	}
-	if results[0].MemoryKey != "test_key" {
-		t.Errorf("expected memory_key test_key, got %s", results[0].MemoryKey)
 	}
 }
 
 func TestMemoryRecall_DefaultValues(t *testing.T) {
-	mock := &mockMCPCaller{response: "[]"}
-	svc := NewService(mock)
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
 
-	_, err := svc.Recall(context.Background(), RecallOpts{})
+	results, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{"user/default/memory"},
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	call := mock.calls[0]
-	// Default ranking should be "activation".
-	if call.Input["ranking"] != "activation" {
-		t.Errorf("expected default ranking activation, got %v", call.Input["ranking"])
+	if len(results) != 0 {
+		t.Errorf("expected 0 memories, got %d", len(results))
 	}
-	// Default limit should be 20.
-	if call.Input["limit"] != 20 {
-		t.Errorf("expected default limit 20, got %v", call.Input["limit"])
+}
+
+func TestMemoryGet(t *testing.T) {
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
+
+	err := svc.Store(context.Background(), Memory{
+		Namespace:  "user/default/memory",
+		MemoryKey:  "test_key",
+		Summary:    "A test memory",
+		Origin:     "observation",
+		Trigger:    "explicit",
+		Confidence: 0.8,
+		SessionID:  "test-get",
+	})
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	m, err := svc.Get(context.Background(), "user/default/memory", "test_key")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if m.Summary != "A test memory" {
+		t.Errorf("unexpected summary: %s", m.Summary)
+	}
+}
+
+func TestMemoryDeprecate(t *testing.T) {
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
+
+	err := svc.Store(context.Background(), Memory{
+		Namespace:  "user/default/memory",
+		MemoryKey:  "to_deprecate",
+		Summary:    "Will be deprecated",
+		Origin:     "observation",
+		Trigger:    "explicit",
+		Confidence: 0.8,
+		SessionID:  "test-dep",
+	})
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Get the revision ID.
+	m, err := svc.Get(context.Background(), "user/default/memory", "to_deprecate")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+
+	// Deprecate it.
+	err = svc.Deprecate(context.Background(), m.RevisionID)
+	if err != nil {
+		t.Fatalf("deprecate: %v", err)
+	}
+
+	// Recall should return nothing (deprecated memories are filtered).
+	results, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{"user/default/memory"},
+	})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 memories after deprecation, got %d", len(results))
 	}
 }
 
@@ -217,40 +233,42 @@ func TestPerTurnExtraction_NoSignal(t *testing.T) {
 }
 
 func TestPostCompactionExtraction(t *testing.T) {
-	// Verify the extractor creates a valid hook without error.
-	storeMock := &mockMCPCaller{response: `{"ok": true}`}
-	svc := NewService(storeMock)
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
 
 	called := false
 	utilityCall := func(_ context.Context, prompt string) (string, error) {
 		called = true
-		return `[{"memory_key": "test", "summary": "A test memory", "origin": "project", "confidence": 0.9, "tags": ["test"]}]`, nil
+		return `[{"memory_key": "test_fact", "summary": "A test memory", "origin": "project", "confidence": 0.9, "tags": ["test"]}]`, nil
 	}
 
 	extractor := NewExtractor(svc, utilityCall)
-	// Directly test the extractPostCompact method.
 	extractor.extractPostCompact("session-123", 5000)
 
 	if !called {
 		t.Error("expected utility call to be made during post-compact extraction")
 	}
 
-	if len(storeMock.calls) != 1 {
-		t.Fatalf("expected 1 store call, got %d", len(storeMock.calls))
+	// Verify the memory was stored.
+	results, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{SessionNamespace("session-123")},
+	})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
 	}
-
-	call := storeMock.calls[0]
-	if call.Input["namespace"] != "app/nanite/session/session-123" {
-		t.Errorf("expected session namespace, got %v", call.Input["namespace"])
+	if len(results) != 1 {
+		t.Fatalf("expected 1 stored memory, got %d", len(results))
 	}
-	if call.Input["trigger"] != "post_compact" {
-		t.Errorf("expected trigger post_compact, got %v", call.Input["trigger"])
+	if results[0].Summary != "A test memory" {
+		t.Errorf("unexpected summary: %s", results[0].Summary)
 	}
 }
 
 func TestPerTurnExtraction_Full(t *testing.T) {
-	storeMock := &mockMCPCaller{response: `{"ok": true}`}
-	svc := NewService(storeMock)
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
 
 	utilityCall := func(_ context.Context, prompt string) (string, error) {
 		return `{"memory_key": "prefers_terse", "summary": "User prefers terse output", "origin": "user", "confidence": 0.85, "tags": ["preferences"]}`, nil
@@ -259,22 +277,25 @@ func TestPerTurnExtraction_Full(t *testing.T) {
 	extractor := NewExtractor(svc, utilityCall)
 	extractor.extractPerTurn("session-456", "I always prefer terse, concise responses.")
 
-	if len(storeMock.calls) != 1 {
-		t.Fatalf("expected 1 store call, got %d", len(storeMock.calls))
+	// Verify the memory was stored.
+	results, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{SessionNamespace("session-456")},
+	})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
 	}
-
-	call := storeMock.calls[0]
-	if call.Input["memory_key"] != "prefers_terse" {
-		t.Errorf("expected memory_key prefers_terse, got %v", call.Input["memory_key"])
+	if len(results) != 1 {
+		t.Fatalf("expected 1 stored memory, got %d", len(results))
 	}
-	if call.Input["origin"] != "user" {
-		t.Errorf("expected origin user, got %v", call.Input["origin"])
+	if results[0].MemoryKey != "prefers_terse" {
+		t.Errorf("expected memory_key prefers_terse, got %s", results[0].MemoryKey)
 	}
 }
 
 func TestPerTurnExtraction_LowConfidence(t *testing.T) {
-	storeMock := &mockMCPCaller{response: `{"ok": true}`}
-	svc := NewService(storeMock)
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
 
 	utilityCall := func(_ context.Context, prompt string) (string, error) {
 		return `{"memory_key": "maybe", "summary": "Maybe important", "origin": "user", "confidence": 0.3, "tags": []}`, nil
@@ -283,19 +304,26 @@ func TestPerTurnExtraction_LowConfidence(t *testing.T) {
 	extractor := NewExtractor(svc, utilityCall)
 	extractor.extractPerTurn("session-789", "Remember this might be useful")
 
-	if len(storeMock.calls) != 0 {
-		t.Error("expected no store calls for low-confidence extraction")
+	// Low confidence should not be stored.
+	results, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{SessionNamespace("session-789")},
+	})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(results) != 0 {
+		t.Error("expected no stored memories for low-confidence extraction")
 	}
 }
 
 func TestNamespaceHelpers(t *testing.T) {
-	if ns := SessionNamespace("abc-123"); ns != "app/nanite/session/abc-123" {
+	if ns := SessionNamespace("abc-123"); ns != "user/default/session/abc-123/memory" {
 		t.Errorf("unexpected session namespace: %s", ns)
 	}
-	if ns := ProjectNamespace("nanite"); ns != "app/nanite/project/nanite" {
+	if ns := ProjectNamespace("nanite"); ns != "user/default/project/nanite/memory" {
 		t.Errorf("unexpected project namespace: %s", ns)
 	}
-	if ns := UserNamespace("chrispian"); ns != "app/nanite/user/chrispian" {
+	if ns := UserNamespace("chrispian"); ns != "user/chrispian/memory" {
 		t.Errorf("unexpected user namespace: %s", ns)
 	}
 }
@@ -319,51 +347,71 @@ func TestCleanJSONResponse(t *testing.T) {
 	}
 }
 
-func TestParseRecallResult(t *testing.T) {
-	// Array format.
-	t.Run("array", func(t *testing.T) {
-		input := `[{"namespace": "ns", "memory_key": "k", "summary": "s"}]`
-		memories, err := parseRecallResult(input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(memories) != 1 {
-			t.Fatalf("expected 1 memory, got %d", len(memories))
-		}
-	})
+func TestStoreError_NilStore(t *testing.T) {
+	svc := NewService(nil)
 
-	// Wrapped format with "memories" key.
-	t.Run("wrapped_memories", func(t *testing.T) {
-		input := `{"memories": [{"namespace": "ns", "memory_key": "k", "summary": "s"}]}`
-		memories, err := parseRecallResult(input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(memories) != 1 {
-			t.Fatalf("expected 1 memory, got %d", len(memories))
-		}
-	})
+	_, err := svc.Recall(context.Background(), RecallOpts{})
+	if err == nil {
+		t.Error("expected error for nil store on recall")
+	}
 
-	// Wrapped format with "results" key.
-	t.Run("wrapped_results", func(t *testing.T) {
-		input := `{"results": [{"namespace": "ns", "memory_key": "k", "summary": "s"}]}`
-		memories, err := parseRecallResult(input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(memories) != 1 {
-			t.Fatalf("expected 1 memory, got %d", len(memories))
-		}
-	})
+	_, err = svc.Get(context.Background(), "ns", "key")
+	if err == nil {
+		t.Error("expected error for nil store on get")
+	}
 
-	// Empty.
-	t.Run("empty", func(t *testing.T) {
-		memories, err := parseRecallResult("")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(memories) != 0 {
-			t.Errorf("expected 0 memories, got %d", len(memories))
-		}
-	})
+	err = svc.Promote(context.Background(), "rev", "ns")
+	if err == nil {
+		t.Error("expected error for nil store on promote")
+	}
+
+	err = svc.Deprecate(context.Background(), "rev")
+	if err == nil {
+		t.Error("expected error for nil store on deprecate")
+	}
 }
+
+// TestMapOrigin verifies origin string mapping.
+func TestMapOrigin(t *testing.T) {
+	tests := []struct {
+		input string
+		want  conduitMemory.Origin
+	}{
+		{"user", conduitMemory.OriginUser},
+		{"feedback", conduitMemory.OriginFeedback},
+		{"project", conduitMemory.OriginProject},
+		{"reference", conduitMemory.OriginReference},
+		{"observation", conduitMemory.OriginObservation},
+		{"", conduitMemory.OriginObservation},
+	}
+	for _, tt := range tests {
+		got := mapOrigin(tt.input)
+		if got != tt.want {
+			t.Errorf("mapOrigin(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// TestMapTrigger verifies trigger string mapping.
+func TestMapTrigger(t *testing.T) {
+	tests := []struct {
+		input string
+		want  conduitMemory.Trigger
+	}{
+		{"explicit", conduitMemory.TriggerExplicit},
+		{"post_compact", conduitMemory.TriggerPostCompact},
+		{"per_turn", conduitMemory.TriggerPerTurn},
+		{"promotion", conduitMemory.TriggerPromotion},
+		{"manual", conduitMemory.TriggerManual},
+		{"", conduitMemory.TriggerManual},
+	}
+	for _, tt := range tests {
+		got := mapTrigger(tt.input)
+		if got != tt.want {
+			t.Errorf("mapTrigger(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// Ensure fmt is used (for error formatting in tests).
+var _ = fmt.Sprintf

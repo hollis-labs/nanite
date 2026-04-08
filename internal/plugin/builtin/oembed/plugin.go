@@ -9,7 +9,7 @@ import (
 	"time"
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 func init() {

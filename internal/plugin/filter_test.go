@@ -192,6 +192,183 @@ func TestFilterRegistry_Len(t *testing.T) {
 	}
 }
 
+func TestFilterView_Full_PassesAllData(t *testing.T) {
+	r := NewFilterRegistry()
+
+	data := map[string]interface{}{
+		"user_message":      "hello",
+		"tool_name":         "bash",
+		"tool_input":        map[string]interface{}{"cmd": "ls"},
+		"assistant_content": "I will run ls for you",
+		"thinking":          "let me reason about this",
+		"reasoning":         "step 1...",
+	}
+
+	var received interface{}
+	r.RegisterWithView("test", "p", 10, FilterViewFull, func(d interface{}, ctx FilterContext) (interface{}, error) {
+		received = d
+		return d, nil
+	})
+
+	_, err := r.Apply("test", data, FilterContext{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	m := received.(map[string]interface{})
+	for _, key := range []string{"user_message", "tool_name", "tool_input", "assistant_content", "thinking", "reasoning"} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("full view should include key %q", key)
+		}
+	}
+}
+
+func TestFilterView_ReasoningBlind_StripsAssistantContent(t *testing.T) {
+	r := NewFilterRegistry()
+
+	data := map[string]interface{}{
+		"user_message":      "hello",
+		"tool_name":         "bash",
+		"tool_input":        map[string]interface{}{"cmd": "ls"},
+		"tool_call":         "call-123",
+		"assistant_content": "I will run ls for you",
+		"thinking":          "let me reason about this",
+		"reasoning":         "step 1...",
+	}
+
+	var received interface{}
+	r.RegisterWithView("test", "safety", 10, FilterViewReasoningBlind, func(d interface{}, ctx FilterContext) (interface{}, error) {
+		received = d
+		return d, nil
+	})
+
+	_, err := r.Apply("test", data, FilterContext{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	m := received.(map[string]interface{})
+
+	// Should keep user/tool keys.
+	for _, key := range []string{"user_message", "tool_name", "tool_input", "tool_call"} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("reasoning-blind view should keep key %q", key)
+		}
+	}
+
+	// Should strip reasoning keys.
+	for _, key := range []string{"assistant_content", "thinking", "reasoning"} {
+		if _, ok := m[key]; ok {
+			t.Errorf("reasoning-blind view should strip key %q", key)
+		}
+	}
+
+	// Original data must be unchanged.
+	orig := data
+	for _, key := range []string{"assistant_content", "thinking", "reasoning"} {
+		if _, ok := orig[key]; !ok {
+			t.Errorf("original data should still contain key %q", key)
+		}
+	}
+}
+
+func TestRegisterFilterWithView_DefaultsFull(t *testing.T) {
+	r := NewFilterRegistry()
+
+	data := map[string]interface{}{
+		"user_message":      "hello",
+		"assistant_content": "reasoning here",
+		"thinking":          "thinking here",
+	}
+
+	var received interface{}
+	// Register via the plain Register (no view) — should default to full.
+	r.Register("test", "p", 10, func(d interface{}, ctx FilterContext) (interface{}, error) {
+		received = d
+		return d, nil
+	})
+
+	_, err := r.Apply("test", data, FilterContext{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	m := received.(map[string]interface{})
+	// Full view: all keys should be present.
+	for _, key := range []string{"user_message", "assistant_content", "thinking"} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("default (full) view should include key %q", key)
+		}
+	}
+}
+
+func TestFilterChain_MixedViews(t *testing.T) {
+	r := NewFilterRegistry()
+
+	data := map[string]interface{}{
+		"user_message":      "hello",
+		"tool_name":         "bash",
+		"assistant_content": "I will help",
+		"thinking":          "let me think",
+		"reasoning":         "step 1",
+	}
+
+	var fullSaw, blindSaw map[string]interface{}
+
+	// Full-view filter at priority 10.
+	r.RegisterWithView("test", "full-plugin", 10, FilterViewFull, func(d interface{}, ctx FilterContext) (interface{}, error) {
+		m := d.(map[string]interface{})
+		fullSaw = make(map[string]interface{}, len(m))
+		for k, v := range m {
+			fullSaw[k] = v
+		}
+		return d, nil
+	})
+
+	// Reasoning-blind filter at priority 20.
+	r.RegisterWithView("test", "safety-plugin", 20, FilterViewReasoningBlind, func(d interface{}, ctx FilterContext) (interface{}, error) {
+		m := d.(map[string]interface{})
+		blindSaw = make(map[string]interface{}, len(m))
+		for k, v := range m {
+			blindSaw[k] = v
+		}
+		return d, nil
+	})
+
+	_, err := r.Apply("test", data, FilterContext{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// Full-view filter should see everything.
+	for _, key := range []string{"user_message", "tool_name", "assistant_content", "thinking", "reasoning"} {
+		if _, ok := fullSaw[key]; !ok {
+			t.Errorf("full-view filter should see key %q", key)
+		}
+	}
+
+	// Reasoning-blind filter should see user/tool but NOT reasoning.
+	for _, key := range []string{"user_message", "tool_name"} {
+		if _, ok := blindSaw[key]; !ok {
+			t.Errorf("reasoning-blind filter should see key %q", key)
+		}
+	}
+	for _, key := range []string{"assistant_content", "thinking", "reasoning"} {
+		if _, ok := blindSaw[key]; ok {
+			t.Errorf("reasoning-blind filter should NOT see key %q", key)
+		}
+	}
+}
+
+func TestStripForView_NonMapData(t *testing.T) {
+	// Non-map data should pass through unchanged for any view.
+	s := "just a string"
+	out := stripForView(s, FilterViewReasoningBlind)
+	if out != s {
+		t.Errorf("expected string passthrough, got %v", out)
+	}
+}
+
 func TestFilterConstants_NonEmpty(t *testing.T) {
 	constants := []string{
 		FilterSystemPrompt,

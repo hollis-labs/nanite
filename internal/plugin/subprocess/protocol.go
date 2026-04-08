@@ -3,7 +3,7 @@ package subprocess
 import (
 	"encoding/json"
 
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 // JSON-RPC protocol for subprocess plugins.

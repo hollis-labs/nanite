@@ -8,6 +8,8 @@ Boot nanite-backend
 Rebrand Conduit → Nanite complete. vNext MVP 0-7 ✅, Post-MVP A+B ✅.
 Plugin Extraction Phases 1-4, 6, 7 ✅. User Shell Task 1 (! exec) ✅.
 Hardening Phase ✅ (2026-04-07). Provider lib extracted to hollis-labs/go-providers.
+Sandbox Hardening ✅ (2026-04-07): Linux bwrap, network proxy, sandbox-first model.
+Memory System ✅ (2026-04-07): Conduit embedded as Go lib, context broker wired, embeddings live.
 Cerberus services: nanite-api (8090), nanite-frontend (5176).
 
 KEY DOCS:
@@ -25,12 +27,15 @@ ARCHITECTURE:
 - Providers: shared lib at hollis-labs/go-providers (8 HTTP API + 8 CLI adapters).
 - Service layer: internal/service/container.go wires all services.
 - engine.go: thin orchestrator (197 lines), delegates to service layer.
-- Sandboxing: AgentExec (full isolation) / UserExec (guardrails). macOS seatbelt Tier 2.
+- Sandboxing: AgentExec (full isolation) / UserExec (guardrails+sandbox). macOS seatbelt + Linux bwrap.
+- Network proxy: domain-allowlisted localhost TCP proxy, injected via HTTP_PROXY.
+- Sandbox-first: OS sandbox is primary boundary, denylist is second line. YOLO = no sandbox, denylist stays.
 - Envelope contracts: JSON schemas → Go test + TS codegen (automated sync).
 - Workflow engine: internal/workflow/ (DAG executor, 5 step handlers, YAML loader).
 - Todo/Plan system: internal/store/todos.go + plans.go, 3 scopes, 13 API routes, 5 agent tools.
-- Memory: internal/memory/ (Conduit-backed via MCP, per-turn + post-compact extraction).
-- Context broker: 4 sources (conduit 25%, memory 15%, pcc 30%, session 30%).
+- Memory: internal/memory/ (embedded Conduit Go lib, per-turn + post-compact extraction).
+- Context broker: 5 sources wired (conduit 25%, memory 15%, pcc 30%, engine 15%, session 15%).
+- Embeddings: OpenAI text-embedding-3-large (preferred) or Ollama nomic-embed-text (fallback).
 - Filter chain: reasoning-blind view support (FilterViewReasoningBlind).
 
 HARDENING PHASE — COMPLETED (2026-04-07):
@@ -47,18 +52,17 @@ HARDENING PHASE — COMPLETED (2026-04-07):
   ✅ Provider lib extraction (hollis-labs/go-providers)
 
 REMAINING:
-- Memory: similarity ranking in Recall needs Conduit embedding provider.
-  Activation + chronological ranking work now. Once Conduit embeddings are
-  configured (Ollama nomic-embed-text or Anthropic API), enable similarity
-  ranking in memory/service.go RecallOpts and contextbroker/source_memory.go.
-- MemorySource not yet added to context_client.go broker — wire when broker
-  is activated (add NewMemorySource alongside NewConduitSource).
+- Memory: similarity ranking available when OPENAI_API_KEY set or Ollama running.
+  Activation ranking is the default in MemorySource. Switch to similarity
+  ranking in contextbroker/source_memory.go when ready to test.
 
 UPCOMING:
 - Plugin Extraction Phase 5 (Connectors) — paused for hardening, ready to resume
-- User Shell Task 2 (Interactive PTY) — sandboxing now ready
+- User Shell Task 2 (Interactive PTY) — backlogged (! exec sufficient)
 - Phase D (Claude Code Integration) — future
 - Frontend: Todo/Plan UI, workflow progress panel, memory viewer
+- Slash commands: /status, /providers, plugin-registered commands
+- Agent model alignment (agentrc schema extensions)
 
 PRINCIPLES:
 - Consult before architecture decisions.

@@ -14,7 +14,7 @@ import (
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 	"gopkg.in/yaml.v3"
 )
 

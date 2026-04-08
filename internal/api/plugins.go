@@ -18,7 +18,7 @@ import (
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
-	fplugin "github.com/hollis-labs/plugin"
+	fplugin "github.com/hollis-labs/go-plugin"
 )
 
 // PluginInfo is the JSON representation of a plugin in the management API.

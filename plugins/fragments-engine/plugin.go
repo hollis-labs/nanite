@@ -10,7 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 func init() {

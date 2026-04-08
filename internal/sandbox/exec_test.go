@@ -1,0 +1,256 @@
+package sandbox
+
+import (
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestAgentExec_BasicCommand(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	result, err := AgentExec(AgentExecOpts{
+		SessionID: "test-basic",
+		Command:   "/bin/echo",
+		Args:      []string{"hello"},
+		Timeout:   5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("AgentExec() error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("exit code = %d, want 0; stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if got := strings.TrimSpace(result.Stdout); got != "hello" {
+		t.Errorf("stdout = %q, want %q", got, "hello")
+	}
+	if result.TimedOut {
+		t.Error("unexpected timeout")
+	}
+}
+
+func TestAgentExec_DenylistBlocked(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	_, err := AgentExec(AgentExecOpts{
+		SessionID: "test-deny",
+		Command:   "rm",
+		Args:      []string{"-rf", "/"},
+	})
+	if err == nil {
+		t.Fatal("expected error for denied command, got nil")
+	}
+	if !strings.Contains(err.Error(), "denied") {
+		t.Errorf("error = %q, want it to contain 'denied'", err.Error())
+	}
+}
+
+func TestAgentExec_Timeout(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	result, err := AgentExec(AgentExecOpts{
+		SessionID: "test-timeout",
+		Command:   "/bin/sleep",
+		Args:      []string{"10"},
+		Timeout:   500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("AgentExec() error: %v", err)
+	}
+	if !result.TimedOut {
+		t.Error("expected TimedOut = true")
+	}
+	if result.ExitCode != 124 {
+		t.Errorf("exit code = %d, want 124", result.ExitCode)
+	}
+}
+
+func TestAgentExec_EnvFiltering(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret-12345")
+
+	result, err := AgentExec(AgentExecOpts{
+		SessionID: "test-env",
+		Command:   "/usr/bin/env",
+		Timeout:   5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("AgentExec() error: %v", err)
+	}
+	if strings.Contains(result.Stdout, "sk-secret-12345") {
+		t.Error("ANTHROPIC_API_KEY leaked to child process")
+	}
+	if strings.Contains(result.Stdout, "ANTHROPIC_API_KEY") {
+		t.Error("ANTHROPIC_API_KEY env var name visible in child process")
+	}
+}
+
+func TestAgentExec_CWDRestricted(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	result, err := AgentExec(AgentExecOpts{
+		SessionID: "test-cwd",
+		Command:   "/bin/pwd",
+		Timeout:   5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("AgentExec() error: %v", err)
+	}
+
+	sandboxDir, _ := Dir("test-cwd")
+	got := strings.TrimSpace(result.Stdout)
+
+	// On macOS, /var and /tmp may resolve through /private.
+	if got != sandboxDir && !strings.HasSuffix(got, "/test-cwd") {
+		t.Errorf("CWD = %q, want sandbox dir %q", got, sandboxDir)
+	}
+}
+
+func TestAgentExec_ExtraEnvFiltered(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	result, err := AgentExec(AgentExecOpts{
+		SessionID: "test-extra-env",
+		Command:   "/usr/bin/env",
+		Timeout:   5 * time.Second,
+		Env: map[string]string{
+			"MY_VAR":         "safe-value",
+			"MY_SECRET_KEY":  "should-be-filtered",
+			"DATABASE_TOKEN": "also-filtered",
+		},
+	})
+	if err != nil {
+		t.Fatalf("AgentExec() error: %v", err)
+	}
+	if !strings.Contains(result.Stdout, "MY_VAR=safe-value") {
+		t.Error("expected MY_VAR to be present")
+	}
+	if strings.Contains(result.Stdout, "should-be-filtered") {
+		t.Error("MY_SECRET_KEY leaked to child process")
+	}
+	if strings.Contains(result.Stdout, "also-filtered") {
+		t.Error("DATABASE_TOKEN leaked to child process")
+	}
+}
+
+func TestUserExec_BasicCommand(t *testing.T) {
+	result, err := UserExec(UserExecOpts{
+		Command: "/bin/echo",
+		Args:    []string{"hello from user"},
+		Dir:     os.TempDir(),
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("UserExec() error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("exit code = %d, want 0", result.ExitCode)
+	}
+	if got := strings.TrimSpace(result.Stdout); got != "hello from user" {
+		t.Errorf("stdout = %q, want %q", got, "hello from user")
+	}
+}
+
+func TestUserExec_DenylistBlocked(t *testing.T) {
+	_, err := UserExec(UserExecOpts{
+		Command: "rm",
+		Args:    []string{"-rf", "/"},
+		Dir:     os.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected error for denied command, got nil")
+	}
+	if !strings.Contains(err.Error(), "denied") {
+		t.Errorf("error = %q, want it to contain 'denied'", err.Error())
+	}
+}
+
+func TestUserExec_UsesRealDir(t *testing.T) {
+	dir := t.TempDir()
+
+	result, err := UserExec(UserExecOpts{
+		Command: "/bin/pwd",
+		Dir:     dir,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("UserExec() error: %v", err)
+	}
+
+	got := strings.TrimSpace(result.Stdout)
+	// On macOS, temp dirs may resolve through /private.
+	if got != dir && !strings.HasPrefix(got, "/private"+dir) {
+		t.Errorf("CWD = %q, want %q (or /private%s)", got, dir, dir)
+	}
+}
+
+func TestCheckDenylist(t *testing.T) {
+	// Blocked commands.
+	blocked := []string{
+		"rm -rf /",
+		"rm -rf /*",
+		"sudo rm -rf /",
+		"mkfs.ext4 /dev/sda1",
+		"dd if=/dev/zero of=/dev/sda",
+		"shutdown -h now",
+		":(){ :|:& };:",
+	}
+	for _, cmd := range blocked {
+		if b, _ := CheckDenylist(cmd); !b {
+			t.Errorf("CheckDenylist(%q) = false, want true (blocked)", cmd)
+		}
+	}
+
+	// Allowed commands.
+	allowed := []string{
+		"ls -la",
+		"git status",
+		"echo hello",
+		"rm -rf ./build",
+		"cat /etc/hosts",
+		"go build ./...",
+	}
+	for _, cmd := range allowed {
+		if b, reason := CheckDenylist(cmd); b {
+			t.Errorf("CheckDenylist(%q) = true (%s), want false (allowed)", cmd, reason)
+		}
+	}
+}
+
+func TestIsSecretKey(t *testing.T) {
+	secrets := []string{
+		"ANTHROPIC_API_KEY",
+		"AWS_SECRET_ACCESS_KEY",
+		"GITHUB_TOKEN",
+		"DATABASE_PASSWORD",
+		"MY_CREDENTIAL",
+		"BASIC_AUTH_HEADER",
+	}
+	for _, k := range secrets {
+		if !isSecretKey(k) {
+			t.Errorf("isSecretKey(%q) = false, want true", k)
+		}
+	}
+
+	safe := []string{
+		"HOME",
+		"USER",
+		"PATH",
+		"LANG",
+		"TERM",
+		"GOPATH",
+		"NODE_ENV",
+	}
+	for _, k := range safe {
+		if isSecretKey(k) {
+			t.Errorf("isSecretKey(%q) = true, want false", k)
+		}
+	}
+}

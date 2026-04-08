@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 // validComponentID matches alphanumeric + hyphens, 2-64 chars, no leading/trailing hyphens.
@@ -343,6 +343,18 @@ func (h *Host) RegisterFilter(name string, priority int, fn FilterFunc) error {
 
 	h.logger.Info("registering filter", "name", name, "priority", priority, "plugin", pluginID)
 	return h.filters.Register(name, pluginID, priority, fn)
+}
+
+// RegisterFilterWithView registers a filter handler with an explicit view that
+// controls what subset of data the handler sees. Use FilterViewReasoningBlind
+// for safety classifiers that must not see assistant reasoning content.
+func (h *Host) RegisterFilterWithView(name string, priority int, view FilterView, fn FilterFunc) error {
+	h.mu.RLock()
+	pluginID := h.activePlugin
+	h.mu.RUnlock()
+
+	h.logger.Info("registering filter with view", "name", name, "priority", priority, "view", view, "plugin", pluginID)
+	return h.filters.RegisterWithView(name, pluginID, priority, view, fn)
 }
 
 // ApplyFilter runs the filter chain for the named filter point. Returns the

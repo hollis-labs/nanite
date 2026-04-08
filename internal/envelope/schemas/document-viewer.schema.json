@@ -1,0 +1,37 @@
+{
+  "$id": "document-viewer",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Document Viewer",
+  "description": "Renders a document with optional download and section navigation.",
+  "type": "object",
+  "required": ["title", "content"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Document title shown in the header."
+    },
+    "content": {
+      "type": "string",
+      "description": "The document body (HTML or Markdown)."
+    },
+    "format": {
+      "type": "string",
+      "enum": ["html", "markdown"],
+      "description": "Content format. Defaults to markdown."
+    },
+    "sections": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Section names for navigation links."
+    },
+    "download_filename": {
+      "type": "string",
+      "description": "Filename used when the user downloads the document."
+    },
+    "download_enabled": {
+      "type": "boolean",
+      "description": "Whether the download button is shown."
+    }
+  },
+  "additionalProperties": false
+}

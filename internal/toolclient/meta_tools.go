@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 // RequestToolsMetaTool returns the provider.ToolDefinition for the

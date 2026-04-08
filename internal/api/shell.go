@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/shell"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -73,34 +74,42 @@ func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check denylist unless in YOLO mode.
-	if mode != shell.ModeYOLO {
-		dl := shell.NewDenylist()
-		if reason := dl.Check(req.Command); reason != "" {
-			a.errorResp(w, http.StatusForbidden, reason)
-			return
-		}
-	}
-
 	// Resolve working directory from session/project.
 	workDir := a.resolveShellWorkDir(sessionID)
 
-	// Execute the command.
-	result := shell.Exec(r.Context(), req.Command, shell.ExecOpts{
-		WorkDir: workDir,
+	// Execute via sandbox.UserExec (handles denylist + env filtering).
+	// YOLO mode skips the OS sandbox but keeps denylist + env filter.
+	var output string
+	var exitCode int
+	var timedOut bool
+
+	result, err := sandbox.UserExec(sandbox.UserExecOpts{
+		Command:   "/bin/sh",
+		Args:      []string{"-c", req.Command},
+		Dir:       workDir,
+		Sandboxed: mode != shell.ModeYOLO, // OS sandbox for ask+session, not yolo
 	})
+	if err != nil {
+		a.errorResp(w, http.StatusForbidden, err.Error())
+		return
+	}
+	output = result.Stdout
+	if result.Stderr != "" {
+		output += result.Stderr
+	}
+	exitCode = result.ExitCode
+	timedOut = result.TimedOut
 
 	// Build the message content the LLM will see.
-	content := fmt.Sprintf("$ %s\n%s", result.Command, result.Output)
+	content := fmt.Sprintf("$ %s\n%s", req.Command, output)
 
 	// Build message metadata.
 	meta := map[string]interface{}{
 		"type": "shell_exec",
 		"shell_exec": map[string]interface{}{
-			"command":     result.Command,
-			"exit_code":   result.ExitCode,
-			"duration_ms": result.DurationMs,
-			"truncated":   result.Truncated,
+			"command":   req.Command,
+			"exit_code": exitCode,
+			"timed_out": timedOut,
 		},
 	}
 	metaJSON, _ := json.Marshal(meta)
@@ -119,12 +128,11 @@ func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]interface{}{
-		"message_id":  msg.ID,
-		"command":     result.Command,
-		"output":      result.Output,
-		"exit_code":   result.ExitCode,
-		"duration_ms": result.DurationMs,
-		"truncated":   result.Truncated,
+		"message_id": msg.ID,
+		"command":    req.Command,
+		"output":     output,
+		"exit_code":  exitCode,
+		"timed_out":  timedOut,
 	})
 }
 
@@ -142,12 +150,9 @@ func (a *API) handleShellCheck(w http.ResponseWriter, r *http.Request) {
 	allowed := true
 	reason := ""
 
-	if mode != shell.ModeYOLO {
-		dl := shell.NewDenylist()
-		if r := dl.Check(command); r != "" {
-			allowed = false
-			reason = r
-		}
+	if blocked, r := sandbox.CheckDenylist(command); blocked {
+		allowed = false
+		reason = r
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]interface{}{

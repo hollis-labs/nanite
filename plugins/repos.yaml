@@ -1,9 +1,57 @@
 plugins:
-  - name: support-ticket
-    repo: hollis-labs/support-ticket
-    description: "IT employee self-service support — KB search + ticket creation"
-    type: user
-  - name: session-stats
-    repo: hollis-labs/session-stats
-    description: "Session statistics tracking and display"
+  # ── Core ────────────────────────────────────────────────────
+  - name: agentrc
+    repo: hollis-labs/nanite-plugin-agentrc
+    description: "Syncs .agentrc agent definitions into database"
     type: core
+
+  - name: agent-widgets
+    repo: hollis-labs/nanite-plugin-agent-widgets
+    description: "Agent status and MCP tools discovery widgets"
+    type: core
+
+  - name: context-widgets
+    repo: hollis-labs/nanite-plugin-context-widgets
+    description: "Session context and token usage widgets"
+    type: core
+
+  - name: debug-widgets
+    repo: hollis-labs/nanite-plugin-debug-widgets
+    description: "Developer-mode debug widgets (broker, slots, turns)"
+    type: core
+
+  - name: observability-widgets
+    repo: hollis-labs/nanite-plugin-observability-widgets
+    description: "LLM execution metrics and telemetry widget"
+    type: core
+
+  - name: bookmarks
+    repo: hollis-labs/nanite-plugin-bookmarks
+    description: "Bookmarked messages quick-access widget"
+    type: core
+
+  # ── Default ─────────────────────────────────────────────────
+  - name: giphy
+    repo: hollis-labs/nanite-plugin-giphy
+    description: "Giphy GIF search via !giphy command"
+    type: default
+
+  - name: oembed
+    repo: hollis-labs/nanite-plugin-oembed
+    description: "Rich URL previews for YouTube, Spotify, and oEmbed providers"
+    type: default
+
+  - name: session-stats
+    repo: hollis-labs/nanite-plugin-session-stats
+    description: "Session statistics tracking and display"
+    type: default
+
+  - name: fragments-engine
+    repo: hollis-labs/nanite-plugin-fragments-engine
+    description: "Fragments Engine MCP integration for sprint planning and tasks"
+    type: default
+
+  - name: support-ticket
+    repo: hollis-labs/nanite-plugin-support-ticket
+    description: "IT self-service support with KB search and ticket management"
+    type: default

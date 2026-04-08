@@ -1,0 +1,28 @@
+{
+  "$id": "session-task",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Session Task",
+  "description": "A session-scoped task card with status transitions.",
+  "type": "object",
+  "required": ["task_id", "title", "status"],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Unique identifier for the task."
+    },
+    "title": {
+      "type": "string",
+      "description": "Display title of the task."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "in_progress", "completed", "failed", "cancelled"],
+      "description": "Current task status."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional description shown below the task title."
+    }
+  },
+  "additionalProperties": false
+}

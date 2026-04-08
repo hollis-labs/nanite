@@ -1,0 +1,37 @@
+{
+  "$id": "proposal-card",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Proposal Card",
+  "description": "A proposed action with editable fields that the user can apply or dismiss.",
+  "type": "object",
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "Proposal type (e.g. create_task, update_sprint)."
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The proposed field values."
+    },
+    "schema": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "label": { "type": "string" },
+          "required": { "type": "boolean" },
+          "options": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Field schema definitions for rendering appropriate input types."
+    }
+  },
+  "additionalProperties": false
+}

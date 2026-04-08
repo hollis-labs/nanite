@@ -1,0 +1,24 @@
+{
+  "$id": "resolution-capture",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Resolution Capture",
+  "description": "Captures resolution details for a support issue.",
+  "type": "object",
+  "required": ["categories"],
+  "properties": {
+    "ticket_id": {
+      "type": "string",
+      "description": "Related ticket ID."
+    },
+    "issue_summary": {
+      "type": "string",
+      "description": "Summary of the issue being resolved."
+    },
+    "categories": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Available resolution categories."
+    }
+  },
+  "additionalProperties": false
+}

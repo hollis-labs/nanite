@@ -10,7 +10,7 @@ import (
 	"text/template"
 	"time"
 
-	pluginsdk "github.com/hollis-labs/plugin"
+	pluginsdk "github.com/hollis-labs/go-plugin"
 )
 
 // TriggerDispatcher evaluates trigger rules after events fire and calls

@@ -6,6 +6,54 @@ import (
 	"sync"
 )
 
+// FilterView specifies what context subset a filter receives.
+type FilterView string
+
+const (
+	// FilterViewFull is the default — filter sees all context.
+	FilterViewFull FilterView = "full"
+	// FilterViewReasoningBlind — filter sees user messages + tool calls only,
+	// never assistant reasoning or internal scratchpad content.
+	FilterViewReasoningBlind FilterView = "reasoning_blind"
+)
+
+// reasoningBlindStripKeys are the top-level map keys removed when applying
+// the reasoning-blind view. This is a best-effort defence-in-depth measure;
+// the specific keys will be tuned as safety classifiers are built.
+var reasoningBlindStripKeys = []string{
+	"assistant_content",
+	"thinking",
+	"reasoning",
+}
+
+// stripForView returns a (possibly filtered) copy of data appropriate for the
+// given view. For FilterViewFull the original data is returned unchanged. For
+// FilterViewReasoningBlind, if data is a map[string]interface{} it is
+// deep-copied with reasoning keys removed. Non-map data is returned as-is.
+func stripForView(data interface{}, view FilterView) interface{} {
+	if view == FilterViewFull {
+		return data
+	}
+
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return data
+	}
+
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+
+	if view == FilterViewReasoningBlind {
+		for _, key := range reasoningBlindStripKeys {
+			delete(out, key)
+		}
+	}
+
+	return out
+}
+
 // FilterFunc transforms data through a synchronous pipeline. Each handler
 // receives the output of the previous handler. Return an error to abort the
 // chain; the error propagates to the caller of ApplyFilter.
@@ -24,6 +72,7 @@ type FilterContext struct {
 type filterEntry struct {
 	PluginID string
 	Priority int
+	View     FilterView
 	Fn       FilterFunc
 }
 
@@ -45,7 +94,14 @@ func NewFilterRegistry() *FilterRegistry {
 // Register adds a filter handler to the named chain at the given priority.
 // Lower priority values execute earlier. If the same pluginID registers
 // multiple handlers on the same chain, all are kept (ordered by priority).
+// The handler uses FilterViewFull (sees all data).
 func (r *FilterRegistry) Register(name, pluginID string, priority int, fn FilterFunc) error {
+	return r.RegisterWithView(name, pluginID, priority, FilterViewFull, fn)
+}
+
+// RegisterWithView adds a filter handler with an explicit view. The view
+// controls what subset of data the handler sees when the chain is applied.
+func (r *FilterRegistry) RegisterWithView(name, pluginID string, priority int, view FilterView, fn FilterFunc) error {
 	if name == "" {
 		return fmt.Errorf("filter name must not be empty")
 	}
@@ -56,7 +112,7 @@ func (r *FilterRegistry) Register(name, pluginID string, priority int, fn Filter
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	entry := filterEntry{PluginID: pluginID, Priority: priority, Fn: fn}
+	entry := filterEntry{PluginID: pluginID, Priority: priority, View: view, Fn: fn}
 	r.chains[name] = append(r.chains[name], entry)
 
 	// Re-sort by priority (stable so equal-priority entries keep insertion order).
@@ -85,7 +141,9 @@ func (r *FilterRegistry) Apply(name string, data interface{}, ctx FilterContext)
 
 	current := data
 	for _, entry := range handlers {
-		result, err := entry.Fn(current, ctx)
+		// Apply the view: strip data the handler should not see.
+		visible := stripForView(current, entry.View)
+		result, err := entry.Fn(visible, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("filter %q (plugin %q, priority %d): %w",
 				name, entry.PluginID, entry.Priority, err)

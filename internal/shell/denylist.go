@@ -1,50 +1,19 @@
 package shell
 
 import (
-	"strings"
+	"github.com/hollis-labs/nanite/internal/sandbox"
 )
 
-// defaultDenyPatterns are command prefixes/patterns that are blocked by default.
-// These are destructive or dangerous commands that should never run without
-// explicit opt-in via YOLO mode.
-var defaultDenyPatterns = []string{
-	"rm -rf /",
-	"rm -rf /*",
-	"rm -rf ~",
-	"rm -rf $HOME",
-	"mkfs",
-	"dd if=",
-	"dd of=/dev",
-	"shutdown",
-	"reboot",
-	"halt",
-	"poweroff",
-	"init 0",
-	"init 6",
-	":(){ :|:& };:",     // fork bomb
-	"chmod -R 777 /",
-	"chown -R",
-	"curl | sh",
-	"curl | bash",
-	"wget | sh",
-	"wget | bash",
-	"> /dev/sda",
-	"> /dev/disk",
-	"mv / ",
-	"mv /* ",
-}
-
 // Denylist checks commands against a set of blocked patterns.
+// This is a thin wrapper around sandbox.CheckDenylist for backward compatibility.
 type Denylist struct {
-	patterns []string
-	enabled  bool
+	enabled bool
 }
 
-// NewDenylist creates a Denylist pre-populated with the default blocked patterns.
+// NewDenylist creates a Denylist that delegates to sandbox.CheckDenylist.
 func NewDenylist() *Denylist {
 	return &Denylist{
-		patterns: append([]string{}, defaultDenyPatterns...),
-		enabled:  true,
+		enabled: true,
 	}
 }
 
@@ -65,15 +34,8 @@ func (d *Denylist) Check(command string) string {
 	if !d.enabled {
 		return ""
 	}
-	lower := strings.ToLower(strings.TrimSpace(command))
-	for _, pattern := range d.patterns {
-		if strings.Contains(lower, strings.ToLower(pattern)) {
-			return "blocked by denylist: matches pattern " + repr(pattern)
-		}
+	if blocked, reason := sandbox.CheckDenylist(command); blocked {
+		return reason
 	}
 	return ""
-}
-
-func repr(s string) string {
-	return "\"" + s + "\""
 }

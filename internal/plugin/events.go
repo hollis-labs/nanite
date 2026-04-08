@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/brand"
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 // Event Catalog
@@ -21,14 +21,16 @@ const (
 	EventAgentLoaded   = "agent.loaded"
 
 	// Message Events
-	EventMessageSent         = "message.sent"
-	EventMessageReceived     = "message.received"
-	EventMessageDeleted      = "message.deleted"
+	EventMessageSent     = "message.sent"
+	EventMessageReceived = "message.received"
+	// planned-v2: needed once message delete API handler is added
+	EventMessageDeleted = "message.deleted"
 	EventMessageBookmarked   = "message.bookmarked"
 	EventMessageUnbookmarked = "message.unbookmarked"
 
 	// Mode Events
 	EventModeChanged = "mode.changed"
+	// planned-v2: needed once runtime scope transitions are tracked
 	EventScopeChanged = "scope.changed"
 
 	// Tool Events
@@ -75,11 +77,9 @@ const (
 
 	// Artifact Events
 	EventArtifactCreated = "artifact.created"
+	// planned-v2: needed once artifact delete API handler is added
 	EventArtifactDeleted = "artifact.deleted"
 
-	// API Events (constants only — wiring deferred; granularity concerns)
-	EventAPIRequest  = "api.request"
-	EventAPIResponse = "api.response"
 )
 
 // Claude Code hook name aliases.

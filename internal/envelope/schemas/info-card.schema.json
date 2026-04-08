@@ -1,0 +1,24 @@
+{
+  "$id": "info-card",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Info Card",
+  "description": "A simple informational card with variant styling.",
+  "type": "object",
+  "required": ["title", "body"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Card title."
+    },
+    "body": {
+      "type": "string",
+      "description": "Card body text."
+    },
+    "variant": {
+      "type": "string",
+      "enum": ["info", "success", "warning", "danger"],
+      "description": "Visual variant. Defaults to info."
+    }
+  },
+  "additionalProperties": false
+}

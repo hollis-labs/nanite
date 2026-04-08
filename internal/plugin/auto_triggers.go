@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	pluginsdk "github.com/hollis-labs/plugin"
+	pluginsdk "github.com/hollis-labs/go-plugin"
 )
 
 // AutoTriggerHandler maps plugin events to custom action auto-triggers.

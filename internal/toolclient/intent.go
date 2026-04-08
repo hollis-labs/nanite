@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 // MinIntentScore is the minimum keyword-overlap score a tool must reach

@@ -1,0 +1,54 @@
+{
+  "$id": "kb-result",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KB Result",
+  "description": "Knowledge base search results.",
+  "type": "object",
+  "required": ["query"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/KBArticle" },
+      "description": "Search results (alias: articles)."
+    },
+    "articles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/KBArticle" },
+      "description": "Search results (alias: results)."
+    },
+    "query": {
+      "type": "string",
+      "description": "The search query."
+    },
+    "total_results": {
+      "type": "integer",
+      "description": "Total number of results."
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "KBArticle": {
+      "type": "object",
+      "required": ["id", "title", "category", "severity"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "severity": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "related": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "body": { "type": "string" },
+        "rank": { "type": "number" },
+        "confidence": { "type": "string" },
+        "source": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -70,7 +70,7 @@ export function WorkTab() {
 
   const handleAddTodo = useCallback(
     (title: string) => {
-      if (!scopeId && scope !== 'workspace') return
+      if (!scopeId) return
       createTodo.mutate({
         title,
         scope,
@@ -141,7 +141,7 @@ export function WorkTab() {
         )}
 
         {/* Todos section */}
-        {!isLoading && (todos.length > 0 || (scopeId || scope === 'workspace')) && (
+        {!isLoading && (todos.length > 0 || !!scopeId) && (
           <div>
             <button
               type="button"
@@ -172,7 +172,7 @@ export function WorkTab() {
                   <AddItemInput
                     placeholder="Add todo..."
                     onAdd={handleAddTodo}
-                    disabled={!scopeId && scope !== 'workspace'}
+                    disabled={!scopeId}
                   />
                 </div>
               </>
@@ -181,7 +181,7 @@ export function WorkTab() {
         )}
 
         {/* Plans section */}
-        {!isLoading && (plans.length > 0 || (scopeId || scope === 'workspace')) && (
+        {!isLoading && (plans.length > 0 || !!scopeId) && (
           <div>
             <button
               type="button"

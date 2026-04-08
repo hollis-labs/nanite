@@ -43,7 +43,9 @@ function statusPillClass(status: MemoryStatus, active: boolean): string {
 }
 
 const inputClass =
-  "w-full px-3 py-2 rounded-md border border-border/50 bg-surface/40 text-xs text-fg outline-none focus:border-indigo-500/50";
+  "w-full px-3 py-2 rounded-md border border-border-subtle bg-bg-elevated text-xs text-fg outline-none focus:border-indigo-500/50 placeholder:text-fg-faint";
+const selectClass =
+  "w-full appearance-none px-3 py-2 rounded-md border border-border-subtle bg-bg-elevated text-xs text-fg outline-none focus:border-indigo-500/50 cursor-pointer";
 const labelClass = "text-[10px] uppercase tracking-wider text-fg-muted font-medium";
 
 export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
@@ -203,7 +205,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
             <select
               value={origin}
               onChange={(e) => setOrigin(e.target.value as MemoryOrigin)}
-              className={inputClass}
+              className={selectClass}
             >
               {ORIGIN_OPTIONS.map((o) => (
                 <option key={o} value={o}>
@@ -234,7 +236,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
             value={scope}
             onChange={(e) => setScope(e.target.value as MemoryScope)}
             disabled={!isCreate}
-            className={`${inputClass} disabled:opacity-50 disabled:cursor-not-allowed`}
+            className={`${selectClass} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {SCOPE_OPTIONS.map((s) => (
               <option key={s} value={s}>

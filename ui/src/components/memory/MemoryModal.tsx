@@ -27,7 +27,7 @@ export function MemoryModal() {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl h-[600px] p-0 flex flex-col overflow-hidden">
+      <DialogContent showCloseButton={false} className="!max-w-2xl h-[600px] !gap-0 !p-0 flex flex-col overflow-hidden !bg-bg !border-border-subtle">
         {view === "browse" && (
           <MemoryBrowse
             onSelect={(key) => {

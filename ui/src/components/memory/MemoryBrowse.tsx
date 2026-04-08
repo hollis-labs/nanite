@@ -86,7 +86,7 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
             placeholder="Search memories…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 text-xs bg-transparent text-fg placeholder:text-fg-faint outline-none min-w-0"
+            className="flex-1 text-xs bg-transparent text-fg placeholder:text-fg-faint outline-none min-w-0 font-sans"
           />
         </div>
 

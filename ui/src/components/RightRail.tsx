@@ -1,5 +1,5 @@
 import { Suspense, useState, useCallback } from 'react'
-import { LayoutGrid, Mail, Package, ListTodo, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
+import { LayoutGrid, Mail, Package, ListTodo, GitBranch, Pencil, GripVertical, Eye, EyeOff } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useQuery } from '@tanstack/react-query'
@@ -16,12 +16,14 @@ import { buildWidgetOrder, filterVisibleWidgets } from '@/lib/widget-order'
 import { ArtifactsContent } from './drawers/ArtifactsContent'
 import { InboxContent } from './a2a/InboxContent'
 import { WorkTab } from './work/WorkTab'
+import { WorkflowTab } from './workflows/WorkflowTab'
 import { api } from '@/lib/api'
 import type { PluginUIComponent } from '@/lib/types'
 
 const CORE_TABS = [
   { id: 'widgets' as const, icon: LayoutGrid, label: 'Widgets' },
   { id: 'work' as const, icon: ListTodo, label: 'Work' },
+  { id: 'workflows' as const, icon: GitBranch, label: 'Workflows' },
   { id: 'inbox' as const, icon: Mail, label: 'Inbox' },
   { id: 'artifacts' as const, icon: Package, label: 'Artifacts' },
 ]
@@ -189,6 +191,10 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
 
         {activeTab === 'work' && (
           <WorkTab />
+        )}
+
+        {activeTab === 'workflows' && (
+          <WorkflowTab />
         )}
 
         {activeTab === 'artifacts' && (

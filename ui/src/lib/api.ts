@@ -54,6 +54,10 @@ import type {
   Worker,
   Workspace,
   WorkflowRun,
+  Memory,
+  MemoryListResponse,
+  MemoryCreateRequest,
+  MemoryUpdateRequest,
 } from "./types";
 
 const API_BASE = "/api";
@@ -1597,6 +1601,68 @@ export const api = {
       method: "POST",
     });
     if (!res.ok) throw new Error(`Failed to cancel workflow run: ${res.status}`);
+    return res.json();
+  },
+
+  // Memories
+  listMemories: async (params?: {
+    scope?: string; status?: string; q?: string; tags?: string; limit?: number; offset?: number;
+  }): Promise<MemoryListResponse> => {
+    const qs = new URLSearchParams();
+    if (params?.scope) qs.set("scope", params.scope);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.q) qs.set("q", params.q);
+    if (params?.tags) qs.set("tags", params.tags);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.offset) qs.set("offset", String(params.offset));
+    const query = qs.toString();
+    const res = await fetch(`${API_BASE}/memories${query ? `?${query}` : ""}`);
+    if (!res.ok) throw new Error(`Failed to list memories: ${res.status}`);
+    return res.json();
+  },
+
+  createMemory: async (data: MemoryCreateRequest): Promise<Memory> => {
+    const res = await fetch(`${API_BASE}/memories`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to create memory: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  updateMemory: async (key: string, data: MemoryUpdateRequest): Promise<Memory> => {
+    const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update memory: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  deleteMemory: async (key: string): Promise<{ deleted: boolean }> => {
+    const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to delete memory: ${res.status}`);
+    return res.json();
+  },
+
+  updateMemoryStatus: async (key: string, status: string): Promise<Memory> => {
+    const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}/status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update memory status: ${res.status}`);
+    }
     return res.json();
   },
 };

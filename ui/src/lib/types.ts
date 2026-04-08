@@ -1001,3 +1001,48 @@ export interface WorkflowRun {
   run: RunState;
   events: WorkflowEvent[];
 }
+
+// --- Memory ---
+
+export type MemoryOrigin = "user" | "feedback" | "project" | "reference" | "observation";
+export type MemoryStatus = "draft" | "reviewed" | "canonical" | "deprecated";
+export type MemoryScope = "session" | "project" | "user";
+
+export interface Memory {
+  memory_key: string;
+  namespace: string;
+  summary: string;
+  body: string;
+  origin: MemoryOrigin;
+  trigger: string;
+  confidence: number;
+  tags: string[];
+  scope: MemoryScope;
+  session_id: string;
+  revision_id: string;
+  status: MemoryStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryListResponse {
+  memories: Memory[];
+  total: number;
+}
+
+export interface MemoryCreateRequest {
+  summary: string;
+  body?: string;
+  origin: MemoryOrigin;
+  confidence: number;
+  scope: MemoryScope;
+  tags: string[];
+}
+
+export interface MemoryUpdateRequest {
+  summary: string;
+  body?: string;
+  origin: MemoryOrigin;
+  confidence: number;
+  tags: string[];
+}

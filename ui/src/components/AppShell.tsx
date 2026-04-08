@@ -75,6 +75,18 @@ export function AppShell() {
   // Load dynamic plugin UI bundles (ESM) at startup
   usePluginModules()
 
+  // Set default workspace on load
+  const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
+  const { data: workspaces = [] } = useQuery({
+    queryKey: ['workspaces'],
+    queryFn: api.listWorkspaces,
+  })
+  useEffect(() => {
+    if (!activeWorkspaceId && workspaces.length > 0) {
+      setActiveWorkspace(workspaces[0].id)
+    }
+  }, [activeWorkspaceId, workspaces, setActiveWorkspace])
+
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', activeWorkspaceId],
     queryFn: () => api.listSessions(activeWorkspaceId ?? undefined),

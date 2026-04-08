@@ -48,7 +48,7 @@ import type { Session } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
-import { ProjectDropdown } from "./ProjectDropdown";
+import { ScopeSelector } from "./ScopeSelector";
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
@@ -237,7 +237,7 @@ export function LeftSidebar() {
         <div className="flex items-center gap-1 px-2 h-12 border-b border-border shrink-0">
           <div className="flex-1 min-w-0">
             {activeWorkspaceId ? (
-              <ProjectDropdown workspaceId={activeWorkspaceId} />
+              <ScopeSelector workspaceId={activeWorkspaceId} />
             ) : (
               <span className="text-sm font-semibold text-fg px-2">Chats</span>
             )}

@@ -75,20 +75,9 @@ func (a *API) handleSyncWork(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Approve plans.
-	for _, id := range diff.PlansApproved {
-		if _, err := svc.ApprovePlan(ctx, id, false); err != nil {
-			log.Printf("work/sync: approve plan %s: %v", id, err)
-		}
-	}
-
-	// Reject plans (transition to abandoned).
-	abandoned := "abandoned"
-	for _, id := range diff.PlansRejected {
-		if _, err := svc.UpdatePlan(ctx, id, service.PlanUpdates{Status: &abandoned}); err != nil {
-			log.Printf("work/sync: reject plan %s: %v", id, err)
-		}
-	}
+	// Plan approval/rejection is handled by dedicated endpoints
+	// (/api/plans/{id}/approve, updatePlan with status=abandoned).
+	// The sync endpoint only processes todo/step changes and broadcasts.
 
 	// Notify other UI tabs that work items changed.
 	a.Services.Streams.BroadcastPresence(chat.PresenceEvent{

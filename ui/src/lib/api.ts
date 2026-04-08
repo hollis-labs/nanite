@@ -57,8 +57,22 @@ import type {
 
 const API_BASE = "/api";
 
-// The Go backend stores plan.steps and plan.metadata as JSON strings.
-// Parse them into their typed forms so components can use them directly.
+// The Go backend stores JSON fields as strings in SQLite.
+// These helpers parse them into typed forms for the UI and stringify on write.
+
+function hydrateTodo(raw: Record<string, unknown>): Todo {
+  const todo = raw as unknown as Todo
+  if (typeof todo.labels === 'string') {
+    try { todo.labels = JSON.parse(todo.labels as unknown as string) } catch { todo.labels = [] }
+  }
+  if (!Array.isArray(todo.labels)) todo.labels = []
+  if (typeof todo.metadata === 'string') {
+    try { todo.metadata = JSON.parse(todo.metadata as unknown as string) } catch { todo.metadata = {} }
+  }
+  if (typeof todo.metadata !== 'object' || todo.metadata === null) todo.metadata = {}
+  return todo
+}
+
 function hydratePlan(raw: Record<string, unknown>): Plan {
   const plan = raw as unknown as Plan
   if (typeof plan.steps === 'string') {
@@ -68,7 +82,23 @@ function hydratePlan(raw: Record<string, unknown>): Plan {
   if (typeof plan.metadata === 'string') {
     try { plan.metadata = JSON.parse(plan.metadata as unknown as string) } catch { plan.metadata = {} }
   }
+  if (typeof plan.metadata !== 'object' || plan.metadata === null) plan.metadata = {}
   return plan
+}
+
+// Serialize structured fields back to JSON strings for the Go backend.
+function serializeTodoUpdates(updates: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...updates }
+  if (out.labels !== undefined && typeof out.labels !== 'string') out.labels = JSON.stringify(out.labels)
+  if (out.metadata !== undefined && typeof out.metadata !== 'string') out.metadata = JSON.stringify(out.metadata)
+  return out
+}
+
+function serializePlanPayload(data: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...data }
+  if (out.steps !== undefined && typeof out.steps !== 'string') out.steps = JSON.stringify(out.steps)
+  if (out.metadata !== undefined && typeof out.metadata !== 'string') out.metadata = JSON.stringify(out.metadata)
+  return out
 }
 
 export const api = {
@@ -910,7 +940,8 @@ export const api = {
     const qs = params.toString()
     const res = await fetch(`${API_BASE}/todos${qs ? `?${qs}` : ''}`)
     if (!res.ok) throw new Error(`Failed to list todos: ${res.status}`)
-    return res.json()
+    const todos = await res.json()
+    return todos.map(hydrateTodo)
   },
 
   createTodo: async (data: {
@@ -929,13 +960,13 @@ export const api = {
       const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
       throw new Error(err.error || `Failed to create todo: ${res.status}`)
     }
-    return res.json()
+    return hydrateTodo(await res.json())
   },
 
   getTodo: async (id: string): Promise<Todo> => {
     const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`)
     if (!res.ok) throw new Error(`Failed to get todo: ${res.status}`)
-    return res.json()
+    return hydrateTodo(await res.json())
   },
 
   updateTodo: async (
@@ -945,10 +976,10 @@ export const api = {
     const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
+      body: JSON.stringify(serializeTodoUpdates(updates as Record<string, unknown>)),
     })
     if (!res.ok) throw new Error(`Failed to update todo: ${res.status}`)
-    return res.json()
+    return hydrateTodo(await res.json())
   },
 
   deleteTodo: async (id: string): Promise<void> => {
@@ -961,7 +992,8 @@ export const api = {
   listTodoChildren: async (id: string): Promise<Todo[]> => {
     const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/children`)
     if (!res.ok) throw new Error(`Failed to list todo children: ${res.status}`)
-    return res.json()
+    const todos = await res.json()
+    return todos.map(hydrateTodo)
   },
 
   // --- Plans ---
@@ -988,7 +1020,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/plans`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify(serializePlanPayload(data as Record<string, unknown>)),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
@@ -1010,7 +1042,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
+      body: JSON.stringify(serializePlanPayload(updates as Record<string, unknown>)),
     })
     if (!res.ok) throw new Error(`Failed to update plan: ${res.status}`)
     return hydratePlan(await res.json())

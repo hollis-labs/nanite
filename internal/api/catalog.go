@@ -224,7 +224,8 @@ func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Reque
 	for _, entry := range entries {
 		be := catalogBrowseEntry{MergedCatalogEntry: entry}
 
-		// Check if installed.
+		// Check if installed — filesystem manifest first, then loaded plugin host
+		// (builtin plugins may not have a plugins-dir manifest).
 		manifestPath := filepath.Join(cs.pluginsDir, entry.Name, "plugin.yaml")
 		if fileExists(manifestPath) {
 			be.Installed = true
@@ -233,6 +234,12 @@ func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Reque
 				if m.Version != entry.Version {
 					be.UpdateAvailable = true
 				}
+			}
+		} else if p, ok := cs.pluginHost.GetPlugin(entry.Name); ok {
+			be.Installed = true
+			be.InstalledVersion = p.Version()
+			if p.Version() != entry.Version {
+				be.UpdateAvailable = true
 			}
 		}
 

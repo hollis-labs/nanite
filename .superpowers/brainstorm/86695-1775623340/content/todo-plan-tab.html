@@ -1,0 +1,101 @@
+<h2>Todo/Plan Tab — Layout Approach</h2>
+<p class="subtitle">Replaces the existing "Tasks" tab in the Right Rail</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Segmented Tabs (Todos | Plans)</h3>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">Right Rail — "Work" Tab</div>
+        <div class="mockup-body" style="font-size: 13px; line-height: 1.6;">
+          <div style="display:flex; gap:2px; background:#27272a; border-radius:6px; padding:2px; margin-bottom:12px;">
+            <div style="flex:1; text-align:center; padding:4px 8px; background:#3f3f46; border-radius:4px; color:#e4e4e7; font-size:12px; font-weight:500;">Todos</div>
+            <div style="flex:1; text-align:center; padding:4px 8px; color:#a1a1aa; font-size:12px;">Plans</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#18181b; border:1px solid #27272a; border-radius:6px; margin-bottom:8px;">
+            <div style="width:14px;height:14px;border:2px solid #4f46e5;border-radius:3px;flex-shrink:0;"></div>
+            <span style="color:#e4e4e7; font-size:12px;">Implement auth middleware</span>
+            <span style="margin-left:auto; font-size:10px; color:#f59e0b; background:#451a03; padding:1px 6px; border-radius:3px;">high</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#18181b; border:1px solid #27272a; border-radius:6px; margin-bottom:8px;">
+            <div style="width:14px;height:14px;background:#4f46e5;border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">
+              <span style="color:white;font-size:10px;">✓</span>
+            </div>
+            <span style="color:#71717a; font-size:12px; text-decoration:line-through;">Set up database schema</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#18181b; border:1px solid #27272a; border-radius:6px; margin-bottom:8px; cursor:grab;">
+            <div style="color:#52525b; font-size:10px;">⠿</div>
+            <div style="width:14px;height:14px;border:2px solid #3f3f46;border-radius:3px;flex-shrink:0;"></div>
+            <span style="color:#e4e4e7; font-size:12px;">Write API tests</span>
+          </div>
+          <div style="padding:6px 8px; border:1px dashed #27272a; border-radius:6px; text-align:center; color:#52525b; font-size:12px; cursor:pointer;">+ Add todo</div>
+          <div style="margin-top:12px; display:flex; justify-content:flex-end;">
+            <div style="padding:4px 12px; background:#27272a; border-radius:4px; color:#52525b; font-size:11px;">Send Changes</div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:8px; font-size:13px;">Two sub-tabs within the "Work" tab. Clean separation. Scope selector at top (Session / Project). Drag handle on left, checkbox on right. "Send Changes" button grays out when no pending changes.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Collapsible Sections (stacked)</h3>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">Right Rail — "Work" Tab</div>
+        <div class="mockup-body" style="font-size: 13px; line-height: 1.6;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #27272a; margin-bottom:8px;">
+            <span style="color:#a1a1aa; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">▼ Todos (3)</span>
+            <span style="font-size:10px; color:#52525b; background:#18181b; padding:1px 6px; border-radius:3px;">Session</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; padding:5px 8px; background:#18181b; border-radius:5px; margin-bottom:4px;">
+            <div style="width:13px;height:13px;border:2px solid #4f46e5;border-radius:3px;flex-shrink:0;"></div>
+            <span style="color:#e4e4e7; font-size:12px;">Implement auth middleware</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; padding:5px 8px; background:#18181b; border-radius:5px; margin-bottom:4px;">
+            <div style="width:13px;height:13px;border:2px solid #3f3f46;border-radius:3px;flex-shrink:0;"></div>
+            <span style="color:#e4e4e7; font-size:12px;">Write API tests</span>
+          </div>
+          <div style="padding:4px 8px; color:#52525b; font-size:11px; cursor:pointer;">+ Add</div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #27272a; margin:12px 0 8px 0;">
+            <span style="color:#a1a1aa; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">▼ Plans (1)</span>
+            <span style="font-size:10px; color:#10b981;">approved</span>
+          </div>
+          <div style="padding:6px 8px; background:#18181b; border:1px solid #27272a; border-radius:5px;">
+            <div style="color:#e4e4e7; font-size:12px; font-weight:500; margin-bottom:6px;">Auth System Rollout</div>
+            <div style="display:flex; align-items:center; gap:6px; padding:2px 0; font-size:11px;">
+              <div style="width:11px;height:11px;background:#4f46e5;border-radius:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="color:white;font-size:8px;">✓</span></div>
+              <span style="color:#71717a; text-decoration:line-through;">Design schema</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; padding:2px 0; font-size:11px;">
+              <div style="width:11px;height:11px;border:2px solid #4f46e5;border-radius:2px;flex-shrink:0;"></div>
+              <span style="color:#e4e4e7;">Implement middleware</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; padding:2px 0; font-size:11px;">
+              <div style="width:11px;height:11px;border:2px solid #3f3f46;border-radius:2px;flex-shrink:0;"></div>
+              <span style="color:#a1a1aa;">Write tests</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:8px; font-size:13px;">Both visible at once in collapsible sections. No sub-tab switching. Plans show inline with their steps. More information density but could get long with many items.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <h3>Shared Features (both approaches)</h3>
+  <ul style="font-size: 13px; color: #a1a1aa; line-height: 1.8;">
+    <li>Drag-and-drop reorder (grip handle)</li>
+    <li>Checkbox toggle with inline feedback field on un-done</li>
+    <li>"Send Changes" button — inactive until changes made, batched diff</li>
+    <li>Auto-inject on next user message if forgotten</li>
+    <li>Toast notification above composer on sync</li>
+    <li>Scope selector: Session (default in chat) / Project</li>
+    <li>Matching envelope cards for inline chat interaction</li>
+    <li>Events emitted: todo.updated, plan.updated, plan.approved</li>
+  </ul>
+</div>

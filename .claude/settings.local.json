@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/chrispian/Projects-apps/libs/go-plugin/.git/**)",
+      "Bash(mkdir -p ~/Projects-apps/plugins/nanite ~/Projects-apps/plugins/engine)",
+      "Read(//Users/chrispian/Projects-apps/plugins/**)",
+      "Bash(mkdir -p ~/Projects-apps/plugins/engine/engine-tasks/)",
+      "Bash(cp -r ~/Projects-apps/fragments-engine/engine/plugins/tasks-nanite/* ~/Projects-apps/plugins/engine/engine-tasks/)",
+      "Bash(cp -r ~/Projects-apps/fragments-engine/engine/plugins/tasks-nanite/.* ~/Projects-apps/plugins/engine/engine-tasks/)"
+    ]
+  }
+}

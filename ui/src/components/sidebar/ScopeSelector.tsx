@@ -77,7 +77,7 @@ export function ScopeSelector({ workspaceId }: ScopeSelectorProps) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left hover:bg-surface/50 transition-colors outline-none">
+        <button type="button" className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left hover:bg-surface/50 transition-colors outline-none">
           <span className="w-5 h-5 rounded bg-primary/15 flex items-center justify-center shrink-0">
             {selectedProject ? (
               <FolderOpen className="size-3 text-primary" />
@@ -142,11 +142,11 @@ export function ScopeSelector({ workspaceId }: ScopeSelectorProps) {
                 {workspaces.map((ws: Workspace) => (
                   <CommandItem
                     key={ws.id}
-                    value={`workspace:${ws.name}`}
+                    value={`workspace:${ws.id}:${ws.name}`}
                     onSelect={() => handleSelectWorkspace(ws.id)}
                     className="gap-2"
                   >
-                    <span className="w-4.5 h-4.5 rounded bg-surface-hover flex items-center justify-center text-[9px] font-bold text-fg-secondary shrink-0">
+                    <span className="w-[18px] h-[18px] rounded bg-surface-hover flex items-center justify-center text-[9px] font-bold text-fg-secondary shrink-0">
                       {ws.icon || ws.name.charAt(0).toUpperCase()}
                     </span>
                     <span className="flex-1 truncate">{ws.name}</span>
@@ -176,7 +176,7 @@ export function ScopeSelector({ workspaceId }: ScopeSelectorProps) {
                 {projects.map((proj: Project) => (
                   <CommandItem
                     key={proj.id}
-                    value={`project:${proj.name}`}
+                    value={`project:${proj.id}:${proj.name}`}
                     onSelect={() => handleSelectProject(proj.id)}
                     className="gap-2"
                   >

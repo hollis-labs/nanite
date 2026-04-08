@@ -12,7 +12,7 @@ Replace the NavRail workspace selector and sidebar ProjectDropdown with a single
 
 ### NavRail
 - Replace workspace selector (icon + dropdown) with a static **N** logo button
-- N uses the theme's primary/brand color (`bg-primary text-white`), italic, bold
+- N uses the theme's primary/brand color (`bg-primary text-white`) and bold styling
 - Click navigates to home/main screen (sets `currentPage: 'chat'`, clears active session)
 - Remove: workspace dropdown, chevron overlay, workspace create flow from NavRail
 
@@ -42,8 +42,6 @@ Built on shadcn's `Command` (cmdk) component.
 - Clicking a workspace: switches active workspace, resets project to "All Chats", closes popover
 - Clicking a project: switches active project filter, closes popover
 - "All Chats" clears project filter
-
-**Footer:** Keyboard hint bar (`↑↓ navigate`, `Enter select`, `Esc close`).
 
 **Scrollbar:** Uses site's custom scrollbar CSS (already in `index.css`).
 

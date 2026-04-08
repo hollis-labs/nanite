@@ -954,3 +954,50 @@ export interface PromptTemplate {
   created_at: string;
   updated_at: string;
 }
+
+// --- Workflow / Pipeline ---
+
+export interface PipelineInfo {
+  id: string;
+  name: string;
+  description: string;
+  step_count: number;
+}
+
+export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type StepStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "cancelled";
+
+export interface StepState {
+  step_id: string;
+  status: StepStatus;
+  attempts: number;
+  started_at: string;
+  completed_at: string;
+  error: string;
+  skip_reason: string;
+}
+
+export interface RunState {
+  pipeline_id: string;
+  run_id: string;
+  status: RunStatus;
+  step_states: Record<string, StepState>;
+  started_at: string;
+  completed_at: string;
+  error: string;
+}
+
+export interface WorkflowEvent {
+  type: string;
+  pipeline_id: string;
+  run_id: string;
+  step_id: string;
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface WorkflowRun {
+  pipeline: PipelineInfo;
+  run: RunState;
+  events: WorkflowEvent[];
+}

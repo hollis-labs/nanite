@@ -53,6 +53,7 @@ import type {
   WorkDiff,
   Worker,
   Workspace,
+  WorkflowRun,
 } from "./types";
 
 const API_BASE = "/api";
@@ -1571,6 +1572,31 @@ export const api = {
   getExecutionMetrics: async (sessionId: string): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/metrics`);
     if (!res.ok) throw new Error(`Failed to get execution metrics: ${res.status}`);
+    return res.json();
+  },
+
+  // Workflow Runs
+  listWorkflowRuns: async (params?: { status?: string; pipeline_id?: string }): Promise<WorkflowRun[]> => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.pipeline_id) qs.set("pipeline_id", params.pipeline_id);
+    const query = qs.toString();
+    const res = await fetch(`${API_BASE}/workflows/runs${query ? `?${query}` : ""}`);
+    if (!res.ok) throw new Error(`Failed to list workflow runs: ${res.status}`);
+    return res.json();
+  },
+
+  getWorkflowRun: async (runId: string): Promise<WorkflowRun> => {
+    const res = await fetch(`${API_BASE}/workflows/runs/${encodeURIComponent(runId)}`);
+    if (!res.ok) throw new Error(`Failed to get workflow run: ${res.status}`);
+    return res.json();
+  },
+
+  cancelWorkflowRun: async (runId: string): Promise<{ status: string }> => {
+    const res = await fetch(`${API_BASE}/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error(`Failed to cancel workflow run: ${res.status}`);
     return res.json();
   },
 };

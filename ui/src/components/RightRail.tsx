@@ -15,13 +15,13 @@ import { DEVELOPER_ONLY_WIDGETS } from '@/generated/plugin-widgets'
 import { buildWidgetOrder, filterVisibleWidgets } from '@/lib/widget-order'
 import { ArtifactsContent } from './drawers/ArtifactsContent'
 import { InboxContent } from './a2a/InboxContent'
-import { SessionTasksTab } from './tasks/SessionTasksTab'
+import { WorkTab } from './work/WorkTab'
 import { api } from '@/lib/api'
 import type { PluginUIComponent } from '@/lib/types'
 
 const CORE_TABS = [
   { id: 'widgets' as const, icon: LayoutGrid, label: 'Widgets' },
-  { id: 'tasks' as const, icon: ListTodo, label: 'Tasks' },
+  { id: 'work' as const, icon: ListTodo, label: 'Work' },
   { id: 'inbox' as const, icon: Mail, label: 'Inbox' },
   { id: 'artifacts' as const, icon: Package, label: 'Artifacts' },
 ]
@@ -187,8 +187,8 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
           </ScrollArea>
         )}
 
-        {activeTab === 'tasks' && (
-          <SessionTasksTab />
+        {activeTab === 'work' && (
+          <WorkTab />
         )}
 
         {activeTab === 'artifacts' && (
@@ -200,7 +200,7 @@ export function RightRail({ inboxAgentId = 'mentat-001' }: RightRailProps) {
         )}
 
         {/* Plugin-registered right rail tab content */}
-        {!['widgets', 'tasks', 'artifacts', 'inbox'].includes(activeTab) && (() => {
+        {!['widgets', 'work', 'artifacts', 'inbox'].includes(activeTab) && (() => {
           const pluginEntry = pluginTabs.find((e) => e.id === activeTab)
           if (!pluginEntry?.component) return null
           const PluginComponent = getSlotComponent(pluginEntry.component)

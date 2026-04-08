@@ -20,15 +20,6 @@ export interface EnvelopeRegistryEntry {
 
 // --- CORE ENVELOPES (primitives + fundamental system cards) ---
 const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
-  // Task system (core)
-  "session-task": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/SessionTaskCard").then((m) => ({
-        default: m.SessionTaskCard,
-      })),
-    ),
-    source: "core",
-  },
   // Generic primitives — reusable by any plugin
   "document-viewer": {
     component: lazy(() =>

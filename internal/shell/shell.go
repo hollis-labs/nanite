@@ -14,7 +14,7 @@ const (
 	ModeAsk Mode = "ask"
 	// ModeSession auto-approves commands but the denylist remains active.
 	ModeSession Mode = "session"
-	// ModeYOLO disables all restrictions — commands run without checks.
+	// ModeYOLO disables the OS sandbox but keeps the denylist and env filtering active.
 	ModeYOLO Mode = "yolo"
 )
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )

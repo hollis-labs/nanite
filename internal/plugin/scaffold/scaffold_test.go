@@ -86,11 +86,13 @@ func TestRun_WithAgent(t *testing.T) {
 func TestRun_WithEnvelope(t *testing.T) {
 	dir := t.TempDir()
 	outDir := filepath.Join(dir, "my-plugin")
+	schemaDir := filepath.Join(dir, "schemas")
 
 	opts := Options{
 		Name:      "my-plugin",
 		Envelopes: []EnvelopeDef{ToEnvelopeDef("card")},
 		OutputDir: outDir,
+		SchemaDir: schemaDir,
 	}
 
 	if err := Run(opts); err != nil {
@@ -113,6 +115,16 @@ func TestRun_WithEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(string(yamlContent), "type: card") {
 		t.Errorf("plugin.yaml missing envelope registration, got:\n%s", yamlContent)
+	}
+
+	// Check JSON Schema was generated
+	schemaPath := filepath.Join(schemaDir, "card.schema.json")
+	schemaContent, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("read card.schema.json: %v", err)
+	}
+	if !strings.Contains(string(schemaContent), `"$id": "card"`) {
+		t.Errorf("schema missing $id, got:\n%s", schemaContent)
 	}
 }
 

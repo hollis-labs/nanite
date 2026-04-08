@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/version"
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 

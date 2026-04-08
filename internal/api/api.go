@@ -254,6 +254,23 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/shell-check", a.handleShellCheck)
 	mux.HandleFunc("GET /api/sessions/{id}/shell-info", a.handleShellInfo)
 
+	// Todos (internal todo system)
+	mux.HandleFunc("GET /api/todos", a.handleListTodos)
+	mux.HandleFunc("POST /api/todos", a.handleCreateTodo)
+	mux.HandleFunc("GET /api/todos/{id}", a.handleGetTodo)
+	mux.HandleFunc("PUT /api/todos/{id}", a.handleUpdateTodo)
+	mux.HandleFunc("DELETE /api/todos/{id}", a.handleDeleteTodo)
+	mux.HandleFunc("GET /api/todos/{id}/children", a.handleListTodoChildren)
+
+	// Plans (internal plan system)
+	mux.HandleFunc("GET /api/plans", a.handleListPlans)
+	mux.HandleFunc("POST /api/plans", a.handleCreatePlan)
+	mux.HandleFunc("GET /api/plans/{id}", a.handleGetPlan)
+	mux.HandleFunc("PUT /api/plans/{id}", a.handleUpdatePlan)
+	mux.HandleFunc("PUT /api/plans/{id}/steps/{stepID}", a.handleUpdatePlanStep)
+	mux.HandleFunc("DELETE /api/plans/{id}", a.handleDeletePlan)
+	mux.HandleFunc("POST /api/plans/{id}/approve", a.handleApprovePlan)
+
 	// Debug
 	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -112,6 +112,8 @@ type minimalStore struct {
 	stubCustomActionStore
 	stubTriggerRuleStore
 	stubProviderStore
+	stubTodoStore
+	stubPlanStore
 }
 
 // Stubs to satisfy the Store composite interface for tests.
@@ -283,6 +285,22 @@ func (stubProviderStore) UpdateProvider(string, store.ProviderUpdate) error     
 func (stubProviderStore) SetProviderAPIKey(string, string) error                            { return nil }
 func (stubProviderStore) HasProviderAPIKey(string) (bool, error)                            { return false, nil }
 
+type stubTodoStore struct{}
+func (stubTodoStore) CreateTodo(*store.Todo) error                                          { return nil }
+func (stubTodoStore) GetTodo(string) (*store.Todo, error)                                   { return nil, nil }
+func (stubTodoStore) ListTodos(store.TodoFilter) ([]store.Todo, error)                      { return nil, nil }
+func (stubTodoStore) UpdateTodo(*store.Todo) error                                          { return nil }
+func (stubTodoStore) DeleteTodo(string) error                                               { return nil }
+func (stubTodoStore) ListTodoChildren(string) ([]store.Todo, error)                         { return nil, nil }
+
+type stubPlanStore struct{}
+func (stubPlanStore) CreatePlan(*store.Plan) error                                          { return nil }
+func (stubPlanStore) GetPlan(string) (*store.Plan, error)                                   { return nil, nil }
+func (stubPlanStore) ListPlans(store.PlanFilter) ([]store.Plan, error)                      { return nil, nil }
+func (stubPlanStore) UpdatePlan(*store.Plan) error                                          { return nil }
+func (stubPlanStore) UpdatePlanStep(string, string, store.PlanStep) error                   { return nil }
+func (stubPlanStore) DeletePlan(string) error                                               { return nil }
+
 func TestChatService_ResolveProvider(t *testing.T) {
 	reg := provider.NewRegistry()
 	testStore := &minimalStore{}
@@ -291,7 +309,7 @@ func TestChatService_ResolveProvider(t *testing.T) {
 		store:     testStore,
 	}
 
-	name, prov := impl.resolveProvider("", "", "gpt-4o")
+	name, prov := impl.resolveProvider("test-session", "", "", "gpt-4o")
 	// No provider registered, so prov should be nil and name should be inferred.
 	if prov != nil {
 		t.Error("expected nil provider when none registered")

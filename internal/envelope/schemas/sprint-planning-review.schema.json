@@ -1,0 +1,53 @@
+{
+  "$id": "sprint-planning-review",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sprint Planning Review",
+  "description": "Interactive sprint planning card for reviewing and assigning tasks to sprints.",
+  "type": "object",
+  "required": ["title", "sprints", "tasks"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Card title."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional description."
+    },
+    "sprints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "description": "Available sprints."
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "suggested_sprint", "priority"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "suggested_sprint": { "type": "string" },
+          "priority": { "type": "string" },
+          "status": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "description": "Tasks to assign."
+    },
+    "page_size": {
+      "type": "integer",
+      "description": "Number of tasks per page. Defaults to 10."
+    }
+  },
+  "additionalProperties": false
+}

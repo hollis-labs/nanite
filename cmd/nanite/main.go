@@ -31,7 +31,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/server"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -243,7 +243,9 @@ if err := s.SeedBuiltinPromptTemplates(); err != nil {
 		filepath.Join(homeDir, "Projects"),
 	}))
 	mcpManager.AddServer("general", mcp.NewGeneralToolsTransport())
-	mcpManager.AddServer("self", mcp.NewSelfToolsTransport(s))
+	mcpManager.AddServer("code", mcp.NewCodeExecTransport(""))
+	selfTools := mcp.NewSelfToolsTransport(s)
+	mcpManager.AddServer("self", selfTools)
 
 	// Load user-configured MCP servers and auto-discover tools.
 	loadPersistedMCPServers(s, mcpManager)
@@ -344,6 +346,9 @@ if err := s.SeedBuiltinPromptTemplates(); err != nil {
 	if err != nil {
 		log.Fatalf("failed to create service container: %v", err)
 	}
+
+	// Wire todo/plan store into the self-tools transport.
+	selfTools.TodoStore = s
 
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {

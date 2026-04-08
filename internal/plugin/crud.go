@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 // handleCRUDList handles GET /api/plugins/{resourceType}

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/tool-broker/broker"
 )

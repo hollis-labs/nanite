@@ -1,21 +1,15 @@
 // Package memory provides persistent memory storage, recall, and extraction
-// backed by Vanta Conduit's memory MCP tools. Memories survive session boundaries
-// and are surfaced during context assembly via the MemorySource.
+// backed by an embedded Vanta Conduit memory store. Memories survive session
+// boundaries and are surfaced during context assembly via the MemorySource.
 package memory
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
-)
 
-// MCPCaller is the interface for calling MCP tools. This matches the
-// subset of mcp.Manager that MemoryService needs, avoiding a direct import.
-type MCPCaller interface {
-	ExecuteTool(ctx context.Context, name string, input map[string]any) (string, error)
-}
+	conduitMemory "github.com/hollis-labs/vanta-conduit/memory"
+)
 
 // Memory represents a memory item to store or recalled from Vanta Conduit.
 type Memory struct {
@@ -34,7 +28,7 @@ type Memory struct {
 
 // RecallOpts configures memory recall.
 type RecallOpts struct {
-	Namespaces    []string // supports globs like "app/nanite/user/*"
+	Namespaces    []string // Conduit-format namespaces (e.g. "user/x/memory")
 	Ranking       string   // "activation" (default), "chronological", "similarity"
 	Limit         int      // max results (default 20)
 	MinConfidence float64  // minimum confidence threshold
@@ -42,54 +36,49 @@ type RecallOpts struct {
 	Tags          []string // filter by tags
 }
 
-// Service provides memory storage and recall via Vanta Conduit MCP tools.
+// Service provides memory storage and recall via an embedded Vanta Conduit memory store.
 type Service struct {
-	mcp        MCPCaller
-	serverName string // MCP server name for Vanta Conduit (default: "conduit")
+	store *conduitMemory.Store
 }
 
-// NewService creates a MemoryService backed by the given MCP caller.
-func NewService(mcp MCPCaller) *Service {
-	return &Service{
-		mcp:        mcp,
-		serverName: "conduit",
-	}
+// NewService creates a MemoryService backed by the given Conduit memory store.
+func NewService(store *conduitMemory.Store) *Service {
+	return &Service{store: store}
 }
 
-// Store writes a memory revision to Vanta Conduit via the memory_write MCP tool.
+// Store writes a memory revision to the embedded Conduit memory store.
 func (s *Service) Store(ctx context.Context, m Memory) error {
-	if s.mcp == nil {
-		return fmt.Errorf("memory service: no MCP caller configured")
+	if s.store == nil {
+		return fmt.Errorf("memory service: no memory store configured")
 	}
 
-	toolName := fmt.Sprintf("mcp__%s__memory_write", s.serverName)
-
-	input := map[string]any{
-		"namespace":  m.Namespace,
-		"memory_key": m.MemoryKey,
-		"summary":    m.Summary,
-		"status":     "draft",
-	}
-	if m.Body != "" {
-		input["body"] = m.Body
-	}
-	if m.Origin != "" {
-		input["origin"] = m.Origin
-	}
-	if m.Trigger != "" {
-		input["trigger"] = m.Trigger
-	}
-	if m.Confidence > 0 {
-		input["confidence"] = m.Confidence
-	}
-	if len(m.Tags) > 0 {
-		input["tags"] = m.Tags
-	}
-	if m.SessionID != "" {
-		input["session_id"] = m.SessionID
+	status := conduitMemory.StatusDraft
+	if m.Status != "" {
+		status = conduitMemory.Status(m.Status)
 	}
 
-	_, err := s.mcp.ExecuteTool(ctx, toolName, input)
+	in := conduitMemory.WriteInput{
+		Namespace:  m.Namespace,
+		MemoryKey:  m.MemoryKey,
+		Status:     status,
+		Author:     conduitMemory.Author{AgentID: "nanite", AgentVersion: "1.0"},
+		Trigger:    mapTrigger(m.Trigger),
+		SessionID:  m.SessionID,
+		Origin:     mapOrigin(m.Origin),
+		Confidence: m.Confidence,
+		Tags:       m.Tags,
+		Payload: conduitMemory.Payload{
+			Summary: m.Summary,
+			Body:    m.Body,
+		},
+	}
+
+	// SessionID is required by Conduit; provide a fallback.
+	if in.SessionID == "" {
+		in.SessionID = "manual:nanite"
+	}
+
+	_, err := s.store.WriteRevision(ctx, in)
 	if err != nil {
 		return fmt.Errorf("memory_write: %w", err)
 	}
@@ -99,96 +88,100 @@ func (s *Service) Store(ctx context.Context, m Memory) error {
 	return nil
 }
 
-// Recall fetches memories from Vanta Conduit via the memory_recall MCP tool.
+// Recall fetches memories from the embedded Conduit memory store.
 func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error) {
-	if s.mcp == nil {
-		return nil, fmt.Errorf("memory service: no MCP caller configured")
+	if s.store == nil {
+		return nil, fmt.Errorf("memory service: no memory store configured")
 	}
 
-	toolName := fmt.Sprintf("mcp__%s__memory_recall", s.serverName)
-
-	input := map[string]any{}
-
-	if len(opts.Namespaces) > 0 {
-		input["namespaces"] = opts.Namespaces
+	ranking := conduitMemory.RankingActivation
+	switch opts.Ranking {
+	case "chronological":
+		ranking = conduitMemory.RankingChronological
+	case "similarity":
+		ranking = conduitMemory.RankingSimilarity
+	case "activation", "":
+		ranking = conduitMemory.RankingActivation
 	}
-	ranking := opts.Ranking
-	if ranking == "" {
-		ranking = "activation"
-	}
-	input["ranking"] = ranking
 
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 20
 	}
-	input["limit"] = limit
 
 	// Build filters.
-	filters := map[string]any{}
+	var filters conduitMemory.RecallFilters
 	if opts.MinConfidence > 0 {
-		filters["min_confidence"] = opts.MinConfidence
+		filters.ConfidenceMin = opts.MinConfidence
 	}
 	if len(opts.Origins) > 0 {
-		filters["origins"] = opts.Origins
+		for _, o := range opts.Origins {
+			filters.Origins = append(filters.Origins, conduitMemory.Origin(o))
+		}
 	}
 	if len(opts.Tags) > 0 {
-		filters["tags"] = opts.Tags
+		filters.Tags = opts.Tags
 	}
 	// Only include statuses that are active.
-	filters["statuses"] = []string{"draft", "reviewed", "canonical"}
-
-	if len(filters) > 0 {
-		input["filters"] = filters
+	filters.Statuses = []conduitMemory.Status{
+		conduitMemory.StatusDraft,
+		conduitMemory.StatusReviewed,
+		conduitMemory.StatusCanonical,
 	}
 
-	result, err := s.mcp.ExecuteTool(ctx, toolName, input)
+	in := conduitMemory.RecallInput{
+		Namespaces: opts.Namespaces,
+		Ranking:    ranking,
+		Limit:      limit,
+		Filters:    filters,
+	}
+
+	results, err := s.store.Recall(ctx, in)
 	if err != nil {
 		return nil, fmt.Errorf("memory_recall: %w", err)
 	}
 
-	return parseRecallResult(result)
+	memories := make([]Memory, 0, len(results))
+	for _, r := range results {
+		memories = append(memories, revisionToMemory(r.Revision))
+	}
+	return memories, nil
 }
 
-// Get fetches a single memory by namespace and key via the memory_get MCP tool.
+// Get fetches a single memory by namespace and key.
 func (s *Service) Get(ctx context.Context, namespace, memoryKey string) (*Memory, error) {
-	if s.mcp == nil {
-		return nil, fmt.Errorf("memory service: no MCP caller configured")
+	if s.store == nil {
+		return nil, fmt.Errorf("memory service: no memory store configured")
 	}
 
-	toolName := fmt.Sprintf("mcp__%s__memory_get", s.serverName)
-
-	input := map[string]any{
-		"namespace":  namespace,
-		"memory_key": memoryKey,
-	}
-
-	result, err := s.mcp.ExecuteTool(ctx, toolName, input)
+	rev, err := s.store.GetCurrent(ctx, namespace, memoryKey)
 	if err != nil {
 		return nil, fmt.Errorf("memory_get: %w", err)
 	}
 
-	var m Memory
-	if err := json.Unmarshal([]byte(result), &m); err != nil {
-		return nil, fmt.Errorf("memory_get: parse response: %w", err)
-	}
+	m := revisionToMemory(rev)
 	return &m, nil
 }
 
-// Promote moves a memory to a broader scope via the memory_promote MCP tool.
+// Promote moves a memory to a broader scope.
 func (s *Service) Promote(ctx context.Context, revisionID, targetNamespace string) error {
-	if s.mcp == nil {
-		return fmt.Errorf("memory service: no MCP caller configured")
+	if s.store == nil {
+		return fmt.Errorf("memory service: no memory store configured")
 	}
 
-	toolName := fmt.Sprintf("mcp__%s__memory_promote", s.serverName)
-
-	input := map[string]any{
-		"revision_id":      revisionID,
-		"target_namespace": targetNamespace,
+	// Look up the revision to find its source memory ID and namespace.
+	rev, err := s.store.GetRevisionByID(ctx, revisionID)
+	if err != nil {
+		return fmt.Errorf("memory_promote: lookup revision: %w", err)
 	}
 
-	_, err := s.mcp.ExecuteTool(ctx, toolName, input)
+	_, err = s.store.Promote(ctx, conduitMemory.PromoteInput{
+		SourceNamespace: rev.Namespace,
+		SourceMemoryID:  rev.MemoryID,
+		TargetNamespace: targetNamespace,
+		ActorAgentID:    "nanite",
+		ActorVersion:    "1.0",
+	})
 	if err != nil {
 		return fmt.Errorf("memory_promote: %w", err)
 	}
@@ -197,20 +190,13 @@ func (s *Service) Promote(ctx context.Context, revisionID, targetNamespace strin
 	return nil
 }
 
-// Deprecate marks a memory revision as deprecated via the memory_deprecate MCP tool.
+// Deprecate marks a memory revision as deprecated.
 func (s *Service) Deprecate(ctx context.Context, revisionID string) error {
-	if s.mcp == nil {
-		return fmt.Errorf("memory service: no MCP caller configured")
+	if s.store == nil {
+		return fmt.Errorf("memory service: no memory store configured")
 	}
 
-	toolName := fmt.Sprintf("mcp__%s__memory_deprecate", s.serverName)
-
-	input := map[string]any{
-		"revision_id": revisionID,
-	}
-
-	_, err := s.mcp.ExecuteTool(ctx, toolName, input)
-	if err != nil {
+	if err := s.store.Deprecate(ctx, revisionID); err != nil {
 		return fmt.Errorf("memory_deprecate: %w", err)
 	}
 
@@ -218,49 +204,83 @@ func (s *Service) Deprecate(ctx context.Context, revisionID string) error {
 	return nil
 }
 
-// SessionNamespace returns the memory namespace for a session.
+// SessionNamespace returns the Conduit-format memory namespace for a session.
 func SessionNamespace(sessionID string) string {
-	return "app/nanite/session/" + sessionID
+	return "user/default/session/" + sessionID + "/memory"
 }
 
-// ProjectNamespace returns the memory namespace for a project.
+// ProjectNamespace returns the Conduit-format memory namespace for a project.
 func ProjectNamespace(projectID string) string {
-	return "app/nanite/project/" + projectID
+	return "user/default/project/" + projectID + "/memory"
 }
 
-// UserNamespace returns the memory namespace for a user.
+// UserNamespace returns the Conduit-format memory namespace for a user.
 func UserNamespace(userID string) string {
-	return "app/nanite/user/" + userID
+	return "user/" + userID + "/memory"
 }
 
-// AllNaniteNamespaces returns glob patterns that cover all Nanite memory namespaces.
+// AllNaniteNamespaces returns namespaces that cover all Nanite memory scopes.
+// Since Conduit doesn't support globs in Recall, we return the broadest
+// user-scope namespace; callers that need session/project should specify explicitly.
 func AllNaniteNamespaces() []string {
-	return []string{"app/nanite/*"}
+	return []string{"user/default/memory"}
 }
 
-// parseRecallResult parses the JSON response from memory_recall into Memory structs.
-func parseRecallResult(raw string) ([]Memory, error) {
-	// Try array format first.
-	var memories []Memory
-	if err := json.Unmarshal([]byte(raw), &memories); err == nil {
-		return memories, nil
+// revisionToMemory converts a Conduit Revision to a Nanite Memory.
+func revisionToMemory(rev conduitMemory.Revision) Memory {
+	return Memory{
+		Namespace:  rev.Namespace,
+		MemoryKey:  rev.MemoryKey,
+		Summary:    rev.Payload.Summary,
+		Body:       rev.Payload.Body,
+		Origin:     string(rev.Origin),
+		Trigger:    string(rev.Trigger),
+		Confidence: rev.Confidence,
+		Tags:       rev.Tags,
+		SessionID:  rev.SessionID,
+		RevisionID: rev.RevisionID,
+		Status:     string(rev.Status),
 	}
+}
 
-	// Try wrapped format with a "memories" or "results" key.
-	var wrapped struct {
-		Memories []Memory `json:"memories"`
-		Results  []Memory `json:"results"`
-	}
-	if err := json.Unmarshal([]byte(raw), &wrapped); err != nil {
-		// If not JSON, return empty.
-		if strings.TrimSpace(raw) == "" {
-			return nil, nil
+// mapOrigin converts a string origin to the Conduit Origin type.
+func mapOrigin(s string) conduitMemory.Origin {
+	switch s {
+	case "user":
+		return conduitMemory.OriginUser
+	case "feedback":
+		return conduitMemory.OriginFeedback
+	case "project":
+		return conduitMemory.OriginProject
+	case "reference":
+		return conduitMemory.OriginReference
+	case "observation":
+		return conduitMemory.OriginObservation
+	default:
+		if s == "" {
+			return conduitMemory.OriginObservation
 		}
-		return nil, fmt.Errorf("parse recall result: %w", err)
+		return conduitMemory.Origin(s)
 	}
+}
 
-	if len(wrapped.Memories) > 0 {
-		return wrapped.Memories, nil
+// mapTrigger converts a string trigger to the Conduit Trigger type.
+func mapTrigger(s string) conduitMemory.Trigger {
+	switch s {
+	case "explicit":
+		return conduitMemory.TriggerExplicit
+	case "post_compact":
+		return conduitMemory.TriggerPostCompact
+	case "per_turn":
+		return conduitMemory.TriggerPerTurn
+	case "promotion":
+		return conduitMemory.TriggerPromotion
+	case "manual":
+		return conduitMemory.TriggerManual
+	default:
+		if s == "" {
+			return conduitMemory.TriggerManual
+		}
+		return conduitMemory.Trigger(s)
 	}
-	return wrapped.Results, nil
 }

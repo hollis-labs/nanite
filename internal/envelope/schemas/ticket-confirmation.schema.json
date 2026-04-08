@@ -1,0 +1,28 @@
+{
+  "$id": "ticket-confirmation",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ticket Confirmation",
+  "description": "Confirms a created support ticket with details.",
+  "type": "object",
+  "required": ["ticket"],
+  "properties": {
+    "ticket": {
+      "type": "object",
+      "required": ["id", "title", "description", "category", "priority", "status", "requester", "routing", "created_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "priority": { "type": "string" },
+        "status": { "type": "string" },
+        "requester": { "type": "string" },
+        "routing": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "description": "The created ticket details."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,19 @@
+{
+  "$id": "{{.Type}}",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "{{.Export}}",
+  "description": "Envelope data for the {{.Type}} envelope type.",
+  "type": "object",
+  "required": ["title"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Card title."
+    },
+    "message": {
+      "type": "string",
+      "description": "Card message."
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,44 @@
+{
+  "$id": "question-form",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Question Form",
+  "description": "An interactive form with multiple question fields.",
+  "type": "object",
+  "required": ["questions"],
+  "properties": {
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["prompt", "type", "required"],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The question text."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["text", "textarea", "select", "radio", "checkbox"],
+            "description": "Input type for the question."
+          },
+          "options": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Options for select, radio, or checkbox types."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether the question must be answered."
+          },
+          "default": {
+            "type": "string",
+            "description": "Default value."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Array of questions."
+    }
+  },
+  "additionalProperties": false
+}

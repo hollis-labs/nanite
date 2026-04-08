@@ -72,12 +72,26 @@ func assembleSystemPromptFromTemplates(s *store.Store, agent *store.AgentProfile
 
 	if composed == "" {
 		// No templates assigned — use legacy path.
-		return assembleSystemPrompt(agent, mode, workspace)
+		composed = assembleSystemPrompt(agent, mode, workspace)
+	} else {
+		log.Printf("chat: assembled system prompt from templates (%d chars)", len(composed))
 	}
 
-	log.Printf("chat: assembled system prompt from templates (%d chars)", len(composed))
+	// Append think tool guidance.
+	composed += thinkToolBlock
+
 	return composed
 }
+
+// thinkToolBlock is a short instruction appended to every system prompt
+// telling the agent when to use the think tool for structured reasoning.
+const thinkToolBlock = `
+
+## Think Tool
+Use the think tool to organize your reasoning before acting:
+- When new information changes your approach, think through the implications first.
+- Before complex multi-step tool sequences, plan the steps.
+- When checking completeness against requirements, verify coverage.`
 
 // buildSkillList creates a human-readable list of skills for the tool-awareness template.
 func buildSkillList(s *store.Store, agentID string) string {

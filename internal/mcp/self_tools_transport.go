@@ -17,6 +17,23 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
+// TodoStoreInterface is the subset of store.Store needed by todo/plan MCP tools.
+// Defined here to avoid circular imports with the service package. Uses raw
+// store methods instead of the service layer's update structs.
+type TodoStoreInterface interface {
+	CreateTodo(t *store.Todo) error
+	GetTodo(id string) (*store.Todo, error)
+	ListTodos(f store.TodoFilter) ([]store.Todo, error)
+	UpdateTodo(t *store.Todo) error
+	DeleteTodo(id string) error
+
+	CreatePlan(p *store.Plan) error
+	GetPlan(id string) (*store.Plan, error)
+	ListPlans(f store.PlanFilter) ([]store.Plan, error)
+	UpdatePlan(p *store.Plan) error
+	UpdatePlanStep(planID, stepID string, updates store.PlanStep) error
+}
+
 // SelfToolsTransport provides self-service tools that let the agent
 // create and manage its own skills, agent profiles, and workflows
 // through the same store layer the API uses.
@@ -24,6 +41,7 @@ type SelfToolsTransport struct {
 	Store           *store.Store
 	BuilderRegistry *builders.Registry
 	BuilderSessions *builders.SessionManager
+	TodoStore       TodoStoreInterface // nil-safe; set after construction
 }
 
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
@@ -75,6 +93,16 @@ func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[
 		return st.callStartBuilder(args)
 	case "nanite_builder_step":
 		return st.callBuilderStep(args)
+	case "nanite_todo_create":
+		return st.callTodoCreate(args)
+	case "nanite_todo_update":
+		return st.callTodoUpdate(args)
+	case "nanite_todo_list":
+		return st.callTodoList(args)
+	case "nanite_plan_create":
+		return st.callPlanCreate(args)
+	case "nanite_plan_update":
+		return st.callPlanUpdate(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -647,6 +675,176 @@ func (st *SelfToolsTransport) callShowTaskDisposition(args map[string]any) (*Too
 
 	result := fmt.Sprintf("Task disposition card ready: %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", title, string(envJSON))
 	return textResult(result), nil
+}
+
+// --- todo/plan handlers ---
+
+func (st *SelfToolsTransport) callTodoCreate(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+	title, _ := args["title"].(string)
+	scope, _ := args["scope"].(string)
+	if title == "" || scope == "" {
+		return errorResult("title and scope are required"), nil
+	}
+
+	t := &store.Todo{
+		Title:       title,
+		Scope:       scope,
+		ScopeID:     strArg(args, "scope_id", ""),
+		Priority:    strArg(args, "priority", "medium"),
+		Description: strArg(args, "description", ""),
+		ParentID:    strArg(args, "parent_id", ""),
+		Labels:      strArg(args, "labels", "[]"),
+		CreatedBy:   "agent",
+	}
+
+	if err := st.TodoStore.CreateTodo(t); err != nil {
+		return errorResult(fmt.Sprintf("create todo: %v", err)), nil
+	}
+
+	out, _ := json.Marshal(t)
+	return textResult(fmt.Sprintf("Created todo %q (id=%s, scope=%s)\n%s", t.Title, t.ID, t.Scope, string(out))), nil
+}
+
+func (st *SelfToolsTransport) callTodoUpdate(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+	id, _ := args["id"].(string)
+	if id == "" {
+		return errorResult("id is required"), nil
+	}
+
+	t, err := st.TodoStore.GetTodo(id)
+	if err != nil {
+		return errorResult(fmt.Sprintf("get todo: %v", err)), nil
+	}
+
+	if v, ok := args["title"].(string); ok && v != "" {
+		t.Title = v
+	}
+	if v, ok := args["description"].(string); ok && v != "" {
+		t.Description = v
+	}
+	if v, ok := args["status"].(string); ok && v != "" {
+		t.Status = v
+	}
+	if v, ok := args["priority"].(string); ok && v != "" {
+		t.Priority = v
+	}
+	if v, ok := args["labels"].(string); ok && v != "" {
+		t.Labels = v
+	}
+
+	if err := st.TodoStore.UpdateTodo(t); err != nil {
+		return errorResult(fmt.Sprintf("update todo: %v", err)), nil
+	}
+
+	return textResult(fmt.Sprintf("Updated todo %q (id=%s, status=%s, priority=%s)", t.Title, t.ID, t.Status, t.Priority)), nil
+}
+
+func (st *SelfToolsTransport) callTodoList(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+
+	f := store.TodoFilter{
+		Scope:    strArg(args, "scope", ""),
+		ScopeID:  strArg(args, "scope_id", ""),
+		Status:   strArg(args, "status", ""),
+		Priority: strArg(args, "priority", ""),
+	}
+
+	todos, err := st.TodoStore.ListTodos(f)
+	if err != nil {
+		return errorResult(fmt.Sprintf("list todos: %v", err)), nil
+	}
+
+	if len(todos) == 0 {
+		return textResult("No todos found matching filters."), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Found %d todo(s):\n\n", len(todos))
+	for _, t := range todos {
+		fmt.Fprintf(&sb, "- [%s] %s (id=%s, priority=%s, scope=%s/%s)\n",
+			t.Status, t.Title, t.ID, t.Priority, t.Scope, t.ScopeID)
+		if t.Description != "" {
+			fmt.Fprintf(&sb, "  %s\n", t.Description)
+		}
+	}
+	return textResult(sb.String()), nil
+}
+
+func (st *SelfToolsTransport) callPlanCreate(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+	title, _ := args["title"].(string)
+	scope, _ := args["scope"].(string)
+	if title == "" || scope == "" {
+		return errorResult("title and scope are required"), nil
+	}
+
+	p := &store.Plan{
+		Title:       title,
+		Scope:       scope,
+		ScopeID:     strArg(args, "scope_id", ""),
+		Description: strArg(args, "description", ""),
+		Steps:       strArg(args, "steps", "[]"),
+		CreatedBy:   "agent",
+	}
+
+	if err := st.TodoStore.CreatePlan(p); err != nil {
+		return errorResult(fmt.Sprintf("create plan: %v", err)), nil
+	}
+
+	out, _ := json.Marshal(p)
+	return textResult(fmt.Sprintf("Created plan %q (id=%s, scope=%s)\n%s", p.Title, p.ID, p.Scope, string(out))), nil
+}
+
+func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+	id, _ := args["id"].(string)
+	if id == "" {
+		return errorResult("id is required"), nil
+	}
+
+	// If step_id is provided, update just that step.
+	stepID, _ := args["step_id"].(string)
+	if stepID != "" {
+		stepUpdates := store.PlanStep{
+			Status: strArg(args, "status", ""),
+			Notes:  strArg(args, "notes", ""),
+		}
+		if err := st.TodoStore.UpdatePlanStep(id, stepID, stepUpdates); err != nil {
+			return errorResult(fmt.Sprintf("update plan step: %v", err)), nil
+		}
+		return textResult(fmt.Sprintf("Updated step %s in plan %s", stepID, id)), nil
+	}
+
+	// Otherwise update plan-level fields.
+	p, err := st.TodoStore.GetPlan(id)
+	if err != nil {
+		return errorResult(fmt.Sprintf("get plan: %v", err)), nil
+	}
+
+	if v, ok := args["title"].(string); ok && v != "" {
+		p.Title = v
+	}
+	if v, ok := args["status"].(string); ok && v != "" {
+		p.Status = v
+	}
+
+	if err := st.TodoStore.UpdatePlan(p); err != nil {
+		return errorResult(fmt.Sprintf("update plan: %v", err)), nil
+	}
+
+	return textResult(fmt.Sprintf("Updated plan %q (id=%s, status=%s)", p.Title, p.ID, p.Status)), nil
 }
 
 // --- helpers ---

@@ -1,0 +1,24 @@
+{
+  "$id": "approval-card",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Approval Card",
+  "description": "An approval request with risk level indicator.",
+  "type": "object",
+  "required": ["description"],
+  "properties": {
+    "description": {
+      "type": "string",
+      "description": "What is being requested for approval."
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Risk level of the action. Defaults to low."
+    },
+    "details": {
+      "type": "string",
+      "description": "Additional details about the request."
+    }
+  },
+  "additionalProperties": false
+}

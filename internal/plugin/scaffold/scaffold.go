@@ -30,6 +30,7 @@ type Options struct {
 	Envelopes     []EnvelopeDef // envelope components to generate
 	CRUDResources []string      // CRUD resource names (e.g. "items")
 	OutputDir     string        // base output directory (e.g. "plugins/my-plugin")
+	SchemaDir     string        // directory for envelope schemas (default: "internal/envelope/schemas")
 }
 
 // templateData holds all data passed to templates.
@@ -109,12 +110,21 @@ func Run(opts Options) error {
 		}
 	}
 
-	// Generate envelope components if requested
+	// Generate envelope components and schemas if requested
 	if len(opts.Envelopes) > 0 {
 		uiDir := filepath.Join(opts.OutputDir, "ui")
 		if err := os.MkdirAll(uiDir, 0755); err != nil {
 			return fmt.Errorf("create ui directory: %w", err)
 		}
+
+		schemaDir := opts.SchemaDir
+		if schemaDir == "" {
+			schemaDir = filepath.Join("internal", "envelope", "schemas")
+		}
+		if err := os.MkdirAll(schemaDir, 0755); err != nil {
+			return fmt.Errorf("create schema directory: %w", err)
+		}
+
 		for _, env := range opts.Envelopes {
 			envData := struct {
 				Type   string
@@ -125,6 +135,12 @@ func Run(opts Options) error {
 			}
 			if err := renderTemplate(funcMap, "templates/envelope.tsx.tmpl", filepath.Join(uiDir, env.Export+".tsx"), envData); err != nil {
 				return fmt.Errorf("generate envelope %s: %w", env.Export, err)
+			}
+			// Generate a JSON Schema file for the envelope type.
+			// The schema is the source of truth — edit it, then run codegen.
+			schemaPath := filepath.Join(schemaDir, env.Type+".schema.json")
+			if err := renderTemplate(funcMap, "templates/envelope.schema.json.tmpl", schemaPath, envData); err != nil {
+				return fmt.Errorf("generate schema %s: %w", env.Type, err)
 			}
 		}
 	}

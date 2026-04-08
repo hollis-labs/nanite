@@ -90,7 +90,7 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("read migration %s: %w", f, err)
 		}
 
-		statements := strings.Split(string(data), ";")
+		statements := splitSQL(string(data))
 		for _, stmt := range statements {
 			stmt = strings.TrimSpace(stmt)
 			if stmt == "" {
@@ -107,4 +107,30 @@ func (s *Store) migrate() error {
 		}
 	}
 	return nil
+}
+
+// splitSQL splits a SQL script on semicolons while keeping BEGIN...END blocks
+// (used by triggers) intact as single statements.
+func splitSQL(sql string) []string {
+	var stmts []string
+	var buf strings.Builder
+	depth := 0
+	for _, raw := range strings.Split(sql, ";") {
+		upper := strings.ToUpper(strings.TrimSpace(raw))
+		// Track BEGIN/END nesting so semicolons inside triggers don't split.
+		depth += strings.Count(upper, "BEGIN") - strings.Count(upper, "END")
+		if buf.Len() > 0 {
+			buf.WriteByte(';')
+		}
+		buf.WriteString(raw)
+		if depth <= 0 {
+			stmts = append(stmts, buf.String())
+			buf.Reset()
+			depth = 0
+		}
+	}
+	if buf.Len() > 0 {
+		stmts = append(stmts, buf.String())
+	}
+	return stmts
 }

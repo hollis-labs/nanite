@@ -1,0 +1,32 @@
+{
+  "$id": "confirmation-card",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Confirmation Card",
+  "description": "A confirmation dialog with risk-level-styled buttons.",
+  "type": "object",
+  "required": ["title", "message"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Confirmation title."
+    },
+    "message": {
+      "type": "string",
+      "description": "Confirmation message body."
+    },
+    "confirm_label": {
+      "type": "string",
+      "description": "Label for the confirm button. Defaults to Confirm."
+    },
+    "cancel_label": {
+      "type": "string",
+      "description": "Label for the cancel button. Defaults to Cancel."
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Risk level. Defaults to low."
+    }
+  },
+  "additionalProperties": false
+}

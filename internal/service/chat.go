@@ -10,7 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/permission"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/worker"
@@ -307,7 +307,17 @@ func (s *chatServiceImpl) SetWorkers(w *worker.Manager) {
 //  3. User's fallback chain (from user_settings)
 //  4. chat.InferProvider(model) — map model name to provider
 //  5. System default ("anthropic")
-func (s *chatServiceImpl) resolveProvider(sessionProvider, agentProvider, model string) (string, provider.Provider) {
+//
+// When a preferred provider is unavailable and the chain falls through,
+// a provider.fallback plugin event is emitted.
+func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model string) (string, provider.Provider) {
+	// Track the first requested provider so we can emit a fallback event
+	// when a later candidate is selected instead.
+	requested := sessionProvider
+	if requested == "" {
+		requested = agentProvider
+	}
+
 	if sessionProvider != "" {
 		if p, ok := s.providers.Get(sessionProvider); ok {
 			return sessionProvider, p
@@ -317,6 +327,9 @@ func (s *chatServiceImpl) resolveProvider(sessionProvider, agentProvider, model 
 
 	if agentProvider != "" {
 		if p, ok := s.providers.Get(agentProvider); ok {
+			if requested != "" && requested != agentProvider && s.pluginHost != nil {
+				s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
+			}
 			return agentProvider, p
 		}
 		log.Printf("chat-service: agent provider %q not registered, falling through", agentProvider)
@@ -325,6 +338,9 @@ func (s *chatServiceImpl) resolveProvider(sessionProvider, agentProvider, model 
 	if us, err := s.store.GetUserSettings(); err == nil && len(us.ProviderFallbackChain) > 0 {
 		for _, name := range us.ProviderFallbackChain {
 			if p, ok := s.providers.Get(name); ok {
+				if requested != "" && requested != name && s.pluginHost != nil {
+					s.pluginHost.EmitProviderFallback(sessionID, requested, name)
+				}
 				return name, p
 			}
 		}
@@ -332,10 +348,16 @@ func (s *chatServiceImpl) resolveProvider(sessionProvider, agentProvider, model 
 
 	inferred := chat.InferProvider(model)
 	if p, ok := s.providers.Get(inferred); ok {
+		if requested != "" && requested != inferred && s.pluginHost != nil {
+			go s.pluginHost.EmitProviderFallback(sessionID, requested, inferred)
+		}
 		return inferred, p
 	}
 
 	if p, ok := s.providers.Get("anthropic"); ok {
+		if requested != "" && requested != "anthropic" && s.pluginHost != nil {
+			go s.pluginHost.EmitProviderFallback(sessionID, requested, "anthropic")
+		}
 		return "anthropic", p
 	}
 

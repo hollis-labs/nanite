@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 // cancellingHook returns plugin.ErrCancelled to signal cancellation.
@@ -116,8 +116,6 @@ func TestNewEventConstantsDefined(t *testing.T) {
 		"EventContextAssembled": EventContextAssembled,
 		"EventArtifactCreated":  EventArtifactCreated,
 		"EventArtifactDeleted":  EventArtifactDeleted,
-		"EventAPIRequest":       EventAPIRequest,
-		"EventAPIResponse":      EventAPIResponse,
 	}
 	for name, value := range newEvents {
 		if value == "" {

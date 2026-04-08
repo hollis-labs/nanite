@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/plugin"
+	"github.com/hollis-labs/go-plugin"
 )
 
 // TestPlugin implements the plugin.Plugin interface for testing

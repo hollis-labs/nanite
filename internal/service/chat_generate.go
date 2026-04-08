@@ -15,7 +15,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -121,7 +121,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Resolve provider ---
-	providerName, prov := s.resolveProvider(session.Provider, agent.DefaultProvider, model)
+	providerName, prov := s.resolveProvider(sessionID, session.Provider, agent.DefaultProvider, model)
 	if prov == nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
 			fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName),

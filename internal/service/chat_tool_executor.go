@@ -16,7 +16,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/truncate"
 )
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
@@ -64,8 +64,8 @@ type ToolMetaInfo struct {
 }
 
 // ProgressiveDiscoveryThreshold is the MCP tool count above which
-// progressive discovery is activated. Matches the existing engine constant.
-const ProgressiveDiscoveryThreshold = 5
+// progressive discovery is activated.
+const ProgressiveDiscoveryThreshold = 10
 
 // BrokerDecisionLogger logs tool selection decisions for debugging.
 type BrokerDecisionLogger interface {

@@ -1,0 +1,28 @@
+{
+  "$id": "ticket-form",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ticket Form",
+  "description": "A support ticket creation form.",
+  "type": "object",
+  "required": ["categories"],
+  "properties": {
+    "prefilled": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "priority": { "type": "string" },
+        "steps_tried": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "description": "Pre-filled form values."
+    },
+    "categories": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Available ticket categories."
+    }
+  },
+  "additionalProperties": false
+}

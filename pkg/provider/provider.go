@@ -101,6 +101,23 @@ type Provider interface {
 	Capabilities() ProviderCapabilities
 }
 
+// Embedder is the interface for providers that support text embedding.
+type Embedder interface {
+	// Embed generates an embedding vector for a single text input.
+	Embed(ctx context.Context, text string, model string) (*EmbeddingResult, error)
+	// EmbedBatch generates embedding vectors for multiple texts in a single API call.
+	EmbedBatch(ctx context.Context, texts []string, model string) ([]EmbeddingResult, error)
+	// EmbeddingDimensions returns the output dimensions for the given embedding model.
+	// Returns 0 if the model is unknown.
+	EmbeddingDimensions(model string) int
+}
+
+// EmbeddingResult holds the result of a single text embedding.
+type EmbeddingResult struct {
+	Embedding  []float32
+	TokenCount int
+}
+
 // ptySessionKeyType is the context key for passing a CLI session ID
 // into the PTY bridge for --resume support.
 type ptySessionKeyType struct{}

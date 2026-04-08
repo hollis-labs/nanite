@@ -212,6 +212,26 @@ type TriggerRuleStore interface {
 	DeleteTriggerRulesByPlugin(pluginID string) error
 }
 
+// TodoStore provides CRUD access to internal todos.
+type TodoStore interface {
+	CreateTodo(t *store.Todo) error
+	GetTodo(id string) (*store.Todo, error)
+	ListTodos(f store.TodoFilter) ([]store.Todo, error)
+	UpdateTodo(t *store.Todo) error
+	DeleteTodo(id string) error
+	ListTodoChildren(parentID string) ([]store.Todo, error)
+}
+
+// PlanStore provides CRUD access to internal plans.
+type PlanStore interface {
+	CreatePlan(p *store.Plan) error
+	GetPlan(id string) (*store.Plan, error)
+	ListPlans(f store.PlanFilter) ([]store.Plan, error)
+	UpdatePlan(p *store.Plan) error
+	UpdatePlanStep(planID, stepID string, updates store.PlanStep) error
+	DeletePlan(id string) error
+}
+
 // ProviderStore provides access to provider and model configuration.
 type ProviderStore interface {
 	ListProviders() ([]store.ProviderConfig, error)
@@ -242,6 +262,8 @@ type Store interface {
 	CustomActionStore
 	TriggerRuleStore
 	ProviderStore
+	TodoStore
+	PlanStore
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

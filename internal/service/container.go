@@ -229,7 +229,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			log.Println("service container: OpenAI embedder (text-embedding-3-large) for Conduit")
 		} else {
 			ollamaProvider := provider.NewOllama()
-			if _, testErr := ollamaProvider.Embed(context.Background(), "test", "nomic-embed-text"); testErr == nil {
+			probeCtx, probeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer probeCancel()
+			if _, testErr := ollamaProvider.Embed(probeCtx, "test", "nomic-embed-text"); testErr == nil {
 				embedder = ollamaProvider
 				embeddingModel = "nomic-embed-text"
 				log.Println("service container: Ollama embedder (nomic-embed-text) for Conduit")

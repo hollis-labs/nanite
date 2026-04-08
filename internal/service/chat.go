@@ -328,7 +328,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	if agentProvider != "" {
 		if p, ok := s.providers.Get(agentProvider); ok {
 			if requested != "" && requested != agentProvider && s.pluginHost != nil {
-				go s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
+				s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
 			}
 			return agentProvider, p
 		}
@@ -339,7 +339,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		for _, name := range us.ProviderFallbackChain {
 			if p, ok := s.providers.Get(name); ok {
 				if requested != "" && requested != name && s.pluginHost != nil {
-					go s.pluginHost.EmitProviderFallback(sessionID, requested, name)
+					s.pluginHost.EmitProviderFallback(sessionID, requested, name)
 				}
 				return name, p
 			}

@@ -4,9 +4,9 @@ import (
 	"strings"
 )
 
-// defaultDenyPatterns are command prefixes/patterns that are blocked by default.
-// These are destructive or dangerous commands that should never run without
-// explicit opt-in via YOLO mode.
+// defaultDenyPatterns are command prefixes/patterns that are always blocked,
+// even in YOLO mode. These are destructive or dangerous commands that no
+// automation should execute regardless of the approval mode.
 var defaultDenyPatterns = []struct {
 	pattern string
 	reason  string

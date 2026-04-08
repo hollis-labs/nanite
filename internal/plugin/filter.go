@@ -29,7 +29,8 @@ var reasoningBlindStripKeys = []string{
 // stripForView returns a (possibly filtered) copy of data appropriate for the
 // given view. For FilterViewFull the original data is returned unchanged. For
 // FilterViewReasoningBlind, if data is a map[string]interface{} it is
-// deep-copied with reasoning keys removed. Non-map data is returned as-is.
+// shallow-copied with reasoning keys removed; nested structures (slices, maps,
+// pointers) remain shared with the original. Non-map data is returned as-is.
 func stripForView(data interface{}, view FilterView) interface{} {
 	if view == FilterViewFull {
 		return data

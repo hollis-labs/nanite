@@ -40,6 +40,11 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cl
 	}
 
 	// Network isolation: deny all unless networkAllow is non-empty.
+	// When networkAllow is non-empty, we skip --unshare-net and rely on
+	// HTTP_PROXY/HTTPS_PROXY env vars to route traffic through the allowlist
+	// proxy. This is weaker than macOS seatbelt enforcement (which hard-blocks
+	// non-localhost outbound). A future improvement could use iptables/nftables
+	// rules inside the namespace to restrict egress to 127.0.0.1 only.
 	if len(networkAllow) == 0 {
 		bwrapArgs = append(bwrapArgs, "--unshare-net")
 	}

@@ -36,3 +36,18 @@ CREATE TABLE IF NOT EXISTS plans (
 
 CREATE INDEX IF NOT EXISTS idx_plans_scope ON plans(scope, scope_id);
 CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
+
+-- Auto-update updated_at on row modification.
+CREATE TRIGGER IF NOT EXISTS trg_todos_updated_at
+AFTER UPDATE ON todos
+FOR EACH ROW
+BEGIN
+    UPDATE todos SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_plans_updated_at
+AFTER UPDATE ON plans
+FOR EACH ROW
+BEGIN
+    UPDATE plans SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;

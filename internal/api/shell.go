@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,14 +85,20 @@ func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	var exitCode int
 	var timedOut bool
 
+	shPath := resolveShell()
+
 	result, err := sandbox.UserExec(sandbox.UserExecOpts{
-		Command:   "/bin/sh",
+		Command:   shPath,
 		Args:      []string{"-c", req.Command},
 		Dir:       workDir,
 		Sandboxed: mode != shell.ModeYOLO, // OS sandbox for ask+session, not yolo
 	})
 	if err != nil {
-		a.errorResp(w, http.StatusForbidden, err.Error())
+		if strings.Contains(err.Error(), "denied") {
+			a.errorResp(w, http.StatusForbidden, err.Error())
+		} else {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	output = result.Stdout
@@ -270,4 +278,16 @@ func fallbackHomeDir() string {
 		return home
 	}
 	return "/"
+}
+
+// resolveShell returns the path to a POSIX shell for command execution.
+// Priority: $SHELL env var > exec.LookPath("sh") > /bin/sh.
+func resolveShell() string {
+	if s := os.Getenv("SHELL"); s != "" {
+		return s
+	}
+	if p, err := exec.LookPath("sh"); err == nil {
+		return p
+	}
+	return "/bin/sh"
 }

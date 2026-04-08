@@ -241,7 +241,7 @@ func (s *Store) Seed() error {
 		`INSERT OR IGNORE INTO catalog_sources (id, name, url, type, priority)
 		 VALUES (?, ?, ?, ?, ?)`,
 		"official", "Hollis Labs",
-		"https://raw.githubusercontent.com/hollis-labs/nanite-plugins/main/catalog.yaml",
+		"https://raw.githubusercontent.com/hollis-labs/plugin-catalog/main/catalog.yaml",
 		"official", 100,
 	); err != nil {
 		return fmt.Errorf("insert catalog source: %w", err)

@@ -65,6 +65,11 @@ export function usePresence() {
             removeCLIActive(evt.session_id)
             queryClient.invalidateQueries({ queryKey: ['sessions'] })
             break
+
+          case 'work_changed':
+            queryClient.invalidateQueries({ queryKey: ['todos'] })
+            queryClient.invalidateQueries({ queryKey: ['plans'] })
+            break
         }
       } catch {
         // Ignore malformed events.

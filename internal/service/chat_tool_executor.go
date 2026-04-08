@@ -348,6 +348,13 @@ func (s *chatServiceImpl) executeSingleTool(
 		Type: "tool_resolved", SessionID: sessionID, AgentID: agentID,
 		ToolName: tu.Name, Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
+	// Notify UI when agent mutates todos/plans so the Work tab can refresh.
+	if isWorkTool(tu.Name) && !toolIsError {
+		s.streams.BroadcastPresence(chat.PresenceEvent{
+			Type: "work_changed", SessionID: sessionID,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		})
+	}
 	if mu != nil {
 		mu.Unlock()
 	}
@@ -474,6 +481,15 @@ func (s *chatServiceImpl) postProcessToolResults(
 
 // toolCallDetail extracts a short human-readable label from a tool's input.
 // For dev_bash this is the command, for file tools the path, etc.
+// isWorkTool returns true for agent tools that mutate todos or plans.
+func isWorkTool(name string) bool {
+	switch name {
+	case "nanite_todo_create", "nanite_todo_update", "nanite_plan_create", "nanite_plan_update":
+		return true
+	}
+	return false
+}
+
 func toolCallDetail(toolName string, input map[string]any) string {
 	get := func(keys ...string) string {
 		for _, k := range keys {

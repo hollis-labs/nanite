@@ -20,15 +20,6 @@ export interface EnvelopeRegistryEntry {
 
 // --- CORE ENVELOPES (primitives + fundamental system cards) ---
 const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
-  // Task system (core)
-  "session-task": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/SessionTaskCard").then((m) => ({
-        default: m.SessionTaskCard,
-      })),
-    ),
-    source: "core",
-  },
   // Generic primitives — reusable by any plugin
   "document-viewer": {
     component: lazy(() =>
@@ -74,6 +65,23 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     component: lazy(() =>
       import("@/components/chat/envelopes/QuestionForm").then((m) => ({
         default: m.QuestionForm,
+      })),
+    ),
+    source: "core",
+  },
+  // Todo/Plan system (core)
+  "todo-list": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/TodoListCard").then((m) => ({
+        default: m.TodoListCard,
+      })),
+    ),
+    source: "core",
+  },
+  "plan-review": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/PlanReviewCard").then((m) => ({
+        default: m.PlanReviewCard,
       })),
     ),
     source: "core",

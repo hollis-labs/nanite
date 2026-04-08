@@ -32,6 +32,9 @@ var registeredTypes = map[string]bool{
 	"table-card":                 true,
 	"timeline-card":              true,
 	"diff-card":                  true,
+	// Work (todo/plan UI)
+	"todo-list":                  true,
+	"plan-review":                true,
 	// Plugin-owned (registered at runtime via RegisterEnvelopeType; listed here for validation fallback)
 	"giphy-modal":                true,
 	"oembed-card":                true,

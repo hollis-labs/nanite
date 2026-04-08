@@ -2,7 +2,7 @@ import { useEffect, useCallback, useState, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { Paperclip, Lock, Unlock, Zap } from 'lucide-react'
+import { Paperclip, Lock, Unlock, Zap, Check, X } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ComposerToolbar } from './ComposerToolbar'
 import { ShellInfoDrawer } from './ShellInfoDrawer'
@@ -15,6 +15,8 @@ import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { usePluginAction } from '@/hooks/usePluginAction'
 import { resolveIcon } from '@/lib/icons'
 import { useAppStore } from '@/stores/useAppStore'
+import { useWorkStore } from '@/stores/useWorkStore'
+import { useWorkSync } from '@/hooks/useWorkSync'
 import { api } from '@/lib/api'
 import type { SlashCommandDef } from '@/lib/types'
 
@@ -63,6 +65,9 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   const { mode: shellMode, cycleMode: cycleShellMode, setMode: setShellMode } = useShellMode(activeSessionId)
   const [isShellInput, setIsShellInput] = useState(false)
   const [shellRunning, setShellRunning] = useState(false)
+  const workToast = useWorkStore((s) => s.toastMessage)
+  const dismissWorkToast = useWorkStore((s) => s.dismissToast)
+  const { flushIfDirty } = useWorkSync()
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
@@ -297,6 +302,12 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     }
   }, [editor, onEditorReady])
 
+  useEffect(() => {
+    if (!workToast) return
+    const timer = setTimeout(() => dismissWorkToast(), 3000)
+    return () => clearTimeout(timer)
+  }, [workToast, dismissWorkToast])
+
   // Shell command execution — intercepts ! prefix
   const [pendingShellCommand, setPendingShellCommand] = useState<string | null>(null)
 
@@ -349,9 +360,12 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       }
     }
 
+    // Auto-sync work changes before sending
+    void flushIfDirty()
+
     onSend(text)
     editor.commands.clearContent()
-  }, [editor, onSend, handleShellExec])
+  }, [editor, onSend, handleShellExec, flushIfDirty])
 
   handleSendRef.current = handleSend
 
@@ -407,6 +421,21 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         {shellRunning && (
           <div className="px-3 py-1.5 text-xs text-fg-muted text-center border-b border-border-subtle bg-bg-elevated/50 animate-pulse">
             Running command...
+          </div>
+        )}
+        {workToast && (
+          <div className="px-3 py-1.5 text-xs text-center border-b border-primary/30 bg-primary/5 flex items-center justify-center gap-2">
+            <span className="w-3.5 h-3.5 bg-primary rounded-full flex items-center justify-center shrink-0">
+              <Check className="w-2 h-2 text-white" />
+            </span>
+            <span className="text-fg-secondary">{workToast}</span>
+            <button
+              type="button"
+              onClick={dismissWorkToast}
+              className="text-fg-faint hover:text-fg-muted ml-1"
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>
         )}
         {pendingShellCommand && (

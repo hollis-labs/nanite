@@ -292,7 +292,7 @@ func selfToolDefinitions() []Tool {
 		},
 		{
 			Name:        "nanite_todo_list",
-			Description: "List todos with optional filters. Returns todos matching the given scope, status, and/or priority.",
+			Description: "List todos with optional filters. Returns todos matching the given scope, status, and/or priority. When presenting results to the user, emit a todo-list envelope: ```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"todo-list\",\"data\":{\"scope\":\"session\",\"scope_id\":\"...\",\"title\":\"Session Todos\"}}\n``` The UI renders this as an interactive card with live data.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -305,7 +305,7 @@ func selfToolDefinitions() []Tool {
 		},
 		{
 			Name:        "nanite_plan_create",
-			Description: "Create a plan with ordered steps. Plans organize work into phases with dependencies and acceptance criteria.",
+			Description: "Create a plan with ordered steps. Plans organize work into phases with dependencies and acceptance criteria. After creating a plan with status 'proposed', emit a plan-review envelope so the user can approve/reject it inline: ```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"plan-review\",\"data\":{\"plan_id\":\"...\",\"title\":\"...\",\"description\":\"...\",\"status\":\"proposed\",\"steps\":[{\"id\":\"...\",\"title\":\"...\"}]}}\n```",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

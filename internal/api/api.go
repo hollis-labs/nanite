@@ -271,6 +271,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/plans/{id}", a.handleDeletePlan)
 	mux.HandleFunc("POST /api/plans/{id}/approve", a.handleApprovePlan)
 
+	// Work sync (batched todo/plan changes from UI)
+	mux.HandleFunc("POST /api/work/sync", a.handleSyncWork)
+
 	// Debug
 	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 

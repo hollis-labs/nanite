@@ -28,6 +28,8 @@ interface LayoutState {
   setCurrentPage: (page: string) => void
   toggleTheme: () => void
   setTheme: (theme: Theme) => void
+  memoryModalOpen: boolean
+  setMemoryModalOpen: (open: boolean) => void
 }
 
 function resolveTheme(theme: Theme): 'dark' | 'light' {
@@ -93,6 +95,8 @@ export const useLayoutStore = create<LayoutState>()(
         applyThemeClass(theme)
         set({ theme })
       },
+      memoryModalOpen: false,
+      setMemoryModalOpen: (open) => set({ memoryModalOpen: open }),
     }),
     {
       name: 'nanite-layout',
@@ -107,6 +111,10 @@ export const useLayoutStore = create<LayoutState>()(
       onRehydrateStorage: () => (state) => {
         if (state?.theme) {
           applyThemeClass(state.theme)
+        }
+        // Never restore modal open state from persisted storage
+        if (state) {
+          state.memoryModalOpen = false
         }
         // Listen for OS theme changes when in system mode
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

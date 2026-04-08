@@ -15,6 +15,7 @@ import { useLayoutStore } from '@/stores/useLayoutStore'
 import { api } from '@/lib/api'
 import SettingsPage from './settings/SettingsPage'
 import { SprintPlanningModal } from './plugins/fragments-engine/SprintPlanningModal'
+import { MemoryModal } from './memory/MemoryModal'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import { usePresence } from '@/hooks/usePresence'
 import { useHashRoute } from '@/hooks/useHashRoute'
@@ -167,6 +168,7 @@ export function AppShell() {
           onClose={() => setSprintOpen(false)}
         />
       )}
+      <MemoryModal />
       <CommandPalette
         open={commandPaletteOpen}
         onOpenChange={setCommandPaletteOpen}

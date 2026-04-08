@@ -16,6 +16,7 @@ import { usePluginAction } from '@/hooks/usePluginAction'
 import { resolveIcon } from '@/lib/icons'
 import { useAppStore } from '@/stores/useAppStore'
 import { useWorkStore } from '@/stores/useWorkStore'
+import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useWorkSync } from '@/hooks/useWorkSync'
 import { api } from '@/lib/api'
 import type { SlashCommandDef } from '@/lib/types'
@@ -151,6 +152,10 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       case 'agent':
       case 'model':
         return
+      case 'memory': {
+        useLayoutStore.getState().setMemoryModalOpen(true)
+        return
+      }
       default: {
         if (!activeSessionId) return
         try {

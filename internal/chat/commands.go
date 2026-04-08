@@ -71,6 +71,7 @@ func NewCommandRegistry() *CommandRegistry {
 		{SlashCommand{Name: "agent", Description: "Switch primary agent", Category: "agent", Source: "builtin"}, nil},
 		{SlashCommand{Name: "model", Description: "Switch model", Category: "config", Source: "builtin"}, nil},
 		{SlashCommand{Name: "mode", Description: "Switch agent mode", Category: "agent", Source: "builtin"}, nil},
+		{SlashCommand{Name: "memory", Description: "Browse and manage memories", Category: "tools", Source: "builtin"}, nil},
 		{SlashCommand{Name: "help", Description: "Show available commands", Category: "help", Source: "builtin"}, r.handleHelp},
 	}
 

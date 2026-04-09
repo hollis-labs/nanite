@@ -3,8 +3,8 @@ package a2a
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -43,9 +43,9 @@ func ValidateAgentID(ctx context.Context, r AgentResolver, agentID string) error
 	if r == nil {
 		return fmt.Errorf("cannot validate agent id %q without resolver", agentID)
 	}
-	if strings.HasPrefix(agentID, "file-") {
+	if agent.IsFileBasedID(agentID) {
 		if _, err := r.Get(ctx, agentID); err != nil {
-			return fmt.Errorf("file agent not found: %s", strings.TrimPrefix(agentID, "file-"))
+			return fmt.Errorf("file agent not found: %s", agent.SlugFromFileID(agentID))
 		}
 		return nil
 	}

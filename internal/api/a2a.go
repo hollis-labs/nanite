@@ -11,10 +11,13 @@ import (
 )
 
 // a2aStatus returns the HTTP status code for an a2a.Service error:
-// 400 for validation errors, 500 for everything else.
+// 400 for validation errors, 404 for not-found, 500 for everything else.
 func a2aStatus(err error) int {
 	if errors.Is(err, a2a.ErrValidation) {
 		return http.StatusBadRequest
+	}
+	if errors.Is(err, a2a.ErrNotFound) {
+		return http.StatusNotFound
 	}
 	return http.StatusInternalServerError
 }
@@ -32,7 +35,7 @@ func (a *API) handleA2AInbox(w http.ResponseWriter, r *http.Request) {
 
 	msgs, err := a.Services.A2A.Inbox(r.Context(), sessionID, agentID, status)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusOK, msgs)
@@ -48,7 +51,7 @@ func (a *API) handleA2AThread(w http.ResponseWriter, r *http.Request) {
 
 	msgs, err := a.Services.A2A.Thread(r.Context(), threadID)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusOK, msgs)
@@ -228,7 +231,7 @@ func (a *API) handleA2ARecent(w http.ResponseWriter, r *http.Request) {
 	}
 	msgs, err := a.Services.A2A.RecentForSession(r.Context(), sessionID, limit)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusOK, msgs)

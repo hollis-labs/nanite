@@ -9,3 +9,7 @@ import "errors"
 // Wrap with fmt.Errorf("%w: details", ErrValidation) so that errors.Is
 // recovers the sentinel and error messages remain descriptive.
 var ErrValidation = errors.New("a2a: validation")
+
+// ErrNotFound indicates a requested resource (handoff, message, etc.) does
+// not exist. HTTP handlers should map this to 404.
+var ErrNotFound = errors.New("a2a: not found")

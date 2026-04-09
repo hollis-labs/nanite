@@ -168,6 +168,10 @@ func a2aAck(svc *a2asvc.Service, args []string) {
 	session := fs.String("session", "", "session id")
 	agentID := fs.String("agent", "", "agent id")
 	fs.Parse(args)
+	if *session == "" || *agentID == "" {
+		fmt.Fprintln(os.Stderr, "a2a ack: --session and --agent are required")
+		os.Exit(1)
+	}
 	if fs.NArg() < 1 {
 		fmt.Fprintf(os.Stderr, "usage: %s a2a ack --session X --agent Y <msgID>\n", brand.BinaryName)
 		os.Exit(1)
@@ -183,6 +187,10 @@ func a2aResolve(svc *a2asvc.Service, args []string) {
 	session := fs.String("session", "", "session id")
 	agentID := fs.String("agent", "", "agent id")
 	fs.Parse(args)
+	if *session == "" || *agentID == "" {
+		fmt.Fprintln(os.Stderr, "a2a resolve: --session and --agent are required")
+		os.Exit(1)
+	}
 	if fs.NArg() < 1 {
 		fmt.Fprintf(os.Stderr, "usage: %s a2a resolve --session X --agent Y <msgID>\n", brand.BinaryName)
 		os.Exit(1)

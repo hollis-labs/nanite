@@ -36,6 +36,11 @@ func (svc *Service) RequestHandoff(ctx context.Context, sessionID, fromAgentID, 
 	if requestedBy == "" {
 		return "", fmt.Errorf("%w: requested_by required", ErrValidation)
 	}
+	switch requestedBy {
+	case "departing", "incoming", "user":
+	default:
+		return "", fmt.Errorf("%w: requested_by must be one of departing|incoming|user", ErrValidation)
+	}
 
 	id := uuid.New().String()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -71,17 +76,15 @@ func (svc *Service) ApproveHandoff(ctx context.Context, handoffID string) error 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// If the handoff doesn't exist, sql.ErrNoRows propagates as a generic
-	// "read handoff" error → HTTP 500 at the API boundary. A richer error
-	// taxonomy (ErrNotFound) is deferred pending a broader sweep; the current
-	// sentinel ErrValidation only covers client-input validation.
+	// If the handoff doesn't exist, wrap sql.ErrNoRows with ErrNotFound so
+	// the API boundary can return HTTP 404 instead of a generic 500.
 	var sessionID, toAgentID, status string
 	err = tx.QueryRowContext(ctx, `
 		SELECT session_id, to_agent_id, status FROM session_handoffs WHERE id = ?
 	`, handoffID).Scan(&sessionID, &toAgentID, &status)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("handoff %s not found", handoffID)
+			return fmt.Errorf("%w: handoff %s", ErrNotFound, handoffID)
 		}
 		return fmt.Errorf("read handoff: %w", err)
 	}

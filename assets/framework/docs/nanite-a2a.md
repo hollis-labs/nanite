@@ -10,7 +10,7 @@ Messages are addressed to a `(session_id, agent_id)` pair. Agent IDs come in thr
 - **`file-<slug>`** — A deterministic ID for file-based agents discovered from `.nanite/config.yaml`.
 - **`"user"`** — The reserved sentinel for addressing the human user in a session.
 
-The `"user"` slug is reserved: you cannot create an agent with slug `"user"`.
+The `"user"` value is reserved: you cannot create an agent with slug `"user"`, and you cannot create or rely on an agent with ID `"user"` — that ID is reserved for the human user sentinel used to address the human participant in a session.
 
 ## CLI
 

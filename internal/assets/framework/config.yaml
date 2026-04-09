@@ -78,22 +78,32 @@ docs:
 # Used by agents to resolve project roots and load context.
 
 projects:
-  # Fragments Engine (monorepo)
+  # Fragments Engine (monorepo — currently just engine/; conduit, cortex, and
+  # libs have been extracted into standalone repos elsewhere in ~/Projects-apps)
   fragments-engine:
     root: ~/Projects-apps/fragments-engine
     type: monorepo
     description: Core platform monorepo
     modules:
-      engine:        { path: engine, lang: go }
-      conduit:       { path: conduit, lang: go }
-      vanta-conduit: { path: cortex, lang: go }
-      libs:          { path: libs, lang: go }
+      engine: { path: engine, lang: go }
 
-  # Monorepo modules (individual project entries for install/update tracking)
-  engine:         { root: ~/Projects-apps/fragments-engine/engine, lang: go, description: "Fragments Engine Core — task/sprint/project management, Nexus agent routing" }
-  conduit:        { root: ~/Projects-apps/fragments-engine/conduit, lang: go, description: Chat interface and conversation management }
-  vanta-conduit:  { root: ~/Projects-apps/fragments-engine/cortex, lang: go, description: "Vanta Conduit — context memory, RAG, and document storage" }
-  libs:           { root: ~/Projects-apps/fragments-engine/libs, lang: go, description: Shared libraries — MCP, OTel, plugin, toolbroker }
+  # Individual project entries (standalone repos)
+  engine:         { root: ~/Projects-apps/fragments-engine/engine, lang: go, description: "Fragments Engine Core — task/sprint/project management, agent routing" }
+  vanta-conduit:  { root: ~/Projects-apps/vanta-conduit, lang: go, description: "Vanta Conduit — context memory, RAG, and document storage" }
+
+  # Shared Go libraries monorepo (formerly fragments-engine/libs)
+  framework:
+    root: ~/Projects-apps/framework
+    type: monorepo
+    description: Shared Go libraries (MCP, OTel, plugin, toolbroker, directives, providers, queue)
+    modules:
+      go-directives: { path: libs/go-directives, lang: go }
+      go-mcp:        { path: libs/go-mcp, lang: go }
+      go-otel:       { path: libs/go-otel, lang: go }
+      go-plugin:     { path: libs/go-plugin, lang: go }
+      go-providers:  { path: libs/go-providers, lang: go }
+      go-queue:      { path: libs/go-queue, lang: go }
+      go-toolbroker: { path: libs/go-toolbroker, lang: go }
 
   # Services
   hadron:    { root: ~/Projects-apps/hadron, lang: go, description: Blueprint automation engine }

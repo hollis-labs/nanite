@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
@@ -45,7 +46,7 @@ func cmdA2A(args []string) {
 
 	s, err := store.New(dbPath)
 	if err != nil {
-		log.Fatalf("a2a: open db: %v", err)
+		log.Fatalf("a2a: open db %q: %v", dbPath, err)
 	}
 	defer s.Close()
 
@@ -79,14 +80,24 @@ func a2aSend(svc *a2asvc.Service, args []string) {
 	fs := flag.NewFlagSet("a2a send", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	to := fs.String("to", "", "to agent id (or 'user')")
-	from := fs.String("from-agent", "user", "from agent id")
+	from := fs.String("from", "user", "from agent id")
 	subject := fs.String("subject", "", "subject line")
 	body := fs.String("body", "", "message body")
 	msgType := fs.String("type", "message", "message type")
 	fs.Parse(args)
 
-	if *session == "" || *to == "" || *body == "" {
-		fmt.Fprintln(os.Stderr, "required: --session, --to, --body")
+	var missing []string
+	if *session == "" {
+		missing = append(missing, "--session")
+	}
+	if *to == "" {
+		missing = append(missing, "--to")
+	}
+	if *body == "" {
+		missing = append(missing, "--body")
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(os.Stderr, "a2a send: missing required flag(s): %s\n", strings.Join(missing, ", "))
 		os.Exit(1)
 	}
 	msg := &store.A2AMessage{
@@ -112,6 +123,19 @@ func a2aInbox(svc *a2asvc.Service, args []string) {
 	status := fs.String("status", "", "filter: unread|read|acknowledged|resolved")
 	fs.Parse(args)
 
+	if *session == "" || *agentID == "" {
+		fmt.Fprintln(os.Stderr, "a2a inbox: --session and --agent are required")
+		os.Exit(1)
+	}
+	if *status != "" {
+		switch *status {
+		case "unread", "read", "acknowledged", "resolved":
+		default:
+			fmt.Fprintf(os.Stderr, "a2a inbox: invalid --status %q (want: unread|read|acknowledged|resolved)\n", *status)
+			os.Exit(1)
+		}
+	}
+
 	inbox, err := svc.Inbox(context.Background(), *session, *agentID, *status)
 	if err != nil {
 		log.Fatalf("a2a inbox: %v", err)
@@ -125,7 +149,7 @@ func a2aInbox(svc *a2asvc.Service, args []string) {
 
 func a2aThread(svc *a2asvc.Service, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: a2a thread <threadID>")
+		fmt.Fprintf(os.Stderr, "usage: %s a2a thread <threadID>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 	messages, err := svc.Thread(context.Background(), args[0])
@@ -145,13 +169,13 @@ func a2aAck(svc *a2asvc.Service, args []string) {
 	agentID := fs.String("agent", "", "agent id")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: a2a ack --session X --agent Y <msgID>")
+		fmt.Fprintf(os.Stderr, "usage: %s a2a ack --session X --agent Y <msgID>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 	if err := svc.Ack(context.Background(), *session, *agentID, fs.Arg(0)); err != nil {
 		log.Fatalf("a2a ack: %v", err)
 	}
-	fmt.Println("acked")
+	fmt.Printf("acked: %s\n", fs.Arg(0))
 }
 
 func a2aResolve(svc *a2asvc.Service, args []string) {
@@ -160,13 +184,13 @@ func a2aResolve(svc *a2asvc.Service, args []string) {
 	agentID := fs.String("agent", "", "agent id")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: a2a resolve --session X --agent Y <msgID>")
+		fmt.Fprintf(os.Stderr, "usage: %s a2a resolve --session X --agent Y <msgID>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 	if err := svc.Resolve(context.Background(), *session, *agentID, fs.Arg(0)); err != nil {
 		log.Fatalf("a2a resolve: %v", err)
 	}
-	fmt.Println("resolved")
+	fmt.Printf("resolved: %s\n", fs.Arg(0))
 }
 
 func a2aCatchUp(svc *a2asvc.Service, args []string) {
@@ -174,6 +198,15 @@ func a2aCatchUp(svc *a2asvc.Service, args []string) {
 	session := fs.String("session", "", "session id")
 	last := fs.Int("last", 20, "number of recent messages")
 	fs.Parse(args)
+
+	if *session == "" {
+		fmt.Fprintln(os.Stderr, "a2a catch-up: --session is required")
+		os.Exit(1)
+	}
+	if *last <= 0 {
+		fmt.Fprintln(os.Stderr, "a2a catch-up: --last must be positive")
+		os.Exit(1)
+	}
 
 	messages, err := svc.RecentForSession(context.Background(), *session, *last)
 	if err != nil {
@@ -188,7 +221,7 @@ func a2aCatchUp(svc *a2asvc.Service, args []string) {
 
 func a2aHandoff(svc *a2asvc.Service, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: a2a handoff <request|approve|reject>")
+		fmt.Fprintf(os.Stderr, "usage: %s a2a handoff <request|approve|reject>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 	sub := args[0]
@@ -202,6 +235,17 @@ func a2aHandoff(svc *a2asvc.Service, args []string) {
 		reqBy := fs.String("requested-by", "user", "departing|incoming|user")
 		fs.Parse(rest)
 
+		if *session == "" || *to == "" {
+			fmt.Fprintln(os.Stderr, "a2a handoff request: --session and --to are required")
+			os.Exit(1)
+		}
+		switch *reqBy {
+		case "departing", "incoming", "user":
+		default:
+			fmt.Fprintf(os.Stderr, "a2a handoff request: invalid --requested-by %q (want: departing|incoming|user)\n", *reqBy)
+			os.Exit(1)
+		}
+
 		id, err := svc.RequestHandoff(context.Background(), *session, *from, *to, *reqBy)
 		if err != nil {
 			log.Fatalf("a2a handoff request: %v", err)
@@ -209,25 +253,25 @@ func a2aHandoff(svc *a2asvc.Service, args []string) {
 		fmt.Printf("handoff requested: %s\n", id)
 	case "approve":
 		if len(rest) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: a2a handoff approve <handoffID>")
+			fmt.Fprintf(os.Stderr, "usage: %s a2a handoff approve <handoffID>\n", brand.BinaryName)
 			os.Exit(1)
 		}
 		if err := svc.ApproveHandoff(context.Background(), rest[0]); err != nil {
 			log.Fatalf("a2a handoff approve: %v", err)
 		}
-		fmt.Println("approved")
+		fmt.Printf("approved: %s\n", rest[0])
 	case "reject":
 		fs := flag.NewFlagSet("handoff reject", flag.ExitOnError)
 		reason := fs.String("reason", "", "rejection reason")
 		fs.Parse(rest)
 		if fs.NArg() < 1 {
-			fmt.Fprintln(os.Stderr, "usage: a2a handoff reject --reason X <handoffID>")
+			fmt.Fprintf(os.Stderr, "usage: %s a2a handoff reject --reason X <handoffID>\n", brand.BinaryName)
 			os.Exit(1)
 		}
 		if err := svc.RejectHandoff(context.Background(), fs.Arg(0), *reason); err != nil {
 			log.Fatalf("a2a handoff reject: %v", err)
 		}
-		fmt.Println("rejected")
+		fmt.Printf("rejected: %s\n", fs.Arg(0))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown handoff subcommand: %s\n", sub)
 		os.Exit(1)

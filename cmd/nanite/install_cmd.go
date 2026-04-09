@@ -131,7 +131,6 @@ func cmdInstall(args []string) {
 		GlobalHome:         defaultGlobalHome(),
 		MigrateFromAgentrc: *migrate,
 		ArchiveOnly:        *archiveOnly,
-		Force:              *force,
 	}
 	report, err := svc.InstallProject(opts)
 	if err != nil {

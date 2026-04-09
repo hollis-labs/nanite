@@ -1,6 +1,6 @@
 Generate a boot prompt for the next session. Creates a focused handoff document with current state and next actions.
 
-Ask the user what the next session should focus on. Then write a boot prompt to /Users/chrispian/Projects-apps/mentat/.nanite/boot-prompt.md with:
+Ask the user what the next session should focus on. Then write a boot prompt to `.nanite/boot-prompt.md` (in the current project) with:
 - Where we left off (1-3 sentences)
 - Current state (decisions, files, changes)
 - Next actions (numbered, priority order)

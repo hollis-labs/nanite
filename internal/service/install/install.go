@@ -56,7 +56,6 @@ type InstallProjectOptions struct {
 	GlobalHome         string // defaults to ~/.nanite
 	MigrateFromAgentrc bool
 	ArchiveOnly        bool
-	Force              bool
 }
 
 // InstallProjectReport summarizes what InstallProject did.

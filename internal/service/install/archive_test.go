@@ -23,6 +23,8 @@ func TestExpandArchiveBase(t *testing.T) {
 		{"no tilde", "/tmp/foo", "/tmp/foo"},
 		{"tilde root", "~", home},
 		{"tilde slash", "~/Projects-apps/.archived", filepath.Join(home, "Projects-apps/.archived")},
+		// "~user" (other-user home) is not supported — returned as-is.
+		{"tilde user unsupported", "~otheruser/foo", "~otheruser/foo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -12,17 +12,27 @@ import (
 // ArchiveBase is the parent directory where all project archives live.
 const ArchiveBase = "~/Projects-apps/.archived"
 
-// ExpandArchiveBase expands a leading "~" in path to the user's home
-// directory. Paths without a "~" prefix are returned unchanged.
+// ExpandArchiveBase expands a leading "~" or "~/" in path to the user's
+// home directory. Paths without a tilde prefix are returned unchanged.
+// The form "~user" (another user's home) is NOT supported and is returned
+// as-is, since Nanite has no use case for it.
 func ExpandArchiveBase(path string) (string, error) {
 	if path == "" || path[0] != '~' {
+		return path, nil
+	}
+	// "~user" (no slash) is not supported — return as-is.
+	if path != "~" && path[1] != '/' {
 		return path, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
-	return filepath.Join(home, path[1:]), nil
+	if path == "~" {
+		return home, nil
+	}
+	// path starts with "~/" — strip the two leading chars before joining.
+	return filepath.Join(home, path[2:]), nil
 }
 
 // ResolveArchiveDir picks a non-colliding archive dir path for the project.

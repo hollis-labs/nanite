@@ -1,0 +1,19 @@
+{{- /* NANITE.md.tmpl — thin boot prompt for project root */ -}}
+# {{.ProjectName}}
+
+> Agent configuration for this project is managed by [Nanite](https://github.com/hollis-labs/nanite).
+> This file is owned by humans. Edit freely. Run `nanite install --project . --refresh` to pick up new framework content.
+
+## Agents
+
+See `.nanite/config.yaml` for agent definitions and `.nanite/agents/` for per-agent context files.
+
+## How to boot
+
+- **Claude Code:** Open this directory. Claude reads `CLAUDE.md` (managed by Nanite) and discovers agents from `.nanite/`.
+- **Other CLI agents:** Nanite writes a managed section into `AGENTS.md` / `GEMINI.md` / `OPENCODE.md` as applicable.
+- **Direct CLI:** `nanite serve --project .` starts the Nanite agent server for this project.
+
+## Project-specific notes
+
+<!-- Add project-specific agent guidance, conventions, or constraints here. This section is NOT managed by Nanite. -->

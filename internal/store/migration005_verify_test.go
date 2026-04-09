@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 )
 
@@ -77,5 +76,3 @@ func keys(m map[string]bool) []string {
 	return out
 }
 
-// suppress unused import
-var _ = os.DevNull

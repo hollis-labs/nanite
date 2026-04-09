@@ -11,10 +11,10 @@ import (
 )
 
 // PCCSource retrieves context from the Project Context Cache (PCC) files.
-// PCC files are read-only 6-file sets under .agentrc/pcc/global/<project>/.
+// PCC files are read-only 6-file sets under .nanite/pcc/global/<project>/.
 type PCCSource struct {
 	// BasePath is the root directory containing PCC files.
-	// Default: .agentrc/pcc/global/
+	// Default: .nanite/pcc/global/
 	BasePath string
 }
 

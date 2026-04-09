@@ -153,10 +153,10 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 
 	// 10. Validate source enum
 	validSources := map[string]bool{
-		"": true, "system": true, "seed": true, "api": true, "agentrc": true,
+		"": true, "system": true, "seed": true, "api": true, "nanite": true,
 		"crewai": true, "autogen": true, "import": true,
 		"builtin": true, "file": true, "cli": true, "project": true,
-		"user": true, "plugin": true, "claude": true,
+		"user": true, "plugin": true, "claude": true, "agentrc": true,
 	}
 	if !validSources[agent.Source] {
 		result.Errors = append(result.Errors, fmt.Sprintf("invalid agent source %q", agent.Source))

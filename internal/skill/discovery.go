@@ -9,14 +9,14 @@ import (
 
 // DiscoverOptions configures skill file discovery.
 type DiscoverOptions struct {
-	// WorkingDir is the project root for .nanite/skills/, .agentrc/skills/, .claude/skills/.
+	// WorkingDir is the project root for .nanite/skills/, .claude/skills/.
 	WorkingDir string
 
 	// PluginsDir is the root plugins directory for plugin-provided skills.
 	PluginsDir string
 }
 
-// Discover scans all 5 locations in priority order and returns parsed Definitions.
+// Discover scans all 4 locations in priority order and returns parsed Definitions.
 // First slug wins — lower-priority locations do not override higher-priority ones.
 // Missing directories are silently skipped.
 func Discover(opts DiscoverOptions) ([]*Definition, error) {
@@ -45,21 +45,14 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 		}
 	}
 
-	// Priority 3: .agentrc/skills/ (agentrc ecosystem).
-	if opts.WorkingDir != "" {
-		for _, def := range discoverDir(filepath.Join(opts.WorkingDir, ".agentrc", "skills"), "agentrc") {
-			add(def)
-		}
-	}
-
-	// Priority 4: .claude/skills/ (Claude Code ecosystem).
+	// Priority 3: .claude/skills/ (Claude Code ecosystem).
 	if opts.WorkingDir != "" {
 		for _, def := range discoverDir(filepath.Join(opts.WorkingDir, ".claude", "skills"), "claude") {
 			add(def)
 		}
 	}
 
-	// Priority 5: plugins/*/skills/ (plugin-provided).
+	// Priority 4: plugins/*/skills/ (plugin-provided).
 	if opts.PluginsDir != "" {
 		discoverPluginSkills(opts.PluginsDir, func(def *Definition) {
 			add(def)

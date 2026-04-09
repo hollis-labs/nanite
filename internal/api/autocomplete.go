@@ -79,7 +79,7 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// Skip known noise dirs but allow hidden files/dirs (e.g. .agentrc, .claude).
+		// Skip known noise dirs but allow hidden files/dirs (e.g. .nanite, .claude).
 		base := info.Name()
 		if info.IsDir() && skipDirs[base] {
 			return filepath.SkipDir

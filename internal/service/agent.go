@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -30,14 +32,20 @@ const defaultFallbackAgent = "file-default"
 // agent nor the default agent ID can be found.
 const defaultFallbackSlug = "default"
 
+// OverrideReader loads session-level config overrides.
+type OverrideReader interface {
+	GetSessionOverrides(sessionID string) (string, error)
+}
+
 // agentServiceImpl implements AgentService backed by file-based definitions
 // (primary) with DB fallback for user-created agents.
 type agentServiceImpl struct {
-	agents   AgentReader
-	writers  AgentWriter
-	settings SettingsStore
-	events   EventEmitter
-	fileDefs []*agent.Definition // file-based agent definitions, priority-ordered
+	agents    AgentReader
+	writers   AgentWriter
+	settings  SettingsStore
+	events    EventEmitter
+	fileDefs  []*agent.Definition // file-based agent definitions, priority-ordered
+	overrides OverrideReader
 }
 
 // AgentServiceConfig holds dependencies for constructing an AgentService.
@@ -47,16 +55,18 @@ type AgentServiceConfig struct {
 	Settings   SettingsStore
 	Events     EventEmitter
 	FileAgents []*agent.Definition // from agent.Discover() + builtin
+	Overrides  OverrideReader
 }
 
 // NewAgentService creates an AgentService from its required dependencies.
 func NewAgentService(cfg AgentServiceConfig) AgentService {
 	return &agentServiceImpl{
-		agents:   cfg.Agents,
-		writers:  cfg.Writers,
-		settings: cfg.Settings,
-		events:   cfg.Events,
-		fileDefs: cfg.FileAgents,
+		agents:    cfg.Agents,
+		writers:   cfg.Writers,
+		settings:  cfg.Settings,
+		events:    cfg.Events,
+		fileDefs:  cfg.FileAgents,
+		overrides: cfg.Overrides,
 	}
 }
 
@@ -149,6 +159,27 @@ func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID stri
 		resolved, err = s.GetBySlug(ctx, defaultFallbackSlug)
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
+		}
+	}
+
+	// Apply session-level overrides (model, provider) from the override cascade.
+	if s.overrides != nil {
+		overridesJSON, err := s.overrides.GetSessionOverrides(sessionID)
+		if err == nil && overridesJSON != "{}" {
+			var sessionOvr override.OverrideConfig
+			if json.Unmarshal([]byte(overridesJSON), &sessionOvr) == nil {
+				base := override.OverrideConfig{
+					Model:    resolved.DefaultModel,
+					Provider: resolved.DefaultProvider,
+				}
+				effective := override.Resolve(base, nil, &sessionOvr)
+				if effective.Model != "" {
+					resolved.DefaultModel = effective.Model
+				}
+				if effective.Provider != "" {
+					resolved.DefaultProvider = effective.Provider
+				}
+			}
 		}
 	}
 

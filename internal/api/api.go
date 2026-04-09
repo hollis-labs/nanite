@@ -5,16 +5,11 @@ import (
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/service"
-	"github.com/hollis-labs/nexus/messaging"
 )
 
 // API holds dependencies for HTTP handlers.
 type API struct {
 	Services *service.Container
-
-	// NexusMsg is the Postgres-backed A2A messaging store.
-	// nil = fall back to SQLite via Services.Store.
-	NexusMsg messaging.Store
 }
 
 // New creates a new API instance from a service container.

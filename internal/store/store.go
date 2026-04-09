@@ -102,6 +102,11 @@ func (s *Store) migrate() error {
 				if strings.Contains(err.Error(), "duplicate column") {
 					continue
 				}
+				// SQLite ALTER TABLE DROP COLUMN fails with "no such column"
+				// if the column was already dropped; treat as idempotent.
+				if strings.Contains(err.Error(), "no such column") {
+					continue
+				}
 				return fmt.Errorf("exec migration statement: %w\nSQL: %s", err, stmt)
 			}
 		}

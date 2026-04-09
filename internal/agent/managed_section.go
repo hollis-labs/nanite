@@ -38,9 +38,7 @@ func WriteManagedSection(path string, content string) error {
 	existing := string(data)
 
 	startIdx := strings.Index(existing, managedStart)
-	endIdx := strings.Index(existing, managedEnd)
-
-	if startIdx == -1 || endIdx == -1 {
+	if startIdx == -1 {
 		// No existing markers — append, ensuring a separating newline.
 		sep := ""
 		if len(existing) > 0 && !strings.HasSuffix(existing, "\n") {
@@ -48,6 +46,18 @@ func WriteManagedSection(path string, content string) error {
 		}
 		return os.WriteFile(path, []byte(existing+sep+block), 0o644)
 	}
+
+	// Find managedEnd *after* managedStart to ensure correct pairing.
+	endIdx := strings.Index(existing[startIdx:], managedEnd)
+	if endIdx == -1 {
+		// Start marker without end marker — append fresh block.
+		sep := ""
+		if len(existing) > 0 && !strings.HasSuffix(existing, "\n") {
+			sep = "\n"
+		}
+		return os.WriteFile(path, []byte(existing+sep+block), 0o644)
+	}
+	endIdx += startIdx // convert to absolute index
 
 	// Replace everything from managedStart through managedEnd (inclusive).
 	before := existing[:startIdx]
@@ -79,13 +89,19 @@ func ReadManagedSection(path string) (string, error) {
 	text := string(data)
 
 	startIdx := strings.Index(text, managedStart)
-	endIdx := strings.Index(text, managedEnd)
-	if startIdx == -1 || endIdx == -1 {
+	if startIdx == -1 {
+		return "", nil
+	}
+
+	// Find managedEnd after managedStart to ensure correct pairing.
+	contentStart := startIdx + len(managedStart)
+	relEnd := strings.Index(text[contentStart:], managedEnd)
+	if relEnd == -1 {
 		return "", nil
 	}
 
 	// Inner content: everything after managedStart line up to managedEnd.
-	inner := text[startIdx+len(managedStart) : endIdx]
+	inner := text[contentStart : contentStart+relEnd]
 
 	// Strip the notice line if present.
 	inner = strings.ReplaceAll(inner, managedNotice, "")

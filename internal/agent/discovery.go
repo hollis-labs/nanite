@@ -70,8 +70,9 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 	}
 
 	// Priority 5+: Adapter-discovered agents.
-	// Replaces hardcoded .nanite/agents/ and .claude/agents/ tiers — those
-	// are now handled by the nanite-native and claude adapters respectively.
+	// Replaces the former hardcoded .agentrc/agents/ and .claude/agents/ tiers
+	// (priorities 5-6). Native .nanite/agents/ discovery (tiers 2-3 above)
+	// remains in core — adapters handle external ecosystem formats.
 	if opts.Adapters != nil {
 		adapterDefs, err := opts.Adapters.DiscoverAll(opts.WorkingDir)
 		if err != nil {

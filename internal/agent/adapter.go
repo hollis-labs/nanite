@@ -85,13 +85,18 @@ func NewAdapterRegistry() *AdapterRegistry {
 }
 
 // Register adds an adapter and re-sorts the internal list by priority (ascending).
+// Ties are broken by adapter name to keep ordering deterministic.
 func (r *AdapterRegistry) Register(a CLIAgentAdapter) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.adapters = append(r.adapters, a)
 	sort.Slice(r.adapters, func(i, j int) bool {
-		return r.adapters[i].Priority() < r.adapters[j].Priority()
+		pi, pj := r.adapters[i].Priority(), r.adapters[j].Priority()
+		if pi != pj {
+			return pi < pj
+		}
+		return r.adapters[i].Name() < r.adapters[j].Name()
 	})
 }
 
@@ -107,14 +112,15 @@ func (r *AdapterRegistry) Adapters() []CLIAgentAdapter {
 
 // DiscoverAll iterates all registered adapters in priority order and returns
 // deduplicated definitions. The first adapter to define a slug wins.
+// The adapter slice is copied before iteration to avoid holding the lock
+// during potentially slow filesystem I/O.
 func (r *AdapterRegistry) DiscoverAll(projectDir string) ([]Definition, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	adapters := r.Adapters() // copy under lock, then release
 
 	seen := make(map[string]bool)
 	var defs []Definition
 
-	for _, a := range r.adapters {
+	for _, a := range adapters {
 		found, err := a.Discover(projectDir)
 		if err != nil {
 			return nil, fmt.Errorf("adapter %s: %w", a.Name(), err)
@@ -132,11 +138,12 @@ func (r *AdapterRegistry) DiscoverAll(projectDir string) ([]Definition, error) {
 }
 
 // PopulateAllSandboxes calls PopulateSandbox on every registered adapter.
+// The adapter slice is copied before iteration to avoid holding the lock
+// during I/O.
 func (r *AdapterRegistry) PopulateAllSandboxes(sandboxDir string, agent store.AgentProfile, session SandboxContext) error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	adapters := r.Adapters()
 
-	for _, a := range r.adapters {
+	for _, a := range adapters {
 		if err := a.PopulateSandbox(sandboxDir, agent, session); err != nil {
 			return fmt.Errorf("adapter %s: populate sandbox: %w", a.Name(), err)
 		}
@@ -145,11 +152,12 @@ func (r *AdapterRegistry) PopulateAllSandboxes(sandboxDir string, agent store.Ag
 }
 
 // SyncAllProjectRoots calls SyncProjectRoot on every registered adapter.
+// The adapter slice is copied before iteration to avoid holding the lock
+// during I/O.
 func (r *AdapterRegistry) SyncAllProjectRoots(projectDir string, agents []store.AgentProfile) error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	adapters := r.Adapters()
 
-	for _, a := range r.adapters {
+	for _, a := range adapters {
 		if err := a.SyncProjectRoot(projectDir, agents); err != nil {
 			return fmt.Errorf("adapter %s: sync project root: %w", a.Name(), err)
 		}

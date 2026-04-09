@@ -61,4 +61,20 @@ func TestState_MarkPhaseComplete(t *testing.T) {
 	if !contains {
 		t.Error("CompletedPhases missing PhaseScaffoldNaniteDir")
 	}
+
+	// Idempotency: calling MarkPhaseComplete a second time with the same phase
+	// should not duplicate the entry in CompletedPhases.
+	s.MarkPhaseComplete(PhaseScaffoldNaniteDir)
+	if len(s.CompletedPhases) != 1 {
+		t.Errorf("CompletedPhases len after duplicate call = %d, want 1", len(s.CompletedPhases))
+	}
+
+	// A different phase should append.
+	s.MarkPhaseComplete(PhaseClaudeSync)
+	if len(s.CompletedPhases) != 2 {
+		t.Errorf("CompletedPhases len after second distinct phase = %d, want 2", len(s.CompletedPhases))
+	}
+	if s.Phase != PhaseClaudeSync {
+		t.Errorf("Phase = %q, want %q", s.Phase, PhaseClaudeSync)
+	}
 }

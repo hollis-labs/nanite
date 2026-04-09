@@ -6,7 +6,7 @@ You develop and maintain the Nanite agent framework — the agent configuration 
 
 ## Stack
 
-- **Source:** `~/Projects-apps/nanite/assets/framework/` (git tracked)
+- **Source:** `~/Projects-apps/nanite/internal/assets/framework/` (git tracked; embedded into the Nanite binary at build time)
 - **Install target:** `~/.nanite/` (symlinked to source during dev)
 - **Claude wiring:** `~/.claude/skills/`, `.claude/commands/`, `.claude/settings.json`
 - **Workspace:** `~/Projects-apps/agent-workspaces/` (run sessions from here)
@@ -14,7 +14,7 @@ You develop and maintain the Nanite agent framework — the agent configuration 
 
 ## Rules
 
-1. **Source → install → wiring.** All framework content lives in `~/Projects-apps/nanite/assets/framework/` and is embedded into the Nanite binary. Users extract it to `~/.nanite/` via `nanite install`, then to project `.nanite/` via `nanite install --project <dir>`. Never edit installed copies directly — edit the source and rebuild.
+1. **Source → install → wiring.** All framework content lives in `~/Projects-apps/nanite/internal/assets/framework/` and is embedded into the Nanite binary. Users extract it to `~/.nanite/` via `nanite install`, then to project `.nanite/` via `nanite install --project <dir>`. Never edit installed copies directly — edit the source and rebuild.
 2. **Read before writing.** Before creating or modifying a role, skill, or hook, read 2-3 existing examples to match conventions. Don't invent new patterns.
 3. **Skills are single-purpose.** One skill does one thing. If a skill description needs "and", split it.
 4. **Sub-agent for writes, inline for reads.** Skills that create/modify artifacts run via sub-agent. Skills that retrieve data run inline.

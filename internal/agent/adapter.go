@@ -37,7 +37,7 @@ type AgentComposer interface {
 
 	// ComposePrompt assembles a system prompt from the given agent config,
 	// combining roles, skills, and project context.
-	ComposePrompt(agentConfig interface{}, projectDir string) (string, error)
+	ComposePrompt(agentConfig any, projectDir string) (string, error)
 
 	// ListRoles returns available roles known to this adapter.
 	ListRoles() ([]RoleInfo, error)
@@ -53,7 +53,7 @@ type SandboxContext struct {
 	WorkingDir string
 	DBPath     string
 	MCPServers []string
-	Overrides  map[string]interface{}
+	Overrides  map[string]any
 }
 
 // RoleInfo describes a role available within an adapter.

@@ -71,11 +71,7 @@ func (svc *Service) ApproveHandoff(ctx context.Context, handoffID string) error 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var (
-		sessionID  string
-		toAgentID  string
-		status     string
-	)
+	var sessionID, toAgentID, status string
 	err = tx.QueryRowContext(ctx, `
 		SELECT session_id, to_agent_id, status FROM session_handoffs WHERE id = ?
 	`, handoffID).Scan(&sessionID, &toAgentID, &status)

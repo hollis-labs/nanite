@@ -43,12 +43,26 @@ func TestHandoff_FullFlow(t *testing.T) {
 		t.Fatalf("ApproveHandoff: %v", err)
 	}
 
-	primary, err := s.GetSessionPrimaryAgent(sess.ID)
+	// Stronger assertion: verify exactly one session_agents row is primary
+	// after the handoff, and that it's file-frontend. This catches the case
+	// where the "clear primary" UPDATE silently fails to demote the old
+	// primary — GetSessionPrimaryAgent alone can't see that bug because it
+	// would still return one of the two matching rows.
+	agents, err := s.ListSessionAgents(sess.ID)
 	if err != nil {
-		t.Fatalf("GetSessionPrimaryAgent: %v", err)
+		t.Fatalf("ListSessionAgents: %v", err)
 	}
-	if primary.AgentID != "file-frontend" {
-		t.Errorf("primary = %q, want file-frontend", primary.AgentID)
+	primaryCount := 0
+	for _, a := range agents {
+		if a.IsPrimary {
+			primaryCount++
+			if a.AgentID != "file-frontend" {
+				t.Errorf("primary = %q, want file-frontend", a.AgentID)
+			}
+		}
+	}
+	if primaryCount != 1 {
+		t.Errorf("expected exactly 1 primary agent, got %d", primaryCount)
 	}
 }
 
@@ -123,5 +137,35 @@ func TestHandoff_ApproveRejected_Errors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rejected") {
 		t.Errorf("expected error to mention rejected, got: %v", err)
+	}
+}
+
+func TestHandoff_OrphanClaim(t *testing.T) {
+	// Orphan-claim flow: a session with no primary hand off "from nobody"
+	// to a new primary. The empty fromAgentID short-circuits the from-side
+	// validation and gets stored as SQL NULL.
+	svc, s := newTestService(t, "file-frontend")
+	sess := newHandoffTestSession(t, s)
+	// NOTE: deliberately no EnsureSessionAgent pre-seed — the session has no current primary.
+
+	handoffID, err := svc.RequestHandoff(context.Background(), sess.ID, "", "file-frontend", "user")
+	if err != nil {
+		t.Fatalf("RequestHandoff: %v", err)
+	}
+	if handoffID == "" {
+		t.Fatal("empty handoff id")
+	}
+
+	if err := svc.ApproveHandoff(context.Background(), handoffID); err != nil {
+		t.Fatalf("ApproveHandoff: %v", err)
+	}
+
+	// Verify frontend is now primary.
+	primary, err := s.GetSessionPrimaryAgent(sess.ID)
+	if err != nil {
+		t.Fatalf("GetSessionPrimaryAgent: %v", err)
+	}
+	if primary.AgentID != "file-frontend" {
+		t.Errorf("primary = %q, want file-frontend", primary.AgentID)
 	}
 }

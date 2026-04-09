@@ -339,7 +339,7 @@ func selfToolDefinitions() []Tool {
 		// handler, which is deferred to a follow-up task.
 		{
 			Name:        "nanite_a2a_send",
-			Description: "Send an A2A message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session.",
+			Description: "Send an A2A message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session. Set reply_to to the parent message ID to continue an existing thread.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -350,6 +350,7 @@ func selfToolDefinitions() []Tool {
 					"subject":         map[string]any{"type": "string"},
 					"body":            map[string]any{"type": "string"},
 					"type":            map[string]any{"type": "string", "enum": []string{"message", "help_request", "directive", "status_update", "handoff"}},
+					"reply_to":        map[string]any{"type": "string", "description": "Parent message ID to continue an existing thread."},
 				},
 				"required": []string{"from_session_id", "from_agent_id", "to_session_id", "to_agent_id", "body"},
 			},

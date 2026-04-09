@@ -8,7 +8,7 @@ Add shadcn MCP server and shadcn-ui skill to a project's frontend agent. The sha
 
 ## Prerequisites
 
-- Project must have agentrc installed (`.nanite/config.yaml` exists)
+- Project must have nanite installed (`.nanite/config.yaml` exists)
 - Project must have a frontend UI directory with `components.json` (shadcn initialized)
 - A frontend agent must be defined in `.nanite/config.yaml`
 - The vendor skill must exist at `~/.nanite/vendor/shadcn-ui/`

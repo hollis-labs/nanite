@@ -1,5 +1,5 @@
-# agentrc global config
-version: 2.2.0
+# nanite global framework config
+version: 2.3.0
 
 # ─── Roles ───────────────────────────────────────────────
 # Domain roles define *what kind of work* (backend, frontend, reviewer)

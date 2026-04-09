@@ -1,6 +1,6 @@
-# agentrc Manage (:nanite-agent-manage)
+# Nanite Agent Manage (:nanite-agent-manage)
 
-Create roles, project context docs, skills, and agent definitions for the agentrc system. Runs via sub-agent.
+Create roles, project context docs, skills, and agent definitions for the Nanite agent framework. Runs via sub-agent.
 
 ## When to use
 
@@ -27,7 +27,7 @@ This skill MUST be executed via the Agent tool (subagent) to keep the main conte
 **Procedure:** Launch a sub-agent with:
 
 ```
-You are building a new agent role definition for the agentrc system.
+You are building a new agent role definition for the Nanite agent framework.
 
 ## Role to create
 - Name: {NAME}
@@ -41,7 +41,7 @@ You are building a new agent role definition for the agentrc system.
    - Stack example: ~/.nanite/roles/stack/go.md (language conventions and tooling)
    - Domain example: ~/.nanite/roles/domain/code-review.md (non-coding domain role)
 
-2. Read the guide: ~/.nanite/docs/agent-setup-guide.md — section "Creating a New Role"
+2. Read the guide: ~/.nanite/docs/nanite-setup-guide.md — section "Creating a New Role"
 
 3. Write the role file to: ~/.nanite/roles/{TYPE}/{NAME}.md
 
@@ -108,7 +108,7 @@ You are building a new agent role definition for the agentrc system.
 **Procedure:** Launch a sub-agent with:
 
 ```
-You are auditing a project's codebase to generate a project-level context doc for the agentrc system.
+You are auditing a project's codebase to generate a project-level context doc for the Nanite agent framework.
 
 ## Target
 - Project: {PROJECT}
@@ -122,7 +122,7 @@ You are auditing a project's codebase to generate a project-level context doc fo
    - For backend: ~/.nanite/templates/backend-project.md
    - For other domains: use the closest template as structural reference, adapt sections
 
-2. Read the setup guide: ~/.nanite/docs/agent-setup-guide.md — section "Creating Project-Level Context"
+2. Read the setup guide: ~/.nanite/docs/nanite-setup-guide.md — section "Creating Project-Level Context"
 
 3. Explore the project codebase thoroughly:
    - Find the directory structure
@@ -171,7 +171,7 @@ You are auditing a project's codebase to generate a project-level context doc fo
 **Procedure:** Launch a sub-agent with:
 
 ```
-You are building a new skill for the agentrc system.
+You are building a new skill for the Nanite agent framework.
 
 ## Skill to create
 - Name: {NAME}
@@ -184,7 +184,7 @@ You are building a new skill for the agentrc system.
    - ~/.nanite/skills/adr.md (good example: concise, single-purpose)
    - ~/.nanite/skills/escalate.md (good example: minimal, focused)
 
-2. Read the setup guide: ~/.nanite/docs/agent-setup-guide.md — section "Skill Tiers"
+2. Read the setup guide: ~/.nanite/docs/nanite-setup-guide.md — section "Skill Tiers"
 
 3. Determine the skill tier:
    - Universal (useful everywhere) → write to ~/.nanite/skills/{NAME}.md
@@ -244,7 +244,7 @@ You are building a new skill for the agentrc system.
 **Procedure:** Launch a sub-agent with:
 
 ```
-You are creating a new agent definition for the agentrc system. An agent combines roles, skills, and project-specific context into a named profile that can be activated with "Boot <slug>".
+You are creating a new agent definition for the Nanite agent framework. An agent combines roles, skills, and project-specific context into a named profile that can be activated with "Boot <slug>".
 
 ## Agent to create
 - Slug: {SLUG}

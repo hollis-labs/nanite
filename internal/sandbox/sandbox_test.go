@@ -3,10 +3,12 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
+	agentpkg "github.com/hollis-labs/nanite/internal/agent"
+	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
 	"github.com/hollis-labs/nanite/internal/store"
+	"strings"
 )
 
 func TestDir_CreatesDirectory(t *testing.T) {
@@ -59,6 +61,13 @@ func TestDir_Idempotent(t *testing.T) {
 	}
 }
 
+func newTestRegistry() *agentpkg.AdapterRegistry {
+	reg := agentpkg.NewAdapterRegistry()
+	p := adapterclaude.New()
+	reg.Register(p.Adapter())
+	return reg
+}
+
 func TestPopulate_CreatesAllFiles(t *testing.T) {
 	dir := t.TempDir()
 	subDir := filepath.Join(dir, sandboxSubDir)
@@ -71,12 +80,12 @@ func TestPopulate_CreatesAllFiles(t *testing.T) {
 		CanExecute:  true,
 		MCPServers:  `["engine","conduit"]`,
 	}
-	mode := &store.AgentMode{
-		Name:           "architect",
-		PromptAddendum: "Focus on system design and architecture.",
-	}
 
-	if err := Populate(dir, agent, mode, PopulateOpts{SessionID: "test-sess", DBPath: "/tmp/test.db"}); err != nil {
+	if err := Populate(dir, agent, nil, PopulateOpts{
+		SessionID: "test-sess",
+		DBPath:    "/tmp/test.db",
+		Adapters:  newTestRegistry(),
+	}); err != nil {
 		t.Fatalf("Populate() error: %v", err)
 	}
 
@@ -107,8 +116,6 @@ func TestPopulate_CreatesAllFiles(t *testing.T) {
 	assertContains(t, agentMD, "# Agent: Test Agent", "agent header")
 	assertContains(t, agentMD, "**ID:** test-001", "agent ID")
 	assertContains(t, agentMD, "**Can Execute:** true", "can_execute flag")
-	assertContains(t, agentMD, "## Current Mode: architect", "mode name")
-	assertContains(t, agentMD, "Focus on system design", "mode addendum")
 	assertContains(t, agentMD, "- engine", "MCP server")
 	assertContains(t, agentMD, "- conduit", "MCP server")
 
@@ -131,7 +138,7 @@ func TestPopulate_EmptyDescription(t *testing.T) {
 		MCPServers:  "[]",
 	}
 
-	if err := Populate(dir, agent, &store.AgentMode{}, PopulateOpts{}); err != nil {
+	if err := Populate(dir, agent, nil, PopulateOpts{Adapters: newTestRegistry()}); err != nil {
 		t.Fatalf("Populate() error: %v", err)
 	}
 
@@ -152,7 +159,7 @@ func TestPopulate_NoMCPJsonWithoutDBPath(t *testing.T) {
 		MCPServers: "[]",
 	}
 
-	if err := Populate(dir, agent, &store.AgentMode{}, PopulateOpts{}); err != nil {
+	if err := Populate(dir, agent, nil, PopulateOpts{Adapters: newTestRegistry()}); err != nil {
 		t.Fatalf("Populate() error: %v", err)
 	}
 
@@ -162,23 +169,24 @@ func TestPopulate_NoMCPJsonWithoutDBPath(t *testing.T) {
 	}
 }
 
-func TestPopulate_NilMode(t *testing.T) {
+func TestPopulate_NilAdapters(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, sandboxSubDir), 0755)
 
 	agent := &store.AgentProfile{
 		ID:         "test-002",
-		Name:       "No Mode Agent",
+		Name:       "No Adapter Agent",
 		MCPServers: "[]",
 	}
 
+	// With nil Adapters, Populate should succeed (no-op beyond dir creation).
 	if err := Populate(dir, agent, nil, PopulateOpts{}); err != nil {
 		t.Fatalf("Populate() error: %v", err)
 	}
 
-	agentMD := readFile(t, filepath.Join(dir, sandboxSubDir, "agent-context.md"))
-	if strings.Contains(agentMD, "## Current Mode") {
-		t.Error("should not include mode section when mode is nil")
+	// No CLAUDE.md should be written when no adapters are registered.
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err == nil {
+		t.Error("expected no CLAUDE.md when Adapters is nil")
 	}
 }
 

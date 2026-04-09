@@ -86,24 +86,6 @@ func TestInstallProject_RefusesWhenBothAgentrcAndNanitePresent(t *testing.T) {
 	}
 }
 
-func TestInstallProject_AdoptPathNotImplementedYet(t *testing.T) {
-	home := setupFakeHome(t)
-	project := t.TempDir()
-	os.MkdirAll(filepath.Join(project, ".nanite"), 0o755)
-
-	svc := New()
-	_, err := svc.InstallProject(InstallProjectOptions{
-		ProjectDir: project,
-		GlobalHome: filepath.Join(home, ".nanite"),
-	})
-	if err == nil {
-		t.Error("expected error from not-yet-implemented adopt path")
-	}
-	if !strings.Contains(err.Error(), "Task 9") && !strings.Contains(err.Error(), "adopt") {
-		t.Errorf("error should mention adopt or Task 9: %v", err)
-	}
-}
-
 func TestInstallProject_MigrateFromAgentrc(t *testing.T) {
 	home := setupFakeHome(t)
 	project := t.TempDir()
@@ -215,5 +197,108 @@ func TestInstallProject_ArchiveOnly(t *testing.T) {
 	// NANITE.md NOT created
 	if _, err := os.Stat(filepath.Join(project, "NANITE.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Error("NANITE.md should not be scaffolded in archive-only mode")
+	}
+}
+
+func TestInstallProject_AdoptExisting(t *testing.T) {
+	home := setupFakeHome(t)
+	project := t.TempDir()
+
+	// Pre-create .nanite/ as if PR #11 had done a manual rename: config.yaml +
+	// agents/ exist, but no symlinks, no NANITE.md, no CLAUDE.md managed section.
+	mkFile := func(p, c string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkFile(filepath.Join(project, ".nanite", "config.yaml"), "nanite_version: 2.3.0\nagents: {}\n")
+	mkFile(filepath.Join(project, ".nanite", "agents", "backend.md"), "# Backend\n")
+	mkFile(filepath.Join(project, "CLAUDE.md"), "# Project\n\nUser content.\n")
+
+	svc := New()
+	report, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: project,
+		GlobalHome: filepath.Join(home, ".nanite"),
+	})
+	if err != nil {
+		t.Fatalf("InstallProject: %v", err)
+	}
+	if !report.Adopted {
+		t.Error("expected Adopted=true")
+	}
+
+	// Symlinks should now exist.
+	for _, sub := range []string{"roles", "skills", "commands"} {
+		link := filepath.Join(project, ".nanite", sub)
+		info, err := os.Lstat(link)
+		if err != nil {
+			t.Errorf("%s symlink missing: %v", sub, err)
+			continue
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s is not a symlink", sub)
+		}
+	}
+	// NANITE.md scaffolded.
+	if _, err := os.Stat(filepath.Join(project, "NANITE.md")); err != nil {
+		t.Errorf("NANITE.md missing: %v", err)
+	}
+	// CLAUDE.md has managed section and preserves user content.
+	claude, _ := os.ReadFile(filepath.Join(project, "CLAUDE.md"))
+	claudeStr := string(claude)
+	if !strings.Contains(claudeStr, "<!-- nanite:start -->") {
+		t.Errorf("CLAUDE.md missing managed section: %q", claude)
+	}
+	if !strings.Contains(claudeStr, "User content.") {
+		t.Errorf("user content lost: %q", claude)
+	}
+	// Existing config.yaml and agents/backend.md preserved verbatim.
+	cfg, _ := os.ReadFile(filepath.Join(project, ".nanite", "config.yaml"))
+	if string(cfg) != "nanite_version: 2.3.0\nagents: {}\n" {
+		t.Errorf("config.yaml modified: %q", cfg)
+	}
+	data, _ := os.ReadFile(filepath.Join(project, ".nanite", "agents", "backend.md"))
+	if string(data) != "# Backend\n" {
+		t.Errorf("existing agents content modified: %q", data)
+	}
+}
+
+func TestInstallProject_AdoptExisting_Idempotent(t *testing.T) {
+	home := setupFakeHome(t)
+	project := t.TempDir()
+
+	os.MkdirAll(filepath.Join(project, ".nanite"), 0o755)
+	os.WriteFile(filepath.Join(project, ".nanite", "config.yaml"), []byte("nanite_version: 2.3.0\nagents: {}\n"), 0o644)
+
+	svc := New()
+	// First adopt.
+	if _, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: project,
+		GlobalHome: filepath.Join(home, ".nanite"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := os.ReadFile(filepath.Join(project, "CLAUDE.md"))
+	firstNanite, _ := os.ReadFile(filepath.Join(project, "NANITE.md"))
+
+	// Second adopt.
+	if _, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: project,
+		GlobalHome: filepath.Join(home, ".nanite"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := os.ReadFile(filepath.Join(project, "CLAUDE.md"))
+	secondNanite, _ := os.ReadFile(filepath.Join(project, "NANITE.md"))
+
+	if string(first) != string(second) {
+		t.Errorf("CLAUDE.md not idempotent:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+	if string(firstNanite) != string(secondNanite) {
+		t.Errorf("NANITE.md not idempotent:\nfirst:\n%s\nsecond:\n%s", firstNanite, secondNanite)
 	}
 }

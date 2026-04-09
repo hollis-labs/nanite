@@ -114,7 +114,7 @@ func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectRep
 	}
 
 	if hasNaniteDir {
-		return nil, errors.New("adopt path not yet implemented (Task 9): refusing to modify existing .nanite/ directory")
+		return s.adoptExisting(projectDir, globalHome)
 	}
 
 	return s.freshScaffold(projectDir, globalHome)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	feotel "github.com/hollis-labs/otel"
+	"gopkg.in/yaml.v3"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -73,8 +74,6 @@ func cmdServe(args []string) {
 		log.Printf("config loaded — project: %s, role: %s, root: %s", name, cfg.Role, cfg.ProjectRoot())
 	}
 
-
-
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
 	dbPath := fs.String("db", "./"+brand.DefaultDBName, "SQLite database path")
@@ -107,112 +106,21 @@ func cmdServe(args []string) {
 	if err := s.SeedBuiltinTemplates(); err != nil {
 		log.Fatalf("failed to seed templates: %v", err)
 	}
-if err := s.SeedBuiltinPromptTemplates(); err != nil {
+	if err := s.SeedBuiltinPromptTemplates(); err != nil {
 		log.Fatalf("failed to seed prompt templates: %v", err)
 	}
 	if err := s.SeedBuiltinModes(); err != nil {
 		log.Fatalf("failed to seed modes: %v", err)
 	}
 
-	// Set up provider registry.
-	// Key resolution: OS keychain → environment variable → skip.
-	registry := provider.NewRegistry()
-
-	// resolveKey reads the API key from the OS keychain only.
-	resolveKey := func(providerID string) string {
-		return secrets.Get(secrets.ProviderKeyName(providerID))
+	// Load core envelope types from manifest.
+	if coreTypes := loadEnvelopeManifest("config/envelopes.yaml"); len(coreTypes) > 0 {
+		chat.InitCoreTypes(coreTypes)
+		log.Printf("envelope manifest: loaded %d core type(s)", len(coreTypes))
 	}
 
-	// API providers: register if a key is available from keychain or env.
-	type apiProvSpec struct {
-		name, provID string
-		create       func() provider.Provider
-		setKey       func(provider.Provider, string)
-	}
-	apiProviders := []apiProvSpec{
-		{"anthropic", "anthropic-001",
-			func() provider.Provider { return provider.NewAnthropic() },
-			func(p provider.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
-		{"openai", "openai-001",
-			func() provider.Provider { return provider.NewOpenAI() },
-			func(p provider.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
-		{"gemini", "gemini-api-001",
-			func() provider.Provider { return provider.NewGemini() },
-			func(p provider.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
-		{"mistral", "mistral-001",
-			func() provider.Provider { return provider.NewMistral() },
-			func(p provider.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
-		{"openrouter", "openrouter-001",
-			func() provider.Provider { return provider.NewOpenRouter() },
-			func(p provider.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
-		{"openzen", "openzen-001",
-			func() provider.Provider { return provider.NewOpenZen() },
-			func(p provider.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
-	}
-
-	var registeredAPI, missingAPI []string
-	for _, spec := range apiProviders {
-		key := resolveKey(spec.provID)
-		if key != "" {
-			p := spec.create()
-			spec.setKey(p, key)
-			registry.Register(spec.name, p)
-			log.Printf("%s provider registered (key from keychain)", spec.name)
-			registeredAPI = append(registeredAPI, spec.name)
-		} else {
-			missingAPI = append(missingAPI, spec.name)
-		}
-	}
-
-	// Azure OpenAI — needs both key and endpoint.
-	azureKey := resolveKey("azure-openai-001")
-	if azureKey != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
-		p := provider.NewAzureOpenAI()
-		p.SetAPIKey(azureKey)
-		registry.Register("azure-openai", p)
-		log.Println("azure-openai provider registered")
-		registeredAPI = append(registeredAPI, "azure-openai")
-	}
-
-	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
-		log.Println("╔══════════════════════════════════════════════════════════════╗")
-		log.Println("║  WARNING: No API providers configured — chat will not work! ║")
-		log.Println("║  Set API keys in Settings → Providers or via environment.   ║")
-		log.Println("╚══════════════════════════════════════════════════════════════╝")
-	}
-
-	// Always register Ollama — it requires no API key (local service).
-	registry.Register("ollama", provider.NewOllama())
-	log.Println("ollama provider registered (default host: http://localhost:11434)")
-
-	// Register CLI adapters — PTY (unix) and subprocess (all platforms).
-	cliAdapters := []provider.CLIAdapter{
-		provider.NewClaudeAdapter(),
-		provider.NewCodexAdapter(),
-		provider.NewGeminiAdapter(),
-		provider.NewCopilotAdapter(),
-		provider.NewAiderAdapter(),
-		provider.NewJunieAdapter(),
-		provider.NewKiroAdapter(),
-		provider.NewQwenAdapter(),
-	}
-	for _, adapter := range cliAdapters {
-		if path, ok := adapter.Detect(); ok {
-			// PTY bridge (unix only, higher fidelity).
-			ptyName := "pty-" + adapter.Name()
-			registry.Register(ptyName, provider.NewPTYBridgeWithAdapter(adapter, path))
-			log.Printf("pty provider registered: %s (%s)", ptyName, path)
-
-			// Subprocess bridge (all platforms, pipe-based fallback).
-			subName := "sub-" + adapter.Name()
-			registry.Register(subName, provider.NewSubprocessBridge(adapter, path))
-			log.Printf("subprocess provider registered: %s (%s)", subName, path)
-		}
-	}
-	// Backwards-compat alias: "pty" → Claude adapter (if available).
-	if ptyBridge := provider.NewPTYBridge(); ptyBridge != nil {
-		registry.Register("pty", ptyBridge)
-	}
+	// Set up provider registry (API keys, Ollama, CLI adapters).
+	registry := initProviders()
 
 	// Load app-level config (tunables like presence throttle, artifact detection).
 	appCfg, err := config.LoadAppConfig("config/" + brand.ConfigFileName + ".yaml")
@@ -228,39 +136,8 @@ if err := s.SeedBuiltinPromptTemplates(); err != nil {
 	outputFilters.Add("no_emoji", filter.NoEmoji)
 	log.Printf("output filters: %v", outputFilters.Names())
 
-	// Set up MCP manager. User-configured servers loaded from DB below.
-	mcpManager := mcp.NewManager()
-
-	// Register built-in dev/general/self-service tools.
-	homeDir, _ := os.UserHomeDir()
-	mcpManager.AddServer("dev", mcp.NewDevToolsTransport([]string{
-		filepath.Join(homeDir, "Projects-apps"),
-		filepath.Join(homeDir, "Projects"),
-	}))
-	mcpManager.AddServer("general", mcp.NewGeneralToolsTransport())
-	mcpManager.AddServer("code", mcp.NewCodeExecTransport(""))
-	selfTools := mcp.NewSelfToolsTransport(s)
-	mcpManager.AddServer("self", selfTools)
-
-	// Load user-configured MCP servers and auto-discover tools.
-	loadPersistedMCPServers(s, mcpManager)
-	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
-	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
-		log.Printf("WARNING: MCP auto-discovery failed: %v", err)
-	} else {
-		log.Printf("MCP auto-discovery: %d tools total, %d added, %d removed",
-			diff.Total, len(diff.Added), len(diff.Removed))
-	}
-
-	// Create tool broker for permission-checked tool access.
-	tb := toolclient.New(mcpManager, s, nil)
-	if mcpManager.Broker != nil {
-		tb.LocalBroker = mcpManager.Broker
-		log.Printf("toolclient: sharing MCPManager broker (%d tool summaries)", len(mcpManager.Broker.AllTools()))
-	}
-	selfToolDefs := mcp.SelfToolProviderDefinitions()
-	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
-	log.Printf("registered %d self-service built-in tools", len(selfToolDefs))
+	// Set up MCP manager, tool broker, and self-service tools.
+	mcpManager, tb, selfTools := initMCP(s)
 
 	// Set up activity emitter (Volon GUI events).
 	activity := chat.NewActivityEmitter("")
@@ -391,6 +268,159 @@ if err := s.SeedBuiltinPromptTemplates(); err != nil {
 		os.Exit(0)
 	}()
 
+	// Start periodic background workers (cleanup, snapshots, reapers).
+	startBackgroundWorkers(container)
+
+	// Start HTTP server.
+	srv := server.New(s, a, *port, *dev, pluginHost)
+
+	// Discover, load plugins, and re-discover MCP tools.
+	pluginsDir := discoverAndLoadPlugins(pluginHost, *dbPath, mcpManager, s)
+	srv.SetPluginsDir(pluginsDir)
+
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatalf("server error: %v", err)
+	}
+}
+
+// initProviders creates the provider registry with all available API providers,
+// Ollama (local, no key required), and CLI adapters (PTY + subprocess).
+func initProviders() *provider.Registry {
+	registry := provider.NewRegistry()
+
+	resolveKey := func(providerID string) string {
+		return secrets.Get(secrets.ProviderKeyName(providerID))
+	}
+
+	type apiProvSpec struct {
+		name, provID string
+		create       func() provider.Provider
+		setKey       func(provider.Provider, string)
+	}
+	apiProviders := []apiProvSpec{
+		{"anthropic", "anthropic-001",
+			func() provider.Provider { return provider.NewAnthropic() },
+			func(p provider.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
+		{"openai", "openai-001",
+			func() provider.Provider { return provider.NewOpenAI() },
+			func(p provider.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
+		{"gemini", "gemini-api-001",
+			func() provider.Provider { return provider.NewGemini() },
+			func(p provider.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
+		{"mistral", "mistral-001",
+			func() provider.Provider { return provider.NewMistral() },
+			func(p provider.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
+		{"openrouter", "openrouter-001",
+			func() provider.Provider { return provider.NewOpenRouter() },
+			func(p provider.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
+		{"openzen", "openzen-001",
+			func() provider.Provider { return provider.NewOpenZen() },
+			func(p provider.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
+	}
+
+	var registeredAPI, missingAPI []string
+	for _, spec := range apiProviders {
+		key := resolveKey(spec.provID)
+		if key != "" {
+			p := spec.create()
+			spec.setKey(p, key)
+			registry.Register(spec.name, p)
+			log.Printf("%s provider registered (key from keychain)", spec.name)
+			registeredAPI = append(registeredAPI, spec.name)
+		} else {
+			missingAPI = append(missingAPI, spec.name)
+		}
+	}
+
+	// Azure OpenAI — needs both key and endpoint.
+	azureKey := resolveKey("azure-openai-001")
+	if azureKey != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
+		p := provider.NewAzureOpenAI()
+		p.SetAPIKey(azureKey)
+		registry.Register("azure-openai", p)
+		log.Println("azure-openai provider registered")
+		registeredAPI = append(registeredAPI, "azure-openai")
+	}
+
+	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
+		log.Println("╔══════════════════════════════════════════════════════════════╗")
+		log.Println("║  WARNING: No API providers configured — chat will not work! ║")
+		log.Println("║  Set API keys in Settings → Providers or via environment.   ║")
+		log.Println("╚══════════════════════════════════════════════════════════════╝")
+	}
+
+	// Always register Ollama — it requires no API key (local service).
+	registry.Register("ollama", provider.NewOllama())
+	log.Println("ollama provider registered (default host: http://localhost:11434)")
+
+	// Register CLI adapters — PTY (unix) and subprocess (all platforms).
+	cliAdapters := []provider.CLIAdapter{
+		provider.NewClaudeAdapter(),
+		provider.NewCodexAdapter(),
+		provider.NewGeminiAdapter(),
+		provider.NewCopilotAdapter(),
+		provider.NewAiderAdapter(),
+		provider.NewJunieAdapter(),
+		provider.NewKiroAdapter(),
+		provider.NewQwenAdapter(),
+	}
+	for _, adapter := range cliAdapters {
+		if path, ok := adapter.Detect(); ok {
+			ptyName := "pty-" + adapter.Name()
+			registry.Register(ptyName, provider.NewPTYBridgeWithAdapter(adapter, path))
+			log.Printf("pty provider registered: %s (%s)", ptyName, path)
+
+			subName := "sub-" + adapter.Name()
+			registry.Register(subName, provider.NewSubprocessBridge(adapter, path))
+			log.Printf("subprocess provider registered: %s (%s)", subName, path)
+		}
+	}
+	// Backwards-compat alias: "pty" → Claude adapter (if available).
+	if ptyBridge := provider.NewPTYBridge(); ptyBridge != nil {
+		registry.Register("pty", ptyBridge)
+	}
+
+	return registry
+}
+
+// initMCP sets up the MCP manager with built-in and user-configured servers,
+// runs auto-discovery, and creates the tool broker.
+func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport) {
+	mcpManager := mcp.NewManager()
+
+	homeDir, _ := os.UserHomeDir()
+	mcpManager.AddServer("dev", mcp.NewDevToolsTransport([]string{
+		filepath.Join(homeDir, "Projects-apps"),
+		filepath.Join(homeDir, "Projects"),
+	}))
+	mcpManager.AddServer("general", mcp.NewGeneralToolsTransport())
+	mcpManager.AddServer("code", mcp.NewCodeExecTransport(""))
+	selfTools := mcp.NewSelfToolsTransport(s)
+	mcpManager.AddServer("self", selfTools)
+
+	loadPersistedMCPServers(s, mcpManager)
+	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
+	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
+		log.Printf("WARNING: MCP auto-discovery failed: %v", err)
+	} else {
+		log.Printf("MCP auto-discovery: %d tools total, %d added, %d removed",
+			diff.Total, len(diff.Added), len(diff.Removed))
+	}
+
+	tb := toolclient.New(mcpManager, s, nil)
+	if mcpManager.Broker != nil {
+		tb.LocalBroker = mcpManager.Broker
+		log.Printf("toolclient: sharing MCPManager broker (%d tool summaries)", len(mcpManager.Broker.AllTools()))
+	}
+	selfToolDefs := mcp.SelfToolProviderDefinitions()
+	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
+	log.Printf("registered %d self-service built-in tools", len(selfToolDefs))
+
+	return mcpManager, tb, selfTools
+}
+
+// startBackgroundWorkers launches periodic goroutines for cleanup, snapshots, and reapers.
+func startBackgroundWorkers(container *service.Container) {
 	// Periodic cleanup of saved tool outputs.
 	go func() {
 		truncate.Cleanup()
@@ -437,12 +467,12 @@ if err := s.SeedBuiltinPromptTemplates(); err != nil {
 			}
 		}()
 	}
+}
 
-	// Start HTTP server.
-	srv := server.New(s, a, *port, *dev, pluginHost)
-
-	// Discover and load plugins.
-	pluginsDir := filepath.Join(filepath.Dir(*dbPath), "plugins")
+// discoverAndLoadPlugins finds plugins on disk, loads them and builtins,
+// then re-runs MCP auto-discovery for any new servers plugins registered.
+func discoverAndLoadPlugins(pluginHost *plugin.Host, dbPath string, mcpManager *mcp.Manager, s *store.Store) string {
+	pluginsDir := filepath.Join(filepath.Dir(dbPath), "plugins")
 	if envDir := os.Getenv(brand.Env("PLUGINS_DIR")); envDir != "" {
 		pluginsDir = envDir
 	}
@@ -469,11 +499,36 @@ if err := s.SeedBuiltinPromptTemplates(); err != nil {
 		log.Printf("post-plugin MCP discovery: %d new tools added: %v", len(postDiff.Added), postDiff.Added)
 	}
 
-	srv.SetPluginsDir(pluginsDir)
+	return pluginsDir
+}
 
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("server error: %v", err)
+// loadEnvelopeManifest reads config/envelopes.yaml and returns the list of
+// core envelope type strings for registration.
+func loadEnvelopeManifest(path string) []string {
+	type entry struct {
+		Type string `yaml:"type"`
 	}
+	type manifest struct {
+		Core []entry `yaml:"core"`
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("WARNING: failed to read envelope manifest: %v — using empty core types", err)
+		return nil
+	}
+
+	var m manifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		log.Printf("WARNING: failed to parse envelope manifest: %v", err)
+		return nil
+	}
+
+	types := make([]string, 0, len(m.Core))
+	for _, e := range m.Core {
+		types = append(types, e.Type)
+	}
+	return types
 }
 
 // loadPersistedMCPServers loads user-configured MCP servers from the database

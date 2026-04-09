@@ -38,9 +38,7 @@ func (a *API) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleSetProviderAPIKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	var body struct {
-		APIKey string `json:"api_key"`
-	}
+	var body SetProviderAPIKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

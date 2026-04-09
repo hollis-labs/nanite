@@ -193,13 +193,13 @@ ui/                          # React SPA (see frontend.md)
 - ~~**Inconsistent nil checks**~~ — RESOLVED: Deliberate pattern now — reads return empty/safe defaults, writes return errors.
 
 ### Still Present
-- **Hardcoded default model** -- `"claude-sonnet-4-20250514"` in `handleDelegateAndAggregate` (`internal/api/messages.go:126`). Should use `a.Services.UtilityModel` which is already available. *Minor fix.*
+- (none — all tech debt items resolved 2026-04-08)
 
-- **Envelope sync fragility** -- Backend envelope types in `chat/envelope.go` and frontend registry in `ui/src/generated/plugin-envelopes.ts` must be manually kept in sync. Adding a backend type without a frontend entry causes silent data loss. CLAUDE.md explicitly warns about this. *Mitigated by JSON schema codegen but still requires discipline.*
-
-- **Anonymous struct request bodies** -- Every handler defines its own inline `var req struct {...}` for request parsing. No shared request/response types. Makes API documentation and type reuse harder. *File: `internal/api/sessions.go`, `messages.go`, etc.*
-
-- **Fat `main.go` wiring** -- `cmdServe()` is 440 lines. `service.Container` struct helps but the function is still large. *File: `cmd/nanite/main.go:68-507`*
+### Resolved (2026-04-08)
+- ~~**Hardcoded default model**~~ — Uses `a.Services.UtilityModel` now.
+- ~~**Anonymous struct request bodies**~~ — 51 named types extracted to `internal/api/types.go`.
+- ~~**Fat `main.go` wiring**~~ — `cmdServe()` down to ~215 lines. Extracted `initProviders`, `initMCP`, `startBackgroundWorkers`, `discoverAndLoadPlugins`.
+- ~~**Envelope sync fragility**~~ — A+ approach: `config/envelopes.yaml` manifest + `config/envelopes.schema.json`. Go reads at startup via `chat.InitCoreTypes()`. Codegen generates both core and plugin entries. CI check: `node scripts/generate-plugin-imports.mjs --check`.
 
 ## Reference Implementations
 

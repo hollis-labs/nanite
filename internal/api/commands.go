@@ -22,11 +22,7 @@ func (a *API) handleListCommands(w http.ResponseWriter, r *http.Request) {
 // If the command produces a "message" result, it is persisted as a system message
 // in the session so the frontend can just refetch messages.
 func (a *API) handleExecuteCommand(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		SessionID string `json:"session_id"`
-		Name      string `json:"name"`
-		Args      string `json:"args"`
-	}
+	var req ExecuteCommandRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

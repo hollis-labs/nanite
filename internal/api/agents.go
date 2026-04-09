@@ -18,30 +18,7 @@ func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID              string `json:"id"`
-		Name            string `json:"name"`
-		Slug            string `json:"slug"`
-		Avatar          string `json:"avatar"`
-		SystemPrompt    string `json:"system_prompt"`
-		Description     string `json:"description"`
-		Modes           string `json:"modes"`
-		DefaultMode     string `json:"default_mode"`
-		DefaultModel    string `json:"default_model"`
-		MCPServers      string `json:"mcp_servers"`
-		ToolPermissions string `json:"tool_permissions"`
-		CanExecute      bool   `json:"can_execute"`
-		Settings        string `json:"settings"`
-		// v2 fields
-		Tools       string `json:"tools"`
-		Directories string `json:"directories"`
-		Constraints string `json:"constraints"`
-		Tags        string `json:"tags"`
-		Status      string `json:"status"`
-		Source      string `json:"source"`
-		SourceRef   string `json:"source_ref"`
-		Icon        string `json:"icon"`
-	}
+	var req CreateAgentRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -124,27 +101,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Name            *string `json:"name"`
-		Slug            *string `json:"slug"`
-		Avatar          *string `json:"avatar"`
-		SystemPrompt    *string `json:"system_prompt"`
-		Description     *string `json:"description"`
-		Modes           *string `json:"modes"`
-		DefaultMode     *string `json:"default_mode"`
-		DefaultModel    *string `json:"default_model"`
-		MCPServers      *string `json:"mcp_servers"`
-		ToolPermissions *string `json:"tool_permissions"`
-		CanExecute      *bool   `json:"can_execute"`
-		Settings        *string `json:"settings"`
-		// v2 fields (source/source_ref immutable after creation)
-		Tools       *string `json:"tools"`
-		Directories *string `json:"directories"`
-		Constraints *string `json:"constraints"`
-		Tags        *string `json:"tags"`
-		Status      *string `json:"status"`
-		Icon        *string `json:"icon"`
-	}
+	var req UpdateAgentRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -249,10 +206,7 @@ func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	var req struct {
-		AgentID string `json:"agent_id"`
-		Role    string `json:"role"`
-	}
+	var req AddSessionAgentRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -326,9 +280,7 @@ func (a *API) handleListAgentProjects(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
-	var req struct {
-		ProjectID string `json:"project_id"`
-	}
+	var req AddAgentProjectRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -381,13 +333,7 @@ func (a *API) handleCreateAgentMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Slug           string `json:"slug"`
-		Name           string `json:"name"`
-		PromptAddendum string `json:"prompt_addendum"`
-		ToolOverrides  string `json:"tool_overrides"`
-		Settings       string `json:"settings"`
-	}
+	var req CreateAgentModeRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

@@ -26,13 +26,7 @@ func (a *API) handleListSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		WorkspaceID string `json:"workspace_id"`
-		ProjectID   string `json:"project_id"`
-		Model       string `json:"model"`
-		Provider    string `json:"provider"`
-		AgentID     string `json:"agent_id"`
-	}
+	var req CreateSessionRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -81,11 +75,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 	sourceID := r.PathValue("id")
 
-	var req struct {
-		IncludeMessages bool   `json:"include_messages"`
-		Provider        string `json:"provider"`
-		Model           string `json:"model"`
-	}
+	var req ForkSessionRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -135,14 +125,7 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Title      *string `json:"title"`
-		CustomName *string `json:"custom_name"`
-		IsPinned   *bool   `json:"is_pinned"`
-		Model      *string `json:"model"`
-		Provider   *string `json:"provider"`
-		Status     *string `json:"status"`
-	}
+	var req UpdateSessionRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -217,9 +200,7 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	var req struct {
-		Mode string `json:"mode"`
-	}
+	var req SwitchSessionModeRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

@@ -74,11 +74,7 @@ func (cs *catalogState) handleListSources(w http.ResponseWriter, r *http.Request
 }
 
 func (cs *catalogState) handleAddSource(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name     string `json:"name"`
-		URL      string `json:"url"`
-		Priority int    `json:"priority"`
-	}
+	var req AddSourceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		cs.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -104,12 +100,7 @@ func (cs *catalogState) handleAddSource(w http.ResponseWriter, r *http.Request) 
 
 func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var req struct {
-		Name     string `json:"name"`
-		URL      string `json:"url"`
-		Enabled  *bool  `json:"enabled"`
-		Priority *int   `json:"priority"`
-	}
+	var req UpdateSourceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		cs.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -160,9 +151,7 @@ func (cs *catalogState) handleDeleteSource(w http.ResponseWriter, r *http.Reques
 
 func (cs *catalogState) handleSetSourceKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var req struct {
-		PublicKey string `json:"public_key"` // hex-encoded Ed25519 public key
-	}
+	var req SetSourceKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		cs.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -257,9 +246,7 @@ func (cs *catalogState) handleRefreshCatalog(w http.ResponseWriter, r *http.Requ
 // --- Catalog install ---
 
 func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name string `json:"name"`
-	}
+	var req CatalogInstallRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		cs.errorResp(w, http.StatusBadRequest, "name is required")
 		return

@@ -124,15 +124,7 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 // that want to deliberately surface a file to the user. The file must already
 // exist on disk at storage_path.
 func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		SessionID   string `json:"session_id"`
-		MessageID   string `json:"message_id"`
-		Name        string `json:"name"`
-		MimeType    string `json:"mime_type"`
-		StoragePath string `json:"storage_path"`
-		AgentID     string `json:"agent_id"`
-		PluginID    string `json:"plugin_id"`
-	}
+	var req PlaceArtifactRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

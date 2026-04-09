@@ -23,16 +23,7 @@ func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCreateSkill(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name         string `json:"name"`
-		Slug         string `json:"slug"`
-		Description  string `json:"description"`
-		Category     string `json:"category"`
-		ToolBindings string `json:"tool_bindings"`
-		InputSchema  string `json:"input_schema"`
-		Settings     string `json:"settings"`
-		Icon         string `json:"icon"`
-	}
+	var req CreateSkillRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -86,16 +77,7 @@ func (a *API) handleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Name         *string `json:"name"`
-		Slug         *string `json:"slug"`
-		Description  *string `json:"description"`
-		Category     *string `json:"category"`
-		ToolBindings *string `json:"tool_bindings"`
-		InputSchema  *string `json:"input_schema"`
-		Settings     *string `json:"settings"`
-		Icon         *string `json:"icon"`
-	}
+	var req UpdateSkillRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -155,10 +137,7 @@ func (a *API) handleListAgentSkills(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
-	var req struct {
-		SkillID string `json:"skill_id"`
-		Config  string `json:"config"`
-	}
+	var req AssignAgentSkillRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

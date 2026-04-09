@@ -255,9 +255,7 @@ func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Requ
 // The directory must contain a plugin.yaml. Contents are copied (not symlinked)
 // into the plugins directory. No signature verification (local trust model).
 func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Path string `json:"path"`
-	}
+	var req InstallLocalRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
 		pms.errorResp(w, http.StatusBadRequest, "path is required")
 		return

@@ -1,0 +1,84 @@
+# Envelope type manifest — single source of truth for both Go and TypeScript.
+#
+# Go embeds this file to populate the registeredTypes validation map.
+# The codegen script reads it to generate CORE_ENTRIES in plugin-envelopes.ts.
+#
+# Adding a new core envelope type:
+#   1. Add an entry here (type + component + export)
+#   2. Create the React component at ui/src/{component}.tsx
+#   3. Run: npm run generate:plugins (or it runs automatically on build/dev)
+#   4. That's it — both Go and TypeScript pick it up.
+#
+# If a type has no frontend component yet, omit `component` and `export`.
+# Go will register it for validation; TypeScript codegen will skip it.
+
+core:
+  # Generic primitives
+  - type: document-viewer
+    component: components/chat/envelopes/DocumentViewerCard
+    export: DocumentViewerCard
+
+  - type: report-card
+    component: components/chat/envelopes/ReportCard
+    export: ReportCard
+
+  - type: error-report
+    component: components/chat/envelopes/ErrorCard
+    export: ErrorCard
+
+  - type: approval-card
+    component: components/chat/envelopes/ApprovalCard
+    export: ApprovalCard
+
+  - type: proposal-card
+    component: components/chat/envelopes/ProposalCard
+    export: ProposalCard
+
+  - type: question-form
+    component: components/chat/envelopes/QuestionForm
+    export: QuestionForm
+
+  # Work system (todo/plan)
+  - type: todo-list
+    component: components/chat/envelopes/TodoListCard
+    export: TodoListCard
+
+  - type: plan-review
+    component: components/chat/envelopes/PlanReviewCard
+    export: PlanReviewCard
+
+  # Reusable primitives (Phase 7)
+  - type: info-card
+    component: components/chat/envelopes/primitives/InfoCard
+    export: InfoCard
+
+  - type: list-card
+    component: components/chat/envelopes/primitives/ListCard
+    export: ListCard
+
+  - type: metric-card
+    component: components/chat/envelopes/primitives/MetricCard
+    export: MetricCard
+
+  - type: progress-card
+    component: components/chat/envelopes/primitives/ProgressCard
+    export: ProgressCard
+
+  - type: confirmation-card
+    component: components/chat/envelopes/primitives/ConfirmationCard
+    export: ConfirmationCard
+
+  - type: table-card
+    component: components/chat/envelopes/primitives/TableCard
+    export: TableCard
+
+  - type: timeline-card
+    component: components/chat/envelopes/primitives/TimelineCard
+    export: TimelineCard
+
+  - type: diff-card
+    component: components/chat/envelopes/primitives/DiffCard
+    export: DiffCard
+
+  # Backend-only (registered for validation, no frontend component yet)
+  - type: session-task

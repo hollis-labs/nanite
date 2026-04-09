@@ -16,15 +16,7 @@ func (a *API) handleListPromptTemplates(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *API) handleCreatePromptTemplate(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name      string `json:"name"`
-		Slug      string `json:"slug"`
-		Scope     string `json:"scope"`
-		Template  string `json:"template"`
-		Variables string `json:"variables"`
-		Priority  int    `json:"priority"`
-		Icon      string `json:"icon"`
-	}
+	var req CreatePromptTemplateRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -80,15 +72,7 @@ func (a *API) handleUpdatePromptTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req struct {
-		Name      *string `json:"name"`
-		Slug      *string `json:"slug"`
-		Scope     *string `json:"scope"`
-		Template  *string `json:"template"`
-		Variables *string `json:"variables"`
-		Priority  *int    `json:"priority"`
-		Icon      *string `json:"icon"`
-	}
+	var req UpdatePromptTemplateRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -145,9 +129,7 @@ func (a *API) handleListAgentPromptTemplates(w http.ResponseWriter, r *http.Requ
 func (a *API) handleAssignAgentPromptTemplate(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
-	var req struct {
-		TemplateID string `json:"template_id"`
-	}
+	var req AssignAgentPromptTemplateRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

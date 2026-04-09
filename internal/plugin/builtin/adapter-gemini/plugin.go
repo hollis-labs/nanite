@@ -1,0 +1,194 @@
+// Package adaptergemini implements the Gemini CLI adapter plugin.
+// It discovers agents from GEMINI.md, populates sandboxes with GEMINI.md
+// content, and syncs the project-root GEMINI.md with a managed section
+// listing available Nanite agents.
+package adaptergemini
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/hollis-labs/nanite/internal/agent"
+	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/store"
+
+	plugin "github.com/hollis-labs/go-plugin"
+)
+
+func init() {
+	hostplugin.RegisterPlugin("adapter-gemini", func() plugin.Plugin { return New() })
+}
+
+// ---------------------------------------------------------------------------
+// Plugin (implements go-plugin.Plugin)
+// ---------------------------------------------------------------------------
+
+// Plugin is the Gemini CLI adapter plugin.
+type Plugin struct {
+	host    plugin.Host
+	status  plugin.PluginStatus
+	adapter *Adapter
+}
+
+// New creates a new Gemini adapter plugin instance.
+func New() *Plugin {
+	p := &Plugin{}
+	p.adapter = &Adapter{plugin: p}
+	return p
+}
+
+// Adapter returns the CLIAgentAdapter for this plugin.
+func (p *Plugin) Adapter() *Adapter { return p.adapter }
+
+func (p *Plugin) ID() string             { return "adapter-gemini" }
+func (p *Plugin) Name() string           { return "Gemini CLI Adapter" }
+func (p *Plugin) Version() string        { return "0.1.0" }
+func (p *Plugin) Description() string    { return "Discovers GEMINI.md and populates Gemini CLI sandboxes" }
+func (p *Plugin) Dependencies() []string { return nil }
+
+func (p *Plugin) Load(host plugin.Host) error {
+	p.host = host
+	p.status = plugin.PluginStatus{
+		Loaded:   true,
+		Enabled:  true,
+		LoadedAt: time.Now(),
+	}
+	host.Logger().Info("adapter-gemini: loaded")
+	return nil
+}
+
+func (p *Plugin) Unload() error {
+	p.status.Loaded = false
+	p.status.Enabled = false
+	if p.host != nil {
+		p.host.Logger().Info("adapter-gemini: unloaded")
+	}
+	return nil
+}
+
+func (p *Plugin) Status() plugin.PluginStatus {
+	return p.status
+}
+
+// ---------------------------------------------------------------------------
+// Adapter (implements agent.CLIAgentAdapter)
+// ---------------------------------------------------------------------------
+
+// Adapter implements agent.CLIAgentAdapter for Gemini CLI.
+type Adapter struct {
+	plugin *Plugin
+}
+
+// Compile-time interface check.
+var _ agent.CLIAgentAdapter = (*Adapter)(nil)
+
+// Name returns the adapter identifier.
+func (a *Adapter) Name() string { return "gemini" }
+
+// Priority returns the discovery order. Lower = checked first.
+func (a *Adapter) Priority() int { return 70 }
+
+// Discover reads {projectDir}/GEMINI.md and returns a single Definition if present.
+func (a *Adapter) Discover(projectDir string) ([]agent.Definition, error) {
+	geminiPath := filepath.Join(projectDir, "GEMINI.md")
+
+	data, err := os.ReadFile(geminiPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("adapter-gemini: read GEMINI.md: %w", err)
+	}
+
+	def := agent.Definition{
+		Slug:         "gemini-default",
+		Source:       "gemini",
+		SystemPrompt: strings.TrimSpace(string(data)),
+	}
+
+	// Extract name from the first # heading.
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			def.Name = strings.TrimPrefix(line, "# ")
+			break
+		}
+	}
+	if def.Name == "" {
+		def.Name = "Gemini Agent"
+	}
+
+	return []agent.Definition{def}, nil
+}
+
+// PopulateSandbox writes GEMINI.md into the sandbox with agent identity and context.
+func (a *Adapter) PopulateSandbox(sandboxDir string, ap store.AgentProfile, session agent.SandboxContext) error {
+	content := buildGeminiMD(ap)
+	path := filepath.Join(sandboxDir, "GEMINI.md")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("adapter-gemini: write GEMINI.md: %w", err)
+	}
+	return nil
+}
+
+// SyncProjectRoot writes a managed section into {projectDir}/GEMINI.md
+// listing available Nanite agents.
+func (a *Adapter) SyncProjectRoot(projectDir string, agents []store.AgentProfile) error {
+	if len(agents) == 0 {
+		return nil
+	}
+
+	content := buildNaniteAgentsSection(agents)
+	geminiPath := filepath.Join(projectDir, "GEMINI.md")
+	return agent.WriteManagedSection(geminiPath, content)
+}
+
+// ---------------------------------------------------------------------------
+// Content generation
+// ---------------------------------------------------------------------------
+
+func buildGeminiMD(ap store.AgentProfile) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "# Agent: %s\n\n", ap.Name)
+	if ap.Description != "" {
+		fmt.Fprintf(&b, "%s\n\n", ap.Description)
+	}
+
+	if ap.Tools != "" && ap.Tools != "[]" {
+		b.WriteString("## Tools\n")
+		b.WriteString(ap.Tools)
+		b.WriteString("\n\n")
+	}
+
+	if ap.Constraints != "" && ap.Constraints != "{}" {
+		b.WriteString("## Constraints\n")
+		b.WriteString(ap.Constraints)
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("## Context\n")
+	b.WriteString("This agent is managed by Nanite. For full configuration, see NANITE.md.\n")
+
+	return b.String()
+}
+
+func buildNaniteAgentsSection(agents []store.AgentProfile) string {
+	var b strings.Builder
+
+	b.WriteString("## Nanite Agents\n\n")
+	b.WriteString("The following agents are available in this project:\n\n")
+	for _, ap := range agents {
+		if ap.Description != "" {
+			fmt.Fprintf(&b, "- **%s** — %s\n", ap.Name, ap.Description)
+		} else {
+			fmt.Fprintf(&b, "- **%s**\n", ap.Name)
+		}
+	}
+	b.WriteString("\nManaged by Nanite. See NANITE.md for configuration.\n")
+
+	return b.String()
+}

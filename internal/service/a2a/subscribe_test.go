@@ -8,6 +8,7 @@ package a2a
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,4 +127,33 @@ func TestSubscribe_NoReplayOnResubscribe(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		// good — no replay.
 	}
+}
+
+// TestSubscribe_PublishUnsubscribeRace stresses the close-during-publish window.
+// Before the fix this reliably panicked with "send on closed channel" under -race
+// within a few iterations.
+func TestSubscribe_PublishUnsubscribeRace(t *testing.T) {
+	svc, _ := newTestService(t, "file-a")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 200; i++ {
+		wg.Add(2)
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			defer wg.Done()
+			_, _ = svc.SubscribeSessionAgent(ctx, "sess-1", "file-a")
+			cancel()
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = svc.SendMessage(context.Background(), &store.A2AMessage{
+				FromSessionID: "sess-1",
+				FromAgentID:   UserSentinel,
+				ToSessionID:   "sess-1",
+				ToAgentID:     "file-a",
+				Body:          "race",
+			})
+		}()
+	}
+	wg.Wait()
 }

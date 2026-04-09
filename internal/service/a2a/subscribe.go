@@ -11,15 +11,19 @@
 //   - subscribe appends a buffered channel to the per-key slice under a
 //     write lock, then spawns a goroutine that waits on ctx.Done() to
 //     remove and close the channel under a write lock.
-//   - publish snapshots the current subscriber slice under an RLock and
-//     releases the lock before performing non-blocking sends. Sending
-//     outside the lock means publish never holds the pubsub lock while
-//     touching a channel, which keeps it from interfering with
-//     unsubscribe's write-lock path.
+//   - publish holds the RLock across the non-blocking sends. Non-blocking
+//     sends are O(1) and cannot wedge the lock, and holding the RLock
+//     prevents a close/send race with the unsubscribe goroutine, which
+//     takes the write lock before closing any channel. A previous version
+//     snapshotted the subscriber slice and released the lock before
+//     sending, which raced with close on shutdown and could panic with
+//     "send on closed channel" — default in a select does not rescue
+//     that, because default only fires when the send would block.
 package a2a
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -80,11 +84,14 @@ func (p *pubsub) subscribe(ctx context.Context, sessionID, agentID string) <-cha
 // non-blocking: if a subscriber's channel is full, the message is
 // dropped for that subscriber only.
 //
-// Per the design in the Task 7 plan, we snapshot the subscriber slice
-// under the RLock and release the lock before performing the sends.
-// Keeping the sends outside the lock means publish never competes with
-// unsubscribe's write lock, and a wedged consumer can never hold up any
-// other part of the service.
+// The RLock is held across the non-blocking sends. This is safe because
+// non-blocking sends are O(1) and cannot wedge the lock, and it is
+// necessary because it blocks the unsubscribe goroutine from taking the
+// write lock and closing a subscriber channel while publish is still
+// sending to it. Without this invariant, publish could race with close
+// and panic with "send on closed channel" — default in the select does
+// not rescue that, because default only fires when the send would
+// block, not when it would panic.
 func (p *pubsub) publish(msg *store.A2AMessage) {
 	if msg == nil {
 		return
@@ -92,13 +99,8 @@ func (p *pubsub) publish(msg *store.A2AMessage) {
 	key := msg.ToSessionID + ":" + msg.ToAgentID
 
 	p.mu.RLock()
-	// Copy the slice while holding the RLock so the snapshot is stable
-	// with respect to subscribe/unsubscribe mutations.
-	subs := make([]chan *store.A2AMessage, len(p.subs[key]))
-	copy(subs, p.subs[key])
-	p.mu.RUnlock()
-
-	for _, ch := range subs {
+	defer p.mu.RUnlock()
+	for _, ch := range p.subs[key] {
 		select {
 		case ch <- msg:
 		default:
@@ -111,10 +113,13 @@ func (p *pubsub) publish(msg *store.A2AMessage) {
 // receive-only channel on which live messages addressed to
 // (sessionID, agentID) will arrive. The caller must cancel ctx to
 // release the subscription; doing so unblocks any pending receive with
-// a closed-channel signal.
+// a closed-channel signal. A context that is never canceled leaks one
+// goroutine and one buffered channel per SubscribeSessionAgent call for
+// the lifetime of the Service — always pass a cancelable context and
+// cancel it when the subscription ends.
 func (svc *Service) SubscribeSessionAgent(ctx context.Context, sessionID, agentID string) (<-chan *store.A2AMessage, error) {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("agent_id: %w", err)
 	}
 	return svc.pub.subscribe(ctx, sessionID, agentID), nil
 }

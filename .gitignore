@@ -5,6 +5,8 @@
 *.test
 *.out
 vendor/
+!assets/framework/vendor/
+!assets/framework/vendor/**
 
 # Node / React
 ui/node_modules/

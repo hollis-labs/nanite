@@ -4,9 +4,11 @@
 package install
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/assets"
 )
@@ -41,4 +43,152 @@ func (s *Service) InstallHome(opts InstallHomeOptions) (*assets.ExtractReport, e
 		target = filepath.Join(home, ".nanite")
 	}
 	return assets.ExtractTo(target, assets.ExtractOptions{Force: opts.Force})
+}
+
+// InstallProjectOptions controls InstallProject.
+type InstallProjectOptions struct {
+	ProjectDir         string
+	GlobalHome         string // defaults to ~/.nanite
+	MigrateFromAgentrc bool
+	ArchiveOnly        bool
+	Force              bool
+}
+
+// InstallProjectReport summarizes what InstallProject did.
+type InstallProjectReport struct {
+	FreshScaffold      bool
+	Migrated           bool
+	Adopted            bool
+	ArchiveOnly        bool
+	ArchivePath        string
+	CLAUDEUpdateReport *CLAUDEUpdateReport
+	Warnings           []string
+}
+
+// InstallProject scaffolds .nanite/, NANITE.md, and CLAUDE.md managed sections
+// in projectDir. Dispatches to a branch based on detected state.
+func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectReport, error) {
+	if opts.ProjectDir == "" {
+		return nil, errors.New("empty project dir")
+	}
+	projectDir, err := filepath.Abs(opts.ProjectDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project dir: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(projectDir); err == nil {
+		projectDir = resolved
+	}
+
+	globalHome := opts.GlobalHome
+	if globalHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home dir: %w", err)
+		}
+		globalHome = filepath.Join(home, ".nanite")
+	}
+
+	hasAgentrc := dirExists(filepath.Join(projectDir, ".agentrc"))
+	hasNaniteDir := dirExists(filepath.Join(projectDir, ".nanite"))
+
+	if hasAgentrc && hasNaniteDir {
+		return nil, fmt.Errorf(".agentrc/ and .nanite/ both present in %s — please resolve manually", projectDir)
+	}
+
+	if opts.ArchiveOnly {
+		if !hasAgentrc {
+			return nil, fmt.Errorf("--archive-only requires .agentrc/ in %s", projectDir)
+		}
+		return s.archiveOnly(projectDir)
+	}
+
+	if opts.MigrateFromAgentrc {
+		if !hasAgentrc {
+			return nil, fmt.Errorf("--migrate-from-agentrc requires .agentrc/ in %s", projectDir)
+		}
+		return s.migrateFromAgentrc(projectDir, globalHome)
+	}
+
+	if hasAgentrc {
+		return nil, fmt.Errorf(".agentrc/ present in %s — pass --migrate-from-agentrc to archive it, or --archive-only to archive without scaffolding", projectDir)
+	}
+
+	if hasNaniteDir {
+		return nil, errors.New("adopt path not yet implemented (Task 9): refusing to modify existing .nanite/ directory")
+	}
+
+	return s.freshScaffold(projectDir, globalHome)
+}
+
+func (s *Service) freshScaffold(projectDir, globalHome string) (*InstallProjectReport, error) {
+	src := ScaffoldSource{
+		FrameworkVersion: assets.Version(),
+		ProjectName:      filepath.Base(projectDir),
+	}
+	if err := ScaffoldNaniteDir(projectDir, globalHome, src); err != nil {
+		return nil, err
+	}
+	if err := ScaffoldNaniteMD(projectDir, src); err != nil {
+		return nil, err
+	}
+	managed := buildManagedSection(src)
+	report, err := UpdateCLAUDEmd(filepath.Join(projectDir, "CLAUDE.md"), managed, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &InstallProjectReport{
+		FreshScaffold:      true,
+		CLAUDEUpdateReport: report,
+	}, nil
+}
+
+func (s *Service) archiveOnly(projectDir string) (*InstallProjectReport, error) {
+	basename := filepath.Base(projectDir)
+	base, err := ExpandArchiveBase(archiveBaseOverride())
+	if err != nil {
+		return nil, err
+	}
+	archiveDir, err := ArchiveProjectAgentrc(projectDir, base, basename, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	// Write a state marker so rollback/resume can find this project.
+	state := NewState(basename, projectDir, archiveDir, assets.Version())
+	state.MarkPhaseComplete(PhaseArchived)
+	state.MarkPhaseComplete(PhaseComplete)
+	if err := WriteState(filepath.Join(archiveDir, StateFileName), state); err != nil {
+		return nil, fmt.Errorf("write state marker: %w", err)
+	}
+	return &InstallProjectReport{
+		ArchiveOnly: true,
+		ArchivePath: archiveDir,
+	}, nil
+}
+
+// buildManagedSection returns the content that goes inside the
+// <!-- nanite:start --> / <!-- nanite:end --> block in CLAUDE.md. The
+// surrounding markers are added by agent.WriteManagedSection.
+func buildManagedSection(src ScaffoldSource) string {
+	_ = src // reserved for future templating
+	return `## Nanite
+
+Agent configuration for this project is managed by Nanite.
+
+- Boot prompt: ` + "`NANITE.md`" + ` at the project root
+- Agent config: ` + "`.nanite/config.yaml`" + `
+- Per-agent context: ` + "`.nanite/agents/*.md`" + `
+
+When the user says "Boot <agent>", look up the agent in .nanite/config.yaml
+under ` + "`agents:`" + `, load each role file from ` + "`~/.nanite/roles/`" + `, load the listed
+skills from ` + "`~/.nanite/skills/`" + `, and read the project context file from
+.nanite/.
+
+After context compaction, re-read NANITE.md and the active role/context files.
+`
+}
+
+// dirExists reports whether path exists and is a directory.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }

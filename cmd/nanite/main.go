@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
@@ -29,7 +30,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/server"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -43,7 +43,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, version")
+		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, a2a, version")
 		os.Exit(1)
 	}
 
@@ -54,6 +54,8 @@ func main() {
 		cmdPlugin(os.Args[2:])
 	case "mcp":
 		cmdMCP(os.Args[2:])
+	case "a2a":
+		cmdA2A(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:
@@ -222,6 +224,7 @@ func cmdServe(args []string) {
 
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
+	selfTools.A2A = container.A2A
 
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {
@@ -611,4 +614,3 @@ func cmdMCPServe(args []string) {
 		os.Exit(1)
 	}
 }
-

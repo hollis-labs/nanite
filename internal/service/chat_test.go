@@ -220,12 +220,12 @@ func (stubArtifactStore) CreateArtifact(*store.Artifact) error                  
 func (stubArtifactStore) GetArtifact(string) (*store.Artifact, error)                       { return nil, nil }
 
 type stubA2AStore struct{}
-func (stubA2AStore) SendA2AMessage(*store.A2AMessage) error                                 { return nil }
-func (stubA2AStore) GetA2AInbox(string, string) ([]store.A2AMessage, error)                 { return nil, nil }
+func (stubA2AStore) SendA2AMessage(*store.A2AMessage) (*store.A2AMessage, error)            { return nil, nil }
+func (stubA2AStore) GetA2AInbox(string, string, string) ([]store.A2AMessage, error)         { return nil, nil }
 func (stubA2AStore) GetA2AThread(string) ([]store.A2AMessage, error)                        { return nil, nil }
 func (stubA2AStore) AckA2AMessage(string) error                                             { return nil }
 func (stubA2AStore) ResolveA2AMessage(string) error                                         { return nil }
-func (stubA2AStore) A2AUnreadCount(string) (int, error)                                     { return 0, nil }
+func (stubA2AStore) A2AUnreadCount(string, string) (int, error)                             { return 0, nil }
 
 type stubTemplateStore struct{}
 func (stubTemplateStore) ListPromptTemplates() ([]store.PromptTemplate, error)              { return nil, nil }

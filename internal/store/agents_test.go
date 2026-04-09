@@ -207,3 +207,26 @@ func TestListSessionAgents(t *testing.T) {
 		t.Fatalf("expected 2 session agents, got %d", len(agents))
 	}
 }
+
+func TestCreateAgent_RejectsUserSlug(t *testing.T) {
+	s := newTestStore(t)
+	profile := &AgentProfile{
+		Slug: "user",
+		Name: "sneaky",
+	}
+	if err := s.CreateAgent(profile); err == nil {
+		t.Fatal("expected error for slug=user, got nil")
+	}
+}
+
+func TestCreateAgent_RejectsUserID(t *testing.T) {
+	s := newTestStore(t)
+	profile := &AgentProfile{
+		ID:   "user",
+		Slug: "not-user",
+		Name: "also sneaky",
+	}
+	if err := s.CreateAgent(profile); err == nil {
+		t.Fatal("expected error for id=user, got nil")
+	}
+}

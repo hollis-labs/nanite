@@ -43,7 +43,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, version")
+		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, install, version")
 		os.Exit(1)
 	}
 
@@ -54,6 +54,8 @@ func main() {
 		cmdPlugin(os.Args[2:])
 	case "mcp":
 		cmdMCP(os.Args[2:])
+	case "install":
+		cmdInstall(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:

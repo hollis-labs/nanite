@@ -28,10 +28,10 @@ type StepInput struct {
 
 // StepOutput is returned by each step handler.
 type StepOutput struct {
-	Data     map[string]any // structured output
-	Stdout   string         // captured stdout (for shell steps)
-	Stderr   string         // captured stderr
-	ExitCode int            // for shell steps
+	Data     map[string]any `json:"data,omitempty"`
+	Stdout   string         `json:"stdout,omitempty"`
+	Stderr   string         `json:"stderr,omitempty"`
+	ExitCode int            `json:"exit_code"`
 }
 
 // GateFunc checks whether a step should proceed.
@@ -85,23 +85,23 @@ const (
 
 // RunState tracks the state of a pipeline execution.
 type RunState struct {
-	PipelineID  string
-	RunID       string
-	Status      RunStatus
-	StepStates  map[string]*StepState // keyed by step ID
-	StartedAt   time.Time
-	CompletedAt time.Time
-	Error       string
+	PipelineID  string                `json:"pipeline_id"`
+	RunID       string                `json:"run_id"`
+	Status      RunStatus             `json:"status"`
+	StepStates  map[string]*StepState `json:"step_states"`
+	StartedAt   time.Time             `json:"started_at"`
+	CompletedAt time.Time             `json:"completed_at"`
+	Error       string                `json:"error"`
 }
 
 // StepState tracks individual step execution state.
 type StepState struct {
-	StepID      string
-	Status      StepStatus
-	Output      *StepOutput
-	Attempts    int
-	StartedAt   time.Time
-	CompletedAt time.Time
-	Error       string
-	SkipReason  string
+	StepID      string      `json:"step_id"`
+	Status      StepStatus  `json:"status"`
+	Output      *StepOutput `json:"output,omitempty"`
+	Attempts    int         `json:"attempts"`
+	StartedAt   time.Time   `json:"started_at"`
+	CompletedAt time.Time   `json:"completed_at"`
+	Error       string      `json:"error"`
+	SkipReason  string      `json:"skip_reason"`
 }

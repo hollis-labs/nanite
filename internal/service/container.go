@@ -432,6 +432,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Model selector for operation-specific model resolution (e.g., cheap model for summarization).
 	modelSelector := provider.NewStaticModelSelector(cfg.UtilityProvider, cfg.UtilityModel)
 
+	// Workflow run store and SSE broadcaster — always enabled.
+	runStore := workflow.NewRunStore(50)
+	workflowBroadcaster := workflow.NewBroadcaster()
+	log.Println("service container: workflow engine enabled")
+
 	log.Println("service container: all services wired")
 
 	return &Container{
@@ -462,7 +467,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		UtilityProvider: cfg.UtilityProvider,
 		UtilityModel:    cfg.UtilityModel,
 		ModelSelector:   modelSelector,
-		Permissions:     permissions,
+		Permissions:         permissions,
+		RunStore:            runStore,
+		WorkflowBroadcaster: workflowBroadcaster,
 	}, nil
 }
 

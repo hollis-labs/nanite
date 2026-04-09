@@ -333,6 +333,54 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"id"},
 			},
 		},
+		// --- Install tools ---
+		{
+			Name:        "nanite_install_home",
+			Description: "Extract embedded Nanite framework assets to ~/.nanite/. Skips user-modified files unless force=true.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"force": map[string]any{"type": "boolean", "description": "overwrite user-modified files"},
+				},
+			},
+		},
+		{
+			Name:        "nanite_install_project",
+			Description: "Scaffold .nanite/ and NANITE.md in a project. Optionally migrate from .agentrc/ or archive-only.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"project_dir":          map[string]any{"type": "string", "description": "absolute path to project dir"},
+					"migrate_from_agentrc": map[string]any{"type": "boolean", "description": "archive .agentrc/ and migrate"},
+					"archive_only":         map[string]any{"type": "boolean", "description": "archive .agentrc/ without scaffolding"},
+				},
+				"required": []string{"project_dir"},
+			},
+		},
+		{
+			Name:        "nanite_install_rollback",
+			Description: "Reverse the most recent migration for a project from its archive snapshot.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"project_dir":  map[string]any{"type": "string", "description": "absolute path to project dir"},
+					"archive_path": map[string]any{"type": "string", "description": "explicit archive dir; finds most recent if empty"},
+				},
+				"required": []string{"project_dir"},
+			},
+		},
+		{
+			Name:        "nanite_install_diff",
+			Description: "Dry-run a project install: show what would change without modifying anything. (Not yet implemented.)",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"project_dir":          map[string]any{"type": "string", "description": "absolute path to project dir"},
+					"migrate_from_agentrc": map[string]any{"type": "boolean", "description": "simulate a migration"},
+				},
+				"required": []string{"project_dir"},
+			},
+		},
 		// --- A2A messaging tools ---
 		// nanite_a2a_subscribe is intentionally NOT registered here: it
 		// requires streaming support in mcp-go or a custom server-side

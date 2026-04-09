@@ -1,0 +1,122 @@
+# nanite global framework config
+version: 2.3.0
+
+# ─── Roles ───────────────────────────────────────────────
+# Domain roles define *what kind of work* (backend, frontend, reviewer)
+# Stack roles define *what tech* (go, react, php, python)
+# Agents compose both.
+
+roles:
+  # Domain roles — roles/domain/
+  backend:
+    file: domain/backend.md
+    type: domain
+    description: API, service, and data engineering
+  frontend:
+    file: domain/frontend.md
+    type: domain
+    description: UI architecture, components, and UX
+  code-review:
+    file: domain/code-review.md
+    type: domain
+    description: Reviews code for bugs, security, and standards
+  project-docs:
+    file: domain/project-docs.md
+    type: domain
+    description: Structured documentation maintainer
+  strategic-planner:
+    file: domain/strategic-planner.md
+    type: domain
+    description: Planning and scoping assistant
+  auditor:
+    file: domain/auditor.md
+    type: domain
+    description: Codebase auditor — reads everything, produces agent context docs
+
+  # Stack roles — roles/stack/
+  go:
+    file: stack/go.md
+    type: stack
+    description: Go language conventions and tooling
+  react:
+    file: stack/react.md
+    type: stack
+    description: React/Next.js/shadcn/Tailwind conventions
+
+  # Meta roles — roles/meta/
+  nanite-agent-manager:
+    file: meta/nanite-agent-manager.md
+    type: meta
+    description: Develop and maintain the Nanite agent framework
+
+# ─── Docs ────────────────────────────────────────────────
+# Framework reference doc. nanite-agent-manager role keeps this current.
+docs:
+  framework: docs/nanite-framework.md
+  setup-guide: docs/nanite-setup-guide.md
+
+# ─── Agent schema ────────────────────────────────────────
+# Agents are defined in project-level .nanite/config.yaml.
+# Schema:
+#
+#   agents:
+#     <slug>:
+#       name: <display name>
+#       description: <one-liner>
+#       roles: [<role>, ...]         # domain + stack roles
+#       skills: [<skill>, ...]       # from ~/.nanite/skills/
+#       plugins: [<plugin>, ...]     # vendor plugins (claude plugins install --scope project)
+#       context: <file.md>           # project context in .nanite/agents/
+#       # Future extensions (siblings to roles/skills/context):
+#       # voice_profile: <profile>
+#       # permissions: { ... }
+#       # model_strategy: { ... }
+#       # settings: { ... }
+
+# ─── Projects ────────────────────────────────────────────
+# Registered projects. Distinguishes projects from plain directories.
+# Used by agents to resolve project roots and load context.
+
+projects:
+  # Fragments Engine (monorepo — currently just engine/; conduit, cortex, and
+  # libs have been extracted into standalone repos elsewhere in ~/Projects-apps)
+  fragments-engine:
+    root: ~/Projects-apps/fragments-engine
+    type: monorepo
+    description: Core platform monorepo
+    modules:
+      engine: { path: engine, lang: go }
+
+  # Individual project entries (standalone repos)
+  engine:         { root: ~/Projects-apps/fragments-engine/engine, lang: go, description: "Fragments Engine Core — task/sprint/project management, agent routing" }
+  vanta-conduit:  { root: ~/Projects-apps/vanta-conduit, lang: go, description: "Vanta Conduit — context memory, RAG, and document storage" }
+
+  # Shared Go libraries monorepo (formerly fragments-engine/libs)
+  framework:
+    root: ~/Projects-apps/framework
+    type: monorepo
+    description: Shared Go libraries (MCP, OTel, plugin, toolbroker, directives, providers, queue)
+    modules:
+      go-directives: { path: libs/go-directives, lang: go }
+      go-mcp:        { path: libs/go-mcp, lang: go }
+      go-otel:       { path: libs/go-otel, lang: go }
+      go-plugin:     { path: libs/go-plugin, lang: go }
+      go-providers:  { path: libs/go-providers, lang: go }
+      go-queue:      { path: libs/go-queue, lang: go }
+      go-toolbroker: { path: libs/go-toolbroker, lang: go }
+
+  # Services
+  hadron:    { root: ~/Projects-apps/hadron, lang: go, description: Blueprint automation engine }
+  nanite:    { root: ~/Projects-apps/nanite, lang: go, description: RAG and document ingestion }
+  cerberus:  { root: ~/Projects-apps/cerberus, lang: go, description: Service lifecycle manager }
+  carrier:   { root: ~/Projects-apps/carrier, description: Message transport layer }
+  nexus:     { root: ~/Projects-apps/nexus, lang: go, description: Agent discovery and routing }
+
+  # Apps
+  clockwork-manifold: { root: ~/Projects-apps/clockwork-manifold, lang: go, description: "Clockwork Manifold — task orchestration and execution engine" }
+  sigil:     { root: ~/Projects-apps/sigil, lang: go, description: UI generation engine }
+  lnklst:    { root: ~/Projects-apps/lnklst, lang: go, description: Link list app }
+  suds-v2:   { root: ~/Projects-apps/suds-v2, lang: typescript, description: MUD game (Next.js) }
+
+  # Sites
+  fragmentsengine.com: { root: ~/Projects-apps/fragmentsengine.com, type: static-site, description: Marketing site }

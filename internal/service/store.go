@@ -140,14 +140,16 @@ type ArtifactStore interface {
 	GetArtifact(id string) (*store.Artifact, error)
 }
 
-// A2AStore provides access to agent-to-agent messaging.
+// A2AStore provides access to agent-to-agent messaging. Addressing is
+// session-scoped — the same agent running in two sessions has two distinct
+// inboxes, keyed by (session_id, agent_id).
 type A2AStore interface {
-	SendA2AMessage(msg *store.A2AMessage) error
-	GetA2AInbox(agentID string, status string) ([]store.A2AMessage, error)
+	SendA2AMessage(msg *store.A2AMessage) (*store.A2AMessage, error)
+	GetA2AInbox(sessionID, agentID, status string) ([]store.A2AMessage, error)
 	GetA2AThread(threadID string) ([]store.A2AMessage, error)
 	AckA2AMessage(id string) error
 	ResolveA2AMessage(id string) error
-	A2AUnreadCount(agentID string) (int, error)
+	A2AUnreadCount(sessionID, agentID string) (int, error)
 }
 
 // TemplateStore provides access to prompt templates and output templates.

@@ -7,10 +7,8 @@ require (
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/google/uuid v1.6.0
 	github.com/hollis-labs/go-plugin v0.0.0
-	github.com/hollis-labs/nexus v0.0.0
 	github.com/hollis-labs/otel v0.0.0
 	github.com/hollis-labs/tool-broker v0.0.0
-	github.com/lib/pq v1.12.0
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/zalando/go-keyring v0.2.8
 	go.opentelemetry.io/otel v1.43.0
@@ -24,8 +22,6 @@ replace github.com/hollis-labs/otel => ../framework/libs/go-otel
 replace github.com/hollis-labs/tool-broker => ../framework/libs/go-toolbroker
 
 replace github.com/hollis-labs/go-plugin => ../framework/libs/go-plugin
-
-replace github.com/hollis-labs/nexus => ../nexus
 
 require (
 	github.com/hollis-labs/go-providers v0.0.0

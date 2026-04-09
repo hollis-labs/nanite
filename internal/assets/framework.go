@@ -1,4 +1,4 @@
-// Package assets bundles the agentrc framework content (roles, skills,
+// Package assets bundles the Nanite agent framework content (roles, skills,
 // commands, docs, templates, vendor files, VERSION) into the Nanite binary
 // via go:embed and exposes accessors used by the install pipeline.
 package assets
@@ -6,6 +6,7 @@ package assets
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -82,12 +83,9 @@ func ExtractTo(targetDir string, opts ExtractOptions) (*ExtractReport, error) {
 		}
 
 		existing, statErr := os.ReadFile(target)
-		if os.IsNotExist(statErr) {
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
+		if errors.Is(statErr, fs.ErrNotExist) {
 			if err := os.WriteFile(target, embedded, 0o644); err != nil {
-				return err
+				return fmt.Errorf("write %s: %w", target, err)
 			}
 			report.Created++
 			return nil
@@ -103,7 +101,7 @@ func ExtractTo(targetDir string, opts ExtractOptions) (*ExtractReport, error) {
 
 		if opts.Force {
 			if err := os.WriteFile(target, embedded, 0o644); err != nil {
-				return err
+				return fmt.Errorf("write %s: %w", target, err)
 			}
 			report.Forced++
 			return nil
@@ -114,8 +112,5 @@ func ExtractTo(targetDir string, opts ExtractOptions) (*ExtractReport, error) {
 		return nil
 	})
 
-	if err != nil {
-		return report, err
-	}
-	return report, nil
+	return report, err
 }

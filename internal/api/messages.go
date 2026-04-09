@@ -9,10 +9,7 @@ import (
 )
 
 func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		SessionID string `json:"session_id"`
-		Content   string `json:"content"`
-	}
+	var req SendMessageRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -37,10 +34,7 @@ func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAgentMessage(w http.ResponseWriter, r *http.Request) {
 	toSessionID := r.PathValue("id")
 
-	var req struct {
-		FromSessionID string `json:"from_session_id"`
-		Content       string `json:"content"`
-	}
+	var req AgentMessageRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -69,13 +63,7 @@ func (a *API) handleDelegateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		AgentID     string `json:"agent_id,omitempty"`
-		Mode        string `json:"mode,omitempty"`
-		Model       string `json:"model,omitempty"`
-	}
+	var req DelegateTaskRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -108,10 +96,7 @@ func (a *API) handleDelegateAndAggregate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req struct {
-		Message string `json:"message"`
-		Model   string `json:"model,omitempty"`
-	}
+	var req DelegateAndAggregateRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -123,7 +108,7 @@ func (a *API) handleDelegateAndAggregate(w http.ResponseWriter, r *http.Request)
 
 	model := req.Model
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = a.Services.UtilityModel
 	}
 
 	result, err := a.Services.Chat.DelegateAndAggregate(r.Context(), parentSessionID, req.Message, model)

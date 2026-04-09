@@ -53,10 +53,7 @@ func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Intent string   `json:"intent"`
-		Hints  []string `json:"hints"`
-	}
+	var req SelectToolsRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return

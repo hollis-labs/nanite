@@ -26,11 +26,7 @@ func (a *API) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		MessageID string `json:"message_id"`
-		SessionID string `json:"session_id"`
-		Note      string `json:"note"`
-	}
+	var req CreateBookmarkRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

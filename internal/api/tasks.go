@@ -139,9 +139,7 @@ func (a *API) handleTransitionTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Status string `json:"status"`
-	}
+	var req TransitionTaskRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -166,10 +164,7 @@ func (a *API) handleAssignTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		AgentID         string `json:"agent_id"`
-		WorkerSessionID string `json:"worker_session_id"`
-	}
+	var req AssignTaskRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return

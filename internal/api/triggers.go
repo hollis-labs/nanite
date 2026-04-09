@@ -22,15 +22,7 @@ func (a *API) handleListTriggerRules(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateTriggerRule creates a new trigger rule.
 func (a *API) handleCreateTriggerRule(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		PluginID        string `json:"plugin_id"`
-		EventType       string `json:"event_type"`
-		ConnectorName   string `json:"connector_name"`
-		PayloadTemplate string `json:"payload_template"`
-		FilterExpr      string `json:"filter_expr"`
-		Enabled         *bool  `json:"enabled"`
-		Description     string `json:"description"`
-	}
+	var req CreateTriggerRuleRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -100,14 +92,7 @@ func (a *API) handleUpdateTriggerRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		EventType       *string `json:"event_type"`
-		ConnectorName   *string `json:"connector_name"`
-		PayloadTemplate *string `json:"payload_template"`
-		FilterExpr      *string `json:"filter_expr"`
-		Enabled         *bool   `json:"enabled"`
-		Description     *string `json:"description"`
-	}
+	var req UpdateTriggerRuleRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON")
 		return

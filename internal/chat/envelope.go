@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // EnvelopeError describes a validation failure for an envelope block.
@@ -13,42 +14,30 @@ type EnvelopeError struct {
 }
 
 // registeredTypes is the set of envelope types the frontend can render.
-// Unregistered types are silently dropped by the UI.
-var registeredTypes = map[string]bool{
-	// Core primitives
-	"session-task":               true,
-	"document-viewer":            true,
-	"report-card":                true,
-	"error-report":               true,
-	"approval-card":              true,
-	"proposal-card":              true,
-	"question-form":              true,
-	// Reusable primitives
-	"info-card":                  true,
-	"list-card":                  true,
-	"metric-card":                true,
-	"progress-card":              true,
-	"confirmation-card":          true,
-	"table-card":                 true,
-	"timeline-card":              true,
-	"diff-card":                  true,
-	// Work (todo/plan UI)
-	"todo-list":                  true,
-	"plan-review":                true,
-	// Plugin-owned (registered at runtime via RegisterEnvelopeType; listed here for validation fallback)
-	"giphy-modal":                true,
-	"oembed-card":                true,
-	"kb-result":                  true,
-	"ticket-form":                true,
-	"ticket-confirmation":        true,
-	"resolution-capture":         true,
-	// fragments-engine plugin registers: task-disposition, task-complete-notification, sprint-planning-review
-}
+// Populated at startup from config/envelopes.yaml via InitCoreTypes;
+// plugins add entries at runtime via RegisterEnvelopeType.
+// Protected by registeredTypesMu for concurrent access.
+var (
+	registeredTypesMu sync.RWMutex
+	registeredTypes   = map[string]bool{}
+)
 
 // RegisterEnvelopeType adds a new envelope type to the registry at runtime.
 // Plugins call this to register their envelope types so they pass validation.
 func RegisterEnvelopeType(envelopeType string) {
+	registeredTypesMu.Lock()
 	registeredTypes[envelopeType] = true
+	registeredTypesMu.Unlock()
+}
+
+// InitCoreTypes populates the registry with core envelope types loaded from
+// the config/envelopes.yaml manifest. Called once at startup before plugins load.
+func InitCoreTypes(types []string) {
+	registeredTypesMu.Lock()
+	for _, t := range types {
+		registeredTypes[t] = true
+	}
+	registeredTypesMu.Unlock()
 }
 
 // ValidateEnvelope checks required fields on a parsed envelope.
@@ -60,7 +49,10 @@ func ValidateEnvelope(env Envelope, raw string) *EnvelopeError {
 	if env.Version < 1 {
 		return &EnvelopeError{Raw: raw, Reason: "missing_version"}
 	}
-	if env.Type != "" && !registeredTypes[env.Type] {
+	registeredTypesMu.RLock()
+	registered := registeredTypes[env.Type]
+	registeredTypesMu.RUnlock()
+	if env.Type != "" && !registered {
 		return &EnvelopeError{Raw: raw, Reason: "unregistered_type"}
 	}
 	return nil

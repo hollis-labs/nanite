@@ -30,13 +30,7 @@ func (a *API) handleGetMode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCreateMode(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name           string `json:"name"`
-		Slug           string `json:"slug"`
-		PromptAddendum string `json:"prompt_addendum"`
-		ToolOverrides  string `json:"tool_overrides"`
-		Settings       string `json:"settings"`
-	}
+	var req CreateModeRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -73,13 +67,7 @@ func (a *API) handleUpdateMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Name           *string `json:"name"`
-		Slug           *string `json:"slug"`
-		PromptAddendum *string `json:"prompt_addendum"`
-		ToolOverrides  *string `json:"tool_overrides"`
-		Settings       *string `json:"settings"`
-	}
+	var req UpdateModeRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -120,9 +108,7 @@ func (a *API) handleDeleteMode(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAssignModeToAgent(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
-	var req struct {
-		ModeID string `json:"mode_id"`
-	}
+	var req AssignModeToAgentRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

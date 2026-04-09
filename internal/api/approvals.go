@@ -21,10 +21,7 @@ func (a *API) handleRespondApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Decision string `json:"decision"` // "allow" or "deny"
-		Scope    string `json:"scope"`    // "once" or "session"
-	}
+	var req RespondApprovalRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -72,9 +69,7 @@ func (a *API) handleSetPermissionMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Mode string `json:"mode"`
-	}
+	var req SetPermissionModeRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid request body")
 		return

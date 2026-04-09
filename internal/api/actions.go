@@ -24,15 +24,7 @@ func (a *API) handleListActions(w http.ResponseWriter, r *http.Request) {
 // handleCreateAction creates a new custom action. If slash_command is set,
 // the action is registered as a slash command in the command registry.
 func (a *API) handleCreateAction(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-		Keybinding   string `json:"keybinding"`
-		Command      string `json:"command"`
-		SlashCommand string `json:"slash_command"`
-		AutoTriggers string `json:"auto_triggers"`
-		Enabled      *bool  `json:"enabled"`
-	}
+	var req CreateActionRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -96,15 +88,7 @@ func (a *API) handleUpdateAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Name         *string `json:"name"`
-		Description  *string `json:"description"`
-		Keybinding   *string `json:"keybinding"`
-		Command      *string `json:"command"`
-		SlashCommand *string `json:"slash_command"`
-		AutoTriggers *string `json:"auto_triggers"`
-		Enabled      *bool   `json:"enabled"`
-	}
+	var req UpdateActionRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -169,9 +153,7 @@ func (a *API) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		SessionID string `json:"session_id"`
-	}
+	var req ExecuteActionRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON")
 		return

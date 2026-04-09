@@ -86,9 +86,7 @@ func (a *API) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleApprovePlan(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		CreateTodos bool `json:"create_todos"`
-	}
+	var req ApprovePlanRequest
 	if err := a.decode(r, &req); err != nil {
 		// Default to not creating todos if body is empty/invalid.
 		req.CreateTodos = false

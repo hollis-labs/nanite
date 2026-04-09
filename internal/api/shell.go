@@ -27,9 +27,7 @@ func (a *API) handleGetShellMode(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleSetShellMode(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	var req struct {
-		Mode string `json:"mode"`
-	}
+	var req SetShellModeRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -52,10 +50,7 @@ func (a *API) handleSetShellMode(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	var req struct {
-		Command  string `json:"command"`
-		Approved bool   `json:"approved"` // required when mode is "ask"
-	}
+	var req ShellExecRequest
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return

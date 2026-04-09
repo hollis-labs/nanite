@@ -35,7 +35,7 @@ ARCHITECTURE:
 - Network proxy: domain-allowlisted localhost TCP proxy, injected via HTTP_PROXY.
 - Sandbox-first: OS sandbox is primary boundary, denylist is second line. YOLO = no sandbox, denylist stays.
 - Sandbox content: delegated to adapter plugins via PopulateAllSandboxes().
-- Envelope contracts: JSON schemas → Go test + TS codegen (automated sync).
+- Envelope contracts: config/envelopes.yaml manifest → Go init + TS codegen (A+ validated sync).
 - Workflow engine: internal/workflow/ (DAG executor, 5 step handlers, YAML loader).
 - Todo/Plan system: internal/store/todos.go + plans.go, 3 scopes, 13 API routes, 5 agent tools.
 - Memory: internal/memory/ (embedded Conduit Go lib, per-turn + post-compact extraction).
@@ -65,10 +65,13 @@ MEMORY:
   ✅ Similarity ranking enabled (source_memory.go, 2026-04-08).
   Uses Ollama nomic-embed-text by default; prefers OpenAI text-embedding-3-large when OPENAI_API_KEY is set.
 
-TECH DEBT (minor):
-- Hardcoded default model in messages.go:126 — should use a.Services.UtilityModel
-- Anonymous struct request bodies — pervasive `var req struct` pattern, no shared types
-- Fat cmdServe() in main.go (440 lines) — service.Container helps but still large
+TECH DEBT (resolved 2026-04-08):
+  ✅ Hardcoded default model — uses a.Services.UtilityModel now
+  ✅ Anonymous struct request bodies — 51 named types in internal/api/types.go
+  ✅ Fat cmdServe() — extracted 4 init functions, down to ~215 lines
+  ✅ Envelope sync fragility — A+ approach: config/envelopes.yaml manifest + JSON Schema
+    Single source of truth, Go reads at startup, TS codegen generates both sides.
+    CI: `node scripts/generate-plugin-imports.mjs --check`
 
 AGENT ADAPTER ARCHITECTURE — COMPLETED (PR #11, 2026-04-08):
   ✅ CLIAgentAdapter + AgentComposer interfaces (internal/agent/adapter.go)
@@ -100,7 +103,7 @@ PRINCIPLES:
 - Always cerberus_rebuild nanite-api for deployment — never raw go build.
 - Brand package: use brand.* constants, never hardcode identity.
 - Migrations = DDL only. seed.go = data only.
-- Envelope sync: JSON schemas are source of truth → Go test + TS codegen.
+- Envelope sync: config/envelopes.yaml is source of truth → Go init + TS codegen + --check CI.
 - Shell exec trust: AgentExec = full isolation, UserExec = guardrails only.
 - Quality over speed.
 

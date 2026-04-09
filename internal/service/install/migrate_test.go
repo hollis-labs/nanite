@@ -267,6 +267,82 @@ func TestInstallProject_AdoptExisting(t *testing.T) {
 	}
 }
 
+func TestInstallProject_DetectsPartialInstall(t *testing.T) {
+	home := setupFakeHome(t)
+	project := t.TempDir()
+	archBase := t.TempDir()
+	t.Setenv("NANITE_ARCHIVE_BASE", archBase)
+
+	// Set up a dangling archive: state marker at PhaseArchived, no .agentrc
+	// or .nanite in the project, but a matching archive dir with the marker.
+	basename := filepath.Base(project)
+	archiveDir := filepath.Join(archBase, basename+"-2026-04-09")
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(archiveDir, ".agentrc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(archiveDir, ".agentrc", "config.yaml"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := NewState(basename, project, archiveDir, "2.3.0")
+	state.MarkPhaseComplete(PhaseArchived)
+	if err := WriteState(filepath.Join(archiveDir, StateFileName), state); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New()
+	_, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: project,
+		GlobalHome: filepath.Join(home, ".nanite"),
+	})
+	if err == nil {
+		t.Fatal("expected error for partial install without --resume or --restart")
+	}
+	if !errors.Is(err, ErrPartialInstall) {
+		t.Errorf("expected ErrPartialInstall, got %v", err)
+	}
+	// Error message should contain the phase and the archive path for the CLI prompt.
+	if !strings.Contains(err.Error(), "archived") {
+		t.Errorf("error message missing phase: %v", err)
+	}
+	if !strings.Contains(err.Error(), "resume") {
+		t.Errorf("error message missing --resume hint: %v", err)
+	}
+}
+
+func TestInstallProject_IgnoresCompletePartialState(t *testing.T) {
+	home := setupFakeHome(t)
+	project := t.TempDir()
+	archBase := t.TempDir()
+	t.Setenv("NANITE_ARCHIVE_BASE", archBase)
+
+	// Set up an archive with a marker at PhaseComplete (e.g., from a prior
+	// archive-only install that finished cleanly). Fresh scaffold on this
+	// project should proceed without error — a completed archive doesn't
+	// count as "partial".
+	basename := filepath.Base(project)
+	archiveDir := filepath.Join(archBase, basename+"-2026-04-09")
+	os.MkdirAll(archiveDir, 0o755)
+	state := NewState(basename, project, archiveDir, "2.3.0")
+	state.MarkPhaseComplete(PhaseArchived)
+	state.MarkPhaseComplete(PhaseComplete)
+	WriteState(filepath.Join(archiveDir, StateFileName), state)
+
+	svc := New()
+	report, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: project,
+		GlobalHome: filepath.Join(home, ".nanite"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !report.FreshScaffold {
+		t.Error("expected fresh scaffold to proceed despite completed archive")
+	}
+}
+
 func TestInstallProject_AdoptExisting_Idempotent(t *testing.T) {
 	home := setupFakeHome(t)
 	project := t.TempDir()

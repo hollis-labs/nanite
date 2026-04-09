@@ -13,6 +13,11 @@ import (
 	"github.com/hollis-labs/nanite/internal/assets"
 )
 
+// ErrPartialInstall is returned when InstallProject detects a partial
+// install (a matching archive dir with a non-complete state marker) and
+// neither --resume nor --restart was requested.
+var ErrPartialInstall = errors.New("partial install detected")
+
 // Service is the install package's public entry point. All CLI and MCP
 // surfaces call into a Service instance.
 type Service struct{}
@@ -115,6 +120,24 @@ func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectRep
 
 	if hasNaniteDir {
 		return s.adoptExisting(projectDir, globalHome)
+	}
+
+	// Partial install detection: if a matching archive dir exists with a
+	// non-complete state marker, refuse to proceed and tell the caller to
+	// use --resume or --restart.
+	if !hasAgentrc && !hasNaniteDir {
+		base, err := ExpandArchiveBase(archiveBaseOverride())
+		if err == nil {
+			if latest, _ := findLatestArchive(base, filepath.Base(projectDir)); latest != "" {
+				if st, err := ReadState(filepath.Join(latest, StateFileName)); err == nil && st.Phase != PhaseComplete {
+					return nil, fmt.Errorf("%w: partial install from %s at phase %q; rerun with --resume or --restart",
+						ErrPartialInstall,
+						st.StartedAt.Format("2006-01-02 15:04:05"),
+						st.Phase,
+					)
+				}
+			}
+		}
 	}
 
 	return s.freshScaffold(projectDir, globalHome)

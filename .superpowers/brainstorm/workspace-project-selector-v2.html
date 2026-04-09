@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nanite — Unified Combobox Selector</title>
+<style>
+  :root {
+    --bg: #09090b;
+    --bg-elevated: #18181b;
+    --surface: #27272a;
+    --surface-hover: #3f3f46;
+    --border: #27272a;
+    --border-subtle: #3f3f46;
+    --fg: #fafafa;
+    --fg-secondary: #a1a1aa;
+    --fg-muted: #71717a;
+    --fg-faint: #52525b;
+    --primary: #6366f1;
+    --primary-muted: rgba(99,102,241,0.15);
+    --success: #34d399;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #000;
+    color: var(--fg);
+    padding: 32px;
+  }
+
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--fg-muted); font-size: 13px; margin-bottom: 32px; }
+
+  .demo-container {
+    display: flex;
+    gap: 48px;
+    max-width: 1100px;
+  }
+
+  /* === Mock shell === */
+  .mock-shell {
+    display: flex;
+    height: 420px;
+    border-radius: 8px;
+    overflow: visible;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .mock-navrail {
+    width: 48px; flex-shrink: 0;
+    background: var(--bg-elevated);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 8px 0; gap: 4px;
+  }
+
+  .mock-icon {
+    width: 32px; height: 32px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600; color: var(--fg-secondary);
+    transition: background 0.15s; cursor: pointer;
+  }
+  .mock-icon:hover { background: var(--surface); }
+  .mock-icon.active { background: var(--surface); color: var(--primary); }
+  .mock-icon.brand {
+    background: var(--primary);
+    color: white;
+    font-weight: 800;
+    font-size: 14px;
+    font-style: italic;
+  }
+
+  .mock-divider { width: 24px; height: 1px; background: var(--border-subtle); margin: 4px 0; }
+  .mock-spacer { flex: 1; }
+
+  .mock-sidebar {
+    width: 240px; flex-shrink: 0;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: visible;
+    position: relative;
+  }
+
+  .mock-sidebar-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mock-selector {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .mock-selector:hover { background: var(--surface); }
+
+  .mock-selector-icon {
+    width: 20px; height: 20px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; flex-shrink: 0;
+    background: var(--primary-muted); color: var(--primary);
+  }
+
+  .mock-selector-text { flex: 1; min-width: 0; }
+  .mock-selector-text .name { font-size: 12px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mock-selector-text .meta { font-size: 10px; color: var(--fg-faint); }
+
+  .mock-chevron { color: var(--fg-faint); font-size: 10px; }
+
+  .mock-session-list { flex: 1; padding: 8px; overflow: hidden; }
+  .mock-session {
+    padding: 8px 10px; border-radius: 6px; margin-bottom: 2px;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .mock-session:hover { background: var(--surface); }
+  .mock-session.active { background: var(--primary-muted); }
+  .mock-session .title { font-size: 12px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mock-session .time { font-size: 10px; color: var(--fg-faint); margin-top: 1px; }
+
+  .mock-chat {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-faint); font-size: 12px;
+  }
+
+  /* === Combobox popover === */
+  .combobox-popover {
+    position: absolute;
+    top: 52px; left: 8px; right: 8px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    z-index: 20;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    max-height: 340px;
+  }
+
+  .combobox-search {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .combobox-search svg { flex-shrink: 0; color: var(--fg-faint); }
+  .combobox-search input {
+    flex: 1; background: none; border: none; outline: none;
+    font-size: 12px; color: var(--fg); font-family: inherit;
+  }
+  .combobox-search input::placeholder { color: var(--fg-faint); }
+
+  .combobox-filters {
+    display: flex; gap: 6px; padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .filter-pill {
+    padding: 3px 10px; border-radius: 99px;
+    font-size: 10px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+    border: 1px solid transparent;
+    user-select: none;
+  }
+  .filter-pill.active {
+    background: var(--primary-muted);
+    color: var(--primary);
+    border-color: rgba(99,102,241,0.3);
+  }
+  .filter-pill:not(.active) {
+    background: var(--surface);
+    color: var(--fg-muted);
+    border-color: var(--border-subtle);
+  }
+  .filter-pill:not(.active):hover {
+    color: var(--fg-secondary);
+    background: var(--surface-hover);
+  }
+
+  .combobox-list {
+    flex: 1; overflow-y: auto; padding: 4px;
+  }
+
+  .combobox-group-label {
+    padding: 6px 10px 4px;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+
+  .combobox-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 6px;
+    font-size: 12px; color: var(--fg-secondary);
+    cursor: pointer; transition: background 0.15s;
+  }
+  .combobox-item:hover { background: var(--surface); color: var(--fg); }
+  .combobox-item.highlighted { background: var(--surface); color: var(--fg); }
+  .combobox-item.selected { color: var(--fg); }
+
+  .combobox-item .item-icon {
+    width: 18px; height: 18px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 9px; font-weight: 700;
+  }
+  .combobox-item .item-icon.ws { background: var(--surface-hover); color: var(--fg-secondary); }
+  .combobox-item .item-icon.proj { background: var(--primary-muted); color: var(--primary); }
+
+  .combobox-item .item-text { flex: 1; min-width: 0; }
+  .combobox-item .item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .combobox-item .item-meta { font-size: 10px; color: var(--fg-faint); }
+
+  .combobox-item .check { color: var(--success); font-size: 11px; margin-left: auto; flex-shrink: 0; }
+
+  .combobox-sep { height: 1px; background: var(--border); margin: 4px 8px; }
+
+  .combobox-footer {
+    padding: 6px 12px; border-top: 1px solid var(--border);
+    font-size: 10px; color: var(--fg-faint);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .combobox-footer kbd {
+    background: var(--surface); padding: 1px 4px; border-radius: 3px;
+    font-size: 9px; font-family: inherit; border: 1px solid var(--border-subtle);
+  }
+
+  /* === Annotations === */
+  .annotations {
+    flex: 1; min-width: 300px;
+  }
+  .annotation-section { margin-bottom: 24px; }
+  .annotation-section h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--fg); }
+  .annotation-section p { font-size: 12px; color: var(--fg-muted); line-height: 1.6; margin-bottom: 6px; }
+  .annotation-section code {
+    background: var(--surface); padding: 1px 5px; border-radius: 3px;
+    font-size: 11px; color: var(--fg-secondary);
+  }
+  .behavior-list { list-style: none; }
+  .behavior-list li {
+    padding: 6px 0; font-size: 12px; color: var(--fg-muted);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .behavior-list li:last-child { border: none; }
+  .behavior-list .icon { flex-shrink: 0; margin-top: 2px; }
+  .behavior-list .icon.toggle { color: var(--primary); }
+  .behavior-list .icon.guard { color: var(--success); }
+  .behavior-list .icon.key { color: var(--fg-faint); }
+</style>
+</head>
+<body>
+
+<h1>Option C — Unified Combobox</h1>
+<p class="subtitle">Single combobox with search, filter pills, and smart toggle guard. Click the pills to test the toggle behavior.</p>
+
+<div class="demo-container">
+
+  <!-- Live mockup -->
+  <div class="mock-shell">
+    <div class="mock-navrail">
+      <div class="mock-icon brand" title="Home">N</div>
+      <div class="mock-divider"></div>
+      <div class="mock-icon active">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div class="mock-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      </div>
+      <div class="mock-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      </div>
+      <div class="mock-spacer"></div>
+      <div class="mock-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </div>
+    </div>
+    <div class="mock-sidebar">
+      <div class="mock-sidebar-header">
+        <div class="mock-selector" onclick="toggleCombobox()">
+          <div class="mock-selector-icon">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          </div>
+          <div class="mock-selector-text">
+            <div class="name">nanite</div>
+            <div class="meta">Fragments Engine</div>
+          </div>
+          <span class="mock-chevron">&#x25BE;</span>
+        </div>
+      </div>
+
+      <!-- Combobox popover -->
+      <div class="combobox-popover" id="combobox">
+        <div class="combobox-search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" placeholder="Search workspaces and projects..." id="searchInput" oninput="filterItems()">
+        </div>
+        <div class="combobox-filters">
+          <div class="filter-pill active" id="pill-ws" onclick="togglePill('ws')">Workspace</div>
+          <div class="filter-pill active" id="pill-proj" onclick="togglePill('proj')">Project</div>
+        </div>
+        <div class="combobox-list" id="comboboxList">
+          <!-- Populated by JS -->
+        </div>
+        <div class="combobox-footer">
+          <span><kbd>&uarr;</kbd> <kbd>&darr;</kbd> navigate</span>
+          <span><kbd>Enter</kbd> select</span>
+          <span><kbd>Esc</kbd> close</span>
+        </div>
+      </div>
+
+      <div class="mock-session-list">
+        <div class="mock-session active"><div class="title">Work tab UAT fixes</div><div class="time">2m ago</div></div>
+        <div class="mock-session"><div class="title">Plugin catalog setup</div><div class="time">1h ago</div></div>
+        <div class="mock-session"><div class="title">Envelope system debug</div><div class="time">3h ago</div></div>
+        <div class="mock-session"><div class="title">Hardening phase</div><div class="time">Yesterday</div></div>
+      </div>
+    </div>
+    <div class="mock-chat">Chat area</div>
+  </div>
+
+  <!-- Behavior annotations -->
+  <div class="annotations">
+    <div class="annotation-section">
+      <h3>Filter Pill Behavior</h3>
+      <p>Try clicking the pills in the mockup to see the guard logic in action.</p>
+      <ul class="behavior-list">
+        <li>
+          <span class="icon toggle">&#x25CF;</span>
+          <span>Both pills <strong>on</strong> by default &mdash; shows all items grouped by type</span>
+        </li>
+        <li>
+          <span class="icon toggle">&#x25CF;</span>
+          <span>Click a pill to toggle it <strong>off</strong> &mdash; hides that group</span>
+        </li>
+        <li>
+          <span class="icon guard">&#x25CF;</span>
+          <span><strong>Guard:</strong> If only one pill is active and you click it, the <em>other</em> pill turns on instead. Prevents empty state &mdash; always at least one active.</span>
+        </li>
+      </ul>
+    </div>
+    <div class="annotation-section">
+      <h3>Search</h3>
+      <p>Filters both workspaces and projects by name. Respects active pills &mdash; if "Workspace" is off, workspace items stay hidden even if they match.</p>
+    </div>
+    <div class="annotation-section">
+      <h3>Selection</h3>
+      <p>Clicking a <strong>workspace</strong> switches the active workspace (and resets project to "All Chats"). Clicking a <strong>project</strong> switches just the project filter. <code>"All Chats"</code> clears the project filter.</p>
+    </div>
+    <div class="annotation-section">
+      <h3>NavRail N Logo</h3>
+      <p>Branded <strong>N</strong> in primary color. Click navigates to home/main screen. Workspace selector is fully removed from the NavRail.</p>
+    </div>
+    <div class="annotation-section">
+      <h3>Keyboard</h3>
+      <p><code>Cmd+K</code> could optionally open this combobox (in addition to command palette), or a dedicated binding.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const ITEMS = [
+  { type: 'ws', name: 'Fragments Engine', icon: 'F', selected: true },
+  { type: 'ws', name: 'Personal', icon: 'P', selected: false },
+  { type: 'ws', name: 'Hollis Labs OSS', icon: 'H', selected: false },
+  { type: 'proj', name: 'All Chats', icon: 'chat', selected: false },
+  { type: 'proj', name: 'nanite', icon: 'folder', selected: true },
+  { type: 'proj', name: 'cortex', icon: 'folder', selected: false },
+  { type: 'proj', name: 'hadron', icon: 'folder', selected: false },
+  { type: 'proj', name: 'volon', icon: 'folder', selected: false },
+  { type: 'proj', name: 'plugin-catalog', icon: 'folder', selected: false },
+];
+
+let showWs = true;
+let showProj = true;
+
+function togglePill(type) {
+  if (type === 'ws') {
+    if (showWs && !showProj) {
+      // Guard: can't turn off last one, swap
+      showWs = false;
+      showProj = true;
+    } else {
+      showWs = !showWs;
+    }
+  } else {
+    if (showProj && !showWs) {
+      // Guard: can't turn off last one, swap
+      showProj = false;
+      showWs = true;
+    } else {
+      showProj = !showProj;
+    }
+  }
+  document.getElementById('pill-ws').classList.toggle('active', showWs);
+  document.getElementById('pill-proj').classList.toggle('active', showProj);
+  renderList();
+}
+
+function filterItems() {
+  renderList();
+}
+
+function renderList() {
+  const query = (document.getElementById('searchInput').value || '').toLowerCase();
+  const list = document.getElementById('comboboxList');
+  let html = '';
+
+  const wsItems = ITEMS.filter(i => i.type === 'ws' && (i.name.toLowerCase().includes(query)));
+  const projItems = ITEMS.filter(i => i.type === 'proj' && (i.name.toLowerCase().includes(query)));
+
+  if (showWs && wsItems.length > 0) {
+    html += '<div class="combobox-group-label">Workspaces</div>';
+    for (const item of wsItems) {
+      html += `
+        <div class="combobox-item ${item.selected ? 'selected' : ''}">
+          <div class="item-icon ws">${item.icon}</div>
+          <div class="item-text">
+            <div class="item-name">${item.name}</div>
+          </div>
+          ${item.selected ? '<span class="check">&#10003;</span>' : ''}
+        </div>`;
+    }
+  }
+
+  if (showWs && wsItems.length > 0 && showProj && projItems.length > 0) {
+    html += '<div class="combobox-sep"></div>';
+  }
+
+  if (showProj && projItems.length > 0) {
+    html += '<div class="combobox-group-label">Projects</div>';
+    for (const item of projItems) {
+      const iconSvg = item.icon === 'chat'
+        ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
+        : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>';
+      html += `
+        <div class="combobox-item ${item.selected ? 'selected' : ''}">
+          <div class="item-icon proj">${iconSvg}</div>
+          <div class="item-text">
+            <div class="item-name">${item.name}</div>
+          </div>
+          ${item.selected ? '<span class="check">&#10003;</span>' : ''}
+        </div>`;
+    }
+  }
+
+  if (html === '') {
+    html = '<div style="padding:20px;text-align:center;font-size:12px;color:var(--fg-faint);">No results</div>';
+  }
+
+  list.innerHTML = html;
+}
+
+function toggleCombobox() {
+  const cb = document.getElementById('combobox');
+  cb.style.display = cb.style.display === 'none' ? 'flex' : 'none';
+  if (cb.style.display === 'flex') {
+    document.getElementById('searchInput').focus();
+  }
+}
+
+// Init
+renderList();
+</script>
+</body>
+</html>

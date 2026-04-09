@@ -8,18 +8,18 @@
 - **Go version:** 1.26.1
 - **Module path:** `github.com/hollis-labs/nanite`
 - **Router:** `net/http` stdlib (`http.ServeMux` with Go 1.22+ method routing: `"GET /api/..."`)
-- **Database:** SQLite via `modernc.org/sqlite v1.46.1` (WAL mode, foreign keys, busy_timeout=5000). PostgreSQL via `github.com/lib/pq v1.12.0` for Nexus A2A messaging only.
+- **Database:** SQLite via `modernc.org/sqlite v1.46.1` (WAL mode, foreign keys, busy_timeout=5000). All messaging is SQLite-native (Nexus/PostgreSQL removed).
 - **CLI framework:** None (manual `os.Args` switch in `cmd/nanite/main.go`)
 - **Config format:** YAML (`gopkg.in/yaml.v3`) for agentrc config; `.env` via `github.com/joho/godotenv`
 - **Tracing:** OpenTelemetry (`go.opentelemetry.io/otel v1.41.0`) via `github.com/hollis-labs/otel` wrapper
 - **Notable dependencies:**
-  - `github.com/hollis-labs/nexus` — A2A messaging (Postgres-backed, local replace)
   - `github.com/hollis-labs/tool-broker` — Tool permission/selection engine (local replace)
-  - `github.com/hollis-labs/fragments-engine/plugin` — Plugin SDK interface (local replace)
+  - `github.com/hollis-labs/go-plugin` — Plugin SDK interface (local replace)
   - `github.com/hollis-labs/otel` — OTel init wrapper (local replace)
+  - `github.com/hollis-labs/go-providers` — Shared LLM provider library (local replace)
   - `github.com/mark3labs/mcp-go v0.44.1` — MCP protocol client (indirect, used by tool-broker)
   - `github.com/google/uuid v1.6.0` — UUID generation
-  - All four local deps use `replace` directives pointing to sibling directories (`../libs/otel`, `../libs/toolbroker`, `../libs/plugin`, `../../nexus`)
+  - Local deps use `replace` directives pointing to sibling directories
 
 ## Project Structure
 
@@ -48,7 +48,7 @@ internal/
 │   ├── envelope.go          # Structured response envelope creation
 │   ├── commands.go          # Slash command handling
 │   └── activity.go          # Volon GUI activity events
-├── config/                  # agentrc.yaml config loading (user + project merge)
+├── config/                  # nanite.yaml config loading (user + project merge)
 ├── contextbroker/           # Universal context retrieval (Conduit, PCC, Engine, Session)
 ├── crossapp/                # Cross-app engine client
 ├── filter/                  # Output filter chain (e.g., strip emoji)
@@ -81,7 +81,7 @@ internal/
 │   ├── event_pipeline.go    # Streaming event pipeline (transforms + cost monitor)
 │   ├── scope_guard.go       # Scope-based safety guardrails
 │   └── registry.go          # Provider registry
-├── sandbox/                 # Sandboxed execution for agent tools
+├── sandbox/                 # Sandbox dir lifecycle + delegates to adapter plugins
 ├── server/                  # HTTP server, middleware, SPA handler, auth
 ├── store/                   # SQLite persistence layer (embedded migrations)
 │   ├── store.go             # DB open, WAL config, migration runner
@@ -113,14 +113,14 @@ ui/                          # React SPA (see frontend.md)
 |---------|----------|----------------|
 | api | `internal/api/` | HTTP handlers for all REST endpoints (100+ routes). One file per resource. Uses `http.ServeMux` method routing. |
 | chat | `internal/chat/` | Core chat engine: message handling, LLM streaming, tool-use loop, context assembly, session compaction, delegation, orchestration, slash commands, activity events. |
-| config | `internal/config/` | Loads and merges agentrc YAML from user-level (`~/.agentrc/agentrc.yaml`) and project-level (`./agentrc.yaml`). |
+| config | `internal/config/` | Loads and merges nanite YAML from user-level (`~/.nanite/nanite.yaml`) and project-level (`./nanite.yaml`). |
 | contextbroker | `internal/contextbroker/` | Universal context retrieval. Queries multiple sources (Conduit, PCC, Engine, Session) with token budget allocation and relevance ranking. |
 | filter | `internal/filter/` | Composable output filter chain applied to LLM responses (e.g., `no_emoji`). |
 | mcp | `internal/mcp/` | MCP server manager: lifecycle management for stdio/HTTP transports, built-in dev/general/self-service tools, auto-discovery, tool broker integration. |
 | mcpserver | `internal/mcpserver/` | Nanite's own MCP server (JSON-RPC over stdio). Exposes nanite tools to external MCP clients (e.g., Claude CLI). |
 | plugin | `internal/plugin/` | Plugin host: discovery, loading, lifecycle, event bus, UI component registry. Supports both built-in and external plugins. |
 | provider | `internal/provider/` | LLM provider adapters implementing the `Provider` interface: Anthropic, OpenAI, Ollama, PTY bridge (Claude/Codex/Gemini CLIs). Includes circuit breaker, rate limiter, retry, cache, event pipeline, scope guard. |
-| sandbox | `internal/sandbox/` | Sandboxed execution environment for agent tool calls. |
+| sandbox | `internal/sandbox/` | Sandbox directory lifecycle. Delegates content writing to CLIAgentAdapter plugins via AdapterRegistry. |
 | server | `internal/server/` | HTTP server with middleware chain: recover -> logging -> basicAuth -> CORS. Serves API routes + embedded SPA. |
 | store | `internal/store/` | SQLite persistence: embedded migrations, CRUD for sessions, messages, agents, skills, modes, templates, usage, bookmarks, artifacts, a2a messages, MCP servers, workflows. |
 | toolclient | `internal/toolclient/` | Tool broker client: intent-based tool selection, permission checking, built-in tool registration, progressive discovery, tool knowledge base. |
@@ -146,7 +146,7 @@ ui/                          # React SPA (see frontend.md)
 - All routes registered centrally in `api.go:RegisterRoutes()` with method+path pattern: `"GET /api/resource"`. *File: `internal/api/api.go:32-185`*
 
 ### Configuration
-- Config loaded once at startup via `config.Load()`. Merges user-level (`~/.agentrc/agentrc.yaml`) with project-level (`./agentrc.yaml`). Project values override user values. *File: `internal/config/config.go:58-68`*
+- Config loaded once at startup via `config.Load()`. Merges user-level (`~/.nanite/nanite.yaml`) with project-level (`./nanite.yaml`). Project values override user values. *File: `internal/config/config.go:58-68`*
 - Provider API keys from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`. *File: `cmd/nanite/main.go:126-134`*
 - Auth from env: `NANITE_AUTH_USER`, `NANITE_AUTH_PASSWORD` (no-op when unset). *File: `internal/server/auth.go:14-16`*
 
@@ -183,27 +183,23 @@ ui/                          # React SPA (see frontend.md)
 
 ## Anti-Patterns to Avoid
 
-- **God object: `Engine` struct** (1760 lines) -- `internal/chat/engine.go` contains the chat engine, streaming, tool-use loop, context assembly, session management, presence tracking, and utility helpers all in one file. 12 fields on the struct, 6 `sync.Map` fields for concurrent state. Should be split into focused subsystems. *File: `internal/chat/engine.go:130-148`*
+### Resolved (2026-04-08 audit)
+- ~~**God object engine.go**~~ — RESOLVED: Decomposed from 1760→197 lines. Logic moved to orchestrator.go, delegate.go, envelope.go, commands.go.
+- ~~**Manual migration ordering**~~ — RESOLVED: Auto-discovered via `fs.ReadDir()`. Schema squashed to `001_schema.sql`. Rule: migrations = DDL only, seed.go = data only.
+- ~~**Hardcoded MCP server paths**~~ — RESOLVED: MCP servers loaded from database via `loadPersistedMCPServers()`.
+- ~~**Hardcoded Conduit MCP token**~~ — RESOLVED: Removed, uses DB-persisted configs.
+- ~~**Version string drift**~~ — RESOLVED: Centralized in `internal/version/version.go` (`0.3.0-beta`).
+- ~~**Store.Seed() monolith**~~ — RESOLVED: Down to 359 lines, structured by subsystem.
+- ~~**Inconsistent nil checks**~~ — RESOLVED: Deliberate pattern now — reads return empty/safe defaults, writes return errors.
 
-- **~~Manual migration ordering~~** -- RESOLVED: Migrations auto-discovered via `fs.ReadDir()` (Phase 7). Schema squashed to single `001_schema.sql` (2026-04-04). Rule: migrations = DDL only, seed.go = data only.
+### Still Present
+- **Hardcoded default model** -- `"claude-sonnet-4-20250514"` in `handleDelegateAndAggregate` (`internal/api/messages.go:126`). Should use `a.Services.UtilityModel` which is already available. *Minor fix.*
 
-- **Hardcoded MCP server paths** -- `setupMCPServers()` in `main.go` hardcodes absolute paths like `home + "/go/bin/engine"` and `home + "/Projects-apps/hadron/bin/hadrond"`. These are developer-machine-specific and will break for other contributors. *File: `cmd/nanite/main.go:377-419`*
+- **Envelope sync fragility** -- Backend envelope types in `chat/envelope.go` and frontend registry in `ui/src/generated/plugin-envelopes.ts` must be manually kept in sync. Adding a backend type without a frontend entry causes silent data loss. CLAUDE.md explicitly warns about this. *Mitigated by JSON schema codegen but still requires discipline.*
 
-- **Hardcoded Conduit MCP token** -- A hex token is hardcoded as a fallback in `setupMCPServers()`. *File: `cmd/nanite/main.go:407-409`*
+- **Anonymous struct request bodies** -- Every handler defines its own inline `var req struct {...}` for request parsing. No shared request/response types. Makes API documentation and type reuse harder. *File: `internal/api/sessions.go`, `messages.go`, etc.*
 
-- **Hardcoded default model** -- `"claude-sonnet-4-20250514"` appears as a hardcoded default in `handleDelegateAndAggregate` and `Engine.UtilityModel`. Should be a constant or config value. *File: `internal/api/messages.go:128`, `internal/chat/engine.go:156`*
-
-- **Version string drift** -- `server.go:handleHealth` returns `"0.2.0"`. No central version constant. *File: `internal/server/server.go:88`*
-
-- **Store.Seed() is a 428-line monolith** -- Seeds default agents, templates, skills, modes, and prompt templates all in one file with inline SQL. No structured seed data files. *File: `internal/store/seed.go`*
-
-- **Envelope sync fragility** -- Backend envelope types in `chat/envelope.go` and frontend registry in `ui/src/generated/plugin-envelopes.ts` must be manually kept in sync. Adding a backend type without a frontend entry causes silent data loss. CLAUDE.md explicitly warns about this. *File: `CLAUDE.md:42-57`*
-
-- **Anonymous struct request bodies** -- Every handler defines its own inline `var req struct {...}` for request parsing. No shared request/response types. This makes API documentation and type reuse impossible. *File: `internal/api/sessions.go:27-31`, `internal/api/messages.go:12-15`, etc.*
-
-- **Fat `main.go` wiring** -- `cmdServe()` in `main.go` is 307 lines of manual dependency wiring. No dependency injection container or wire framework. Every new subsystem requires editing main.go. *File: `cmd/nanite/main.go:62-369`*
-
-- **Inconsistent nil checks for optional deps** -- API handlers check `if a.ToolClient == nil` inline. Some handlers (e.g., `handleListTools`) return empty arrays, others return errors. No consistent pattern for optional dependency availability. *File: `internal/api/tools.go:10-12` vs `tools.go:49`*
+- **Fat `main.go` wiring** -- `cmdServe()` is 440 lines. `service.Container` struct helps but the function is still large. *File: `cmd/nanite/main.go:68-507`*
 
 ## Reference Implementations
 
@@ -215,9 +211,8 @@ ui/                          # React SPA (see frontend.md)
 
 ## Pre-Existing Issues (logged for follow-up)
 
-- **server.TestAuthMiddlewareEnabled:** auth middleware not enforcing in test. Returns 200 instead of 401. Spotted 2026-03-27.
-
-### Resolved (2026-04-04)
+### Resolved
+- ~~**server.TestAuthMiddlewareEnabled**~~ — Fixed. Test correctly returns 401 on missing/wrong credentials. Spotted 2026-03-27, resolved by 2026-04-08.
 - ~~Broken connector imports~~ — cleaned up during rebrand, no broken imports exist.
 - ~~mcp.TestSelfToolsTransport_ListTools~~ — test uses `>=` comparison, passes with all 16 tools.
 - ~~Seed/migration overlap~~ — migrations squashed to DDL-only `001_schema.sql`, all seed data consolidated in `seed.go`.
@@ -277,18 +272,10 @@ All registered in `main.go` cliAdapters slice and `handleDetectCLI` API endpoint
 - [x] **Plugin generator** — `nanite plugin new <name>` with `--with-agent`, `--with-envelope`, `--with-crud`
 - [x] **Plugin guide** — `docs/plugin-install-guide.md`
 
-### 3. Slash Commands & UI/UX from Fragments v1
+### 3. Slash Commands & UI/UX from Fragments v1 — Partially Done
 
-Currently 11 commands in `internal/chat/commands.go`. Categories: agent, session, tools, help.
-
-#### 3a. Backend slash commands
-- [ ] Review Fragments v1 slash commands and port missing ones. Likely candidates: `/agent <name>` (switch agent), `/model <name>` (switch model), `/export` (export session), `/import`, `/search` (search messages).
-- [ ] `/status` — Show session info (agent, model, provider, adapter, message count, token usage).
-- [ ] `/providers` — List registered providers and their status (available/unavailable).
-- [ ] Ensure the command registry pattern in `commands.go` is extensible — plugins should be able to register custom slash commands via `Host.RegisterCommand(name, handler)`.
-
-#### 3b. Frontend UI/UX (frontend)
-- [ ] Port relevant UI patterns from Fragments v1 (the user will specify which ones).
+- [x] Plugin-registered commands via `Host.RegisterCommand()` — wired in `host.go:718`, `main.go:370`
+- Remaining slash commands and UI/UX porting will be addressed as needed.
 
 ### 4. Multi-Session Presence ✅
 
@@ -311,27 +298,35 @@ Currently 11 commands in `internal/chat/commands.go`. Categories: agent, session
 - [x] **Inline artifact references** — `ArtifactChip.tsx`. `[name](artifact:name)` markdown links render as clickable chips that open the drawer.
 - [x] **Artifact upload** — Paperclip button + drag-and-drop in ChatComposer. Keyboard shortcut Cmd+.
 
-### 6. Agent Model — agentrc Compatibility
+### 6. Agent Adapter Architecture ✅ (PR #11, 2026-04-08)
 
-Currently agents are DB records (AgentProfile in `internal/store/agents.go`). The agentrc system (`~/.agentrc/`) uses YAML composition (roles + skills + context). Key alignment:
+Universal agent harness with plugin-per-adapter model. Spec: `docs/superpowers/specs/2026-04-08-agent-adapter-architecture-design.md`
 
-#### 6a. Agent schema (backend)
-- [ ] **Extend AgentProfile** to support the agentrc-style fields:
-  - `unique_id` — stable identifier across versions (currently just `id` which is a UUID)
-  - `version` — agent definition version
-  - `hash` — content hash, constant through versions (for identity tracking)
-  - `tools` — JSON array of allowed/configured tools (currently in `tool_permissions` but as permission rules, not tool lists)
-  - `skills` — JSON array of skill IDs (currently managed via `agent_skills` join table)
-  - `permissions` — structured permission object (currently `tool_permissions` JSON blob)
-  - `directories` — JSON array of directories this agent can access (for sandbox scoping)
-- [ ] **Per-project/session overrides** — tools, skills, permissions, and directories should be overridable at the project level (`projects.settings` JSON) and session level (`sessions.metadata` JSON). Define merge semantics: session overrides project overrides agent defaults.
+#### 6a. Core interfaces — DONE
+- [x] `CLIAgentAdapter` interface — Discover, PopulateSandbox, SyncProjectRoot, Priority
+- [x] `AgentComposer` extension — ComposePrompt, ListRoles, ListSkills (for role-based composition)
+- [x] `AdapterRegistry` — priority-sorted, thread-safe, copy-before-iterate for I/O safety
+- [x] Config override cascade — Agent Base → Project → Session, per-field merge (scalars/lists/maps)
+- [x] `session_agent_overrides` table + store methods
+- [x] Managed section protocol — `<!-- nanite:start -->` blocks in CLI-specific files
 
-#### 6b. agentrc integration (backend — needs decision)
-- [ ] **Decision needed:** How standalone should Nanite be? Options:
-  1. **Import agentrc configs** — Read `~/.agentrc/config.yaml` and `.agentrc/config.yaml` at startup, create/update AgentProfile records from them. Nanite owns the runtime, agentrc provides definitions.
-  2. **Full integration** — Nanite's config loader (`internal/config/`) already merges user+project agentrc YAML. Extend this to populate agent profiles from the merged config.
-  3. **Adapter layer** — Define an `AgentSource` interface. One implementation reads from DB, another reads from agentrc YAML. Engine queries the source at runtime. Allows switching or layering.
-- [ ] **Agent framework adapters (future)** — Consider adapters for other agent definition formats (e.g., CrewAI, AutoGen, LangGraph agent configs). These would implement the same `AgentSource` interface.
+#### 6b. Adapter plugins — DONE
+- [x] `adapter-nanite-native` — replaces agentrc-sync, CLIAgentAdapter + AgentComposer, .nanite/.agentrc fallback
+- [x] `adapter-claude` — reads .claude/agents/, writes CLAUDE.md + .mcp.json (absorbed sandbox.go)
+- [x] `adapter-codex` — reads/writes AGENTS.md (Codex/Copilot)
+- [x] `adapter-gemini` — reads/writes GEMINI.md
+- [x] `adapter-opencode` — reads/writes OPENCODE.md
+
+#### 6c. Infrastructure — DONE
+- [x] Nexus dependency removed — A2A messaging SQLite-only
+- [x] Discovery tiers 5-6 replaced by AdapterRegistry.DiscoverAll()
+- [x] Sandbox.Populate() delegates to AdapterRegistry.PopulateAllSandboxes()
+- [x] Go code paths renamed .agentrc → .nanite (nanite-native retains fallback)
+
+#### 6d. Future adapters — DEFERRED
+- [ ] CrewAI adapter (first priority — most config-driven)
+- [ ] AutoGen adapter (declarative configs only)
+- [ ] LangGraph adapter (declarative configs only)
 
 ### 7. Small Backend Items ✅
 
@@ -357,8 +352,8 @@ Currently agents are DB records (AgentProfile in `internal/store/agents.go`). Th
 - **Pre-commit hooks via lefthook:** `gofmt`, `goimports`, `golangci-lint --new`, `go vet` (parallel). Frontend: `biome check`. Pre-push: `go test ./...`.
 - **SPA embedding:** Go binary embeds the built UI from `internal/server/ui_dist/` via `//go:embed`. The `-dev` flag skips this for local development with Vite HMR.
 - **Auth:** Optional basic auth via `NANITE_AUTH_USER` / `NANITE_AUTH_PASSWORD` env vars. Disabled when unset (local dev). `/api/health` is always exempt.
-- **A2A messaging:** Prefers Postgres (via `ENGINE_POSTGRES_DSN` or `VOLON_POSTGRES_DSN` env var) for Nexus-backed messaging. Falls back to SQLite when Postgres is unavailable.
+- **A2A messaging:** SQLite-native via `internal/store/a2a.go`. Nexus/PostgreSQL dependency removed (PR #11).
 - **Provider registration:** Anthropic/OpenAI require API keys; Ollama is always registered (local); PTY adapters auto-detect installed CLI binaries (Claude, Codex, Gemini).
 - **Tool broker:** Manages tool permissions and intent-based selection. Progressive discovery kicks in above 5 tools (sends summaries to LLM, LLM requests full schemas via `request_tools` meta-tool).
 - **Output filters:** Configurable via `NANITE_OUTPUT_FILTERS` env var (comma-separated). Default: `no_emoji`.
-- **Local replace directives:** Four sibling libraries (`../libs/otel`, `../libs/toolbroker`, `../libs/plugin`, `../../nexus`) are referenced via `replace` in `go.mod`. These must be present locally for builds to work.
+- **Local replace directives:** Sibling libraries (`../framework/libs/go-otel`, `go-toolbroker`, `go-plugin`, `go-providers`, `go-queue`, `go-mcp`, `../vanta-conduit`) are referenced via `replace` in `go.mod`. These must be present locally for builds to work.

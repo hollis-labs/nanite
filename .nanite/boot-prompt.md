@@ -23,6 +23,10 @@ KEY DOCS:
 ARCHITECTURE:
 - Migrations: DDL only. Seed data in seed.go.
 - Agents/skills: file-based (MD + YAML frontmatter), DB = runtime state only.
+- Agent adapters: CLIAgentAdapter interface in internal/agent/adapter.go.
+  5 built-in adapters: nanite-native, claude, codex, gemini, opencode.
+  AdapterRegistry manages discovery + sandbox population + project root sync.
+  Config override cascade: Agent Base → Project → Session (per-field merge).
 - Plugins: YAML manifest + Go/subprocess, event hooks, connectors, UI components.
 - Providers: shared lib at hollis-labs/go-providers (8 HTTP API + 8 CLI adapters).
 - Service layer: internal/service/container.go wires all services.
@@ -30,6 +34,7 @@ ARCHITECTURE:
 - Sandboxing: AgentExec (full isolation) / UserExec (guardrails+sandbox). macOS seatbelt + Linux bwrap.
 - Network proxy: domain-allowlisted localhost TCP proxy, injected via HTTP_PROXY.
 - Sandbox-first: OS sandbox is primary boundary, denylist is second line. YOLO = no sandbox, denylist stays.
+- Sandbox content: delegated to adapter plugins via PopulateAllSandboxes().
 - Envelope contracts: JSON schemas → Go test + TS codegen (automated sync).
 - Workflow engine: internal/workflow/ (DAG executor, 5 step handlers, YAML loader).
 - Todo/Plan system: internal/store/todos.go + plans.go, 3 scopes, 13 API routes, 5 agent tools.
@@ -37,6 +42,7 @@ ARCHITECTURE:
 - Context broker: 5 sources wired (conduit 25%, memory 15%, pcc 30%, engine 15%, session 15%).
 - Embeddings: OpenAI text-embedding-3-large (preferred) or Ollama nomic-embed-text (fallback).
 - Filter chain: reasoning-blind view support (FilterViewReasoningBlind).
+- Messaging: SQLite-native A2A (internal/store/a2a.go). Nexus removed.
 
 HARDENING PHASE — COMPLETED (2026-04-07):
   ✅ Task 1 — God-object decomp (engine.go 2164→197 lines)
@@ -50,19 +56,43 @@ HARDENING PHASE — COMPLETED (2026-04-07):
   ✅ Task 9 — Code execution (nanite_code_execute, shell/python/js)
   ✅ Think tool, Reasoning-blind filter view
   ✅ Provider lib extraction (hollis-labs/go-providers)
+  ✅ Version centralized (internal/version/version.go)
+  ✅ MCP server paths DB-loaded (no more hardcoded paths/tokens)
+  ✅ Nil check pattern standardized (reads→empty, writes→error)
+  ✅ Auth middleware test fixed (401 on missing/wrong creds)
 
-REMAINING:
-- Memory: similarity ranking available when OPENAI_API_KEY set or Ollama running.
-  Activation ranking is the default in MemorySource. Switch to similarity
-  ranking in contextbroker/source_memory.go when ready to test.
+MEMORY:
+  ✅ Similarity ranking enabled (source_memory.go, 2026-04-08).
+  Uses Ollama nomic-embed-text by default; prefers OpenAI text-embedding-3-large when OPENAI_API_KEY is set.
+
+TECH DEBT (minor):
+- Hardcoded default model in messages.go:126 — should use a.Services.UtilityModel
+- Anonymous struct request bodies — pervasive `var req struct` pattern, no shared types
+- Fat cmdServe() in main.go (440 lines) — service.Container helps but still large
+
+AGENT ADAPTER ARCHITECTURE — COMPLETED (PR #11, 2026-04-08):
+  ✅ CLIAgentAdapter + AgentComposer interfaces (internal/agent/adapter.go)
+  ✅ AdapterRegistry (priority-sorted, copy-before-iterate)
+  ✅ 5 adapter plugins: nanite-native, claude, codex, gemini, opencode
+  ✅ Config override cascade (Agent Base → Project → Session, per-field merge)
+  ✅ session_agent_overrides table
+  ✅ Managed section protocol (<!-- nanite:start --> blocks)
+  ✅ Nexus dependency removed, SQLite-only messaging
+  ✅ .agentrc → .nanite rename in Go code (nanite-native retains fallback)
+  ✅ Sandbox delegation to adapters
+  Spec: docs/superpowers/specs/2026-04-08-agent-adapter-architecture-design.md
 
 UPCOMING:
-- Plugin Extraction Phase 5 (Connectors) — paused for hardening, ready to resume
+- Future adapters: CrewAI (first), AutoGen, LangGraph
+- Plugin Extraction Phase 5 (Connectors) — PARKED, pending first connector.
+  Infrastructure complete: Connector interface, Host.RegisterConnector, health tracking,
+  trigger dispatcher w/ retry, API endpoints, tests. No concrete connectors yet.
 - User Shell Task 2 (Interactive PTY) — backlogged (! exec sufficient)
 - Phase D (Claude Code Integration) — future
-- Frontend: workflow progress panel, memory viewer
-- Slash commands: /status, /providers, plugin-registered commands
-- Agent model alignment (agentrc schema extensions)
+- Frontend: workflow progress panel, memory viewer, tool prefs UI, worker status UI,
+  adapter source badges, override editor, sync status, NANITE.md preview
+- Slash commands: additional commands as needed (Host.RegisterCommand ✅)
+- .agentrc/ → .nanite/ file rename (separate agent handles agentrc repo changes)
 
 PRINCIPLES:
 - Consult before architecture decisions.
@@ -137,12 +167,19 @@ PENDING FRONTEND TASKS:
    - Run `npm run generate:envelopes` or `make generate-envelopes`
    - Staleness check: `npm run check:envelopes`
 
-4. Workflow progress panel (priority: low, future)
+4. Agent Adapter UI (priority: medium, from PR #11)
+   - Adapter source badges — show source (nanite, claude, codex, etc.) on agent list
+   - Override editor — project + session overrides, cascade visualization
+   - Sync status — active adapters, last sync, errors
+   - NANITE.md preview — managed section content with "sync now" button
+   - Adapter management — enable/disable per adapter
+
+5. Workflow progress panel (priority: low, future)
    - Backend workflow engine ready (internal/workflow/)
    - Show pipeline step status, progress, events
    - Reserved: collapsible section in WorkTab (hidden when empty)
 
-5. Memory viewer (priority: low, future)
+6. Memory viewer (priority: low, future)
    - Show recalled memories in context, extraction history
    - Reserved: future RightRail tab or widget
 ```

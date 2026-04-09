@@ -1,0 +1,189 @@
+<h2>Memory Viewer — Modal via /memory</h2>
+<p class="subtitle">Full CRUD modal for browsing and managing agent memories. Launched from chat composer slash command.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Browse View (default)</div>
+    <div class="mockup-body" style="background: #18181b; padding: 0; min-height: 420px;">
+      <!-- Modal header -->
+      <div style="padding: 14px 20px; border-bottom: 1px solid #27272a; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 14px; font-weight: 600; color: #fafafa;">Memories</span>
+          <span style="font-size: 10px; padding: 2px 8px; border-radius: 10px; background: #27272a; color: #a1a1aa;">23 total</span>
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <span style="font-size: 11px; padding: 4px 10px; border-radius: 6px; background: #4f46e5; color: #e0e7ff; cursor: pointer;">+ New</span>
+          <span style="font-size: 16px; color: #71717a; cursor: pointer;">×</span>
+        </div>
+      </div>
+
+      <!-- Filters bar -->
+      <div style="padding: 10px 20px; border-bottom: 1px solid #27272a20; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <!-- Search -->
+        <div style="flex: 1; min-width: 140px; padding: 5px 10px; border-radius: 6px; background: #27272a; font-size: 11px; color: #71717a; display: flex; align-items: center; gap: 6px;">
+          <span>🔍</span> Search memories...
+        </div>
+        <!-- Scope pills -->
+        <div style="display: flex; gap: 3px;">
+          <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #4f46e520; color: #818cf8; border: 1px solid #4f46e540;">all</span>
+          <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #27272a; color: #71717a;">session</span>
+          <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #27272a; color: #71717a;">project</span>
+          <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #27272a; color: #71717a;">user</span>
+        </div>
+        <!-- Status filter -->
+        <div style="display: flex; gap: 3px;">
+          <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #22c55e20; color: #4ade80;">canonical</span>
+          <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #27272a; color: #71717a;">draft</span>
+          <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #27272a; color: #71717a;">deprecated</span>
+        </div>
+      </div>
+
+      <!-- Memory list -->
+      <div style="overflow-y: auto;">
+        <!-- Memory item 1 -->
+        <div style="padding: 12px 20px; border-bottom: 1px solid #27272a20; cursor: pointer;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span style="font-size: 12px; font-weight: 500; color: #fafafa;">User prefers dark zinc palette</span>
+            <span style="font-size: 9px; padding: 1px 5px; border-radius: 3px; background: #22c55e20; color: #4ade80; margin-left: auto;">canonical</span>
+          </div>
+          <div style="font-size: 11px; color: #a1a1aa; margin-bottom: 6px; line-height: 1.4;">Frontend styling should always use zinc dark theme with indigo accents. Confirmed across multiple sessions.</div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #27272a; color: #71717a;">user</span>
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #27272a; color: #71717a;">feedback</span>
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #f59e0b20; color: #fbbf24;">0.95</span>
+            <span style="font-size: 10px; color: #52525b; margin-left: auto;">2d ago</span>
+          </div>
+        </div>
+
+        <!-- Memory item 2 -->
+        <div style="padding: 12px 20px; border-bottom: 1px solid #27272a20; cursor: pointer;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span style="font-size: 12px; font-weight: 500; color: #fafafa;">Deploy via Cerberus, not go build</span>
+            <span style="font-size: 9px; padding: 1px 5px; border-radius: 3px; background: #22c55e20; color: #4ade80; margin-left: auto;">canonical</span>
+          </div>
+          <div style="font-size: 11px; color: #a1a1aa; margin-bottom: 6px; line-height: 1.4;">Running service uses ~/go/bin/nanite installed by Cerberus. Direct go build outputs to ./nanite which is separate.</div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #27272a; color: #71717a;">project</span>
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #27272a; color: #71717a;">observation</span>
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #f59e0b20; color: #fbbf24;">0.90</span>
+            <span style="font-size: 10px; color: #52525b; margin-left: auto;">5d ago</span>
+          </div>
+        </div>
+
+        <!-- Memory item 3: draft -->
+        <div style="padding: 12px 20px; border-bottom: 1px solid #27272a20; cursor: pointer; opacity: 0.75;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span style="font-size: 12px; font-weight: 500; color: #fafafa;">Session used TipTap for rich text</span>
+            <span style="font-size: 9px; padding: 1px 5px; border-radius: 3px; background: #3b82f620; color: #60a5fa; margin-left: auto;">draft</span>
+          </div>
+          <div style="font-size: 11px; color: #a1a1aa; margin-bottom: 6px; line-height: 1.4;">ChatComposer uses TipTap 3.20 with slash command extension for agent commands.</div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #27272a; color: #71717a;">session</span>
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #27272a; color: #71717a;">observation</span>
+            <span style="font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #f59e0b20; color: #fbbf24;">0.60</span>
+            <span style="font-size: 10px; color: #52525b; margin-left: auto;">12m ago</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Detail / Edit View (click a memory)</div>
+    <div class="mockup-body" style="background: #18181b; padding: 0; min-height: 420px;">
+      <!-- Header with back + actions -->
+      <div style="padding: 14px 20px; border-bottom: 1px solid #27272a; display: flex; align-items: center; gap: 8px;">
+        <span style="color: #71717a; cursor: pointer;">←</span>
+        <span style="font-size: 14px; font-weight: 600; color: #fafafa; flex: 1;">Edit Memory</span>
+        <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #ef444420; color: #f87171; cursor: pointer;">Delete</span>
+        <span style="font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #4f46e5; color: #e0e7ff; cursor: pointer;">Save</span>
+      </div>
+
+      <!-- Form -->
+      <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 14px;">
+        <!-- Summary -->
+        <div>
+          <label style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; display: block; margin-bottom: 4px;">Summary</label>
+          <div style="padding: 8px 12px; border-radius: 6px; border: 1px solid #3f3f46; background: #27272a; font-size: 12px; color: #fafafa;">User prefers dark zinc palette</div>
+        </div>
+
+        <!-- Body -->
+        <div>
+          <label style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; display: block; margin-bottom: 4px;">Body</label>
+          <div style="padding: 8px 12px; border-radius: 6px; border: 1px solid #3f3f46; background: #27272a; font-size: 12px; color: #e4e4e7; min-height: 60px; line-height: 1.5;">Frontend styling should always use zinc dark theme with indigo accents. Confirmed across multiple sessions.</div>
+        </div>
+
+        <!-- Row: Origin + Confidence -->
+        <div style="display: flex; gap: 12px;">
+          <div style="flex: 1;">
+            <label style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; display: block; margin-bottom: 4px;">Origin</label>
+            <div style="padding: 6px 10px; border-radius: 6px; border: 1px solid #3f3f46; background: #27272a; font-size: 11px; color: #a1a1aa; display: flex; justify-content: space-between; align-items: center;">
+              feedback <span style="color: #52525b;">▾</span>
+            </div>
+          </div>
+          <div style="flex: 1;">
+            <label style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; display: block; margin-bottom: 4px;">Confidence</label>
+            <div style="padding: 6px 10px; border-radius: 6px; border: 1px solid #3f3f46; background: #27272a; font-size: 11px; color: #fbbf24;">0.95</div>
+          </div>
+        </div>
+
+        <!-- Row: Scope + Status -->
+        <div style="display: flex; gap: 12px;">
+          <div style="flex: 1;">
+            <label style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; display: block; margin-bottom: 4px;">Scope</label>
+            <div style="padding: 6px 10px; border-radius: 6px; border: 1px solid #3f3f46; background: #27272a; font-size: 11px; color: #a1a1aa; display: flex; justify-content: space-between; align-items: center;">
+              user <span style="color: #52525b;">▾</span>
+            </div>
+          </div>
+          <div style="flex: 1;">
+            <label style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; display: block; margin-bottom: 4px;">Status</label>
+            <div style="display: flex; gap: 4px;">
+              <span style="font-size: 10px; padding: 4px 8px; border-radius: 4px; background: #3b82f620; color: #60a5fa; cursor: pointer;">draft</span>
+              <span style="font-size: 10px; padding: 4px 8px; border-radius: 4px; background: #a855f720; color: #c084fc; cursor: pointer;">reviewed</span>
+              <span style="font-size: 10px; padding: 4px 8px; border-radius: 4px; background: #22c55e20; color: #4ade80; border: 1px solid #22c55e40; cursor: pointer;">canonical</span>
+              <span style="font-size: 10px; padding: 4px 8px; border-radius: 4px; background: #27272a; color: #52525b; cursor: pointer;">depr.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tags -->
+        <div>
+          <label style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; display: block; margin-bottom: 4px;">Tags</label>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center;">
+            <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: #27272a; color: #a1a1aa; display: flex; align-items: center; gap: 4px;">styling <span style="color: #52525b; cursor: pointer;">×</span></span>
+            <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: #27272a; color: #a1a1aa; display: flex; align-items: center; gap: 4px;">ui <span style="color: #52525b; cursor: pointer;">×</span></span>
+            <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px dashed #3f3f46; color: #52525b; cursor: pointer;">+ add</span>
+          </div>
+        </div>
+
+        <!-- Meta (read-only) -->
+        <div style="padding-top: 10px; border-top: 1px solid #27272a;">
+          <div style="display: flex; gap: 16px; font-size: 10px; color: #52525b;">
+            <span>Session: <span style="color: #71717a; font-family: monospace;">8f3a2c</span></span>
+            <span>Revision: <span style="color: #71717a; font-family: monospace;">v3</span></span>
+            <span>Trigger: <span style="color: #71717a;">explicit</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 20px;">
+  <h3>Backend API (new REST endpoints)</h3>
+  <div style="background: #1e1e2e; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; color: #cdd6f4; line-height: 1.8;">
+    <div><span style="color: #89b4fa;">GET</span>    <span style="color: #a6e3a1;">/api/memories</span> <span style="color: #6c7086;">?scope=user&status=canonical&q=search&tags=ui,styling&limit=50</span></div>
+    <div><span style="color: #a6e3a1;">POST</span>   <span style="color: #a6e3a1;">/api/memories</span> <span style="color: #6c7086;">{ summary, body, origin, confidence, scope, tags }</span></div>
+    <div><span style="color: #fab387;">PUT</span>    <span style="color: #a6e3a1;">/api/memories/{key}</span> <span style="color: #6c7086;">{ summary, body, origin, confidence, tags }</span></div>
+    <div><span style="color: #f38ba8;">DELETE</span> <span style="color: #a6e3a1;">/api/memories/{key}</span></div>
+    <div><span style="color: #fab387;">PUT</span>    <span style="color: #a6e3a1;">/api/memories/{key}/status</span> <span style="color: #6c7086;">{ status: "canonical" | "deprecated" | ... }</span></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 16px;">
+  <h3>Slash Command Integration</h3>
+  <div style="background: #1e1e2e; border-radius: 8px; padding: 12px 16px; font-size: 12px; color: #cdd6f4; line-height: 1.6;">
+    <p style="margin: 0;">User types <code style="background: #27272a; padding: 2px 6px; border-radius: 4px;">/memory</code> in ChatComposer → opens modal (browse view).</p>
+    <p style="margin: 6px 0 0;">Slash command registered as a <strong>client-side command</strong> in TipTap extension — no backend round-trip needed. Just toggles modal state in a store or via a ref callback.</p>
+  </div>
+</div>

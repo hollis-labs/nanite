@@ -25,6 +25,13 @@ agents:
     plugins: [vercel]
     context: agents/plugin-dev.md
 
+  nanite-planner:
+    name: Nanite Planner
+    description: Strategic planning, scoping, and architecture decisions for Nanite
+    roles: [strategic-planner]
+    skills: [adr, blg, doc-note, doc-search, superpowers:brainstorming, superpowers:writing-plans, superpowers:executing-plans, superpowers:dispatching-parallel-agents]
+    context: agents/planner.md
+
   nanite-reviewer:
     name: Nanite Code Reviewer
     description: Code review for Nanite PRs

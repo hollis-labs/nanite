@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nanite — Workspace/Project Selector Options</title>
+<style>
+  :root {
+    --bg: #09090b;
+    --bg-elevated: #18181b;
+    --surface: #27272a;
+    --surface-hover: #3f3f46;
+    --border: #27272a;
+    --border-subtle: #3f3f46;
+    --fg: #fafafa;
+    --fg-secondary: #a1a1aa;
+    --fg-muted: #71717a;
+    --fg-faint: #52525b;
+    --primary: #6366f1;
+    --primary-muted: rgba(99,102,241,0.15);
+    --success: #34d399;
+    --warning: #fbbf24;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #000;
+    color: var(--fg);
+    padding: 32px;
+  }
+
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--fg-muted); font-size: 13px; margin-bottom: 32px; }
+
+  .options-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    max-width: 1200px;
+  }
+
+  .option-card {
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .option-card:hover { border-color: var(--fg-muted); }
+  .option-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-muted); }
+
+  .option-label {
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elevated);
+  }
+  .option-label .letter {
+    width: 24px; height: 24px; border-radius: 6px;
+    background: var(--primary); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; flex-shrink: 0;
+  }
+  .option-label h3 { font-size: 14px; font-weight: 600; }
+  .option-label p { font-size: 11px; color: var(--fg-muted); }
+
+  .option-body { padding: 16px; }
+
+  .pros-cons { display: flex; gap: 12px; padding: 12px 16px; background: var(--bg-elevated); border-top: 1px solid var(--border); font-size: 11px; }
+  .pros-cons .pros { flex: 1; }
+  .pros-cons .cons { flex: 1; }
+  .pros-cons h4 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .pros-cons .pros h4 { color: var(--success); }
+  .pros-cons .cons h4 { color: var(--warning); }
+  .pros-cons ul { list-style: none; color: var(--fg-muted); }
+  .pros-cons li { padding: 1px 0; }
+  .pros-cons li::before { content: "- "; }
+
+  /* === Mockup building blocks === */
+  .mock-shell {
+    display: flex;
+    height: 320px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .mock-navrail {
+    width: 48px; flex-shrink: 0;
+    background: var(--bg-elevated);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 8px 0; gap: 4px;
+  }
+
+  .mock-icon {
+    width: 32px; height: 32px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600; color: var(--fg-secondary);
+    transition: background 0.15s;
+  }
+  .mock-icon:hover { background: var(--surface); }
+  .mock-icon.active { background: var(--surface); color: var(--primary); }
+  .mock-icon.brand {
+    background: var(--primary);
+    color: white;
+    font-weight: 800;
+    font-size: 14px;
+    font-style: italic;
+  }
+
+  .mock-divider { width: 24px; height: 1px; background: var(--border-subtle); margin: 4px 0; }
+  .mock-spacer { flex: 1; }
+
+  .mock-sidebar {
+    width: 220px; flex-shrink: 0;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  .mock-sidebar-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mock-selector {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .mock-selector:hover { background: var(--surface); }
+
+  .mock-selector-icon {
+    width: 20px; height: 20px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; flex-shrink: 0;
+  }
+
+  .mock-selector-text {
+    flex: 1; min-width: 0;
+  }
+  .mock-selector-text .name { font-size: 12px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mock-selector-text .meta { font-size: 10px; color: var(--fg-faint); }
+
+  .mock-chevron { color: var(--fg-faint); font-size: 10px; }
+
+  .mock-tabs {
+    display: flex; border-bottom: 1px solid var(--border);
+  }
+  .mock-tab {
+    flex: 1; padding: 6px 0; text-align: center;
+    font-size: 10px; font-weight: 500; color: var(--fg-muted);
+    cursor: pointer; position: relative; transition: color 0.15s;
+  }
+  .mock-tab.active { color: var(--fg); }
+  .mock-tab.active::after {
+    content: ''; position: absolute; bottom: -1px; left: 20%; right: 20%;
+    height: 2px; background: var(--primary); border-radius: 1px;
+  }
+
+  .mock-session-list { flex: 1; padding: 8px; overflow: hidden; }
+  .mock-session {
+    padding: 8px 10px; border-radius: 6px; margin-bottom: 2px;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .mock-session:hover { background: var(--surface); }
+  .mock-session.active { background: var(--primary-muted); }
+  .mock-session .title { font-size: 12px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mock-session .time { font-size: 10px; color: var(--fg-faint); margin-top: 1px; }
+
+  .mock-chat {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-faint); font-size: 12px;
+  }
+
+  /* Dropdown overlay */
+  .mock-dropdown {
+    position: absolute;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    padding: 4px;
+    z-index: 10;
+    min-width: 190px;
+  }
+  .mock-dropdown-item {
+    padding: 6px 10px;
+    border-radius: 4px;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--fg-secondary);
+    cursor: pointer; transition: background 0.15s;
+  }
+  .mock-dropdown-item:hover { background: var(--surface); color: var(--fg); }
+  .mock-dropdown-item.active { color: var(--fg); }
+  .mock-dropdown-item .check { color: var(--success); font-size: 10px; margin-left: auto; }
+  .mock-dropdown-sep { height: 1px; background: var(--border); margin: 4px 0; }
+  .mock-dropdown-label { padding: 6px 10px; font-size: 9px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* Segmented control */
+  .mock-segmented {
+    display: flex; background: var(--surface); border-radius: 6px; padding: 2px; gap: 2px;
+  }
+  .mock-seg {
+    flex: 1; padding: 4px 0; text-align: center;
+    font-size: 10px; font-weight: 500; color: var(--fg-muted);
+    border-radius: 4px; cursor: pointer; transition: all 0.15s;
+  }
+  .mock-seg.active { background: var(--bg-elevated); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+
+  .rec-badge {
+    display: inline-block; padding: 2px 6px; border-radius: 4px;
+    background: var(--primary-muted); color: var(--primary);
+    font-size: 10px; font-weight: 600; margin-left: 6px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Workspace / Project Selector</h1>
+<p class="subtitle">3 options for combining workspace + project selection into the sidebar header. Click to select your preference.</p>
+
+<div class="options-grid">
+
+<!-- ========== OPTION A ========== -->
+<div class="option-card" onclick="select(this, 'A')">
+  <div class="option-label">
+    <div class="letter">A</div>
+    <div>
+      <h3>Breadcrumb Dropdown <span class="rec-badge">Recommended</span></h3>
+      <p>Single row: N logo &gt; Workspace &gt; Project</p>
+    </div>
+  </div>
+  <div class="option-body">
+    <div class="mock-shell">
+      <div class="mock-navrail">
+        <div class="mock-icon brand">N</div>
+        <div class="mock-divider"></div>
+        <div class="mock-icon active">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <div class="mock-spacer"></div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        </div>
+      </div>
+      <div class="mock-sidebar">
+        <div class="mock-sidebar-header">
+          <div class="mock-selector">
+            <div style="display:flex;align-items:center;gap:4px;flex:1;min-width:0;">
+              <span style="font-size:11px;color:var(--fg-muted);">Fragments Engine</span>
+              <span style="font-size:9px;color:var(--fg-faint);">/</span>
+              <span style="font-size:11px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">nanite</span>
+            </div>
+            <span class="mock-chevron">&#x25BE;</span>
+          </div>
+        </div>
+        <div class="mock-session-list">
+          <div class="mock-session active"><div class="title">Work tab UAT fixes</div><div class="time">2m ago</div></div>
+          <div class="mock-session"><div class="title">Plugin catalog setup</div><div class="time">1h ago</div></div>
+          <div class="mock-session"><div class="title">Envelope system debug</div><div class="time">3h ago</div></div>
+        </div>
+      </div>
+      <div class="mock-chat">Chat area</div>
+    </div>
+  </div>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Pros</h4>
+      <ul>
+        <li>Compact single row</li>
+        <li>Shows both at a glance</li>
+        <li>Familiar breadcrumb pattern</li>
+        <li>N logo is always visible</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Cons</h4>
+      <ul>
+        <li>Long names truncate</li>
+        <li>Two dropdown targets close together</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ========== OPTION B ========== -->
+<div class="option-card" onclick="select(this, 'B')">
+  <div class="option-label">
+    <div class="letter">B</div>
+    <div>
+      <h3>Segmented Switcher</h3>
+      <p>Segmented control toggles workspace / project view</p>
+    </div>
+  </div>
+  <div class="option-body">
+    <div class="mock-shell">
+      <div class="mock-navrail">
+        <div class="mock-icon brand">N</div>
+        <div class="mock-divider"></div>
+        <div class="mock-icon active">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <div class="mock-spacer"></div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        </div>
+      </div>
+      <div class="mock-sidebar">
+        <div class="mock-sidebar-header">
+          <div style="padding:0 0 8px 0;">
+            <div class="mock-segmented">
+              <div class="mock-seg">Workspace</div>
+              <div class="mock-seg active">Project</div>
+            </div>
+          </div>
+          <div class="mock-selector">
+            <div class="mock-selector-icon" style="background:var(--primary-muted);color:var(--primary);">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            </div>
+            <div class="mock-selector-text">
+              <div class="name">nanite</div>
+              <div class="meta">3 sessions</div>
+            </div>
+            <span class="mock-chevron">&#x25BE;</span>
+          </div>
+        </div>
+        <div class="mock-session-list">
+          <div class="mock-session active"><div class="title">Work tab UAT fixes</div><div class="time">2m ago</div></div>
+          <div class="mock-session"><div class="title">Plugin catalog setup</div><div class="time">1h ago</div></div>
+          <div class="mock-session"><div class="title">Envelope system debug</div><div class="time">3h ago</div></div>
+        </div>
+      </div>
+      <div class="mock-chat">Chat area</div>
+    </div>
+  </div>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Pros</h4>
+      <ul>
+        <li>Clear mode indication</li>
+        <li>Full width for names</li>
+        <li>Easy to discover both scopes</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Cons</h4>
+      <ul>
+        <li>Takes 2 rows of header space</li>
+        <li>Segmented control may feel heavy</li>
+        <li>Extra click to switch scope</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ========== OPTION C ========== -->
+<div class="option-card" onclick="select(this, 'C')">
+  <div class="option-label">
+    <div class="letter">C</div>
+    <div>
+      <h3>Unified Dropdown</h3>
+      <p>One dropdown with workspace + project sections</p>
+    </div>
+  </div>
+  <div class="option-body">
+    <div class="mock-shell" style="position:relative;">
+      <div class="mock-navrail">
+        <div class="mock-icon brand">N</div>
+        <div class="mock-divider"></div>
+        <div class="mock-icon active">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <div class="mock-spacer"></div>
+        <div class="mock-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        </div>
+      </div>
+      <div class="mock-sidebar">
+        <div class="mock-sidebar-header">
+          <div class="mock-selector">
+            <div class="mock-selector-icon" style="background:var(--primary-muted);color:var(--primary);">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            </div>
+            <div class="mock-selector-text">
+              <div class="name">nanite</div>
+              <div class="meta">Fragments Engine</div>
+            </div>
+            <span class="mock-chevron">&#x25BE;</span>
+          </div>
+        </div>
+        <div class="mock-session-list">
+          <div class="mock-session active"><div class="title">Work tab UAT fixes</div><div class="time">2m ago</div></div>
+          <div class="mock-session"><div class="title">Plugin catalog setup</div><div class="time">1h ago</div></div>
+          <div class="mock-session"><div class="title">Envelope system debug</div><div class="time">3h ago</div></div>
+        </div>
+      </div>
+
+      <!-- Floating dropdown overlay showing what it looks like open -->
+      <div class="mock-dropdown" style="position:absolute; top:38px; left:60px; width: 210px;">
+        <div class="mock-dropdown-label">Workspace</div>
+        <div class="mock-dropdown-item active">
+          <span style="width:16px;height:16px;border-radius:3px;background:var(--surface-hover);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;">F</span>
+          Fragments Engine
+          <span class="check">&#10003;</span>
+        </div>
+        <div class="mock-dropdown-item">
+          <span style="width:16px;height:16px;border-radius:3px;background:var(--surface-hover);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;flex-shrink:0;">P</span>
+          Personal
+        </div>
+        <div class="mock-dropdown-sep"></div>
+        <div class="mock-dropdown-label">Project</div>
+        <div class="mock-dropdown-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          All Chats
+        </div>
+        <div class="mock-dropdown-item active">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          nanite
+          <span class="check">&#10003;</span>
+        </div>
+        <div class="mock-dropdown-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          cortex
+        </div>
+        <div class="mock-dropdown-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          hadron
+        </div>
+      </div>
+
+      <div class="mock-chat">Chat area</div>
+    </div>
+  </div>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Pros</h4>
+      <ul>
+        <li>Most compact header (1 row)</li>
+        <li>Shows project + workspace context</li>
+        <li>Single click opens everything</li>
+        <li>VS Code / Linear pattern</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Cons</h4>
+      <ul>
+        <li>Dropdown can get long</li>
+        <li>Two concepts in one menu</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<p style="margin-top:24px;font-size:12px;color:var(--fg-faint);">
+  All 3 options: N logo in NavRail (brand color, click = home). Workspace selector moved from NavRail into sidebar.
+</p>
+
+<script>
+function select(el, choice) {
+  document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+}
+</script>
+</body>
+</html>

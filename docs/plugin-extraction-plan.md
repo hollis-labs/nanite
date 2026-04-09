@@ -109,7 +109,13 @@ type TaskBackend interface {
 - A registry for backends: `Host.RegisterTaskBackend(name, backend)`
 - API routes delegate to the active backend (configured in user_settings)
 
-## Phase 5 — Connector Plugins
+## Phase 5 — Connector Plugins — PARKED (pending first connector)
+
+**Status:** Infrastructure complete. No concrete connectors built yet. Will implement per-connector as needed.
+
+**Built:** Connector interface, `Host.RegisterConnector()`, health tracking (consecutive failures), trigger dispatcher with retry/backoff, `GET /api/connectors` + `/api/connectors/:name/health`, tests.
+
+**Not built:** Transport selection layer (CLI > MCP > API), concrete connector plugins, feature plugin consumption pattern.
 
 Build connectors as-needed. Each connector is a standalone plugin that registers a transport.
 

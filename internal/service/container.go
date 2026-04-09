@@ -314,7 +314,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		}
 
 		// PCCSource — reads filesystem, always available.
-		sources = append(sources, contextbroker.NewPCCSource(".agentrc/pcc/global"))
+		sources = append(sources, contextbroker.NewPCCSource(".nanite/pcc/global"))
 
 		// SessionSource — reads message history, always available.
 		sources = append(sources, contextbroker.NewSessionSource(func(sessionID string, limit int) ([]contextbroker.MessageSummary, error) {

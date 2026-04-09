@@ -33,7 +33,7 @@ type Definition struct {
 	Prompt string `yaml:"-"`
 
 	// Metadata set by the loader, not parsed from file.
-	Source    string `yaml:"-"` // "builtin", "project", "user", "plugin", "agentrc", "claude"
+	Source    string `yaml:"-"` // "builtin", "project", "user", "plugin", "nanite", "claude"
 	SourceRef string `yaml:"-"` // file path or "embedded:*.md"
 }
 

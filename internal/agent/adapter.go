@@ -31,7 +31,7 @@ type CLIAgentAdapter interface {
 }
 
 // AgentComposer extends CLIAgentAdapter with prompt composition capabilities
-// for adapters that support role/skill-based prompt assembly (e.g., agentrc).
+// for adapters that support role/skill-based prompt assembly (e.g., nanite-native).
 type AgentComposer interface {
 	CLIAgentAdapter
 

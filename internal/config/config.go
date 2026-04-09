@@ -1,5 +1,5 @@
-// Package config loads and merges agentrc.yaml configuration from
-// user-level (~/.agentrc/agentrc.yaml) and project-level (./agentrc.yaml).
+// Package config loads and merges nanite configuration from
+// user-level (~/.nanite/nanite.yaml) and project-level (./nanite.yaml).
 // Project-level values override user-level values for any field that is set.
 package config
 
@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the top-level agentrc configuration.
+// Config is the top-level nanite configuration.
 type Config struct {
 	Version        int                      `yaml:"version"`
 	Project        ProjectConfig            `yaml:"project"`
@@ -52,8 +52,8 @@ type ProjectEntry struct {
 }
 
 // Load reads and merges configuration. It first reads the user-level config
-// (~/.agentrc/agentrc.yaml) as a base, then overlays the project-level config
-// (./agentrc.yaml relative to the working directory). Project values override
+// (~/.nanite/nanite.yaml) as a base, then overlays the project-level config
+// (./nanite.yaml relative to the working directory). Project values override
 // user values for any field that is set.
 func Load() (*Config, error) {
 	home, err := os.UserHomeDir()
@@ -61,8 +61,8 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	userPath := filepath.Join(home, ".agentrc", "agentrc.yaml")
-	projectPath := "agentrc.yaml" // relative to cwd
+	userPath := filepath.Join(home, ".nanite", "nanite.yaml")
+	projectPath := "nanite.yaml" // relative to cwd
 
 	return LoadFrom(userPath, projectPath)
 }

@@ -12,14 +12,14 @@ type DiscoverOptions struct {
 	// CLIAgentPath is a single agent file specified via --agent flag (priority 1).
 	CLIAgentPath string
 
-	// WorkingDir is the project root for .nanite/agents/, .agentrc/agents/, .claude/agents/.
+	// WorkingDir is the project root for .nanite/agents/, .claude/agents/.
 	WorkingDir string
 
 	// PluginsDir is the root plugins directory for plugin-provided agents.
 	PluginsDir string
 
 	// Adapters is an optional AdapterRegistry for adapter-based discovery
-	// (replaces hardcoded .agentrc/agents/ and .claude/agents/ tiers).
+	// (replaces hardcoded .nanite/agents/ and .claude/agents/ tiers).
 	Adapters *AdapterRegistry
 }
 
@@ -70,7 +70,7 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 	}
 
 	// Priority 5+: Adapter-discovered agents.
-	// Replaces hardcoded .agentrc/agents/ and .claude/agents/ tiers — those
+	// Replaces hardcoded .nanite/agents/ and .claude/agents/ tiers — those
 	// are now handled by the nanite-native and claude adapters respectively.
 	if opts.Adapters != nil {
 		adapterDefs, err := opts.Adapters.DiscoverAll(opts.WorkingDir)

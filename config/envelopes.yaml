@@ -1,6 +1,6 @@
 # Envelope type manifest — single source of truth for both Go and TypeScript.
 #
-# Go embeds this file to populate the registeredTypes validation map.
+# Go loads this file at runtime to populate the registeredTypes validation map.
 # The codegen script reads it to generate CORE_ENTRIES in plugin-envelopes.ts.
 #
 # Adding a new core envelope type:

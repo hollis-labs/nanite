@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -514,18 +515,19 @@ func loadEnvelopeManifest(path string) []string {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("WARNING: failed to read envelope manifest: %v — using empty core types", err)
-		return nil
+		log.Fatalf("failed to read envelope manifest %s: %v", path, err)
 	}
 
 	var m manifest
 	if err := yaml.Unmarshal(data, &m); err != nil {
-		log.Printf("WARNING: failed to parse envelope manifest: %v", err)
-		return nil
+		log.Fatalf("failed to parse envelope manifest %s: %v", path, err)
 	}
 
 	types := make([]string, 0, len(m.Core))
 	for _, e := range m.Core {
+		if strings.TrimSpace(e.Type) == "" {
+			continue
+		}
 		types = append(types, e.Type)
 	}
 	return types

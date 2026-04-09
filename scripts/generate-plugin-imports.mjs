@@ -4,7 +4,7 @@
 //   - config/envelopes.yaml (core envelope types)
 //   - plugins/*/plugin.yaml (plugin envelope types)
 //
-// Validates the core manifest against config/envelopes.schema.json.
+// Validates the core manifest using built-in checks (pattern, required fields, duplicates).
 //
 // Usage:
 //   node scripts/generate-plugin-imports.mjs          # generate
@@ -43,7 +43,6 @@ function parseYamlList(content, sectionKey) {
     // Another top-level key ends the section
     if (/^\S/.test(trimmed) && !trimmed.startsWith('#') && trimmed !== '') {
       if (inSection) {
-        inSection = false;
         break;
       }
       continue;

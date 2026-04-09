@@ -1,6 +1,16 @@
 package chat
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
+
+func TestMain(m *testing.M) {
+	// Seed the envelope registry with types used by tests.
+	// In production these are loaded from config/envelopes.yaml at startup.
+	InitCoreTypes([]string{"kb-result", "session-task", "document-viewer"})
+	os.Exit(m.Run())
+}
 
 func TestParseEnvelopes(t *testing.T) {
 	input := "Here is my response.\n\n" +

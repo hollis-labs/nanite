@@ -6,39 +6,62 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-// TestEnvelopeRegistrySync verifies that every backend envelope type in
-// registeredTypes has a matching entry in the frontend registry file
-// (ui/src/generated/plugin-envelopes.ts). This catches the silent-drop
-// bug where a backend type is added without a frontend component.
+// TestEnvelopeRegistrySync verifies that every core envelope type declared
+// in config/envelopes.yaml (that has a component) has a matching entry in the
+// generated frontend registry (ui/src/generated/plugin-envelopes.ts).
 func TestEnvelopeRegistrySync(t *testing.T) {
-	// Locate project root relative to this test file.
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("unable to determine test file path")
 	}
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
-	registryPath := filepath.Join(projectRoot, "ui", "src", "generated", "plugin-envelopes.ts")
-	data, err := os.ReadFile(registryPath)
+	// Load the envelope manifest (source of truth).
+	manifestPath := filepath.Join(projectRoot, "config", "envelopes.yaml")
+	manifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Skipf("frontend registry not found (skipping in CI-only builds): %v", err)
+		t.Fatalf("failed to read envelope manifest: %v", err)
 	}
-	registryContent := string(data)
 
+	type entry struct {
+		Type      string `yaml:"type"`
+		Component string `yaml:"component"`
+	}
+	type manifest struct {
+		Core []entry `yaml:"core"`
+	}
+	var m manifest
+	if err := yaml.Unmarshal(manifestData, &m); err != nil {
+		t.Fatalf("failed to parse envelope manifest: %v", err)
+	}
+
+	// Load the generated frontend registry.
+	registryPath := filepath.Join(projectRoot, "ui", "src", "generated", "plugin-envelopes.ts")
+	registryData, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Skipf("frontend registry not found (skipping — run npm run generate:plugins first): %v", err)
+	}
+	registryContent := string(registryData)
+
+	// Check that every manifest entry with a component appears in the TS registry.
 	var missing []string
-	for envelopeType := range registeredTypes {
-		// The frontend file uses the type string as a quoted key, e.g. "kb-result":
-		needle := `"` + envelopeType + `"`
+	for _, e := range m.Core {
+		if e.Component == "" {
+			continue // backend-only type, no frontend component expected
+		}
+		needle := `"` + e.Type + `"`
 		if !strings.Contains(registryContent, needle) {
-			missing = append(missing, envelopeType)
+			missing = append(missing, e.Type)
 		}
 	}
 
 	if len(missing) > 0 {
-		t.Errorf("backend envelope types missing from frontend registry (%s):\n  %s\n"+
-			"Add a component entry for each in ui/src/generated/plugin-envelopes.ts",
+		t.Errorf("envelope types in manifest but missing from generated frontend registry (%s):\n  %s\n"+
+			"Run: npm run generate:plugins",
 			registryPath, strings.Join(missing, "\n  "))
 	}
 }

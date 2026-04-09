@@ -1,6 +1,33 @@
 # Boot Prompt — Plan B: Nanite A2A Session Scoping
 
+> **⚠️ Resuming from a prior session? Read this first.**
+>
+> Plan B is **partially complete**. Tasks 1–3 landed on branch `feature/a2a-session-scoping` in the worktree at `/Users/chrispian/Projects-apps/nanite-a2a`. The first session stopped at the top of Task 4 to hand off cleanly.
+>
+> **Before doing anything else, read the handoff doc:** `docs/superpowers/plans/2026-04-09-nanite-a2a-handoff.md`. It lists:
+> - The 4 commits already on the branch (with SHAs)
+> - **Three plan deviations** the first session already applied (one of which — the `AgentResolver` interface — changes the shape of Tasks 5, 6, 8, 9, 10)
+> - Pre-verified facts so you do not waste a subagent re-checking them
+> - The exact place to resume (Task 4)
+>
+> **To resume:**
+>
+> ```bash
+> cd /Users/chrispian/Projects-apps/nanite-a2a
+> claude
+> ```
+>
+> Then inside the session:
+>
+> > Boot nanite-backend. Resume from `docs/superpowers/plans/2026-04-09-nanite-a2a-handoff.md` and start at Task 4.
+>
+> Do **not** create a new worktree. Do **not** cherry-pick or reset the existing commits. The worktree is persistent and the branch is clean.
+>
+> ---
+
 Copy this into a fresh Claude Code session (or other CLI agent) started from `~/Projects-apps/nanite/` to execute Plan B in parallel with Plan A.
+
+> **Note for fresh-start sessions only:** If you are starting Plan B from scratch (no prior worktree), follow the instructions below. If the worktree already exists, use the resume instructions above instead.
 
 ---
 

@@ -102,6 +102,19 @@ func (s *Store) migrate() error {
 				if strings.Contains(err.Error(), "duplicate column") {
 					continue
 				}
+				// SQLite ALTER TABLE DROP COLUMN fails with "no such column"
+				// if the column was already dropped; treat as idempotent.
+				// CREATE INDEX can also reference a column that a later migration
+				// dropped (e.g. migration 001 creates idx_a2a_inbox on to_agent,
+				// which migration 005 drops). Both are DDL-level idempotency cases.
+				// Gate this on DDL-only statements so DML typos (SELECT, UPDATE,
+				// INSERT, DELETE) are never silently swallowed.
+				upper := strings.ToUpper(stmt)
+				isDDLIdempotent := strings.Contains(upper, "DROP COLUMN") ||
+					strings.Contains(upper, "CREATE INDEX")
+				if isDDLIdempotent && strings.Contains(err.Error(), "no such column") {
+					continue
+				}
 				return fmt.Errorf("exec migration statement: %w\nSQL: %s", err, stmt)
 			}
 		}

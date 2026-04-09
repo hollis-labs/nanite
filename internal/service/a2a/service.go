@@ -84,7 +84,7 @@ func (svc *Service) Thread(ctx context.Context, threadID string) ([]store.A2AMes
 // validated so typos and garbage don't silently succeed.
 func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) error {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
-		return err
+		return fmt.Errorf("agent_id: %w", err)
 	}
 	return svc.store.AckA2AMessage(msgID)
 }
@@ -94,7 +94,7 @@ func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) e
 // message.
 func (svc *Service) Resolve(ctx context.Context, sessionID, agentID, msgID string) error {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
-		return err
+		return fmt.Errorf("agent_id: %w", err)
 	}
 	return svc.store.ResolveA2AMessage(msgID)
 }

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -160,8 +159,8 @@ func TestService_Inbox(t *testing.T) {
 func TestService_Thread(t *testing.T) {
 	svc, s := newTestService(t, "file-backend")
 
-	// Seed 3 messages sharing a thread_id. Spacing the inserts guarantees
-	// distinct created_at values so the ORDER BY is deterministic.
+	// Seed 3 messages sharing a thread_id. The store's GetA2AThread query
+	// tiebreaks on rowid ASC so same-tick inserts remain deterministic.
 	threadID := "thread-xyz"
 	for i := 0; i < 3; i++ {
 		if _, err := s.SendA2AMessage(&store.A2AMessage{
@@ -174,7 +173,6 @@ func TestService_Thread(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		time.Sleep(1100 * time.Millisecond) // RFC3339 second resolution
 	}
 
 	msgs, err := svc.Thread(context.Background(), threadID)

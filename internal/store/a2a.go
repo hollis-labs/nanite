@@ -137,11 +137,13 @@ func (s *Store) GetA2AInbox(sessionID, agentID, status string) ([]A2AMessage, er
 }
 
 // GetA2AThread returns all messages in a thread, ordered chronologically.
+// Tiebreak on rowid so same-tick inserts remain deterministic — multiple
+// inserts in the same RFC3339 second share created_at.
 func (s *Store) GetA2AThread(threadID string) ([]A2AMessage, error) {
 	rows, err := s.DB.Query(
 		`SELECT `+a2aSelectColumns+`
 		 FROM a2a_messages WHERE thread_id = ?
-		 ORDER BY created_at ASC`, threadID,
+		 ORDER BY created_at ASC, rowid ASC`, threadID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get a2a thread: %w", err)

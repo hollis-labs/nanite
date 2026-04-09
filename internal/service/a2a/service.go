@@ -38,24 +38,26 @@ func NewService(s *store.Store, r AgentResolver) *Service {
 // watching the recipient's inbox. It returns the authoritative row as stored.
 func (svc *Service) SendMessage(ctx context.Context, msg *store.A2AMessage) (*store.A2AMessage, error) {
 	if msg == nil {
-		return nil, fmt.Errorf("message required")
+		return nil, fmt.Errorf("%w: message required", ErrValidation)
 	}
 	if err := ValidateAgentID(ctx, svc.resolver, msg.FromAgentID); err != nil {
-		return nil, fmt.Errorf("from_agent_id: %w", err)
+		return nil, fmt.Errorf("%w: from_agent_id: %v", ErrValidation, err)
 	}
 	if err := ValidateAgentID(ctx, svc.resolver, msg.ToAgentID); err != nil {
-		return nil, fmt.Errorf("to_agent_id: %w", err)
+		return nil, fmt.Errorf("%w: to_agent_id: %v", ErrValidation, err)
 	}
 	if msg.FromSessionID == "" {
-		return nil, fmt.Errorf("from_session_id required")
+		return nil, fmt.Errorf("%w: from_session_id required", ErrValidation)
 	}
 	if msg.ToSessionID == "" {
-		return nil, fmt.Errorf("to_session_id required")
+		return nil, fmt.Errorf("%w: to_session_id required", ErrValidation)
 	}
 	if msg.Body == "" {
-		return nil, fmt.Errorf("body required")
+		return nil, fmt.Errorf("%w: body required", ErrValidation)
 	}
 
+	// DB error: propagate unwrapped so it is classified as internal, not
+	// validation, at the API boundary.
 	out, err := svc.store.SendA2AMessage(msg)
 	if err != nil {
 		return nil, err
@@ -84,7 +86,7 @@ func (svc *Service) Thread(ctx context.Context, threadID string) ([]store.A2AMes
 // validated so typos and garbage don't silently succeed.
 func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) error {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
-		return fmt.Errorf("agent_id: %w", err)
+		return fmt.Errorf("%w: agent_id: %v", ErrValidation, err)
 	}
 	return svc.store.AckA2AMessage(msgID)
 }
@@ -94,7 +96,7 @@ func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) e
 // message.
 func (svc *Service) Resolve(ctx context.Context, sessionID, agentID, msgID string) error {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
-		return fmt.Errorf("agent_id: %w", err)
+		return fmt.Errorf("%w: agent_id: %v", ErrValidation, err)
 	}
 	return svc.store.ResolveA2AMessage(msgID)
 }

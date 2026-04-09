@@ -1,11 +1,23 @@
 package api
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
+	"github.com/hollis-labs/nanite/internal/service/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// a2aStatus returns the HTTP status code for an a2a.Service error:
+// 400 for validation errors, 500 for everything else.
+func a2aStatus(err error) int {
+	if errors.Is(err, a2a.ErrValidation) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
 
 // handleA2AInbox returns messages for a (session_id, agent_id) inbox.
 // Routes through a2a.Service so validation stays in one place.
@@ -44,7 +56,8 @@ func (a *API) handleA2AThread(w http.ResponseWriter, r *http.Request) {
 
 // handleA2ASendMessage sends a new A2A message. The caller must supply
 // from_session_id, from_agent_id, to_session_id, to_agent_id, and body.
-// Validation happens inside the service, so errors here are surfaced as 400.
+// Validation errors from the service are mapped to 400 via a2aStatus; DB
+// and other internal errors become 500.
 func (a *API) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 	var msg store.A2AMessage
 	if err := a.decode(r, &msg); err != nil {
@@ -54,9 +67,7 @@ func (a *API) handleA2ASendMessage(w http.ResponseWriter, r *http.Request) {
 
 	saved, err := a.Services.A2A.SendMessage(r.Context(), &msg)
 	if err != nil {
-		// The service only errors on validation or DB issues. Returning 400
-		// for both is acceptable for MVP — validation is by far the common case.
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusCreated, saved)
@@ -74,7 +85,10 @@ func (a *API) handleA2AAck(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"session_id"`
 		AgentID   string `json:"agent_id"`
 	}
-	if err := a.decode(r, &req); err != nil {
+	// Treat an empty body as zero-value req so the next validation block
+	// produces a descriptive "session_id and agent_id are required" 400
+	// instead of the opaque "invalid JSON body".
+	if err := a.decode(r, &req); err != nil && !errors.Is(err, io.EOF) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -84,7 +98,7 @@ func (a *API) handleA2AAck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.Services.A2A.Ack(r.Context(), req.SessionID, req.AgentID, id); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "read"})
@@ -102,7 +116,9 @@ func (a *API) handleA2AResolve(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"session_id"`
 		AgentID   string `json:"agent_id"`
 	}
-	if err := a.decode(r, &req); err != nil {
+	// Treat an empty body as zero-value req so the next validation block
+	// produces the descriptive error rather than "invalid JSON body".
+	if err := a.decode(r, &req); err != nil && !errors.Is(err, io.EOF) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -112,7 +128,7 @@ func (a *API) handleA2AResolve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.Services.A2A.Resolve(r.Context(), req.SessionID, req.AgentID, id); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "resolved"})
@@ -151,7 +167,7 @@ func (a *API) handleA2AHandoffRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := a.Services.A2A.RequestHandoff(r.Context(), req.SessionID, req.FromAgentID, req.ToAgentID, req.RequestedBy)
 	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusCreated, map[string]string{"id": id})
@@ -165,7 +181,7 @@ func (a *API) handleA2AHandoffApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.Services.A2A.ApproveHandoff(r.Context(), id); err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "completed"})
@@ -181,9 +197,14 @@ func (a *API) handleA2AHandoffReject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Reason string `json:"reason"`
 	}
-	_ = a.decode(r, &req) // reason is optional
+	// Empty body is fine (reason is optional), but malformed JSON should
+	// still be rejected rather than silently becoming "no reason".
+	if err := a.decode(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
 	if err := a.Services.A2A.RejectHandoff(r.Context(), id, req.Reason); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.errorResp(w, a2aStatus(err), err.Error())
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "rejected"})
@@ -198,9 +219,12 @@ func (a *API) handleA2ARecent(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil {
-			limit = n
+		n, err := strconv.Atoi(l)
+		if err != nil {
+			a.errorResp(w, http.StatusBadRequest, "limit must be an integer")
+			return
 		}
+		limit = n
 	}
 	msgs, err := a.Services.A2A.RecentForSession(r.Context(), sessionID, limit)
 	if err != nil {

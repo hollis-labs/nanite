@@ -20,21 +20,21 @@ import (
 // validated against the resolver the same way toAgentID is.
 func (svc *Service) RequestHandoff(ctx context.Context, sessionID, fromAgentID, toAgentID, requestedBy string) (string, error) {
 	if sessionID == "" {
-		return "", fmt.Errorf("session_id required")
+		return "", fmt.Errorf("%w: session_id required", ErrValidation)
 	}
 	if toAgentID == "" {
-		return "", fmt.Errorf("to_agent_id required")
+		return "", fmt.Errorf("%w: to_agent_id required", ErrValidation)
 	}
 	if err := ValidateAgentID(ctx, svc.resolver, toAgentID); err != nil {
-		return "", fmt.Errorf("to_agent_id: %w", err)
+		return "", fmt.Errorf("%w: to_agent_id: %v", ErrValidation, err)
 	}
 	if fromAgentID != "" {
 		if err := ValidateAgentID(ctx, svc.resolver, fromAgentID); err != nil {
-			return "", fmt.Errorf("from_agent_id: %w", err)
+			return "", fmt.Errorf("%w: from_agent_id: %v", ErrValidation, err)
 		}
 	}
 	if requestedBy == "" {
-		return "", fmt.Errorf("requested_by required")
+		return "", fmt.Errorf("%w: requested_by required", ErrValidation)
 	}
 
 	id := uuid.New().String()
@@ -62,7 +62,7 @@ func (svc *Service) RequestHandoff(ctx context.Context, sessionID, fromAgentID, 
 // (idempotent). Calling it on a rejected handoff returns an error.
 func (svc *Service) ApproveHandoff(ctx context.Context, handoffID string) error {
 	if handoffID == "" {
-		return fmt.Errorf("handoff_id required")
+		return fmt.Errorf("%w: handoff_id required", ErrValidation)
 	}
 
 	tx, err := svc.store.DB.BeginTx(ctx, nil)
@@ -71,6 +71,10 @@ func (svc *Service) ApproveHandoff(ctx context.Context, handoffID string) error 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// If the handoff doesn't exist, sql.ErrNoRows propagates as a generic
+	// "read handoff" error → HTTP 500 at the API boundary. A richer error
+	// taxonomy (ErrNotFound) is deferred pending a broader sweep; the current
+	// sentinel ErrValidation only covers client-input validation.
 	var sessionID, toAgentID, status string
 	err = tx.QueryRowContext(ctx, `
 		SELECT session_id, to_agent_id, status FROM session_handoffs WHERE id = ?
@@ -87,7 +91,11 @@ func (svc *Service) ApproveHandoff(ctx context.Context, handoffID string) error 
 		// Rollback is harmless.
 		return tx.Commit()
 	case "rejected":
-		return fmt.Errorf("handoff %s is rejected", handoffID)
+		// MVP decision: approving an already-rejected handoff is a
+		// client-side precondition/conflict error. Wrapping with
+		// ErrValidation rather than introducing ErrConflict keeps the
+		// sentinel taxonomy minimal; the caller maps this to HTTP 400.
+		return fmt.Errorf("%w: handoff %s is rejected", ErrValidation, handoffID)
 	case "pending", "approved":
 		// ok — proceed
 	default:
@@ -138,7 +146,7 @@ func (svc *Service) ApproveHandoff(ctx context.Context, handoffID string) error 
 // affected, no error) — the existing status is already terminal.
 func (svc *Service) RejectHandoff(ctx context.Context, handoffID, reason string) error {
 	if handoffID == "" {
-		return fmt.Errorf("handoff_id required")
+		return fmt.Errorf("%w: handoff_id required", ErrValidation)
 	}
 	_, err := svc.store.DB.ExecContext(ctx, `
 		UPDATE session_handoffs

@@ -8,6 +8,42 @@ import (
 	"time"
 )
 
+func TestExpandArchiveBase(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"no tilde", "/tmp/foo", "/tmp/foo"},
+		{"tilde root", "~", home},
+		{"tilde slash", "~/Projects-apps/.archived", filepath.Join(home, "Projects-apps/.archived")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ExpandArchiveBase(tc.in)
+			if err != nil {
+				t.Fatalf("ExpandArchiveBase(%q): %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveArchiveDir_EmptyBasename(t *testing.T) {
+	ts := time.Date(2026, 4, 9, 14, 30, 22, 0, time.UTC)
+	if _, err := ResolveArchiveDir(t.TempDir(), "", ts); err == nil {
+		t.Error("expected error for empty basename")
+	}
+}
+
 func TestResolveArchiveDir_NoCollision(t *testing.T) {
 	base := t.TempDir()
 	ts := time.Date(2026, 4, 9, 14, 30, 22, 0, time.UTC)

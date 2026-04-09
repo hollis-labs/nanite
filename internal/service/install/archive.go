@@ -34,6 +34,9 @@ func ResolveArchiveDir(base, projectBasename string, ts time.Time) (string, erro
 	if base == "" {
 		return "", errors.New("empty archive base")
 	}
+	if projectBasename == "" {
+		return "", errors.New("empty project basename")
+	}
 	ts = ts.UTC()
 	date := ts.Format("2006-01-02")
 

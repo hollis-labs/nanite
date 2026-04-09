@@ -11,12 +11,12 @@ import (
 
 // Event represents a workflow execution event.
 type Event struct {
-	Type       string         // e.g. "step.started", "pipeline.completed"
-	PipelineID string
-	RunID      string
-	StepID     string // empty for pipeline events
-	Data       map[string]any
-	Timestamp  time.Time
+	Type       string         `json:"type"`
+	PipelineID string         `json:"pipeline_id"`
+	RunID      string         `json:"run_id"`
+	StepID     string         `json:"step_id,omitempty"`
+	Data       map[string]any `json:"data,omitempty"`
+	Timestamp  time.Time      `json:"timestamp"`
 }
 
 // EventHandler receives workflow execution events.

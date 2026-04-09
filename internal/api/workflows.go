@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/workflow"
 )
@@ -66,6 +69,70 @@ func (a *API) handleCancelWorkflowRun(w http.ResponseWriter, r *http.Request) {
 
 	record.Run.Status = workflow.RunCancelled
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+// handleRunWorkflow accepts a YAML workflow definition and executes it.
+// The run is stored in the RunStore and events are broadcast via SSE.
+//
+// POST /api/workflows/runs
+func (a *API) handleRunWorkflow(w http.ResponseWriter, r *http.Request) {
+	if a.Services.RunStore == nil || a.Services.WorkflowBroadcaster == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "workflow system not initialized")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+
+	pipeline, err := workflow.Load(body)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid workflow: %v", err))
+		return
+	}
+	if pipeline.ID == "" {
+		pipeline.ID = pipeline.Name
+	}
+
+	info := workflow.PipelineInfo{
+		ID:          pipeline.ID,
+		Name:        pipeline.Name,
+		Description: pipeline.Description,
+		StepCount:   len(pipeline.Steps),
+	}
+
+	broadcaster := a.Services.WorkflowBroadcaster
+	store := a.Services.RunStore
+
+	// Collect events in a local slice; we'll attach them to the record after the run.
+	var events []workflow.Event
+	executor := workflow.NewExecutor(workflow.WithEventHandler(func(event workflow.Event) {
+		events = append(events, event)
+		broadcaster.Broadcast(event)
+	}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	runState, runErr := executor.Run(ctx, pipeline, nil)
+	if runState == nil {
+		a.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("workflow run failed: %v", runErr))
+		return
+	}
+
+	store.Add(info, runState)
+	// Attach collected events to the stored record.
+	for _, ev := range events {
+		store.AppendEvent(runState.RunID, ev)
+	}
+
+	a.jsonResp(w, http.StatusOK, map[string]any{
+		"run_id":      runState.RunID,
+		"pipeline_id": pipeline.ID,
+		"status":      string(runState.Status),
+	})
 }
 
 // handleWorkflowEvents serves an SSE stream of workflow execution events.

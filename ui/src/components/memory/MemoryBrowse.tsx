@@ -37,8 +37,8 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
 
 function pillClass(active: boolean): string {
   return active
-    ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40"
-    : "bg-surface/40 text-fg-muted hover:text-fg border border-transparent";
+    ? "bg-primary text-white"
+    : "bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover";
 }
 
 export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
@@ -59,17 +59,17 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="px-3 pt-3 pb-2 shrink-0 flex items-center gap-2 border-b border-border-subtle">
+      <div className="px-3 pt-3 pb-2 pr-10 shrink-0 flex items-center gap-2 border-b border-border-subtle">
         <span className="text-sm font-medium text-fg flex-1">Memories</span>
         {total > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface/60 text-fg-faint border border-border-subtle">
+          <span className="text-xs px-1.5 py-0.5 rounded-md bg-surface text-fg-muted">
             {total}
           </span>
         )}
         <button
           type="button"
           onClick={onCreate}
-          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 border border-indigo-500/40 transition-colors"
+          className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md bg-primary text-white hover:bg-primary-hover transition-colors"
         >
           <Plus className="size-3" />
           New
@@ -79,25 +79,25 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
       {/* Search + filters */}
       <div className="px-3 py-2 space-y-2 shrink-0 border-b border-border-subtle">
         {/* Search input */}
-        <div className="flex items-center gap-1.5 bg-bg-elevated rounded px-2 py-1.5 border border-border-subtle">
-          <Search className="size-3 text-fg-faint shrink-0" />
+        <div className="flex items-center gap-2 bg-bg-elevated rounded-md px-3 py-2 border border-border-subtle">
+          <Search className="size-3.5 text-fg-faint shrink-0" />
           <input
             type="text"
             placeholder="Search memories…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 text-xs bg-transparent text-fg placeholder:text-fg-faint outline-none min-w-0 font-sans"
+            className="flex-1 text-sm bg-transparent text-fg placeholder:text-fg-faint outline-none min-w-0 font-sans"
           />
         </div>
 
         {/* Scope pills */}
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {SCOPE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               type="button"
               onClick={() => setScope(opt.value)}
-              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${pillClass(scope === opt.value)}`}
+              className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${pillClass(scope === opt.value)}`}
             >
               {opt.label}
             </button>
@@ -105,13 +105,13 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
         </div>
 
         {/* Status pills */}
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {STATUS_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               type="button"
               onClick={() => setStatus(opt.value)}
-              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${pillClass(status === opt.value)}`}
+              className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${pillClass(status === opt.value)}`}
             >
               {opt.label}
             </button>

@@ -29,24 +29,24 @@ const STATUS_OPTIONS: MemoryStatus[] = ["draft", "reviewed", "canonical", "depre
 
 function statusPillClass(status: MemoryStatus, active: boolean): string {
   if (!active)
-    return "bg-surface/40 text-fg-muted border border-transparent hover:border-border/50 cursor-pointer transition-colors";
+    return "bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover cursor-pointer transition-colors";
   switch (status) {
     case "draft":
-      return "bg-blue-500/20 text-blue-300 border border-blue-500/40 cursor-pointer transition-colors";
+      return "bg-info-muted text-info cursor-pointer transition-colors";
     case "reviewed":
-      return "bg-purple-500/20 text-purple-300 border border-purple-500/40 cursor-pointer transition-colors";
+      return "bg-primary text-white cursor-pointer transition-colors";
     case "canonical":
-      return "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-pointer transition-colors";
+      return "bg-success-muted text-success cursor-pointer transition-colors";
     case "deprecated":
-      return "bg-surface/60 text-fg-faint border border-border/50 cursor-pointer transition-colors";
+      return "bg-surface text-fg-muted cursor-pointer transition-colors";
   }
 }
 
 const inputClass =
-  "w-full px-3 py-2 rounded-md border border-border-subtle bg-bg-elevated text-xs text-fg outline-none focus:border-indigo-500/50 placeholder:text-fg-faint";
+  "w-full px-3 py-2 rounded-md border border-border-subtle bg-bg-elevated text-sm text-fg outline-none focus:border-primary/50 placeholder:text-fg-faint";
 const selectClass =
-  "w-full appearance-none px-3 py-2 rounded-md border border-border-subtle bg-bg-elevated text-xs text-fg outline-none focus:border-indigo-500/50 cursor-pointer";
-const labelClass = "text-[10px] uppercase tracking-wider text-fg-muted font-medium";
+  "w-full appearance-none px-3 py-2 rounded-md border border-border-subtle bg-bg-elevated text-sm text-fg outline-none focus:border-primary/50 cursor-pointer";
+const labelClass = "text-xs uppercase tracking-wider text-fg-muted font-medium";
 
 export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
   const isCreate = memoryKey === null;
@@ -141,7 +141,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="px-3 pt-3 pb-2 shrink-0 flex items-center gap-2 border-b border-border-subtle">
+      <div className="px-3 pt-3 pb-2 pr-10 shrink-0 flex items-center gap-2 border-b border-border-subtle">
         <button
           type="button"
           onClick={onBack}
@@ -156,7 +156,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 transition-colors"
+            className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md bg-danger-muted text-danger hover:bg-danger-muted/80 transition-colors"
           >
             <Trash2 className="size-3" />
             Delete
@@ -166,7 +166,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
           type="button"
           onClick={handleSave}
           disabled={isSaving || !summary.trim()}
-          className="flex items-center gap-1 text-[11px] px-3 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 border border-indigo-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center gap-1 text-xs font-medium px-3 py-1 rounded-md bg-primary text-white hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isSaving ? "Saving…" : "Save"}
         </button>
@@ -256,7 +256,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
                   key={s}
                   type="button"
                   onClick={() => handleStatusClick(s)}
-                  className={`text-[10px] px-2.5 py-1 rounded-full ${statusPillClass(s, status === s)}`}
+                  className={`text-xs px-2.5 py-1 rounded-md font-medium ${statusPillClass(s, status === s)}`}
                 >
                   {s.charAt(0).toUpperCase() + s.slice(1)}
                 </button>
@@ -272,7 +272,7 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-surface/40 text-fg-muted border border-border/30"
+                className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-surface text-fg-secondary"
               >
                 {tag}
                 <button
@@ -300,19 +300,19 @@ export function MemoryDetail({ memoryKey, onBack }: MemoryDetailProps) {
           <div className="pt-2 border-t border-border-subtle space-y-1">
             <p className={`${labelClass} mb-1`}>Metadata</p>
             {memory.session_id && (
-              <div className="flex items-center gap-2 text-[10px] text-fg-faint">
+              <div className="flex items-center gap-2 text-xs text-fg-faint">
                 <span className="text-fg-muted">Session</span>
                 <span className="font-mono">{memory.session_id.slice(0, 8)}…</span>
               </div>
             )}
             {memory.revision_id && (
-              <div className="flex items-center gap-2 text-[10px] text-fg-faint">
+              <div className="flex items-center gap-2 text-xs text-fg-faint">
                 <span className="text-fg-muted">Revision</span>
                 <span className="font-mono">{memory.revision_id.slice(0, 8)}…</span>
               </div>
             )}
             {memory.trigger && (
-              <div className="flex items-center gap-2 text-[10px] text-fg-faint">
+              <div className="flex items-center gap-2 text-xs text-fg-faint">
                 <span className="text-fg-muted">Trigger</span>
                 <span>{memory.trigger}</span>
               </div>

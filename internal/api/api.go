@@ -231,6 +231,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Workflow runs + SSE event stream
 	mux.HandleFunc("GET /api/workflows/runs", a.handleListWorkflowRuns)
+	mux.HandleFunc("POST /api/workflows/runs", a.handleRunWorkflow)
 	mux.HandleFunc("GET /api/workflows/runs/{runId}", a.handleGetWorkflowRun)
 	mux.HandleFunc("POST /api/workflows/runs/{runId}/cancel", a.handleCancelWorkflowRun)
 	mux.HandleFunc("GET /api/workflows/events", a.handleWorkflowEvents)

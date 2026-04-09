@@ -17,6 +17,7 @@ import { useLayoutStore } from "@/stores/useLayoutStore";
 type SettingsSection =
   | "profile"
   | "preferences"
+  | "appearance"
   | "providers"
   | "shortcuts"
   | "actions"
@@ -32,6 +33,7 @@ type SettingsSection =
 const VALID_SETTINGS_SECTIONS = new Set<string>([
   "profile",
   "preferences",
+  "appearance",
   "providers",
   "shortcuts",
   "actions",

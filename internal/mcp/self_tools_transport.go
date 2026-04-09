@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/crossapp"
+	a2a "github.com/hollis-labs/nanite/internal/service/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -42,6 +43,8 @@ type SelfToolsTransport struct {
 	BuilderRegistry *builders.Registry
 	BuilderSessions *builders.SessionManager
 	TodoStore       TodoStoreInterface // nil-safe; set after construction
+	// A2A is set post-construction from the container's A2A service; nil-safe.
+	A2A *a2a.Service
 }
 
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
@@ -103,6 +106,24 @@ func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[
 		return st.callPlanCreate(args)
 	case "nanite_plan_update":
 		return st.callPlanUpdate(args)
+	case "nanite_a2a_send":
+		return st.callA2ASend(args)
+	case "nanite_a2a_inbox":
+		return st.callA2AInbox(args)
+	case "nanite_a2a_thread":
+		return st.callA2AThread(args)
+	case "nanite_a2a_ack":
+		return st.callA2AAck(args)
+	case "nanite_a2a_resolve":
+		return st.callA2AResolve(args)
+	case "nanite_a2a_catch_up":
+		return st.callA2ACatchUp(args)
+	case "nanite_a2a_handoff_request":
+		return st.callA2AHandoffRequest(args)
+	case "nanite_a2a_handoff_approve":
+		return st.callA2AHandoffApprove(args)
+	case "nanite_a2a_handoff_reject":
+		return st.callA2AHandoffReject(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -297,7 +318,6 @@ func (st *SelfToolsTransport) callUpdateAgent(args map[string]any) (*ToolResult,
 	}
 	return textResult(fmt.Sprintf("Updated agent %q (id=%s)", a.Name, a.ID)), nil
 }
-
 
 // --- builder handlers ---
 
@@ -847,6 +867,175 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*ToolResult, 
 	return textResult(fmt.Sprintf("Updated plan %q (id=%s, status=%s)", p.Title, p.ID, p.Status)), nil
 }
 
+// --- A2A messaging handlers ---
+//
+// The nanite_a2a_subscribe tool is intentionally not registered here: it
+// requires streaming support in mcp-go or a custom server-side handler,
+// which is deferred to a follow-up task. See Task 10 notes.
+
+func (st *SelfToolsTransport) callA2ASend(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	msg := &store.A2AMessage{
+		FromSessionID: stringArg(args, "from_session_id"),
+		FromAgentID:   stringArg(args, "from_agent_id"),
+		ToSessionID:   stringArg(args, "to_session_id"),
+		ToAgentID:     stringArg(args, "to_agent_id"),
+		Subject:       stringArg(args, "subject"),
+		Body:          stringArg(args, "body"),
+		Type:          stringArg(args, "type"),
+	}
+	out, err := st.A2A.SendMessage(context.Background(), msg)
+	if err != nil {
+		return errorResult(fmt.Sprintf("a2a send: %v", err)), nil
+	}
+	return textResult(fmt.Sprintf("sent: %s", out.ID)), nil
+}
+
+func (st *SelfToolsTransport) callA2AInbox(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	inbox, err := st.A2A.Inbox(
+		context.Background(),
+		stringArg(args, "session_id"),
+		stringArg(args, "agent_id"),
+		stringArg(args, "status"),
+	)
+	if err != nil {
+		return errorResult(fmt.Sprintf("a2a inbox: %v", err)), nil
+	}
+	if inbox == nil {
+		inbox = []store.A2AMessage{}
+	}
+	data, err := json.Marshal(inbox)
+	if err != nil {
+		return errorResult(fmt.Sprintf("a2a inbox marshal: %v", err)), nil
+	}
+	return textResult(string(data)), nil
+}
+
+func (st *SelfToolsTransport) callA2AThread(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	messages, err := st.A2A.Thread(context.Background(), stringArg(args, "thread_id"))
+	if err != nil {
+		return errorResult(fmt.Sprintf("a2a thread: %v", err)), nil
+	}
+	if messages == nil {
+		messages = []store.A2AMessage{}
+	}
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return errorResult(fmt.Sprintf("a2a thread marshal: %v", err)), nil
+	}
+	return textResult(string(data)), nil
+}
+
+func (st *SelfToolsTransport) callA2AAck(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	if err := st.A2A.Ack(
+		context.Background(),
+		stringArg(args, "session_id"),
+		stringArg(args, "agent_id"),
+		stringArg(args, "message_id"),
+	); err != nil {
+		return errorResult(fmt.Sprintf("a2a ack: %v", err)), nil
+	}
+	return textResult("acked"), nil
+}
+
+func (st *SelfToolsTransport) callA2AResolve(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	if err := st.A2A.Resolve(
+		context.Background(),
+		stringArg(args, "session_id"),
+		stringArg(args, "agent_id"),
+		stringArg(args, "message_id"),
+	); err != nil {
+		return errorResult(fmt.Sprintf("a2a resolve: %v", err)), nil
+	}
+	return textResult("resolved"), nil
+}
+
+func (st *SelfToolsTransport) callA2ACatchUp(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	limit := 20
+	switch v := args["limit"].(type) {
+	case float64:
+		limit = int(v)
+	case int:
+		limit = v
+	case int64:
+		limit = int(v)
+	}
+	messages, err := st.A2A.RecentForSession(
+		context.Background(),
+		stringArg(args, "session_id"),
+		limit,
+	)
+	if err != nil {
+		return errorResult(fmt.Sprintf("a2a catch_up: %v", err)), nil
+	}
+	if messages == nil {
+		messages = []store.A2AMessage{}
+	}
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return errorResult(fmt.Sprintf("a2a catch_up marshal: %v", err)), nil
+	}
+	return textResult(string(data)), nil
+}
+
+func (st *SelfToolsTransport) callA2AHandoffRequest(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	id, err := st.A2A.RequestHandoff(
+		context.Background(),
+		stringArg(args, "session_id"),
+		stringArg(args, "from_agent_id"),
+		stringArg(args, "to_agent_id"),
+		stringArg(args, "requested_by"),
+	)
+	if err != nil {
+		return errorResult(fmt.Sprintf("a2a handoff request: %v", err)), nil
+	}
+	return textResult("handoff requested: " + id), nil
+}
+
+func (st *SelfToolsTransport) callA2AHandoffApprove(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	if err := st.A2A.ApproveHandoff(context.Background(), stringArg(args, "handoff_id")); err != nil {
+		return errorResult(fmt.Sprintf("a2a handoff approve: %v", err)), nil
+	}
+	return textResult("approved"), nil
+}
+
+func (st *SelfToolsTransport) callA2AHandoffReject(args map[string]any) (*ToolResult, error) {
+	if st.A2A == nil {
+		return errorResult("a2a service not configured"), nil
+	}
+	if err := st.A2A.RejectHandoff(
+		context.Background(),
+		stringArg(args, "handoff_id"),
+		stringArg(args, "reason"),
+	); err != nil {
+		return errorResult(fmt.Sprintf("a2a handoff reject: %v", err)), nil
+	}
+	return textResult("rejected"), nil
+}
+
 // --- helpers ---
 
 func strArg(args map[string]any, key, def string) string {
@@ -855,4 +1044,15 @@ func strArg(args map[string]any, key, def string) string {
 		return def
 	}
 	return v
+}
+
+// stringArg returns a string argument from a tool call's args map, or "" if
+// the key is missing or the value is not a string. Unlike strArg, it has no
+// default — used by A2A handlers where empty strings are validated at the
+// service layer.
+func stringArg(args map[string]any, key string) string {
+	if v, ok := args[key].(string); ok {
+		return v
+	}
+	return ""
 }

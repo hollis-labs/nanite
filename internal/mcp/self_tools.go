@@ -333,5 +333,125 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"id"},
 			},
 		},
+		// --- A2A messaging tools ---
+		// nanite_a2a_subscribe is intentionally NOT registered here: it
+		// requires streaming support in mcp-go or a custom server-side
+		// handler, which is deferred to a follow-up task.
+		{
+			Name:        "nanite_a2a_send",
+			Description: "Send an A2A message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"from_session_id": map[string]any{"type": "string"},
+					"from_agent_id":   map[string]any{"type": "string"},
+					"to_session_id":   map[string]any{"type": "string"},
+					"to_agent_id":     map[string]any{"type": "string"},
+					"subject":         map[string]any{"type": "string"},
+					"body":            map[string]any{"type": "string"},
+					"type":            map[string]any{"type": "string", "enum": []string{"message", "help_request", "directive", "status_update", "handoff"}},
+				},
+				"required": []string{"from_session_id", "from_agent_id", "to_session_id", "to_agent_id", "body"},
+			},
+		},
+		{
+			Name:        "nanite_a2a_inbox",
+			Description: "Read the A2A inbox for (session_id, agent_id). Optional status filter.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{"type": "string"},
+					"agent_id":   map[string]any{"type": "string"},
+					"status":     map[string]any{"type": "string", "enum": []string{"", "unread", "read", "acknowledged", "resolved"}},
+				},
+				"required": []string{"session_id", "agent_id"},
+			},
+		},
+		{
+			Name:        "nanite_a2a_thread",
+			Description: "Get all messages in a thread by thread_id.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"thread_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"thread_id"},
+			},
+		},
+		{
+			Name:        "nanite_a2a_ack",
+			Description: "Mark an A2A message as read.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{"type": "string"},
+					"agent_id":   map[string]any{"type": "string"},
+					"message_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"session_id", "agent_id", "message_id"},
+			},
+		},
+		{
+			Name:        "nanite_a2a_resolve",
+			Description: "Mark an A2A message as resolved.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{"type": "string"},
+					"agent_id":   map[string]any{"type": "string"},
+					"message_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"session_id", "agent_id", "message_id"},
+			},
+		},
+		{
+			Name:        "nanite_a2a_catch_up",
+			Description: "Get the last N messages for a session across both sides of the conversation. Used for handoff catch-up.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{"type": "string"},
+					"limit":      map[string]any{"type": "integer", "default": 20},
+				},
+				"required": []string{"session_id"},
+			},
+		},
+		{
+			Name:        "nanite_a2a_handoff_request",
+			Description: "Request a session handoff from one agent to another. Creates a pending row; user must approve.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id":    map[string]any{"type": "string"},
+					"from_agent_id": map[string]any{"type": "string"},
+					"to_agent_id":   map[string]any{"type": "string"},
+					"requested_by":  map[string]any{"type": "string", "enum": []string{"departing", "incoming", "user"}},
+				},
+				"required": []string{"session_id", "to_agent_id", "requested_by"},
+			},
+		},
+		{
+			Name:        "nanite_a2a_handoff_approve",
+			Description: "Approve a pending handoff. Atomically rebinds the session's primary agent and marks the handoff complete.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"handoff_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"handoff_id"},
+			},
+		},
+		{
+			Name:        "nanite_a2a_handoff_reject",
+			Description: "Reject a pending handoff with a reason.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"handoff_id": map[string]any{"type": "string"},
+					"reason":     map[string]any{"type": "string"},
+				},
+				"required": []string{"handoff_id"},
+			},
+		},
 	}
 }

@@ -1,11 +1,13 @@
 # Handoff — Nanite A2A Session Scoping (Plan B)
 
-**Date:** 2026-04-09
+**Date:** 2026-04-09 (initial), updated 2026-04-09 after Task 12
 **Branch:** `feature/a2a-session-scoping`
 **Worktree:** `/Users/chrispian/Projects-apps/nanite-a2a`
 **Parent boot prompt:** `docs/superpowers/plans/2026-04-09-nanite-a2a-boot-prompt.md`
 **Plan:** `docs/superpowers/plans/2026-04-09-nanite-a2a-session-scoping.md`
 **Spec:** `docs/superpowers/specs/2026-04-09-nanite-agentrc-consolidation-design.md` (§2.4)
+
+**Status:** code-complete. Tasks 1–12 committed; Task 13 (operational smoke test) deferred pending Plan A Task 16 and the pre-existing `plugins/support-ticket` module error.
 
 ---
 
@@ -30,9 +32,22 @@ Use `superpowers:subagent-driven-development` to execute remaining tasks. Serial
 
 ## State at handoff
 
-7 commits ahead of `main` (`be14204`). Working tree clean.
+21 commits ahead of `main` (`be14204`). Working tree clean.
 
 ```
+26b7cd1 docs: nanite a2a CLI + HTTP + MCP reference
+1e44267 test(a2a): integration test for full handoff round-trip
+47f3ba2 fix(mcp): a2a_send reply_to support + helper cleanup
+7817d99 feat(mcp): A2A MCP tools — send/inbox/thread/ack/resolve/catch-up/handoff
+77b05d1 fix(cli): a2a command polish — flag validation + consistent output
+a09219b feat(cli): nanite a2a send/inbox/thread/ack/resolve/catch-up/handoff
+a22ff08 fix(a2a): typed validation errors for API error-code mapping
+7f8dca2 refactor(api): A2A HTTP endpoints route through a2a.Service + handoff routes
+9c2d310 fix(a2a): close-on-publish race in pubsub
+0fb2e11 feat(a2a): in-process pubsub for bidirectional MCP subscriptions
+b6b7e4c fix(a2a): strengthen handoff tests + gofmt
+d7e8a77 feat(a2a): handoff flow with single-transaction binding update
+aad46ab docs: handoff update after Tasks 4-5 complete
 59b163e fix(a2a): wrap Ack/Resolve errors, stable thread ordering
 721ab75 feat(a2a): service layer for send/inbox/thread/ack/resolve
 b897f35 refactor(store,api): A2A session-scoped addressing
@@ -50,14 +65,14 @@ ccbec70 feat(store): reject reserved 'user' slug/id in agent creation
 | 3 | Agent ID validator (`internal/service/a2a/validate.go`) | ✅ done (with plan deviation) | `a54a5c2` |
 | 4 | Rewrite `internal/store/a2a.go` for new schema | ✅ done | `b897f35` |
 | 5 | Service layer basics (send/inbox/thread/ack/resolve) | ✅ done (deviation 3 applied) | `721ab75`, `59b163e` |
-| 6 | Handoff transaction | ⏭ **next** — needs `Store.DB()` accessor or `WithTx` helper | — |
-| 7 | Subscribe/pubsub for MCP streaming | pending — stub exists in `subscribe.go`, replace wholesale | — |
-| 8 | Rewrite `internal/api/a2a.go` | pending — partially done in Task 4; Task 8 routes through `a2a.Service` for validation | — |
-| 9 | `nanite a2a` CLI command | pending | — |
-| 10 | Register A2A MCP tools | pending (9 req/resp; `a2a_subscribe` deferred per plan) | — |
-| 11 | Handoff round-trip integration test | pending | — |
-| 12 | User-facing docs | pending | — |
-| 13 | Phase 4b smoke test on Nanite | pending — depends on Plan A Task 16 |
+| 6 | Handoff transaction | ✅ done (with minor review fixes) | `d7e8a77`, `b6b7e4c` |
+| 7 | Subscribe/pubsub for MCP streaming | ✅ done (race fix on review) | `0fb2e11`, `9c2d310` |
+| 8 | Rewrite `internal/api/a2a.go` through service | ✅ done (typed-error fix on review) | `7f8dca2`, `a22ff08` |
+| 9 | `nanite a2a` CLI command | ✅ done (flag-validation polish on review) | `a09219b`, `77b05d1` |
+| 10 | Register A2A MCP tools (9 req/resp; subscribe deferred) | ✅ done (helper cleanup on review) | `7817d99`, `47f3ba2` |
+| 11 | Handoff round-trip integration test | ✅ done | `1e44267` |
+| 12 | User-facing docs | ✅ done | `26b7cd1` |
+| 13 | Phase 4b smoke test on Nanite | ⏭ **deferred** — needs Plan A Task 16 AND requires `cmd/nanite` to build (blocked by pre-existing `plugins/support-ticket` module error) | — |
 
 ---
 
@@ -172,6 +187,99 @@ The original boot prompt's stopping conditions still apply. Summarized:
 - Plan A's Task 16 not landed by the time you reach your Task 13 → skip Task 13 with an explicit note.
 - You discover a new design gap in the spec or plan that affects architecture → stop, write it up in a new deviation entry in this handoff doc, ask before working around it.
 - `go build ./...` fails on anything other than the pre-existing `plugins/support-ticket` failure → stop, investigate.
+
+## Deviations added during Tasks 6–12
+
+### Deviation 6 — Typed validation error sentinel (`a2a.ErrValidation`)
+
+**Where:** `internal/service/a2a/errors.go` (new, Task 8 fix cycle).
+
+**What:** Introduced `var ErrValidation = errors.New("a2a: validation")`. Every validation branch in `service.go`, `handoff.go`, and `subscribe.go` wraps its error via `fmt.Errorf("%w: <field>: %v", ErrValidation, innerErr)` so callers can discriminate validation failures from internal errors via `errors.Is(err, ErrValidation)`.
+
+**Why:** Code review on Task 8 caught that the initial HTTP handlers flattened every service error into HTTP 400 — including real DB errors. A disk-full SQLite write would be reported to the CLI as "validation error" and retried with already-valid input. The sentinel lets API handlers map validation → 400, other errors → 500. CLI and MCP surfaces inherit the benefit structurally.
+
+**How it propagates:** `internal/api/a2a.go` uses a local `a2aStatus(err)` helper that wraps `errors.Is(err, a2a.ErrValidation)`. No change needed at the CLI or MCP sites — they use `log.Fatalf` / `errorResult` respectively, which surface the inner error message without relying on the sentinel.
+
+**Not expanded to `ErrNotFound` / `ErrConflict`:** Future work. `ApproveHandoff`'s "handoff not found" and "already rejected" errors currently surface as HTTP 500. Documented in a comment above the `tx.QueryRowContext` in `handoff.go`.
+
+### Deviation 7 — Publish held under RLock, no snapshot-and-release
+
+**Where:** `internal/service/a2a/subscribe.go` `publish()` (Task 7 fix cycle, commit `9c2d310`).
+
+**What:** The plan's Task 7 sketch instructed to take RLock, copy the subscriber slice, release RLock, then send on the snapshotted channels. The code-quality reviewer for Task 7 found this is a race: between `RUnlock` and the non-blocking send, the unsubscribe goroutine can take the write lock, remove the channel, and call `close(ch)` — then the publisher sends on a closed channel and panics. The `default` branch of `select` does NOT rescue this; `default` only fires when the send would block, not when it would panic.
+
+**Fix:** hold the RLock across the non-blocking sends. Non-blocking sends are O(1), so the lock is held for a bounded time and cannot deadlock. The RLock blocks the unsubscribe goroutine from acquiring the write lock until the publisher finishes.
+
+**Why this matters architecturally:** the close-on-publish race fires on the exact shutdown path for MCP streaming subscribers — a client disconnects while a message is arriving. It's not theoretical. The regression test `TestSubscribe_PublishUnsubscribeRace` stresses 200 concurrent subscribe/publish pairs and would panic pre-fix under `-race`.
+
+**Plan correction:** the plan text still has the old sketch. If the plan is ever re-executed, the reviewer should override the plan's instruction and use the lock-held pattern. Flagged in the fix commit message.
+
+### Deviation 8 — HTTP route shapes preserved, new shapes for new endpoints
+
+**Where:** `internal/api/api.go` A2A routes (Task 8, commit `7f8dca2`).
+
+**What:** The plan specified renaming existing A2A routes (`POST /api/a2a/messages` → `POST /api/a2a/send`, etc.). We kept the existing paths for backward compatibility and only introduced new routes for the new endpoints. New routes use `{id}` (Nanite's Go 1.22+ mux syntax, not `:id`) and plural `handoffs` (matching the existing `messages` precedent).
+
+**Why:** Route renames would break any existing client. The change-the-handler-body-not-the-URL approach gives the same benefit (routing through the service layer) without the churn.
+
+**New routes added:**
+- `POST /api/a2a/handoffs`
+- `POST /api/a2a/handoffs/{id}/approve`
+- `POST /api/a2a/handoffs/{id}/reject`
+- `GET /api/a2a/recent?session_id=X&limit=N`
+
+### Deviation 9 — MCP tool file layout
+
+**Where:** `internal/mcp/self_tools.go` (tool definitions) and `internal/mcp/self_tools_transport.go` (dispatch + handlers), Task 10 (commit `7817d99`).
+
+**What:** The plan said to modify `internal/mcp/self_tools_transport.go` for both schemas and handlers. In reality these are split: `selfToolDefinitions()` lives in `self_tools.go`, and dispatch + handlers live in `self_tools_transport.go`. The 9 A2A tool definitions were added to `self_tools.go` at the bottom; the 9 dispatch cases + 9 handlers + the subscribe-deferral comment were added to `self_tools_transport.go`.
+
+**Also:** `SelfToolsTransport` gained an `A2A *a2a.Service` field wired from the container in `main.go` (`selfTools.A2A = container.A2A`), mirroring the existing `TodoStore` pattern. The plan's `a2aService()` helper that constructed a fresh service per-call was not used — it would have been both wrong (signature mismatch with the resolver) and expensive (file-agent discovery per call).
+
+**Nil-safety:** every A2A handler guards `if st.A2A == nil { return errorResult(...), nil }` because the field is set post-construction.
+
+### Deviation 10 — CLI uses existing `strArg` helper, not a new `stringArg`
+
+**Where:** `internal/mcp/self_tools_transport.go` (Task 10 fix cycle, commit `47f3ba2`).
+
+**What:** The plan sketched a new `stringArg(args, key)` helper. Review caught that the existing `strArg(args, key, default)` is functionally identical when `default = ""`. Removed the new helper; all 9 A2A handlers use `strArg(args, "<key>", "")`.
+
+Also: `callA2ACatchUp` originally had an inline type switch for `float64`/`int`/`int64` limit parsing. Replaced with the existing `intArg(args, key, default)` helper which also handles `json.Number` if callers ever enable `decoder.UseNumber()`.
+
+Also: `nanite_a2a_send` schema gained a `reply_to` field (forwarded to `store.A2AMessage.ReplyTo`) so MCP callers can continue threads — essential for multi-turn A2A conversations.
+
+## Final verification (2026-04-09)
+
+```
+go test ./internal/store/... ./internal/service/a2a/... ./internal/mcp/... -count=1
+ok  	github.com/hollis-labs/nanite/internal/store                3.978s
+ok  	github.com/hollis-labs/nanite/internal/service/a2a          1.744s
+ok  	github.com/hollis-labs/nanite/internal/mcp                 61.737s
+```
+
+Test counts:
+- `internal/service/a2a/` — 26 tests (unit + integration + race stress)
+- `internal/store/` — all pre-existing tests pass, including migration 005 verify
+- `internal/mcp/` — pre-existing tests pass, A2A dispatch covered by the service-layer tests
+
+`gofmt -l internal/service/a2a/ internal/api/ internal/mcp/self_tools.go internal/mcp/self_tools_transport.go cmd/nanite/a2a_cmd.go` → clean.
+
+`go vet ./internal/service/a2a/... ./internal/api/... ./internal/mcp/...` → clean.
+
+**`./nanite a2a send --help` NOT verified.** The `cmd/nanite` binary cannot be built on this branch because `internal/plugin/allplugins/allplugins.go:25` imports `github.com/hollis-labs/nanite/plugins/support-ticket`, a module that's not in `go.mod`. This failure was present on `be14204` (Plan B's base) and has nothing to do with A2A work. Fixing it is outside Plan B's scope. Once it's resolved — either by landing the missing plugin module or by removing the import — the CLI smoke test can run.
+
+## Task 13 deferral
+
+Task 13 is the operational runbook to smoke-test A2A end-to-end on a real Nanite install. It requires:
+
+1. Plan A Task 16 (dogfood install on Nanite) to be complete — so the `nanite` binary is installed and the user's DB has the current schema.
+2. `cmd/nanite` to actually build — blocked by the pre-existing plugin module error.
+
+Neither prerequisite is satisfied on `feature/a2a-session-scoping`. Task 13 is explicitly deferred per the boot prompt's stopping conditions ("Plan A's Task 16 isn't done by the time you reach your Task 13 → skip Task 13 and leave a note — it can run after both plans' code work is done").
+
+The MCP and HTTP surfaces are verified by construction: they route through the same `a2a.Service` that the 26 unit and integration tests exercise. The only thing the smoke test would add is end-to-end validation through the `cmd/nanite` binary's wiring (`selfTools.A2A = container.A2A`), which was verified via `gopls check` but not runtime.
+
+**Recommended follow-up:** after Plan A merges and the plugin module issue is resolved, run the 11 steps in Task 13 against `~/.nanite/nanite.db` on a live install. Capture the result in a separate commit.
 
 ---
 

@@ -89,8 +89,7 @@ UPCOMING:
   trigger dispatcher w/ retry, API endpoints, tests. No concrete connectors yet.
 - User Shell Task 2 (Interactive PTY) — backlogged (! exec sufficient)
 - Phase D (Claude Code Integration) — future
-- Frontend: workflow progress panel, memory viewer, tool prefs UI, worker status UI,
-  adapter source badges, override editor, sync status, NANITE.md preview
+- Frontend: Agent Adapter UI (source badges, override editor, sync status, NANITE.md preview)
 - Slash commands: additional commands as needed (Host.RegisterCommand ✅)
 - .agentrc/ → .nanite/ file rename (separate agent handles agentrc repo changes)
 
@@ -117,7 +116,7 @@ Rebrand from Conduit → Nanite — all waves complete.
 
 CRITICAL — Read these before touching any code:
 - memory: feedback_ui_design_patterns.md — THE design system reference
-- .agentrc/agents/frontend.md — full project context
+- .nanite/agents/frontend.md — full project context
 - CLAUDE.md — envelope system warnings
 
 ARCHITECTURE:
@@ -150,36 +149,21 @@ COMPLETED (Todo/Plan UI — PR #9, 2026-04-08):
   - Old session-task code fully removed (SessionTasksTab, useSessionTasks, etc.)
   - Spec: docs/superpowers/specs/2026-04-08-todo-plan-ui-design.md
 
+COMPLETED FRONTEND TASKS (since vNext):
+  ✅ Tool Load Preferences UI
+  ✅ Worker Status UI
+  ✅ Envelope type codegen (npm run generate:envelopes / check:envelopes)
+  ✅ Workflow progress panel
+  ✅ Memory viewer
+
 PENDING FRONTEND TASKS:
 
-1. Tool Load Preferences UI (priority: high)
-   - Backend APIs ready: GET/PUT /api/tools/load-preferences, GET /api/tools/all
-   - Settings panel where users toggle tool load types (auto/opt-in/disabled) per tool
-   - Follow patterns in ToolsWidget.tsx
-
-2. Worker Status UI (priority: medium)
-   - Backend APIs ready: GET /api/workers, POST /api/workers/{id}/cancel
-   - Workers are background multi-agent orchestration processes
-   - Need: worker list widget showing active workers, status, cancel button
-
-3. Envelope types (priority: medium, automated)
-   - TS types auto-generated from JSON schemas via scripts/generate-envelope-types.mjs
-   - Run `npm run generate:envelopes` or `make generate-envelopes`
-   - Staleness check: `npm run check:envelopes`
-
-4. Agent Adapter UI (priority: medium, from PR #11)
+1. Agent Adapter UI (priority: medium, from PR #11)
    - Adapter source badges — show source (nanite, claude, codex, etc.) on agent list
    - Override editor — project + session overrides, cascade visualization
    - Sync status — active adapters, last sync, errors
    - NANITE.md preview — managed section content with "sync now" button
    - Adapter management — enable/disable per adapter
-
-5. Workflow progress panel (priority: low, future)
-   - Backend workflow engine ready (internal/workflow/)
-   - Show pipeline step status, progress, events
-   - Reserved: collapsible section in WorkTab (hidden when empty)
-
-6. Memory viewer (priority: low, future)
-   - Show recalled memories in context, extraction history
-   - Reserved: future RightRail tab or widget
+   - Backend: AdapterRegistry, 5 adapters, override cascade all ready
+   - Spec: docs/superpowers/specs/2026-04-08-agent-adapter-architecture-design.md § 8
 ```

@@ -1,7 +1,7 @@
 # Frontend Context — Nanite (React SPA)
 
 > Project-specific frontend conventions. Loaded by the frontend agent role when working in this project.
-> Lives at `nanite/.agentrc/agents/frontend.md`.
+> Lives at `nanite/.nanite/agents/frontend.md`.
 
 ## Stack
 

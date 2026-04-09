@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/crossapp"
+	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -103,6 +104,14 @@ func (st *SelfToolsTransport) CallTool(_ context.Context, name string, args map[
 		return st.callPlanCreate(args)
 	case "nanite_plan_update":
 		return st.callPlanUpdate(args)
+	case "nanite_install_home":
+		return st.callInstallHome(args)
+	case "nanite_install_project":
+		return st.callInstallProject(args)
+	case "nanite_install_rollback":
+		return st.callInstallRollback(args)
+	case "nanite_install_diff":
+		return st.callInstallDiff(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -845,6 +854,75 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*ToolResult, 
 	}
 
 	return textResult(fmt.Sprintf("Updated plan %q (id=%s, status=%s)", p.Title, p.ID, p.Status)), nil
+}
+
+// --- install handlers ---
+
+func (st *SelfToolsTransport) callInstallHome(args map[string]any) (*ToolResult, error) {
+	force, _ := args["force"].(bool)
+	svc := install.New()
+	report, err := svc.InstallHome(install.InstallHomeOptions{Force: force})
+	if err != nil {
+		return errorResult(fmt.Sprintf("install home: %v", err)), nil
+	}
+	return textResult(fmt.Sprintf("install home: created=%d unchanged=%d skipped=%d forced=%d",
+		report.Created, report.Unchanged, report.Skipped, report.Forced)), nil
+}
+
+func (st *SelfToolsTransport) callInstallProject(args map[string]any) (*ToolResult, error) {
+	projectDir, _ := args["project_dir"].(string)
+	if projectDir == "" {
+		return errorResult("project_dir is required"), nil
+	}
+	migrate, _ := args["migrate_from_agentrc"].(bool)
+	archiveOnly, _ := args["archive_only"].(bool)
+
+	svc := install.New()
+	report, err := svc.InstallProject(install.InstallProjectOptions{
+		ProjectDir:         projectDir,
+		MigrateFromAgentrc: migrate,
+		ArchiveOnly:        archiveOnly,
+	})
+	if err != nil {
+		return errorResult(fmt.Sprintf("install project: %v", err)), nil
+	}
+
+	summary := fmt.Sprintf("install project %s:", projectDir)
+	switch {
+	case report.FreshScaffold:
+		summary += " fresh scaffold"
+	case report.Migrated:
+		summary += fmt.Sprintf(" migrated (archive=%s)", report.ArchivePath)
+	case report.Adopted:
+		summary += " adopted existing"
+	case report.ArchiveOnly:
+		summary += fmt.Sprintf(" archive-only (archive=%s)", report.ArchivePath)
+	}
+	if len(report.Warnings) > 0 {
+		summary += "\nwarnings:\n  - " + strings.Join(report.Warnings, "\n  - ")
+	}
+	return textResult(summary), nil
+}
+
+func (st *SelfToolsTransport) callInstallRollback(args map[string]any) (*ToolResult, error) {
+	projectDir, _ := args["project_dir"].(string)
+	if projectDir == "" {
+		return errorResult("project_dir is required"), nil
+	}
+	archivePath, _ := args["archive_path"].(string)
+
+	svc := install.New()
+	if err := svc.Rollback(install.RollbackOptions{ProjectDir: projectDir, ArchivePath: archivePath}); err != nil {
+		return errorResult(fmt.Sprintf("rollback: %v", err)), nil
+	}
+	return textResult("rollback complete: " + projectDir), nil
+}
+
+func (st *SelfToolsTransport) callInstallDiff(args map[string]any) (*ToolResult, error) {
+	// TODO(Plan A Task 15+): implement dry-run mode in internal/service/install
+	// that returns an action list without mutating state.
+	_ = args
+	return textResult("install diff not yet implemented"), nil
 }
 
 // --- helpers ---

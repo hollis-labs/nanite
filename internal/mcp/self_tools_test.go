@@ -36,15 +36,19 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"nanite_create_skill":          false,
-		"nanite_list_skills":           false,
-		"nanite_update_skill":          false,
-		"nanite_delete_skill":          false,
-		"nanite_create_agent":          false,
-		"nanite_list_agents":           false,
-		"nanite_update_agent":          false,
-		"nanite_start_builder":         false,
-		"nanite_builder_step":          false,
+		"nanite_create_skill":     false,
+		"nanite_list_skills":      false,
+		"nanite_update_skill":     false,
+		"nanite_delete_skill":     false,
+		"nanite_create_agent":     false,
+		"nanite_list_agents":      false,
+		"nanite_update_agent":     false,
+		"nanite_start_builder":    false,
+		"nanite_builder_step":     false,
+		"nanite_install_home":     false,
+		"nanite_install_project":  false,
+		"nanite_install_rollback": false,
+		"nanite_install_diff":     false,
 	}
 
 	for _, tool := range tools {

@@ -179,6 +179,14 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/a2a/messages/{id}/resolve", a.handleA2AResolve)
 	mux.HandleFunc("GET /api/a2a/unread", a.handleA2AUnreadCount)
 
+	// A2A handoff
+	mux.HandleFunc("POST /api/a2a/handoffs", a.handleA2AHandoffRequest)
+	mux.HandleFunc("POST /api/a2a/handoffs/{id}/approve", a.handleA2AHandoffApprove)
+	mux.HandleFunc("POST /api/a2a/handoffs/{id}/reject", a.handleA2AHandoffReject)
+
+	// A2A recent messages (for handoff catch-up / debugging)
+	mux.HandleFunc("GET /api/a2a/recent", a.handleA2ARecent)
+
 	// Output Templates
 	mux.HandleFunc("GET /api/templates", a.handleListTemplates)
 	mux.HandleFunc("POST /api/templates", a.handleCreateTemplate)

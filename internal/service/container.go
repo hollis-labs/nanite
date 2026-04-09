@@ -10,21 +10,22 @@ import (
 
 	conduit "github.com/hollis-labs/vanta-conduit"
 
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/coordination"
-	"github.com/hollis-labs/nanite/internal/skill"
-	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
+	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/permission"
-	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/secrets"
+	"github.com/hollis-labs/nanite/internal/service/a2a"
+	"github.com/hollis-labs/nanite/internal/skill"
+	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -48,6 +49,10 @@ type Container struct {
 	Commands  *chat.CommandRegistry
 	Plugins   *plugin.Host
 	MCP       *mcp.Manager
+
+	// A2A messaging service — validates, persists, and fans out
+	// agent-to-agent messages plus handoff state transitions.
+	A2A *a2a.Service
 
 	// Internal todo/plan system.
 	Todos TodoService
@@ -91,12 +96,12 @@ type Container struct {
 // ContainerConfig holds all the external dependencies needed to construct
 // a Container. Everything that main.go sets up before wiring goes here.
 type ContainerConfig struct {
-	Store     *store.Store
-	Providers *provider.Registry
-	MCP       *mcp.Manager
+	Store      *store.Store
+	Providers  *provider.Registry
+	MCP        *mcp.Manager
 	ToolClient *toolclient.ToolClient
-	Plugins   *plugin.Host
-	AppConfig *config.AppConfig
+	Plugins    *plugin.Host
+	AppConfig  *config.AppConfig
 
 	// Optional subsystems — nil-safe.
 	Activity     *chat.ActivityEmitter
@@ -177,6 +182,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		FileAgents: agentDefs,
 		Overrides:  cfg.Store,
 	})
+
+	// A2A messaging service. Uses the AgentService as its resolver so both
+	// DB-backed and file-based agents validate uniformly.
+	a2aSvc := a2a.NewService(cfg.Store, agents)
+	log.Println("service container: A2A service enabled")
 
 	// Discover file-based skill definitions from all 5 priority locations.
 	skillDefs, err := skill.Discover(skill.DiscoverOptions{
@@ -356,20 +366,20 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	permissions := permission.NewEngine(permission.ModeDefault, nil)
 
 	chatSvc := NewChatService(ChatServiceConfig{
-		Sessions:       sessions,
-		Agents:         agents,
-		Tools:          tools,
-		Streams:        streams,
-		Context:        ctxService,
-		Events:         events,
-		Providers:      cfg.Providers,
-		Store:          cfg.Store,
-		Orchestrator:   orchestrator,
-		AppConfig:      cfg.AppConfig,
-		OutputFilter:   cfg.OutputFilter,
-		Commands:       commands,
-		PluginHost:     pluginSink,
-		ProcessTracker: processTracker,
+		Sessions:        sessions,
+		Agents:          agents,
+		Tools:           tools,
+		Streams:         streams,
+		Context:         ctxService,
+		Events:          events,
+		Providers:       cfg.Providers,
+		Store:           cfg.Store,
+		Orchestrator:    orchestrator,
+		AppConfig:       cfg.AppConfig,
+		OutputFilter:    cfg.OutputFilter,
+		Commands:        commands,
+		PluginHost:      pluginSink,
+		ProcessTracker:  processTracker,
 		UtilityProvider: cfg.UtilityProvider,
 		UtilityModel:    cfg.UtilityModel,
 		Permissions:     permissions,
@@ -450,33 +460,34 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	log.Println("service container: all services wired")
 
 	return &Container{
-		Sessions:        sessions,
-		Agents:          agents,
-		Skills:          skills,
-		Tools:           tools,
-		Chat:            chatSvc,
-		Context:         ctxService,
-		Streams:         streams,
-		Events:          events,
-		Providers:       cfg.Providers,
-		Commands:        commands,
-		Plugins:         cfg.Plugins,
-		MCP:             cfg.MCP,
-		Todos:           todos,
-		Conduit:         conduitInstance,
-		Memory:          memorySvc,
-		Coord:           cfg.CoordStore,
-		Tasks:           tasks,
-		Workers:         workers,
-		Worktrees:       cfg.Worktrees,
-		Store:           cfg.Store,
-		ToolClient:      cfg.ToolClient,
-		ProcessTracker:  processTracker,
-		Orchestrator:    orchestrator,
-		Activity:        cfg.Activity,
-		UtilityProvider: cfg.UtilityProvider,
-		UtilityModel:    cfg.UtilityModel,
-		ModelSelector:   modelSelector,
+		Sessions:            sessions,
+		Agents:              agents,
+		Skills:              skills,
+		Tools:               tools,
+		Chat:                chatSvc,
+		Context:             ctxService,
+		Streams:             streams,
+		Events:              events,
+		Providers:           cfg.Providers,
+		Commands:            commands,
+		Plugins:             cfg.Plugins,
+		MCP:                 cfg.MCP,
+		A2A:                 a2aSvc,
+		Todos:               todos,
+		Conduit:             conduitInstance,
+		Memory:              memorySvc,
+		Coord:               cfg.CoordStore,
+		Tasks:               tasks,
+		Workers:             workers,
+		Worktrees:           cfg.Worktrees,
+		Store:               cfg.Store,
+		ToolClient:          cfg.ToolClient,
+		ProcessTracker:      processTracker,
+		Orchestrator:        orchestrator,
+		Activity:            cfg.Activity,
+		UtilityProvider:     cfg.UtilityProvider,
+		UtilityModel:        cfg.UtilityModel,
+		ModelSelector:       modelSelector,
 		Permissions:         permissions,
 		AdapterRegistry:     adapterRegistry,
 		RunStore:            runStore,

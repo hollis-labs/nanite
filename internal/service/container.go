@@ -83,6 +83,9 @@ type Container struct {
 	// Workflow run store and SSE broadcaster. nil = workflow system disabled.
 	RunStore            *workflow.RunStore
 	WorkflowBroadcaster *workflow.Broadcaster
+
+	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
+	AdapterRegistry *agent.AdapterRegistry
 }
 
 // ContainerConfig holds all the external dependencies needed to construct
@@ -144,10 +147,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Events:   events,
 	})
 
-	// Discover file-based agent definitions from all 6 priority locations.
+	// Adapter registry — adapters self-register via plugin loading.
+	// For now, the registry is created and passed through; adapter plugins
+	// will be wired when the plugin host supports adapter registration.
+	adapterRegistry := agent.NewAdapterRegistry()
+
+	// Discover file-based agent definitions from all priority locations.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
 		WorkingDir: ".",
 		PluginsDir: "plugins",
+		Adapters:   adapterRegistry,
 	})
 	if err != nil {
 		log.Printf("service container: agent discovery: %v", err)
@@ -166,6 +175,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Settings:   cfg.Store,
 		Events:     events,
 		FileAgents: agentDefs,
+		Overrides:  cfg.Store,
 	})
 
 	// Discover file-based skill definitions from all 5 priority locations.
@@ -462,7 +472,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		UtilityProvider: cfg.UtilityProvider,
 		UtilityModel:    cfg.UtilityModel,
 		ModelSelector:   modelSelector,
-		Permissions:     permissions,
+		Permissions:      permissions,
+		AdapterRegistry: adapterRegistry,
 	}, nil
 }
 

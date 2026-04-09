@@ -4,7 +4,48 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// testDirAdapter is a simple CLIAgentAdapter that discovers agents from a
+// specific subdirectory, used to replace the old hardcoded .agentrc/.claude tiers in tests.
+type testDirAdapter struct {
+	name     string
+	subDir   string
+	source   string
+	priority int
+}
+
+func (a *testDirAdapter) Name() string { return a.name }
+func (a *testDirAdapter) Priority() int { return a.priority }
+
+func (a *testDirAdapter) Discover(projectDir string) ([]Definition, error) {
+	dir := filepath.Join(projectDir, a.subDir)
+	defs := discoverDir(dir, a.source)
+	out := make([]Definition, len(defs))
+	for i, d := range defs {
+		out[i] = *d
+	}
+	return out, nil
+}
+
+func (a *testDirAdapter) PopulateSandbox(_ string, _ store.AgentProfile, _ SandboxContext) error {
+	return nil
+}
+
+func (a *testDirAdapter) SyncProjectRoot(_ string, _ []store.AgentProfile) error {
+	return nil
+}
+
+// newTestAdapterRegistry builds an AdapterRegistry with adapters for
+// .agentrc/agents/ and .claude/agents/ (mirroring the real nanite-native and claude adapters).
+func newTestAdapterRegistry() *AdapterRegistry {
+	r := NewAdapterRegistry()
+	r.Register(&testDirAdapter{name: "agentrc", subDir: filepath.Join(".agentrc", "agents"), source: "agentrc", priority: 50})
+	r.Register(&testDirAdapter{name: "claude", subDir: filepath.Join(".claude", "agents"), source: "claude", priority: 60})
+	return r
+}
 
 func writeAgentFile(t *testing.T, dir, filename, slug string) {
 	t.Helper()
@@ -27,7 +68,7 @@ func TestDiscover_PriorityOrder(t *testing.T) {
 	// Write a unique agent at lower priority.
 	writeAgentFile(t, filepath.Join(root, ".agentrc", "agents"), "research.md", "research")
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, Adapters: newTestAdapterRegistry()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +82,7 @@ func TestDiscover_PriorityOrder(t *testing.T) {
 		t.Errorf("defs[0]: slug=%q source=%q, want code/project", defs[0].Slug, defs[0].Source)
 	}
 
-	// "research" only exists in agentrc.
+	// "research" only exists in agentrc (discovered via adapter).
 	if defs[1].Slug != "research" || defs[1].Source != "agentrc" {
 		t.Errorf("defs[1]: slug=%q source=%q, want research/agentrc", defs[1].Slug, defs[1].Source)
 	}
@@ -148,7 +189,7 @@ func TestDiscover_ClaudeCodeAgents(t *testing.T) {
 	root := t.TempDir()
 	writeAgentFile(t, filepath.Join(root, ".claude", "agents"), "helper.md", "helper")
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, Adapters: newTestAdapterRegistry()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -172,6 +213,7 @@ func TestDiscover_SlugDedup(t *testing.T) {
 	defs, err := Discover(DiscoverOptions{
 		WorkingDir: root,
 		PluginsDir: pluginsDir,
+		Adapters:   newTestAdapterRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -17,6 +17,10 @@ type DiscoverOptions struct {
 
 	// PluginsDir is the root plugins directory for plugin-provided agents.
 	PluginsDir string
+
+	// Adapters is an optional AdapterRegistry for adapter-based discovery
+	// (replaces hardcoded .agentrc/agents/ and .claude/agents/ tiers).
+	Adapters *AdapterRegistry
 }
 
 // Discover scans all 6 locations in priority order and returns parsed Definitions.
@@ -65,17 +69,17 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 		})
 	}
 
-	// Priority 5: .agentrc/agents/ (agentrc ecosystem).
-	if opts.WorkingDir != "" {
-		for _, def := range discoverDir(filepath.Join(opts.WorkingDir, ".agentrc", "agents"), "agentrc") {
-			add(def)
-		}
-	}
-
-	// Priority 6: .claude/agents/ (Claude Code ecosystem).
-	if opts.WorkingDir != "" {
-		for _, def := range discoverDir(filepath.Join(opts.WorkingDir, ".claude", "agents"), "claude") {
-			add(def)
+	// Priority 5+: Adapter-discovered agents.
+	// Replaces hardcoded .agentrc/agents/ and .claude/agents/ tiers — those
+	// are now handled by the nanite-native and claude adapters respectively.
+	if opts.Adapters != nil {
+		adapterDefs, err := opts.Adapters.DiscoverAll(opts.WorkingDir)
+		if err != nil {
+			log.Printf("agent: adapter discovery: %v", err)
+		} else {
+			for i := range adapterDefs {
+				add(&adapterDefs[i])
+			}
 		}
 	}
 

@@ -8,7 +8,7 @@
 package allplugins
 
 import (
-	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/agentrc"
+	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/agentwidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/bookmarks"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/contextwidgets"

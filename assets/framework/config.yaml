@@ -47,13 +47,13 @@ roles:
   nanite-agent-manager:
     file: meta/nanite-agent-manager.md
     type: meta
-    description: Develop and maintain the agentrc framework
+    description: Develop and maintain the Nanite agent framework
 
 # ─── Docs ────────────────────────────────────────────────
 # Framework reference doc. nanite-agent-manager role keeps this current.
 docs:
-  framework: docs/agent-framework-v2.md
-  setup-guide: docs/agent-setup-guide.md
+  framework: docs/nanite-framework.md
+  setup-guide: docs/nanite-setup-guide.md
 
 # ─── Agent schema ────────────────────────────────────────
 # Agents are defined in project-level .nanite/config.yaml.

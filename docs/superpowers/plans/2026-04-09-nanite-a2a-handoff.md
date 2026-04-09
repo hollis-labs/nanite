@@ -20,7 +20,7 @@ claude
 
 Then inside the session:
 
-> Boot nanite-backend and see `docs/superpowers/plans/2026-04-09-nanite-a2a-boot-prompt.md`. Resume from the handoff at `docs/superpowers/plans/2026-04-09-nanite-a2a-handoff.md`. Start at Task 4.
+> Boot nanite-backend and see `docs/superpowers/plans/2026-04-09-nanite-a2a-boot-prompt.md`. Resume from the handoff at `docs/superpowers/plans/2026-04-09-nanite-a2a-handoff.md`. Start at Task 6.
 
 The worktree already exists and is persistent — do **not** create a new one. Plan A continues to run in a separate worktree at `../nanite-install-and-rollout` and does not affect this branch.
 
@@ -30,9 +30,13 @@ Use `superpowers:subagent-driven-development` to execute remaining tasks. Serial
 
 ## State at handoff
 
-4 commits ahead of `main` (`be14204`). Working tree clean.
+7 commits ahead of `main` (`be14204`). Working tree clean.
 
 ```
+59b163e fix(a2a): wrap Ack/Resolve errors, stable thread ordering
+721ab75 feat(a2a): service layer for send/inbox/thread/ack/resolve
+b897f35 refactor(store,api): A2A session-scoped addressing
+4887385 docs: handoff for Plan B resumption after tasks 1-3
 a54a5c2 feat(a2a): agent ID validation with user sentinel
 ccbec70 feat(store): reject reserved 'user' slug/id in agent creation
 453f9a5 fix(store): scope DROP COLUMN suppression and clean up test imports
@@ -44,11 +48,11 @@ ccbec70 feat(store): reject reserved 'user' slug/id in agent creation
 | 1 | Schema migration 005 | ✅ done | `50a22d8`, `453f9a5` |
 | 2 | `"user"` sentinel rejection in `CreateAgent` | ✅ done | `ccbec70` |
 | 3 | Agent ID validator (`internal/service/a2a/validate.go`) | ✅ done (with plan deviation) | `a54a5c2` |
-| 4 | Rewrite `internal/store/a2a.go` for new schema | ⏭ **next** | — |
-| 5 | Service layer basics (send/inbox/thread/ack/resolve) | pending — signature deviation required | — |
-| 6 | Handoff transaction | pending — needs `Store.DB()` accessor | — |
-| 7 | Subscribe/pubsub for MCP streaming | pending | — |
-| 8 | Rewrite `internal/api/a2a.go` | pending — partially touched in Task 4 | — |
+| 4 | Rewrite `internal/store/a2a.go` for new schema | ✅ done | `b897f35` |
+| 5 | Service layer basics (send/inbox/thread/ack/resolve) | ✅ done (deviation 3 applied) | `721ab75`, `59b163e` |
+| 6 | Handoff transaction | ⏭ **next** — needs `Store.DB()` accessor or `WithTx` helper | — |
+| 7 | Subscribe/pubsub for MCP streaming | pending — stub exists in `subscribe.go`, replace wholesale | — |
+| 8 | Rewrite `internal/api/a2a.go` | pending — partially done in Task 4; Task 8 routes through `a2a.Service` for validation | — |
 | 9 | `nanite a2a` CLI command | pending | — |
 | 10 | Register A2A MCP tools | pending (9 req/resp; `a2a_subscribe` deferred per plan) | — |
 | 11 | Handoff round-trip integration test | pending | — |
@@ -111,20 +115,52 @@ func ValidateAgentID(ctx context.Context, r AgentResolver, agentID string) error
 
 **Commit message on `a54a5c2` documents this deviation** — read it before touching Tasks 5–10.
 
+### Deviation 4 — `A2AStore` interface stays store-concrete in the service
+
+**Where:** `internal/service/store.go:143-151` (the `A2AStore` interface) and `internal/service/a2a/service.go:18` (the `Service` struct).
+
+**What changed:** The plan's Task 5 code snippet and the code reviewer's Important issue both assumed `GetA2AMessage` / `GetA2ARecent` should be added to the `A2AStore` interface for Task 5 and later. They are NOT. The `a2a.Service` holds a `*store.Store` (concrete type) rather than an `A2AStore` interface, so it can call the new methods directly without widening the shared interface. This matches the plan's struct definition at plan lines 785–789 (`store *store.Store`, not `store A2AStore`).
+
+**Why:** The `A2AStore` interface in `internal/service/store.go` exists for the chat engine's `StoreInterface` composition — it's a test-seam for the engine layer, not a general-purpose boundary. The new `a2a.Service` is its own module and doesn't participate in that seam. Keeping the interface narrow avoids YAGNI scope creep into unrelated code.
+
+**How it propagates:** When Task 6 (handoff) or Task 11 (integration test) need to mock the store, they mock `*store.Store` via `newTestA2AStore(t)`/`newTestStore(t)` — a real in-memory SQLite DB — not a stub implementing `A2AStore`. No changes to `internal/service/store.go` or `internal/service/chat_test.go`'s `stubA2AStore` beyond what Task 4 already did (`SendA2AMessage` return type, `GetA2AInbox` tri-arg, `A2AUnreadCount` bi-arg).
+
+### Deviation 5 — `GetA2AThread` now has a `rowid ASC` tiebreak
+
+**Where:** `internal/store/a2a.go` `GetA2AThread` (commit `59b163e`).
+
+**What changed:** Added `rowid ASC` as a secondary sort key on the existing `ORDER BY created_at ASC` clause. Matches the pattern already in `GetA2ARecent` from Task 4.
+
+**Why:** RFC3339 second resolution causes same-tick inserts to tie. Without a deterministic tiebreak, `TestService_Thread` had to sleep 1.1s between inserts (3.3s total) to get reliable ordering. The rowid fallback is cheap and semantically correct — rowid is monotonic per insert — and removes the sleep from the unit test.
+
+**How it propagates:** None. This is a local store-layer fix; no call-site changes needed. Thread ordering is now stable regardless of timestamp granularity.
+
 ---
 
 ## Pre-verified facts (don't re-check)
 
-Everything below was verified against `be14204`:
+Everything below was verified against `be14204` (baseline) and updated through `59b163e`:
 
 - **SQLite driver:** `modernc.org/sqlite v1.48.1` — supports `ALTER TABLE ... DROP COLUMN`. No fallback strategy needed.
 - **Real store agent-lookup method:** `GetAgent(id string) (*AgentProfile, error)` at `internal/store/agents.go:94` — **not** `GetAgentByID` as the plan assumed.
 - **`CreateAgent` signature:** `func (s *Store) CreateAgent(a *AgentProfile) error` — returns `error` only, **not** `(*AgentProfile, error)`. Task 2 already adapted test snippets accordingly; apply the same correction if future tasks use `CreateAgent` in test setup.
-- **`Store.DB()` accessor:** **Does not exist.** Only `DBPath()` is exposed at `internal/store/store.go:25`. Task 6 needs `svc.store.DB().BeginTx(...)` per the plan — you'll need to either add a `DB()` method or find/add a `WithTx(func(*sql.Tx) error)` helper. Check `internal/store/store.go` for existing transaction helpers first before adding new ones.
+- **`Store.DB`** is an **exported struct field** on `*Store`, not a method. See `internal/store/store.go:20-21`. Task 6 should do `svc.store.DB.BeginTx(ctx, nil)` directly. The handoff's earlier claim that a `DB()` method needs to be added is wrong — the field is already accessible.
+- **`a2a.Service` fields:** `store *store.Store`, `resolver AgentResolver`, `pub *pubsub`. Constructor: `NewService(s *store.Store, r AgentResolver) *Service`. Task 6's handoff methods attach to `*Service` and can use `svc.store.DB.BeginTx(...)`.
+- **Existing store methods available to the service** (Task 4 added these on top of the pre-existing ones): `SendA2AMessage(*A2AMessage) (*A2AMessage, error)`, `GetA2AMessage(id) (*A2AMessage, error)`, `GetA2AInbox(sessionID, agentID, status)`, `GetA2AThread(threadID)`, `GetA2ARecent(sessionID, limit)`, `AckA2AMessage(id)`, `ResolveA2AMessage(id)`, `A2AUnreadCount(sessionID, agentID)`.
+- **`GetA2AThread` ordering** is now deterministic: `ORDER BY created_at ASC, rowid ASC` (Deviation 5). Tests do not need to sleep between inserts.
 - **File agents:** not in the DB. See Deviation 3 above. The in-memory registry lives at `internal/service/agent.go` via `agentServiceImpl.fileDefs []*agent.Definition`. Discovery entry point is `agent.Discover()` in `internal/agent/`.
+- **`AgentResolver` interface consumers already exist:** `internal/service.AgentService.Get(ctx, id)` at `internal/service/agent.go:73` structurally satisfies `a2a.AgentResolver`. Task 8/9/10 will wire the concrete `AgentService` into `NewService(store, agentService)` at the HTTP/CLI/MCP boundary.
+- **Session-agent binding:** the `session_agents` junction table already exists (migrated pre-Task-1). Task 6's handoff transaction mutates `is_primary` on that table. Schema: check `internal/store/migrations/001_schema.sql` or equivalent for exact column names.
+- **`session_handoffs` audit table:** created by migration 005 (`50a22d8`). Columns: `id`, `session_id`, `from_agent_id`, `to_agent_id`, `requested_by`, `status` (pending|approved|rejected|completed), `requested_at`, `approved_at`, `approved_by_user`, `context_message_count`, `notes`. Task 6 inserts into this table inside the same transaction that mutates `session_agents.is_primary`.
 - **File agent ID helpers:** `agent.IsFileBasedID(id)` and `agent.SlugFromFileID(id)` already exist in `internal/agent/convert.go` — use them rather than inlining `strings.HasPrefix(id, "file-")` checks.
+- **Test helper pattern for `internal/service/a2a/`:** use `newTestA2AStore(t)` (in `service_test.go`) because `store.newTestStore` is unexported. Use `newFakeResolver(ids...)` (in `validate_test.go`) for the resolver — do NOT re-define either helper in Task 6's test file; both are package-local and accessible.
 - **Plan A worktree:** `/Users/chrispian/Projects-apps/nanite-install-and-rollout` on `feature/nanite-install-and-rollout`. Plan A touches `assets/framework/`, `internal/assets/`, `internal/service/install/`, `cmd/nanite/install_cmd.go`, plus MCP tool registrations. The two files that may conflict at merge time are `cmd/nanite/main.go` (both plans add a `case` to the command switch) and `internal/mcp/self_tools_transport.go` (both plans add tool definitions and handlers). Resolutions are mechanical — keep both sets of additions.
-- **Pre-existing build failure:** `go build ./plugins/support-ticket/...` fails on `be14204` with a missing module error. It is **not** something Plan B caused and is **not** something Plan B must fix. When you run `go build ./...` and see this error, it is pre-existing.
+- **Pre-existing build failure:** `go build ./plugins/support-ticket/...` fails on `be14204` with a missing module error. Still present on `59b163e`. `cmd/nanite` transitively imports `internal/plugin/allplugins` which transitively imports it, so `go build ./...` will fail with this one error. This is **not** something Plan B caused and is **not** something Plan B must fix. Explicit package builds (`go build ./internal/...`) work cleanly.
+- **Code review follow-ups from Task 5** (not blocking, noted for future polish):
+  - `GetA2AInbox` priority ordering (`ORDER BY priority DESC, created_at ASC`) has no explicit test. Add one when convenient.
+  - `GetA2ARecent` multi-session test case (seed `sess-2` and confirm it's excluded) would harden the `WHERE from_session_id = ? OR to_session_id = ?` clause.
+  - `GetA2AMessage` wraps `sql.ErrNoRows` via `err == sql.ErrNoRows`; `errors.Is(err, sql.ErrNoRows)` would be more future-proof.
+  - `Ack`/`Resolve` do not verify the caller actually owns the binding (impersonation gap). Comment marks this as MVP permissive; add a `TODO(a2a):` marker before GA.
 
 ---
 

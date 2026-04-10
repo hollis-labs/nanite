@@ -70,6 +70,20 @@ type InstallProjectOptions struct {
 	Stdout      io.Writer // injection for prompts (defaults to os.Stdout)
 }
 
+// normalized returns a copy of opts with Stdin/Stdout defaulted to
+// os.Stdin/os.Stdout when nil. Prevents bufio.NewReader(nil) panics
+// for library consumers that set Interactive=true but leave the IO
+// streams unset.
+func (opts InstallProjectOptions) normalized() InstallProjectOptions {
+	if opts.Stdin == nil {
+		opts.Stdin = os.Stdin
+	}
+	if opts.Stdout == nil {
+		opts.Stdout = os.Stdout
+	}
+	return opts
+}
+
 // InstallProjectReport summarizes what InstallProject did.
 type InstallProjectReport struct {
 	FreshScaffold      bool
@@ -87,6 +101,7 @@ type InstallProjectReport struct {
 // InstallProject scaffolds .nanite/, NANITE.md, and CLAUDE.md managed sections
 // in projectDir. Dispatches to a branch based on detected state.
 func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectReport, error) {
+	opts = opts.normalized()
 	if opts.ProjectDir == "" {
 		return nil, errors.New("empty project dir")
 	}

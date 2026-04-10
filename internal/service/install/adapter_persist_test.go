@@ -64,3 +64,35 @@ func TestLoadProjectConfig_TriStateAdapters(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadProjectConfig_MissingFileReturnsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.yaml")
+	cfg, err := loadProjectConfig(path)
+	if err != nil {
+		t.Fatalf("expected nil error for missing file, got %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil *projectConfig, got nil")
+	}
+	if cfg.Adapters != nil {
+		t.Errorf("expected nil Adapters, got %v", *cfg.Adapters)
+	}
+	if cfg.Agents != nil {
+		t.Errorf("expected nil Agents, got %v", cfg.Agents)
+	}
+}
+
+func TestLoadProjectConfig_ParseError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	// Malformed YAML: unterminated flow sequence.
+	if err := os.WriteFile(path, []byte("adapters: [claude\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadProjectConfig(path)
+	if err == nil {
+		t.Fatal("expected parse error, got nil")
+	}
+	if cfg != nil {
+		t.Errorf("expected nil *projectConfig on parse error, got %+v", cfg)
+	}
+}

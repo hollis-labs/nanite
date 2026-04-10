@@ -13,7 +13,7 @@
 - 🟡 **Needs investigation** — root cause or scope unclear
 - 🔴 **Not started**
 
-Last updated: 2026-04-10
+Last updated: 2026-04-10 (afternoon — all P0 items resolved; P0-4 closed by documentation)
 
 ---
 
@@ -57,18 +57,24 @@ Companion issue to #1. Nanite supports concurrent full-worker spawns today, and 
 
 ---
 
-### 4. Dev-mode launches compiled user binary instead of dev build — 🟡 Needs investigation
+### 4. Dev-mode launches compiled user binary instead of dev build — ✅ Done (documentation)
 
 Engine backlog: [BLG-20260312-018](https://engine-local/backlog/BLG-20260312-018) (P2, tags: `bug`, `cerberus`, `wails`, filed 2026-03-12)
 
-**Summary:** when running Nanite in dev mode via Cerberus, the launcher invokes the compiled/installed binary at `~/go/bin/nanite` instead of the local dev build at `./nanite` in the project root. The two binaries drift when active development is in progress, causing confusing "my fix isn't taking effect" bugs.
+**Original summary:** when running Nanite in dev mode via Cerberus, the launcher invokes `~/go/bin/nanite` instead of the local dev build at `./nanite`, causing "my fix isn't taking effect" confusion.
 
-**Investigation needed:**
-- The `wails` tag may be stale — Nanite uses React SPA + `go:embed`, no Wails code is in the current repo. Backlog item predates the current architecture; verify whether the issue still reproduces against `main`.
-- If it still reproduces: is it a Cerberus config issue (`cerberus rebuild` / `cerberus start` pointing at the wrong binary path) or a Nanite-side issue (dev flag not causing Cerberus to use the right target)?
-- Acceptance: either a code fix OR very clear documentation in `.nanite/agents/backend.md` under "Build & Run" explaining the dev-mode binary distinction (note: there's already a mention at `backend.md:351` — may need expansion).
+**Investigation (2026-04-10):** The bug as framed does not exist in the current architecture:
 
-**Files to check:** `cmd/nanite/main.go` (the `-dev` flag handling), Cerberus service definition for Nanite, `backend.md:351` (existing doc).
+1. The `wails` tag on the backlog item is **stale**. `grep -ri wails` across `.go` files returns zero matches. Backlog item predates the current React SPA + `go:embed` setup.
+2. The `-dev` flag (`cmd/nanite/main.go:85`) is purely a runtime flag on the binary: when set, `internal/server/spa.go:19` serves a placeholder HTML instead of the embedded UI so Vite can run HMR on a separate port. It does **not** change which binary is running or where it lives.
+3. Cerberus `nanite-api` launches `~/go/bin/nanite` by design. Verified 2026-04-10 by `lsof` on the running PID — the `txt` mapping resolves to `$HOME/go/bin/nanite`, not the project-root `./nanite`.
+4. The *actual* footgun is a developer muscle-memory issue: running `go build` writes `./nanite` in the project root (which Cerberus never looks at), then restarting the service leaves stale code running. `cerberus_rebuild nanite-api` is the only deploy path that both rebuilds and restarts.
+
+**Resolution:** Documentation only, per the original acceptance criteria. Added a dedicated "Two binaries, only one is live" subsection under §Build & Run in `.nanite/agents/backend.md` with a table showing which commands produce which binary, a `lsof` recipe for verifying the live executable, and an explicit note that `-dev` is unrelated to the binary-location question. The old one-line note in the §Notes footer now cross-references the new subsection instead of duplicating the content. `CLAUDE.md` at repo root already has a compact version of the same warning under "Build & Test → Deploying changes" and does not need to change.
+
+**Follow-up:** Update `BLG-20260312-018` in the Engine backlog to strip the stale `wails` tag and mark it closed-by-documentation, pointing at the new `.nanite/agents/backend.md` §Build & Run subsection. Not blocking for beta.
+
+**Files:** `.nanite/agents/backend.md` (new subsection + footer fix)
 
 ---
 

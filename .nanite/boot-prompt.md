@@ -85,6 +85,25 @@ AGENT ADAPTER ARCHITECTURE — COMPLETED (PR #11, 2026-04-08):
   ✅ Sandbox delegation to adapters
   Spec: docs/superpowers/specs/2026-04-08-agent-adapter-architecture-design.md
 
+BETA KNOWN ISSUES SWEEP — COMPLETED (2026-04-10):
+  ✅ P0 #1 TestShutdown data race in internal/worker — merged 1343446 (Worker.Status RWMutex + StatusCancelled guard)
+  ✅ P0 #2 TestTriggerDispatch race in internal/plugin — merged 48bf67e (testConnector stub mutex)
+  ✅ P0 #3 Worker.SessionID/WorktreePath concurrent access — merged d5da5bb (RWMutex extended, Snapshot type, Manager.List/ReapStale return []Snapshot)
+  ✅ P0 #4 Dev-mode binary mismatch — closed by documentation (.nanite/agents/backend.md §Build & Run "Two binaries, only one is live")
+  Repo-wide go test -race ./... clean post-merge. docs/beta-known-issues.md has zero open P0/P1 items.
+
+PLUGIN ENVELOPE EMISSION — INVESTIGATION DEFERRED (2026-04-10):
+  Discovered during plugin extraction attempt that the plugin envelope emission story is broken system-wide, not just
+  for fragments-engine and support-ticket. Documented in docs/architecture/plugin-envelope-emission-findings-2026-04-10.md.
+  Key facts (see doc for file:line pointers and runtime evidence):
+  - Only ONE working emission path: tool handler returns <!--ENVELOPE_DATA:{json}:ENVELOPE_DATA--> markers → captureEnvelopeData in chat_generate.go
+  - ValidateEnvelope is ADVISORY, not blocking — unregistered_type errors are logged but the envelope passes through
+  - event.Data["envelope"] path in giphy/oembed builtin plugins is DEAD CODE (no readers anywhere)
+  - Nothing in the backend reads plugin.yaml registers.envelopes — only consumed by frontend TypeScript codegen
+  - plugins/fragments-engine and plugins/support-ticket use internal/* imports (internal/chat, internal/mcp, internal/store) that an external Go module cannot use
+  - Core nanite self-tools and chat_generate.go emit "plugin" envelope types directly (kb-result, ticket-confirmation, task-disposition, task-complete-notification, giphy-modal)
+  8 gaps enumerated in the findings doc. NEXT STEP: plugin agent boots cold from that doc, owns the extraction work. Not a backend-agent concern going forward.
+
 UPCOMING:
 - Future adapters: CrewAI (first), AutoGen, LangGraph
 - Plugin Extraction Phase 5 (Connectors) — PARKED, pending first connector.

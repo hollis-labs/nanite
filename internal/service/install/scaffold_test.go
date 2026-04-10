@@ -114,6 +114,12 @@ func TestScaffoldNaniteMD_Fresh(t *testing.T) {
 	if !strings.Contains(string(data), "testproj") {
 		t.Errorf("NANITE.md missing project name: %q", data)
 	}
+	if !strings.Contains(string(data), "First-time setup") {
+		t.Error("NANITE.md missing First-time setup section")
+	}
+	if !strings.Contains(string(data), "offer to help the user") {
+		t.Error("NANITE.md missing agent setup instruction")
+	}
 }
 
 func TestScaffoldNaniteMD_PreservesExisting(t *testing.T) {

@@ -8,6 +8,15 @@
 
 See `.nanite/config.yaml` for agent definitions and `.nanite/agents/` for per-agent context files.
 
+## First-time setup
+
+If `.nanite/config.yaml` has an empty `agents:` block, this project hasn't been
+configured yet. As the agent reading this file: please offer to help the user
+define their first agent. Ask about the project's purpose and tech stack,
+suggest roles from `~/.nanite/roles/` (browse domain/, stack/, meta/), then
+edit `agents:` and re-run `nanite install --project .` to refresh the managed
+sections.
+
 ## How to boot
 
 - **Claude Code:** Open this directory. Claude reads `CLAUDE.md` (managed section written by `nanite install`) and discovers agents from `.nanite/`.
@@ -16,7 +25,7 @@ See `.nanite/config.yaml` for agent definitions and `.nanite/agents/` for per-ag
 - **Opencode CLI:** reads `OPENCODE.md` (managed section written by `nanite install`).
 - **Direct CLI:** `nanite serve --project .` starts the Nanite agent server for this project.
 
-The four CLI files above are kept in sync automatically by `nanite install`'s adapter pipeline. Edit your project content outside the `<!-- nanite:start --> ... <!-- nanite:end -->` markers — anything inside will be overwritten on the next install or refresh.
+The four CLI files above are managed by `nanite install` based on the `adapters:` list in `.nanite/config.yaml`. Only the listed adapters' files are created or updated. Edit your project content outside the `<!-- nanite:start --> ... <!-- nanite:end -->` markers — anything inside will be overwritten on the next install or refresh. Run `nanite install --project . --reconfigure` to change which adapters are managed.
 
 ## Project-specific notes
 

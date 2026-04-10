@@ -19,39 +19,41 @@ Last updated: 2026-04-10
 
 ## P0 — Ship blockers
 
-### 1. `TestShutdown` data race in `internal/worker` — ✅ Done
+### 1. `TestShutdown` data race in `internal/worker` — ✅ Done (merged)
 
 Race between `Manager.Shutdown()` writing `w.Status = StatusCancelled` and the in-flight `SpawnFull` goroutine writing terminal status values (`StatusFailed` / `StatusCompleted`). Both wrote `Worker.Status` without synchronization. Reproducible via `go test -race -run TestShutdown ./internal/worker/...`.
 
 **Fix:** Added `sync.RWMutex` to `Worker` with `GetStatus()`/`SetStatus()` accessors; routed all in-package reads/writes through them; added a "don't clobber `StatusCancelled`" guard in `SpawnFull`'s terminal transitions.
 
-**Branch:** `fix/worker-shutdown-race` — **superseded by** `fix/worker-field-sync` (see P0 #3 below), which contains this fix plus additional coverage. Merge only `fix/worker-field-sync`.
+**Merged:** `1343446` on `main` (2026-04-10). Landed together with #3 below via the combined branch `fix/worker-field-sync` (now deleted).
 
 **Files:** `internal/worker/worker.go`, `internal/worker/manager.go`, `internal/worker/manager_test.go`
 
 ---
 
-### 2. `TestTriggerDispatch_EmptyTemplate` data race in `internal/plugin` — ✅ Done
+### 2. `TestTriggerDispatch_EmptyTemplate` data race in `internal/plugin` — ✅ Done (merged)
 
 `TriggerDispatcher.Dispatch` is intentionally fire-and-forget (comment at `triggers.go:43`). The test stub `testConnector` wrote `lastPayload` before incrementing the `sendCount` atomic, so the atomic provided zero happens-before for the payload field. Same latent race in `TestTriggerDispatch_PayloadTemplate`.
 
 **Fix:** Test-stub only — added `sync.Mutex` guarding `lastPayload`, flipped the write ordering so the mutex release happens after the atomic increment, added a `getLastPayload()` helper. Production `triggers.go` untouched.
 
-**Branch:** `fix/plugin-trigger-dispatch-race` at `6b8174a`
-**Verification:** `go test -race -count=5 ./internal/plugin/...` — all passing
+**Merged:** `48bf67e` on `main` (2026-04-10). Branch `fix/plugin-trigger-dispatch-race` deleted.
+
 **Files:** `internal/plugin/triggers_test.go` (+32 / -7)
 
 **Note:** `TestTriggerDispatch_DisabledRule` and `TestTriggerDispatch_FilterExpr` check `sendCount == 0` without waiting. Currently safe because filter/disabled checks are synchronous in `Dispatch` before the goroutine spawn, but brittle if that ever changes. Not fixed — flagged for future-proofing.
 
 ---
 
-### 3. Concurrent access to `Worker.SessionID` / `Worker.WorktreePath` — 🔄 In progress
+### 3. Concurrent access to `Worker.SessionID` / `Worker.WorktreePath` — ✅ Done (merged)
 
-Companion issue to #1. Nanite supports concurrent full-worker spawns today, and `Manager.List()` copies `*Worker` pointers out of `m.workers` while `SpawnFull` is still writing `SessionID` and `WorktreePath` after publication. No reproducible test fails on `main`, but the race is real under concurrent load.
+Companion issue to #1. Nanite supports concurrent full-worker spawns today, and `Manager.List()` copies `*Worker` pointers out of `m.workers` while `SpawnFull` was still writing `SessionID` and `WorktreePath` after publication. No reproducible test failed on unmodified `main` beforehand, but the race was real under concurrent load — a new `TestListConcurrentFieldAccess` (4 spawners × 4 readers × 50 iterations, 20ms delegator delay) reproduces it on the unfixed tree and flags races on `Status`, `SessionID`, and `WorktreePath` simultaneously.
 
-**Fix:** Extend the `sync.RWMutex` added in #1 to also guard `SessionID` and `WorktreePath`. The fix branch is a clean superset of `fix/worker-shutdown-race` so only one branch needs to merge.
+**Fix:** Extended the `sync.RWMutex` added in #1 to also guard `SessionID` and `WorktreePath`. Introduced a `Snapshot` value type + `(*Worker).Snapshot()` method capturing all fields under the lock. Changed `Manager.List()` from `[]*Worker` to `[]Snapshot` and `ReapStale()` similarly — this moves the synchronization boundary inside the Manager so nothing downstream (including reflection-based JSON marshaling in `internal/api/workers.go`) can reach raw `*Worker` fields unsynchronized. The only external caller (`internal/api/workers.go:13`) was unaffected because the new return type is JSON-compatible.
 
-**Branch:** `fix/worker-field-sync` (off `main`, subsumes `fix/worker-shutdown-race`)
+**Merged:** `d5da5bb` on `main` (2026-04-10). Branch `fix/worker-field-sync` deleted.
+
+**Repo-wide verification:** `go test -race ./...` on `main` at `48bf67e` — all packages pass, no data races detected anywhere in the tree.
 
 ---
 

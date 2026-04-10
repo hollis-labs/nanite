@@ -544,3 +544,31 @@ None remaining — all design questions resolved during the brainstorming sessio
 - `internal/service/install/adapters.go:136-147` — `syncAdaptersForProject` (the signature being changed)
 - `internal/plugin/builtin/adapter-claude/plugin.go:161-178` — example `SyncProjectRoot` (the short-circuit being removed)
 - `cmd/nanite/install_cmd.go:162-198` — `handlePartialInteractive` (the prompt pattern being reused)
+
+---
+
+## Implementation Smoke Test (2026-04-09)
+
+Verified end-to-end on `~/Projects/chrispian.dev`:
+
+- ✅ Fresh install, no detection, `< /dev/null` → `adapters: []`, no CLI files
+- ✅ `--adapters claude --reconfigure` → CLAUDE.md placeholder created
+- ✅ `--adapters codex --reconfigure` → CLAUDE.md cleaned up, AGENTS.md created
+- ✅ `--no-adapters --reconfigure` → all CLI files cleaned up, `adapters: []`
+- ✅ `--adapters claude,gemini --reconfigure` → CLAUDE.md + GEMINI.md only
+- ✅ `--adapters frobnicate` → error, exit code 1, files unchanged
+- ✅ Pre-existing CLAUDE.md + `< /dev/null` → detected, user content preserved
+- ✅ First-time setup section present in NANITE.md
+
+**Note:** Tests 1 and 7 initially failed in the smoke test runner due to an
+`isStdinTTY()` implementation bug: the original check used `os.ModeCharDevice`
+which is true for `/dev/null` on macOS (it is a character device). This caused
+the interactive prompt path to run even with `< /dev/null`, where it then hit
+EOF and exited with code 1.
+
+Fix applied: `isStdinTTY()` in `cmd/nanite/install_cmd.go` now uses
+`github.com/mattn/go-isatty` (already a transitive dependency) which correctly
+distinguishes a real interactive terminal from `/dev/null` and other character
+devices via `TIOCGETA`. With the fix, closing stdin with `< /dev/null` correctly
+forces the non-interactive path, which is the right behavior for CI and
+automated contexts. Interactive prompts require a real TTY.

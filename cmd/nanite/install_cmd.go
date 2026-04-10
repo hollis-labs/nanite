@@ -11,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/service/install"
+	"github.com/mattn/go-isatty"
 )
 
 // cmdInstall is the entry point for `nanite install`. Thin wrapper over
@@ -240,13 +241,11 @@ func installDie(action string, err error) {
 	os.Exit(1)
 }
 
-// isStdinTTY returns true if stdin is a terminal (character device).
+// isStdinTTY returns true if stdin is an actual interactive terminal.
+// Uses go-isatty for correct detection on macOS where /dev/null is also
+// a character device and would falsely trigger the interactive prompt path.
 func isStdinTTY() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (info.Mode() & os.ModeCharDevice) != 0
+	return isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
 }
 
 // resolveProjectDir expands "." to the current working directory and returns

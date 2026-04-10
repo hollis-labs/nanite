@@ -127,6 +127,32 @@ func TestIntegration_FullMigrationRoundTrip(t *testing.T) {
 		t.Errorf("CLAUDE.md.pre-edit snapshot missing: %v", err)
 	}
 
+	// Adapter sync should have created managed sections in the other CLI
+	// target files. The migration carried over backend-dev from the
+	// archived .agentrc/config.yaml, so all four adapters have an agent
+	// to write about.
+	for _, name := range []string{"AGENTS.md", "GEMINI.md", "OPENCODE.md"} {
+		data, err := os.ReadFile(filepath.Join(project, name))
+		if err != nil {
+			t.Errorf("%s missing after adapter sync: %v", name, err)
+			continue
+		}
+		content := string(data)
+		if !strings.Contains(content, "<!-- nanite:start -->") {
+			t.Errorf("%s missing nanite:start marker:\n%s", name, content)
+		}
+		if !strings.Contains(content, "Backend") {
+			t.Errorf("%s missing Backend agent reference:\n%s", name, content)
+		}
+	}
+	// These files didn't exist before install, so no pre-edit snapshots
+	// should have been written for them.
+	for _, name := range []string{"AGENTS.md.pre-edit", "GEMINI.md.pre-edit", "OPENCODE.md.pre-edit"} {
+		if _, err := os.Stat(filepath.Join(report.ArchivePath, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should not exist (file was created by installer, not pre-existing)", name)
+		}
+	}
+
 	// --- Roll back ---
 	if err := svc.Rollback(RollbackOptions{ProjectDir: project, ArchivePath: report.ArchivePath}); err != nil {
 		t.Fatalf("rollback: %v", err)

@@ -2,6 +2,7 @@
 package install
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/hollis-labs/nanite/internal/assets"
@@ -48,6 +49,15 @@ func (s *Service) adoptExisting(projectDir, globalHome string) (*InstallProjectR
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	// Sync managed sections in all CLI target files via the built-in
+	// adapter registry. Adopt is the typical entry point for projects
+	// that already have a populated .nanite/config.yaml (PR #11 manual
+	// rename, prior install, etc.), so the agents list is usually
+	// non-empty and the adapters write content to all 4 CLI files.
+	if err := syncAdaptersForProject(projectDir); err != nil {
+		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
 
 	return &InstallProjectReport{

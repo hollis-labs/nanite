@@ -64,19 +64,25 @@ func (s *Service) Rollback(opts RollbackOptions) error {
 		return fmt.Errorf("state marker missing at %s — refusing to roll back without evidence of a prior install", statePath)
 	}
 
-	// Restore CLAUDE.md from pre-edit snapshot (if present).
-	preEdit := filepath.Join(archiveDir, "CLAUDE.md.pre-edit")
-	if data, err := os.ReadFile(preEdit); err == nil {
-		if err := os.WriteFile(filepath.Join(projectDir, "CLAUDE.md"), data, 0o644); err != nil {
-			return fmt.Errorf("restore CLAUDE.md: %w", err)
+	// Restore each CLI target file (CLAUDE.md, AGENTS.md, GEMINI.md,
+	// OPENCODE.md) from its pre-edit snapshot. If the snapshot is
+	// missing, the installer created the file from scratch — remove
+	// it instead of restoring.
+	for _, name := range adapterTargetFiles {
+		preEdit := filepath.Join(archiveDir, name+".pre-edit")
+		dst := filepath.Join(projectDir, name)
+		if data, err := os.ReadFile(preEdit); err == nil {
+			if err := os.WriteFile(dst, data, 0o644); err != nil {
+				return fmt.Errorf("restore %s: %w", name, err)
+			}
+		} else if errors.Is(err, fs.ErrNotExist) {
+			// No snapshot — file was created by installer. Remove it.
+			if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("remove installer-created %s: %w", name, err)
+			}
+		} else {
+			return fmt.Errorf("read %s.pre-edit: %w", name, err)
 		}
-	} else if errors.Is(err, fs.ErrNotExist) {
-		// No snapshot — CLAUDE.md was created by the installer. Remove it.
-		if err := os.Remove(filepath.Join(projectDir, "CLAUDE.md")); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("remove installer-created CLAUDE.md: %w", err)
-		}
-	} else {
-		return fmt.Errorf("read CLAUDE.md.pre-edit: %w", err)
 	}
 
 	// Remove .nanite/ and NANITE.md from project.

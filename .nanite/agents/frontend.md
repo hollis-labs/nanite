@@ -229,6 +229,42 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 6. **Global error counter** — `errorCounter` variable in useChat is module-scoped outside the component, persisting across re-renders in unexpected ways.
 
+---
+
+## Beta Known Issues (canonical list)
+
+**Primary tracking:** [`docs/beta-known-issues.md`](../../docs/beta-known-issues.md). Check this document before starting frontend work. P0 ship blockers there are currently backend-only, but that can change — always check first.
+
+**Post-beta items filed to Engine backlog:** query `engine_backlog_list --project-id nanite` for deferred items.
+
+---
+
+## Frontend Quick Wins (pre-beta polish)
+
+Small items the frontend agent should knock out during the beta-prep window. These are not ship blockers, but they're quick enough that clearing them improves the beta experience.
+
+### Code quality — from §Anti-Patterns Found above
+
+- [ ] **(1)** Replace `(a as any).is_primary` cast in `AppShell.tsx` with proper type narrowing. Extend `SessionAgent` type in `lib/types.ts` if the field is real.
+- [ ] **(2)** Consolidate `listAgentProfiles()` and `listAgents()` in `lib/api.ts` — both hit `/api/agents`. Pick one canonical name, delete the other, update call sites.
+- [ ] **(3)** Refactor `useChat.sendMessage` 17-dep hook array. Extract stable callbacks via `useRef` or split responsibilities. Stale-closure risk grows with every new dependency.
+- [ ] **(5)** Replace magic SSE event strings (`'delta'`, `'tool_call'`, `'tool_result'`, `'tool_warning'`, `'status'`, `'circuit_open'`, `'session_takeover'`, `'stream_end'`, `'error'`) with a shared const/enum. Single source of truth in `lib/types.ts` or new `lib/sse-events.ts`.
+- [ ] **(6)** Move module-scoped `errorCounter` in `hooks/useChat.ts` into a `useRef` or component-local state. Currently persists across re-renders in unexpected ways.
+
+### Wiring — from inline TODOs
+
+- [ ] **`SearchModal.tsx:107`** — wire `jumpToMessage` so search results scroll to the specific message on select. Currently commented `// TODO: scroll to specific message via jumpToMessage when wired`. Low-hanging UX improvement.
+
+---
+
+## Frontend Polish Backlog (post-beta)
+
+**Source:** [`docs/frontend-punchlist.md`](../../docs/frontend-punchlist.md) — ~60 UI polish items (command palette, infinite scroll, drawers redesign, widget controls, CRUD-in-modals, search, context menus, skeletons, optimistic UI, etc.).
+
+All polish-tier. Not beta blockers. Address in a dedicated post-beta sprint or opportunistically when touching the relevant files.
+
+---
+
 ## Reference Implementations
 
 | Pattern | File | Why it's good |

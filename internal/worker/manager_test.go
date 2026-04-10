@@ -256,8 +256,8 @@ func TestShutdown(t *testing.T) {
 	// All workers should be cancelled.
 	workers := mgr.List()
 	for _, w := range workers {
-		if w.Status != StatusCancelled {
-			t.Errorf("worker %s status = %q, want cancelled", w.ID[:8], w.Status)
+		if s := w.GetStatus(); s != StatusCancelled {
+			t.Errorf("worker %s status = %q, want cancelled", w.ID[:8], s)
 		}
 	}
 }

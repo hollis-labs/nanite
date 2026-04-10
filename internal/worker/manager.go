@@ -121,7 +121,7 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 	}
 
 	// Transition to running.
-	w.Status = StatusRunning
+	w.SetStatus(StatusRunning)
 	m.writeWorkerStatus(w)
 
 	log.Printf("worker %s: spawning full worker (agent=%s, isolation=%s)",
@@ -144,8 +144,12 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 		Duration: time.Since(start),
 	}
 
+	// A concurrent Shutdown/Cancel may have already marked this worker as
+	// cancelled. Respect that terminal state rather than overwriting it.
 	if delegErr != nil {
-		w.Status = StatusFailed
+		if w.GetStatus() != StatusCancelled {
+			w.SetStatus(StatusFailed)
+		}
 		result.Success = false
 		result.Error = delegErr.Error()
 	} else {
@@ -156,10 +160,14 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 		result.TokensUsed = delegResult.TokensUsed
 		result.Success = delegResult.Success
 		if !delegResult.Success {
-			w.Status = StatusFailed
+			if w.GetStatus() != StatusCancelled {
+				w.SetStatus(StatusFailed)
+			}
 			result.Error = delegResult.Error
 		} else {
-			w.Status = StatusCompleted
+			if w.GetStatus() != StatusCancelled {
+				w.SetStatus(StatusCompleted)
+			}
 		}
 	}
 
@@ -173,7 +181,7 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 		m.workers.Delete(workerID)
 	}()
 
-	log.Printf("worker %s: %s in %s", workerID[:8], w.Status, result.Duration.Round(time.Millisecond))
+	log.Printf("worker %s: %s in %s", workerID[:8], w.GetStatus(), result.Duration.Round(time.Millisecond))
 	return result, nil
 }
 
@@ -231,7 +239,7 @@ func (m *Manager) Cancel(workerID string) error {
 	if w.cancel != nil {
 		w.cancel()
 	}
-	w.Status = StatusCancelled
+	w.SetStatus(StatusCancelled)
 	m.writeWorkerStatus(w)
 
 	// Cancel linked task if tracked.
@@ -247,7 +255,8 @@ func (m *Manager) ActiveCount() int {
 	count := 0
 	m.workers.Range(func(_, value any) bool {
 		if w, ok := value.(*Worker); ok {
-			if w.Status == StatusSpawning || w.Status == StatusRunning {
+			s := w.GetStatus()
+			if s == StatusSpawning || s == StatusRunning {
 				count++
 			}
 		}
@@ -266,7 +275,7 @@ func (m *Manager) ReapStale(threshold time.Duration) []*Worker {
 	var stale []*Worker
 	m.workers.Range(func(key, value any) bool {
 		w, ok := value.(*Worker)
-		if !ok || w.Status != StatusRunning {
+		if !ok || w.GetStatus() != StatusRunning {
 			return true
 		}
 
@@ -305,7 +314,7 @@ func (m *Manager) Shutdown() {
 			if w.cancel != nil {
 				w.cancel()
 			}
-			w.Status = StatusCancelled
+			w.SetStatus(StatusCancelled)
 		}
 		return true
 	})
@@ -319,7 +328,7 @@ func (m *Manager) writeWorkerStatus(w *Worker) {
 	data, _ := json.Marshal(map[string]any{
 		"id":         w.ID,
 		"type":       w.Type,
-		"status":     w.Status,
+		"status":     w.GetStatus(),
 		"agent_id":   w.AgentID,
 		"session_id": w.SessionID,
 		"parent":     w.ParentSessionID,

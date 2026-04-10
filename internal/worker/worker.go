@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -29,6 +30,13 @@ const (
 )
 
 // Worker represents an active worker in the orchestration system.
+//
+// Worker is safe for concurrent access: the mutable Status field must be
+// read and written through GetStatus and SetStatus, which guard it with
+// an RWMutex. Other fields are only written during SpawnFull before the
+// worker becomes visible to other goroutines and are treated as immutable
+// thereafter, with the exception of SessionID and WorktreePath which are
+// set only from within SpawnFull before the final status transition.
 type Worker struct {
 	ID              string             `json:"id"`
 	Type            Type               `json:"type"`
@@ -36,10 +44,25 @@ type Worker struct {
 	SessionID       string             `json:"session_id,omitempty"`   // for full workers
 	TaskID          string             `json:"task_id,omitempty"`      // linked task
 	AgentID         string             `json:"agent_id"`
-	Status          Status             `json:"status"`
+	Status          Status             `json:"status"` // access via GetStatus/SetStatus
 	WorktreePath    string             `json:"worktree_path,omitempty"`
 	CreatedAt       time.Time          `json:"created_at"`
 	cancel          context.CancelFunc `json:"-"`
+	mu              sync.RWMutex       `json:"-"`
+}
+
+// GetStatus returns the worker's current status, guarded by the worker mutex.
+func (w *Worker) GetStatus() Status {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.Status
+}
+
+// SetStatus updates the worker's current status, guarded by the worker mutex.
+func (w *Worker) SetStatus(s Status) {
+	w.mu.Lock()
+	w.Status = s
+	w.mu.Unlock()
 }
 
 // SpawnRequest describes a full worker session to spawn.

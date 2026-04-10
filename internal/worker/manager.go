@@ -101,7 +101,7 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 	cleanup := func() {
 		close(heartbeatStop)
 		<-m.sem // release semaphore
-		if w.WorktreePath != "" && m.worktrees != nil {
+		if w.GetWorktreePath() != "" && m.worktrees != nil {
 			if err := m.worktrees.Cleanup(workerID); err != nil {
 				log.Printf("worker %s: worktree cleanup: %v", workerID[:8], err)
 			}
@@ -117,7 +117,7 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 			cancel()
 			return nil, fmt.Errorf("create worktree: %w", err)
 		}
-		w.WorktreePath = wtPath
+		w.SetWorktreePath(wtPath)
 	}
 
 	// Transition to running.
@@ -153,7 +153,7 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 		result.Success = false
 		result.Error = delegErr.Error()
 	} else {
-		w.SessionID = delegResult.WorkerSessionID
+		w.SetSessionID(delegResult.WorkerSessionID)
 		result.SessionID = delegResult.WorkerSessionID
 		result.TaskID = delegResult.TaskID
 		result.Content = delegResult.Content
@@ -217,12 +217,15 @@ func (m *Manager) SpawnLight(ctx context.Context, executor ToolExecutor, req Lig
 	return result, nil
 }
 
-// List returns all active workers.
-func (m *Manager) List() []*Worker {
-	var workers []*Worker
+// List returns a snapshot of all active workers. Each returned Snapshot
+// is a value-copy captured atomically under the worker mutex and is safe
+// to read, share across goroutines, and JSON-marshal without further
+// synchronization.
+func (m *Manager) List() []Snapshot {
+	var workers []Snapshot
 	m.workers.Range(func(key, value any) bool {
 		if w, ok := value.(*Worker); ok {
-			workers = append(workers, w)
+			workers = append(workers, w.Snapshot())
 		}
 		return true
 	})
@@ -266,13 +269,13 @@ func (m *Manager) ActiveCount() int {
 }
 
 // ReapStale cancels workers whose heartbeat has expired (no update for
-// longer than threshold). Returns the list of reaped workers.
-func (m *Manager) ReapStale(threshold time.Duration) []*Worker {
+// longer than threshold). Returns snapshots of the reaped workers.
+func (m *Manager) ReapStale(threshold time.Duration) []Snapshot {
 	if m.coord == nil || !m.coord.Available() {
 		return nil
 	}
 
-	var stale []*Worker
+	var stale []Snapshot
 	m.workers.Range(func(key, value any) bool {
 		w, ok := value.(*Worker)
 		if !ok || w.GetStatus() != StatusRunning {
@@ -284,7 +287,7 @@ func (m *Manager) ReapStale(threshold time.Duration) []*Worker {
 		data, err := m.coord.Get(hbKey)
 		if err != nil {
 			// No heartbeat — stale.
-			stale = append(stale, w)
+			stale = append(stale, w.Snapshot())
 			return true
 		}
 
@@ -293,15 +296,15 @@ func (m *Manager) ReapStale(threshold time.Duration) []*Worker {
 		}
 		if err := json.Unmarshal(data, &hb); err == nil {
 			if time.Since(hb.Timestamp) > threshold {
-				stale = append(stale, w)
+				stale = append(stale, w.Snapshot())
 			}
 		}
 		return true
 	})
 
-	for _, w := range stale {
-		log.Printf("worker %s: reaped as stale (heartbeat expired)", w.ID[:8])
-		m.Cancel(w.ID)
+	for _, s := range stale {
+		log.Printf("worker %s: reaped as stale (heartbeat expired)", s.ID[:8])
+		m.Cancel(s.ID)
 	}
 
 	return stale
@@ -321,21 +324,25 @@ func (m *Manager) Shutdown() {
 }
 
 // writeWorkerStatus persists worker status to the coordination store.
+// It captures a consistent snapshot of the worker fields under the worker
+// mutex before marshaling so no concurrent SpawnFull/Cancel writer races
+// against the read.
 func (m *Manager) writeWorkerStatus(w *Worker) {
 	if m.coord == nil || !m.coord.Available() {
 		return
 	}
+	snap := w.Snapshot()
 	data, _ := json.Marshal(map[string]any{
-		"id":         w.ID,
-		"type":       w.Type,
-		"status":     w.GetStatus(),
-		"agent_id":   w.AgentID,
-		"session_id": w.SessionID,
-		"parent":     w.ParentSessionID,
-		"worktree":   w.WorktreePath,
-		"created_at": w.CreatedAt,
+		"id":         snap.ID,
+		"type":       snap.Type,
+		"status":     snap.Status,
+		"agent_id":   snap.AgentID,
+		"session_id": snap.SessionID,
+		"parent":     snap.ParentSessionID,
+		"worktree":   snap.WorktreePath,
+		"created_at": snap.CreatedAt,
 	})
-	_ = m.coord.Put(coordination.PrefixWorker+w.ID+":status", data, coordination.WorkerTTL)
+	_ = m.coord.Put(coordination.PrefixWorker+snap.ID+":status", data, coordination.WorkerTTL)
 }
 
 // heartbeatLoop writes periodic heartbeats to the coordination store.

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -253,11 +254,70 @@ func TestShutdown(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	mgr.Shutdown()
 
-	// All workers should be cancelled.
+	// All workers should be cancelled. List returns value snapshots, so
+	// field reads here are safe without further synchronization.
 	workers := mgr.List()
 	for _, w := range workers {
-		if s := w.GetStatus(); s != StatusCancelled {
-			t.Errorf("worker %s status = %q, want cancelled", w.ID[:8], s)
+		if w.Status != StatusCancelled {
+			t.Errorf("worker %s status = %q, want cancelled", w.ID[:8], w.Status)
 		}
 	}
+}
+
+// TestListConcurrentFieldAccess stresses concurrent Manager.List() reads
+// against an in-flight SpawnFull that writes SessionID and WorktreePath
+// after the worker has been published to the sync.Map. Run with -race;
+// without synchronization on those fields the race detector flags the
+// reader/writer pair.
+func TestListConcurrentFieldAccess(t *testing.T) {
+	// Small delay gives readers time to observe the worker before
+	// DelegateTask returns and the SessionID write happens.
+	deleg := &stubDelegator{delay: 20 * time.Millisecond, content: "hi"}
+	mgr := newTestManager(deleg)
+
+	const spawners = 4
+	const readersPerSpawner = 4
+	const iterations = 50
+
+	stop := make(chan struct{})
+	var readerWG sync.WaitGroup
+	for i := 0; i < spawners*readersPerSpawner; i++ {
+		readerWG.Add(1)
+		go func() {
+			defer readerWG.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				for _, w := range mgr.List() {
+					// Touch every concurrently-mutable field. Without the
+					// fix, these reads race with SpawnFull's writes.
+					_ = w.Status
+					_ = w.SessionID
+					_ = w.WorktreePath
+				}
+			}
+		}()
+	}
+
+	var spawnWG sync.WaitGroup
+	for i := 0; i < spawners; i++ {
+		spawnWG.Add(1)
+		go func(i int) {
+			defer spawnWG.Done()
+			for j := 0; j < iterations; j++ {
+				_, _ = mgr.SpawnFull(context.Background(), SpawnRequest{
+					ParentSessionID: "p-1",
+					Title:           fmt.Sprintf("task-%d-%d", i, j),
+					AgentID:         "agent-1",
+				})
+			}
+		}(i)
+	}
+
+	spawnWG.Wait()
+	close(stop)
+	readerWG.Wait()
 }

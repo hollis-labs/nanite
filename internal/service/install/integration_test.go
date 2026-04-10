@@ -47,12 +47,16 @@ func TestIntegration_FullMigrationRoundTrip(t *testing.T) {
 	// Snapshot the original state.
 	originalState := snapshotDir(t, project)
 
-	// Migrate.
+	// Migrate. Pass all four adapters explicitly: the fixture has no CLI
+	// indicator files (no .claude/agents/, no .codex, etc.) so detection
+	// would return empty. The test asserts that all four adapter files are
+	// written, so we drive adapter selection via the --adapters flag.
 	svc := New()
 	report, err := svc.InstallProject(InstallProjectOptions{
 		ProjectDir:         project,
 		GlobalHome:         filepath.Join(home, ".nanite"),
 		MigrateFromAgentrc: true,
+		Adapters:           "claude,codex,gemini,opencode",
 	})
 	if err != nil {
 		t.Fatalf("migrate: %v", err)

@@ -126,7 +126,7 @@ func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectRep
 		if !hasAgentrc {
 			return nil, fmt.Errorf("--migrate-from-agentrc requires .agentrc/ in %s", projectDir)
 		}
-		return s.migrateFromAgentrc(projectDir, globalHome)
+		return s.migrateFromAgentrc(projectDir, globalHome, opts)
 	}
 
 	if hasAgentrc {

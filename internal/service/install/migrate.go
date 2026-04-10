@@ -17,8 +17,8 @@ import (
 
 // migrateFromAgentrc is the migrate-from-agentrc branch of InstallProject.
 // It archives the legacy .agentrc/ directory, carries over project-specific
-// content into a freshly scaffolded .nanite/, and rewrites CLAUDE.md.
-func (s *Service) migrateFromAgentrc(projectDir, globalHome string) (*InstallProjectReport, error) {
+// content into a freshly scaffolded .nanite/, and syncs adapter target files.
+func (s *Service) migrateFromAgentrc(projectDir, globalHome string, opts InstallProjectOptions) (*InstallProjectReport, error) {
 	basename := filepath.Base(projectDir)
 	archiveBase, err := ExpandArchiveBase(archiveBaseOverride())
 	if err != nil {
@@ -86,27 +86,57 @@ func (s *Service) migrateFromAgentrc(projectDir, globalHome string) (*InstallPro
 		return nil, fmt.Errorf("write state after scaffold-nanite-md: %w", err)
 	}
 
-	// CLAUDE.md surgery.
-	managed := buildManagedSection(src)
-	claudeReport, err := UpdateCLAUDEmd(
-		filepath.Join(projectDir, "CLAUDE.md"),
-		managed,
-		&CLAUDESnapshotOpts{Dir: archiveDir},
-	)
+	// Strip legacy agentrc section from CLAUDE.md before adapter sync.
+	// This is migrate-specific cleanup: the old agentrc-injected ## agentrc
+	// heading must be removed before the new managed section is written.
+	claudePath := filepath.Join(projectDir, "CLAUDE.md")
+	if existing, err := os.ReadFile(claudePath); err == nil {
+		cleaned, _ := RemoveAgentrcSection(string(existing))
+		if cleaned != string(existing) {
+			if err := os.WriteFile(claudePath, []byte(cleaned), 0o644); err != nil {
+				return nil, fmt.Errorf("clean agentrc section from CLAUDE.md: %w", err)
+			}
+		}
+	}
+
+	// Adapter selection + sync. Replaces the legacy CLAUDE.md surgery
+	// path. The migrate path is always non-interactive in practice
+	// (sub-agents during portfolio rollout) — the caller can pass
+	// --no-adapters or --adapters explicitly to control behavior.
+	cfgPath := filepath.Join(projectDir, ".nanite", "config.yaml")
+	cfg, err := loadProjectConfig(cfgPath)
 	if err != nil {
 		return nil, err
 	}
-	state.MarkPhaseComplete(PhaseClaudeSync)
+
+	resolved, previous, err := ResolveAdapters(cfg, projectDir, ResolveOpts{
+		Flag:        opts.Adapters,
+		NoAdapters:  opts.NoAdapters,
+		Reconfigure: opts.Reconfigure,
+		Interactive: opts.Interactive,
+		Stdin:       opts.Stdin,
+		Stdout:      opts.Stdout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve adapters: %w", err)
+	}
+
+	removed := setDifference(previous, resolved)
+	cleanupReports, err := cleanupRemovedAdapters(projectDir, removed)
+	if err != nil {
+		return nil, fmt.Errorf("cleanup removed adapters: %w", err)
+	}
+
+	if err := persistAdapterList(cfgPath, resolved); err != nil {
+		return nil, fmt.Errorf("persist adapter list: %w", err)
+	}
+
+	state.MarkPhaseComplete(PhaseClaudeSync) // legacy phase name retained
 	if err := WriteState(statePath, state); err != nil {
 		return nil, fmt.Errorf("write state after claude-sync: %w", err)
 	}
 
-	// Sync managed sections in all CLI target files via the built-in
-	// adapter registry. This writes/updates managed sections in CLAUDE.md
-	// (overwriting the install service's baseline content from above with
-	// the claude adapter's agent listing if any agents are defined),
-	// AGENTS.md, GEMINI.md, and OPENCODE.md.
-	if err := syncAdaptersForProject(projectDir, nil); err != nil {
+	if err := syncAdaptersForProject(projectDir, resolved); err != nil {
 		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
 	state.MarkPhaseComplete(PhaseAdapterSync)
@@ -116,9 +146,10 @@ func (s *Service) migrateFromAgentrc(projectDir, globalHome string) (*InstallPro
 	}
 
 	return &InstallProjectReport{
-		Migrated:           true,
-		ArchivePath:        archiveDir,
-		CLAUDEUpdateReport: claudeReport,
+		Migrated:        true,
+		ArchivePath:     archiveDir,
+		Adapters:        resolved,
+		AdapterCleanups: cleanupReports,
 	}, nil
 }
 

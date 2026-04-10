@@ -174,7 +174,7 @@ agents:
 	}
 }
 
-func TestSyncAdaptersForProject_EmptyAgentsListIsNoop(t *testing.T) {
+func TestSyncAdaptersForProject_EmptyAgentsListWritesPlaceholder(t *testing.T) {
 	project := t.TempDir()
 
 	// .nanite/config.yaml with no agents.
@@ -193,11 +193,20 @@ func TestSyncAdaptersForProject_EmptyAgentsListIsNoop(t *testing.T) {
 		t.Fatalf("syncAdaptersForProject: %v", err)
 	}
 
-	// None of the CLI files should have been created (adapters short-circuit
-	// on empty agents list).
+	// All CLI files should exist with placeholder content (adapters now write
+	// a managed section even when the agents list is empty).
 	for _, name := range []string{"CLAUDE.md", "AGENTS.md", "GEMINI.md", "OPENCODE.md"} {
-		if _, err := os.Stat(filepath.Join(project, name)); !os.IsNotExist(err) {
-			t.Errorf("%s should not exist after empty-agents sync", name)
+		data, err := os.ReadFile(filepath.Join(project, name))
+		if err != nil {
+			t.Errorf("%s should exist after empty-agents sync: %v", name, err)
+			continue
+		}
+		got := string(data)
+		if !strings.Contains(got, "<!-- nanite:start -->") {
+			t.Errorf("%s missing nanite:start marker", name)
+		}
+		if !strings.Contains(got, "No agents configured") {
+			t.Errorf("%s missing placeholder text", name)
 		}
 	}
 }

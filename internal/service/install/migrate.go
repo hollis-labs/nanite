@@ -40,14 +40,11 @@ func (s *Service) migrateFromAgentrc(projectDir, globalHome string) (*InstallPro
 		return nil, fmt.Errorf("write initial state: %w", err)
 	}
 
-	// Snapshot CLAUDE.md pre-edit for rollback.
-	claudeSrc := filepath.Join(projectDir, "CLAUDE.md")
-	if data, err := os.ReadFile(claudeSrc); err == nil {
-		if err := os.WriteFile(filepath.Join(archiveDir, "CLAUDE.md.pre-edit"), data, 0o644); err != nil {
-			return nil, fmt.Errorf("snapshot CLAUDE.md: %w", err)
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("read CLAUDE.md for snapshot: %w", err)
+	// Snapshot all adapter target files (CLAUDE.md, AGENTS.md, GEMINI.md,
+	// OPENCODE.md) so Rollback can restore them. Files that don't exist are
+	// skipped — Rollback knows that means the installer created them.
+	if err := snapshotAdapterTargets(projectDir, archiveDir); err != nil {
+		return nil, fmt.Errorf("snapshot adapter targets: %w", err)
 	}
 
 	// Move .agentrc/ and .agentrc-legacy/ into our already-created archive
@@ -104,9 +101,14 @@ func (s *Service) migrateFromAgentrc(projectDir, globalHome string) (*InstallPro
 		return nil, fmt.Errorf("write state after claude-sync: %w", err)
 	}
 
-	// TODO(Plan A Task 14+): call AdapterRegistry.SyncAllProjectRoots() once
-	// the install service is wired into the DI container. For now, just
-	// mark the phase as complete so the state machine stays linear.
+	// Sync managed sections in all CLI target files via the built-in
+	// adapter registry. This writes/updates managed sections in CLAUDE.md
+	// (overwriting the install service's baseline content from above with
+	// the claude adapter's agent listing if any agents are defined),
+	// AGENTS.md, GEMINI.md, and OPENCODE.md.
+	if err := syncAdaptersForProject(projectDir); err != nil {
+		return nil, fmt.Errorf("adapter sync: %w", err)
+	}
 	state.MarkPhaseComplete(PhaseAdapterSync)
 	state.MarkPhaseComplete(PhaseComplete)
 	if err := WriteState(statePath, state); err != nil {

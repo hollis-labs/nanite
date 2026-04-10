@@ -158,6 +158,13 @@ func (s *Service) freshScaffold(projectDir, globalHome string) (*InstallProjectR
 	if err != nil {
 		return nil, err
 	}
+	// Sync managed sections in all CLI target files via the built-in
+	// adapter registry. For fresh scaffold the agents list is typically
+	// empty, in which case the adapters short-circuit and only CLAUDE.md
+	// (already written above) ends up with content.
+	if err := syncAdaptersForProject(projectDir); err != nil {
+		return nil, fmt.Errorf("adapter sync: %w", err)
+	}
 	return &InstallProjectReport{
 		FreshScaffold:      true,
 		CLAUDEUpdateReport: report,

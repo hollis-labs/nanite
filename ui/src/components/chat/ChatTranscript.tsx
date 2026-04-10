@@ -235,17 +235,34 @@ export function ChatTranscript({
     let target: HTMLElement | null = null;
     const deadline = Date.now() + 1000; // give up polling after 1s
 
+    const giveUp = () => {
+      // Target never arrived. Clear the store state so the next jump can
+      // retrigger and the app doesn't sit in "pending scroll" forever.
+      console.warn(
+        `[ChatTranscript] Jump target ${scrollToMessageId} not found within ${1000}ms — clearing pending scroll.`,
+      );
+      setScrollToMessageId(null);
+    };
+
     const tryLocate = () => {
       const scrollElement = scrollRef.current;
       if (!scrollElement) {
-        if (Date.now() < deadline) rafId = requestAnimationFrame(tryLocate);
+        if (Date.now() < deadline) {
+          rafId = requestAnimationFrame(tryLocate);
+        } else {
+          giveUp();
+        }
         return;
       }
       target = scrollElement.querySelector<HTMLElement>(
         `[data-message-id="${scrollToMessageId}"]`,
       );
       if (!target) {
-        if (Date.now() < deadline) rafId = requestAnimationFrame(tryLocate);
+        if (Date.now() < deadline) {
+          rafId = requestAnimationFrame(tryLocate);
+        } else {
+          giveUp();
+        }
         return;
       }
       // Found it — scroll + highlight + schedule cleanup.

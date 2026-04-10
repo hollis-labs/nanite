@@ -267,6 +267,12 @@ The backend slot system (`internal/plugin/host.go` `RegisterSlot`/`GetAllSlots`,
 
 **What needs deciding before any work here:** how should plugins ship React components to the frontend? Options roughly: (a) convention-based lazy import from a plugin path, (b) plugin JS bundles loaded over HTTP at runtime, (c) a build-time codegen step that scans `plugin.yaml` manifests for component declarations and writes a registry like `plugin-envelopes.ts`. Each has real design trade-offs — don't pick one in a hurry. See `docs/architecture/plugin-system.md` §13 ("No Widget/Slot System") for the documented acknowledgment of this gap.
 
+### Chat window-mode pagination after jump-to-message — unresolved
+
+After a search → jump-to-message lands, `useChat` fetches a centered window via `api.getMessagesAround` and sets `paginationState` to `null`. The null state hides the "load older" button and makes `hasOlderMessages` return false — because the `messages-around` endpoint doesn't currently return the window's `oldest_offset` relative to the full session, so we genuinely don't know where in the full history we are. Users who land on a jumped-to message therefore cannot scroll further back within that session until they re-enter it normally.
+
+**Options for fixing:** extend the backend `messages?around=...` response to include `oldest_offset`/`total` for the around-window, then `useChat` can reconstruct a real pagination state; OR add an explicit "window mode" flag to `paginationState` that shows a "Load full history" button instead of "Load older"; OR keep current behavior and require a session re-entry. Post-beta decision.
+
 ---
 
 ## Frontend Polish Backlog (post-beta)

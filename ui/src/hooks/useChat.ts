@@ -185,13 +185,10 @@ export function useChat(sessionId: string | null) {
   // running loadMessages first would be wasted work and would race with the
   // jump fetch (whoever called setMessages last would win).
   useEffect(() => {
-    let cancelled = false;
     const queuedJump = useChatStore.getState().pendingJump;
     const skipLoad = queuedJump && queuedJump.sessionId === sessionId && !!sessionId;
     if (!skipLoad) {
-      (async () => {
-        await loadMessages();
-      })();
+      void loadMessages();
     }
     // Session-switch side effects — always run regardless of jump state.
     const settings = queryClient.getQueryData<UserSettings>(['settings'])
@@ -199,10 +196,6 @@ export function useChat(sessionId: string | null) {
     store().loadSessionToolCalls(sessionId, retention);
     useLayoutStore.getState().setToolDrawerState('closed');
     store().setTextOnlyMode(false);
-    return () => {
-      cancelled = true;
-      void cancelled;
-    };
   }, [loadMessages, sessionId]);
 
   // Pending-jump consumer. Subscribes reactively to `pendingJump` so it fires
@@ -218,7 +211,14 @@ export function useChat(sessionId: string | null) {
         const page = await api.getMessagesAround(sessionId, pendingJump.messageId);
         if (cancelled) return;
         setMessages(page.messages ?? []);
-        setPaginationState({ total: page.total, oldestOffset: 0 });
+        // Explicitly set paginationState to null — the messages-around endpoint
+        // returns a window from the middle of the session, and we don't know
+        // its oldest offset. Setting oldestOffset: 0 would lie about being at
+        // the start of history and incorrectly disable the "load older" button.
+        // `hasOlderMessages` will be false until the user navigates back to a
+        // normal load. See frontend.md §Known Gaps for the full window-mode
+        // pagination story.
+        setPaginationState(null);
         useChatStore.getState().setScrollToMessageId(pendingJump.messageId);
       } catch (err) {
         console.error("Failed to load messages around jump target:", err);

@@ -128,21 +128,21 @@ func snapshotAdapterTargets(projectDir, archiveDir string) error {
 	return nil
 }
 
-// syncAdaptersForProject runs SyncAllProjectRoots against the built-in
-// adapter registry, parsing the agents list from
-// `<projectDir>/.nanite/config.yaml`. Returns nil on success.
+// syncAdaptersForProject runs SyncAllProjectRootsFiltered against the
+// built-in adapter registry, parsing the agents list from
+// `<projectDir>/.nanite/config.yaml`. Only the adapters whose Name() is
+// in allowedAdapters are run; nanite-native is always included.
 //
 // If the config file is missing or empty, the agents list is empty and
-// each adapter's SyncProjectRoot writes a placeholder managed section
-// rather than skipping the file.
-func syncAdaptersForProject(projectDir string) error {
+// each (allowed) adapter writes a placeholder section.
+func syncAdaptersForProject(projectDir string, allowedAdapters []string) error {
 	cfgPath := filepath.Join(projectDir, ".nanite", "config.yaml")
 	agents, err := extractAgentsFromConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("extract agents: %w", err)
 	}
 	reg := newBuiltinAdapterRegistry()
-	if err := reg.SyncAllProjectRoots(projectDir, agents); err != nil {
+	if err := reg.SyncAllProjectRootsFiltered(projectDir, agents, allowedAdapters); err != nil {
 		return fmt.Errorf("sync adapters: %w", err)
 	}
 	return nil

@@ -145,7 +145,7 @@ agents:
 		t.Fatal(err)
 	}
 
-	if err := syncAdaptersForProject(project); err != nil {
+	if err := syncAdaptersForProject(project, []string{"claude", "codex", "gemini", "opencode"}); err != nil {
 		t.Fatalf("syncAdaptersForProject: %v", err)
 	}
 
@@ -189,7 +189,7 @@ func TestSyncAdaptersForProject_EmptyAgentsListWritesPlaceholder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := syncAdaptersForProject(project); err != nil {
+	if err := syncAdaptersForProject(project, []string{"claude", "codex", "gemini", "opencode"}); err != nil {
 		t.Fatalf("syncAdaptersForProject: %v", err)
 	}
 
@@ -207,6 +207,59 @@ func TestSyncAdaptersForProject_EmptyAgentsListWritesPlaceholder(t *testing.T) {
 		}
 		if !strings.Contains(got, "No agents configured") {
 			t.Errorf("%s missing placeholder text", name)
+		}
+	}
+}
+
+func TestSyncAdaptersForProject_FilterAllowed(t *testing.T) {
+	dir := t.TempDir()
+	naniteDir := filepath.Join(dir, ".nanite")
+	if err := os.MkdirAll(naniteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Write a config with one agent so adapters produce non-placeholder content.
+	cfg := `nanite_version: 2.3.0
+agents:
+  frontend:
+    name: Frontend Developer
+    description: React work
+`
+	if err := os.WriteFile(filepath.Join(naniteDir, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run with only claude allowed.
+	if err := syncAdaptersForProject(dir, []string{"claude"}); err != nil {
+		t.Fatalf("syncAdaptersForProject: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
+		t.Errorf("CLAUDE.md should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Errorf("AGENTS.md should NOT exist (codex not allowed), stat: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "GEMINI.md")); !os.IsNotExist(err) {
+		t.Errorf("GEMINI.md should NOT exist (gemini not allowed), stat: %v", err)
+	}
+}
+
+func TestSyncAdaptersForProject_EmptyAllowedListWritesNoFiles(t *testing.T) {
+	dir := t.TempDir()
+	naniteDir := filepath.Join(dir, ".nanite")
+	if err := os.MkdirAll(naniteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(naniteDir, "config.yaml"), []byte("agents: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := syncAdaptersForProject(dir, []string{}); err != nil {
+		t.Fatalf("syncAdaptersForProject: %v", err)
+	}
+	for _, name := range adapterTargetFiles {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should NOT exist with empty allowed list", name)
 		}
 	}
 }

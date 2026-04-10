@@ -162,7 +162,7 @@ func (s *Service) freshScaffold(projectDir, globalHome string) (*InstallProjectR
 	// adapter registry. For fresh scaffold the agents list is typically
 	// empty, in which case the adapters short-circuit and only CLAUDE.md
 	// (already written above) ends up with content.
-	if err := syncAdaptersForProject(projectDir); err != nil {
+	if err := syncAdaptersForProject(projectDir, nil); err != nil {
 		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
 	return &InstallProjectReport{

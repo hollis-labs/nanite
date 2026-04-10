@@ -56,7 +56,7 @@ func (s *Service) adoptExisting(projectDir, globalHome string) (*InstallProjectR
 	// that already have a populated .nanite/config.yaml (PR #11 manual
 	// rename, prior install, etc.), so the agents list is usually
 	// non-empty and the adapters write content to all 4 CLI files.
-	if err := syncAdaptersForProject(projectDir); err != nil {
+	if err := syncAdaptersForProject(projectDir, nil); err != nil {
 		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
 

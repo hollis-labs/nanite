@@ -106,7 +106,7 @@ func (s *Service) migrateFromAgentrc(projectDir, globalHome string) (*InstallPro
 	// (overwriting the install service's baseline content from above with
 	// the claude adapter's agent listing if any agents are defined),
 	// AGENTS.md, GEMINI.md, and OPENCODE.md.
-	if err := syncAdaptersForProject(projectDir); err != nil {
+	if err := syncAdaptersForProject(projectDir, nil); err != nil {
 		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
 	state.MarkPhaseComplete(PhaseAdapterSync)

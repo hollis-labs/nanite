@@ -165,6 +165,33 @@ func (r *AdapterRegistry) SyncAllProjectRoots(projectDir string, agents []store.
 	return nil
 }
 
+// SyncAllProjectRootsFiltered is the same as SyncAllProjectRoots but
+// only runs the adapters whose Name() is present in the allowed slice.
+// The "nanite-native" adapter is always run regardless of the allowed
+// list — it manages .nanite/ and NANITE.md, which are not user-selectable.
+//
+// The adapter slice is copied before iteration to avoid holding the lock
+// during I/O.
+func (r *AdapterRegistry) SyncAllProjectRootsFiltered(projectDir string, agents []store.AgentProfile, allowed []string) error {
+	allowSet := make(map[string]bool, len(allowed)+1)
+	for _, name := range allowed {
+		allowSet[name] = true
+	}
+	allowSet["nanite-native"] = true
+
+	adapters := r.Adapters()
+
+	for _, a := range adapters {
+		if !allowSet[a.Name()] {
+			continue
+		}
+		if err := a.SyncProjectRoot(projectDir, agents); err != nil {
+			return fmt.Errorf("adapter %s: sync project root: %w", a.Name(), err)
+		}
+	}
+	return nil
+}
+
 // GetAdapter returns the adapter with the given name, or false if not found.
 func (r *AdapterRegistry) GetAdapter(name string) (CLIAgentAdapter, bool) {
 	r.mu.RLock()

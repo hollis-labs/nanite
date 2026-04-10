@@ -184,3 +184,100 @@ func TestReadManagedSection_NoMarkers(t *testing.T) {
 		t.Errorf("expected empty string, got: %q", got)
 	}
 }
+
+func TestRemoveManagedSection_FileMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "missing.md")
+	removed, becameEmpty, err := RemoveManagedSection(path)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if removed {
+		t.Errorf("expected removed=false")
+	}
+	if becameEmpty {
+		t.Errorf("expected becameEmpty=false")
+	}
+}
+
+func TestRemoveManagedSection_NoMarkers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.md")
+	original := "# user content\n\nhello\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, becameEmpty, err := RemoveManagedSection(path)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if removed {
+		t.Errorf("expected removed=false (no markers)")
+	}
+	if becameEmpty {
+		t.Errorf("expected becameEmpty=false")
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != original {
+		t.Errorf("file should be untouched, got %q want %q", string(got), original)
+	}
+}
+
+func TestRemoveManagedSection_PreservesOutsideContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.md")
+	if err := WriteManagedSection(path, "managed body"); err != nil {
+		t.Fatal(err)
+	}
+	// Prepend user content
+	existing, _ := os.ReadFile(path)
+	full := "# user header\n\nuser intro\n\n" + string(existing) + "\n# user footer\n"
+	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, becameEmpty, err := RemoveManagedSection(path)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !removed {
+		t.Errorf("expected removed=true")
+	}
+	if becameEmpty {
+		t.Errorf("expected becameEmpty=false (user content remains)")
+	}
+	got, _ := os.ReadFile(path)
+	gotStr := string(got)
+	if !strings.Contains(gotStr, "user header") {
+		t.Errorf("missing user header in %q", gotStr)
+	}
+	if !strings.Contains(gotStr, "user intro") {
+		t.Errorf("missing user intro in %q", gotStr)
+	}
+	if !strings.Contains(gotStr, "user footer") {
+		t.Errorf("missing user footer in %q", gotStr)
+	}
+	if strings.Contains(gotStr, managedStart) {
+		t.Errorf("managed start marker still present in %q", gotStr)
+	}
+	if strings.Contains(gotStr, managedEnd) {
+		t.Errorf("managed end marker still present in %q", gotStr)
+	}
+}
+
+func TestRemoveManagedSection_EmptyAfterRemoval(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.md")
+	if err := WriteManagedSection(path, "managed body"); err != nil {
+		t.Fatal(err)
+	}
+	removed, becameEmpty, err := RemoveManagedSection(path)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !removed {
+		t.Errorf("expected removed=true")
+	}
+	if !becameEmpty {
+		t.Errorf("expected becameEmpty=true (file was managed-section-only)")
+	}
+}

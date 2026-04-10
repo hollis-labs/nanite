@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -110,4 +111,72 @@ func ReadManagedSection(path string) (string, error) {
 	inner = strings.TrimSpace(inner)
 
 	return inner, nil
+}
+
+// RemoveManagedSection strips the Nanite-managed section (markers and
+// content between them) from the file at path, preserving any user
+// content outside the markers.
+//
+// Returns:
+//   - removedAny: true if a managed section was found and removed
+//   - becameEmpty: true if the file is empty (or whitespace-only) after removal
+//   - err: I/O or parse errors
+//
+// If the file does not exist, returns (false, false, nil) — no-op.
+// If the file has no managed-section markers, returns (false, false, nil)
+// and leaves the file untouched.
+func RemoveManagedSection(path string) (removedAny bool, becameEmpty bool, err error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+
+	existing := string(data)
+
+	startIdx := strings.Index(existing, managedStart)
+	if startIdx == -1 {
+		return false, false, nil
+	}
+
+	endIdx := strings.Index(existing[startIdx:], managedEnd)
+	if endIdx == -1 {
+		// Start marker without end marker — leave the file alone (we don't
+		// know where the section ends, so we can't safely strip it).
+		return false, false, nil
+	}
+	endIdx += startIdx + len(managedEnd)
+
+	before := existing[:startIdx]
+	after := existing[endIdx:]
+
+	// Trim a single leading newline from `after` so we don't accumulate
+	// blank lines, mirroring WriteManagedSection's behavior.
+	after = strings.TrimPrefix(after, "\n")
+
+	// Trim trailing whitespace from `before` so we don't leave dangling
+	// blank lines either.
+	before = strings.TrimRight(before, "\n")
+	if before != "" && after != "" {
+		before += "\n\n"
+	} else if before != "" {
+		before += "\n"
+	}
+
+	combined := before + after
+	trimmed := strings.TrimSpace(combined)
+	if trimmed == "" {
+		// Whole file is empty after removal.
+		if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+			return false, false, fmt.Errorf("truncate %s: %w", path, err)
+		}
+		return true, true, nil
+	}
+
+	if err := os.WriteFile(path, []byte(combined), 0o644); err != nil {
+		return false, false, fmt.Errorf("write %s: %w", path, err)
+	}
+	return true, false, nil
 }

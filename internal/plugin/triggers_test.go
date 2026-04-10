@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,10 +16,19 @@ import (
 )
 
 // testConnector is a minimal Connector implementation for testing.
+//
+// Dispatch runs Send on a background goroutine while the test goroutine
+// inspects stub state after waitForSend. sendCount is atomic so waitForSend
+// can poll it safely, but any other state the test observes (lastPayload)
+// must be guarded by mu so reads from the test goroutine don't race with
+// writes from the dispatch goroutine.
 type testConnector struct {
 	name      string
 	sendCount atomic.Int32
+
+	mu          sync.Mutex
 	lastPayload map[string]interface{}
+
 	sendErr   error
 	healthErr error
 }
@@ -26,9 +36,22 @@ type testConnector struct {
 func (c *testConnector) Name() string { return c.name }
 
 func (c *testConnector) Send(_ context.Context, payload map[string]interface{}) error {
-	c.sendCount.Add(1)
+	c.mu.Lock()
 	c.lastPayload = payload
+	c.mu.Unlock()
+	// Increment after the protected write so waitForSend observing sendCount>=N
+	// guarantees the Nth payload is already visible under the mutex.
+	c.sendCount.Add(1)
 	return c.sendErr
+}
+
+// getLastPayload returns the most recent payload passed to Send, guarded
+// by the stub's mutex. Tests should use this helper rather than touching
+// lastPayload directly.
+func (c *testConnector) getLastPayload() map[string]interface{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastPayload
 }
 
 func (c *testConnector) Health(_ context.Context) error {
@@ -148,11 +171,12 @@ func TestTriggerDispatch_PayloadTemplate(t *testing.T) {
 	if conn.sendCount.Load() != 1 {
 		t.Fatalf("expected 1 send, got %d", conn.sendCount.Load())
 	}
-	if conn.lastPayload["event"] != "session.end" {
-		t.Errorf("expected event=session.end, got %v", conn.lastPayload["event"])
+	payload := conn.getLastPayload()
+	if payload["event"] != "session.end" {
+		t.Errorf("expected event=session.end, got %v", payload["event"])
 	}
-	if conn.lastPayload["session"] != "abc-123" {
-		t.Errorf("expected session=abc-123, got %v", conn.lastPayload["session"])
+	if payload["session"] != "abc-123" {
+		t.Errorf("expected session=abc-123, got %v", payload["session"])
 	}
 }
 
@@ -181,8 +205,9 @@ func TestTriggerDispatch_EmptyTemplate(t *testing.T) {
 		t.Fatalf("expected 1 send, got %d", conn.sendCount.Load())
 	}
 	// Empty template passes through event.Data.
-	if conn.lastPayload["session_id"] != "s1" {
-		t.Errorf("expected session_id=s1 in passthrough payload, got %v", conn.lastPayload["session_id"])
+	payload := conn.getLastPayload()
+	if payload["session_id"] != "s1" {
+		t.Errorf("expected session_id=s1 in passthrough payload, got %v", payload["session_id"])
 	}
 }
 

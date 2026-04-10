@@ -157,25 +157,32 @@ func (a *Adapter) PopulateSandbox(sandboxDir string, ap store.AgentProfile, sess
 }
 
 // SyncProjectRoot writes a managed section into {projectDir}/CLAUDE.md
-// listing available Nanite agents.
+// listing available Nanite agents. If no agents are configured, writes
+// a placeholder section pointing to NANITE.md for setup help.
 func (a *Adapter) SyncProjectRoot(projectDir string, agents []store.AgentProfile) error {
+	var content string
 	if len(agents) == 0 {
-		return nil
-	}
-
-	var b strings.Builder
-	b.WriteString("Available Nanite agents:\n\n")
-	for _, ap := range agents {
-		if ap.Description != "" {
-			fmt.Fprintf(&b, "- **%s** — %s\n", ap.Name, ap.Description)
-		} else {
-			fmt.Fprintf(&b, "- **%s**\n", ap.Name)
+		content = placeholderContent
+	} else {
+		var b strings.Builder
+		b.WriteString("Available Nanite agents:\n\n")
+		for _, ap := range agents {
+			if ap.Description != "" {
+				fmt.Fprintf(&b, "- **%s** — %s\n", ap.Name, ap.Description)
+			} else {
+				fmt.Fprintf(&b, "- **%s**\n", ap.Name)
+			}
 		}
+		content = b.String()
 	}
 
 	claudePath := filepath.Join(projectDir, "CLAUDE.md")
-	return agent.WriteManagedSection(claudePath, b.String())
+	return agent.WriteManagedSection(claudePath, content)
 }
+
+const placeholderContent = `## Nanite Agents
+
+No agents configured for this project yet. See NANITE.md for setup help, or add an agent definition to ` + "`.nanite/config.yaml`" + ` and re-run ` + "`nanite install --project .`" + `.`
 
 // ---------------------------------------------------------------------------
 // Content generation (moved from sandbox.go)

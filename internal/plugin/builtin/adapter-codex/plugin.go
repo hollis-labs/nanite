@@ -135,16 +135,22 @@ func (a *Adapter) PopulateSandbox(sandboxDir string, ap store.AgentProfile, sess
 }
 
 // SyncProjectRoot writes a managed section into {projectDir}/AGENTS.md
-// listing available Nanite agents.
+// listing available Nanite agents. If no agents are configured, writes
+// a placeholder section pointing to NANITE.md for setup help.
 func (a *Adapter) SyncProjectRoot(projectDir string, agents []store.AgentProfile) error {
+	var content string
 	if len(agents) == 0 {
-		return nil
+		content = placeholderContent
+	} else {
+		content = buildNaniteAgentsSection(agents)
 	}
-
-	content := buildNaniteAgentsSection(agents)
 	agentsPath := filepath.Join(projectDir, "AGENTS.md")
 	return agent.WriteManagedSection(agentsPath, content)
 }
+
+const placeholderContent = `## Nanite Agents
+
+No agents configured for this project yet. See NANITE.md for setup help, or add an agent definition to ` + "`.nanite/config.yaml`" + ` and re-run ` + "`nanite install --project .`" + `.`
 
 // ---------------------------------------------------------------------------
 // Content generation

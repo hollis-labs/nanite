@@ -6,6 +6,7 @@ package install
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -56,6 +57,31 @@ type InstallProjectOptions struct {
 	GlobalHome         string // defaults to ~/.nanite
 	MigrateFromAgentrc bool
 	ArchiveOnly        bool
+
+	// Adapter selection options (new in 2026-04-09 design).
+	Adapters    string // value of --adapters flag, comma-separated, "" = unset
+	NoAdapters  bool   // --no-adapters flag
+	Reconfigure bool   // --reconfigure flag
+
+	// Interactive controls whether to prompt the user for adapter
+	// selection. Set by the CLI based on isStdinTTY().
+	Interactive bool
+	Stdin       io.Reader // injection for prompts (defaults to os.Stdin)
+	Stdout      io.Writer // injection for prompts (defaults to os.Stdout)
+}
+
+// normalized returns a copy of opts with Stdin/Stdout defaulted to
+// os.Stdin/os.Stdout when nil. Prevents bufio.NewReader(nil) panics
+// for library consumers that set Interactive=true but leave the IO
+// streams unset.
+func (opts InstallProjectOptions) normalized() InstallProjectOptions {
+	if opts.Stdin == nil {
+		opts.Stdin = os.Stdin
+	}
+	if opts.Stdout == nil {
+		opts.Stdout = os.Stdout
+	}
+	return opts
 }
 
 // InstallProjectReport summarizes what InstallProject did.
@@ -65,13 +91,17 @@ type InstallProjectReport struct {
 	Adopted            bool
 	ArchiveOnly        bool
 	ArchivePath        string
-	CLAUDEUpdateReport *CLAUDEUpdateReport
-	Warnings           []string
+	Warnings []string
+
+	// Adapter selection results (new in 2026-04-09 design).
+	Adapters        []string        // resolved adapter list (may be empty)
+	AdapterCleanups []CleanupReport // sections that were stripped/deleted
 }
 
 // InstallProject scaffolds .nanite/, NANITE.md, and CLAUDE.md managed sections
 // in projectDir. Dispatches to a branch based on detected state.
 func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectReport, error) {
+	opts = opts.normalized()
 	if opts.ProjectDir == "" {
 		return nil, errors.New("empty project dir")
 	}
@@ -110,7 +140,7 @@ func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectRep
 		if !hasAgentrc {
 			return nil, fmt.Errorf("--migrate-from-agentrc requires .agentrc/ in %s", projectDir)
 		}
-		return s.migrateFromAgentrc(projectDir, globalHome)
+		return s.migrateFromAgentrc(projectDir, globalHome, opts)
 	}
 
 	if hasAgentrc {
@@ -118,7 +148,7 @@ func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectRep
 	}
 
 	if hasNaniteDir {
-		return s.adoptExisting(projectDir, globalHome)
+		return s.adoptExisting(projectDir, globalHome, opts)
 	}
 
 	// Partial install detection: if a matching archive dir exists with a
@@ -139,10 +169,10 @@ func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectRep
 		}
 	}
 
-	return s.freshScaffold(projectDir, globalHome)
+	return s.freshScaffold(projectDir, globalHome, opts)
 }
 
-func (s *Service) freshScaffold(projectDir, globalHome string) (*InstallProjectReport, error) {
+func (s *Service) freshScaffold(projectDir, globalHome string, opts InstallProjectOptions) (*InstallProjectReport, error) {
 	src := ScaffoldSource{
 		FrameworkVersion: assets.Version(),
 		ProjectName:      filepath.Base(projectDir),
@@ -153,22 +183,59 @@ func (s *Service) freshScaffold(projectDir, globalHome string) (*InstallProjectR
 	if err := ScaffoldNaniteMD(projectDir, src); err != nil {
 		return nil, err
 	}
-	managed := buildManagedSection(src)
-	report, err := UpdateCLAUDEmd(filepath.Join(projectDir, "CLAUDE.md"), managed, nil)
+
+	cfgPath := filepath.Join(projectDir, ".nanite", "config.yaml")
+	cfg, err := loadProjectConfig(cfgPath)
 	if err != nil {
 		return nil, err
 	}
-	// Sync managed sections in all CLI target files via the built-in
-	// adapter registry. For fresh scaffold the agents list is typically
-	// empty, in which case the adapters short-circuit and only CLAUDE.md
-	// (already written above) ends up with content.
-	if err := syncAdaptersForProject(projectDir); err != nil {
+
+	resolved, previous, err := ResolveAdapters(cfg, projectDir, ResolveOpts{
+		Flag:        opts.Adapters,
+		NoAdapters:  opts.NoAdapters,
+		Reconfigure: opts.Reconfigure,
+		Interactive: opts.Interactive,
+		Stdin:       opts.Stdin,
+		Stdout:      opts.Stdout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve adapters: %w", err)
+	}
+
+	removed := setDifference(previous, resolved)
+	cleanupReports, err := cleanupRemovedAdapters(projectDir, removed)
+	if err != nil {
+		return nil, fmt.Errorf("cleanup removed adapters: %w", err)
+	}
+
+	if err := persistAdapterList(cfgPath, resolved); err != nil {
+		return nil, fmt.Errorf("persist adapter list: %w", err)
+	}
+
+	if err := syncAdaptersForProject(projectDir, resolved); err != nil {
 		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
+
 	return &InstallProjectReport{
-		FreshScaffold:      true,
-		CLAUDEUpdateReport: report,
+		FreshScaffold:   true,
+		Adapters:        resolved,
+		AdapterCleanups: cleanupReports,
 	}, nil
+}
+
+// setDifference returns elements present in `a` but not in `b`.
+func setDifference(a, b []string) []string {
+	bSet := make(map[string]bool, len(b))
+	for _, x := range b {
+		bSet[x] = true
+	}
+	var out []string
+	for _, x := range a {
+		if !bSet[x] {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 func (s *Service) archiveOnly(projectDir string) (*InstallProjectReport, error) {
@@ -192,28 +259,6 @@ func (s *Service) archiveOnly(projectDir string) (*InstallProjectReport, error) 
 		ArchiveOnly: true,
 		ArchivePath: archiveDir,
 	}, nil
-}
-
-// buildManagedSection returns the content that goes inside the
-// <!-- nanite:start --> / <!-- nanite:end --> block in CLAUDE.md. The
-// surrounding markers are added by agent.WriteManagedSection.
-func buildManagedSection(src ScaffoldSource) string {
-	_ = src // reserved for future templating
-	return `## Nanite
-
-Agent configuration for this project is managed by Nanite.
-
-- Boot prompt: ` + "`NANITE.md`" + ` at the project root
-- Agent config: ` + "`.nanite/config.yaml`" + `
-- Per-agent context: ` + "`.nanite/agents/*.md`" + `
-
-When the user says "Boot <agent>", look up the agent in .nanite/config.yaml
-under ` + "`agents:`" + `, load each role file from ` + "`~/.nanite/roles/`" + `, load the listed
-skills from ` + "`~/.nanite/skills/`" + `, and read the project context file from
-.nanite/.
-
-After context compaction, re-read NANITE.md and the active role/context files.
-`
 }
 
 // dirExists reports whether path exists and is a directory.

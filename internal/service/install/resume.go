@@ -65,23 +65,33 @@ func (s *Service) Resume(opts ResumeOptions) error {
 		}
 	}
 
-	if !hasPhase(state, PhaseClaudeSync) {
-		managed := buildManagedSection(src)
-		if _, err := UpdateCLAUDEmd(
-			filepath.Join(opts.ProjectDir, "CLAUDE.md"),
-			managed,
-			&CLAUDESnapshotOpts{Dir: opts.ArchivePath},
-		); err != nil {
-			return fmt.Errorf("update CLAUDE.md: %w", err)
+	if !hasPhase(state, PhaseClaudeSync) || !hasPhase(state, PhaseAdapterSync) {
+		// Replaces the legacy buildManagedSection + UpdateCLAUDEmd path.
+		// Load whatever adapter list was persisted (or empty if the interrupt
+		// happened before persistAdapterList ran), then re-persist and sync.
+		cfgPath := filepath.Join(opts.ProjectDir, ".nanite", "config.yaml")
+		cfg, err := loadProjectConfig(cfgPath)
+		if err != nil {
+			return fmt.Errorf("load project config: %w", err)
 		}
-		state.MarkPhaseComplete(PhaseClaudeSync)
+		resolved, _, err := ResolveAdapters(cfg, opts.ProjectDir, ResolveOpts{
+			Interactive: false,
+		})
+		if err != nil {
+			return fmt.Errorf("resolve adapters: %w", err)
+		}
+		if err := persistAdapterList(cfgPath, resolved); err != nil {
+			return fmt.Errorf("persist adapter list: %w", err)
+		}
+		state.MarkPhaseComplete(PhaseClaudeSync) // legacy phase name retained
 		if err := WriteState(statePath, state); err != nil {
 			return fmt.Errorf("write state after claude-sync: %w", err)
 		}
+		if err := syncAdaptersForProject(opts.ProjectDir, resolved); err != nil {
+			return fmt.Errorf("adapter sync: %w", err)
+		}
 	}
 
-	// Adapter sync is a no-op for now; still mark the phase so the marker
-	// reflects reality.
 	state.MarkPhaseComplete(PhaseAdapterSync)
 	state.MarkPhaseComplete(PhaseComplete)
 	if err := WriteState(statePath, state); err != nil {

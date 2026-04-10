@@ -3,6 +3,7 @@ package install
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -46,12 +47,16 @@ func TestIntegration_FullMigrationRoundTrip(t *testing.T) {
 	// Snapshot the original state.
 	originalState := snapshotDir(t, project)
 
-	// Migrate.
+	// Migrate. Pass all four adapters explicitly: the fixture has no CLI
+	// indicator files (no .claude/agents/, no .codex, etc.) so detection
+	// would return empty. The test asserts that all four adapter files are
+	// written, so we drive adapter selection via the --adapters flag.
 	svc := New()
 	report, err := svc.InstallProject(InstallProjectOptions{
 		ProjectDir:         project,
 		GlobalHome:         filepath.Join(home, ".nanite"),
 		MigrateFromAgentrc: true,
+		Adapters:           "claude,codex,gemini,opencode",
 	})
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -215,4 +220,115 @@ func compareSnapshots(before, after map[string][]byte) []string {
 		}
 	}
 	return diffs
+}
+
+func TestInstallProject_Fresh_NoAdapters_NoCLIFiles(t *testing.T) {
+	dir := t.TempDir()
+	home := setupFakeHome(t)
+
+	svc := New()
+	report, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: dir,
+		GlobalHome: filepath.Join(home, ".nanite"),
+		NoAdapters: true,
+	})
+	if err != nil {
+		t.Fatalf("InstallProject: %v", err)
+	}
+	if !report.FreshScaffold {
+		t.Error("expected FreshScaffold=true")
+	}
+	if len(report.Adapters) != 0 {
+		t.Errorf("Adapters: got %v, want []", report.Adapters)
+	}
+	for _, name := range []string{"CLAUDE.md", "AGENTS.md", "GEMINI.md", "OPENCODE.md"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should NOT exist with --no-adapters: %v", name, err)
+		}
+	}
+
+	cfg, err := loadProjectConfig(filepath.Join(dir, ".nanite", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Adapters == nil {
+		t.Error("expected non-nil Adapters in persisted config")
+	}
+	if len(*cfg.Adapters) != 0 {
+		t.Errorf("expected empty Adapters in persisted config, got %v", *cfg.Adapters)
+	}
+}
+
+func TestInstallProject_Fresh_AdaptersFlag_WritesFiles(t *testing.T) {
+	dir := t.TempDir()
+	home := setupFakeHome(t)
+
+	svc := New()
+	report, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: dir,
+		GlobalHome: filepath.Join(home, ".nanite"),
+		Adapters:   "claude,codex",
+	})
+	if err != nil {
+		t.Fatalf("InstallProject: %v", err)
+	}
+	if !report.FreshScaffold {
+		t.Error("expected FreshScaffold=true")
+	}
+	if !reflect.DeepEqual(report.Adapters, []string{"claude", "codex"}) {
+		t.Errorf("Adapters: got %v, want [claude codex]", report.Adapters)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
+		t.Errorf("CLAUDE.md should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Errorf("AGENTS.md should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "GEMINI.md")); !os.IsNotExist(err) {
+		t.Errorf("GEMINI.md should NOT exist: %v", err)
+	}
+}
+
+func TestInstallProject_Adopt_Reconfigure_RemovesDroppedAdapter(t *testing.T) {
+	dir := t.TempDir()
+	home := setupFakeHome(t)
+	globalHome := filepath.Join(home, ".nanite")
+
+	// First install with claude + codex.
+	if _, err := New().InstallProject(InstallProjectOptions{
+		ProjectDir: dir,
+		GlobalHome: globalHome,
+		Adapters:   "claude,codex",
+	}); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Fatalf("AGENTS.md should exist after first install: %v", err)
+	}
+
+	// Re-run with --reconfigure and only claude → AGENTS.md should be cleaned up.
+	report, err := New().InstallProject(InstallProjectOptions{
+		ProjectDir:  dir,
+		GlobalHome:  globalHome,
+		Adapters:    "claude",
+		Reconfigure: true,
+	})
+	if err != nil {
+		t.Fatalf("reconfigure: %v", err)
+	}
+	if !report.Adopted {
+		t.Errorf("expected Adopted=true, got %+v", report)
+	}
+	if !reflect.DeepEqual(report.Adapters, []string{"claude"}) {
+		t.Errorf("Adapters: got %v, want [claude]", report.Adapters)
+	}
+	if len(report.AdapterCleanups) != 1 {
+		t.Errorf("expected 1 cleanup report, got %d", len(report.AdapterCleanups))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Errorf("AGENTS.md should be deleted, stat: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
+		t.Errorf("CLAUDE.md should still exist: %v", err)
+	}
 }

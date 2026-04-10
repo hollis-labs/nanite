@@ -1,10 +1,46 @@
 package install
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestInstallProjectOptions_Normalized_DefaultsNilIOStreams(t *testing.T) {
+	opts := InstallProjectOptions{
+		// Stdin and Stdout intentionally nil
+	}
+	norm := opts.normalized()
+	if norm.Stdin == nil {
+		t.Error("Stdin should default to os.Stdin")
+	}
+	if norm.Stdout == nil {
+		t.Error("Stdout should default to os.Stdout")
+	}
+	if norm.Stdin != os.Stdin {
+		t.Error("Stdin should be os.Stdin")
+	}
+	if norm.Stdout != os.Stdout {
+		t.Error("Stdout should be os.Stdout")
+	}
+}
+
+func TestInstallProjectOptions_Normalized_PreservesSetIOStreams(t *testing.T) {
+	var buf bytes.Buffer
+	in := bytes.NewBufferString("hi")
+	opts := InstallProjectOptions{
+		Stdin:  in,
+		Stdout: &buf,
+	}
+	norm := opts.normalized()
+	if norm.Stdin != in {
+		t.Error("Stdin should be preserved when set")
+	}
+	if norm.Stdout != &buf {
+		t.Error("Stdout should be preserved when set")
+	}
+}
 
 func TestService_InstallHome(t *testing.T) {
 	home := t.TempDir()

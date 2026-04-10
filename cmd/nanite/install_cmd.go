@@ -11,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/service/install"
+	"github.com/mattn/go-isatty"
 )
 
 // cmdInstall is the entry point for `nanite install`. Thin wrapper over
@@ -27,7 +28,14 @@ func cmdInstall(args []string) {
 	refresh := fs.Bool("refresh", false, "re-extract embedded assets to ~/.nanite/, skipping user-modified files")
 	force := fs.Bool("force", false, "overwrite user-modified files during --refresh")
 	printDiff := fs.Bool("print-diff", false, "dry-run: show what would change (not yet implemented)")
+	adapters := fs.String("adapters", "", "comma-separated list of CLI adapters to manage (claude, codex, gemini, opencode)")
+	noAdapters := fs.Bool("no-adapters", false, "disable all CLI adapter management for this project")
+	reconfigure := fs.Bool("reconfigure", false, "re-prompt for adapter selection even if config has adapters: set")
 	fs.Parse(args)
+
+	if *adapters != "" && *noAdapters {
+		installDie("flag conflict", fmt.Errorf("--adapters and --no-adapters are mutually exclusive"))
+	}
 
 	svc := install.New()
 
@@ -131,6 +139,12 @@ func cmdInstall(args []string) {
 		GlobalHome:         defaultGlobalHome(),
 		MigrateFromAgentrc: *migrate,
 		ArchiveOnly:        *archiveOnly,
+		Adapters:           *adapters,
+		NoAdapters:         *noAdapters,
+		Reconfigure:        *reconfigure,
+		Interactive:        isStdinTTY(),
+		Stdin:              os.Stdin,
+		Stdout:             os.Stdout,
 	}
 	report, err := svc.InstallProject(opts)
 	if err != nil {
@@ -156,6 +170,29 @@ func cmdInstall(args []string) {
 		fmt.Printf("%s: adopted existing .nanite/ in %s\n", brand.BinaryName, projectDir)
 	case report.ArchiveOnly:
 		fmt.Printf("%s: archived %s (archive: %s)\n", brand.BinaryName, projectDir, report.ArchivePath)
+	}
+
+	// Post-install summary: show resolved adapters and any cleanup notices.
+	if len(report.Adapters) > 0 {
+		fmt.Printf("%s install: adapters [%s] (%d enabled, %d disabled)\n",
+			brand.BinaryName,
+			strings.Join(report.Adapters, ", "),
+			len(report.Adapters),
+			4-len(report.Adapters), // 4 user-selectable adapters total
+		)
+	} else if !report.ArchiveOnly {
+		fmt.Printf("%s install: no CLI adapters enabled (run with --reconfigure to add them later)\n",
+			brand.BinaryName)
+	}
+	for _, cleanup := range report.AdapterCleanups {
+		switch cleanup.Action {
+		case "stripped":
+			fmt.Printf("%s install: removed managed section from %s (re-run with --reconfigure to add it back)\n",
+				brand.BinaryName, filepath.Base(cleanup.FilePath))
+		case "deleted":
+			fmt.Printf("%s install: deleted %s (was managed-section-only)\n",
+				brand.BinaryName, filepath.Base(cleanup.FilePath))
+		}
 	}
 }
 
@@ -204,13 +241,11 @@ func installDie(action string, err error) {
 	os.Exit(1)
 }
 
-// isStdinTTY returns true if stdin is a terminal (character device).
+// isStdinTTY returns true if stdin is an actual interactive terminal.
+// Uses go-isatty for correct detection on macOS where /dev/null is also
+// a character device and would falsely trigger the interactive prompt path.
 func isStdinTTY() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (info.Mode() & os.ModeCharDevice) != 0
+	return isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
 }
 
 // resolveProjectDir expands "." to the current working directory and returns

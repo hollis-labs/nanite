@@ -35,7 +35,8 @@ var userSelectableAdapters = []string{"claude", "codex", "gemini", "opencode"}
 //
 // Returns (resolved, previous, error). The caller is responsible for
 // cleanup (using `previous - resolved`) and persistence. ResolveAdapters
-// is read-only — it does not write to disk.
+// is read-only — it does not write to disk. The cfg argument must be
+// non-nil; use loadProjectConfig to obtain one.
 func ResolveAdapters(cfg *projectConfig, projectDir string, opts ResolveOpts) (resolved []string, previous []string, err error) {
 	if cfg.Adapters != nil {
 		previous = append(previous, (*cfg.Adapters)...)
@@ -60,6 +61,11 @@ func ResolveAdapters(cfg *projectConfig, projectDir string, opts ResolveOpts) (r
 		return previous, previous, nil // resolved == previous (no-op case)
 	}
 
+	// 3b. Non-interactive --reconfigure with existing config: no-op, skip detection.
+	if !opts.Interactive && opts.Reconfigure && cfg.Adapters != nil {
+		return previous, previous, nil
+	}
+
 	// 4. Detection (with prompt in interactive mode).
 	detected := DetectAdapters(projectDir)
 	sort.Strings(detected)
@@ -69,11 +75,6 @@ func ResolveAdapters(cfg *projectConfig, projectDir string, opts ResolveOpts) (r
 		// to detection-only behavior — Task 10 will replace this branch
 		// with promptAdapterSelection().
 		return detected, previous, nil
-	}
-
-	// Non-interactive --reconfigure with existing config: keep current.
-	if opts.Reconfigure && cfg.Adapters != nil {
-		return previous, previous, nil
 	}
 
 	// Non-interactive fresh: use detection result.

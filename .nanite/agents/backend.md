@@ -375,9 +375,32 @@ Universal agent harness with plugin-per-adapter model. Spec: `docs/superpowers/s
 - **Run MCP server:** `./nanite mcp --db ./nanite.db [--session ID]` (stdio JSON-RPC)
 - **Docker:** `docker-compose up` (multi-stage: Node build -> Go build -> Alpine runtime, port 8090)
 
+### ⚠ Two binaries, only one is live — read this before debugging "my fix isn't taking effect"
+
+Nanite has **two separate binary locations** and running the wrong command will silently leave the Cerberus-managed service running stale code. This is the single most common source of "my fix isn't taking effect" confusion.
+
+| Command | Writes to | Is it the live service? |
+|---|---|---|
+| `go build ./cmd/nanite` *or* `go build -o nanite ./cmd/nanite` *or* `make build` | `./nanite` (project root) | **NO** — this binary is for local `./nanite serve` runs only. Cerberus does not know about it. |
+| `go install ./cmd/nanite` *or* `make install` | `~/go/bin/nanite` | **YES, iff you then restart the service.** This is what Cerberus launches. |
+| `cerberus_rebuild nanite-api --reason "..."` | `~/go/bin/nanite` *and* restarts the service | **YES — this is what you always want for a deploy.** |
+
+**The rule:** when you want your change to hit the live `nanite-api` (port 8090), use `cerberus_rebuild nanite-api` — nothing else. `go build` is only for compile-checking or for running a one-off `./nanite serve` outside Cerberus.
+
+Verifying which binary is actually running:
+
+```bash
+cerberus_status nanite-api                 # get the PID
+lsof -p <PID> | awk '$4=="txt"{print $NF}' # first line is the executable path
+```
+
+It should print `/Users/<you>/go/bin/nanite`. If it prints the project-root `./nanite`, you are not running under Cerberus — you launched it manually at some point.
+
+The `-dev` flag is **unrelated** to this. It only changes how the SPA is served (placeholder HTML instead of the `go:embed`'d UI, so Vite can run HMR on a different port — see `internal/server/spa.go:17`). Dev mode does not change which binary is running or where it lives.
+
 ## Notes
 
-- **Deploying changes:** Use Cerberus (`cerberus_rebuild nanite-api --reason "..."`). Direct `go build` outputs to `./nanite` in the project root, but the running service uses `~/go/bin/nanite` installed by Cerberus. These are separate binaries.
+- **Deploying changes:** Use Cerberus (`cerberus_rebuild nanite-api --reason "..."`). See §Build & Run "Two binaries, only one is live" above for the full footgun explanation.
 - **Pre-commit hooks via lefthook:** `gofmt`, `goimports`, `golangci-lint --new`, `go vet` (parallel). Frontend: `biome check`. Pre-push: `go test ./...`.
 - **SPA embedding:** Go binary embeds the built UI from `internal/server/ui_dist/` via `//go:embed`. The `-dev` flag skips this for local development with Vite HMR.
 - **Auth:** Optional basic auth via `NANITE_AUTH_USER` / `NANITE_AUTH_PASSWORD` env vars. Disabled when unset (local dev). `/api/health` is always exempt.

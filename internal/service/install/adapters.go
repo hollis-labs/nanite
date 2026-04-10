@@ -133,8 +133,8 @@ func snapshotAdapterTargets(projectDir, archiveDir string) error {
 // `<projectDir>/.nanite/config.yaml`. Returns nil on success.
 //
 // If the config file is missing or empty, the agents list is empty and
-// each adapter's SyncProjectRoot returns nil immediately (the built-in
-// adapters short-circuit on empty agent lists).
+// each adapter's SyncProjectRoot writes a placeholder managed section
+// rather than skipping the file.
 func syncAdaptersForProject(projectDir string) error {
 	cfgPath := filepath.Join(projectDir, ".nanite", "config.yaml")
 	agents, err := extractAgentsFromConfig(cfgPath)

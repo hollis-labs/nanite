@@ -15,13 +15,14 @@ import (
 // source of truth and only adds what's missing:
 //   - symlinks into globalHome for roles/skills/commands (if missing)
 //   - NANITE.md at project root (if missing)
-//   - CLAUDE.md managed section (created or updated, existing content
-//     outside the section preserved)
 //
 // The underlying Scaffold* helpers are already idempotent: they skip
 // existing files and symlinks, so re-running adopt on a completed project
 // is a no-op.
-func (s *Service) adoptExisting(projectDir, globalHome string) (*InstallProjectReport, error) {
+//
+// Follows the same Resolve → cleanup → persist → sync pattern as
+// freshScaffold, so --reconfigure and adapter removal work correctly.
+func (s *Service) adoptExisting(projectDir, globalHome string, opts InstallProjectOptions) (*InstallProjectReport, error) {
 	src := ScaffoldSource{
 		FrameworkVersion: assets.Version(),
 		ProjectName:      filepath.Base(projectDir),
@@ -40,28 +41,41 @@ func (s *Service) adoptExisting(projectDir, globalHome string) (*InstallProjectR
 		return nil, err
 	}
 
-	// UpdateCLAUDEmd creates or updates the managed section.
-	managed := buildManagedSection(src)
-	claudeReport, err := UpdateCLAUDEmd(
-		filepath.Join(projectDir, "CLAUDE.md"),
-		managed,
-		nil, // no snapshot dir for adopt (no archive involved)
-	)
+	cfgPath := filepath.Join(projectDir, ".nanite", "config.yaml")
+	cfg, err := loadProjectConfig(cfgPath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Sync managed sections in all CLI target files via the built-in
-	// adapter registry. Adopt is the typical entry point for projects
-	// that already have a populated .nanite/config.yaml (PR #11 manual
-	// rename, prior install, etc.), so the agents list is usually
-	// non-empty and the adapters write content to all 4 CLI files.
-	if err := syncAdaptersForProject(projectDir, nil); err != nil {
+	resolved, previous, err := ResolveAdapters(cfg, projectDir, ResolveOpts{
+		Flag:        opts.Adapters,
+		NoAdapters:  opts.NoAdapters,
+		Reconfigure: opts.Reconfigure,
+		Interactive: opts.Interactive,
+		Stdin:       opts.Stdin,
+		Stdout:      opts.Stdout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve adapters: %w", err)
+	}
+
+	removed := setDifference(previous, resolved)
+	cleanupReports, err := cleanupRemovedAdapters(projectDir, removed)
+	if err != nil {
+		return nil, fmt.Errorf("cleanup removed adapters: %w", err)
+	}
+
+	if err := persistAdapterList(cfgPath, resolved); err != nil {
+		return nil, fmt.Errorf("persist adapter list: %w", err)
+	}
+
+	if err := syncAdaptersForProject(projectDir, resolved); err != nil {
 		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
 
 	return &InstallProjectReport{
-		Adopted:            true,
-		CLAUDEUpdateReport: claudeReport,
+		Adopted:         true,
+		Adapters:        resolved,
+		AdapterCleanups: cleanupReports,
 	}, nil
 }

@@ -134,7 +134,7 @@ func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectRep
 	}
 
 	if hasNaniteDir {
-		return s.adoptExisting(projectDir, globalHome)
+		return s.adoptExisting(projectDir, globalHome, opts)
 	}
 
 	// Partial install detection: if a matching archive dir exists with a

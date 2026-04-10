@@ -254,11 +254,17 @@ func TestInstallProject_AdoptExisting(t *testing.T) {
 	if !strings.Contains(claudeStr, "User content.") {
 		t.Errorf("user content lost: %q", claude)
 	}
-	// Existing config.yaml and agents/backend.md preserved verbatim.
-	cfg, _ := os.ReadFile(filepath.Join(project, ".nanite", "config.yaml"))
-	if string(cfg) != "nanite_version: 2.3.0\nagents: {}\n" {
-		t.Errorf("config.yaml modified: %q", cfg)
+	// config.yaml: existing keys preserved; adapter list is now written by the
+	// new flow (persistAdapterList runs as part of adoptExisting).
+	cfgBytes, _ := os.ReadFile(filepath.Join(project, ".nanite", "config.yaml"))
+	cfgStr := string(cfgBytes)
+	if !strings.Contains(cfgStr, "nanite_version: 2.3.0") {
+		t.Errorf("config.yaml lost nanite_version: %q", cfgStr)
 	}
+	if !strings.Contains(cfgStr, "adapters:") {
+		t.Errorf("config.yaml missing adapters key: %q", cfgStr)
+	}
+	// agents/backend.md unchanged.
 	data, _ := os.ReadFile(filepath.Join(project, ".nanite", "agents", "backend.md"))
 	if string(data) != "# Backend\n" {
 		t.Errorf("existing agents content modified: %q", data)

@@ -71,10 +71,17 @@ func ResolveAdapters(cfg *projectConfig, projectDir string, opts ResolveOpts) (r
 	sort.Strings(detected)
 
 	if opts.Interactive {
-		// Prompt integration is wired in Task 10. For now, fall through
-		// to detection-only behavior — Task 10 will replace this branch
-		// with promptAdapterSelection().
-		return detected, previous, nil
+		picked, perr := promptAdapterSelection(promptInput{
+			Detected:      detected,
+			Current:       previous, // nil if cfg.Adapters was nil
+			IsReconfigure: opts.Reconfigure,
+			Stdin:         opts.Stdin,
+			Stdout:        opts.Stdout,
+		})
+		if perr != nil {
+			return nil, previous, perr
+		}
+		return picked, previous, nil
 	}
 
 	// Non-interactive fresh: use detection result.

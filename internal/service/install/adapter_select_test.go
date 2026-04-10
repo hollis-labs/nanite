@@ -118,5 +118,44 @@ func TestResolveAdapters_ReconfigureBypassesConfig_NonInteractive(t *testing.T) 
 	}
 }
 
-// Sentinel to keep bytes import alive for Task 10 prompt wiring.
-var _ = bytes.NewBuffer
+func TestResolveAdapters_InteractivePrompt_Accept(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# x"), 0o644)
+	cfg := &projectConfig{}
+	in := bytes.NewBufferString("y\n")
+	var out bytes.Buffer
+	resolved, _, err := ResolveAdapters(cfg, dir, ResolveOpts{
+		Interactive: true,
+		Stdin:       in,
+		Stdout:      &out,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(resolved, []string{"claude"}) {
+		t.Errorf("resolved: got %v, want [claude]", resolved)
+	}
+}
+
+func TestResolveAdapters_InteractivePrompt_Reconfigure_KeepsCurrent(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "GEMINI.md"), []byte("# x"), 0o644)
+	cfg := &projectConfig{Adapters: ptr([]string{"claude"})}
+	in := bytes.NewBufferString("\n")
+	var out bytes.Buffer
+	resolved, previous, err := ResolveAdapters(cfg, dir, ResolveOpts{
+		Reconfigure: true,
+		Interactive: true,
+		Stdin:       in,
+		Stdout:      &out,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(resolved, []string{"claude"}) {
+		t.Errorf("resolved: got %v, want current [claude]", resolved)
+	}
+	if !reflect.DeepEqual(previous, []string{"claude"}) {
+		t.Errorf("previous: got %v, want [claude]", previous)
+	}
+}

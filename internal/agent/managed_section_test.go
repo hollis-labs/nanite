@@ -262,6 +262,9 @@ func TestRemoveManagedSection_PreservesOutsideContent(t *testing.T) {
 	if strings.Contains(gotStr, managedEnd) {
 		t.Errorf("managed end marker still present in %q", gotStr)
 	}
+	if strings.Contains(gotStr, "\n\n\n") {
+		t.Errorf("output has triple newline (managed section collapse bug): %q", gotStr)
+	}
 }
 
 func TestRemoveManagedSection_EmptyAfterRemoval(t *testing.T) {

@@ -152,9 +152,11 @@ func RemoveManagedSection(path string) (removedAny bool, becameEmpty bool, err e
 	before := existing[:startIdx]
 	after := existing[endIdx:]
 
-	// Trim a single leading newline from `after` so we don't accumulate
-	// blank lines, mirroring WriteManagedSection's behavior.
-	after = strings.TrimPrefix(after, "\n")
+	// Trim all leading newlines from `after` — the "\n\n" padding injected
+	// below is the sole source of separation between user content before
+	// and after the removed block. This prevents triple-newline output
+	// when both sides have content.
+	after = strings.TrimLeft(after, "\n")
 
 	// Trim trailing whitespace from `before` so we don't leave dangling
 	// blank lines either.

@@ -77,8 +77,7 @@ type InstallProjectReport struct {
 	Adopted            bool
 	ArchiveOnly        bool
 	ArchivePath        string
-	CLAUDEUpdateReport *CLAUDEUpdateReport
-	Warnings           []string
+	Warnings []string
 
 	// Adapter selection results (new in 2026-04-09 design).
 	Adapters        []string        // resolved adapter list (may be empty)
@@ -245,28 +244,6 @@ func (s *Service) archiveOnly(projectDir string) (*InstallProjectReport, error) 
 		ArchiveOnly: true,
 		ArchivePath: archiveDir,
 	}, nil
-}
-
-// buildManagedSection returns the content that goes inside the
-// <!-- nanite:start --> / <!-- nanite:end --> block in CLAUDE.md. The
-// surrounding markers are added by agent.WriteManagedSection.
-func buildManagedSection(src ScaffoldSource) string {
-	_ = src // reserved for future templating
-	return `## Nanite
-
-Agent configuration for this project is managed by Nanite.
-
-- Boot prompt: ` + "`NANITE.md`" + ` at the project root
-- Agent config: ` + "`.nanite/config.yaml`" + `
-- Per-agent context: ` + "`.nanite/agents/*.md`" + `
-
-When the user says "Boot <agent>", look up the agent in .nanite/config.yaml
-under ` + "`agents:`" + `, load each role file from ` + "`~/.nanite/roles/`" + `, load the listed
-skills from ` + "`~/.nanite/skills/`" + `, and read the project context file from
-.nanite/.
-
-After context compaction, re-read NANITE.md and the active role/context files.
-`
 }
 
 // dirExists reports whether path exists and is a directory.

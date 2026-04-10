@@ -11,8 +11,12 @@ See `.nanite/config.yaml` for agent definitions and `.nanite/agents/` for per-ag
 ## How to boot
 
 - **Claude Code:** Open this directory. Claude reads `CLAUDE.md` (managed section written by `nanite install`) and discovers agents from `.nanite/`.
+- **Codex / Copilot CLI:** reads `AGENTS.md` (managed section written by `nanite install`).
+- **Gemini CLI:** reads `GEMINI.md` (managed section written by `nanite install`).
+- **Opencode CLI:** reads `OPENCODE.md` (managed section written by `nanite install`).
 - **Direct CLI:** `nanite serve --project .` starts the Nanite agent server for this project.
-- **Other CLI agents (Codex, Gemini, Opencode):** adapters for `AGENTS.md` / `GEMINI.md` / `OPENCODE.md` exist in the Nanite codebase (see `internal/plugin/builtin/adapter-*`) but `nanite install` does not yet invoke them to write managed sections. Follow-up work will wire `AdapterRegistry.SyncAllProjectRoots()` into the install service; until then, only CLAUDE.md is kept in sync automatically.
+
+The four CLI files above are kept in sync automatically by `nanite install`'s adapter pipeline. Edit your project content outside the `<!-- nanite:start --> ... <!-- nanite:end -->` markers — anything inside will be overwritten on the next install or refresh.
 
 ## Project-specific notes
 

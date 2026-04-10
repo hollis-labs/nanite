@@ -50,10 +50,12 @@ func newBuiltinAdapterRegistry() *agent.AdapterRegistry {
 
 // projectConfig is the minimal subset of .nanite/config.yaml that the
 // install service needs in order to extract an agents list for adapter
-// sync. We define our own struct (rather than reusing the one in
-// adapter-nanite-native) to avoid coupling.
+// sync and to read/write the adapters selection list. We define our own
+// struct (rather than reusing the one in adapter-nanite-native) to avoid
+// coupling.
 type projectConfig struct {
-	Agents map[string]projectAgent `yaml:"agents"`
+	Adapters *[]string               `yaml:"adapters,omitempty"`
+	Agents   map[string]projectAgent `yaml:"agents"`
 }
 
 type projectAgent struct {

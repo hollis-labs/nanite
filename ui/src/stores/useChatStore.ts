@@ -76,6 +76,12 @@ interface ChatState {
   removePendingTool: (sessionId: string) => void
   setCLIActive: (sessionId: string, info: CLIActiveInfo) => void
   removeCLIActive: (sessionId: string) => void
+
+  // Cross-session jump-to-message (search result navigation)
+  pendingJump: { sessionId: string; messageId: string } | null
+  setPendingJump: (jump: { sessionId: string; messageId: string } | null) => void
+  scrollToMessageId: string | null
+  setScrollToMessageId: (id: string | null) => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -265,4 +271,10 @@ export const useChatStore = create<ChatState>((set) => ({
       next.delete(sessionId)
       return { cliActiveSessions: next }
     }),
+
+  // Cross-session jump-to-message
+  pendingJump: null,
+  setPendingJump: (jump) => set({ pendingJump: jump }),
+  scrollToMessageId: null,
+  setScrollToMessageId: (id) => set({ scrollToMessageId: id }),
 }))

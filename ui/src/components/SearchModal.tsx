@@ -13,6 +13,7 @@ import {
 import { api } from "@/lib/api";
 import type { SearchResult } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
+import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 
 interface SearchModalProps {
@@ -38,6 +39,7 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage);
+  const setPendingJump = useChatStore((s) => s.setPendingJump);
 
   // Reset query when modal opens
   useEffect(() => {
@@ -100,13 +102,13 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
 
   const selectMessage = useCallback(
     (result: SearchResult) => {
+      setPendingJump({ sessionId: result.session_id, messageId: result.message_id });
       setActiveSession(result.session_id);
       setCurrentPage("chat");
       window.location.hash = "#chat";
       onOpenChange(false);
-      // TODO: scroll to specific message via jumpToMessage when wired
     },
-    [setActiveSession, setCurrentPage, onOpenChange],
+    [setPendingJump, setActiveSession, setCurrentPage, onOpenChange],
   );
 
   const showMessageResults = query.length >= 2;

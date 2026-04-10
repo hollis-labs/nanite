@@ -177,21 +177,65 @@ export function useChat(sessionId: string | null) {
     }
   }, []);
 
-  // Load messages when sessionId changes
+  // Load messages when sessionId changes.
+  //
+  // If a pending cross-session jump is already queued for this sessionId when
+  // the effect fires, we skip the normal loadMessages path entirely — the
+  // jump effect below will fetch the messages-around window instead, so
+  // running loadMessages first would be wasted work and would race with the
+  // jump fetch (whoever called setMessages last would win).
   useEffect(() => {
-    void loadMessages();
-    // Load retained tool calls — skip prune if settings not yet cached (avoids
-    // pruning with wrong default when user configured -1). Re-runs when settings load
-    // via the separate effect below.
+    let cancelled = false;
+    const queuedJump = useChatStore.getState().pendingJump;
+    const skipLoad = queuedJump && queuedJump.sessionId === sessionId && !!sessionId;
+    if (!skipLoad) {
+      (async () => {
+        await loadMessages();
+      })();
+    }
+    // Session-switch side effects — always run regardless of jump state.
     const settings = queryClient.getQueryData<UserSettings>(['settings'])
     const retention = settings ? settings.tool_drawer_retention : -1
     store().loadSessionToolCalls(sessionId, retention);
-    // Close the tool drawer on session switch — user opens as needed
     useLayoutStore.getState().setToolDrawerState('closed');
-    // Clear text-only mode on session switch — it will be re-set if the new
-    // session's agent also has 0 MCP tools.
     store().setTextOnlyMode(false);
+    return () => {
+      cancelled = true;
+      void cancelled;
+    };
   }, [loadMessages, sessionId]);
+
+  // Pending-jump consumer. Subscribes reactively to `pendingJump` so it fires
+  // for BOTH cross-session jumps (sessionId also changes) and same-session
+  // jumps (only pendingJump changes). On trigger, fetches the messages-around
+  // window and signals ChatTranscript to scroll + highlight.
+  const pendingJump = useChatStore((s) => s.pendingJump);
+  useEffect(() => {
+    if (!pendingJump || !sessionId || pendingJump.sessionId !== sessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const page = await api.getMessagesAround(sessionId, pendingJump.messageId);
+        if (cancelled) return;
+        setMessages(page.messages ?? []);
+        setPaginationState({ total: page.total, oldestOffset: 0 });
+        useChatStore.getState().setScrollToMessageId(pendingJump.messageId);
+      } catch (err) {
+        console.error("Failed to load messages around jump target:", err);
+      }
+      // Clear the pending jump (success or failure) unless this run was cancelled
+      // or the store now holds a different jump. Done outside the catch to
+      // avoid a return-in-finally pattern.
+      if (cancelled) return;
+      const current = useChatStore.getState().pendingJump;
+      if (current && current.messageId === pendingJump.messageId && current.sessionId === pendingJump.sessionId) {
+        useChatStore.getState().setPendingJump(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingJump, sessionId]);
 
   const sendMessage = useCallback(
     async (content: string) => {

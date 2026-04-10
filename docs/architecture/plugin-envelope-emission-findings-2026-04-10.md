@@ -215,7 +215,7 @@ Additional emission sites in core chat/envelope code:
 ### 3.5 Types emitted by a plugin's own code (not via tool output)
 
 - **`oembed-card`** — emitted by `internal/plugin/builtin/oembed/plugin.go:131-139` in the `message.sent` hook handler. Assigned to `event.Data["envelope"]`. Per §2.3, this assignment is dead code.
-- **`giphy-modal`** (second emission site) — emitted by `internal/plugin/builtin/giphy/plugin.go:154-161` in the `message.sent` hook handler. Also assigned to `event.Data["envelope"]`. Also dead code per §2.3.
+- **`giphy-card`** — emitted by `internal/plugin/builtin/giphy/plugin.go:154-161` in the `message.sent` hook handler (the literal `"type": "giphy-card"` is at line 156). Assigned to `event.Data["envelope"]`. Dead code per §2.3. **Anomaly:** this type name does not match the `giphy-modal` declaration in `plugins/giphy/plugin.yaml:17`. The plugin's own Go code emits a type name that disagrees with its own manifest, and no downstream consumer of either name exists that would have caught the discrepancy. This is additional evidence that the hook-based envelope emission path has never been exercised in production.
 
 ### 3.6 Types referenced in adapter-claude system prompt
 
@@ -377,7 +377,7 @@ Commands and actions run during this investigation on 2026-04-10:
 - `grep -rn 'envelopes\|RegisterEnvelopeType\|UIComponentTypeEnvelope'` over `internal/plugin/loader.go host.go registry.go types.go manage.go config.go` — confirmed §2.5
 - `grep -rn 'schemaFS\|loadSchemaFiles\|jsonschema\.NewCompiler' --include='*.go'` — confirmed §2.4
 - `grep -rn 'ParseEnvelopes\|ENVELOPE_DATA' --include='*.go'` — enumerated all emission sites and the captureEnvelopeData extractor
-- `sqlite3 /Users/chrispian/Projects-apps/nanite/nanite.db "SELECT envelope FROM messages WHERE session_id = 'bf0a2fbe-9d10-40b3-9191-254a98741595' ..."` — retrieved the live giphy envelope documented in §2.1
+- `sqlite3 $PWD/nanite.db "SELECT envelope FROM messages WHERE session_id = 'bf0a2fbe-9d10-40b3-9191-254a98741595' ..."` — retrieved the live giphy envelope documented in §2.1 (run from the repo root)
 - `wc -l config/envelopes.yaml` — confirmed 84 lines, full contents read
 - Full read of `internal/chat/envelope.go` (runtime file) — confirmed `registeredTypes` map, advisory validation
 - Full read of `internal/plugin/host.go:1078-1110` — confirmed `EmitEvent` flow

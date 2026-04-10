@@ -396,7 +396,7 @@ lsof -p <PID> | awk '$4=="txt"{print $NF}' # first line is the executable path
 
 It should print `/Users/<you>/go/bin/nanite`. If it prints the project-root `./nanite`, you are not running under Cerberus — you launched it manually at some point.
 
-The `-dev` flag is **unrelated** to this. It only changes how the SPA is served (placeholder HTML instead of the `go:embed`'d UI, so Vite can run HMR on a different port — see `internal/server/spa.go:17`). Dev mode does not change which binary is running or where it lives.
+The `-dev` flag is **unrelated** to this. It only changes how the SPA is served (placeholder HTML instead of the `go:embed`'d UI, so Vite can run HMR on a different port — see the `if s.dev` branch at `internal/server/spa.go:19`). Dev mode does not change which binary is running or where it lives.
 
 ## Notes
 

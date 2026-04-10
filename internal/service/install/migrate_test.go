@@ -45,12 +45,10 @@ func TestInstallProject_Fresh(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(project, "NANITE.md")); err != nil {
 		t.Errorf("NANITE.md missing: %v", err)
 	}
-	// CLAUDE.md was created with the managed section
-	claude, err := os.ReadFile(filepath.Join(project, "CLAUDE.md"))
-	if err != nil {
-		t.Errorf("CLAUDE.md missing: %v", err)
-	} else if !strings.Contains(string(claude), "<!-- nanite:start -->") {
-		t.Errorf("CLAUDE.md missing nanite markers: %q", claude)
+	// With no --adapters flag and no detection evidence, non-interactive fresh
+	// scaffold should NOT write any CLI integration files (CLAUDE.md, etc.).
+	if _, err := os.Stat(filepath.Join(project, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Errorf("CLAUDE.md should NOT exist on non-interactive fresh install with no adapters flag: %v", err)
 	}
 }
 

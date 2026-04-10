@@ -6,6 +6,7 @@ package install
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -56,6 +57,17 @@ type InstallProjectOptions struct {
 	GlobalHome         string // defaults to ~/.nanite
 	MigrateFromAgentrc bool
 	ArchiveOnly        bool
+
+	// Adapter selection options (new in 2026-04-09 design).
+	Adapters    string // value of --adapters flag, comma-separated, "" = unset
+	NoAdapters  bool   // --no-adapters flag
+	Reconfigure bool   // --reconfigure flag
+
+	// Interactive controls whether to prompt the user for adapter
+	// selection. Set by the CLI based on isStdinTTY().
+	Interactive bool
+	Stdin       io.Reader // injection for prompts (defaults to os.Stdin)
+	Stdout      io.Writer // injection for prompts (defaults to os.Stdout)
 }
 
 // InstallProjectReport summarizes what InstallProject did.
@@ -67,6 +79,10 @@ type InstallProjectReport struct {
 	ArchivePath        string
 	CLAUDEUpdateReport *CLAUDEUpdateReport
 	Warnings           []string
+
+	// Adapter selection results (new in 2026-04-09 design).
+	Adapters        []string        // resolved adapter list (may be empty)
+	AdapterCleanups []CleanupReport // sections that were stripped/deleted
 }
 
 // InstallProject scaffolds .nanite/, NANITE.md, and CLAUDE.md managed sections
@@ -139,10 +155,10 @@ func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectRep
 		}
 	}
 
-	return s.freshScaffold(projectDir, globalHome)
+	return s.freshScaffold(projectDir, globalHome, opts)
 }
 
-func (s *Service) freshScaffold(projectDir, globalHome string) (*InstallProjectReport, error) {
+func (s *Service) freshScaffold(projectDir, globalHome string, opts InstallProjectOptions) (*InstallProjectReport, error) {
 	src := ScaffoldSource{
 		FrameworkVersion: assets.Version(),
 		ProjectName:      filepath.Base(projectDir),
@@ -153,22 +169,59 @@ func (s *Service) freshScaffold(projectDir, globalHome string) (*InstallProjectR
 	if err := ScaffoldNaniteMD(projectDir, src); err != nil {
 		return nil, err
 	}
-	managed := buildManagedSection(src)
-	report, err := UpdateCLAUDEmd(filepath.Join(projectDir, "CLAUDE.md"), managed, nil)
+
+	cfgPath := filepath.Join(projectDir, ".nanite", "config.yaml")
+	cfg, err := loadProjectConfig(cfgPath)
 	if err != nil {
 		return nil, err
 	}
-	// Sync managed sections in all CLI target files via the built-in
-	// adapter registry. For fresh scaffold the agents list is typically
-	// empty, in which case the adapters short-circuit and only CLAUDE.md
-	// (already written above) ends up with content.
-	if err := syncAdaptersForProject(projectDir, nil); err != nil {
+
+	resolved, previous, err := ResolveAdapters(cfg, projectDir, ResolveOpts{
+		Flag:        opts.Adapters,
+		NoAdapters:  opts.NoAdapters,
+		Reconfigure: opts.Reconfigure,
+		Interactive: opts.Interactive,
+		Stdin:       opts.Stdin,
+		Stdout:      opts.Stdout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve adapters: %w", err)
+	}
+
+	removed := setDifference(previous, resolved)
+	cleanupReports, err := cleanupRemovedAdapters(projectDir, removed)
+	if err != nil {
+		return nil, fmt.Errorf("cleanup removed adapters: %w", err)
+	}
+
+	if err := persistAdapterList(cfgPath, resolved); err != nil {
+		return nil, fmt.Errorf("persist adapter list: %w", err)
+	}
+
+	if err := syncAdaptersForProject(projectDir, resolved); err != nil {
 		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
+
 	return &InstallProjectReport{
-		FreshScaffold:      true,
-		CLAUDEUpdateReport: report,
+		FreshScaffold:   true,
+		Adapters:        resolved,
+		AdapterCleanups: cleanupReports,
 	}, nil
+}
+
+// setDifference returns elements present in `a` but not in `b`.
+func setDifference(a, b []string) []string {
+	bSet := make(map[string]bool, len(b))
+	for _, x := range b {
+		bSet[x] = true
+	}
+	var out []string
+	for _, x := range a {
+		if !bSet[x] {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 func (s *Service) archiveOnly(projectDir string) (*InstallProjectReport, error) {

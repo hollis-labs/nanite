@@ -3,6 +3,7 @@ package install
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -215,4 +216,71 @@ func compareSnapshots(before, after map[string][]byte) []string {
 		}
 	}
 	return diffs
+}
+
+func TestInstallProject_Fresh_NoAdapters_NoCLIFiles(t *testing.T) {
+	dir := t.TempDir()
+	home := setupFakeHome(t)
+
+	svc := New()
+	report, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: dir,
+		GlobalHome: filepath.Join(home, ".nanite"),
+		NoAdapters: true,
+	})
+	if err != nil {
+		t.Fatalf("InstallProject: %v", err)
+	}
+	if !report.FreshScaffold {
+		t.Error("expected FreshScaffold=true")
+	}
+	if len(report.Adapters) != 0 {
+		t.Errorf("Adapters: got %v, want []", report.Adapters)
+	}
+	for _, name := range []string{"CLAUDE.md", "AGENTS.md", "GEMINI.md", "OPENCODE.md"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should NOT exist with --no-adapters: %v", name, err)
+		}
+	}
+
+	cfg, err := loadProjectConfig(filepath.Join(dir, ".nanite", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Adapters == nil {
+		t.Error("expected non-nil Adapters in persisted config")
+	}
+	if len(*cfg.Adapters) != 0 {
+		t.Errorf("expected empty Adapters in persisted config, got %v", *cfg.Adapters)
+	}
+}
+
+func TestInstallProject_Fresh_AdaptersFlag_WritesFiles(t *testing.T) {
+	dir := t.TempDir()
+	home := setupFakeHome(t)
+
+	svc := New()
+	report, err := svc.InstallProject(InstallProjectOptions{
+		ProjectDir: dir,
+		GlobalHome: filepath.Join(home, ".nanite"),
+		Adapters:   "claude,codex",
+	})
+	if err != nil {
+		t.Fatalf("InstallProject: %v", err)
+	}
+	if !report.FreshScaffold {
+		t.Error("expected FreshScaffold=true")
+	}
+	if !reflect.DeepEqual(report.Adapters, []string{"claude", "codex"}) {
+		t.Errorf("Adapters: got %v, want [claude codex]", report.Adapters)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
+		t.Errorf("CLAUDE.md should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Errorf("AGENTS.md should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "GEMINI.md")); !os.IsNotExist(err) {
+		t.Errorf("GEMINI.md should NOT exist: %v", err)
+	}
 }

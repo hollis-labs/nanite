@@ -273,9 +273,6 @@ export const api = {
     return res.json();
   },
 
-  /** @deprecated Use listAgents — same endpoint, same return type */
-  listAgentProfiles: async (): Promise<AgentProfile[]> => api.listAgents(),
-
   getAgentProfile: async (
     id: string,
   ): Promise<{ agent: AgentProfile; modes: AgentModeProfile[] }> => {

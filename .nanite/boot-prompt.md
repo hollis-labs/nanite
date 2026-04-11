@@ -178,6 +178,32 @@ COMPLETED FRONTEND TASKS (since vNext):
   ✅ Workflow progress panel
   ✅ Memory viewer
 
+COMPLETED (Beta Polish — PR #18, 2026-04-10):
+  ✅ Tooltip.tsx → tooltip.tsx rename — fixes fresh-worktree/clone build failures
+     under forceConsistentCasingInFileNames (git had tracked capitalized filename
+     since Sprint 0; main had an uncommitted on-disk rename APFS-hid from git)
+  ✅ Plugin slot lookup simplification — replaced gitignored empty-scaffolding
+     ui/src/generated/plugin-slot-components.ts with 4-line runtime shim at
+     ui/src/lib/plugin-slot-lookup.ts; fresh checkouts now build
+  ✅ Search → jump-to-message — SearchModal clicks navigate to target session,
+     scroll target message into view, flash 1.5s ring highlight. Works for both
+     same-session and cross-session jumps via pendingJump + scrollToMessageId
+     state bus in useChatStore and a dedicated reactive effect in useChat.
+  ✅ Anti-pattern checklist cleanup — items 1, 2, 3, 5, 6 in frontend.md
+     §Anti-Patterns Found were closed in prior work but the list wasn't
+     updated; now reflects reality. Dead `listAgentProfiles` alias removed.
+  ✅ New §Known Gaps section in .nanite/agents/frontend.md documenting:
+     (1) plugin slot component resolution is incomplete — backend slot system
+     is live but frontend component resolution was never built. No plugin
+     registers a React component via registerSlotComponent() at runtime;
+     real plugins bypass the slot system with hardcoded AppShell mappings.
+     See docs/architecture/plugin-system.md §13.
+     (2) chat window-mode pagination — after a jump-to-message, useChat
+     fetches a centered window but paginationState is set to null because
+     the messages?around= endpoint doesn't return oldest_offset, so
+     "load older" is hidden until session re-entry. Post-beta fix: extend
+     backend response.
+
 PENDING FRONTEND TASKS:
 
 1. Agent Adapter UI (priority: medium, from PR #11)
@@ -188,4 +214,10 @@ PENDING FRONTEND TASKS:
    - Adapter management — enable/disable per adapter
    - Backend: AdapterRegistry, 5 adapters, override cascade all ready
    - Spec: docs/superpowers/specs/2026-04-08-agent-adapter-architecture-design.md § 8
+
+2. Window-mode pagination for jump-to-message (post-beta)
+   - Extend backend `/api/sessions/{id}/messages?around={msg}` to return
+     oldest_offset for the window so useChat can build a real paginationState
+   - Re-enable "load older" button after jump lands
+   - See frontend.md §Known Gaps for full context
 ```

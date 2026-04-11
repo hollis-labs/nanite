@@ -217,17 +217,17 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 ## Anti-Patterns Found
 
-1. **Loose TypeScript** — `(a as any).is_primary` casts in AppShell to check session agent role. Should use proper type narrowing or extend the `SessionAgent` type.
+1. ~~**Loose TypeScript** — `(a as any).is_primary` casts in AppShell~~ — **FIXED.** No `as any` casts remain in `AppShell.tsx`.
 
-2. **Duplicate API definitions** — `listAgentProfiles()` and `listAgents()` both hit `/api/agents`. One should delegate to the other.
+2. ~~**Duplicate API definitions** — `listAgentProfiles()` and `listAgents()`~~ — **FIXED (2026-04-10).** Dead `listAgentProfiles` alias removed from `lib/api.ts`; `listAgents()` is canonical.
 
-3. **Long hook dependency arrays** — `useChat.sendMessage` has 17 dependencies, risking stale closures. Consider `useRef` for stable callback references.
+3. ~~**Long hook dependency arrays** — `useChat.sendMessage` 17 deps~~ — **FIXED.** `sendMessage` dep array now `[sessionId, queryClient]` (2 deps).
 
 4. ~~**Manual Map mutations in store**~~ — **FIXED.** Store now creates immutable `new Map()` copies for all Map mutations (`activeStreams`, `pendingTools`, `cliActiveSessions`).
 
-5. **Magic event strings** — SSE event types (`'delta'`, `'tool_call'`, etc.) are hardcoded strings. Define as constants or an enum.
+5. ~~**Magic event strings** — SSE event types~~ — **FIXED.** Centralized as `SSE.DELTA`, `SSE.TOOL_CALL`, etc. (see `lib/sse-events.ts`), used throughout `useChat.ts`.
 
-6. **Global error counter** — `errorCounter` variable in useChat is module-scoped outside the component, persisting across re-renders in unexpected ways.
+6. ~~**Global error counter** — module-scoped `errorCounter` in `useChat`~~ — **FIXED.** Symbol no longer present.
 
 ---
 
@@ -245,15 +245,33 @@ Small items the frontend agent should knock out during the beta-prep window. The
 
 ### Code quality — from §Anti-Patterns Found above
 
-- [ ] **(1)** Replace `(a as any).is_primary` cast in `AppShell.tsx` with proper type narrowing. Extend `SessionAgent` type in `lib/types.ts` if the field is real.
-- [ ] **(2)** Consolidate `listAgentProfiles()` and `listAgents()` in `lib/api.ts` — both hit `/api/agents`. Pick one canonical name, delete the other, update call sites.
-- [ ] **(3)** Refactor `useChat.sendMessage` 17-dep hook array. Extract stable callbacks via `useRef` or split responsibilities. Stale-closure risk grows with every new dependency.
-- [ ] **(5)** Replace magic SSE event strings (`'delta'`, `'tool_call'`, `'tool_result'`, `'tool_warning'`, `'status'`, `'circuit_open'`, `'session_takeover'`, `'stream_end'`, `'error'`) with a shared const/enum. Single source of truth in `lib/types.ts` or new `lib/sse-events.ts`.
-- [ ] **(6)** Move module-scoped `errorCounter` in `hooks/useChat.ts` into a `useRef` or component-local state. Currently persists across re-renders in unexpected ways.
+All code-quality items (1, 3, 5, 6) have been resolved in flight since this list was written. Item (2) closed 2026-04-10. See the strike-throughs in §Anti-Patterns Found above for specifics. **No open code-quality items remain.**
 
 ### Wiring — from inline TODOs
 
-- [ ] **`SearchModal.tsx:107`** — wire `jumpToMessage` so search results scroll to the specific message on select. Currently commented `// TODO: scroll to specific message via jumpToMessage when wired`. Low-hanging UX improvement.
+- [x] **`SearchModal.tsx`** — `jumpToMessage` wired via `pendingJump` state bus in `useChatStore` (2026-04-10). `useChat` has a dedicated reactive `pendingJump` effect (separate from the load-messages effect) that fetches the messages-around window on trigger and signals `ChatTranscript` via `scrollToMessageId`. `ChatTranscript`'s scroll effect uses a `requestAnimationFrame` retry loop (max 1s deadline) because the signal can race ahead of the DOM commit for fetched messages. Works for both same-session and cross-session jumps.
+
+---
+
+## Known Gaps
+
+> Architectural or design gaps that affect how the frontend should evolve. Not bugs, not backlog polish — these are decisions that were deferred or started but not finished. Read this before doing related work so you don't rebuild a half-built abstraction on top of another one.
+
+### Plugin slot component resolution — incomplete
+
+The backend slot system (`internal/plugin/host.go` `RegisterSlot`/`GetAllSlots`, `/api/plugins/ui-slots`) is live, and plugins register slot entries with a `component` string field (e.g. fragments-engine's `sprint-planning`). The frontend fetches them via `usePluginSlots()` and 3 call sites (`AppShell.tsx`, `RightRail.tsx`, `SettingsPage.tsx`) look up the component via `getSlotComponent()` in `ui/src/lib/plugin-slot-lookup.ts`.
+
+**The gap:** there is no mechanism for a plugin to ship a React component that `getSlotComponent()` can return. Today it only delegates to the runtime `getDynamicSlotComponent()` in `plugin-loader.ts`, which would return a hit if a plugin called `registerSlotComponent()` at runtime — but **no plugin does**. Real plugins that need UI (like fragments-engine's sprint-planning modal) bypass the slot system entirely: they register an action name in Go, and `AppShell.tsx` has a hardcoded `useEffect` that catches a `plugin-modal` event and renders a hardcoded `<SprintPlanningModal>`. All 3 `getSlotComponent()` call sites handle `undefined` gracefully (silent no-render), so the gap is invisible at runtime.
+
+**Earlier state (now cleaned up):** there used to be a `ui/src/generated/plugin-slot-components.ts` file with empty `CORE_ENTRIES`/`PLUGIN_ENTRIES` registries and `@PLUGIN_SLOT_ENTRIES_START`/`END` marker comments for a never-written generator. It was gitignored because it lived under `ui/src/generated/`, which broke fresh checkouts. Removed 2026-04-10 and replaced with the 4-line `plugin-slot-lookup.ts` shim.
+
+**What needs deciding before any work here:** how should plugins ship React components to the frontend? Options roughly: (a) convention-based lazy import from a plugin path, (b) plugin JS bundles loaded over HTTP at runtime, (c) a build-time codegen step that scans `plugin.yaml` manifests for component declarations and writes a registry like `plugin-envelopes.ts`. Each has real design trade-offs — don't pick one in a hurry. See `docs/architecture/plugin-system.md` §13 ("No Widget/Slot System") for the documented acknowledgment of this gap.
+
+### Chat window-mode pagination after jump-to-message — unresolved
+
+After a search → jump-to-message lands, `useChat` fetches a centered window via `api.getMessagesAround` and sets `paginationState` to `null`. The null state hides the "load older" button and makes `hasOlderMessages` return false — because the `messages-around` endpoint doesn't currently return the window's `oldest_offset` relative to the full session, so we genuinely don't know where in the full history we are. Users who land on a jumped-to message therefore cannot scroll further back within that session until they re-enter it normally.
+
+**Options for fixing:** extend the backend `messages?around=...` response to include `oldest_offset`/`total` for the around-window, then `useChat` can reconstruct a real pagination state; OR add an explicit "window mode" flag to `paginationState` that shows a "Load full history" button instead of "Load older"; OR keep current behavior and require a session re-entry. Post-beta decision.
 
 ---
 

@@ -52,6 +52,8 @@ export function ChatTranscript({
   const saveToolCallDisplayMode = useChatStore((s) => s.saveToolCallDisplayMode);
   const loadToolCallDisplayMode = useChatStore((s) => s.loadToolCallDisplayMode);
   const pendingApprovals = useChatStore((s) => s.pendingApprovals);
+  const scrollToMessageId = useChatStore((s) => s.scrollToMessageId);
+  const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId);
   const { data: userSettings } = useSettings();
   const toolStreamBehavior = userSettings?.tool_stream_behavior ?? 'streaming';
   const chatErrors = useChatStore((s) => s.chatErrors);
@@ -212,9 +214,85 @@ export function ChatTranscript({
     setUserHasScrolled(false);
   }, []);
 
+  // Scroll a specific message into view when a cross-session jump lands.
+  // Notes on the design:
+  //   - Uses requestAnimationFrame-based polling (max ~1s) because the effect
+  //     fires as soon as `scrollToMessageId` is set, which can race ahead of
+  //     the DOM commit for the messages fetched by useChat's pending-jump
+  //     consumer. We retry until the target element exists.
+  //   - The store state is cleared INSIDE the setTimeout (not eagerly) because
+  //     this effect subscribes to `scrollToMessageId` — clearing it eagerly
+  //     would re-run the effect, running the previous cleanup which would
+  //     cancel the highlight-removal timer and leave the ring on-screen.
+  //   - `suppressAutoScrollRef` prevents the auto-scroll-to-bottom effect
+  //     from stealing focus on the same render.
+  const suppressAutoScrollRef = useRef(false);
+  useEffect(() => {
+    if (!scrollToMessageId) return;
+    const HIGHLIGHT_CLASSES = ["ring-2", "ring-primary/60", "rounded-md", "transition-shadow"] as const;
+    let removeTimer: ReturnType<typeof setTimeout> | null = null;
+    let rafId: number | null = null;
+    let target: HTMLElement | null = null;
+    const deadline = Date.now() + 1000; // give up polling after 1s
+
+    const giveUp = () => {
+      // Target never arrived. Clear the store state so the next jump can
+      // retrigger and the app doesn't sit in "pending scroll" forever.
+      console.warn(
+        `[ChatTranscript] Jump target ${scrollToMessageId} not found within ${1000}ms — clearing pending scroll.`,
+      );
+      setScrollToMessageId(null);
+    };
+
+    const tryLocate = () => {
+      const scrollElement = scrollRef.current;
+      if (!scrollElement) {
+        if (Date.now() < deadline) {
+          rafId = requestAnimationFrame(tryLocate);
+        } else {
+          giveUp();
+        }
+        return;
+      }
+      target = scrollElement.querySelector<HTMLElement>(
+        `[data-message-id="${scrollToMessageId}"]`,
+      );
+      if (!target) {
+        if (Date.now() < deadline) {
+          rafId = requestAnimationFrame(tryLocate);
+        } else {
+          giveUp();
+        }
+        return;
+      }
+      // Found it — scroll + highlight + schedule cleanup.
+      suppressAutoScrollRef.current = true;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add(...HIGHLIGHT_CLASSES);
+      setIsAtBottom(false);
+      setUserHasScrolled(true);
+      removeTimer = setTimeout(() => {
+        target?.classList.remove(...HIGHLIGHT_CLASSES);
+        setScrollToMessageId(null);
+      }, 1500);
+    };
+
+    rafId = requestAnimationFrame(tryLocate);
+
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      if (removeTimer !== null) clearTimeout(removeTimer);
+      target?.classList.remove(...HIGHLIGHT_CLASSES);
+    };
+  }, [scrollToMessageId, setScrollToMessageId]);
+
   // Auto-scroll to bottom on new messages or streaming updates
   // Only when user is at bottom AND hasn't manually scrolled up
   useEffect(() => {
+    if (suppressAutoScrollRef.current) {
+      suppressAutoScrollRef.current = false;
+      return;
+    }
     if (isAtBottom && !userHasScrolled) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }

@@ -25,7 +25,7 @@ import {
 } from "@/hooks/useHashRoute";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
 import { resolveIcon } from "@/lib/icons";
-import { getSlotComponent } from "@/generated/plugin-slot-components";
+import { getSlotComponent } from "@/lib/plugin-slot-lookup";
 import { useNavigationStore } from "@/stores/useNavigationStore";
 import { ActionsPanel } from "./ActionsPanel";
 import { AgentProfileManager } from "./AgentProfileManager";

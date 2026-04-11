@@ -331,3 +331,16 @@ VALIDATION GATES per track are spelled out in the execution plan. Each track
 has a "gate for leaving" subsection with concrete check criteria. Do not
 declare a track complete without running them.
 ```
+
+## Deferred from Phase 1 audit campaign (2026-04-11) — needs scoping session
+
+The following items were pulled out of the Phase 1 audit queue during the 2026-04-11 audit-orchestrator brainstorm. They are not audit material — most are pre-release / aspirational / forward-design work. User plans to run a brainstorming session with the backend agent to scope each before any execution happens.
+
+- **Build process & tooling.** Makefile, `go build` flags, binary sizing, embed asset pipeline, CI config, test runner config, dev dependencies. Currently in-tree but never formally reviewed as a subsystem.
+- **Release process.** Tagging, versioning, changelogs, binary distribution, Wails packaging, installer generation, rollback story. Pre-release — much of this does not exist yet. Phase 5 of the release-prep meta-project also has a release workstream slot; the scoping session decides where this actually lives.
+- **Upgrade / migration story.** Data migration, rollback paths, version compat across releases. Coupled with release-process — shipping decides what, upgrade decides how users move between ships.
+- **models.dev integration.** API, daily refresh, mirror strategy, `updated_at` filter. Replace hardcoded model metadata (token limits, context windows, pricing, knowledge cutoffs) with a live external source. Forward design, not an audit target.
+
+**Recommended shape for the scoping session:** brainstorm (sp-brainstorming) against each item in turn, producing a short spec or backlog entry. Do not combine into a single "release readiness" umbrella — the items are coupled but distinct and each needs its own scope check.
+
+**Cross-reference:** the audit campaign's `tokens-and-model-hardcoding` scope will document where hardcoded model metadata lives. That audit's findings are input to the models.dev design work — run the audit first, then design against its output.

@@ -233,7 +233,7 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 ## Beta Known Issues (canonical list)
 
-**Primary tracking:** [`docs/beta-known-issues.md`](../../docs/beta-known-issues.md). Check this document before starting frontend work. P0 ship blockers there are currently backend-only, but that can change — always check first.
+**Primary tracking:** [`docs/beta-known-issues.md`](../../docs/beta-known-issues.md). Check this document before starting frontend work. P0 issues there are currently backend-only, but that can change — always check first.
 
 **Post-beta items filed to Engine backlog:** query `engine_backlog_list --project-id nanite` for deferred items.
 
@@ -241,7 +241,7 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 ## Frontend Quick Wins (pre-beta polish)
 
-Small items the frontend agent should knock out during the beta-prep window. These are not ship blockers, but they're quick enough that clearing them improves the beta experience.
+Small items the frontend agent can knock out. These are not high-severity, but they're quick enough that clearing them improves the user experience.
 
 ### Code quality — from §Anti-Patterns Found above
 
@@ -279,7 +279,7 @@ After a search → jump-to-message lands, `useChat` fetches a centered window vi
 
 **Source:** [`docs/frontend-punchlist.md`](../../docs/frontend-punchlist.md) — ~60 UI polish items (command palette, infinite scroll, drawers redesign, widget controls, CRUD-in-modals, search, context menus, skeletons, optimistic UI, etc.).
 
-All polish-tier. Not beta blockers. Address in a dedicated post-beta sprint or opportunistically when touching the relevant files.
+All polish-tier. Not high-severity. Address in a dedicated post-beta sprint or opportunistically when touching the relevant files.
 
 ---
 

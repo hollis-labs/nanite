@@ -75,9 +75,9 @@ Drawn from prior audits' `Noticed but out of scope` sections, the reviewer-backe
 
 ### Medium priority (depth and follow-on)
 
-9. **`plugin-tooling-and-tests`** — deferred from the plugin audit. Run `go vet`, `-race`, `staticcheck`, `golangci-lint`, `govulncheck` against the plugin package; fill the test gaps the plan-eval flagged.
-10. **`sandbox-tooling-and-tests`** — same, scoped to `internal/sandbox/`.
-11. **`installer-tooling-and-tests`** — same, scoped to `internal/service/install/` + `cmd/nanite/install_cmd.go`.
+9. ~~**`plugin-tooling-and-tests`**~~ — deferred from the plugin audit. Run `go vet`, `-race`, `staticcheck`, `golangci-lint`, `govulncheck` against the plugin package; fill the test gaps the plan-eval flagged. **~~SUPERSEDED by `whole-repo-tooling-and-tests-sweep` (appended 2026-04-11)~~**
+10. ~~**`sandbox-tooling-and-tests`**~~ — same, scoped to `internal/sandbox/`. **~~SUPERSEDED by `whole-repo-tooling-and-tests-sweep` (appended 2026-04-11)~~**
+11. ~~**`installer-tooling-and-tests`**~~ — same, scoped to `internal/service/install/` + `cmd/nanite/install_cmd.go`. **~~SUPERSEDED by `whole-repo-tooling-and-tests-sweep` (appended 2026-04-11)~~**
 12. **`auto-triggers-disposition`** — `internal/plugin/auto_triggers.go` was never opened during the plugin audit. Disposition unknown; in the plugin package, may be load-bearing for the plan.
 13. **`framework-libs-go-plugin-inventory`** — `framework/libs/go-plugin/`. The plan's Track I.1 deletes this without a verified inventory. Audit before any deletion happens.
 14. **`assets-framework-content-correctness`** — `internal/assets/framework/`. The embedded roles/skills/commands the installer extracts. Their correctness is its own audit, distinct from the install code that ships them.
@@ -92,7 +92,7 @@ Drawn from prior audits' `Noticed but out of scope` sections, the reviewer-backe
 20. **`plugin-settings-dynamic-forms`** — `secret` field handling, dev/recover-mode gating.
 21. **`observability-panels`** — privileged kill-stale button, large log rendering performance.
 22. **`provider-and-settings-ui`** — API key masking, CLI path validation in settings.
-23. **`keyboard-shortcuts-and-a11y`** — focus traps, Esc handling, WCAG AA contrast, ARIA on icon buttons.
+23. ~~**`keyboard-shortcuts-and-a11y`**~~ — focus traps, Esc handling, WCAG AA contrast, ARIA on icon buttons. **~~MOVED to frontend workstream follow-up (2026-04-11)~~** — see `.nanite/agents/frontend.md` deferred section.
 
 ### Plan / design audits (use `plan-review` skill)
 
@@ -101,6 +101,45 @@ Drawn from prior audits' `Noticed but out of scope` sections, the reviewer-backe
 ### Subsystems not yet enumerated
 
 A pre-execution inventory pass would identify any package not on this list. Candidates likely missed: `internal/brand/` (probably trivial), the `plugins/` directory (concrete plugin implementations as a class — pattern audit, not per-plugin), `cmd/` entrypoints other than install, integration tests as their own audit target, `scripts/` (build scripts, codegen).
+
+### Appended 2026-04-11 — from release-prep meta-project
+
+**Source:** `~/Projects-apps/agent-workspaces/planning/nanite-release-prep/plans/phase-1-scope-alignment.md`. User-confirmed during the 2026-04-11 audit-orchestrator brainstorm. Order within each group is suggestive, not strict.
+
+#### From TRIAGE technical audit scopes
+
+25. **`toolbroker`** — `internal/toolclient/` (broker, tool_knowledge, permissions). Deep-review.
+26. **`contextbroker`** — `internal/contextbroker/`. Deep-review of the broker subsystem as code. **Not** about token counting, compaction, or context-window management — those are separate scopes.
+27. **`context-management`** — slot system, hot-swap, auto-compaction, `/compact` command. Mixed deep-review + claimed-vs-actual verification. **Explicit mandate:** prove hot-swap and slots actually work end-to-end. Reviewer should verify behavior, not just code presence. Suspected stubs/partials per user report.
+28. **`context-counting-in-widgets`** — frontend-side targeted check. Suspected hardcoded token counting. Small scope. Cross-reference with `tokens-and-model-hardcoding`.
+29. **`tokens-and-model-hardcoding`** — every place model names, token limits, context windows, pricing are hardcoded. Deep-review. (The models.dev integration design is deferred to a backend-agent scoping session; see `.nanite/agents/backend.md` deferred section.)
+30. **`eval-subprocess-pty-sdk`** — subprocess / PTY / SDK usage patterns for running CLI agents. Best-pattern determination. Deep-review of existing implementations.
+31. **`frontend-hygiene`** — component reuse vs. hardcoded, semantic tokens, composition, props-down/messages-up, Tailwind no-hardcoded-styles, modal/alert/drawer reuse. Frontend deep-review.
+32. **`entities-tags-relational`** — objects / entities / tags relational correctness. Tags per-entity vs per-object. FK stubs vs real relationships. Deep-review.
+33. **`memory-ranking`** — activation vs similarity vs hybrid ranking. Deep-review of the current memory ranking implementation; pair with a hybrid BM25+vector recall audit at dispatch time.
+34. **`backpressure-followup`** — confirm backpressure coverage in all sites that need it. Follow-on from the initial PTY build.
+
+#### From tests-and-coverage split
+
+35. **`whole-repo-tooling-and-tests-sweep`** — mechanical sweep. `go vet`, `go test -race`, `staticcheck`, `golangci-lint`, `govulncheck`, `errcheck` across the whole tree. Single pass, single dispatch. Supersedes `plugin-tooling-and-tests`, `sandbox-tooling-and-tests`, `installer-tooling-and-tests`. Deliverable shape: one summary file + one failure-listing per tool.
+36. **`tests-coverage-overall`** — test-design gap analysis. What's missing, what's under-tested, what's misaligned with its subject. Judgment-heavy. Deep-review skill with test-design lens.
+
+#### From `*`-proposed security/trust-model items
+
+37. **`security-threat-model`** — fresh deep-review. Trust-boundary audit against the enumeration in `reviewer-backend.md` §"Trust boundaries". Cover every trust boundary not yet audited by a named scope: plugin manifest parser, PTY input/output, env var handling surface, provider API paths, HTTP API input validation (minus the `api-privilege-boundary` scope already queued). Synthesis of completed-audit findings is out of scope for this audit — that happens in Phase 4 meta-synthesis.
+38. **`dependency-supply-chain`** — Go `go.mod` + frontend `package.json`: license compliance, CVEs (beyond `govulncheck` alone), vendored-vs-hosted, version lag, known-bad detection. Cross-stack scope; orchestrator decides dispatch strategy at pull time.
+39. **`telemetry-privacy-posture`** — what leaves the user's machine: embedding APIs, provider APIs, error reporting, any analytics. Opt-in defaults. Local-first guarantees. Distinct from observability.
+40. **`plugin-capability-model`** — map the current plugin capability surface. What plugins can touch via `internal/*` imports. What host state leaks. What's implicitly available. What a malicious plugin could do. **Not** a sandbox design — the design of a sandbox is future work. Deliverable: capability map + gap list.
+
+#### From `*`-proposed operability/quality items
+
+41. **`observability`** — `internal/otel` wrapper usage, structured-logging discipline, PII in log fields, metric coverage, error-reporting surface. Deep-review.
+42. **`single-binary-asset-embedding-mechanics`** — `internal/assets/framework/` embed mechanics, `nanite install` extraction, binary size, cold-start perf, extraction atomicity. Deep-review. **Distinct** from the existing `assets-framework-content-correctness` scope (that audits embedded content; this audits mechanics).
+
+#### Mini-sweep scopes (grep-driven, different deliverable shape)
+
+43. **`panic-recovery-sweep`** — mini-sweep. Grep `recover()` across the whole tree. Produce an authoritative map of every goroutine spawn + panic boundary + recover gap. Closes the cross-cutting "No panic recovery" theme. Deliverable shape: single map file + per-package gap listings, not per-finding folders.
+44. **`concurrency-cancellation-sweep`** — mini-sweep. Same shape as `panic-recovery-sweep`. Grep goroutine spawn sites, `ctx.Done` handling, `Close`/cancel paths, graceful-shutdown hooks. Produce a concurrency-lifecycle map. Closes the cross-cutting "Concurrency teardown" theme.
 
 ---
 

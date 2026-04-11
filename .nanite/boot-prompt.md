@@ -221,3 +221,113 @@ PENDING FRONTEND TASKS:
    - Re-enable "load older" button after jump lands
    - See frontend.md §Known Gaps for full context
 ```
+
+## Plugin Developer Agent
+
+```
+Boot nanite-plugin-dev
+
+Plugin system is being overhauled end-to-end. Full architectural design complete
+2026-04-10; execution in progress.
+
+CRITICAL — READ THESE IN ORDER BEFORE TOUCHING ANY CODE:
+
+1. docs/architecture/plugin-execution-plan-2026-04-10.md — THE plan. Ten-track
+   execution with file:line pointers, sharp edges, done-ness gates. Start here.
+2. .nanite/agents/plugin-dev.md — current plugin-dev context and conventions.
+3. docs/architecture/plugin-envelope-emission-findings-2026-04-10.md — raw
+   findings from the envelope emission investigation.
+4. CLAUDE.md — envelope system warnings.
+
+ARCHITECTURE (post-2026-04-10 target state):
+- Plugins ship as prebuilt per-platform archives; users never compile anything
+- Subprocess plugins talk to host over JSON-RPC 2.0 via stdio (existing infra at
+  internal/plugin/subprocess/, extended)
+- Core plugins stay compiled into the binary but go through the same
+  yaml-authoritative loader as subprocess plugins
+- plugin.yaml is authoritative for all registrations; LoadResult degenerates to
+  ack-only (carries only SkippedRegistrations)
+- Plugin SDK lives at NEW repo github.com/hollis-labs/plugin-sdk
+- Nanite-specific extensions live at github.com/hollis-labs/nanite/pkg/plugin
+- Old github.com/hollis-labs/go-plugin module gets DELETED post-migration
+- Fragments-engine is REMOVED entirely (deletion is part of Track A)
+- Catalog + archives hosted on Cloudflare R2 + Pages at
+  plugins.nanite.hollis-labs.dev and archives.nanite.hollis-labs.dev
+- Frontend loads plugin ESM bundles dynamically via importmap + es-module-shims,
+  sharing React with the host
+
+────────────────────────────────────────────────────────────────────────
+FIRST TWO ACTIONS — DO THESE BEFORE ANYTHING ELSE:
+────────────────────────────────────────────────────────────────────────
+
+STEP 1 — Track A (pre-execution cleanup). Must complete in full before any
+other work starts. ~30–60 minutes of mechanical work. Low risk. Unblocks
+everything else. Do it fresh — DO NOT batch with anything else so the context
+stays clean.
+
+  Track A contents (from §3 of the execution plan):
+  - A.1 Delete drift copies of giphy/oembed/session-stats in internal/plugin/
+        builtin/ and nanite/plugins/, plus framework/plugins/nanite/fragments-
+        engine/ and nanite/plugins/fragments-engine/
+  - A.2 Fix known P0 blockers:
+        • Host.Shutdown() deadlock (internal/plugin/host.go:1170)
+        • Protocol version handshake enforcement
+          (internal/plugin/subprocess/plugin.go:133-138)
+        • Scaffold template imports (internal/plugin/scaffold/templates/
+          plugin.go.tmpl)
+  - A.3 Remove fragments-engine entirely — directory + allplugins.go import +
+        chat.RegisterEnvelopeType call sites + core emission sites in
+        internal/mcp/self_tools_transport.go + envelope components in
+        ui/src/components/chat/envelopes/ + config/envelopes.yaml entries
+  - A.4 Decide canonical git repos for support-ticket/giphy/oembed (rename
+        hollis-labs/support-ticket → hollis-labs/nanite-plugin-support-ticket,
+        delete the single-commit extraction snapshots)
+  - A.5 Gate: go build / vet / test -race clean; grep for deleted names returns
+        no unexpected results
+
+STEP 2 — After Track A completes cleanly, Tracks B, C, and F can all start
+IN PARALLEL with separate agents. That's where the real work begins.
+
+  - Track B = host core refactor (yaml-authoritative loader, unregister paths,
+    /api/plugins/registry endpoint, /api/plugins/events lifecycle SSE). Backend.
+  - Track C = plugin-sdk module creation (new repo, move wire types out of
+    nanite, implement subprocess.Serve + helpers + testing harness). Standalone.
+  - Track F = Cloudflare R2 + Pages provisioning, catalog build pipeline, root
+    key generation. Mostly infra + ops, minimal Go code.
+
+  Tracks B and C are tightly related — the wire protocol type move in C.3 is
+  a coordinated flip that affects both. Track F is fully independent.
+
+────────────────────────────────────────────────────────────────────────
+
+DO NOT:
+- Skip Track A. Prior sessions have tried to start in the middle and bitten
+  the drift landmine every single time. Agents cargo-cult the wrong file.
+  Delete the stale copies FIRST.
+- Start Track B/C/F before Track A gates pass.
+- Try to migrate giphy/oembed/support-ticket before Track E (giphy is the
+  integration test for everything in B+C+D).
+- Touch Fragments Engine as anything other than a deletion target.
+- Add any internal/* imports to plugin code — if a plugin needs something
+  the public SDK doesn't expose, flag it and extend the SDK. Subprocess
+  plugins literally cannot reach internal/* across module boundaries.
+- Treat plugin.yaml as documentation-only. It is authoritative after Track B.
+
+SHARP EDGES (full list in execution plan §13):
+- Drift: three parallel plugin trees. Resolve in Track A or waste hours.
+- Host.Shutdown() mutex deadlock. Four-line fix in Track A.2.
+- http.ServeMux can't unregister routes — use mutable mux adapter per §B.6.
+- SDK wire-type move is a coordinated flip between nanite and plugin-sdk.
+  Follow §C.3 order exactly or compilation breaks.
+- EventHook interface gains PluginID() method — breaking change.
+- os.Rename is only atomic within same filesystem — staging dir must share FS
+  with plugins dir.
+- Windows process groups and os.Rename behave differently — guard with
+  //go:build tags in subprocess manager.
+- React version compatibility couples plugin to nanite — enforce via
+  ui.react_version plugin.yaml field at install time.
+
+VALIDATION GATES per track are spelled out in the execution plan. Each track
+has a "gate for leaving" subsection with concrete check criteria. Do not
+declare a track complete without running them.
+```

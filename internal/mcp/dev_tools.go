@@ -215,27 +215,63 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	}, nil
 }
 
+// Tunable bounds for dev tools. These are package constants so tests and
+// callers have a single place to reason about memory / CPU budgets.
+const (
+	// devBashStreamCap is the per-stream (stdout, stderr) byte cap applied when
+	// assembling the dev_bash tool result. Output beyond the cap is discarded
+	// and a truncation marker is appended. 1 MiB per stream is ample for human
+	// inspection and bounds the steady-state memory a runaway command can
+	// wedge into the tool result envelope.
+	devBashStreamCap = 1 << 20 // 1 MiB
+
+	// devGrepPerFileCap skips any file larger than this during dev_grep. Text
+	// files beyond 10 MiB are almost always generated blobs (minified JS,
+	// sqlite dumps, log rolls) that the grep handler has no business slurping
+	// into memory.
+	devGrepPerFileCap = 10 << 20 // 10 MiB
+
+	// devGrepResultCap bounds the total bytes of match output returned from
+	// dev_grep. Walking huge trees can otherwise return arbitrarily large
+	// payloads that blow past LLM context budgets.
+	devGrepResultCap = 1 << 20 // 1 MiB
+
+	// devGrepPatternCap bounds the length of a user-supplied regex pattern.
+	// Go's RE2 engine is linear-time in input length, but a 10 MB pattern is
+	// still a clear abuse signal.
+	devGrepPatternCap = 4 << 10 // 4 KiB
+
+	// devGrepFileBudget caps the number of files dev_grep will inspect per
+	// call. Monorepos can have hundreds of thousands of files; this is a soft
+	// liveness bound that surfaces a truncation marker rather than silently
+	// blocking on a multi-minute walk.
+	devGrepFileBudget = 10_000
+)
+
 // CallTool dispatches to the appropriate handler.
-func (d *DevToolsTransport) CallTool(_ context.Context, name string, args map[string]any) (*ToolResult, error) {
+func (d *DevToolsTransport) CallTool(ctx context.Context, name string, args map[string]any) (*ToolResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	switch name {
 	case "dev_read":
-		return d.callRead(args)
+		return d.callRead(ctx, args)
 	case "dev_grep":
-		return d.callGrep(args)
+		return d.callGrep(ctx, args)
 	case "dev_write":
-		return d.callWrite(args)
+		return d.callWrite(ctx, args)
 	case "dev_glob":
-		return d.callGlob(args)
+		return d.callGlob(ctx, args)
 	case "dev_edit":
-		return d.callEdit(args)
+		return d.callEdit(ctx, args)
 	case "dev_bash":
-		return d.callBash(args)
+		return d.callBash(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
 }
 
-func (d *DevToolsTransport) callRead(args map[string]any) (*ToolResult, error) {
+func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	path, _ := args["path"].(string)
 	if path == "" {
 		return errorResult("path is required"), nil
@@ -265,6 +301,9 @@ func (d *DevToolsTransport) callRead(args map[string]any) (*ToolResult, error) {
 	lineNum := 0
 	collected := 0
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		}
 		lineNum++
 		if lineNum < offset {
 			continue
@@ -285,11 +324,14 @@ func (d *DevToolsTransport) callRead(args map[string]any) (*ToolResult, error) {
 	return textResult(sb.String()), nil
 }
 
-func (d *DevToolsTransport) callGrep(args map[string]any) (*ToolResult, error) {
+func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	pattern, _ := args["pattern"].(string)
 	dir, _ := args["directory"].(string)
 	if pattern == "" || dir == "" {
 		return errorResult("pattern and directory are required"), nil
+	}
+	if len(pattern) > devGrepPatternCap {
+		return errorResult(fmt.Sprintf("pattern too long: %d bytes (max %d)", len(pattern), devGrepPatternCap)), nil
 	}
 	resolvedDir, err := d.resolveAllowed(dir)
 	if err != nil {
@@ -304,12 +346,38 @@ func (d *DevToolsTransport) callGrep(args map[string]any) (*ToolResult, error) {
 
 	globFilter, _ := args["glob"].(string)
 	ctxLines := intArg(args, "context", 2)
+	if ctxLines < 0 {
+		ctxLines = 0
+	}
+	// Bound context-line ring size so a huge caller-supplied context value
+	// cannot blow the ring allocation.
+	if ctxLines > 32 {
+		ctxLines = 32
+	}
+	ringSize := ctxLines + 1
+	if ringSize < 1 {
+		ringSize = 1
+	}
 
 	var sb strings.Builder
 	matchCount := 0
+	filesInspected := 0
+	filesSkippedBySize := 0
+	truncatedBySize := false
+	truncatedByMatches := false
+	truncatedByBytes := false
+	truncatedByFileBudget := false
 	const maxMatches = 100
 
+	// errStopWalk is a sentinel used to short-circuit filepath.Walk when a cap
+	// fires. filepath.Walk treats any non-nil error as a stop signal, and we
+	// translate the sentinel back to "clean stop" after the walk returns.
+	errStopWalk := errors.New("stop walk")
+
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return nil // skip unreadable entries
 		}
@@ -327,8 +395,23 @@ func (d *DevToolsTransport) callGrep(args map[string]any) (*ToolResult, error) {
 			}
 		}
 		if matchCount >= maxMatches {
-			return filepath.SkipAll
+			truncatedByMatches = true
+			return errStopWalk
 		}
+		if sb.Len() >= devGrepResultCap {
+			truncatedByBytes = true
+			return errStopWalk
+		}
+		if filesInspected >= devGrepFileBudget {
+			truncatedByFileBudget = true
+			return errStopWalk
+		}
+		if info.Size() > devGrepPerFileCap {
+			filesSkippedBySize++
+			truncatedBySize = true
+			return nil
+		}
+		filesInspected++
 
 		f, err := os.Open(path)
 		if err != nil {
@@ -338,56 +421,126 @@ func (d *DevToolsTransport) callGrep(args map[string]any) (*ToolResult, error) {
 
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		var lines []string
-		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-		}
 
 		relPath, _ := filepath.Rel(dir, path)
 		if relPath == "" {
 			relPath = path
 		}
 
-		for i, line := range lines {
-			if !re.MatchString(line) {
+		// Ring of recent lines for pre-match context.
+		ring := make([]string, ringSize)
+		ringStart := 0 // lowest line number currently in the ring
+		ringLen := 0
+		lineNo := 0
+		pendingTrail := 0
+		matchLine := 0 // the line number whose post-context we are currently trailing
+
+		for scanner.Scan() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			lineNo++
+			line := scanner.Text()
+
+			if re.MatchString(line) {
+				matchCount++
+				if matchCount > maxMatches {
+					truncatedByMatches = true
+					break
+				}
+				fmt.Fprintf(&sb, "--- %s:%d ---\n", relPath, lineNo)
+				// Pre-context from ring.
+				preStart := ringStart
+				if lineNo-ctxLines > preStart {
+					preStart = lineNo - ctxLines
+				}
+				for j := preStart; j < lineNo; j++ {
+					idx := (j - ringStart) % ringLen
+					if ringLen == 0 {
+						break
+					}
+					fmt.Fprintf(&sb, " %4d\t%s\n", j, ring[idx])
+				}
+				fmt.Fprintf(&sb, ">%4d\t%s\n", lineNo, line)
+				matchLine = lineNo
+				pendingTrail = ctxLines
+				if sb.Len() >= devGrepResultCap {
+					truncatedByBytes = true
+					break
+				}
 				continue
 			}
-			matchCount++
-			if matchCount > maxMatches {
-				break
-			}
-			start := i - ctxLines
-			if start < 0 {
-				start = 0
-			}
-			end := i + ctxLines + 1
-			if end > len(lines) {
-				end = len(lines)
-			}
-			fmt.Fprintf(&sb, "--- %s:%d ---\n", relPath, i+1)
-			for j := start; j < end; j++ {
-				marker := " "
-				if j == i {
-					marker = ">"
+			if pendingTrail > 0 {
+				fmt.Fprintf(&sb, " %4d\t%s\n", lineNo, line)
+				pendingTrail--
+				if pendingTrail == 0 {
+					sb.WriteString("\n")
+					_ = matchLine
 				}
-				fmt.Fprintf(&sb, "%s%4d\t%s\n", marker, j+1, lines[j])
+				if sb.Len() >= devGrepResultCap {
+					truncatedByBytes = true
+					break
+				}
 			}
+			// Push into ring.
+			if ringLen < ringSize {
+				ring[ringLen] = line
+				ringLen++
+				if ringStart == 0 {
+					ringStart = 1
+				}
+			} else {
+				// Slide window: drop ringStart, append new.
+				copy(ring, ring[1:])
+				ring[ringLen-1] = line
+				ringStart = lineNo - ringLen + 1
+			}
+		}
+		if pendingTrail > 0 {
 			sb.WriteString("\n")
+		}
+		if err := scanner.Err(); err != nil {
+			// Swallow scanner errors (oversized single line, binary garbage);
+			// continuing the walk is the right behavior for grep.
+			_ = err
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errStopWalk) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		}
 		return errorResult(fmt.Sprintf("walk error: %v", err)), nil
 	}
 
 	if matchCount == 0 {
+		if truncatedBySize || truncatedByFileBudget {
+			return textResult(fmt.Sprintf("no matches found (skipped %d file(s) over %d bytes; inspected %d files)", filesSkippedBySize, devGrepPerFileCap, filesInspected)), nil
+		}
 		return textResult("no matches found"), nil
 	}
-	header := fmt.Sprintf("Found %d match(es):\n\n", matchCount)
-	return textResult(header + sb.String()), nil
+	var header strings.Builder
+	fmt.Fprintf(&header, "Found %d match(es):\n", matchCount)
+	if truncatedByMatches {
+		fmt.Fprintf(&header, "(truncated at match cap %d)\n", maxMatches)
+	}
+	if truncatedByBytes {
+		fmt.Fprintf(&header, "(truncated at result-size cap %d bytes)\n", devGrepResultCap)
+	}
+	if truncatedBySize {
+		fmt.Fprintf(&header, "(skipped %d file(s) over per-file cap %d bytes)\n", filesSkippedBySize, devGrepPerFileCap)
+	}
+	if truncatedByFileBudget {
+		fmt.Fprintf(&header, "(stopped after %d files per file-budget cap)\n", devGrepFileBudget)
+	}
+	header.WriteString("\n")
+	return textResult(header.String() + sb.String()), nil
 }
 
-func (d *DevToolsTransport) callWrite(args map[string]any) (*ToolResult, error) {
+func (d *DevToolsTransport) callWrite(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+	}
 	path, _ := args["path"].(string)
 	content, _ := args["content"].(string)
 	if path == "" {
@@ -411,7 +564,10 @@ func (d *DevToolsTransport) callWrite(args map[string]any) (*ToolResult, error) 
 	return textResult(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
 }
 
-func (d *DevToolsTransport) callEdit(args map[string]any) (*ToolResult, error) {
+func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+	}
 	path, _ := args["path"].(string)
 	oldStr, _ := args["old_string"].(string)
 	newStr, _ := args["new_string"].(string)
@@ -471,7 +627,7 @@ func (d *DevToolsTransport) callEdit(args map[string]any) (*ToolResult, error) {
 	return textResult(msg), nil
 }
 
-func (d *DevToolsTransport) callGlob(args map[string]any) (*ToolResult, error) {
+func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	pattern, _ := args["pattern"].(string)
 	dir, _ := args["directory"].(string)
 	if pattern == "" || dir == "" {
@@ -495,6 +651,9 @@ func (d *DevToolsTransport) callGlob(args map[string]any) (*ToolResult, error) {
 	var matches []fileEntry
 
 	err = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return nil
 		}
@@ -521,6 +680,9 @@ func (d *DevToolsTransport) callGlob(args map[string]any) (*ToolResult, error) {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		}
 		return errorResult(fmt.Sprintf("walk error: %v", err)), nil
 	}
 
@@ -591,7 +753,10 @@ func globMatchParts(patParts, pathParts []string) bool {
 // platform OS-level isolation layer.
 const devBashSessionID = "dev-bash"
 
-func (d *DevToolsTransport) callBash(args map[string]any) (*ToolResult, error) {
+func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+	}
 	command, _ := args["command"].(string)
 	if command == "" {
 		return errorResult("command is required"), nil
@@ -626,28 +791,56 @@ func (d *DevToolsTransport) callBash(args map[string]any) (*ToolResult, error) {
 		execFn = defaultAgentExec
 	}
 
-	result, err := execFn(sandbox.AgentExecOpts{
-		SessionID: devBashSessionID,
-		Command:   "sh",
-		Args:      []string{"-c", command},
-		Timeout:   time.Duration(timeout) * time.Second,
-	})
+	type execOutcome struct {
+		res *sandbox.ExecResult
+		err error
+	}
+	done := make(chan execOutcome, 1)
+	go func() {
+		res, err := execFn(sandbox.AgentExecOpts{
+			SessionID: devBashSessionID,
+			Command:   "sh",
+			Args:      []string{"-c", command},
+			Timeout:   time.Duration(timeout) * time.Second,
+		})
+		done <- execOutcome{res: res, err: err}
+	}()
+
+	var result *sandbox.ExecResult
+	var err error
+	select {
+	case <-ctx.Done():
+		// Caller cancellation. The sandbox subprocess is still bounded by its
+		// own timeout; we return promptly so the caller's goroutine does not
+		// stay wedged waiting for the shell. The in-flight goroutine drains
+		// into the buffered `done` channel and is garbage-collected.
+		return errorResult(fmt.Sprintf("cancelled: %v", ctx.Err())), nil
+	case out := <-done:
+		result, err = out.res, out.err
+	}
 	if err != nil {
 		// sandbox setup / denylist / dir-resolve errors surface here. These
 		// are hard rejections (e.g. CheckDenylist match).
 		return errorResult(fmt.Sprintf("sandbox error: %v", err)), nil
 	}
 
+	// Cap each stream at devBashStreamCap to bound the envelope size. The
+	// sandbox already collects stdout/stderr into strings; trimming at assembly
+	// time still prevents the ToolResult from pushing multi-MB payloads into
+	// the MCP transport or the LLM prompt.
+	stdoutStr := capOutput(result.Stdout, devBashStreamCap)
+	stderrStr := capOutput(result.Stderr, devBashStreamCap)
+
 	var sb strings.Builder
-	if result.Stdout != "" {
-		sb.WriteString(result.Stdout)
+	if stdoutStr != "" {
+		sb.WriteString(stdoutStr)
 	}
-	if result.Stderr != "" {
+	if stderrStr != "" {
 		if sb.Len() > 0 {
 			sb.WriteString("\n")
 		}
 		sb.WriteString("--- stderr ---\n")
-		sb.WriteString(result.Stderr)
+		sb.WriteString(stderrStr)
 	}
 	output := sb.String()
 
@@ -665,6 +858,16 @@ func (d *DevToolsTransport) callBash(args map[string]any) (*ToolResult, error) {
 }
 
 // --- helpers ---
+
+// capOutput truncates s to at most cap bytes and appends a clear marker when
+// truncation occurs. The marker calls out the original size so callers can
+// tell whether re-running with a narrower command is appropriate.
+func capOutput(s string, cap int) string {
+	if cap <= 0 || len(s) <= cap {
+		return s
+	}
+	return s[:cap] + fmt.Sprintf("\n[truncated: %d of %d bytes shown]", cap, len(s))
+}
 
 func intArg(args map[string]any, key string, def int) int {
 	v, ok := args[key]

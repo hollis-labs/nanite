@@ -49,6 +49,20 @@ lint:
 vuln:
 	govulncheck ./...
 
+# Phase 1 Wave 1 (2026-04-12): surface bare `go` statements in target
+# packages that should adopt internal/safego. forbidigo cannot match the
+# `go` keyword, so this is a grep-based sweep. Output lists files +
+# line numbers; non-zero exit when matches are found (kept non-fatal by
+# the leading `-` so `make lint` as a whole isn't gated on adoption).
+.PHONY: lint-goroutines
+lint-goroutines:
+	@echo "==> internal/safego adoption sweep (bare 'go ' statements)"
+	@-grep -rn --include='*.go' --exclude='*_test.go' -E '^\s+go [A-Za-z_][A-Za-z0-9_.]*\(' \
+		internal/plugin internal/worker internal/mcp internal/service \
+		internal/server internal/api internal/memory internal/workflow \
+		2>/dev/null | grep -v 'safego\.Go' | grep -v 'safego\.Call' || \
+		echo "(no bare goroutines in target packages)"
+
 # Run with default settings
 run: build
 	./nanite serve --port 8090

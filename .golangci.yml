@@ -50,6 +50,13 @@ linters:
     - errorlint      # enforce errors.Is/As and %w wrapping
     - nilerr         # returning nil in an error path (if err != nil { return nil })
 
+    # --- Phase 1 Wave 1 adoption surfacing (2026-04-12) ---
+    # Forbids bare equivalents of the new internal/* primitives in the
+    # target packages so follow-up adoption tasks (TASK-013/014/etc.) can
+    # use `make lint` as a worklist. These rules surface violations as
+    # errors in the listed paths only; other packages are unaffected.
+    - forbidigo
+
   # Explicitly disabled — documented so future us knows why.
   # - nilaway      : experimental; evaluate when it stabilizes
   # - gocyclo      : complexity metrics add noise on legacy code
@@ -77,6 +84,23 @@ linters:
       # Only flag switch statements that have no default case.
       # A default case counts as "handling" remaining values.
       default-signifies-exhaustive: true
+
+    forbidigo:
+      # Phase 1 Wave 1 adoption surfacing — these are only applied to the
+      # target packages via exclusions.rules below so unrelated packages
+      # are not forced into the new primitives.
+      #
+      # NOTE on goroutines: forbidigo matches identifiers / calls; it cannot
+      # match the `go` keyword. `internal/safego.Go` adoption is therefore
+      # tracked by a separate grep-based sweep (see Makefile `lint-goroutines`
+      # and the goroutine-map audit doc). The rules here cover the two
+      # patterns forbidigo expresses cleanly: os.WriteFile and filepath.Join.
+      analyze-types: true
+      forbid:
+        - pattern: '^os\.WriteFile$'
+          msg: "use internal/fsutil.AtomicWriteFile for crash-safe writes (Phase 1 Wave 1)"
+        - pattern: '^filepath\.Join$'
+          msg: "use internal/pathsafe.ResolveUnder to prevent path traversal (Phase 1 Wave 1)"
 
     gosec:
       excludes:
@@ -140,6 +164,30 @@ linters:
     generated: lax
 
     rules:
+      # -----------------------------------------------------------------
+      # Phase 1 Wave 1 adoption scope (2026-04-12)
+      # -----------------------------------------------------------------
+      # forbidigo is enabled globally but only meaningful inside the
+      # target paths below. Outside those paths, silence it so existing
+      # code isn't churned: we only want the surfaced worklist.
+      #
+      # Rule 1: AtomicWriteFile — applies to agent, install service, and
+      # adapter plugins. Silence the "AtomicWriteFile" message everywhere
+      # else.
+      - text: 'AtomicWriteFile'
+        linters: [forbidigo]
+        path-except: '(internal/agent/|internal/service/install/|internal/plugin/builtin/adapter-)'
+      # Rule 2: ResolveUnder (filepath.Join) — applies to sandbox, mcp,
+      # install. Silence everywhere else.
+      - text: 'ResolveUnder'
+        linters: [forbidigo]
+        path-except: '(internal/sandbox/|internal/mcp/|internal/service/install/)'
+      # The four new internal/* packages themselves legitimately use the
+      # bare primitives (pathsafe calls filepath.Join; fsutil calls
+      # os.Rename etc.). Keep them exempt regardless.
+      - path: '^internal/(safego|pathsafe|lifecycle|fsutil)/'
+        linters: [forbidigo]
+
       # Test files: relax errcheck — test helpers often ignore errors
       # intentionally (e.g., httptest, os.Remove cleanup).
       - path: _test\.go
@@ -175,6 +223,10 @@ issues:
   # explicitly.
   max-issues-per-linter: 0
   max-same-issues: 0
+  # Keep issues from different linters that land on the same line (e.g. gosec
+  # G306 + forbidigo os.WriteFile). The default collapses them, which hides
+  # Phase 1 Wave 1 adoption violations behind unrelated gosec findings.
+  uniq-by-line: false
 
 # ---------------------------------------------------------------------------
 # Formatters

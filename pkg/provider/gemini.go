@@ -41,8 +41,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/pkg/models"
@@ -60,17 +62,154 @@ const maxGeminiErrBody = 1 << 20 // 1 MiB
 var _ Embedder = (*Gemini)(nil)
 
 // Gemini implements the Provider interface for the Google Gemini API.
+//
+// The adapter carries the same decorator-chain fields as every other adapter
+// in this package (retry, circuit breaker, rate tracker, status callbacks) so
+// Gemini calls participate in the shared resilience envelope even though the
+// transport is a hand-rolled HTTP client rather than an SDK.
 type Gemini struct {
 	apiKey string
 	client *http.Client
+
+	Retry          RetryConfig
+	OnStatus       StatusCallback
+	CircuitBreaker *CircuitBreaker
+	OnCircuitOpen  func()
+	RateTracker    *TokenRateTracker
 }
 
 // NewGemini creates a new Gemini provider. It reads GOOGLE_API_KEY from the environment.
 func NewGemini() *Gemini {
 	return &Gemini{
-		apiKey: "",
-		client: &http.Client{},
+		apiKey:         "",
+		client:         &http.Client{},
+		Retry:          DefaultRetryConfig(),
+		CircuitBreaker: NewCircuitBreaker(3),
+		RateTracker:    NewTokenRateTracker(30000),
 	}
+}
+
+// doGeminiRequest issues an HTTP request using the decorator chain: circuit
+// breaker short-circuit, rate-tracker pacing, retry-with-backoff on retryable
+// status codes. On success it returns the *http.Response with Body still open
+// for the caller to consume (and close). On terminal failure it returns an
+// *APIError (or a wrapped ctx / transport error). The caller is responsible
+// for preserving request headers — req.GetBody is set by the helper so the
+// retry loop can rebuild the body on each attempt.
+//
+// estimatedTokens is used for rate-tracker pacing before the call and for
+// Record() after success; pass 0 to skip pacing but still allow output
+// accounting via the returned response.
+func (g *Gemini) doGeminiRequest(ctx context.Context, method, urlStr string, payload []byte, estimatedTokens int) (*http.Response, error) {
+	if g.CircuitBreaker != nil && g.CircuitBreaker.IsOpen() {
+		if g.OnCircuitOpen != nil {
+			g.OnCircuitOpen()
+		}
+		return nil, fmt.Errorf("circuit breaker open: provider rate limited after multiple retries")
+	}
+
+	if g.RateTracker != nil && estimatedTokens > 0 {
+		if wait := g.RateTracker.WaitTime(estimatedTokens); wait > 0 {
+			avail, limit := g.RateTracker.Remaining()
+			if estimatedTokens > limit {
+				log.Printf("provider: request ~%d tokens exceeds per-minute rate limit %d, proceeding anyway", estimatedTokens, limit)
+			}
+			if g.OnStatus != nil {
+				g.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
+			}
+			log.Printf("provider: pacing — waiting %s for rate limit budget (est. %d tokens, available %d/%d)",
+				wait.Round(time.Millisecond), estimatedTokens, avail, limit)
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
+			case <-time.After(wait):
+			}
+		}
+	}
+
+	var lastAPIErr *APIError
+	for attempt := 0; attempt <= g.Retry.MaxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, urlStr, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-goog-api-key", g.apiKey)
+
+		resp, err := g.client.Do(req)
+		if err != nil {
+			// Transport-level error — non-retryable here (context/dial).
+			if g.CircuitBreaker != nil && attempt == g.Retry.MaxRetries {
+				if tripped := g.CircuitBreaker.RecordFailure(); tripped {
+					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					if g.OnCircuitOpen != nil {
+						g.OnCircuitOpen()
+					}
+				}
+			}
+			return nil, fmt.Errorf("send request: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			if g.CircuitBreaker != nil {
+				g.CircuitBreaker.RecordSuccess()
+			}
+			if g.RateTracker != nil && estimatedTokens > 0 {
+				g.RateTracker.Record(estimatedTokens)
+				avail, limit := g.RateTracker.Remaining()
+				log.Printf("provider: recorded %d input tokens (rate budget: %d/%d)", estimatedTokens, avail, limit)
+			}
+			if g.OnStatus != nil && attempt > 0 {
+				g.OnStatus(fmt.Sprintf("Recovered after %d retries.", attempt))
+			}
+			return resp, nil
+		}
+
+		// Non-2xx: classify, cap body, decide retry.
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxGeminiErrBody))
+		_ = resp.Body.Close()
+		retryAfter := ParseRetryAfter(resp.Header.Get("Retry-After"))
+		apiErr := &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    string(errBody),
+			RetryAfter: retryAfter,
+		}
+		lastAPIErr = apiErr
+
+		if !RetryableStatusCode(apiErr.StatusCode) || attempt == g.Retry.MaxRetries {
+			if g.CircuitBreaker != nil && attempt == g.Retry.MaxRetries {
+				if tripped := g.CircuitBreaker.RecordFailure(); tripped {
+					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					if g.OnCircuitOpen != nil {
+						g.OnCircuitOpen()
+					}
+				}
+			}
+			if g.OnStatus != nil {
+				g.OnStatus(fmt.Sprintf("Gemini request failed: status %d", apiErr.StatusCode))
+			}
+			return nil, apiErr
+		}
+
+		delay := g.Retry.BackoffDelay(attempt, retryAfter)
+		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
+			apiErr.StatusCode, attempt+1, g.Retry.MaxRetries, delay)
+		if g.OnStatus != nil {
+			g.OnStatus(fmt.Sprintf("Rate limited, retrying in %s... (attempt %d/%d)",
+				delay.Round(time.Millisecond), attempt+1, g.Retry.MaxRetries))
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+		case <-time.After(delay):
+		}
+	}
+
+	// Loop exhausted without a success or terminal branch (shouldn't happen).
+	if lastAPIErr != nil {
+		return nil, lastAPIErr
+	}
+	return nil, fmt.Errorf("gemini: retry loop exhausted")
 }
 
 // geminiRequest is the request body for the Gemini generateContent API.
@@ -112,22 +251,10 @@ func (g *Gemini) StreamChat(ctx context.Context, systemPrompt string, messages [
 	}
 
 	url := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse", geminiAPI, model)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
+	estInput := estimatePromptTokens(systemPrompt, messages)
+	resp, err := g.doGeminiRequest(ctx, "POST", url, payload, estInput)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", g.apiKey)
-
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxGeminiErrBody))
-		return nil, fmt.Errorf("gemini API error %d: %s", resp.StatusCode, string(errBody))
+		return nil, err
 	}
 
 	ch := make(chan StreamEvent, 64)
@@ -250,6 +377,9 @@ func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 		}
 
 		if chunk.UsageMetadata != nil {
+			if g.RateTracker != nil && chunk.UsageMetadata.CandidatesTokenCount > 0 {
+				g.RateTracker.Record(chunk.UsageMetadata.CandidatesTokenCount)
+			}
 			ch <- StreamEvent{
 				Type: "usage",
 				Usage: &Usage{
@@ -291,23 +421,12 @@ func (g *Gemini) Complete(ctx context.Context, systemPrompt string, messages []C
 	}
 
 	url := fmt.Sprintf("%s/%s:generateContent", geminiAPI, model)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
+	estInput := estimatePromptTokens(systemPrompt, messages)
+	resp, err := g.doGeminiRequest(ctx, "POST", url, payload, estInput)
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", g.apiKey)
-
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxGeminiErrBody))
-		return "", fmt.Errorf("gemini API error %d: %s", resp.StatusCode, string(errBody))
-	}
 
 	var result struct {
 		Candidates []struct {
@@ -317,9 +436,18 @@ func (g *Gemini) Complete(ctx context.Context, systemPrompt string, messages []C
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
+		UsageMetadata *struct {
+			PromptTokenCount     int `json:"promptTokenCount"`
+			CandidatesTokenCount int `json:"candidatesTokenCount"`
+			TotalTokenCount      int `json:"totalTokenCount"`
+		} `json:"usageMetadata"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
+	}
+
+	if g.RateTracker != nil && result.UsageMetadata != nil && result.UsageMetadata.CandidatesTokenCount > 0 {
+		g.RateTracker.Record(result.UsageMetadata.CandidatesTokenCount)
 	}
 
 	if len(result.Candidates) > 0 {
@@ -394,23 +522,17 @@ func (g *Gemini) EmbedBatch(ctx context.Context, texts []string, model string) (
 	}
 
 	url := fmt.Sprintf("%s/%s:batchEmbedContents", geminiAPI, model)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+	// Rough input-token estimate across all texts (~4 chars/token).
+	totalChars := 0
+	for _, t := range texts {
+		totalChars += len(t)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", g.apiKey)
-
-	resp, err := g.client.Do(req)
+	estInput := totalChars / 4
+	resp, err := g.doGeminiRequest(ctx, "POST", url, payload, estInput)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxGeminiErrBody))
-		return nil, fmt.Errorf("gemini embeddings error %d: %s", resp.StatusCode, string(errBody))
-	}
 
 	var batchResp geminiBatchEmbedResponse
 	if err := json.NewDecoder(resp.Body).Decode(&batchResp); err != nil {

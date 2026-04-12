@@ -10,6 +10,21 @@ Tracking ongoing first-pass coverage of the Nanite codebase. This index lists co
 
 ## Completed audits
 
+### 2026-04-11 — `tests-coverage-overall` (Go, deep-review)
+- **Counts:** 2 Critical, 5 High, 5 Medium, 2 Low, 2 Info
+- **Folder:** `docs/audits/2026-04-11-tests-coverage-overall/`
+- **Headline:** Test-design gap analysis across the whole tree. 2 Critical: (1) `internal/sandbox/` has zero test coverage — the primary security boundary has no automated verification. (2) `internal/mcp/` has zero tests for the stdio/HTTP transport lifecycle (subprocess reap, timeout, reconnect). 5 High coverage gaps in security-critical packages: plugin host shutdown, auth middleware edge cases, managed-section parser hard cases, provider key handling, store FK/transaction paths. 18 packages have no tests at all — the majority are justified (trivial, types-only, or generated), but sandbox + MCP + several API handlers are unjustified gaps.
+
+### 2026-04-11 — `auto-triggers-disposition` (Go, deep-review)
+- **Counts:** 0 Critical, 0 High, 2 Medium, 1 Low, 1 Info
+- **Folder:** `docs/audits/2026-04-11-auto-triggers-disposition/`
+- **Headline:** `auto_triggers.go` is a **half-wired feature**. It registers a plugin event handler (`EventActionTriggered`) and emits events when custom actions fire, but NO consumer listens for those events — the event is emitted into the void. The store layer (`custom_actions.go`) and the frontend keybinding UI work correctly for manual triggers; only the auto-trigger → event → handler path is dead. Two Medium: (1) the handler registration bloats the event dispatch path for every event type. (2) the emitted event has no consumer. Recommendation: remove the dead handler, keep the store/UI.
+
+### 2026-04-11 — `framework-libs-go-plugin-inventory` (Go, deep-review)
+- **Counts:** 1 Critical, 1 High, 1 Medium, 0 Low, 3 Info
+- **Folder:** `docs/audits/2026-04-11-framework-libs-go-plugin-inventory/`
+- **Headline:** `framework/libs/go-plugin/` is the **old shared plugin module** that nanite still imports via `replace` directive. 1 Critical: nanite's `internal/plugin/` imports types from `go-plugin` (the `Plugin` interface, `LoadResult` struct, `Host` interface) that are THE canonical definitions used everywhere in the plugin system — deleting this module without migrating those types into nanite's own package would break the build. 1 High: the module also contains subprocess transport code (`subprocess/`) that is duplicated in nanite's `internal/plugin/subprocess/` — both implementations exist and compile, creating ambiguity about which is authoritative. Inventory of all exported types, interfaces, and functions provided. The planned Track I.1 deletion requires a type-migration step not currently in the plan.
+
 ### 2026-04-11 — `dependency-supply-chain` (Go + frontend, deep-review)
 - **Counts:** 0 Critical, 3 High, 4 Medium, 1 Low, 2 Info
 - **Folder:** `docs/audits/2026-04-11-dependency-supply-chain/`
@@ -205,8 +220,8 @@ Drawn from prior audits' `Noticed but out of scope` sections, the reviewer-backe
 9. ~~**`plugin-tooling-and-tests`**~~ — deferred from the plugin audit. Run `go vet`, `-race`, `staticcheck`, `golangci-lint`, `govulncheck` against the plugin package; fill the test gaps the plan-eval flagged. **~~SUPERSEDED by `whole-repo-tooling-and-tests-sweep` (appended 2026-04-11)~~**
 10. ~~**`sandbox-tooling-and-tests`**~~ — same, scoped to `internal/sandbox/`. **~~SUPERSEDED by `whole-repo-tooling-and-tests-sweep` (appended 2026-04-11)~~**
 11. ~~**`installer-tooling-and-tests`**~~ — same, scoped to `internal/service/install/` + `cmd/nanite/install_cmd.go`. **~~SUPERSEDED by `whole-repo-tooling-and-tests-sweep` (appended 2026-04-11)~~**
-12. **`auto-triggers-disposition`** — `internal/plugin/auto_triggers.go` was never opened during the plugin audit. Disposition unknown; in the plugin package, may be load-bearing for the plan.
-13. **`framework-libs-go-plugin-inventory`** — `framework/libs/go-plugin/`. The plan's Track I.1 deletes this without a verified inventory. Audit before any deletion happens.
+12. ~~**`auto-triggers-disposition`**~~ — `internal/plugin/auto_triggers.go`. **~~COMPLETED 2026-04-11~~** — half-wired feature, event emitted with no consumer. 2 Medium.
+13. ~~**`framework-libs-go-plugin-inventory`**~~ — `framework/libs/go-plugin/`. **~~COMPLETED 2026-04-11~~** — 1 Critical (deletion would break build, types not migrated), 1 High (duplicate subprocess transport).
 14. **`assets-framework-content-correctness`** — `internal/assets/framework/`. The embedded roles/skills/commands the installer extracts. Their correctness is its own audit, distinct from the install code that ships them.
 15. **`config-loader-merge`** — `internal/config/`. User vs project merge precedence, config validation, hot-reload (if any).
 45. **`plugin-catalog-fetcher-concurrency`** — `internal/plugin/catalog.go:102` spawns `len(sources)` parallel HTTP fetch goroutines unbounded. No worker pool, no per-source rate limit. A user-configured catalog with many sources fans out to hundreds of parallel HTTP requests. Also parses JSON from untrusted catalog responses. Scope: concurrency bounding + HTTP fetch discipline + catalog JSON parse safety. (2026-04-11, from `panic-recovery-sweep`)
@@ -266,7 +281,7 @@ A pre-execution inventory pass would identify any package not on this list. Cand
 #### From tests-and-coverage split
 
 35. ~~**`whole-repo-tooling-and-tests-sweep`**~~ — mechanical sweep. `go vet`, `go test -race`, `staticcheck`, `golangci-lint`, `govulncheck`, `errcheck` across the whole tree. Single pass, single dispatch. Supersedes `plugin-tooling-and-tests`, `sandbox-tooling-and-tests`, `installer-tooling-and-tests`. Deliverable shape: one summary file + one failure-listing per tool. **~~COMPLETED 2026-04-11~~** — see Completed audits above.
-36. **`tests-coverage-overall`** — test-design gap analysis. What's missing, what's under-tested, what's misaligned with its subject. Judgment-heavy. Deep-review skill with test-design lens.
+36. ~~**`tests-coverage-overall`**~~ — test-design gap analysis. **~~COMPLETED 2026-04-11~~** — 2 Critical (sandbox zero tests, MCP zero transport tests), 5 High coverage gaps.
 
 #### From `*`-proposed security/trust-model items
 

@@ -2,6 +2,7 @@ package coordination
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -51,7 +52,7 @@ func (s *BadgerStore) Get(key string) ([]byte, error) {
 	var val []byte
 	err := s.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(key))
-		if err == badger.ErrKeyNotFound {
+		if errors.Is(err, badger.ErrKeyNotFound) {
 			return ErrNotFound
 		}
 		if err != nil {
@@ -66,7 +67,7 @@ func (s *BadgerStore) Get(key string) ([]byte, error) {
 func (s *BadgerStore) Delete(key string) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		err := txn.Delete([]byte(key))
-		if err == badger.ErrKeyNotFound {
+		if errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
 		}
 		return err

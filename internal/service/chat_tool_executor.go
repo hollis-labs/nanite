@@ -117,6 +117,8 @@ func (s *chatServiceImpl) preCheckTools(
 			}
 			permResult := s.permissions.Check(ctx, sessionID, tu.Name, tu.Input, meta)
 			switch permResult.Decision {
+			case permission.DecisionAllow:
+				// Allow: fall through to tool execution below.
 			case permission.DecisionDeny:
 				ls.recordToolCall(tu.Name, false)
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
@@ -180,6 +182,26 @@ func (s *chatServiceImpl) preCheckTools(
 				}
 				log.Printf("chat-service: tool %s approved (scope: %s)", tu.Name, resp.Scope)
 				ls.continueWith(ContinuePermission, fmt.Sprintf("tool %s approved (scope: %s)", tu.Name, resp.Scope))
+
+			default:
+				// Fail closed on any unknown Decision value (defence against future
+				// enum additions that might otherwise silently fall through to tool
+				// execution).
+				ls.recordToolCall(tu.Name, false)
+				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — unknown permission decision %q", tu.Name, permResult.Decision)
+				log.Printf("chat-service: tool %s denied (unknown decision %q)", tu.Name, permResult.Decision)
+				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
+				block := provider.ContentBlock{
+					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
+				}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+				plan.status = toolPlanDenied
+				plan.denyReason = fmt.Sprintf("unknown permission decision %q", permResult.Decision)
+				plan.resultBlock = &block
+				plan.ref = &ref
+				plans = append(plans, plan)
+				continue
 			}
 		}
 

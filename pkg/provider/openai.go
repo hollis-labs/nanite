@@ -17,6 +17,7 @@ import (
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/openai/openai-go/shared"
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/pkg/models"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -328,7 +329,9 @@ func (o *OpenAI) streamChatInternal(ctx context.Context, systemPrompt string, me
 	)
 
 	ch := make(chan StreamEvent, 64)
-	go o.bridgeStream(ctx, stream, ch, span)
+	safego.Go(ctx, "provider.openai.bridgeStream", func() {
+		o.bridgeStream(ctx, stream, ch, span)
+	})
 	return ch, nil
 }
 

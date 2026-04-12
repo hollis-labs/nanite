@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // Transport handles JSON-RPC communication with a subprocess plugin over
@@ -104,10 +106,10 @@ func (t *Transport) read(ctx context.Context) (*RPCResponse, error) {
 		err  error
 	}
 	ch := make(chan readResult, 1)
-	go func() {
+	safego.Go(ctx, "plugin.subprocess.transport.read", func() {
 		line, err := t.r.ReadBytes('\n')
 		ch <- readResult{line, err}
-	}()
+	})
 
 	// Default 30s timeout, respect context deadline if shorter.
 	timeout := 30 * time.Second

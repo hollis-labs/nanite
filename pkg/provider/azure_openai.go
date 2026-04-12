@@ -13,6 +13,7 @@ import (
 	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/shared"
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/pkg/models"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -149,7 +150,9 @@ func (az *AzureOpenAI) streamChatInternal(ctx context.Context, systemPrompt stri
 	}
 
 	ch := make(chan StreamEvent, 64)
-	go bridgeCompatStream(ctx, stream, ch, az.RateTracker, span)
+	safego.Go(ctx, "provider.azure_openai.bridgeCompatStream", func() {
+		bridgeCompatStream(ctx, stream, ch, az.RateTracker, span)
+	})
 	return ch, nil
 }
 

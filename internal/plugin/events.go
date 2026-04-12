@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/go-plugin"
 )
 
@@ -573,7 +574,11 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 
 	for _, hook := range hooks {
 		ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
-		err := hook.Handle(ctx, event)
+		var err error
+		hk := hook
+		safego.Call(ctx, "plugin-hook.pre-hook."+eventType, func() {
+			err = hk.Handle(ctx, event)
+		})
 		cancel()
 		if err != nil {
 			if errors.Is(err, plugin.ErrCancelled) {

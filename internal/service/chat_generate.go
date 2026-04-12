@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/pkg/models"
@@ -201,7 +202,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Emit context.assembled event after tool selection and filters are applied.
 	if s.pluginHost != nil {
-		go s.pluginHost.EmitContextAssembled(sessionID, len(systemPrompt), len(chatMessages), len(tools))
+		safego.Go(ctx, "service.chat.emit.context-assembled", func() {
+			s.pluginHost.EmitContextAssembled(sessionID, len(systemPrompt), len(chatMessages), len(tools))
+		})
 	}
 
 	// --- Stream start ---
@@ -221,7 +224,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 	// Emit agent.loaded plugin event (fire-and-forget).
 	if s.pluginHost != nil {
-		go s.pluginHost.EmitAgentLoaded(sessionID, agent.ID, agent.Name, fmt.Sprintf("%d", agent.Version))
+		safego.Go(ctx, "service.chat.emit.agent-loaded", func() {
+			s.pluginHost.EmitAgentLoaded(sessionID, agent.ID, agent.Name, fmt.Sprintf("%d", agent.Version))
+		})
 	}
 
 	// --- Loop state ---
@@ -356,7 +361,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			}
 			// Emit provider.error plugin event.
 			if s.pluginHost != nil {
-				go s.pluginHost.EmitProviderError(sessionID, providerName, model, err.Error())
+				errMsg := err.Error()
+				safego.Go(ctx, "service.chat.emit.provider-error", func() {
+					s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
+				})
 			}
 			if ls.retryBudget > 0 {
 				ls.retryBudget--
@@ -654,7 +662,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		envRefs = append(envRefs, chat.EnvelopeRef{Type: env.Type, Data: json.RawMessage(innerData)})
 		// Emit envelope.rendered plugin event for each envelope attached to the response.
 		if s.pluginHost != nil {
-			go s.pluginHost.EmitEnvelopeRendered(sessionID, env.Type, env.Data)
+			envType := env.Type
+			envData := env.Data
+			safego.Go(ctx, "service.chat.emit.envelope-rendered", func() {
+				s.pluginHost.EmitEnvelopeRendered(sessionID, envType, envData)
+			})
 		}
 	}
 
@@ -758,9 +770,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Auto-title and auto-tags.
 	if session.Title == "" {
-		go s.autoTitle(sessionID, userContent)
+		safego.Go(ctx, "service.chat.autoTitle", func() {
+			s.autoTitle(sessionID, userContent)
+		})
 	}
-	go s.autoTags(sessionID)
+	safego.Go(ctx, "service.chat.autoTags", func() {
+		s.autoTags(sessionID)
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/agentvalidation"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -242,7 +243,9 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Emit agent.switched plugin event when primary changes to a different agent.
 	if isPrimary && previousAgentID != "" && previousAgentID != req.AgentID && a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitAgentSwitched(sessionID, previousAgentID, req.AgentID)
+		safego.Go(r.Context(), "api.agents.emit.agent-switched", func() {
+			a.Services.Plugins.EmitAgentSwitched(sessionID, previousAgentID, req.AgentID)
+		})
 	}
 
 	// Return the updated agents list.

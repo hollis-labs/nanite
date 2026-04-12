@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/coordination"
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/worktree"
 )
@@ -43,6 +44,11 @@ type Manager struct {
 	workers   sync.Map     // workerID -> *Worker
 	sem       chan struct{} // concurrency semaphore
 	maxWorkers int
+
+	// lifecycle owns all goroutines spawned by this Manager (heartbeats,
+	// deferred worker-map cleanups). Shutdown cancels its context and waits
+	// for every tracked goroutine to exit before returning.
+	lifecycle *lifecycle.Manager
 }
 
 // NewManager creates a worker manager with the given configuration.
@@ -58,6 +64,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		worktrees:  cfg.Worktrees,
 		sem:        make(chan struct{}, max),
 		maxWorkers: max,
+		lifecycle:  lifecycle.NewManager("worker.manager"),
 	}
 }
 
@@ -91,9 +98,13 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 	// Write worker status to coordination store.
 	m.writeWorkerStatus(w)
 
-	// Start heartbeat.
+	// Start heartbeat as a tracked goroutine on the manager's lifecycle.
+	// Per-worker cleanup closes heartbeatStop; Shutdown cancels the manager
+	// context. Either one causes the heartbeat to exit.
 	heartbeatStop := make(chan struct{})
-	go m.heartbeatLoop(workerID, heartbeatStop)
+	m.lifecycle.Go("heartbeat."+workerID[:8], func(ctx context.Context) {
+		m.heartbeatLoop(ctx, workerID, heartbeatStop)
+	})
 
 	start := time.Now()
 
@@ -175,11 +186,18 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 	cleanup()
 	cancel()
 
-	// Remove from active workers after a short retention period for status queries.
-	go func() {
-		time.Sleep(30 * time.Second)
+	// Remove from active workers after a short retention period for status
+	// queries. Tracked on the manager lifecycle so Shutdown waits for it —
+	// and so the 30s sleep is cancellable via ctx, closing BLG-001's leak.
+	m.lifecycle.Go("retention."+workerID[:8], func(ctx context.Context) {
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+		}
 		m.workers.Delete(workerID)
-	}()
+	})
 
 	log.Printf("worker %s: %s in %s", workerID[:8], w.GetStatus(), result.Duration.Round(time.Millisecond))
 	return result, nil
@@ -310,8 +328,14 @@ func (m *Manager) ReapStale(threshold time.Duration) []Snapshot {
 	return stale
 }
 
-// Shutdown cancels all active workers.
-func (m *Manager) Shutdown() {
+// Shutdown cancels all active workers and waits up to maxWait for tracked
+// goroutines (heartbeats, retention timers) to exit. Returns
+// context.DeadlineExceeded if any goroutine is still running after maxWait.
+//
+// Before this refactor, Shutdown cancelled per-worker contexts but did not
+// wait, and the 30-second retention goroutine in SpawnFull leaked past
+// process exit (BLG-001). Both are now tracked by the manager's lifecycle.
+func (m *Manager) Shutdown(maxWait time.Duration) error {
 	m.workers.Range(func(key, value any) bool {
 		if w, ok := value.(*Worker); ok {
 			if w.cancel != nil {
@@ -321,6 +345,7 @@ func (m *Manager) Shutdown() {
 		}
 		return true
 	})
+	return m.lifecycle.Shutdown(maxWait)
 }
 
 // writeWorkerStatus persists worker status to the coordination store.
@@ -346,7 +371,9 @@ func (m *Manager) writeWorkerStatus(w *Worker) {
 }
 
 // heartbeatLoop writes periodic heartbeats to the coordination store.
-func (m *Manager) heartbeatLoop(workerID string, stop chan struct{}) {
+// Exits when either the per-worker stop channel is closed (normal worker
+// completion) or when ctx is cancelled (manager shutdown).
+func (m *Manager) heartbeatLoop(ctx context.Context, workerID string, stop chan struct{}) {
 	if m.coord == nil || !m.coord.Available() {
 		return
 	}
@@ -370,6 +397,8 @@ func (m *Manager) heartbeatLoop(workerID string, stop chan struct{}) {
 	for {
 		select {
 		case <-stop:
+			return
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			write()

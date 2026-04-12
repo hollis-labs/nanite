@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/worker"
@@ -121,7 +122,9 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 	ch := s.streams.CreateStream(assistantMsgID, workerSession.ID)
 
 	// Start async generation in worker session.
-	go s.generateResponse(ctx, workerSession.ID, assistantMsgID, taskContent, ch)
+	safego.Go(ctx, "service.delegation.delegateTask.generateResponse", func() {
+		s.generateResponse(ctx, workerSession.ID, assistantMsgID, taskContent, ch)
+	})
 
 	// Drain the stream and collect the response.
 	result := &chat.DelegationResult{
@@ -262,15 +265,17 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 		ch := make(chan indexedResult, len(decomposition.SubTasks))
 
 		for i, st := range decomposition.SubTasks {
-			go func(idx int, st chat.SubTask) {
-				log.Printf("delegation: spawning worker %d/%d: %s", idx+1, len(decomposition.SubTasks), st.Title)
+			idx := i
+			sub := st
+			safego.Go(ctx, "service.delegation.delegateAndAggregate.spawnWorker", func() {
+				log.Printf("delegation: spawning worker %d/%d: %s", idx+1, len(decomposition.SubTasks), sub.Title)
 				wr, err := s.workers.SpawnFull(ctx, worker.SpawnRequest{
 					ParentSessionID: parentSessionID,
-					Title:           st.Title,
-					Description:     st.Description,
+					Title:           sub.Title,
+					Description:     sub.Description,
 					Model:           model,
 				})
-				r := chat.SubTaskResult{Title: st.Title}
+				r := chat.SubTaskResult{Title: sub.Title}
 				if err != nil {
 					r.Error = err.Error()
 				} else {
@@ -280,7 +285,7 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 					}
 				}
 				ch <- indexedResult{idx: idx, result: r}
-			}(i, st)
+			})
 		}
 
 		// Collect results in order.

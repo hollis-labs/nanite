@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
@@ -503,7 +504,9 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 	)
 
 	ch := make(chan StreamEvent, 64)
-	go a.bridgeStream(ctx, stream, ch, span)
+	safego.Go(ctx, "provider.anthropic.bridgeStream", func() {
+		a.bridgeStream(ctx, stream, ch, span)
+	})
 	return ch, nil
 }
 

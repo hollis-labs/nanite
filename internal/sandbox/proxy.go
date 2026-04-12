@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // Proxy is a domain-allowlisted HTTP proxy that listens on localhost TCP.
@@ -47,12 +49,12 @@ func (p *Proxy) Start() error {
 	}
 
 	p.wg.Add(1)
-	go func() {
+	safego.Go(context.Background(), "sandbox.proxy.serve", func() {
 		defer p.wg.Done()
 		if err := p.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Printf("proxy: serve error: %v", err)
 		}
-	}()
+	})
 
 	return nil
 }
@@ -119,14 +121,14 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Bidirectional copy.
 	var copyWg sync.WaitGroup
 	copyWg.Add(2)
-	go func() {
+	safego.Go(context.Background(), "sandbox.proxy.connect.copy-to-target", func() {
 		defer copyWg.Done()
 		_, _ = io.Copy(targetConn, clientConn)
-	}()
-	go func() {
+	})
+	safego.Go(context.Background(), "sandbox.proxy.connect.copy-to-client", func() {
 		defer copyWg.Done()
 		_, _ = io.Copy(clientConn, targetConn)
-	}()
+	})
 	copyWg.Wait()
 }
 

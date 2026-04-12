@@ -44,6 +44,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
@@ -130,7 +131,9 @@ func (g *Gemini) StreamChat(ctx context.Context, systemPrompt string, messages [
 	}
 
 	ch := make(chan StreamEvent, 64)
-	go g.readSSE(ctx, resp.Body, ch)
+	safego.Go(ctx, "provider.gemini.readSSE", func() {
+		g.readSSE(ctx, resp.Body, ch)
+	})
 	return ch, nil
 }
 

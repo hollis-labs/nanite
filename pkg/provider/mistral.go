@@ -11,6 +11,7 @@ import (
 	"time"
 
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -132,7 +133,9 @@ func (m *Mistral) streamChatInternal(ctx context.Context, systemPrompt string, m
 	}
 
 	ch := make(chan StreamEvent, 64)
-	go bridgeCompatStream(ctx, stream, ch, m.RateTracker, span)
+	safego.Go(ctx, "provider.mistral.bridgeCompatStream", func() {
+		bridgeCompatStream(ctx, stream, ch, m.RateTracker, span)
+	})
 	return ch, nil
 }
 

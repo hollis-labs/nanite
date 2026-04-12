@@ -26,11 +26,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/server"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -264,18 +266,27 @@ func cmdServe(args []string) {
 		}
 	}
 
-	// Shutdown handler.
-	go func() {
+	// Lifecycle manager for long-running daemon goroutines (cleanup,
+	// snapshots, reapers). Owned by cmdServe; shut down on signal before
+	// container.Shutdown so daemons stop referencing container state.
+	daemonLifecycle := lifecycle.NewManager("cmd.nanite.daemons")
+
+	// Shutdown handler. Uses context.Background() because cmdServe has no
+	// parent ctx at this scope; the goroutine lives until the process exits.
+	safego.Go(context.Background(), "cmd.nanite.signal-handler", func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Println("shutting down...")
+		if err := daemonLifecycle.Shutdown(10 * time.Second); err != nil {
+			log.Printf("daemon lifecycle shutdown: %v", err)
+		}
 		container.Shutdown()
 		os.Exit(0)
-	}()
+	})
 
 	// Start periodic background workers (cleanup, snapshots, reapers).
-	startBackgroundWorkers(container)
+	startBackgroundWorkers(daemonLifecycle, container)
 
 	// Start HTTP server.
 	srv := server.New(s, a, *port, *dev, pluginHost)
@@ -425,53 +436,75 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	return mcpManager, tb, selfTools
 }
 
-// startBackgroundWorkers launches periodic goroutines for cleanup, snapshots, and reapers.
-func startBackgroundWorkers(container *service.Container) {
+// startBackgroundWorkers launches periodic goroutines for cleanup, snapshots,
+// and reapers on the supplied lifecycle manager. Each daemon's inner loop
+// selects on ctx.Done() so Shutdown drains them deterministically.
+func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container) {
 	// Periodic cleanup of saved tool outputs.
-	go func() {
+	lc.Go("truncate-cleanup", func(ctx context.Context) {
 		truncate.Cleanup()
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			truncate.Cleanup()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				truncate.Cleanup()
+			}
 		}
-	}()
+	})
 
 	// Periodic task snapshot (flush Badger state to SQLite).
 	if container.Tasks != nil {
-		go func() {
+		lc.Go("task-snapshot", func(ctx context.Context) {
 			ticker := time.NewTicker(60 * time.Second)
 			defer ticker.Stop()
-			for range ticker.C {
-				if err := container.Tasks.Snapshot(context.Background()); err != nil {
-					log.Printf("task snapshot: %v", err)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := container.Tasks.Snapshot(ctx); err != nil {
+						log.Printf("task snapshot: %v", err)
+					}
 				}
 			}
-		}()
+		})
 	}
 
 	// Periodic stale process reaper.
-	go func() {
+	lc.Go("stale-process-reaper", func(ctx context.Context) {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			if killed := container.ProcessTracker.KillStale(5 * time.Minute); killed > 0 {
-				log.Printf("stale process reaper: killed %d hung CLI processes", killed)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if killed := container.ProcessTracker.KillStale(5 * time.Minute); killed > 0 {
+					log.Printf("stale process reaper: killed %d hung CLI processes", killed)
+				}
 			}
 		}
-	}()
+	})
 
 	// Periodic stale worker reaper.
 	if container.Workers != nil {
-		go func() {
+		lc.Go("stale-worker-reaper", func(ctx context.Context) {
 			ticker := time.NewTicker(2 * time.Minute)
 			defer ticker.Stop()
-			for range ticker.C {
-				if stale := container.Workers.ReapStale(60 * time.Second); len(stale) > 0 {
-					log.Printf("stale worker reaper: reaped %d workers", len(stale))
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if stale := container.Workers.ReapStale(60 * time.Second); len(stale) > 0 {
+						log.Printf("stale worker reaper: reaped %d workers", len(stale))
+					}
 				}
 			}
-		}()
+		})
 	}
 }
 

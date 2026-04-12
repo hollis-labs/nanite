@@ -10,6 +10,8 @@ import (
 	"time"
 
 	pluginsdk "github.com/hollis-labs/go-plugin"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // UtilityCallFunc is a function that makes a lightweight LLM call for extraction.
@@ -79,7 +81,7 @@ type perTurnHook struct {
 	extractor *Extractor
 }
 
-func (h *perTurnHook) Handle(_ context.Context, event pluginsdk.Event) error {
+func (h *perTurnHook) Handle(ctx context.Context, event pluginsdk.Event) error {
 	// Only process user messages.
 	role, _ := event.Data["role"].(string)
 	if role != "" && role != "user" {
@@ -102,7 +104,9 @@ func (h *perTurnHook) Handle(_ context.Context, event pluginsdk.Event) error {
 	}
 
 	// Fire-and-forget: don't block the message flow.
-	go h.extractor.extractPerTurn(sessionID, content)
+	safego.Go(ctx, "memory.extractor.perTurn", func() {
+		h.extractor.extractPerTurn(sessionID, content)
+	})
 	return nil
 }
 
@@ -121,7 +125,7 @@ type postCompactHook struct {
 	extractor *Extractor
 }
 
-func (h *postCompactHook) Handle(_ context.Context, event pluginsdk.Event) error {
+func (h *postCompactHook) Handle(ctx context.Context, event pluginsdk.Event) error {
 	sessionID := event.SessionID
 	if sessionID == "" {
 		sessionID, _ = event.Data["session_id"].(string)
@@ -133,7 +137,9 @@ func (h *postCompactHook) Handle(_ context.Context, event pluginsdk.Event) error
 	tokensSaved, _ := event.Data["tokens_saved"].(int)
 
 	// Fire-and-forget: don't block compaction flow.
-	go h.extractor.extractPostCompact(sessionID, tokensSaved)
+	safego.Go(ctx, "memory.extractor.postCompact", func() {
+		h.extractor.extractPostCompact(sessionID, tokensSaved)
+	})
 	return nil
 }
 

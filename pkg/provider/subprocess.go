@@ -7,6 +7,8 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // SubprocessBridge is a provider that wraps CLI tools using standard pipes
@@ -108,7 +110,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 	ch := make(chan StreamEvent, 64)
 	activityCb, hasActivity := ActivityCallbackFromContext(ctx)
 
-	go func() {
+	safego.Go(ctx, "provider.subprocess.readLoop", func() {
 		defer close(ch)
 		defer stdout.Close()
 
@@ -160,7 +162,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		if cb, ok := ProcessCallbackFromContext(ctx); ok && cmd.Process != nil {
 			cb(cmd.Process, false)
 		}
-	}()
+	})
 
 	return ch, nil
 }

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // PTYBridge is a provider that wraps CLI tools in pseudo-terminals.
@@ -123,7 +125,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 	ch := make(chan StreamEvent, 64)
 	activityCb, hasActivity := ActivityCallbackFromContext(ctx)
 
-	go func() {
+	safego.Go(ctx, "provider.pty.readLoop", func() {
 		defer close(ch)
 		defer ptmx.Close()
 
@@ -180,7 +182,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		if cb, ok := ProcessCallbackFromContext(ctx); ok && cmd.Process != nil {
 			cb(cmd.Process, false)
 		}
-	}()
+	})
 
 	return ch, nil
 }
@@ -192,10 +194,10 @@ func (p *PTYBridge) killProcess(cmd *exec.Cmd) {
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	done := make(chan struct{})
-	go func() {
+	safego.Go(context.Background(), "provider.pty.killProcess.wait", func() {
 		cmd.Wait()
 		close(done)
-	}()
+	})
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):

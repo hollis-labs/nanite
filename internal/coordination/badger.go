@@ -1,16 +1,19 @@
 package coordination
 
 import (
+	"context"
 	"log"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
+
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 )
 
 // BadgerStore implements CoordStore using Badger v4.
 type BadgerStore struct {
-	db     *badger.DB
-	stopGC chan struct{}
+	db        *badger.DB
+	lifecycle *lifecycle.Manager
 }
 
 // NewBadgerStore opens a Badger database at dir and starts a background
@@ -27,10 +30,10 @@ func NewBadgerStore(dir string) (*BadgerStore, error) {
 	}
 
 	s := &BadgerStore{
-		db:     db,
-		stopGC: make(chan struct{}),
+		db:        db,
+		lifecycle: lifecycle.NewManager("coordination.badger"),
 	}
-	go s.gcLoop()
+	s.lifecycle.Go("gc", s.gcLoop)
 	return s, nil
 }
 
@@ -101,17 +104,20 @@ func (s *BadgerStore) List(prefix string) ([]KVEntry, error) {
 func (s *BadgerStore) Available() bool { return true }
 
 func (s *BadgerStore) Close() error {
-	close(s.stopGC)
+	// Cancel and wait for the GC loop before closing the DB. Closing the DB
+	// while gcLoop is mid-RunValueLogGC would race; lifecycle.Shutdown
+	// guarantees the goroutine has exited before we proceed.
+	_ = s.lifecycle.Shutdown(10 * time.Second)
 	return s.db.Close()
 }
 
 // gcLoop runs Badger's value log garbage collection periodically.
-func (s *BadgerStore) gcLoop() {
+func (s *BadgerStore) gcLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-s.stopGC:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			for {

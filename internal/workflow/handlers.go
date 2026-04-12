@@ -7,6 +7,7 @@ import (
 	"sync"
 	"text/template"
 
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 )
 
@@ -145,7 +146,9 @@ func (p *ParallelStep) Execute(ctx context.Context, input StepInput) (*StepOutpu
 
 	for i, step := range p.Steps {
 		wg.Add(1)
-		go func(idx int, s Step) {
+		idx := i
+		s := step
+		safego.Go(ctx, "workflow.parallel.step", func() {
 			defer wg.Done()
 			subInput := StepInput{
 				PipelineID:   input.PipelineID,
@@ -156,7 +159,7 @@ func (p *ParallelStep) Execute(ctx context.Context, input StepInput) (*StepOutpu
 			}
 			out, err := s.Handler.Execute(ctx, subInput)
 			results[idx] = result{id: s.ID, out: out, err: err}
-		}(i, step)
+		})
 	}
 	wg.Wait()
 

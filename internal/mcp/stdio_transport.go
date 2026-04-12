@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // StdioTransport implements MCP over a subprocess stdin/stdout.
@@ -106,10 +108,10 @@ func (t *StdioTransport) call(ctx context.Context, method string, params any) (*
 		err  error
 	}
 	readCh := make(chan readResult, 1)
-	go func() {
+	safego.Go(ctx, "mcp.stdio.transport.read", func() {
 		line, err := t.stdout.ReadBytes('\n')
 		readCh <- readResult{line, err}
-	}()
+	})
 
 	timeout := 30 * time.Second
 	if deadline, ok := ctx.Deadline(); ok {

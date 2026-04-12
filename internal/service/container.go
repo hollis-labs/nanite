@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	conduit "github.com/hollis-labs/vanta-conduit"
@@ -507,26 +508,68 @@ func (c *Container) RefreshUtilitySettings(prov, model string) {
 	}
 }
 
-// Shutdown performs graceful shutdown of all services.
+// containerShutdownMaxWait bounds total time spent shutting down subsystems.
+// Individual subsystems may use a share of this — they are run in parallel so
+// the ceiling applies to the slowest one, not the sum.
+const containerShutdownMaxWait = 10 * time.Second
+
+// Shutdown performs graceful shutdown of all services. Subsystems are shut
+// down in parallel under a single max-wait ceiling so one stuck component
+// cannot stall the others indefinitely. Returns when all subsystems have
+// exited or the ceiling is hit, whichever comes first.
 func (c *Container) Shutdown() {
-	if c.Workers != nil {
-		c.Workers.Shutdown()
+	var wg sync.WaitGroup
+
+	run := func(label string, fn func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				// A subsystem shutdown panicking should not abort the others.
+				if r := recover(); r != nil {
+					log.Printf("shutdown: %s panic: %v", label, r)
+				}
+			}()
+			fn()
+		}()
 	}
-	c.Chat.Shutdown()
+
+	if c.Workers != nil {
+		run("workers", func() {
+			if err := c.Workers.Shutdown(containerShutdownMaxWait); err != nil {
+				log.Printf("shutdown: workers: %v", err)
+			}
+		})
+	}
+	run("chat", func() { c.Chat.Shutdown() })
 	if c.Tasks != nil {
-		if err := c.Tasks.Snapshot(context.Background()); err != nil {
-			log.Printf("shutdown: task snapshot: %v", err)
-		}
+		run("tasks", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), containerShutdownMaxWait)
+			defer cancel()
+			if err := c.Tasks.Snapshot(ctx); err != nil {
+				log.Printf("shutdown: task snapshot: %v", err)
+			}
+		})
 	}
 	if c.Coord != nil {
-		c.Coord.Close()
+		run("coord", func() { c.Coord.Close() })
 	}
 	if c.Conduit != nil {
-		if err := c.Conduit.Close(); err != nil {
-			log.Printf("shutdown: conduit close: %v", err)
-		}
+		run("conduit", func() {
+			if err := c.Conduit.Close(); err != nil {
+				log.Printf("shutdown: conduit close: %v", err)
+			}
+		})
 	}
 	if c.MCP != nil {
-		c.MCP.Close()
+		run("mcp", func() { c.MCP.Close() })
+	}
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(containerShutdownMaxWait):
+		log.Printf("shutdown: timeout after %s — some subsystems may still be running", containerShutdownMaxWait)
 	}
 }

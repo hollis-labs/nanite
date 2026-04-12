@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -114,7 +115,9 @@ func (a *API) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 
 	// Emit artifact.created plugin event.
 	if a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitArtifactCreated(sessionID, artifact.ID, mimeType, store.ArtifactOriginUploaded)
+		safego.Go(r.Context(), "api.artifacts.emit.artifact-created", func() {
+			a.Services.Plugins.EmitArtifactCreated(sessionID, artifact.ID, mimeType, store.ArtifactOriginUploaded)
+		})
 	}
 
 	a.jsonResp(w, http.StatusCreated, artifact)
@@ -165,7 +168,9 @@ func (a *API) handlePlaceArtifact(w http.ResponseWriter, r *http.Request) {
 
 	// Emit artifact.created plugin event.
 	if a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitArtifactCreated(req.SessionID, artifact.ID, req.MimeType, string(store.ArtifactOriginPlaced))
+		safego.Go(r.Context(), "api.artifacts.emit.artifact-placed", func() {
+			a.Services.Plugins.EmitArtifactCreated(req.SessionID, artifact.ID, req.MimeType, string(store.ArtifactOriginPlaced))
+		})
 	}
 
 	a.jsonResp(w, http.StatusCreated, artifact)

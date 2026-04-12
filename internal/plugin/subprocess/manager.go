@@ -8,6 +8,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // ProcessState tracks the current state of a subprocess.
@@ -164,16 +166,20 @@ func (m *Manager) Start(ctx context.Context) (*Transport, error) {
 	m.waitCh = waitCh
 
 	// Single goroutine calls cmd.Wait(); both waitForExit and Stop observe waitCh.
-	go func() {
+	safego.Go(context.Background(), "plugin.subprocess.manager.cmdWait", func() {
 		waitCh <- cmd.Wait()
-	}()
-	go m.waitForExit(stderr)
+	})
+	safego.Go(context.Background(), "plugin.subprocess.manager.waitForExit", func() {
+		m.waitForExit(stderr)
+	})
 
 	// Start periodic health checks if configured.
 	if m.cfg.HealthInterval > 0 {
 		hctx, hcancel := context.WithCancel(context.Background())
 		m.healthCancel = hcancel
-		go m.healthLoop(hctx)
+		safego.Go(hctx, "plugin.subprocess.manager.healthLoop", func() {
+			m.healthLoop(hctx)
+		})
 	}
 
 	return transport, nil
@@ -268,7 +274,9 @@ func (m *Manager) waitForExit(stderr *ringBuffer) {
 	log.Printf("subprocess: %s", exitErr)
 
 	if m.onCrash != nil {
-		m.onCrash(exitErr)
+		safego.Call(context.Background(), "plugin-hook.subprocess.onCrash", func() {
+			m.onCrash(exitErr)
+		})
 	}
 
 	// Attempt restart if within limits.

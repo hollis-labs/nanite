@@ -53,12 +53,25 @@ func (s *stubToolExecutor) Execute(ctx context.Context, agentID, toolName string
 
 func newTestManager(delegator ChatDelegator) *Manager {
 	coord := coordination.NewNoopStore()
-	return NewManager(ManagerConfig{
+	m := NewManager(ManagerConfig{
 		MaxConcurrentWorkers: 3,
 		Chat:                 delegator,
 		Coord:                coord,
 	})
+	testManagersMu.Lock()
+	testManagers = append(testManagers, m)
+	testManagersMu.Unlock()
+	return m
 }
+
+// testManagers tracks all test-created managers so TestMain can drain them
+// via Shutdown before goleak.VerifyTestMain runs its leak check. Before
+// lifecycle-based tracking, the manager's 30-second retention goroutine
+// would outlive the test and trip goleak.
+var (
+	testManagers   []*Manager
+	testManagersMu sync.Mutex
+)
 
 func TestSpawnFull(t *testing.T) {
 	deleg := &stubDelegator{content: "hello from worker"}
@@ -114,6 +127,9 @@ func TestConcurrencyLimit(t *testing.T) {
 		Chat:                 deleg,
 		Coord:                coordination.NewNoopStore(),
 	})
+	testManagersMu.Lock()
+	testManagers = append(testManagers, mgr)
+	testManagersMu.Unlock()
 
 	// Spawn 3 workers concurrently. With limit=2, the 3rd must wait.
 	done := make(chan *Result, 3)
@@ -252,7 +268,7 @@ func TestShutdown(t *testing.T) {
 	})
 
 	time.Sleep(50 * time.Millisecond)
-	mgr.Shutdown()
+	_ = mgr.Shutdown(2 * time.Second)
 
 	// All workers should be cancelled. List returns value snapshots, so
 	// field reads here are safe without further synchronization.

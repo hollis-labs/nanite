@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/truncate"
 )
 
@@ -257,11 +258,12 @@ func (s *chatServiceImpl) executeToolBatch(
 		var mu sync.Mutex // protects ch sends ordering (presence events)
 		for _, ip := range concurrent {
 			wg.Add(1)
-			go func(ip indexedPlan) {
+			ipc := ip
+			safego.Go(ctx, "service.chat.executeSingleTool.concurrent", func() {
 				defer wg.Done()
-				result := s.executeSingleTool(ctx, ip.plan.tu, agentID, sessionID, ch, &mu)
-				results[ip.planIdx] = result
-			}(ip)
+				result := s.executeSingleTool(ctx, ipc.plan.tu, agentID, sessionID, ch, &mu)
+				results[ipc.planIdx] = result
+			})
 		}
 		wg.Wait()
 	}

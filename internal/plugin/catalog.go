@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // CatalogEntry represents a single plugin in a remote catalog.
@@ -99,10 +101,11 @@ func (cf *CatalogFetcher) Fetch(ctx context.Context, sources []CatalogSource) ([
 		if !src.Enabled {
 			continue
 		}
-		go func(s CatalogSource) {
+		s := src
+		safego.Go(ctx, "plugin.catalog.fetchSource", func() {
 			cat, err := cf.fetchSource(ctx, s)
 			results <- fetchResult{source: s, catalog: cat, err: err}
-		}(src)
+		})
 	}
 
 	// Collect results.

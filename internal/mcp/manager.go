@@ -448,13 +448,28 @@ func toolNameToSlug(name string) string {
 }
 
 // Close shuts down all transports that implement io.Closer.
+//
+// Inner transport Close() calls are made WITHOUT holding m.mu — the transport
+// Close may block on subprocess exit, and holding the manager mutex across it
+// would deadlock any concurrent RLock caller (GetTools, ExecuteTool, etc.).
+// We snapshot the transport list under lock, then release and call Close on
+// each one.
 func (m *Manager) Close() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	for name, transport := range m.servers {
-		if closer, ok := transport.(interface{ Close() error }); ok {
+	type namedTransport struct {
+		name      string
+		transport MCPTransport
+	}
+	snapshot := make([]namedTransport, 0, len(m.servers))
+	for name, t := range m.servers {
+		snapshot = append(snapshot, namedTransport{name: name, transport: t})
+	}
+	m.mu.Unlock()
+
+	for _, nt := range snapshot {
+		if closer, ok := nt.transport.(interface{ Close() error }); ok {
 			closer.Close()
-			log.Printf("mcp: closed transport for %s", name)
+			log.Printf("mcp: closed transport for %s", nt.name)
 		}
 	}
 }

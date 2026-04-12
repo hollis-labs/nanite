@@ -7,6 +7,7 @@ import (
 	"os"
 
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
@@ -129,7 +130,9 @@ func (o *OpenRouter) streamChatInternal(ctx context.Context, systemPrompt string
 	}
 
 	ch := make(chan StreamEvent, 64)
-	go bridgeCompatStream(ctx, stream, ch, o.RateTracker, span)
+	safego.Go(ctx, "provider.openrouter.bridgeCompatStream", func() {
+		bridgeCompatStream(ctx, stream, ch, o.RateTracker, span)
+	})
 	return ch, nil
 }
 

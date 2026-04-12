@@ -14,6 +14,7 @@ import (
 
 	"github.com/ollama/ollama/api"
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/pkg/models"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -244,7 +245,9 @@ func (o *Ollama) streamChatInternal(ctx context.Context, systemPrompt string, me
 	}
 
 	ch := make(chan StreamEvent, 64)
-	go o.bridgeStream(ctx, req, ch, span)
+	safego.Go(ctx, "provider.ollama.bridgeStream", func() {
+		o.bridgeStream(ctx, req, ch, span)
+	})
 	return ch, nil
 }
 

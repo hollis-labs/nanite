@@ -2,11 +2,14 @@ package skill
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // dynamicContextPattern matches !`command` markers in skill prompts.
@@ -48,7 +51,7 @@ func runContextCommand(command, workingDir string) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("start: %w", err)
 	}
-	go func() { done <- cmd.Wait() }()
+	safego.Go(context.Background(), "skill.runContextCommand.wait", func() { done <- cmd.Wait() })
 
 	select {
 	case err := <-done:

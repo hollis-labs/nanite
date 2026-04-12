@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -59,7 +60,7 @@ func (p *pubsub) subscribe(ctx context.Context, sessionID, agentID string) <-cha
 	p.subs[key] = append(p.subs[key], ch)
 	p.mu.Unlock()
 
-	go func() {
+	safego.Go(ctx, "a2a.pubsub.unsubscribe", func() {
 		<-ctx.Done()
 		p.mu.Lock()
 		defer p.mu.Unlock()
@@ -74,7 +75,7 @@ func (p *pubsub) subscribe(ctx context.Context, sessionID, agentID string) <-cha
 			delete(p.subs, key)
 		}
 		close(ch)
-	}()
+	})
 
 	return ch
 }

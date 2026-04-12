@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/go-plugin"
@@ -329,7 +330,11 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 	if s, ok := component.Props["slot"].(string); ok {
 		slot = s
 	}
-	go h.EmitWidgetLoaded(component.ID, string(component.Type), slot)
+	compID := component.ID
+	compType := string(component.Type)
+	safego.Go(h.ctx, "plugin.host.emit.widget-loaded", func() {
+		h.EmitWidgetLoaded(compID, compType, slot)
+	})
 	return nil
 }
 
@@ -500,7 +505,9 @@ func (h *Host) SetConfig(key string, value string) error {
 
 	// Emit config.changed event (fire-and-forget).
 	valStr := fmt.Sprintf("%v", value)
-	go h.EmitConfigChanged(id, key, valStr)
+	safego.Go(h.ctx, "plugin.host.emit.config-changed", func() {
+		h.EmitConfigChanged(id, key, valStr)
+	})
 	return nil
 }
 
@@ -936,7 +943,11 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 	h.logger.Info("loaded plugin", "id", id, "name", p.Name(), "version", p.Version())
 
 	// Emit plugin.installed event (fire-and-forget).
-	go h.EmitPluginInstalled(id, p.Name(), p.Version())
+	pName := p.Name()
+	pVer := p.Version()
+	safego.Go(h.ctx, "plugin.host.emit.plugin-installed", func() {
+		h.EmitPluginInstalled(id, pName, pVer)
+	})
 	return nil
 }
 
@@ -1007,12 +1018,18 @@ func (h *Host) registerSubprocessExtensions(sp *subprocess.SubprocessPlugin) {
 }
 
 // UnloadPlugin unloads a plugin from the host.
+//
+// The plugin's Unload() is invoked WITHOUT holding h.mu. Inner Unload calls
+// may take arbitrary time (subprocess shutdown, network close) and may re-
+// enter the host (e.g., to unregister routes), which would deadlock under
+// the host mutex. We validate under lock, capture the plugin reference,
+// release, then call Unload.
 func (h *Host) UnloadPlugin(id string) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	p, exists := h.plugins[id]
 	if !exists {
+		h.mu.Unlock()
 		return fmt.Errorf("plugin %q not found", id)
 	}
 
@@ -1023,15 +1040,21 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 		for _, dep := range other.Dependencies() {
 			if dep == id {
+				h.mu.Unlock()
 				return fmt.Errorf("cannot unload plugin %q: plugin %q depends on it", id, other.ID())
 			}
 		}
 	}
+	h.mu.Unlock()
 
+	// Inner Unload call outside the lock.
 	if err := p.Unload(); err != nil {
 		return fmt.Errorf("failed to unload plugin %q: %w", id, err)
 	}
 
+	// Re-acquire to mutate host state.
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	delete(h.plugins, id)
 
 	// Clean up plugin-owned registrations: filters, event hooks, UI components,
@@ -1071,7 +1094,9 @@ func (h *Host) UnloadPlugin(id string) error {
 	h.logger.Info("unloaded plugin", "id", id)
 
 	// Emit plugin.uninstalled event (fire-and-forget).
-	go h.EmitPluginUninstalled(id)
+	safego.Go(h.ctx, "plugin.host.emit.plugin-uninstalled", func() {
+		h.EmitPluginUninstalled(id)
+	})
 	return nil
 }
 
@@ -1087,22 +1112,27 @@ func (h *Host) EmitEvent(event plugin.Event) {
 		var wg sync.WaitGroup
 		for _, hook := range hooks {
 			wg.Add(1)
-			go func(hook plugin.EventHook) {
+			hk := hook
+			safego.Go(h.ctx, "plugin.host.emit-event.hook", func() {
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
 				defer cancel()
 
-				if err := hook.Handle(ctx, event); err != nil {
-					h.logger.Error("event hook failed", "eventType", event.Type, "error", err)
-				}
-			}(hook)
+				safego.Call(ctx, "plugin-hook.event-handle", func() {
+					if err := hk.Handle(ctx, event); err != nil {
+						h.logger.Error("event hook failed", "eventType", event.Type, "error", err)
+					}
+				})
+			})
 		}
 		wg.Wait()
 	}
 
 	// 2. Dispatch to trigger rules (event → connector bindings).
 	if h.triggers != nil {
-		go h.triggers.Dispatch(event)
+		safego.Go(h.ctx, "plugin.host.emit-event.triggers-dispatch", func() {
+			h.triggers.Dispatch(event)
+		})
 	}
 
 	// 3. Broadcast to SSE event stream subscribers.
@@ -1167,16 +1197,34 @@ func (h *Host) ListPlugins() []plugin.Plugin {
 }
 
 // Shutdown gracefully shuts down the plugin host and all loaded plugins.
+//
+// Inner Unload() calls are made WITHOUT holding h.mu — see UnloadPlugin for
+// the rationale. We snapshot the plugin map under lock, release, then unload
+// each plugin.
 func (h *Host) Shutdown() error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	type namedPlugin struct {
+		id string
+		p  plugin.Plugin
+	}
+	snapshot := make([]namedPlugin, 0, len(h.plugins))
+	for id, p := range h.plugins {
+		snapshot = append(snapshot, namedPlugin{id: id, p: p})
+	}
+	h.mu.Unlock()
 
 	var errors []string
-	for id, p := range h.plugins {
-		if err := p.Unload(); err != nil {
-			errors = append(errors, fmt.Sprintf("failed to unload plugin %q: %v", id, err))
+	for _, np := range snapshot {
+		if err := np.p.Unload(); err != nil {
+			errors = append(errors, fmt.Sprintf("failed to unload plugin %q: %v", np.id, err))
 		}
 	}
+
+	h.mu.Lock()
+	for _, np := range snapshot {
+		delete(h.plugins, np.id)
+	}
+	h.mu.Unlock()
 
 	h.ctxCancel()
 

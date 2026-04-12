@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +139,10 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Emit plugin event: user config changed.
 	if a.Services.Plugins != nil {
 		for key := range raw {
-			go a.Services.Plugins.EmitConfigChanged("user", key, "")
+			k := key
+			safego.Go(r.Context(), "api.settings.emit.config-changed", func() {
+				a.Services.Plugins.EmitConfigChanged("user", k, "")
+			})
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -66,7 +67,9 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	// Emit session creation event (fire-and-forget).
 	if a.Services.Activity != nil {
-		go a.Services.Activity.EmitSessionCreated(r.Context(), sess.ID, sess.WorkspaceID)
+		safego.Go(r.Context(), "api.sessions.activity.session-created", func() {
+			a.Services.Activity.EmitSessionCreated(r.Context(), sess.ID, sess.WorkspaceID)
+		})
 	}
 
 	a.jsonResp(w, http.StatusCreated, sess)
@@ -163,7 +166,9 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 
 	// Emit plugin event when session is archived via update.
 	if req.Status != nil && *req.Status == "archived" && a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitSessionArchived(id)
+		safego.Go(r.Context(), "api.sessions.emit.session-archived-update", func() {
+			a.Services.Plugins.EmitSessionArchived(id)
+		})
 	}
 
 	a.jsonResp(w, http.StatusOK, existing)
@@ -186,12 +191,16 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 	// Emit session ended event (fire-and-forget).
 	if a.Services.Activity != nil {
-		go a.Services.Activity.EmitSessionEnded(r.Context(), id)
+		safego.Go(r.Context(), "api.sessions.activity.session-ended", func() {
+			a.Services.Activity.EmitSessionEnded(r.Context(), id)
+		})
 	}
 
 	// Emit plugin event: session archived.
 	if a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitSessionArchived(id)
+		safego.Go(r.Context(), "api.sessions.emit.session-archived-delete", func() {
+			a.Services.Plugins.EmitSessionArchived(id)
+		})
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
@@ -233,7 +242,9 @@ func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 
 	// Emit plugin event: mode changed.
 	if a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitModeChanged(sessionID, previousMode, req.Mode)
+		safego.Go(r.Context(), "api.sessions.emit.mode-changed", func() {
+			a.Services.Plugins.EmitModeChanged(sessionID, previousMode, req.Mode)
+		})
 	}
 
 	// Return updated session info.

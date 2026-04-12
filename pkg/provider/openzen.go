@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -145,7 +146,9 @@ func (oz *OpenZen) streamChatInternal(ctx context.Context, systemPrompt string, 
 	}
 
 	ch := make(chan StreamEvent, 64)
-	go bridgeCompatStream(ctx, stream, ch, oz.RateTracker, span)
+	safego.Go(ctx, "provider.openzen.bridgeCompatStream", func() {
+		bridgeCompatStream(ctx, stream, ch, oz.RateTracker, span)
+	})
 	return ch, nil
 }
 

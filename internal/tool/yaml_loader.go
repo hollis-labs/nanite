@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,7 +59,7 @@ func LoadYAMLTools(workingDir string) []Tool {
 	}
 
 	if len(tools) > 0 {
-		log.Printf("tool/yaml: loaded %d YAML tools", len(tools))
+		slog.Info("tool/yaml: loaded YAML tools", "count", len(tools))
 	}
 
 	return tools
@@ -80,7 +80,7 @@ func loadYAMLDir(dir string) []Tool {
 		path := filepath.Join(dir, e.Name())
 		t, err := loadYAMLFile(path)
 		if err != nil {
-			log.Printf("tool/yaml: skipping %s: %v", path, err)
+			slog.Warn("tool/yaml: skipping", "path", path, "err", err)
 			continue
 		}
 		tools = append(tools, t)

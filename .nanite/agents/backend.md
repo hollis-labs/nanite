@@ -21,6 +21,16 @@
   - `github.com/google/uuid v1.6.0` — UUID generation
   - Local deps use `replace` directives pointing to sibling directories
 
+### Canonical libs for new code (Phase 0 Wave 1, 2026-04-12)
+
+Adopted as direct `require`s. Use these for new code; do not rewrite existing code to use them en masse.
+
+- `golang.org/x/sync/errgroup` — goroutine fan-out with cancellation and error propagation
+- `github.com/cenkalti/backoff/v5` — retry with exponential backoff (promoted from indirect)
+- `github.com/stretchr/testify/require` — test assertions that halt on failure
+- `go.uber.org/goleak` — wired into `TestMain` for `internal/worker`, `internal/plugin`, `internal/mcp` to catch goroutine leaks
+- `github.com/google/go-cmp/cmp` — struct diffing in tests
+
 ## Project Structure
 
 ```

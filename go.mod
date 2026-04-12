@@ -29,6 +29,20 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 )
 
+// Phase 0 Wave 1 adopted libs (canonical for new code going forward):
+require (
+	github.com/cenkalti/backoff/v5 v5.0.3
+	github.com/google/go-cmp v0.7.0
+	github.com/stretchr/testify v1.11.1
+	go.uber.org/goleak v1.3.0
+	golang.org/x/sync v0.20.0
+)
+
+require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+)
+
 replace github.com/hollis-labs/go-providers => ../framework/libs/go-providers
 
 replace github.com/hollis-labs/vanta-conduit => ../vanta-conduit
@@ -40,7 +54,6 @@ replace github.com/hollis-labs/mcp-helpers => ../framework/libs/go-mcp
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
-	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect

@@ -10,6 +10,21 @@ Tracking ongoing first-pass coverage of the Nanite codebase. This index lists co
 
 ## Completed audits
 
+### 2026-04-11 — `security-threat-model` (Go, deep-review)
+- **Counts:** 0 Critical, 5 High, 4 Medium, 0 Low, 1 Info
+- **Folder:** `docs/audits/2026-04-11-security-threat-model/`
+- **Headline:** Trust-boundary audit against the 11-item enumeration in reviewer-backend.md. 6 boundaries already covered by completed audits (cross-referenced). 5 boundaries audited fresh: (1) **Plugin manifest parser** — `plugin.yaml` is parsed with `gopkg.in/yaml.v3` which is safe against YAML bombs, but the parsed manifest fields (command, args, env) are passed to `exec.Command` without validation — a malicious manifest achieves arbitrary command execution at plugin load time (High). (2) **PTY bridge I/O** — PTY adapters parse CLI agent output with unvalidated regex/string matching; a CLI agent can inject fake tool results or fake completion signals into the nanite message stream via crafted stdout (High). (3) **Env var handling** — API keys loaded from env vars at init; no runtime re-read, but `HTTP_PROXY`/`HTTPS_PROXY` are inherited by all outbound HTTP clients including provider and embedding calls — an attacker who controls the env can MITM all LLM traffic (High). (4) **Provider API return data** — LLM responses are parsed but tool-call arguments from the LLM are forwarded to tool execution with no schema validation (High, extends toolbroker findings). (5) **User message prompt injection** — `scope_guard.go` is dead (chat-engine audit), no replacement exists; user messages flow to the LLM and back to tool execution unfiltered (High, confirms the dead-defense theme).
+
+### 2026-04-11 — `plugin-capability-model` (Go, deep-review)
+- **Counts:** 3 Critical, 3 High, 4 Medium, 2 Low, 1 Info
+- **Folder:** `docs/audits/2026-04-11-plugin-capability-model/`
+- **Headline:** **Plugins have FULL host access with ZERO isolation.** 3 Criticals: (1) Every builtin plugin imports `internal/*` packages directly — `internal/store`, `internal/mcp`, `internal/chat`, `internal/service` — giving plugins direct DB access, direct MCP server access, direct chat engine access, and the ability to call any unexported function in those packages. (2) The `Host` interface passed to plugins at load time exposes `EmitEvent` (fire arbitrary events to all other plugins), `RegisterRoute` (mount HTTP endpoints on the server), `RegisterTool` (inject tools into the LLM's tool list), `GetStore` (direct SQLite access). A malicious plugin can: exfiltrate all user data via the store, inject tools that run arbitrary commands, mount an HTTP endpoint that serves as a backdoor, and emit events that trigger other plugins' hooks with crafted payloads. (3) `LoadResult` from `OnLoad` can register any number of routes, tools, hooks, filters, connectors, and triggers with no cap or review — the host accepts everything unconditionally. Plus: no capability declaration in `plugin.yaml` (the manifest doesn't declare what the plugin will register; the host discovers capabilities post-load), no revocation path (once loaded, capabilities persist until process restart per the event-hook deregister bug).
+
+### 2026-04-11 — `telemetry-privacy-posture` (Go, deep-review)
+- **Counts:** 0 Critical, 2 High, 3 Medium, 2 Low, 4 Info
+- **Folder:** `docs/audits/2026-04-11-telemetry-privacy-posture/`
+- **Headline:** **No telemetry, no analytics, no phone-home.** Nanite sends data to exactly two categories of external services: (1) LLM provider APIs (expected, user-configured) and (2) embedding APIs (OpenAI/Ollama, for memory vectorization). No Sentry, no Mixpanel, no usage tracking. Local-first: works fully offline with Ollama. **Two High findings:** (1) Embedding API calls send raw user message content to OpenAI by default — there's no opt-out toggle and no content summarization before embedding. Users who don't set `OPENAI_API_KEY` avoid this (Ollama fallback is local), but if the key is set, every conversation turn's content leaves the machine for vectorization. (2) Provider error responses may contain echoed request content (including system prompts and user messages) and are logged at `slog.Error` level — PII in logs. Medium findings: sandbox proxy domain allowlist is hardcoded, MCP server subprocess inherits all env vars (including API keys), no data-at-rest encryption on SQLite DB.
+
 ### 2026-04-11 — `eval-subprocess-pty-sdk` (Go, deep-review)
 - **Counts:** 0 Critical, 3 High, 5 Medium, 2 Low, 2 Info
 - **Folder:** `docs/audits/2026-04-11-eval-subprocess-pty-sdk/`
@@ -240,10 +255,10 @@ A pre-execution inventory pass would identify any package not on this list. Cand
 
 #### From `*`-proposed security/trust-model items
 
-37. **`security-threat-model`** — fresh deep-review. Trust-boundary audit against the enumeration in `reviewer-backend.md` §"Trust boundaries". Cover every trust boundary not yet audited by a named scope: plugin manifest parser, PTY input/output, env var handling surface, provider API paths, HTTP API input validation (minus the `api-privilege-boundary` scope already queued). Synthesis of completed-audit findings is out of scope for this audit — that happens in Phase 4 meta-synthesis.
+37. ~~**`security-threat-model`**~~ — fresh deep-review. Trust-boundary audit. **~~COMPLETED 2026-04-11~~** — 5 High (plugin manifest exec, PTY output injection, env var MITM, LLM tool-arg pass-through, dead scope_guard).
 38. **`dependency-supply-chain`** — Go `go.mod` + frontend `package.json`: license compliance, CVEs (beyond `govulncheck` alone), vendored-vs-hosted, version lag, known-bad detection. Cross-stack scope; orchestrator decides dispatch strategy at pull time.
-39. **`telemetry-privacy-posture`** — what leaves the user's machine: embedding APIs, provider APIs, error reporting, any analytics. Opt-in defaults. Local-first guarantees. Distinct from observability.
-40. **`plugin-capability-model`** — map the current plugin capability surface. What plugins can touch via `internal/*` imports. What host state leaks. What's implicitly available. What a malicious plugin could do. **Not** a sandbox design — the design of a sandbox is future work. Deliverable: capability map + gap list.
+39. ~~**`telemetry-privacy-posture`**~~ — what leaves the user's machine. **~~COMPLETED 2026-04-11~~** — 2 High (embedding sends raw content to OpenAI by default, PII in error logs). No telemetry/analytics/phone-home found.
+40. ~~**`plugin-capability-model`**~~ — map the current plugin capability surface. **~~COMPLETED 2026-04-11~~** — 3 Critical (plugins have full internal/* access + direct DB/MCP/chat, Host exposes unrestricted register/emit/store, LoadResult uncapped). Capability map produced. Zero isolation confirmed.
 
 #### From `*`-proposed operability/quality items
 

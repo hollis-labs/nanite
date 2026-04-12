@@ -6,9 +6,9 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/google/uuid v1.6.0
-	github.com/hollis-labs/go-plugin v0.0.0
-	github.com/hollis-labs/otel v0.0.0
-	github.com/hollis-labs/tool-broker v0.0.0
+	github.com/hollis-labs/go-otel v0.0.2
+	github.com/hollis-labs/go-plugin v0.0.1
+	github.com/hollis-labs/go-toolbroker v0.0.2
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/zalando/go-keyring v0.2.8
 	go.opentelemetry.io/otel v1.43.0
@@ -17,39 +17,17 @@ require (
 	modernc.org/sqlite v1.48.1
 )
 
-replace github.com/hollis-labs/otel => ../framework/libs/go-otel
-
-replace github.com/hollis-labs/tool-broker => ../framework/libs/go-toolbroker
-
-replace github.com/hollis-labs/go-plugin => ../framework/libs/go-plugin
-
 require (
-	github.com/hollis-labs/go-providers v0.0.0
-	github.com/hollis-labs/vanta-conduit v0.0.0
+	github.com/hollis-labs/go-providers v0.0.1
+	github.com/hollis-labs/vanta-conduit v0.0.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 )
 
 // Phase 0 Wave 1 adopted libs (canonical for new code going forward):
 require (
-	github.com/cenkalti/backoff/v5 v5.0.3
-	github.com/google/go-cmp v0.7.0
-	github.com/stretchr/testify v1.11.1
+	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	go.uber.org/goleak v1.3.0
-	golang.org/x/sync v0.20.0
 )
-
-require (
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
-)
-
-replace github.com/hollis-labs/go-providers => ../framework/libs/go-providers
-
-replace github.com/hollis-labs/vanta-conduit => ../vanta-conduit
-
-replace github.com/hollis-labs/go-queue => ../framework/libs/go-queue
-
-replace github.com/hollis-labs/mcp-helpers => ../framework/libs/go-mcp
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -63,12 +41,11 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
-	github.com/hollis-labs/go-queue v0.0.0 // indirect
+	github.com/hollis-labs/go-queue v0.1.2 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
-	github.com/lib/pq v1.12.0
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-isatty v0.0.20
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

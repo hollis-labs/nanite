@@ -3,7 +3,7 @@ package toolclient
 import (
 	"log"
 
-	"github.com/hollis-labs/tool-broker/broker"
+	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 // DefaultToolTokenBudgetPct is the default fraction of the context window reserved for tool definitions.

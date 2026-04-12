@@ -10,7 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/tool-broker/broker"
+	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 // MaxSelectedTools is the maximum number of tools returned by SelectTools.

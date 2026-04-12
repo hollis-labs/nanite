@@ -6,7 +6,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/tool-broker/broker"
+	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 func TestSelectTools_ReturnsTools(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	feotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/go-otel"
 	"gopkg.in/yaml.v3"
 
 	"github.com/hollis-labs/nanite/internal/brand"
@@ -37,7 +37,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/internal/version"
-	"github.com/hollis-labs/tool-broker/broker"
+	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 func main() {

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"

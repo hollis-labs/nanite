@@ -7,13 +7,13 @@ import (
 	"strings"
 	"sync"
 
-	feotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/tool-broker/broker"
+	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 // MCPTransport is the interface for MCP server connections (stdio or HTTP).

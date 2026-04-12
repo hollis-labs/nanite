@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/safego"
 )
 
@@ -103,10 +104,35 @@ type Proxy struct {
 	// servers on dynamic ports; callers normally leave this empty.
 	ExtraCONNECTPorts []string
 
+	// connectDeadline caps the lifetime of each CONNECT tunnel. Zero uses
+	// the default of 5 minutes. Tests override this to exercise the deadline
+	// path deterministically.
+	connectDeadline time.Duration
+
 	listener net.Listener
 	server   *http.Server
 	wg       sync.WaitGroup
+
+	// lc tracks CONNECT tunnel goroutines so Stop can cancel and drain them.
+	// Initialized in Start.
+	lc *lifecycle.Manager
+
+	// conns tracks in-flight hijacked CONNECT connections so Stop can close
+	// both ends — http.Server.Shutdown is documented to not touch hijacked
+	// conns. Guarded by connsMu.
+	connsMu sync.Mutex
+	conns   map[net.Conn]struct{}
 }
+
+// defaultCONNECTDeadline bounds each CONNECT tunnel. Chosen to be long
+// enough for a normal HTTPS request-response cycle but short enough that a
+// stalled peer cannot wedge a handler forever.
+const defaultCONNECTDeadline = 5 * time.Minute
+
+// proxyStopDrainWindow is the time Stop waits for in-flight CONNECT
+// tunnels to drain after cancelling their context and closing their conns
+// before returning to the caller.
+const proxyStopDrainWindow = 5 * time.Second
 
 // NewProxy creates a proxy that will listen on 127.0.0.1:0 (random port).
 func NewProxy(allowedDomains []string) *Proxy {
@@ -124,6 +150,8 @@ func (p *Proxy) Start() error {
 	}
 	p.listener = ln
 	p.Addr = ln.Addr().String()
+	p.conns = make(map[net.Conn]struct{})
+	p.lc = lifecycle.NewManager("sandbox.proxy")
 
 	p.server = &http.Server{
 		Handler: http.HandlerFunc(p.handleRequest),
@@ -140,16 +168,66 @@ func (p *Proxy) Start() error {
 	return nil
 }
 
-// Stop gracefully shuts down the proxy listener.
+// Stop gracefully shuts down the proxy listener. It cancels all in-flight
+// CONNECT tunnels, forces their hijacked connections closed (http.Server
+// Shutdown is documented not to touch hijacked conns), waits up to
+// proxyStopDrainWindow for tunnel goroutines to exit, and then returns.
+// Safe to call multiple times.
 func (p *Proxy) Stop() error {
 	if p.server == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Phase 1: cancel the lifecycle ctx so CONNECT select-loops see Done.
+	// Force hijacked conns closed so any io.Copy blocked on Read returns.
+	p.connsMu.Lock()
+	for c := range p.conns {
+		_ = c.SetDeadline(time.Unix(1, 0))
+		_ = c.Close()
+	}
+	p.connsMu.Unlock()
+
+	// Phase 2: tell net/http to stop accepting new connections. This does
+	// NOT wait for hijacked conns, hence the explicit close above.
+	ctx, cancel := context.WithTimeout(context.Background(), proxyStopDrainWindow)
 	defer cancel()
-	err := p.server.Shutdown(ctx)
-	p.wg.Wait()
-	return err
+	shutdownErr := p.server.Shutdown(ctx)
+
+	// Phase 3: drain tunnel goroutines. lifecycle.Shutdown cancels the
+	// root ctx and waits up to the window. Any leftover goroutines will be
+	// recorded on the shutdown span but cannot leak past process exit.
+	if p.lc != nil {
+		_ = p.lc.Shutdown(proxyStopDrainWindow)
+	}
+
+	// Phase 4: wait for the Serve goroutine. Bounded because the listener
+	// is already closed by Shutdown above.
+	done := make(chan struct{})
+	safego.Go(context.Background(), "sandbox.proxy.stop-wait", func() {
+		p.wg.Wait()
+		close(done)
+	})
+	select {
+	case <-done:
+	case <-time.After(proxyStopDrainWindow):
+	}
+	return shutdownErr
+}
+
+// trackConn registers a hijacked CONNECT conn so Stop can force-close it.
+func (p *Proxy) trackConn(c net.Conn) {
+	p.connsMu.Lock()
+	if p.conns == nil {
+		p.conns = make(map[net.Conn]struct{})
+	}
+	p.conns[c] = struct{}{}
+	p.connsMu.Unlock()
+}
+
+// untrackConn removes a hijacked CONNECT conn from the tracking set.
+func (p *Proxy) untrackConn(c net.Conn) {
+	p.connsMu.Lock()
+	delete(p.conns, c)
+	p.connsMu.Unlock()
 }
 
 // handleRequest dispatches HTTP CONNECT (HTTPS tunneling) and plain HTTP requests.
@@ -271,36 +349,89 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("dial target: %v", err), http.StatusBadGateway)
 		return
 	}
-	defer targetConn.Close()
 
 	// Hijack the client connection to pipe bytes bidirectionally.
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
+		_ = targetConn.Close()
 		http.Error(w, "hijack not supported", http.StatusInternalServerError)
 		return
 	}
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
+		_ = targetConn.Close()
 		http.Error(w, fmt.Sprintf("hijack: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer clientConn.Close()
 
 	// Send 200 Connection Established.
 	_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
-	// Bidirectional copy.
-	var copyWg sync.WaitGroup
-	copyWg.Add(2)
-	safego.Go(context.Background(), "sandbox.proxy.connect.copy-to-target", func() {
-		defer copyWg.Done()
-		_, _ = io.Copy(targetConn, clientConn)
-	})
-	safego.Go(context.Background(), "sandbox.proxy.connect.copy-to-client", func() {
-		defer copyWg.Done()
-		_, _ = io.Copy(clientConn, targetConn)
-	})
-	copyWg.Wait()
+	// Track conns so Stop() can force-close them. http.Server.Shutdown is
+	// documented not to touch hijacked connections, and the Linux bwrap
+	// proxy mode relies on this to exit cleanly when a stalled peer is on
+	// the other end.
+	p.trackConn(clientConn)
+	p.trackConn(targetConn)
+
+	// Bound the tunnel lifetime so a stalled peer cannot pin the handler
+	// goroutine forever.
+	deadline := p.connectDeadline
+	if deadline <= 0 {
+		deadline = defaultCONNECTDeadline
+	}
+	absDeadline := time.Now().Add(deadline)
+	_ = clientConn.SetDeadline(absDeadline)
+	_ = targetConn.SetDeadline(absDeadline)
+
+	p.runTunnel(clientConn, targetConn)
+}
+
+// runTunnel copies bytes bidirectionally between client and target, using
+// lifecycle-tracked goroutines. It returns as soon as either direction
+// finishes (or errors), after closing both ends so the other direction
+// unblocks. Both goroutines are drained before return, so the caller can
+// rely on the tunnel being fully released when this function exits.
+//
+// Tracked via p.lc so Proxy.Stop can cancel the root context; the conns
+// themselves are force-closed separately by Stop to unblock any io.Copy
+// that is currently parked in a read.
+func (p *Proxy) runTunnel(clientConn, targetConn net.Conn) {
+	defer func() {
+		_ = clientConn.Close()
+		_ = targetConn.Close()
+		p.untrackConn(clientConn)
+		p.untrackConn(targetConn)
+	}()
+
+	errCh := make(chan error, 2)
+	copyOne := func(label string, dst, src net.Conn) {
+		p.lc.Go(label, func(ctx context.Context) {
+			// Fire a watcher that closes conns when the lifecycle ctx is
+			// cancelled (e.g. via Stop). Cheap — exits when the copy does.
+			done := make(chan struct{})
+			defer close(done)
+			go func() {
+				select {
+				case <-ctx.Done():
+					_ = dst.SetDeadline(time.Unix(1, 0))
+					_ = src.SetDeadline(time.Unix(1, 0))
+				case <-done:
+				}
+			}()
+			_, err := io.Copy(dst, src)
+			errCh <- err
+		})
+	}
+	copyOne("connect.copy-to-target", targetConn, clientConn)
+	copyOne("connect.copy-to-client", clientConn, targetConn)
+
+	// Wait for the first direction to finish. Close both ends so the other
+	// io.Copy unblocks immediately, then drain its result.
+	<-errCh
+	_ = clientConn.Close()
+	_ = targetConn.Close()
+	<-errCh
 }
 
 // handleHTTP forwards plain HTTP requests after checking the domain allowlist.
@@ -362,6 +493,15 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Remove hop-by-hop headers.
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
+	// Do not forward the client's arbitrary Host header to upstream. Go's
+	// http.Client uses req.Host / req.URL.Host when writing the request
+	// line — setting it explicitly here makes the policy visible and
+	// prevents a header-injection path from leaking internal hostnames.
+	// The "Host" entry in Header is already special-cased by net/http, but
+	// scrub it defensively in case a future Go release or a hijacking
+	// transport reads it directly.
+	outReq.Header.Del("Host")
+	outReq.Host = r.URL.Host
 
 	client := &http.Client{
 		Transport: transport,

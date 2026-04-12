@@ -148,8 +148,16 @@ func (m *Manager) Start(ctx context.Context) (*Transport, error) {
 	stderr := &ringBuffer{buf: make([]byte, 4096)}
 	cmd.Stderr = stderr
 
-	// Set process group so we can kill the whole tree on shutdown.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Process group + WaitDelay: the subprocess plugin binary may fork
+	// helper processes (language runtimes, e.g. a Node wrapper spawning
+	// its own workers). Setpgid places the whole tree in a new process
+	// group so Stop's -pid SIGKILL below reaches every descendant. The
+	// audit's finding 07 calls this out specifically for orphan
+	// grandchildren that outlive the direct child. WaitDelay bounds
+	// cmd.Wait so a grandchild holding an inherited stdout pipe cannot
+	// pin cmdWait forever.
+	configureSubprocAttr(cmd)
+	cmd.WaitDelay = 10 * time.Second
 
 	if err := cmd.Start(); err != nil {
 		m.state = StateStopped

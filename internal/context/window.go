@@ -1,7 +1,7 @@
 package context
 
 import (
-	"log"
+	"log/slog"
 	"unicode/utf8"
 )
 
@@ -64,7 +64,7 @@ func NewContextWindow(providerWindowSize int, estimator TokenEstimator) *Context
 func (cw *ContextWindow) SetContent(slotName, content string) {
 	s, ok := cw.slots[slotName]
 	if !ok {
-		log.Printf("context: unknown slot %q, ignoring SetContent", slotName)
+		slog.Warn("context: unknown slot, ignoring SetContent", "slot", slotName)
 		return
 	}
 	s.Content = content
@@ -164,8 +164,9 @@ func (cw *ContextWindow) Assemble() []SlotBlock {
 	}
 	cw.PrevHashes = newHashes
 
-	log.Printf("context: assembled %d slot blocks, %d/%d tokens used, %d cache hits",
-		len(blocks), cw.UsedTokens(), cw.TotalBudget, cw.countCacheHits())
+	slog.Debug("context: assembled slot blocks",
+		"blocks", len(blocks), "used_tokens", cw.UsedTokens(),
+		"budget", cw.TotalBudget, "cache_hits", cw.countCacheHits())
 
 	return blocks
 }

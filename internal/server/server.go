@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"log"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -155,7 +155,7 @@ func (s *Server) ListenAndServe() error {
 		),
 	)
 	addr := fmt.Sprintf(":%d", s.port)
-	slog.Info("nanite listening", "addr", addr, "dev", s.dev)
+	log.Printf("nanite listening on %s (dev=%v)", addr, s.dev)
 
 	httpSrv := &http.Server{
 		Addr:              addr,
@@ -346,7 +346,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		slog.Debug("http request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
 	})
 }
 
@@ -369,7 +369,7 @@ func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
 			if len(stack) > maxRecoveredStackBytes {
 				stack = stack[:maxRecoveredStackBytes]
 			}
-			slog.Error("PANIC recovered", "panic", err, "stack", string(stack))
+			log.Printf("PANIC: %v\nstack:\n%s\n", err, stack)
 
 			// OTel span event: only recorded when the request already has
 			// a span in context. When OTel is disabled (no-op provider)

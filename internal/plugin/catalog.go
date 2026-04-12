@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -148,13 +148,13 @@ func (cf *CatalogFetcher) fetchSource(ctx context.Context, src CatalogSource) (*
 
 	resp, err := cf.client.Do(req)
 	if err != nil {
-		log.Printf("catalog: fetch %s failed (using cache): %v", src.Name, err)
+		slog.Warn("catalog: fetch failed (using cache)", "name", src.Name, "err", err)
 		return cf.loadDiskCache(src.ID)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("catalog: fetch %s returned %d (using cache)", src.Name, resp.StatusCode)
+		slog.Warn("catalog: fetch returned error (using cache)", "name", src.Name, "status", resp.StatusCode)
 		return cf.loadDiskCache(src.ID)
 	}
 

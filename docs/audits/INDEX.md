@@ -10,6 +10,21 @@ Tracking ongoing first-pass coverage of the Nanite codebase. This index lists co
 
 ## Completed audits
 
+### 2026-04-11 — `dependency-supply-chain` (Go + frontend, deep-review)
+- **Counts:** 0 Critical, 3 High, 4 Medium, 1 Low, 2 Info
+- **Folder:** `docs/audits/2026-04-11-dependency-supply-chain/`
+- **Headline:** Go module: 94 direct+indirect deps, no vendor dir, `govulncheck` not installed (zero CVE signal). Three High: (1) `go.mod` replace directive for `mcp-helpers` points to a nonexistent local path — phantom dep that breaks reproducible builds outside the dev machine. (2) `modernc.org/sqlite` is 6+ minor versions behind — a pure-Go SQLite re-implementation that receives frequent correctness fixes. (3) Frontend `npm audit` reports multiple high-severity CVEs in transitive deps. License posture: all MIT/Apache/BSD, no GPL contamination. Version lag documented for top-20 deps.
+
+### 2026-04-11 — `observability` (Go, deep-review)
+- **Counts:** 0 Critical, 3 High, 3 Medium, 1 Low, 2 Info
+- **Folder:** `docs/audits/2026-04-11-observability/`
+- **Headline:** OTel wrapper is well-structured but **always-on** — `internal/otel/` initializes a Jaeger exporter with no off-switch (High, privacy concern cross-ref telemetry-privacy-posture). Structured logging uses `slog` consistently but: (1) middleware recover only logs `%v` on panic — no stack trace, no OTel span event (High). (2) Provider error responses are logged at `slog.Error` with potentially PII-bearing response bodies (High, cross-ref provider-abstractions). Span discipline is partial: chat generation and tool execution have spans, but plugin lifecycle, memory extraction, and worker management have none (Medium). No metrics emitted anywhere in the codebase — counter/histogram infrastructure exists in `go-otel` wrapper but is unused (Medium).
+
+### 2026-04-11 — `single-binary-asset-embedding-mechanics` (Go, deep-review)
+- **Counts:** 0 Critical, 0 High, 2 Medium, 2 Low, 2 Info
+- **Folder:** `docs/audits/2026-04-11-single-binary-asset-embedding-mechanics/`
+- **Headline:** Embed mechanics are sound. `//go:embed` captures `internal/assets/framework/` and `ui/dist/` into the binary. Extraction via `nanite install` uses direct `os.WriteFile` (non-atomic, cross-ref managed-section-parser finding 03). Frontend embed uses `io/fs.Sub` correctly. Two Medium: (1) extraction overwrites existing files without backup — user customizations in `~/.nanite/` are lost on reinstall. (2) No integrity check on embedded content — if the binary is patched post-build, extracted files are silently corrupted. Binary size contribution from embed is documented.
+
 ### 2026-04-11 — `security-threat-model` (Go, deep-review)
 - **Counts:** 0 Critical, 5 High, 4 Medium, 0 Low, 1 Info
 - **Folder:** `docs/audits/2026-04-11-security-threat-model/`
@@ -256,14 +271,14 @@ A pre-execution inventory pass would identify any package not on this list. Cand
 #### From `*`-proposed security/trust-model items
 
 37. ~~**`security-threat-model`**~~ — fresh deep-review. Trust-boundary audit. **~~COMPLETED 2026-04-11~~** — 5 High (plugin manifest exec, PTY output injection, env var MITM, LLM tool-arg pass-through, dead scope_guard).
-38. **`dependency-supply-chain`** — Go `go.mod` + frontend `package.json`: license compliance, CVEs (beyond `govulncheck` alone), vendored-vs-hosted, version lag, known-bad detection. Cross-stack scope; orchestrator decides dispatch strategy at pull time.
+38. ~~**`dependency-supply-chain`**~~ — Go `go.mod` + frontend `package.json`: license compliance, CVEs, version lag. **~~COMPLETED 2026-04-11~~** — 3 High (phantom replace, sqlite version lag, npm CVEs).
 39. ~~**`telemetry-privacy-posture`**~~ — what leaves the user's machine. **~~COMPLETED 2026-04-11~~** — 2 High (embedding sends raw content to OpenAI by default, PII in error logs). No telemetry/analytics/phone-home found.
 40. ~~**`plugin-capability-model`**~~ — map the current plugin capability surface. **~~COMPLETED 2026-04-11~~** — 3 Critical (plugins have full internal/* access + direct DB/MCP/chat, Host exposes unrestricted register/emit/store, LoadResult uncapped). Capability map produced. Zero isolation confirmed.
 
 #### From `*`-proposed operability/quality items
 
-41. **`observability`** — `internal/otel` wrapper usage, structured-logging discipline, PII in log fields, metric coverage, error-reporting surface. Deep-review.
-42. **`single-binary-asset-embedding-mechanics`** — `internal/assets/framework/` embed mechanics, `nanite install` extraction, binary size, cold-start perf, extraction atomicity. Deep-review. **Distinct** from the existing `assets-framework-content-correctness` scope (that audits embedded content; this audits mechanics).
+41. ~~**`observability`**~~ — `internal/otel` wrapper, logging, PII, metrics, error-reporting. **~~COMPLETED 2026-04-11~~** — 3 High (OTel always-on, middleware recover no stack trace, PII in error logs).
+42. ~~**`single-binary-asset-embedding-mechanics`**~~ — embed mechanics, `nanite install` extraction, binary size. **~~COMPLETED 2026-04-11~~** — 2 Medium (non-atomic extraction, no integrity check). Embed mechanics are sound.
 
 #### Mini-sweep scopes (grep-driven, different deliverable shape)
 

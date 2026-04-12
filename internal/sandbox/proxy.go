@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -161,7 +161,7 @@ func (p *Proxy) Start() error {
 	safego.Go(context.Background(), "sandbox.proxy.serve", func() {
 		defer p.wg.Done()
 		if err := p.server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Printf("proxy: serve error: %v", err)
+			slog.Error("proxy: serve error", "err", err)
 		}
 	})
 
@@ -322,13 +322,13 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// another port can layer it on top of HTTPS, or the operator can extend
 	// this list after review.
 	if !p.connectPortAllowed(port) {
-		log.Printf("proxy: denied CONNECT to %s (port %s not in TLS allowlist)", r.Host, port)
+		slog.Warn("proxy: denied CONNECT (port not in TLS allowlist)", "host", r.Host, "port", port)
 		http.Error(w, "CONNECT only allowed to TLS ports (443, 8443)", http.StatusForbidden)
 		return
 	}
 
 	if !p.domainAllowed(host) {
-		log.Printf("proxy: denied CONNECT to %s", r.Host)
+		slog.Warn("proxy: denied CONNECT", "host", r.Host)
 		http.Error(w, "domain not allowed", http.StatusForbidden)
 		return
 	}
@@ -337,7 +337,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// DNS-rebinding to RFC1918 / loopback / IMDS targets.
 	pinned, err := p.resolveAndPin(r.Context(), host)
 	if err != nil {
-		log.Printf("proxy: blocked CONNECT to %s: %v", r.Host, err)
+		slog.Warn("proxy: blocked CONNECT", "host", r.Host, "err", err)
 		http.Error(w, fmt.Sprintf("blocked: %v", err), http.StatusForbidden)
 		return
 	}
@@ -456,7 +456,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !p.domainAllowed(host) {
-		log.Printf("proxy: denied %s to %s", r.Method, r.URL.Host)
+		slog.Warn("proxy: denied", "method", r.Method, "host", r.URL.Host)
 		http.Error(w, "domain not allowed", http.StatusForbidden)
 		return
 	}

@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,7 +76,7 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 	if opts.Adapters != nil {
 		adapterDefs, err := opts.Adapters.DiscoverAll(opts.WorkingDir)
 		if err != nil {
-			log.Printf("agent: adapter discovery: %v", err)
+			slog.Warn("agent: adapter discovery failed", "err", err)
 		} else {
 			for i := range adapterDefs {
 				add(&adapterDefs[i])
@@ -103,7 +103,7 @@ func discoverDir(dir, source string) []*Definition {
 		path := filepath.Join(dir, e.Name())
 		def, err := ParseMDFile(path)
 		if err != nil {
-			log.Printf("agent: skipping %s: %v", path, err)
+			slog.Warn("agent: skipping", "path", path, "err", err)
 			continue
 		}
 		def.Source = source

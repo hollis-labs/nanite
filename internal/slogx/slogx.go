@@ -116,6 +116,33 @@ func FatalContext(ctx context.Context, msg string, args ...any) {
 	os.Exit(1)
 }
 
+// ParseLevel maps a string ("debug", "info", "warn", "error") to a
+// slog.Level. Unknown or empty values fall back to slog.LevelInfo.
+// Matching is case-insensitive.
+func ParseLevel(s string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error", "err":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// ParseFormat maps a string to a Format. Unknown or empty values fall
+// back to FormatJSON.
+func ParseFormat(s string) Format {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "text":
+		return FormatText
+	default:
+		return FormatJSON
+	}
+}
+
 // ---------- PII redactor ----------
 
 // sensitiveAttrKeys names attributes whose values are replaced with

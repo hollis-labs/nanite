@@ -14,6 +14,28 @@ type AppConfig struct {
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
 	HTTP      HTTPConfig      `yaml:"http"`
 	OTel      OTelConfig      `yaml:"otel"`
+	Logging   LoggingConfig   `yaml:"logging"`
+}
+
+// LoggingConfig controls the structured logging handler installed by
+// internal/slogx at startup.
+//
+// Defaults (see DefaultAppConfig): JSON format, INFO level, PII
+// redaction enabled. Unknown format/level values fall back to these
+// defaults rather than erroring out so a typo never takes the process
+// down.
+type LoggingConfig struct {
+	// Format is "json" or "text". Unknown values fall back to "json".
+	Format string `yaml:"format"`
+	// Level is "debug", "info", "warn", or "error". Case-insensitive.
+	// Unknown values fall back to "info".
+	Level string `yaml:"level"`
+	// RedactPII, when true, installs the slogx.PIIRedactor handler
+	// wrapper. Default true (set via DefaultAppConfig). Explicitly set
+	// false only in tightly-controlled debug environments.
+	RedactPII bool `yaml:"redact_pii"`
+	// AddSource, when true, annotates records with file:line.
+	AddSource bool `yaml:"add_source"`
 }
 
 // OTelConfig controls OpenTelemetry initialisation.
@@ -91,6 +113,11 @@ func DefaultAppConfig() *AppConfig {
 			IdleTimeoutSeconds:       120,
 			MaxRequestBodyBytes:      10 << 20, // 10 MiB
 			MaxUploadBodyBytes:       32 << 20, // 32 MiB (matches pre-existing multipart cap)
+		},
+		Logging: LoggingConfig{
+			Format:    "json",
+			Level:     "info",
+			RedactPII: true,
 		},
 	}
 }

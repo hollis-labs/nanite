@@ -36,6 +36,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/server"
 	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/truncate"
@@ -70,6 +71,36 @@ func main() {
 }
 
 func cmdServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	port := fs.Int("port", 8090, "HTTP listen port")
+	dbPath := fs.String("db", "./"+brand.DefaultDBName, "SQLite database path")
+	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
+	fs.Parse(args)
+
+	// Load app-level config first so the logging handler and OTel init
+	// both observe the same settings. A missing or malformed config
+	// falls back to safe defaults rather than aborting startup.
+	appCfg, appCfgErr := config.LoadAppConfig("config/" + brand.ConfigFileName + ".yaml")
+	if appCfgErr != nil {
+		appCfg = config.DefaultAppConfig()
+	}
+
+	// Install the structured logging handler before anything else
+	// emits a log record. Every subsequent log.Printf (until migrated)
+	// still goes to stdlib stderr, but slog-based sites flow through
+	// the PII redactor and JSON handler.
+	_, logCloser, logErr := slogx.Init(slogx.Config{
+		Format:    slogx.ParseFormat(appCfg.Logging.Format),
+		Level:     slogx.ParseLevel(appCfg.Logging.Level),
+		RedactPII: appCfg.Logging.RedactPII,
+		AddSource: appCfg.Logging.AddSource,
+	})
+	if logErr != nil {
+		log.Printf("warning: slog handler init failed: %v (continuing with stdlib log)", logErr)
+	} else {
+		defer logCloser.Close()
+	}
+
 	// Load agentrc config (user-level + project-level, merged).
 	cfg, cfgErr := config.Load()
 	if cfgErr != nil {
@@ -82,17 +113,8 @@ func cmdServe(args []string) {
 		log.Printf("config loaded — project: %s, role: %s, root: %s", name, cfg.Role, cfg.ProjectRoot())
 	}
 
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	port := fs.Int("port", 8090, "HTTP listen port")
-	dbPath := fs.String("db", "./"+brand.DefaultDBName, "SQLite database path")
-	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
-	fs.Parse(args)
-
-	// Load app-level config early so OTel init can honour OTel.Disabled.
-	// Full app-config logging happens at the later (post-provider) site.
-	otelAppCfg, otelAppCfgErr := config.LoadAppConfig("config/" + brand.ConfigFileName + ".yaml")
-	if otelAppCfgErr != nil {
-		otelAppCfg = config.DefaultAppConfig()
+	if appCfgErr != nil {
+		log.Printf("warning: failed to load app config: %v (using defaults)", appCfgErr)
 	}
 
 	// Initialise OpenTelemetry tracing via the internal/otel wrapper.
@@ -102,7 +124,7 @@ func cmdServe(args []string) {
 	otelCtx := context.Background()
 	otelShutdown, otelErr := naniteotel.Init(otelCtx, naniteotel.Config{
 		ServiceName: brand.OTelService,
-		Disabled:    otelAppCfg.OTel.Disabled,
+		Disabled:    appCfg.OTel.Disabled,
 	})
 	if otelErr != nil {
 		log.Printf("warning: OTel init failed: %v", otelErr)
@@ -143,12 +165,6 @@ func cmdServe(args []string) {
 	// Set up provider registry (API keys, Ollama, CLI adapters).
 	registry := initProviders()
 
-	// Load app-level config (tunables like presence throttle, artifact detection).
-	appCfg, err := config.LoadAppConfig("config/" + brand.ConfigFileName + ".yaml")
-	if err != nil {
-		log.Printf("warning: failed to load app config: %v (using defaults)", err)
-		appCfg = config.DefaultAppConfig()
-	}
 	log.Printf("app config loaded (cli_active_throttle=%ds, auto_detect_tools=%d)",
 		appCfg.Presence.CLIActiveThrottleSeconds, len(appCfg.Artifacts.AutoDetectTools))
 

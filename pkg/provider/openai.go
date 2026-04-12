@@ -704,27 +704,3 @@ func parseOpenAIRetryAfter(err error) time.Duration {
 // ensure io is referenced for the error-cap constant and keep imports stable
 // if future edits move the read path around.
 var _ = io.EOF
-
-// -----------------------------------------------------------------------------
-// OpenAI-compatible wire shapes (shared with hand-rolled siblings)
-//
-// These types describe the OpenAI chat-completions request body. They are
-// retained here because other providers in this package (mistral.go,
-// openrouter.go, azure_openai.go, openzen.go) still speak the
-// OpenAI-compatible protocol directly over net/http. The SDK-backed OpenAI
-// adapter above does not use them — they exist solely so those sibling
-// providers continue to compile against a single source of truth for the
-// shape. When those providers are each swapped to their own SDKs, these
-// declarations can be deleted.
-// -----------------------------------------------------------------------------
-
-type openaiMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type openaiRequest struct {
-	Model    string          `json:"model"`
-	Messages []openaiMessage `json:"messages"`
-	Stream   bool            `json:"stream"`
-}

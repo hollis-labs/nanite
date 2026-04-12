@@ -2,7 +2,7 @@ package worktree
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,7 +100,7 @@ func (m *gitManager) Create(sessionID string) (string, error) {
 		CreatedAt: time.Now().UTC(),
 	}
 	m.active[sessionID] = wt
-	log.Printf("worktree: created %s at %s (branch %s)", sessionID, wtPath, branch)
+	slog.Info("worktree: created", "session_id", sessionID, "path", wtPath, "branch", branch)
 	return wtPath, nil
 }
 
@@ -120,7 +120,7 @@ func (m *gitManager) Cleanup(sessionID string) error {
 	cmd := exec.Command("git", "worktree", "remove", wt.Path, "--force")
 	cmd.Dir = m.repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("worktree: remove %s failed: %s: %v", wt.Path, strings.TrimSpace(string(out)), err)
+		slog.Warn("worktree: remove failed", "path", wt.Path, "output", strings.TrimSpace(string(out)), "err", err)
 		// Try manual cleanup as fallback.
 		os.RemoveAll(wt.Path)
 	}
@@ -129,13 +129,13 @@ func (m *gitManager) Cleanup(sessionID string) error {
 	cmd = exec.Command("git", "branch", "-D", wt.Branch)
 	cmd.Dir = m.repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("worktree: delete branch %s failed: %s: %v", wt.Branch, strings.TrimSpace(string(out)), err)
+		slog.Warn("worktree: delete branch failed", "branch", wt.Branch, "output", strings.TrimSpace(string(out)), "err", err)
 	}
 
 	// Prune stale worktree references.
 	exec.Command("git", "worktree", "prune").Run()
 
-	log.Printf("worktree: cleaned up %s", sessionID)
+	slog.Info("worktree: cleaned up", "session_id", sessionID)
 	return nil
 }
 

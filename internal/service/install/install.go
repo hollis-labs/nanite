@@ -40,6 +40,9 @@ type InstallHomeOptions struct {
 // directory (typically ~/.nanite). Skips user-modified files unless
 // Force is set. Returns the extract report from assets.ExtractTo.
 func (s *Service) InstallHome(opts InstallHomeOptions) (*assets.ExtractReport, error) {
+	if err := Preflight(); err != nil {
+		return nil, err
+	}
 	target := opts.Target
 	if target == "" {
 		home, err := os.UserHomeDir()
@@ -101,6 +104,9 @@ type InstallProjectReport struct {
 // InstallProject scaffolds .nanite/, NANITE.md, and CLAUDE.md managed sections
 // in projectDir. Dispatches to a branch based on detected state.
 func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectReport, error) {
+	if err := Preflight(); err != nil {
+		return nil, err
+	}
 	opts = opts.normalized()
 	if opts.ProjectDir == "" {
 		return nil, errors.New("empty project dir")

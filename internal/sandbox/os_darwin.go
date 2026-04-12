@@ -10,14 +10,70 @@ import (
 	"strings"
 )
 
+// seatbeltUnsafeRuneError is returned when a string destined for a seatbelt
+// profile literal contains a byte the profile syntax cannot quote safely.
+type seatbeltUnsafeRuneError struct {
+	field string
+	value string
+	reason string
+}
+
+func (e *seatbeltUnsafeRuneError) Error() string {
+	return fmt.Sprintf("sandbox: seatbelt: %s contains unsafe value: %s", e.field, e.reason)
+}
+
+// validateSeatbeltLiteral rejects strings that cannot be embedded in a
+// TinyScheme string literal without changing the meaning of the profile.
+// The seatbelt/TinyScheme parser treats `"`, `\`, parens, semicolons, and
+// whitespace as structural; even backslash-escaping is unreliable across
+// macOS releases, so we fail closed on any of these bytes. ASCII control
+// chars (< 0x20) are always rejected.
+func validateSeatbeltLiteral(field, value string) error {
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c < 0x20 || c == 0x7f {
+			return &seatbeltUnsafeRuneError{
+				field:  field,
+				value:  value,
+				reason: fmt.Sprintf("control byte 0x%02x at offset %d", c, i),
+			}
+		}
+		switch c {
+		case '"', '\\', '(', ')', ';', '\'':
+			return &seatbeltUnsafeRuneError{
+				field:  field,
+				value:  value,
+				reason: fmt.Sprintf("forbidden byte %q at offset %d", c, i),
+			}
+		}
+	}
+	return nil
+}
+
 // seatbeltProfile generates a macOS sandbox-exec seatbelt profile.
 // Strategy: allow default, then deny file writes outside sandbox and network.
 // This is more practical than deny-default because macOS processes need many
 // mach ports, sysctls, and IPC operations that are hard to enumerate.
-func seatbeltProfile(sandboxDir string, networkAllow []string) string {
+//
+// Any interpolated value is validated via validateSeatbeltLiteral before
+// being written to the profile. Invalid values return a non-nil error and
+// the caller must refuse to spawn the sandbox.
+func seatbeltProfile(sandboxDir string, networkAllow []string) (string, error) {
 	absDir, err := filepath.Abs(sandboxDir)
 	if err != nil {
 		absDir = sandboxDir
+	}
+	if err := validateSeatbeltLiteral("sandboxDir", absDir); err != nil {
+		return "", err
+	}
+	// Even though the current profile only uses a fixed "localhost:*" host
+	// pattern for network rules, validate every networkAllow entry so that a
+	// future change interpolating these values into the profile cannot be
+	// retrofitted into an injection vector.
+	for i, dom := range networkAllow {
+		if err := validateSeatbeltLiteral(fmt.Sprintf("networkAllow[%d]", i), dom); err != nil {
+			return "", err
+		}
 	}
 
 	var b strings.Builder
@@ -53,7 +109,7 @@ func seatbeltProfile(sandboxDir string, networkAllow []string) string {
 		b.WriteString("(deny network-inbound)\n\n")
 	}
 
-	return b.String()
+	return b.String(), nil
 }
 
 // applyOSSandbox wraps the command with macOS sandbox-exec for OS-level isolation.
@@ -61,7 +117,10 @@ func seatbeltProfile(sandboxDir string, networkAllow []string) string {
 // The returned cleanup function removes the temporary seatbelt profile file
 // and should be called after the command finishes.
 func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cleanup func(), err error) {
-	profile := seatbeltProfile(sandboxDir, networkAllow)
+	profile, err := seatbeltProfile(sandboxDir, networkAllow)
+	if err != nil {
+		return nil, fmt.Errorf("build seatbelt profile: %w", err)
+	}
 
 	// Write profile to a temp file (sandbox-exec -f requires a file path).
 	f, err := os.CreateTemp("", "nanite-seatbelt-*.sb")

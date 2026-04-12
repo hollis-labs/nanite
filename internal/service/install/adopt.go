@@ -4,6 +4,7 @@ package install
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/assets"
 )
@@ -69,6 +70,17 @@ func (s *Service) adoptExisting(projectDir, globalHome string, opts InstallProje
 		return nil, fmt.Errorf("persist adapter list: %w", err)
 	}
 
+	// BLG-20260412-002: back up any prior managed block before the adapter
+	// sync re-renders it. Only files that actually contain a Nanite managed
+	// section get snapshotted. If the backup fails, abort before touching
+	// the live files — the AtomicWriteFile migration guarantees the
+	// re-render itself can't leave a half-written target, but that only
+	// matters when we have a known-good prior copy to compare against.
+	refreshArchive, err := snapshotAdapterTargetsForRefresh(projectDir, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("refresh-snapshot adapter targets: %w", err)
+	}
+
 	if err := syncAdaptersForProject(projectDir, resolved); err != nil {
 		return nil, fmt.Errorf("adapter sync: %w", err)
 	}
@@ -77,5 +89,6 @@ func (s *Service) adoptExisting(projectDir, globalHome string, opts InstallProje
 		Adopted:         true,
 		Adapters:        resolved,
 		AdapterCleanups: cleanupReports,
+		ArchivePath:     refreshArchive,
 	}, nil
 }

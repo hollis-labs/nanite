@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/assets"
+	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 // migrateFromAgentrc is the migrate-from-agentrc branch of InstallProject.
@@ -93,7 +94,7 @@ func (s *Service) migrateFromAgentrc(projectDir, globalHome string, opts Install
 	if existing, err := os.ReadFile(claudePath); err == nil {
 		cleaned, _ := RemoveAgentrcSection(string(existing))
 		if cleaned != string(existing) {
-			if err := os.WriteFile(claudePath, []byte(cleaned), 0o644); err != nil {
+			if err := fsutil.AtomicWriteFile(claudePath, []byte(cleaned), 0o644); err != nil {
 				return nil, fmt.Errorf("clean agentrc section from CLAUDE.md: %w", err)
 			}
 		}
@@ -204,7 +205,7 @@ func carryOverFromArchive(archiveDir, projectDir string) error {
 
 	// boot-prompt.md
 	if data, err := os.ReadFile(filepath.Join(srcAgentrc, "boot-prompt.md")); err == nil {
-		if err := os.WriteFile(filepath.Join(dstNanite, "boot-prompt.md"), data, 0o644); err != nil {
+		if err := fsutil.AtomicWriteFile(filepath.Join(dstNanite, "boot-prompt.md"), data, 0o644); err != nil {
 			return fmt.Errorf("copy boot-prompt: %w", err)
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -214,7 +215,7 @@ func carryOverFromArchive(archiveDir, projectDir string) error {
 	// config.yaml (with field rename)
 	if data, err := os.ReadFile(filepath.Join(srcAgentrc, "config.yaml")); err == nil {
 		renamed := renameConfigFields(data)
-		if err := os.WriteFile(filepath.Join(dstNanite, "config.yaml"), renamed, 0o644); err != nil {
+		if err := fsutil.AtomicWriteFile(filepath.Join(dstNanite, "config.yaml"), renamed, 0o644); err != nil {
 			return fmt.Errorf("copy config: %w", err)
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -245,7 +246,7 @@ func copyDir(src, dst string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
 		}
-		if err := os.WriteFile(target, data, info.Mode()); err != nil {
+		if err := fsutil.AtomicWriteFile(target, data, info.Mode()); err != nil {
 			return fmt.Errorf("write %s: %w", target, err)
 		}
 		return nil

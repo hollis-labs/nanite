@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 // RollbackOptions controls Rollback.
@@ -72,7 +74,7 @@ func (s *Service) Rollback(opts RollbackOptions) error {
 		preEdit := filepath.Join(archiveDir, name+".pre-edit")
 		dst := filepath.Join(projectDir, name)
 		if data, err := os.ReadFile(preEdit); err == nil {
-			if err := os.WriteFile(dst, data, 0o644); err != nil {
+			if err := fsutil.AtomicWriteFile(dst, data, 0o644); err != nil {
 				return fmt.Errorf("restore %s: %w", name, err)
 			}
 		} else if errors.Is(err, fs.ErrNotExist) {

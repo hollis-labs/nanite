@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/hollis-labs/go-providers/provider"
 )
@@ -84,10 +84,10 @@ func (d *Decomposer) DecomposeTask(ctx context.Context, userMessage string, agen
 
 	var result DecompositionResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		log.Printf("decomposer: failed to parse LLM response: %v (raw: %s)", err, raw)
+		slog.Warn("decomposer: failed to parse LLM response", "err", err, "response_body", raw)
 		return &DecompositionResult{IsComplex: false}, nil
 	}
 
-	log.Printf("decomposer: analyzed message — complex=%v, sub_tasks=%d", result.IsComplex, len(result.SubTasks))
+	slog.Info("decomposer: analyzed message", "complex", result.IsComplex, "sub_tasks", len(result.SubTasks))
 	return &result, nil
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	feotel "github.com/hollis-labs/go-otel"
@@ -109,8 +109,9 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 		attribute.Int("nanite.broker.budget", budget),
 	)
 
-	log.Printf("broker: assembled context — system=%d tokens, messages=%d, total=%d tokens (budget=%d)",
-		systemTokens, len(chatMessages), totalTokens, budget)
+	slog.Info("broker: assembled context",
+		"system_tokens", systemTokens, "messages", len(chatMessages),
+		"total_tokens", totalTokens, "budget", budget)
 
 	return systemPrompt, chatMessages, nil
 }
@@ -149,7 +150,7 @@ func (cb *ContextClient) PruneAfterTurn(sessionID string) error {
 		if m.Role == "tool" && !m.IsCompacted && len(m.Content) > 500 {
 			marker := fmt.Sprintf("[compacted: tool output, %d chars]", len(m.Content))
 			if err := cb.Store.UpdateMessageContent(m.ID, marker, true); err != nil {
-				log.Printf("broker: failed to compact message %s: %v", m.ID, err)
+				slog.Warn("broker: failed to compact message", "id", m.ID, "err", err)
 				continue
 			}
 			compacted++
@@ -157,7 +158,7 @@ func (cb *ContextClient) PruneAfterTurn(sessionID string) error {
 	}
 
 	if compacted > 0 {
-		log.Printf("broker: compacted %d tool messages in session %s", compacted, sessionID)
+		slog.Info("broker: compacted tool messages", "count", compacted, "session_id", sessionID)
 	}
 	return nil
 }
@@ -244,8 +245,9 @@ func EnforceTokenBudget(
 		Ceiling:  ceiling,
 	}
 
-	log.Printf("broker: token gate — system=%d messages=%d tools=%d total=%d ceiling=%d",
-		systemTokens, msgTokens, toolTokens, total, ceiling)
+	slog.Debug("broker: token gate",
+		"system", systemTokens, "messages", msgTokens, "tools", toolTokens,
+		"total", total, "ceiling", ceiling)
 
 	if total <= ceiling {
 		return messages, tools, breakdown, nil
@@ -257,7 +259,7 @@ func EnforceTokenBudget(
 	total = systemTokens + msgTokens + toolTokens
 	breakdown.Messages = msgTokens
 	breakdown.Total = total
-	log.Printf("broker: after tool-result pruning — messages=%d total=%d ceiling=%d", msgTokens, total, ceiling)
+	slog.Debug("broker: after tool-result pruning", "messages", msgTokens, "total", total, "ceiling", ceiling)
 
 	if total <= ceiling {
 		return messages, tools, breakdown, nil
@@ -271,7 +273,7 @@ func EnforceTokenBudget(
 	}
 	breakdown.Tools = toolTokens
 	breakdown.Total = total
-	log.Printf("broker: after tool reduction — tools=%d total=%d ceiling=%d", len(tools), total, ceiling)
+	slog.Debug("broker: after tool reduction", "tools", len(tools), "total", total, "ceiling", ceiling)
 
 	if total <= ceiling {
 		return messages, tools, breakdown, nil
@@ -289,7 +291,7 @@ func EnforceTokenBudget(
 	total = systemTokens + msgTokens + toolTokens
 	breakdown.Messages = msgTokens
 	breakdown.Total = total
-	log.Printf("broker: after message drop — messages=%d total=%d ceiling=%d", len(messages), total, ceiling)
+	slog.Debug("broker: after message drop", "messages", len(messages), "total", total, "ceiling", ceiling)
 
 	if total <= ceiling {
 		return messages, tools, breakdown, nil
@@ -328,7 +330,7 @@ func (cb *ContextClient) enrichWithContextBroker(ctx context.Context, systemProm
 
 	packet, err := cb.ContextBroker.Fetch(ctx, intent)
 	if err != nil {
-		log.Printf("broker: context enrichment failed: %v", err)
+		slog.Warn("broker: context enrichment failed", "err", err)
 		return systemPrompt
 	}
 
@@ -341,8 +343,8 @@ func (cb *ContextClient) enrichWithContextBroker(ctx context.Context, systemProm
 		return systemPrompt
 	}
 
-	log.Printf("broker: enriched system prompt with %d context items (~%d tokens)",
-		packet.Manifest.ItemCount, packet.TokenEstimate)
+	slog.Info("broker: enriched system prompt with context",
+		"items", packet.Manifest.ItemCount, "tokens", packet.TokenEstimate)
 
 	return systemPrompt + "\n\n" + formatted
 }
@@ -433,7 +435,7 @@ func pruneToolResultsInMemory(messages []provider.ChatMessage) []provider.ChatMe
 	}
 
 	if pruned > 0 {
-		log.Printf("broker: pruned %d tool results in-memory (before idx %d)", pruned, cutoffIdx)
+		slog.Debug("broker: pruned tool results in-memory", "count", pruned, "cutoff_idx", cutoffIdx)
 	}
 	return result
 }

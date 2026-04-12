@@ -23,6 +23,24 @@ import (
 	fplugin "github.com/hollis-labs/go-plugin"
 )
 
+// Archive extraction caps — defense against zip-bomb / tar-bomb plugin
+// archives uploaded via handleInstallArchive. Breaches return a
+// *archiveLimitError wrapping fmt.Errorf with exact bytes/counts so
+// operators can raise caps deliberately if a legitimate plugin trips them.
+const (
+	// maxArchiveFileSize bounds a single decompressed file (100 MiB). A
+	// Nanite plugin shipping a binary over this cap should split or
+	// externalize it.
+	maxArchiveFileSize int64 = 100 * 1024 * 1024
+	// maxArchiveTotalSize bounds cumulative decompressed bytes across all
+	// entries (500 MiB). Defends against many-small-files bombs that slip
+	// under the per-file cap.
+	maxArchiveTotalSize int64 = 500 * 1024 * 1024
+	// maxArchiveFileCount bounds entry count (10,000). Defends against
+	// inode-exhaustion bombs (millions of 0-byte entries).
+	maxArchiveFileCount = 10_000
+)
+
 // PluginInfo is the JSON representation of a plugin in the management API.
 type PluginInfo struct {
 	Name        string `json:"name"`
@@ -738,6 +756,10 @@ func extractTarGz(archivePath, destDir string) error {
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
+	var (
+		totalBytes int64
+		entryCount int
+	)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -747,11 +769,16 @@ func extractTarGz(archivePath, destDir string) error {
 			return fmt.Errorf("tar: %w", err)
 		}
 
-		target := filepath.Join(destDir, hdr.Name)
+		entryCount++
+		if entryCount > maxArchiveFileCount {
+			return fmt.Errorf("archive too many entries: %d > %d", entryCount, maxArchiveFileCount)
+		}
 
-		// Guard against zip-slip (path traversal).
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("illegal path in archive: %s", hdr.Name)
+		// Path confinement via pathsafe.ResolveUnder. Defends against
+		// absolute paths, `..` segments, and symlink-pointed entries.
+		target, err := pathsafe.ResolveUnder(destDir, hdr.Name)
+		if err != nil {
+			return fmt.Errorf("illegal path in archive: %s: %w", hdr.Name, err)
 		}
 
 		switch hdr.Typeflag {
@@ -760,6 +787,15 @@ func extractTarGz(archivePath, destDir string) error {
 				return err
 			}
 		case tar.TypeReg:
+			// Per-file size cap using the declared header size. tar
+			// headers carry Size; reject obvious bombs before opening
+			// the destination file.
+			if hdr.Size > maxArchiveFileSize {
+				return fmt.Errorf("archive file too large: %s declared %d > %d", hdr.Name, hdr.Size, maxArchiveFileSize)
+			}
+			if totalBytes+hdr.Size > maxArchiveTotalSize {
+				return fmt.Errorf("archive total size too large: %d + %d > %d", totalBytes, hdr.Size, maxArchiveTotalSize)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
@@ -767,11 +803,22 @@ func extractTarGz(archivePath, destDir string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
+			// Defense-in-depth against mismatched-header bombs (Size in
+			// header underreports actual stream length): cap the copy at
+			// maxArchiveFileSize + 1 so a liar trips the per-file cap.
+			//nolint:gosec // G110: copy is explicitly bounded by io.LimitReader below; bomb is rejected before it can exhaust disk/memory.
+			written, err := io.Copy(out, io.LimitReader(tr, maxArchiveFileSize+1))
+			out.Close()
+			if err != nil {
 				return err
 			}
-			out.Close()
+			if written > maxArchiveFileSize {
+				return fmt.Errorf("archive file too large: %s exceeded %d during decompress", hdr.Name, maxArchiveFileSize)
+			}
+			totalBytes += written
+			if totalBytes > maxArchiveTotalSize {
+				return fmt.Errorf("archive total size too large: %d > %d", totalBytes, maxArchiveTotalSize)
+			}
 		}
 	}
 	return nil
@@ -785,12 +832,16 @@ func extractZip(archivePath, destDir string) error {
 	}
 	defer zr.Close()
 
-	for _, f := range zr.File {
-		target := filepath.Join(destDir, f.Name)
+	if len(zr.File) > maxArchiveFileCount {
+		return fmt.Errorf("archive too many entries: %d > %d", len(zr.File), maxArchiveFileCount)
+	}
 
-		// Guard against zip-slip.
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("illegal path in archive: %s", f.Name)
+	var totalBytes int64
+	for _, f := range zr.File {
+		// Path confinement via pathsafe.ResolveUnder.
+		target, err := pathsafe.ResolveUnder(destDir, f.Name)
+		if err != nil {
+			return fmt.Errorf("illegal path in archive: %s: %w", f.Name, err)
 		}
 
 		if f.FileInfo().IsDir() {
@@ -798,6 +849,19 @@ func extractZip(archivePath, destDir string) error {
 				return err
 			}
 			continue
+		}
+
+		// Per-file cap on declared uncompressed size. zip header
+		// UncompressedSize64 is authoritative for zip; an archive with a
+		// mismatched header is rejected by the io.LimitReader sentinel
+		// below.
+		//nolint:gosec // G115: UncompressedSize64 is uint64; cap is 100 MiB so any value above maxArchiveFileSize trips the >= check before any int64 conversion risk.
+		declared := f.UncompressedSize64
+		if declared > uint64(maxArchiveFileSize) {
+			return fmt.Errorf("archive file too large: %s declared %d > %d", f.Name, declared, maxArchiveFileSize)
+		}
+		if totalBytes+int64(declared) > maxArchiveTotalSize {
+			return fmt.Errorf("archive total size too large: %d + %d > %d", totalBytes, declared, maxArchiveTotalSize)
 		}
 
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
@@ -813,11 +877,22 @@ func extractZip(archivePath, destDir string) error {
 			rc.Close()
 			return err
 		}
-		_, err = io.Copy(out, rc)
+		// Bounded copy: reject at maxArchiveFileSize+1 bytes. Defends
+		// against a compressed entry whose actual expansion exceeds the
+		// declared UncompressedSize64 (header mismatch bombs).
+		//nolint:gosec // G110: copy is explicitly bounded by io.LimitReader; bomb is rejected before disk/memory exhaustion.
+		written, err := io.Copy(out, io.LimitReader(rc, maxArchiveFileSize+1))
 		out.Close()
 		rc.Close()
 		if err != nil {
 			return err
+		}
+		if written > maxArchiveFileSize {
+			return fmt.Errorf("archive file too large: %s exceeded %d during decompress", f.Name, maxArchiveFileSize)
+		}
+		totalBytes += written
+		if totalBytes > maxArchiveTotalSize {
+			return fmt.Errorf("archive total size too large: %d > %d", totalBytes, maxArchiveTotalSize)
 		}
 	}
 	return nil

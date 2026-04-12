@@ -51,9 +51,17 @@ func NewManager(label string) *Manager {
 
 // NewManagerWithContext returns a Manager whose root context is derived from
 // parent. Cancelling parent also cancels the manager.
+//
+// Ownership contract: the returned Manager owns the CancelFunc. It is stored
+// on the struct and invoked unconditionally by Shutdown (including the
+// idempotent re-entry path). Callers that construct a Manager MUST call
+// Shutdown — treat it as a `defer mgr.Shutdown(...)` sibling to `defer
+// Close()`. Parent-context cancellation alone will cancel the manager's
+// context but does not release the CancelFunc allocation; Shutdown does.
 func NewManagerWithContext(parent context.Context, label string) *Manager {
-	ctx, cancel := context.WithCancel(parent)
-	return &Manager{label: label, ctx: ctx, cancel: cancel}
+	ctx, cancel := context.WithCancel(parent) //nolint:gosec // G118: cancel is stored on Manager and invoked by (*Manager).Shutdown; see ownership contract above. Verified by TestShutdown_InvokesCancel.
+	m := &Manager{label: label, ctx: ctx, cancel: cancel}
+	return m
 }
 
 // Context returns the manager's root context. It is cancelled on Shutdown.

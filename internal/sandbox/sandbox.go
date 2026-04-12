@@ -79,11 +79,3 @@ func Populate(dir string, agent *store.AgentProfile, mode *store.AgentMode, opts
 	return nil
 }
 
-// writeFile is a convenience helper for writing a single file into a directory.
-func writeFile(dir, name, content string) error {
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("sandbox: write %s: %w", name, err)
-	}
-	return nil
-}

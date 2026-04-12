@@ -140,3 +140,63 @@ func TestContextAccessor(t *testing.T) {
 		t.Fatal("context not cancelled after shutdown")
 	}
 }
+
+// TestShutdown_InvokesCancel is the G118 regression: asserts that Shutdown
+// invokes the CancelFunc returned by context.WithCancel inside
+// NewManagerWithContext. The CancelFunc is stored on the Manager and the
+// ownership contract is that Shutdown MUST invoke it; any refactor that
+// drops the invocation would leak cancel nodes off the parent context.
+func TestShutdown_InvokesCancel(t *testing.T) {
+	parent := context.Background()
+	m := NewManagerWithContext(parent, "cancel-invoked")
+
+	// Before shutdown, context is live.
+	select {
+	case <-m.Context().Done():
+		t.Fatal("manager context cancelled before Shutdown")
+	default:
+	}
+
+	if err := m.Shutdown(time.Second); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+
+	// After shutdown, the context must be done with Canceled (not
+	// DeadlineExceeded from a parent timer).
+	select {
+	case <-m.Context().Done():
+	default:
+		t.Fatal("manager context not cancelled after Shutdown")
+	}
+	if err := m.Context().Err(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ctx err after Shutdown = %v, want context.Canceled", err)
+	}
+}
+
+// TestShutdown_RepeatedCyclesNoLeak asserts that creating and draining many
+// Managers back-to-back does not leak cancel nodes off the parent context.
+// Combined with the package-level goleak TestMain, this is the functional
+// regression for G118.
+func TestShutdown_RepeatedCyclesNoLeak(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+
+	for i := 0; i < 50; i++ {
+		m := NewManagerWithContext(parent, "cycle")
+		var ran atomic.Bool
+		m.Go("w", func(ctx context.Context) {
+			<-ctx.Done()
+			ran.Store(true)
+		})
+		if err := m.Shutdown(time.Second); err != nil {
+			t.Fatalf("cycle %d shutdown: %v", i, err)
+		}
+		if !ran.Load() {
+			t.Fatalf("cycle %d: goroutine did not observe cancel", i)
+		}
+		// Second Shutdown is idempotent and must not panic or block.
+		if err := m.Shutdown(10 * time.Millisecond); err != nil {
+			t.Fatalf("cycle %d second shutdown: %v", i, err)
+		}
+	}
+}

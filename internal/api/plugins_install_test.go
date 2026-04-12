@@ -2,9 +2,11 @@ package api
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -263,5 +265,201 @@ func TestCopyDir(t *testing.T) {
 	data, err = os.ReadFile(filepath.Join(dst, "sub", "b.txt"))
 	if err != nil || string(data) != "bbb" {
 		t.Errorf("sub/b.txt: got %q, err %v", data, err)
+	}
+}
+
+// writeTarGzToFile is a helper that builds a tar.gz from the provided
+// (name,size,mode) entries and writes it to path. If declaredSize > 0 the
+// tar header Size is set to that value independently of actual payload;
+// payload is len(payload) zero-bytes. Used to craft both honest and
+// header-lying bomb archives.
+func writeTarGzToFile(t *testing.T, path string, entries []tarEntry) {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	zeroChunk := make([]byte, 1024*1024) // 1 MiB of zeros; compresses tiny
+	for _, e := range entries {
+		hdr := &tar.Header{Name: e.name, Typeflag: tar.TypeReg, Mode: 0644, Size: e.declaredSize}
+		if e.isDir {
+			hdr.Typeflag = tar.TypeDir
+			hdr.Mode = 0755
+			hdr.Size = 0
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("tar header %s: %v", e.name, err)
+		}
+		if e.isDir {
+			continue
+		}
+		// tar requires exactly Size bytes of payload per entry. We write
+		// explicit payload first if set, then pad with zeros to reach
+		// declaredSize so the archive is well-formed.
+		written := int64(0)
+		if len(e.payload) > 0 {
+			n, err := tw.Write(e.payload)
+			if err != nil {
+				t.Fatalf("tar write %s: %v", e.name, err)
+			}
+			written = int64(n)
+		}
+		remaining := e.declaredSize - written
+		for remaining > 0 {
+			n := int64(len(zeroChunk))
+			if n > remaining {
+				n = remaining
+			}
+			w, err := tw.Write(zeroChunk[:n])
+			if err != nil {
+				t.Fatalf("tar pad %s: %v", e.name, err)
+			}
+			remaining -= int64(w)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("tar close: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("gz close: %v", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+}
+
+type tarEntry struct {
+	name         string
+	declaredSize int64
+	payload      []byte
+	isDir        bool
+}
+
+// TestExtractTarGz_RejectsOversizedFile regression for G110: a single
+// tar entry with a declared Size exceeding maxArchiveFileSize must be
+// rejected before any bytes are written to disk.
+func TestExtractTarGz_RejectsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "bomb.tar.gz")
+	writeTarGzToFile(t, archive, []tarEntry{
+		{name: "huge.bin", declaredSize: maxArchiveFileSize + 1, payload: []byte("x")},
+	})
+	dst := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	err := extractTarGz(archive, dst)
+	if err == nil {
+		t.Fatal("expected error for oversized file, got nil")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected size-cap error, got %v", err)
+	}
+}
+
+// TestExtractTarGz_RejectsTooManyEntries regression for G110: an archive
+// with more than maxArchiveFileCount entries must be rejected mid-stream.
+func TestExtractTarGz_RejectsTooManyEntries(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "many.tar.gz")
+	entries := make([]tarEntry, maxArchiveFileCount+10)
+	for i := range entries {
+		entries[i] = tarEntry{name: fmt.Sprintf("f-%d", i), declaredSize: 1, payload: []byte("x")}
+	}
+	writeTarGzToFile(t, archive, entries)
+	dst := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	err := extractTarGz(archive, dst)
+	if err == nil {
+		t.Fatal("expected error for too many entries, got nil")
+	}
+	if !strings.Contains(err.Error(), "too many entries") {
+		t.Fatalf("expected entry-count error, got %v", err)
+	}
+}
+
+// TestExtractZip_RejectsOversizedFile regression for G110 on the zip
+// path: an entry with UncompressedSize64 above maxArchiveFileSize must be
+// rejected.
+func TestExtractZip_RejectsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "bomb.zip")
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	// A huge-but-zero-byte entry is hard to craft honestly via the
+	// writer (it'd set UncompressedSize64 to actual payload). Instead,
+	// craft a real over-cap payload: 100 MiB + 1 byte of zeros.
+	//
+	// To keep the test fast and memory-thrift, use the LimitReader
+	// trip: write maxArchiveFileSize+1 bytes (zeros compress well, so
+	// the archive itself stays small) and confirm the cap trips.
+	w, err := zw.Create("huge.bin")
+	if err != nil {
+		t.Fatalf("zw.Create: %v", err)
+	}
+	// Write in 1 MiB chunks of zeros.
+	chunk := make([]byte, 1024*1024)
+	total := maxArchiveFileSize + 1
+	for total > 0 {
+		n := int64(len(chunk))
+		if n > total {
+			n = total
+		}
+		if _, err := w.Write(chunk[:n]); err != nil {
+			t.Fatalf("zip write: %v", err)
+		}
+		total -= n
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zw.Close: %v", err)
+	}
+	if err := os.WriteFile(archive, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+
+	dst := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractZip(archive, dst); err == nil {
+		t.Fatal("expected oversized file error, got nil")
+	} else if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected size-cap error, got %v", err)
+	}
+}
+
+// TestExtractZip_RejectsTraversal asserts that pathsafe.ResolveUnder
+// rejects zip entries whose names contain .. segments. Complements the
+// TestHandleInstall_PathTraversal test that hits handleInstall.
+func TestExtractZip_RejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "trav.zip")
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("../../escape.txt")
+	if err != nil {
+		t.Fatalf("zw.Create: %v", err)
+	}
+	_, _ = w.Write([]byte("pwn"))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archive, buf.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	err = extractZip(archive, dst)
+	if err == nil {
+		t.Fatal("expected traversal error, got nil")
+	}
+	if !strings.Contains(err.Error(), "illegal path") {
+		t.Fatalf("expected illegal-path error, got %v", err)
 	}
 }

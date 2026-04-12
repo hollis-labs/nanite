@@ -10,6 +10,21 @@ Tracking ongoing first-pass coverage of the Nanite codebase. This index lists co
 
 ## Completed audits
 
+### 2026-04-11 — `worker-lifecycle-regression` (Go, deep-review)
+- **Counts:** 0 Critical, 0 High, 0 Medium, 1 Low, 2 Info
+- **Folder:** `docs/audits/2026-04-11-worker-lifecycle-regression/`
+- **Headline:** All three 2026-04-10 race fixes (`Worker.Status` RWMutex, trigger dispatch test mutex, `Manager.List` returns `[]Snapshot`) are intact. No new races introduced. Immutable-field discipline (cancel func, worktree path set once) is sound. Minor: `Manager.Shutdown` cancel-before-status ordering is inverted (Low). **Clean bill on the regression guard scope.**
+
+### 2026-04-11 — `contextbroker` (Go, deep-review)
+- **Counts:** 0 Critical, 2 High, 5 Medium, 2 Low, 1 Info
+- **Folder:** `docs/audits/2026-04-11-contextbroker/`
+- **Headline:** **Similarity ranking always fails** (High) — `source_memory.go` calls `recall.SimilarRevisions()` which requires embedded revisions, but the `Recall` method is invoked with `EmbedQuery: false` and no embedding is generated on the query side, so the cosine similarity is always 0 for every revision. The similarity ranking feature (enabled 2026-04-08) is effectively dead. **Conduit raw truncation splits multibyte** (High) — `source_conduit.go` truncates at byte boundaries, not rune boundaries, producing broken UTF-8. Budget allocation excludes memory source from intent-driven adjustments (Medium). PCC source path traversal possible via crafted PCC filename (Medium). Session source fetches messages in reverse chronological order but doesn't re-reverse for the final context window (Medium).
+
+### 2026-04-11 — `toolbroker` (Go, deep-review)
+- **Counts:** 0 Critical, 3 High, 5 Medium, 2 Low, 1 Info
+- **Folder:** `docs/audits/2026-04-11-toolbroker/`
+- **Headline:** **Three High-severity permission bypasses:** (1) `MCPManager.CallTool` fallback in `broker.go` bypasses `permissions.go` when the primary path fails — the fallback calls `m.manager.CallTool` directly, skipping the permission check. (2) Builtin tools (self-service, dev, general, code-exec) are injected into the tool list via `builtinToolDefs` in `broker.go` without passing through `permissions.go` at all — they inherit a blanket allow. (3) `request_tools` meta-tool in `broker.go` allows the LLM to request additional tools by name at runtime, bypassing the progressive-disclosure filtering and re-checking permissions only on the *name*, not the *arguments*. Plus: tool name collisions resolved by first-match (non-deterministic), error messages leak internal paths, `maxCallsPerTurn` not enforced, tool arguments passed through unvalidated.
+
 ### 2026-04-11 — `api-privilege-boundary` (Go, deep-review)
 - **Counts:** 3 Critical, 4 High, 4 Medium (+ 1 Low/Info group)
 - **Folder:** `docs/audits/2026-04-11-api-privilege-boundary/`
@@ -121,7 +136,7 @@ Drawn from prior audits' `Noticed but out of scope` sections, the reviewer-backe
 5. ~~**`mcp-client-transport`**~~ — `internal/mcp/` client side. Subprocess management, JSON-RPC framing, tool result handling, plugin-hosted MCP servers. **~~COMPLETED 2026-04-10~~** — see Completed audits above (stale queue entry, cleaned up 2026-04-11).
 6. ~~**`store-and-migrations`**~~ — `internal/store/`. SQLite raw queries, transaction correctness, migration safety, plugin schema persistence (relevant to plan track B's yaml-authoritative work). **~~COMPLETED 2026-04-11~~** — 3 High (FK disable, scan mismatch, non-atomic fork). See Completed audits above.
 7. ~~**`provider-abstractions`**~~ — `internal/provider/`. PTY bridge goroutine lifecycle, API key handling, Anthropic/OpenAI/Ollama paths, secret exposure in logs. **~~COMPLETED 2026-04-11~~** — 2 High (Gemini key in URL, unbounded response bodies). See Completed audits above.
-8. **`worker-lifecycle-regression`** — guard the three race fixes from 2026-04-10 (`fix/worker-field-sync`, `fix/plugin-trigger-dispatch-race`, `fix/worker-shutdown-race`).
+8. ~~**`worker-lifecycle-regression`**~~ — guard the three race fixes from 2026-04-10 (`fix/worker-field-sync`, `fix/plugin-trigger-dispatch-race`, `fix/worker-shutdown-race`). **~~COMPLETED 2026-04-11~~** — clean: 0C/0H/0M, all fixes intact.
 
 ### Medium priority (depth and follow-on)
 
@@ -147,6 +162,8 @@ Drawn from prior audits' `Noticed but out of scope` sections, the reviewer-backe
 57. **`workflow-concurrency`** — `handleCancelWorkflowRun` directly mutates `record.Run.Status` without a lock; data race if workflow executor is concurrently updating. Also: `handleRunWorkflow` uses `context.Background()` detached from request context (2-min timeout correct, but workflow survives request cancel). Scope: workflow state mutation concurrency + lifecycle. (2026-04-11, from `api-privilege-boundary`)
 58. **`data-retention`** — `event_log`, `execution_metrics`, `token_usage`, `broker_decisions` tables have no retention policy, TTL, or max-rows. Unbounded growth over time. Scope: data-lifecycle + retention strategy. (2026-04-11, from `store-and-migrations`)
 59. **`provider-http-client-hardening`** — All 8 HTTP API providers create `&http.Client{}` with zero-value timeouts. A hung API server blocks the goroutine indefinitely; the chat engine's 5-min outer timeout provides some bound but the HTTP client itself has no per-request or connection timeout. Scope: per-provider HTTP client timeout + connection pool configuration. (2026-04-11, from `provider-abstractions`)
+60. **`mcpserver-permission-boundary`** — `internal/mcpserver/server.go:L69-L79` — Nanite-as-MCP-server calls `SelfToolsTransport.CallTool()` directly, bypassing `ToolClient` and its permission enforcement. External MCP clients connecting to Nanite's server get direct access to self-service tools with no permission checks. Scope: MCP server inbound tool-call permission layer. (2026-04-11, from `toolbroker`)
+61. **`tool-meta-safety-classification`** — `internal/service/tool.go:L236-L268` `GetToolMeta()` classifies tool safety with name-based `strings.Contains` heuristics ("bash" → destructive). A tool named `execute_arbitrary_code` is NOT classified as destructive. Scope: safety classification model correctness + extensibility. (2026-04-11, from `toolbroker`)
 
 ### Frontend (queued, not yet started — needs `nanite-reviewer-frontend`)
 
@@ -173,8 +190,8 @@ A pre-execution inventory pass would identify any package not on this list. Cand
 
 #### From TRIAGE technical audit scopes
 
-25. **`toolbroker`** — `internal/toolclient/` (broker, tool_knowledge, permissions). Deep-review.
-26. **`contextbroker`** — `internal/contextbroker/`. Deep-review of the broker subsystem as code. **Not** about token counting, compaction, or context-window management — those are separate scopes.
+25. ~~**`toolbroker`**~~ — `internal/toolclient/` (broker, tool_knowledge, permissions). Deep-review. **~~COMPLETED 2026-04-11~~** — 3 High (permission bypass via MCPManager fallback, builtin tools bypass, request_tools meta-tool bypass). See Completed audits above.
+26. ~~**`contextbroker`**~~ — `internal/contextbroker/`. Deep-review of the broker subsystem as code. **Not** about token counting, compaction, or context-window management — those are separate scopes. **~~COMPLETED 2026-04-11~~** — 2 High (similarity ranking always fails, Conduit truncation splits multibyte). See Completed audits above.
 27. **`context-management`** — slot system, hot-swap, auto-compaction, `/compact` command. Mixed deep-review + claimed-vs-actual verification. **Explicit mandate:** prove hot-swap and slots actually work end-to-end. Reviewer should verify behavior, not just code presence. Suspected stubs/partials per user report.
 28. **`context-counting-in-widgets`** — frontend-side targeted check. Suspected hardcoded token counting. Small scope. Cross-reference with `tokens-and-model-hardcoding`.
 29. **`tokens-and-model-hardcoding`** — every place model names, token limits, context windows, pricing are hardcoded. Deep-review. (The models.dev integration design is deferred to a backend-agent scoping session; see `.nanite/agents/backend.md` deferred section.)

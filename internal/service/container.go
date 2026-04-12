@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -171,15 +171,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Adapters:   adapterRegistry,
 	})
 	if err != nil {
-		log.Printf("service container: agent discovery: %v", err)
+		slog.Warn("service container: agent discovery", "err", err)
 	}
 	// Append built-in default agent as lowest priority.
 	if defaultDef, defErr := builtin.DefaultAgent(); defErr == nil {
 		agentDefs = append(agentDefs, defaultDef)
 	} else {
-		log.Printf("service container: built-in default agent: %v", defErr)
+		slog.Warn("service container: built-in default agent", "err", defErr)
 	}
-	log.Printf("service container: discovered %d file-based agents", len(agentDefs))
+	slog.Info("service container: discovered file-based agents", "count", len(agentDefs))
 
 	agents := NewAgentService(AgentServiceConfig{
 		Agents:     cfg.Store,
@@ -193,7 +193,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// A2A messaging service. Uses the AgentService as its resolver so both
 	// DB-backed and file-based agents validate uniformly.
 	a2aSvc := a2a.NewService(cfg.Store, agents)
-	log.Println("service container: A2A service enabled")
+	slog.Info("service container: A2A service enabled")
 
 	// Discover file-based skill definitions from all 5 priority locations.
 	skillDefs, err := skill.Discover(skill.DiscoverOptions{
@@ -201,15 +201,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		PluginsDir: "plugins",
 	})
 	if err != nil {
-		log.Printf("service container: skill discovery: %v", err)
+		slog.Warn("service container: skill discovery", "err", err)
 	}
 	// Append built-in skills as lowest priority.
 	if builtinDefs, bErr := skillbuiltin.BuiltinSkills(); bErr == nil {
 		skillDefs = append(skillDefs, builtinDefs...)
 	} else {
-		log.Printf("service container: built-in skills: %v", bErr)
+		slog.Warn("service container: built-in skills", "err", bErr)
 	}
-	log.Printf("service container: discovered %d file-based skills", len(skillDefs))
+	slog.Info("service container: discovered file-based skills", "count", len(skillDefs))
 
 	skills := NewSkillService(SkillServiceConfig{
 		Skills:     cfg.Store,
@@ -221,7 +221,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Todos: cfg.Store,
 		Plans: cfg.Store,
 	})
-	log.Println("service container: todo/plan service enabled")
+	slog.Info("service container: todo/plan service enabled")
 
 	// Task tracking service — requires coordination store.
 	var tasks task.Service
@@ -237,9 +237,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 				return us.TaskBackend
 			},
 		})
-		log.Println("service container: task tracking enabled (badger-backed)")
+		slog.Info("service container: task tracking enabled (badger-backed)")
 	} else {
-		log.Println("service container: task tracking disabled (no coordination store)")
+		slog.Info("service container: task tracking disabled (no coordination store)")
 	}
 
 	// Embedded Conduit instance for memory storage.
@@ -263,7 +263,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			oai.SetAPIKey(openaiKey)
 			embedder = oai
 			embeddingModel = "text-embedding-3-large"
-			log.Println("service container: OpenAI embedder (text-embedding-3-large) for Conduit")
+			slog.Info("service container: OpenAI embedder enabled", "model", "text-embedding-3-large")
 		} else {
 			ollamaProvider := provider.NewOllama()
 			probeCtx, probeCancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -271,9 +271,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			if _, testErr := ollamaProvider.Embed(probeCtx, "test", "nomic-embed-text"); testErr == nil {
 				embedder = ollamaProvider
 				embeddingModel = "nomic-embed-text"
-				log.Println("service container: Ollama embedder (nomic-embed-text) for Conduit")
+				slog.Info("service container: Ollama embedder enabled", "model", "nomic-embed-text")
 			} else {
-				log.Printf("service container: no embedder available (set OPENAI_API_KEY or run Ollama), similarity ranking disabled")
+				slog.Warn("service container: no embedder available, similarity ranking disabled")
 			}
 		}
 
@@ -282,17 +282,22 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			conduitOpts = append(conduitOpts, conduit.WithEmbedder(embedder))
 			conduitOpts = append(conduitOpts, conduit.WithEmbeddingModel(embeddingModel))
 		}
-		conduitOpts = append(conduitOpts, conduit.WithLogger(log.Printf))
+		// Bridge Conduit's printf-style logger callback into slog. Conduit
+		// formats its own messages, so we emit them verbatim at Info level —
+		// structured attrs aren't available on this callback boundary.
+		conduitOpts = append(conduitOpts, conduit.WithLogger(func(format string, args ...any) {
+			slog.Info("conduit: " + fmt.Sprintf(format, args...))
+		}))
 
 		var conduitErr error
 		conduitInstance, conduitErr = conduit.Open(context.Background(), conduit.Config{
 			RootDir: conduitRoot,
 		}, conduitOpts...)
 		if conduitErr != nil {
-			log.Printf("service container: failed to open Conduit: %v", conduitErr)
+			slog.Warn("service container: failed to open Conduit", "err", conduitErr)
 		} else {
 			memorySvc = memory.NewService(conduitInstance.MemoryStore())
-			log.Println("service container: memory service enabled (embedded Conduit)")
+			slog.Info("service container: memory service enabled (embedded Conduit)")
 		}
 	}
 
@@ -348,7 +353,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 		broker := contextbroker.New(contextbroker.DefaultBudget(), sources...)
 		contextClient.ContextBroker = broker
-		log.Printf("service container: context broker enabled (%d sources)", len(sources))
+		slog.Info("service container: context broker enabled", "sources", len(sources))
 	}
 
 	ctxService := NewContextService(ContextServiceConfig{Client: contextClient})
@@ -407,9 +412,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		if impl, ok := chatSvc.(*chatServiceImpl); ok {
 			impl.SetWorkers(workers)
 		}
-		log.Println("service container: worker manager enabled")
+		slog.Info("service container: worker manager enabled")
 	} else {
-		log.Println("service container: worker manager disabled (no coordination store)")
+		slog.Info("service container: worker manager disabled (no coordination store)")
 	}
 
 	// Memory extraction hooks + agent tools.
@@ -437,23 +442,23 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// Register per-turn extraction hook (message.received).
 		perTurnHook := extractor.PerTurnHook()
 		if err := cfg.Plugins.RegisterEventHook(perTurnHook.EventTypes(), perTurnHook); err != nil {
-			log.Printf("service container: failed to register per-turn memory hook: %v", err)
+			slog.Warn("service container: failed to register per-turn memory hook", "err", err)
 		}
 
 		// Register post-compaction extraction hook (context.compacted).
 		postCompactHook := extractor.PostCompactHook()
 		if err := cfg.Plugins.RegisterEventHook(postCompactHook.EventTypes(), postCompactHook); err != nil {
-			log.Printf("service container: failed to register post-compact memory hook: %v", err)
+			slog.Warn("service container: failed to register post-compact memory hook", "err", err)
 		}
 
-		log.Println("service container: memory extraction hooks registered")
+		slog.Info("service container: memory extraction hooks registered")
 	}
 
 	// Register memory tools as a built-in MCP transport.
 	if memorySvc != nil && cfg.MCP != nil {
 		memoryTransport := mcp.NewMemoryToolsTransport(memorySvc)
 		cfg.MCP.AddServer("nanite-memory", memoryTransport)
-		log.Println("service container: memory agent tools registered")
+		slog.Info("service container: memory agent tools registered")
 	}
 
 	// Model selector for operation-specific model resolution (e.g., cheap model for summarization).
@@ -462,9 +467,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Workflow run store and SSE broadcaster — always enabled.
 	runStore := workflow.NewRunStore(50)
 	workflowBroadcaster := workflow.NewBroadcaster()
-	log.Println("service container: workflow engine enabled")
+	slog.Info("service container: workflow engine enabled")
 
-	log.Println("service container: all services wired")
+	slog.Info("service container: all services wired")
 
 	return &Container{
 		Sessions:            sessions,
@@ -533,7 +538,7 @@ func (c *Container) Shutdown() {
 			defer func() {
 				// A subsystem shutdown panicking should not abort the others.
 				if r := recover(); r != nil {
-					log.Printf("shutdown: %s panic: %v", label, r)
+					slog.Error("shutdown: subsystem panic", "label", label, "panic", r)
 				}
 			}()
 			fn()
@@ -543,7 +548,7 @@ func (c *Container) Shutdown() {
 	if c.Workers != nil {
 		run("workers", func() {
 			if err := c.Workers.Shutdown(containerShutdownMaxWait); err != nil {
-				log.Printf("shutdown: workers: %v", err)
+				slog.Warn("shutdown: workers", "err", err)
 			}
 		})
 	}
@@ -553,7 +558,7 @@ func (c *Container) Shutdown() {
 			ctx, cancel := context.WithTimeout(context.Background(), containerShutdownMaxWait)
 			defer cancel()
 			if err := c.Tasks.Snapshot(ctx); err != nil {
-				log.Printf("shutdown: task snapshot: %v", err)
+				slog.Warn("shutdown: task snapshot", "err", err)
 			}
 		})
 	}
@@ -563,7 +568,7 @@ func (c *Container) Shutdown() {
 	if c.Conduit != nil {
 		run("conduit", func() {
 			if err := c.Conduit.Close(); err != nil {
-				log.Printf("shutdown: conduit close: %v", err)
+				slog.Warn("shutdown: conduit close", "err", err)
 			}
 		})
 	}
@@ -576,6 +581,6 @@ func (c *Container) Shutdown() {
 	select {
 	case <-done:
 	case <-time.After(containerShutdownMaxWait):
-		log.Printf("shutdown: timeout after %s — some subsystems may still be running", containerShutdownMaxWait)
+		slog.Warn("shutdown: timeout — some subsystems may still be running", "timeout", containerShutdownMaxWait.String())
 	}
 }

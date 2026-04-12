@@ -3,7 +3,7 @@
 package sandbox
 
 import (
-	"log"
+	"log/slog"
 	"os/exec"
 	"sync"
 )
@@ -14,7 +14,7 @@ var osWarnOnce sync.Once
 // and falls through to Tier 1 (convention-level) sandbox.
 func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cleanup func(), err error) {
 	osWarnOnce.Do(func() {
-		log.Println("sandbox: OS-level isolation unavailable on this platform — using Tier 1 (convention-level) sandbox only")
+		slog.Warn("sandbox: OS-level isolation unavailable on this platform — using Tier 1 (convention-level) sandbox only")
 	})
 	return func() {}, nil
 }

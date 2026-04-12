@@ -4,7 +4,7 @@ package sandbox
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,7 +65,7 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cl
 	bwrapPath, lookErr := exec.LookPath("bwrap")
 	if lookErr != nil {
 		bwrapWarnOnce.Do(func() {
-			log.Println("sandbox: bwrap not found — install bubblewrap for OS-level isolation (using Tier 1 only)")
+			slog.Warn("sandbox: bwrap not found — install bubblewrap for OS-level isolation (using Tier 1 only)")
 		})
 		return func() {}, nil
 	}

@@ -1,72 +1,44 @@
 package plugin
 
 import (
-	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/hollis-labs/go-plugin"
 )
 
-// Logger implements plugin.Logger using Go's standard log package
+// Logger implements plugin.Logger by delegating to log/slog. The
+// prefix becomes a persistent "prefix" attribute on every record so
+// downstream filters can scope plugin logs.
 type Logger struct {
-	prefix string
+	logger *slog.Logger
 }
 
-// NewLogger creates a new plugin logger with an optional prefix
+// NewLogger creates a new plugin logger that attaches the given prefix
+// as a slog attribute to every record.
 func NewLogger(prefix string) plugin.Logger {
 	return &Logger{
-		prefix: prefix,
+		logger: slog.Default().With("prefix", prefix),
 	}
 }
 
-// Debug logs a debug message
 func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
-	l.logWithLevel("DEBUG", msg, keysAndValues...)
+	l.logger.Debug(msg, keysAndValues...)
 }
 
-// Info logs an info message
 func (l *Logger) Info(msg string, keysAndValues ...interface{}) {
-	l.logWithLevel("INFO", msg, keysAndValues...)
+	l.logger.Info(msg, keysAndValues...)
 }
 
-// Warn logs a warning message
 func (l *Logger) Warn(msg string, keysAndValues ...interface{}) {
-	l.logWithLevel("WARN", msg, keysAndValues...)
+	l.logger.Warn(msg, keysAndValues...)
 }
 
-// Error logs an error message
 func (l *Logger) Error(msg string, keysAndValues ...interface{}) {
-	l.logWithLevel("ERROR", msg, keysAndValues...)
+	l.logger.Error(msg, keysAndValues...)
 }
 
-// With returns a new logger with additional key-value pairs
+// With returns a derived logger that includes the additional attrs on
+// every subsequent record, matching slog.Logger.With semantics.
 func (l *Logger) With(keysAndValues ...interface{}) plugin.Logger {
-	// For this simple implementation, we'll append the keys to the prefix
-	newPrefix := l.prefix
-	if len(keysAndValues) > 0 {
-		newPrefix += " "
-		for i := 0; i < len(keysAndValues); i += 2 {
-			if i+1 < len(keysAndValues) {
-				newPrefix += fmt.Sprint(keysAndValues[i]) + "=" + fmt.Sprint(keysAndValues[i+1]) + " "
-			}
-		}
-	}
-	return &Logger{prefix: newPrefix}
-}
-
-// logWithLevel logs a message with the given level
-func (l *Logger) logWithLevel(level, msg string, keysAndValues ...interface{}) {
-	fullMsg := level + " " + l.prefix + " " + msg
-
-	// Append key-value pairs to the message
-	if len(keysAndValues) > 0 {
-		fullMsg += " |"
-		for i := 0; i < len(keysAndValues); i += 2 {
-			if i+1 < len(keysAndValues) {
-				fullMsg += " " + fmt.Sprint(keysAndValues[i]) + "=" + fmt.Sprint(keysAndValues[i+1])
-			}
-		}
-	}
-
-	log.Println(fullMsg)
+	return &Logger{logger: l.logger.With(keysAndValues...)}
 }

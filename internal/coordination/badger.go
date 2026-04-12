@@ -3,7 +3,7 @@ package coordination
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
@@ -125,7 +125,7 @@ func (s *BadgerStore) gcLoop(ctx context.Context) {
 				if err := s.db.RunValueLogGC(0.5); err != nil {
 					break // nothing more to GC
 				}
-				log.Println("coordination: badger value log GC completed")
+				slog.Debug("coordination: badger value log GC completed")
 			}
 		}
 	}

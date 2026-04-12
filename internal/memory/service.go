@@ -6,7 +6,7 @@ package memory
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	conduitMemory "github.com/hollis-labs/vanta-conduit/memory"
 )
@@ -83,8 +83,9 @@ func (s *Service) Store(ctx context.Context, m Memory) error {
 		return fmt.Errorf("memory_write: %w", err)
 	}
 
-	log.Printf("memory: stored %s/%s (origin=%s, trigger=%s, confidence=%.1f)",
-		m.Namespace, m.MemoryKey, m.Origin, m.Trigger, m.Confidence)
+	slog.Info("memory: stored",
+		"namespace", m.Namespace, "memory_key", m.MemoryKey,
+		"origin", m.Origin, "trigger", m.Trigger, "confidence", m.Confidence)
 	return nil
 }
 
@@ -186,7 +187,7 @@ func (s *Service) Promote(ctx context.Context, revisionID, targetNamespace strin
 		return fmt.Errorf("memory_promote: %w", err)
 	}
 
-	log.Printf("memory: promoted revision %s to %s", revisionID, targetNamespace)
+	slog.Info("memory: promoted revision", "revision_id", revisionID, "target_namespace", targetNamespace)
 	return nil
 }
 
@@ -200,7 +201,7 @@ func (s *Service) Deprecate(ctx context.Context, revisionID string) error {
 		return fmt.Errorf("memory_deprecate: %w", err)
 	}
 
-	log.Printf("memory: deprecated revision %s", revisionID)
+	slog.Info("memory: deprecated revision", "revision_id", revisionID)
 	return nil
 }
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -179,7 +179,7 @@ Return ONLY the JSON object, no markdown fences or explanation.`, truncateForPro
 
 	result, err := e.utilityCall(ctx, prompt)
 	if err != nil {
-		log.Printf("memory: per-turn extraction LLM call failed: %v", err)
+		slog.Warn("memory: per-turn extraction LLM call failed", "err", err)
 		return
 	}
 
@@ -194,18 +194,18 @@ Return ONLY the JSON object, no markdown fences or explanation.`, truncateForPro
 
 	result = cleanJSONResponse(result)
 	if err := json.Unmarshal([]byte(result), &extracted); err != nil {
-		log.Printf("memory: per-turn extraction parse failed: %v", err)
+		slog.Warn("memory: per-turn extraction parse failed", "err", err)
 		return
 	}
 
 	// Skip low-confidence extractions.
 	if extracted.Confidence < 0.5 {
-		log.Printf("memory: per-turn extraction skipped (confidence=%.1f < 0.5)", extracted.Confidence)
+		slog.Debug("memory: per-turn extraction skipped (low confidence)", "confidence", extracted.Confidence)
 		return
 	}
 
 	if extracted.MemoryKey == "" || extracted.Summary == "" {
-		log.Printf("memory: per-turn extraction skipped (empty key or summary)")
+		slog.Debug("memory: per-turn extraction skipped (empty key or summary)")
 		return
 	}
 
@@ -227,7 +227,7 @@ Return ONLY the JSON object, no markdown fences or explanation.`, truncateForPro
 	}
 
 	if err := e.service.Store(context.Background(), m); err != nil {
-		log.Printf("memory: per-turn store failed: %v", err)
+		slog.Warn("memory: per-turn store failed", "err", err)
 	}
 }
 
@@ -263,7 +263,7 @@ Session ID: %s`, tokensSaved, sessionID)
 
 	result, err := e.utilityCall(ctx, prompt)
 	if err != nil {
-		log.Printf("memory: post-compact extraction LLM call failed: %v", err)
+		slog.Warn("memory: post-compact extraction LLM call failed", "err", err)
 		return
 	}
 
@@ -278,7 +278,7 @@ Session ID: %s`, tokensSaved, sessionID)
 
 	result = cleanJSONResponse(result)
 	if err := json.Unmarshal([]byte(result), &extracted); err != nil {
-		log.Printf("memory: post-compact extraction parse failed: %v", err)
+		slog.Warn("memory: post-compact extraction parse failed", "err", err)
 		return
 	}
 
@@ -306,14 +306,14 @@ Session ID: %s`, tokensSaved, sessionID)
 		}
 
 		if err := e.service.Store(context.Background(), m); err != nil {
-			log.Printf("memory: post-compact store failed for %s: %v", ex.MemoryKey, err)
+			slog.Warn("memory: post-compact store failed", "memory_key", ex.MemoryKey, "err", err)
 			continue
 		}
 		stored++
 	}
 
-	log.Printf("memory: post-compact extraction stored %d/%d memories for session %s",
-		stored, len(extracted), sessionID)
+	slog.Info("memory: post-compact extraction stored",
+		"stored", stored, "total", len(extracted), "session_id", sessionID)
 }
 
 // truncateForPrompt trims content to maxLen characters for inclusion in a prompt.

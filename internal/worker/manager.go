@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -114,7 +114,7 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 		<-m.sem // release semaphore
 		if w.GetWorktreePath() != "" && m.worktrees != nil {
 			if err := m.worktrees.Cleanup(workerID); err != nil {
-				log.Printf("worker %s: worktree cleanup: %v", workerID[:8], err)
+				slog.Warn("worker: worktree cleanup failed", "worker_id", workerID[:8], "err", err)
 			}
 		}
 	}
@@ -135,8 +135,8 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 	w.SetStatus(StatusRunning)
 	m.writeWorkerStatus(w)
 
-	log.Printf("worker %s: spawning full worker (agent=%s, isolation=%s)",
-		workerID[:8], req.AgentID, req.Isolation)
+	slog.Info("worker: spawning full worker",
+		"worker_id", workerID[:8], "agent", req.AgentID, "isolation", req.Isolation)
 
 	// Delegate the task.
 	delegResult, delegErr := m.chat.DelegateTask(workerCtx, chat.DelegationRequest{
@@ -199,7 +199,7 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 		m.workers.Delete(workerID)
 	})
 
-	log.Printf("worker %s: %s in %s", workerID[:8], w.GetStatus(), result.Duration.Round(time.Millisecond))
+	slog.Info("worker: finished", "worker_id", workerID[:8], "status", w.GetStatus(), "duration", result.Duration.Round(time.Millisecond))
 	return result, nil
 }
 
@@ -216,7 +216,7 @@ func (m *Manager) SpawnLight(ctx context.Context, executor ToolExecutor, req Lig
 	workerID := uuid.NewString()
 	start := time.Now()
 
-	log.Printf("worker %s: light execution (tool=%s)", workerID[:8], req.ToolName)
+	slog.Info("worker: light execution", "worker_id", workerID[:8], "tool", req.ToolName)
 
 	content, isError, err := executor.Execute(ctx, req.AgentID, req.ToolName, req.Input)
 
@@ -321,7 +321,7 @@ func (m *Manager) ReapStale(threshold time.Duration) []Snapshot {
 	})
 
 	for _, s := range stale {
-		log.Printf("worker %s: reaped as stale (heartbeat expired)", s.ID[:8])
+		slog.Warn("worker: reaped as stale (heartbeat expired)", "worker_id", s.ID[:8])
 		m.Cancel(s.ID)
 	}
 

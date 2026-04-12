@@ -2,7 +2,7 @@ package permission
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -192,8 +192,8 @@ func (e *Engine) RequestApproval(sessionID, toolName string, input map[string]an
 		Response:  make(chan ApprovalResponse, 1),
 	}
 	e.pendingApprovals.Store(req.ID, req)
-	log.Printf("permission: approval request %s created for tool %s in session %s",
-		req.ID, toolName, sessionID)
+	slog.Info("permission: approval request created",
+		"id", req.ID, "tool", toolName, "session_id", sessionID)
 	return req
 }
 
@@ -210,13 +210,13 @@ func (e *Engine) WaitForApproval(ctx context.Context, req *ApprovalRequest) Appr
 
 	select {
 	case resp := <-req.Response:
-		log.Printf("permission: approval %s responded: %s (scope: %s)", req.ID, resp.Decision, resp.Scope)
+		slog.Info("permission: approval responded", "id", req.ID, "decision", resp.Decision, "scope", resp.Scope)
 		return resp
 	case <-timer.C:
-		log.Printf("permission: approval %s timed out after %s — defaulting to deny", req.ID, timeout)
+		slog.Warn("permission: approval timed out — defaulting to deny", "id", req.ID, "timeout", timeout)
 		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: true}
 	case <-ctx.Done():
-		log.Printf("permission: approval %s cancelled — defaulting to deny", req.ID)
+		slog.Warn("permission: approval cancelled — defaulting to deny", "id", req.ID)
 		return ApprovalResponse{Decision: DecisionDeny, Scope: ScopeOnce, TimedOut: false}
 	}
 }

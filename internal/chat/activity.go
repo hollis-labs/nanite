@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -57,7 +57,7 @@ func NewActivityEmitter(url string) *ActivityEmitter {
 	}
 	disabled := url == ""
 	if disabled {
-		log.Println("activity: no ENGINE_ACTIVITY_URL set — activity emitter disabled")
+		slog.Info("activity: no ENGINE_ACTIVITY_URL set — emitter disabled")
 	}
 	return &ActivityEmitter{
 		baseURL:   url,
@@ -82,25 +82,25 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 
 	body, err := json.Marshal(ev)
 	if err != nil {
-		log.Printf("activity: marshal error: %v", err)
+		slog.Warn("activity: marshal error", "err", err)
 		return
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/v1/activity/events", bytes.NewReader(body))
 	if err != nil {
-		log.Printf("activity: request error: %v", err)
+		slog.Warn("activity: request error", "err", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		log.Printf("activity: send error (engine unreachable): %v", err)
+		slog.Warn("activity: send error (engine unreachable)", "err", err)
 		return
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		log.Printf("activity: engine returned %d", resp.StatusCode)
+		slog.Warn("activity: engine non-2xx", "status", resp.StatusCode)
 	}
 }
 

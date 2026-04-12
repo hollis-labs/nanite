@@ -114,7 +114,11 @@ func (c RetryConfig) BackoffDelay(attempt int, retryAfter time.Duration) time.Du
 		}
 	}
 
-	// Apply jitter: subtract 0-25% of the delay.
+	// Apply jitter: subtract 0-25% of the delay. math/rand is appropriate here;
+	// backoff jitter exists to prevent thundering-herd, not to resist an
+	// adversary predicting retry timing. No token, nonce, or identity is
+	// derived from this value.
+	//nolint:gosec // G404: backoff jitter, non-security; see comment above.
 	jitter := time.Duration(rand.Int63n(int64(delay) / 4))
 	delay -= jitter
 

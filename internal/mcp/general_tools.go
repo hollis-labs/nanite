@@ -2,6 +2,10 @@ package mcp
 
 import (
 	"context"
+	//nolint:gosec // G501: md5 is exposed as a user-selectable option in the
+	// `hash` MCP tool (algorithm=md5). It is not used for any security
+	// decision inside nanite; callers who opt in are responsible for their
+	// use case. See callHash below.
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
@@ -708,6 +712,10 @@ func (g *GeneralToolsTransport) callHash(args map[string]any) (*ToolResult, erro
 		h := sha256.Sum256([]byte(input))
 		return textResult(hex.EncodeToString(h[:])), nil
 	case "md5":
+		// md5 is offered as an explicit, user-requested algorithm choice in
+		// the tool contract. Not used internally for any security purpose
+		// (integrity, authentication, cache-key collision-resistance).
+		//nolint:gosec // G401: user-requested algorithm, non-security use.
 		h := md5.Sum([]byte(input))
 		return textResult(hex.EncodeToString(h[:])), nil
 	default:

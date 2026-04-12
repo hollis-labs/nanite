@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os/exec"
 	"strings"
 
@@ -85,7 +85,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 	cliSessionID, _ := CLISessionIDFromContext(ctx)
 	args := s.adapter.BuildArgs(prompt, systemPrompt, cliSessionID)
 
-	log.Printf("subprocess[%s]: launching CLI with %d args", s.adapter.Name(), len(args))
+	slog.Info("subprocess: launching CLI", "adapter", s.adapter.Name(), "args", len(args))
 
 	cmd := exec.CommandContext(ctx, s.cliPath, args...)
 
@@ -135,7 +135,10 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 
 			events, err := s.adapter.ParseLine(line)
 			if err != nil {
-				log.Printf("subprocess[%s]: parse error: %v (line: %s)", s.adapter.Name(), err, string(line))
+				// Raw CLI output line can contain user prompt / assistant
+				// response text. Name attr "content" so the PII redactor
+				// scrubs it in production.
+				slog.Warn("subprocess: parse error", "adapter", s.adapter.Name(), "err", err, "content", string(line))
 				continue
 			}
 
@@ -149,12 +152,12 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		}
 
 		if err := scanner.Err(); err != nil {
-			log.Printf("subprocess[%s]: scanner error: %v", s.adapter.Name(), err)
+			slog.Warn("subprocess: scanner error", "adapter", s.adapter.Name(), "err", err)
 		}
 
 		if err := cmd.Wait(); err != nil {
 			if ctx.Err() == nil {
-				log.Printf("subprocess[%s]: process exited: %v", s.adapter.Name(), err)
+				slog.Info("subprocess: process exited", "adapter", s.adapter.Name(), "err", err)
 			}
 		}
 

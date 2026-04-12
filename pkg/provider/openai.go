@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -258,13 +258,22 @@ func (o *OpenAI) streamChatInternal(ctx context.Context, systemPrompt string, me
 		if wait := o.RateTracker.WaitTime(estimatedTokens); wait > 0 {
 			avail, limit := o.RateTracker.Remaining()
 			if estimatedTokens > limit {
-				log.Printf("provider: request ~%d tokens exceeds per-minute rate limit %d, proceeding anyway", estimatedTokens, limit)
+				slog.Warn("provider: request exceeds per-minute rate limit, proceeding anyway",
+					"provider", "openai",
+					"estimated_tokens", estimatedTokens,
+					"rate_limit", limit,
+				)
 			}
 			if o.OnStatus != nil {
 				o.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
 			}
-			log.Printf("provider: pacing — waiting %s for rate limit budget (est. %d tokens, available %d/%d)",
-				wait.Round(time.Millisecond), estimatedTokens, avail, limit)
+			slog.Info("provider: pacing for rate limit budget",
+				"provider", "openai",
+				"wait", wait.Round(time.Millisecond).String(),
+				"estimated_tokens", estimatedTokens,
+				"available", avail,
+				"rate_limit", limit,
+			)
 			select {
 			case <-ctx.Done():
 				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
@@ -295,7 +304,7 @@ func (o *OpenAI) streamChatInternal(ctx context.Context, systemPrompt string, me
 		if !RetryableStatusCode(apiErr.StatusCode) || attempt == o.Retry.MaxRetries {
 			if o.CircuitBreaker != nil && attempt == o.Retry.MaxRetries {
 				if tripped := o.CircuitBreaker.RecordFailure(); tripped {
-					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					slog.Warn("provider: circuit breaker tripped after consecutive failures", "provider", "openai")
 					if o.OnCircuitOpen != nil {
 						o.OnCircuitOpen()
 					}
@@ -309,8 +318,13 @@ func (o *OpenAI) streamChatInternal(ctx context.Context, systemPrompt string, me
 		}
 
 		delay := o.Retry.BackoffDelay(attempt, retryAfter)
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, o.Retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "openai",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", o.Retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		if o.OnStatus != nil {
 			o.OnStatus(fmt.Sprintf("Rate limited, retrying in %s... (attempt %d/%d)",
 				delay.Round(time.Millisecond), attempt+1, o.Retry.MaxRetries))
@@ -492,7 +506,12 @@ func (o *OpenAI) bridgeStream(ctx context.Context, handle *openaiStreamHandle, c
 				if o.RateTracker != nil {
 					o.RateTracker.Record(in)
 					avail, limit := o.RateTracker.Remaining()
-					log.Printf("provider: recorded %d input tokens (rate budget: %d/%d)", in, avail, limit)
+					slog.Debug("provider: recorded input tokens",
+						"provider", "openai",
+						"input_tokens", in,
+						"available", avail,
+						"rate_limit", limit,
+					)
 				}
 				ch <- StreamEvent{Type: "usage", Usage: &Usage{InputTokens: in}}
 				inputRecorded = true
@@ -568,8 +587,13 @@ func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []C
 			return "", apiErr
 		}
 		delay := o.Retry.BackoffDelay(attempt, parseOpenAIRetryAfter(err))
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, o.Retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "openai",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", o.Retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		select {
 		case <-ctx.Done():
 			return "", fmt.Errorf("context cancelled during retry: %w", ctx.Err())

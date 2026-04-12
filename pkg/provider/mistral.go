@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -288,13 +288,22 @@ func waitForRateBudget(ctx context.Context, rt *TokenRateTracker, onStatus Statu
 	}
 	avail, limit := rt.Remaining()
 	if estimatedTokens > limit {
-		log.Printf("provider: request ~%d tokens exceeds per-minute rate limit %d, proceeding anyway", estimatedTokens, limit)
+		slog.Warn("provider: request exceeds per-minute rate limit, proceeding anyway",
+			"provider", "mistral",
+			"estimated_tokens", estimatedTokens,
+			"rate_limit", limit,
+		)
 	}
 	if onStatus != nil {
 		onStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
 	}
-	log.Printf("provider: pacing — waiting %s for rate limit budget (est. %d tokens, available %d/%d)",
-		wait.Round(time.Millisecond), estimatedTokens, avail, limit)
+	slog.Info("provider: pacing for rate limit budget",
+		"provider", "mistral",
+		"wait", wait.Round(time.Millisecond).String(),
+		"estimated_tokens", estimatedTokens,
+		"available", avail,
+		"rate_limit", limit,
+	)
 	select {
 	case <-ctx.Done():
 		return
@@ -369,7 +378,7 @@ func runCompatStreamRetry(
 		if !RetryableStatusCode(apiErr.StatusCode) || attempt == retry.MaxRetries {
 			if cb != nil && attempt == retry.MaxRetries {
 				if tripped := cb.RecordFailure(); tripped {
-					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					slog.Warn("provider: circuit breaker tripped after consecutive failures", "provider", "mistral")
 					if onCircuitOpen != nil {
 						onCircuitOpen()
 					}
@@ -385,8 +394,13 @@ func runCompatStreamRetry(
 		}
 
 		delay := retry.BackoffDelay(attempt, retryAfter)
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "mistral",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		if onStatus != nil {
 			onStatus(fmt.Sprintf("Rate limited, retrying in %s... (attempt %d/%d)",
 				delay.Round(time.Millisecond), attempt+1, retry.MaxRetries))
@@ -422,8 +436,13 @@ func runCompatComplete(ctx context.Context, client *openai.Client, params openai
 			return "", apiErr
 		}
 		delay := retry.BackoffDelay(attempt, parseCompatRetryAfter(err))
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "mistral",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		select {
 		case <-ctx.Done():
 			return "", fmt.Errorf("context cancelled during retry: %w", ctx.Err())
@@ -538,7 +557,12 @@ func bridgeCompatStream(ctx context.Context, handle *compatStreamHandle, ch chan
 				if rateTracker != nil {
 					rateTracker.Record(in)
 					avail, limit := rateTracker.Remaining()
-					log.Printf("provider: recorded %d input tokens (rate budget: %d/%d)", in, avail, limit)
+					slog.Debug("provider: recorded input tokens",
+						"provider", "mistral",
+						"input_tokens", in,
+						"available", avail,
+						"rate_limit", limit,
+					)
 				}
 				ch <- StreamEvent{Type: "usage", Usage: &Usage{InputTokens: in}}
 				inputRecorded = true

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -365,7 +365,7 @@ func (o *Ollama) bridgeStream(ctx context.Context, req *api.ChatRequest, ch chan
 		if !RetryableStatusCode(apiErr.StatusCode) || attempt == o.Retry.MaxRetries {
 			if o.CircuitBreaker != nil && attempt == o.Retry.MaxRetries {
 				if tripped := o.CircuitBreaker.RecordFailure(); tripped {
-					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					slog.Warn("provider: circuit breaker tripped after consecutive failures", "provider", "ollama")
 					if o.OnCircuitOpen != nil {
 						o.OnCircuitOpen()
 					}
@@ -377,8 +377,13 @@ func (o *Ollama) bridgeStream(ctx context.Context, req *api.ChatRequest, ch chan
 			return
 		}
 		delay := o.Retry.BackoffDelay(attempt, retryAfter)
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, o.Retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "ollama",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", o.Retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		if o.OnStatus != nil {
 			o.OnStatus(fmt.Sprintf("Ollama transient error, retrying in %s... (attempt %d/%d)",
 				delay.Round(time.Millisecond), attempt+1, o.Retry.MaxRetries))
@@ -438,8 +443,13 @@ func (o *Ollama) Complete(ctx context.Context, systemPrompt string, messages []C
 			return "", apiErr
 		}
 		delay := o.Retry.BackoffDelay(attempt, retryAfter)
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, o.Retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "ollama",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", o.Retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		select {
 		case <-ctx.Done():
 			return "", fmt.Errorf("context cancelled during retry: %w", ctx.Err())

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -428,13 +428,22 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		if wait := a.RateTracker.WaitTime(estimatedTokens); wait > 0 {
 			avail, limit := a.RateTracker.Remaining()
 			if estimatedTokens > limit {
-				log.Printf("provider: request ~%d tokens exceeds per-minute rate limit %d, proceeding anyway", estimatedTokens, limit)
+				slog.Warn("provider: request exceeds per-minute rate limit, proceeding anyway",
+					"provider", "anthropic",
+					"estimated_tokens", estimatedTokens,
+					"rate_limit", limit,
+				)
 			}
 			if a.OnStatus != nil {
 				a.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
 			}
-			log.Printf("provider: pacing — waiting %s for rate limit budget (est. %d tokens, available %d/%d)",
-				wait.Round(time.Millisecond), estimatedTokens, avail, limit)
+			slog.Info("provider: pacing for rate limit budget",
+				"provider", "anthropic",
+				"wait", wait.Round(time.Millisecond).String(),
+				"estimated_tokens", estimatedTokens,
+				"available", avail,
+				"rate_limit", limit,
+			)
 			select {
 			case <-ctx.Done():
 				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
@@ -470,7 +479,7 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		if !RetryableStatusCode(apiErr.StatusCode) || attempt == a.Retry.MaxRetries {
 			if a.CircuitBreaker != nil && attempt == a.Retry.MaxRetries {
 				if tripped := a.CircuitBreaker.RecordFailure(); tripped {
-					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					slog.Warn("provider: circuit breaker tripped after consecutive failures", "provider", "anthropic")
 					if a.OnCircuitOpen != nil {
 						a.OnCircuitOpen()
 					}
@@ -484,8 +493,13 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		}
 
 		delay := a.Retry.BackoffDelay(attempt, retryAfter)
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, a.Retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "anthropic",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", a.Retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		if a.OnStatus != nil {
 			a.OnStatus(fmt.Sprintf("Rate limited, retrying in %s... (attempt %d/%d)",
 				delay.Round(time.Millisecond), attempt+1, a.Retry.MaxRetries))
@@ -600,15 +614,24 @@ func (a *Anthropic) bridgeStream(ctx context.Context, handle *anthropicStreamHan
 		case anthropic.MessageStartEvent:
 			u := variant.Message.Usage
 			if u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 {
-				log.Printf("provider: prompt cache — creation=%d read=%d input=%d",
-					u.CacheCreationInputTokens, u.CacheReadInputTokens, u.InputTokens)
+				slog.Debug("provider: prompt cache usage",
+					"provider", "anthropic",
+					"cache_creation", u.CacheCreationInputTokens,
+					"cache_read", u.CacheReadInputTokens,
+					"input_tokens", u.InputTokens,
+				)
 			}
 			in := int(u.InputTokens)
 			totalInput += in
 			if a.RateTracker != nil && in > 0 {
 				a.RateTracker.Record(in)
 				avail, limit := a.RateTracker.Remaining()
-				log.Printf("provider: recorded %d input tokens (rate budget: %d/%d)", in, avail, limit)
+				slog.Debug("provider: recorded input tokens",
+					"provider", "anthropic",
+					"input_tokens", in,
+					"available", avail,
+					"rate_limit", limit,
+				)
 			}
 			ch <- StreamEvent{Type: "usage", Usage: &Usage{
 				InputTokens:         in,
@@ -705,8 +728,13 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 			return "", apiErr
 		}
 		delay := a.Retry.BackoffDelay(attempt, parseRetryAfterFromErr(err))
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, a.Retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "anthropic",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", a.Retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		select {
 		case <-ctx.Done():
 			return "", fmt.Errorf("context cancelled during retry: %w", ctx.Err())

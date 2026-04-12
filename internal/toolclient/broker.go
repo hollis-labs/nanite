@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -49,7 +49,7 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 // RegisterTools registers tool definitions with the underlying broker.
 func (tb *ToolClient) RegisterTools(tools []broker.ToolDefinition) {
 	tb.LocalBroker.RegisterTools(tools)
-	log.Printf("toolclient: registered %d tools", len(tools))
+	slog.Info("toolclient: registered tools", "count", len(tools))
 }
 
 // isWildcardIntent returns true if the intent is a wildcard or empty string.
@@ -63,8 +63,8 @@ func isWildcardIntent(intent string) bool {
 func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]broker.ToolDefinition, error) {
 	// Reject wildcard intent — fall back to a minimal safe set.
 	if isWildcardIntent(intent) {
-		log.Printf("toolclient: WARNING wildcard/empty intent received (workspace=%s, agent=%s) — returning fallback set of %d tools",
-			workspaceID, agentID, DefaultFallbackToolCount)
+		slog.Warn("toolclient: wildcard/empty intent received — returning fallback set",
+			"workspace", workspaceID, "agent", agentID, "count", DefaultFallbackToolCount)
 		intent = "general"
 	}
 
@@ -98,12 +98,14 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 	beforeCount := len(tools)
 	tools = PruneToolsToTokenBudget(tools, tokenBudget)
 	if len(tools) < beforeCount {
-		log.Printf("toolclient: pruned %d tools to %d due to token budget (%d tokens)",
-			beforeCount, len(tools), tokenBudget)
+		slog.Info("toolclient: pruned tools due to token budget",
+			"before", beforeCount, "after", len(tools), "budget", tokenBudget)
 	}
 
-	log.Printf("toolclient: selected %d/%d tools for intent %q (workspace=%s, agent=%s, tool_tokens=%d, budget=%d)",
-		len(tools), result.Total, intent, workspaceID, agentID, EstimateToolTokens(tools), tokenBudget)
+	slog.Info("toolclient: selected tools for intent",
+		"selected", len(tools), "total", result.Total, "intent", intent,
+		"workspace", workspaceID, "agent", agentID,
+		"tool_tokens", EstimateToolTokens(tools), "budget", tokenBudget)
 
 	return tools, nil
 }
@@ -262,7 +264,7 @@ func (tb *ToolClient) GetPermissions(agentID string) ToolPermissions {
 
 	agent, err := tb.Store.GetAgent(agentID)
 	if err != nil {
-		log.Printf("toolclient: could not load agent %s for permissions: %v", agentID, err)
+		slog.Warn("toolclient: could not load agent for permissions", "agent", agentID, "err", err)
 		return ToolPermissions{MaxCallsPerTurn: DefaultMaxCallsPerTurn}
 	}
 

@@ -2,7 +2,7 @@ package toolclient
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"path"
 	"strings"
 )
@@ -54,7 +54,7 @@ func (p *ToolPermissions) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if len(shorthand) > 0 {
-		log.Printf("toolclient: deprecated field \"allow\" in tool_permissions — use \"allow_list\" instead")
+		slog.Warn("toolclient: deprecated field \"allow\" in tool_permissions — use \"allow_list\" instead")
 		p.AllowList = append(p.AllowList, shorthand...)
 	}
 
@@ -71,7 +71,7 @@ func (p *ToolPermissions) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if len(shorthand) > 0 {
-		log.Printf("toolclient: deprecated field \"deny\" in tool_permissions — use \"deny_list\" instead")
+		slog.Warn("toolclient: deprecated field \"deny\" in tool_permissions — use \"deny_list\" instead")
 		p.DenyList = append(p.DenyList, shorthand...)
 	}
 

@@ -3,7 +3,7 @@ package toolclient
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/go-providers/provider"
@@ -62,7 +62,7 @@ func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]provider.ToolD
 	if intentStr, ok := input["intent"]; ok {
 		if s, ok := intentStr.(string); ok && s != "" {
 			byIntent = tb.SelectByIntent(s, DefaultMaxIntentResults)
-			log.Printf("toolclient: request_tools intent=%q matched %d tools", s, len(byIntent))
+			slog.Info("toolclient: request_tools matched", "intent", s, "count", len(byIntent))
 		}
 	}
 

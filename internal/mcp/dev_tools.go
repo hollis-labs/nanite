@@ -4,20 +4,34 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/nanite/internal/sandbox"
 )
+
+// agentExecFunc is the type of sandbox.AgentExec. It is stored as a package
+// variable so tests can stub it without spinning up real sandbox infrastructure.
+type agentExecFunc func(sandbox.AgentExecOpts) (*sandbox.ExecResult, error)
+
+var defaultAgentExec agentExecFunc = sandbox.AgentExec
 
 // DevToolsTransport provides built-in developer tools (grep, read, write)
 // that operate on local files, scoped to an allow-list of directories.
 type DevToolsTransport struct {
 	AllowedPaths []string // Absolute directory paths tools may access.
+
+	// agentExec is the sandbox execution entry point. Nil means use the
+	// package default (sandbox.AgentExec). Tests override this to capture
+	// invocations without running real commands.
+	agentExec agentExecFunc
 }
 
 // NewDevToolsTransport creates a DevToolsTransport scoped to the given paths.
@@ -32,24 +46,88 @@ func NewDevToolsTransport(allowedPaths []string) *DevToolsTransport {
 	return &DevToolsTransport{AllowedPaths: cleaned}
 }
 
-// isAllowed checks whether a path is under one of the allowed directories.
-func (d *DevToolsTransport) isAllowed(path string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("invalid path: %w", err)
+// resolveAllowed validates userPath against the configured allow-list using
+// pathsafe.ResolveUnder for each root. The first root whose relative path to
+// the requested target stays under that root wins. If every root rejects the
+// path, the *pathsafe.EscapeError from the last attempt is returned so
+// callers can classify via errors.As.
+//
+// Because pathsafe.ResolveUnder treats absolute user paths as root-relative
+// (strip the leading separator and join under root), passing an absolute
+// path straight through would double the prefix. To compose correctly we
+// first compute the relative path from each root to the absolute target,
+// skip roots where the target lies outside (Rel returns "../..."), and then
+// delegate the symlink-aware escape check to pathsafe.
+func (d *DevToolsTransport) resolveAllowed(userPath string) (string, error) {
+	if userPath == "" {
+		return "", fmt.Errorf("path is required")
 	}
-	// Resolve symlinks.
-	real, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		// File may not exist yet (write). Check parent dir.
-		real = abs
+	if len(d.AllowedPaths) == 0 {
+		return "", fmt.Errorf("no allowed paths configured")
 	}
-	for _, allowed := range d.AllowedPaths {
-		if strings.HasPrefix(real, allowed+"/") || real == allowed {
-			return nil
+
+	abs, err := filepath.Abs(userPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+
+	var lastErr error
+	for _, root := range d.AllowedPaths {
+		absRoot, absErr := filepath.Abs(root)
+		if absErr != nil {
+			lastErr = absErr
+			continue
 		}
+		// Resolve symlinks on the root once so macOS /var vs /private/var
+		// comparisons work. Fall back to the cleaned path if resolution
+		// fails (e.g. root does not exist).
+		if real, evalErr := filepath.EvalSymlinks(absRoot); evalErr == nil {
+			absRoot = real
+		}
+		// Resolve symlinks on the target's longest existing ancestor so the
+		// Rel computation uses the same canonical form as the root.
+		target := abs
+		if real, evalErr := filepath.EvalSymlinks(target); evalErr == nil {
+			target = real
+		}
+
+		rel, relErr := filepath.Rel(absRoot, target)
+		if relErr != nil {
+			lastErr = relErr
+			continue
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			// Target is outside this root; try the next root.
+			lastErr = &pathsafe.EscapeError{
+				Root:     absRoot,
+				Attempt:  userPath,
+				Resolved: target,
+				Cause:    errors.New("resolved path outside root"),
+			}
+			continue
+		}
+		// Delegate the final symlink-aware check to pathsafe. This catches
+		// symlinks inside the target that point out of the root.
+		resolved, resolveErr := pathsafe.ResolveUnder(absRoot, rel)
+		if resolveErr == nil {
+			return resolved, nil
+		}
+		lastErr = resolveErr
 	}
-	return fmt.Errorf("path %q is outside allowed directories", path)
+	// Surface the typed *pathsafe.EscapeError from the final attempt so
+	// callers can classify with errors.As. Non-escape errors (e.g. malformed
+	// ancestor) propagate too.
+	return "", lastErr
+}
+
+// pathErrorResult formats a resolveAllowed error into an MCP tool error,
+// preserving the *pathsafe.EscapeError type in the textual message.
+func pathErrorResult(userPath string, err error) *ToolResult {
+	var escape *pathsafe.EscapeError
+	if errors.As(err, &escape) {
+		return errorResult(fmt.Sprintf("path %q outside allowed directories: %s", userPath, escape.Error()))
+	}
+	return errorResult(fmt.Sprintf("path %q: %v", userPath, err))
 }
 
 // ListTools returns the three dev tools.
@@ -162,9 +240,11 @@ func (d *DevToolsTransport) callRead(args map[string]any) (*ToolResult, error) {
 	if path == "" {
 		return errorResult("path is required"), nil
 	}
-	if err := d.isAllowed(path); err != nil {
-		return errorResult(err.Error()), nil
+	resolved, err := d.resolveAllowed(path)
+	if err != nil {
+		return pathErrorResult(path, err), nil
 	}
+	path = resolved
 
 	offset := intArg(args, "offset", 1)
 	limit := intArg(args, "limit", 200)
@@ -211,9 +291,11 @@ func (d *DevToolsTransport) callGrep(args map[string]any) (*ToolResult, error) {
 	if pattern == "" || dir == "" {
 		return errorResult("pattern and directory are required"), nil
 	}
-	if err := d.isAllowed(dir); err != nil {
-		return errorResult(err.Error()), nil
+	resolvedDir, err := d.resolveAllowed(dir)
+	if err != nil {
+		return pathErrorResult(dir, err), nil
 	}
+	dir = resolvedDir
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -311,9 +393,11 @@ func (d *DevToolsTransport) callWrite(args map[string]any) (*ToolResult, error) 
 	if path == "" {
 		return errorResult("path is required"), nil
 	}
-	if err := d.isAllowed(path); err != nil {
-		return errorResult(err.Error()), nil
+	resolved, err := d.resolveAllowed(path)
+	if err != nil {
+		return pathErrorResult(path, err), nil
 	}
+	path = resolved
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -337,9 +421,11 @@ func (d *DevToolsTransport) callEdit(args map[string]any) (*ToolResult, error) {
 	if oldStr == newStr {
 		return errorResult("old_string and new_string must be different"), nil
 	}
-	if err := d.isAllowed(path); err != nil {
-		return errorResult(err.Error()), nil
+	resolved, err := d.resolveAllowed(path)
+	if err != nil {
+		return pathErrorResult(path, err), nil
 	}
+	path = resolved
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -391,9 +477,11 @@ func (d *DevToolsTransport) callGlob(args map[string]any) (*ToolResult, error) {
 	if pattern == "" || dir == "" {
 		return errorResult("pattern and directory are required"), nil
 	}
-	if err := d.isAllowed(dir); err != nil {
-		return errorResult(err.Error()), nil
+	resolvedDir, err := d.resolveAllowed(dir)
+	if err != nil {
+		return pathErrorResult(dir, err), nil
 	}
+	dir = resolvedDir
 
 	maxResults := intArg(args, "max_results", 50)
 	if maxResults < 1 {
@@ -406,7 +494,7 @@ func (d *DevToolsTransport) callGlob(args map[string]any) (*ToolResult, error) {
 	}
 	var matches []fileEntry
 
-	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
@@ -496,6 +584,13 @@ func globMatchParts(patParts, pathParts []string) bool {
 	return globMatchParts(patParts[1:], pathParts[1:])
 }
 
+// devBashSessionID is the session ID used for dev_bash sandbox scoping. All
+// dev_bash invocations share one session so callers can observe consistent
+// resource limits and denylist behavior; the underlying command still runs
+// inside the agent sandbox with stripped PATH, filtered environment, and the
+// platform OS-level isolation layer.
+const devBashSessionID = "dev-bash"
+
 func (d *DevToolsTransport) callBash(args map[string]any) (*ToolResult, error) {
 	command, _ := args["command"].(string)
 	if command == "" {
@@ -508,10 +603,15 @@ func (d *DevToolsTransport) callBash(args map[string]any) (*ToolResult, error) {
 			workDir = d.AllowedPaths[0]
 		}
 	} else {
-		if err := d.isAllowed(workDir); err != nil {
-			return errorResult(err.Error()), nil
+		resolved, err := d.resolveAllowed(workDir)
+		if err != nil {
+			return pathErrorResult(workDir, err), nil
 		}
+		workDir = resolved
 	}
+	_ = workDir // sandbox scopes CWD to its own directory; working_dir is
+	// accepted for compatibility and is validated above but the sandbox
+	// enforces its own sandboxDir regardless.
 
 	timeout := intArg(args, "timeout", 30)
 	if timeout < 1 {
@@ -521,20 +621,41 @@ func (d *DevToolsTransport) callBash(args map[string]any) (*ToolResult, error) {
 		timeout = 120
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
+	execFn := d.agentExec
+	if execFn == nil {
+		execFn = defaultAgentExec
+	}
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Dir = workDir
+	result, err := execFn(sandbox.AgentExecOpts{
+		SessionID: devBashSessionID,
+		Command:   "sh",
+		Args:      []string{"-c", command},
+		Timeout:   time.Duration(timeout) * time.Second,
+	})
+	if err != nil {
+		// sandbox setup / denylist / dir-resolve errors surface here. These
+		// are hard rejections (e.g. CheckDenylist match).
+		return errorResult(fmt.Sprintf("sandbox error: %v", err)), nil
+	}
 
-	out, err := cmd.CombinedOutput()
-	output := string(out)
+	var sb strings.Builder
+	if result.Stdout != "" {
+		sb.WriteString(result.Stdout)
+	}
+	if result.Stderr != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("--- stderr ---\n")
+		sb.WriteString(result.Stderr)
+	}
+	output := sb.String()
 
-	if ctx.Err() == context.DeadlineExceeded {
+	if result.TimedOut {
 		return errorResult(fmt.Sprintf("command timed out after %ds\n%s", timeout, output)), nil
 	}
-	if err != nil {
-		return errorResult(fmt.Sprintf("exit error: %v\n%s", err, output)), nil
+	if result.ExitCode != 0 {
+		return errorResult(fmt.Sprintf("exit error: exit status %d\n%s", result.ExitCode, output)), nil
 	}
 
 	if output == "" {

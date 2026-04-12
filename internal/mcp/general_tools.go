@@ -7,9 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,14 +20,77 @@ import (
 	"unicode"
 )
 
+// ssrfResolver resolves a hostname to IP addresses. Tests replace this to
+// control what IPs the dialer pins against without real DNS lookups.
+type ssrfResolver func(ctx context.Context, host string) ([]net.IP, error)
+
+// defaultSSRFResolver uses the system resolver.
+func defaultSSRFResolver(ctx context.Context, host string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
+
 // GeneralToolsTransport provides general-purpose utility tools
 // that are not path-scoped.
-type GeneralToolsTransport struct{}
+type GeneralToolsTransport struct {
+	// AllowLocalhost permits connections to 127.0.0.0/8 and `localhost`. Off
+	// by default; enable explicitly via configuration when the host process
+	// legitimately needs to reach localhost services.
+	AllowLocalhost bool
+
+	// resolver is the DNS hook used by the SSRF guard. Nil falls back to
+	// the system resolver. Tests install a stub here.
+	resolver ssrfResolver
+
+	// dialer is the low-level dial function used once the IP has been
+	// validated. Nil uses net.Dialer with a short connect timeout. Tests
+	// install a stub that records the dial target without opening a socket.
+	dialer func(ctx context.Context, network, addr string) (net.Conn, error)
+}
 
 // NewGeneralToolsTransport creates a GeneralToolsTransport.
 func NewGeneralToolsTransport() *GeneralToolsTransport {
 	return &GeneralToolsTransport{}
 }
+
+// ssrfDeniedCIDRs is the set of IP ranges that web_fetch refuses to dial.
+// Covers loopback, link-local (AWS/GCP/Azure IMDS at 169.254.169.254),
+// RFC1918 private ranges, CGNAT, unspecified, IPv6 loopback, ULA, and IPv6
+// link-local. Localhost is handled separately so AllowLocalhost can override.
+var ssrfDeniedCIDRs = mustParseCIDRs([]string{
+	"169.254.0.0/16", // link-local incl. cloud IMDS
+	"10.0.0.0/8",     // RFC1918
+	"172.16.0.0/12",  // RFC1918
+	"192.168.0.0/16", // RFC1918
+	"0.0.0.0/8",      // unspecified
+	"100.64.0.0/10",  // CGNAT
+	"fc00::/7",       // IPv6 ULA
+	"fe80::/10",      // IPv6 link-local
+	"::/128",         // IPv6 unspecified
+})
+
+// ssrfLoopbackCIDRs covers 127.0.0.0/8 and ::1/128. Separated so the allow
+// flag can gate them.
+var ssrfLoopbackCIDRs = mustParseCIDRs([]string{
+	"127.0.0.0/8",
+	"::1/128",
+})
+
+func mustParseCIDRs(cidrs []string) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		_, block, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(fmt.Sprintf("ssrf: invalid CIDR %q: %v", c, err))
+		}
+		out = append(out, block)
+	}
+	return out
+}
+
+// errSSRFBlocked is the sentinel used for every SSRF-class rejection so
+// callers (and tests) can distinguish validator errors from transport errors
+// via errors.Is.
+var errSSRFBlocked = errors.New("ssrf: blocked destination")
 
 // ListTools returns the general utility tools.
 func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
@@ -173,14 +238,115 @@ func (g *GeneralToolsTransport) CallTool(_ context.Context, name string, args ma
 }
 
 func (g *GeneralToolsTransport) callWebFetch(args map[string]any) (*ToolResult, error) {
-	url, _ := args["url"].(string)
-	if url == "" {
+	rawURL, _ := args["url"].(string)
+	if rawURL == "" {
 		return errorResult("url is required"), nil
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	parsed, err := url.Parse(rawURL)
 	if err != nil {
+		return errorResult(fmt.Sprintf("invalid url: %v", err)), nil
+	}
+
+	// Scheme allowlist. Reject file://, ftp://, gopher://, etc. Go's default
+	// transport handles only http/https anyway, but we reject explicitly so
+	// the error message is informative and no clever transport injection
+	// reaches the dialer.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errorResult(fmt.Sprintf("unsupported scheme %q (http/https only)", parsed.Scheme)), nil
+	}
+	if parsed.Host == "" {
+		return errorResult("url missing host"), nil
+	}
+
+	// Build a Transport whose DialContext resolves the hostname once, checks
+	// every returned IP against the SSRF denylist, and pins the connection
+	// to the validated IP. This is the standard defense against DNS
+	// rebinding: the DNS answer we checked is the exact IP we dial.
+	resolver := g.resolver
+	if resolver == nil {
+		resolver = defaultSSRFResolver
+	}
+	innerDial := g.dialer
+	if innerDial == nil {
+		d := &net.Dialer{Timeout: 5 * time.Second}
+		innerDial = d.DialContext
+	}
+	allowLocal := g.AllowLocalhost
+
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, splitErr := net.SplitHostPort(addr)
+		if splitErr != nil {
+			return nil, splitErr
+		}
+		// Reject `localhost` and `*.localhost` unless explicitly allowed.
+		if !allowLocal && isLocalhostName(host) {
+			return nil, fmt.Errorf("%w: localhost name %q", errSSRFBlocked, host)
+		}
+		ips, resolveErr := resolver(ctx, host)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("%w: no IPs for %q", errSSRFBlocked, host)
+		}
+		for _, ip := range ips {
+			if !allowLocal {
+				for _, block := range ssrfLoopbackCIDRs {
+					if block.Contains(ip) {
+						return nil, fmt.Errorf("%w: loopback %s", errSSRFBlocked, ip)
+					}
+				}
+			}
+			for _, block := range ssrfDeniedCIDRs {
+				if block.Contains(ip) {
+					return nil, fmt.Errorf("%w: %s in %s", errSSRFBlocked, ip, block)
+				}
+			}
+			if ip.IsUnspecified() {
+				return nil, fmt.Errorf("%w: unspecified %s", errSSRFBlocked, ip)
+			}
+		}
+		// Pin to the first validated IP. DNS cannot rebind between the
+		// resolver call above and the dial below because we supply a literal
+		// address, not a name.
+		pinned := ips[0].String()
+		return innerDial(ctx, network, net.JoinHostPort(pinned, port))
+	}
+
+	transport := &http.Transport{
+		DialContext:           dial,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 8 * time.Second,
+		DisableKeepAlives:     true,
+	}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+		// Cap redirects at 3 and re-validate scheme on each hop. The dialer
+		// re-runs the IP check for each new request so redirect targets get
+		// the same protection as the original URL.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to unsupported scheme %q", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
+
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid request: %v", err)), nil
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		if errors.Is(err, errSSRFBlocked) {
+			return errorResult(fmt.Sprintf("fetch blocked: %v", err)), nil
+		}
 		return errorResult(fmt.Sprintf("fetch error: %v", err)), nil
 	}
 	defer resp.Body.Close()
@@ -194,6 +360,13 @@ func (g *GeneralToolsTransport) callWebFetch(args map[string]any) (*ToolResult, 
 
 	result := fmt.Sprintf("Status: %d %s\n\n%s", resp.StatusCode, resp.Status, string(body))
 	return textResult(result), nil
+}
+
+// isLocalhostName matches "localhost" and any subdomain of ".localhost"
+// (RFC 6761 reserves both). Case-insensitive.
+func isLocalhostName(host string) bool {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	return h == "localhost" || strings.HasSuffix(h, ".localhost")
 }
 
 func (g *GeneralToolsTransport) callJSONParse(args map[string]any) (*ToolResult, error) {

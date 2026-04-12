@@ -26,7 +26,10 @@ func TestWebFetch_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// httptest binds to 127.0.0.1; flip the opt-in flag so the SSRF guard
+	// allows loopback for this positive-path test.
 	gt := newGeneralTools()
+	gt.AllowLocalhost = true
 	result, err := gt.CallTool(context.Background(), "web_fetch", map[string]any{
 		"url": srv.URL,
 	})

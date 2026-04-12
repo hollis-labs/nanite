@@ -3,7 +3,7 @@ package subprocess
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -279,7 +279,7 @@ func (m *Manager) waitForExit(stderr *ringBuffer) {
 	m.mu.Unlock()
 
 	exitErr := fmt.Errorf("plugin process exited unexpectedly: %w (stderr: %s)", err, stderr.String())
-	log.Printf("subprocess: %s", exitErr)
+	slog.Error("subprocess: exited unexpectedly", "err", exitErr)
 
 	if m.onCrash != nil {
 		safego.Call(context.Background(), "plugin-hook.subprocess.onCrash", func() {
@@ -304,7 +304,7 @@ func (m *Manager) attemptRestart(attempt int) {
 		}
 	}
 
-	log.Printf("subprocess: restarting in %s (attempt %d/%d)", backoff, attempt+1, m.cfg.MaxRestarts)
+	slog.Warn("subprocess: restarting", "backoff", backoff, "attempt", attempt+1, "max_restarts", m.cfg.MaxRestarts)
 	time.Sleep(backoff)
 
 	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.StartupTimeout)
@@ -312,7 +312,7 @@ func (m *Manager) attemptRestart(attempt int) {
 
 	_, err := m.Start(ctx)
 	if err != nil {
-		log.Printf("subprocess: restart failed: %v", err)
+		slog.Error("subprocess: restart failed", "err", err)
 		m.mu.Lock()
 		m.state = StateCrashed
 		m.mu.Unlock()
@@ -323,7 +323,7 @@ func (m *Manager) attemptRestart(attempt int) {
 	m.restarts++
 	m.mu.Unlock()
 
-	log.Printf("subprocess: restart successful (attempt %d/%d)", attempt+1, m.cfg.MaxRestarts)
+	slog.Info("subprocess: restart successful", "attempt", attempt+1, "max_restarts", m.cfg.MaxRestarts)
 }
 
 // healthLoop periodically checks the subprocess health.
@@ -357,12 +357,12 @@ func (m *Manager) healthCheck() {
 
 	result, err := CallResult[HealthResult](transport, ctx, MethodHealth, nil)
 	if err != nil {
-		log.Printf("subprocess: health check failed: %v", err)
+		slog.Warn("subprocess: health check failed", "err", err)
 		return
 	}
 
 	if !result.OK {
-		log.Printf("subprocess: health check unhealthy: %s", result.Message)
+		slog.Warn("subprocess: health check unhealthy", "message", result.Message)
 	}
 }
 

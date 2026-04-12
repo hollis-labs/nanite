@@ -251,7 +251,6 @@ func cmdServe(args []string) {
 	if container.Tasks != nil {
 		pluginHost.RegisterService("tasks", container.Tasks)
 	}
-	plugin.RegisterAutoTriggerHandler(pluginHost)
 
 	// Create API layer.
 	a := api.New(container)

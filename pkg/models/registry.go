@@ -5,7 +5,6 @@
 //   - internal/store.SeedProviders       — rows written to the models table
 //   - internal/store.estimateCost        — pricing for usage records
 //   - pkg/provider.*.Capabilities()      — provider-level defaults
-//   - pkg/provider.CostMonitor           — budget enforcement rates
 //   - internal/chat.InferProvider        — model → provider routing
 //
 // Runtime code should reach for ModelByID, ProviderFor, Pricing, or

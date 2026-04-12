@@ -31,6 +31,20 @@ type HTTPConfig struct {
 	// Override separately from MaxRequestBodyBytes so routine JSON endpoints
 	// stay tight while file-upload endpoints get the headroom they need.
 	MaxUploadBodyBytes int64 `yaml:"max_upload_body_bytes"`
+	// CORSAllowedOrigins is the exact-match allowlist consulted by the server's
+	// CORS middleware when deciding whether to reflect the Origin header.
+	//
+	// Semantics:
+	//   - Empty / unset: the server falls back to a development-oriented default
+	//     of ["http://localhost:5173", "http://127.0.0.1:5173"]. This replaces
+	//     the prior reflect-any behaviour (audit finding: Critical) so an
+	//     unconfigured deployment is no longer open to arbitrary web origins.
+	//   - Comparison is an exact string match against the Origin header. No
+	//     substring, suffix, or regex matching is performed.
+	//   - The special value "*" reflects any origin but, per the CORS spec,
+	//     disables Access-Control-Allow-Credentials. Opt in explicitly by
+	//     listing "*" as a sole entry when credentials are not required.
+	CORSAllowedOrigins []string `yaml:"cors_allowed_origins"`
 }
 
 // PresenceConfig controls presence broadcast behavior.

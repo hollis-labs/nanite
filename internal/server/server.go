@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -100,6 +101,15 @@ func resolveHTTPConfig(cfg config.HTTPConfig) config.HTTPConfig {
 	}
 	if cfg.MaxUploadBodyBytes <= 0 {
 		cfg.MaxUploadBodyBytes = defaultMaxUploadBodyBytes
+	}
+	if len(cfg.CORSAllowedOrigins) == 0 {
+		// Dev-oriented default. Deliberately narrow — replaces the prior
+		// reflect-any policy (audit finding: Critical). Production deployments
+		// are expected to set cors_allowed_origins in nanite.yaml.
+		cfg.CORSAllowedOrigins = []string{
+			"http://localhost:5173",
+			"http://127.0.0.1:5173",
+		}
 	}
 	return cfg
 }
@@ -213,12 +223,25 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		// Vary: Origin must be set on all responses whose content could vary
+		// with Origin, even when the caller is disallowed — otherwise shared
+		// caches can serve a cross-origin hit to a same-origin client.
+		if origin != "" {
+			w.Header().Add("Vary", "Origin")
+		}
 		if origin != "" && s.isOriginAllowed(origin) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
+			// Special-case wildcard: per spec, Access-Control-Allow-Origin: *
+			// cannot be combined with Access-Control-Allow-Credentials: true.
+			// When operators opt into "*" we reflect any origin but drop
+			// credentials rather than silently violating the spec.
+			if s.hasWildcardCORS() {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -228,13 +251,35 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// isOriginAllowed decides whether to reflect an Origin header. Current policy
-// (pre-TASK-016) is reflect-any — matches the prior server behaviour and
-// preserves compatibility for the post-audit phase-1 cut. TASK-016 replaces
-// this with a config-driven allowlist.
+// isOriginAllowed decides whether to reflect the Origin header based on the
+// configured HTTPConfig.CORSAllowedOrigins allowlist.
+//
+// Semantics (see appconfig.go for the full policy doc):
+//   - Exact string match against the Origin header. No substring/suffix/regex.
+//   - The special value "*" reflects any origin (see hasWildcardCORS); the
+//     middleware then drops Access-Control-Allow-Credentials per spec.
+//   - An empty Origin is rejected (handled by the middleware before calling).
 func (s *Server) isOriginAllowed(origin string) bool {
-	_ = origin
-	return true
+	for _, allowed := range s.httpCfg.CORSAllowedOrigins {
+		if allowed == "*" {
+			return true
+		}
+		if allowed == origin {
+			return true
+		}
+	}
+	return false
+}
+
+// hasWildcardCORS reports whether the configured allowlist contains the "*"
+// sentinel. Used by the middleware to switch to wildcard ACAO + no credentials.
+func (s *Server) hasWildcardCORS() bool {
+	for _, allowed := range s.httpCfg.CORSAllowedOrigins {
+		if allowed == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 // bodyLimitMiddleware wraps the request Body in http.MaxBytesReader for
@@ -361,17 +406,77 @@ func (s *Server) handleGetUISlots(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(slots)
 }
 
+// knownEmitEventTypes lists the event names the HTTP /api/plugins/events
+// endpoint will accept from external callers. Sourced from the plugin event
+// catalog in internal/plugin/events.go plus the Claude Code hook aliases that
+// NormalizeEventType resolves to canonical names.
+//
+// TODO: replace this hardcoded list once Host exposes a richer registered-
+// event-types lookup (plugins will then contribute event types via manifest
+// metadata). Until then the allowlist is curated in source.
+var knownEmitEventTypes = map[string]struct{}{
+	naniteplugin.EventSessionStart:        {},
+	naniteplugin.EventSessionEnd:          {},
+	naniteplugin.EventSessionArchived:     {},
+	naniteplugin.EventAgentSwitched:       {},
+	naniteplugin.EventAgentLoaded:         {},
+	naniteplugin.EventMessageSent:         {},
+	naniteplugin.EventMessageReceived:     {},
+	naniteplugin.EventMessageDeleted:      {},
+	naniteplugin.EventMessageBookmarked:   {},
+	naniteplugin.EventMessageUnbookmarked: {},
+	naniteplugin.EventModeChanged:         {},
+	naniteplugin.EventScopeChanged:        {},
+	naniteplugin.EventToolCalled:          {},
+	naniteplugin.EventToolFailed:          {},
+	naniteplugin.EventToolComplete:        {},
+	naniteplugin.EventToolExecuting:       {},
+	naniteplugin.EventMessageSending:      {},
+	naniteplugin.EventEnvelopeRendered:    {},
+	naniteplugin.EventWidgetLoaded:        {},
+	naniteplugin.EventActionTriggered:     {},
+	naniteplugin.EventWorkflowStarted:     {},
+	naniteplugin.EventWorkflowComplete:    {},
+	naniteplugin.EventWorkflowFailed:      {},
+	naniteplugin.EventConfigChanged:       {},
+	naniteplugin.EventPluginInstalled:     {},
+	naniteplugin.EventPluginUninstalled:   {},
+	naniteplugin.EventProviderError:       {},
+	naniteplugin.EventProviderFallback:    {},
+	naniteplugin.EventShellExec:           {},
+	naniteplugin.EventShellError:          {},
+	naniteplugin.EventShellBlocked:        {},
+	naniteplugin.EventContextCompacted:    {},
+	naniteplugin.EventContextAssembled:    {},
+	naniteplugin.EventArtifactCreated:     {},
+	naniteplugin.EventArtifactDeleted:     {},
+}
+
+// isKnownEmitEventType reports whether name is an allowlisted event type the
+// HTTP emit endpoint will forward. The input is normalized via
+// NormalizeEventType first so Claude Code aliases (e.g. "PreToolUse") resolve
+// to the canonical Nanite name before the lookup.
+func isKnownEmitEventType(name string) bool {
+	canonical := naniteplugin.NormalizeEventType(name)
+	_, ok := knownEmitEventTypes[canonical]
+	return ok
+}
+
 func (s *Server) handleEmitEvent(w http.ResponseWriter, r *http.Request) {
 	if s.pluginHost == nil {
 		http.Error(w, "Plugin system not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
+	// Decode as json.RawMessage for the data field so we can enforce
+	// "must be a JSON object" explicitly — decoding directly into a
+	// map[string]interface{} would reject raw scalars but also reject a
+	// missing field the same way, which we want to distinguish.
 	var req struct {
-		EventType string                 `json:"event_type"`
-		Source    string                 `json:"source"`
-		Data      map[string]interface{} `json:"data"`
-		SessionID string                 `json:"session_id"`
+		EventType string          `json:"event_type"`
+		Source    string          `json:"source"`
+		Data      json.RawMessage `json:"data"`
+		SessionID string          `json:"session_id"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -380,12 +485,40 @@ func (s *Server) handleEmitEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	if req.EventType == "" {
+		http.Error(w, "event_type is required", http.StatusBadRequest)
+		return
+	}
+	if !isKnownEmitEventType(req.EventType) {
+		http.Error(w, fmt.Sprintf("unknown event_type %q", req.EventType), http.StatusBadRequest)
+		return
+	}
+
+	// Payload must be a JSON object (or omitted). Raw strings, arrays, numbers,
+	// booleans, and explicit nulls are rejected — the plugin event contract
+	// assumes keyed data.
+	var data map[string]interface{}
+	if len(req.Data) > 0 && string(req.Data) != "null" {
+		trimmed := bytes.TrimSpace(req.Data)
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			http.Error(w, "data must be a JSON object", http.StatusBadRequest)
+			return
+		}
+		if err := json.Unmarshal(req.Data, &data); err != nil {
+			http.Error(w, "data must be a JSON object", http.StatusBadRequest)
+			return
+		}
+	}
+	if data == nil {
+		data = map[string]interface{}{}
+	}
+
 	event := naniteplugin.NewEvent(req.EventType, req.Source, naniteplugin.EventData{
 		SessionID: req.SessionID,
 	})
 
 	// Override data with the provided data
-	event.Data = req.Data
+	event.Data = data
 	if req.SessionID != "" {
 		event.SessionID = req.SessionID
 	}

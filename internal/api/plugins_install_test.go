@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -189,6 +190,57 @@ description: From archive
 	}
 	if !fileExists(filepath.Join(pluginsDir, "archive-plugin", "data.txt")) {
 		t.Error("data.txt not found")
+	}
+}
+
+// TestHandleInstall_PathTraversal asserts that handleInstall rejects names
+// that would resolve outside pluginsDir via ".." segments. Regression for
+// the audit Critical finding: plugin install target was joined raw.
+func TestHandleInstall_PathTraversal(t *testing.T) {
+	pms, _ := setupPluginTestState(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/plugins/install", pms.handleInstall)
+
+	body, _ := json.Marshal(map[string]string{"name": "../../etc/passwd"})
+	req := httptest.NewRequest("POST", "/api/plugins/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for traversal name, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]string
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !strings.Contains(resp["error"], "escapes root") && !strings.Contains(resp["error"], "invalid plugin name") {
+		t.Errorf("expected pathsafe escape error in body, got %q", resp["error"])
+	}
+}
+
+// TestHandleInstallLocal_ManifestTraversal asserts that a manifest whose name
+// contains traversal segments is refused.
+func TestHandleInstallLocal_ManifestTraversal(t *testing.T) {
+	pms, _ := setupPluginTestState(t)
+
+	// Create a source with a malicious manifest name.
+	srcDir := t.TempDir()
+	pluginDir := filepath.Join(srcDir, "evil")
+	os.MkdirAll(pluginDir, 0755)
+	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"),
+		[]byte("name: ../../etc/evil\nversion: 1.0.0\n"), 0644)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/plugins/install-local", pms.handleInstallLocal)
+
+	body, _ := json.Marshal(map[string]string{"path": pluginDir})
+	req := httptest.NewRequest("POST", "/api/plugins/install-local", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for traversal manifest name, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

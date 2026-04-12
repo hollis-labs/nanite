@@ -7,10 +7,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/config"
+	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
 
 // newTestServer constructs a *Server with an empty store/API and the given
@@ -252,6 +254,185 @@ func TestResolveHTTPConfigDefaults(t *testing.T) {
 	// headroom exception).
 	if got.MaxUploadBodyBytes < got.MaxRequestBodyBytes {
 		t.Errorf("upload cap %d must be >= request cap %d", got.MaxUploadBodyBytes, got.MaxRequestBodyBytes)
+	}
+}
+
+// newTestServerWithHost wires a minimal Server with a real plugin.Host so
+// handlers that depend on the host (handleEmitEvent) can be exercised
+// without the full bootstrap sequence.
+func newTestServerWithHost(t *testing.T) *Server {
+	t.Helper()
+	host := naniteplugin.NewHostWithStore(nil)
+	mux := http.NewServeMux()
+	s := &Server{
+		mux:        mux,
+		pluginHost: host,
+		httpCfg:    resolveHTTPConfig(config.HTTPConfig{}),
+	}
+	mux.HandleFunc("POST /api/plugins/events", s.handleEmitEvent)
+	return s
+}
+
+// TestHandleEmitEvent_UnknownType rejects event names not in the allowlist.
+func TestHandleEmitEvent_UnknownType(t *testing.T) {
+	srv := newTestServerWithHost(t)
+	body := bytes.NewBufferString(`{"event_type":"totally.invented.event","data":{}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/events", body)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown event_type, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleEmitEvent_RawStringPayload rejects non-object data payloads.
+func TestHandleEmitEvent_RawStringPayload(t *testing.T) {
+	srv := newTestServerWithHost(t)
+	body := bytes.NewBufferString(`{"event_type":"session.start","data":"not-an-object"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/events", body)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for raw-string data, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleEmitEvent_ValidObject accepts a well-formed allowlisted event.
+func TestHandleEmitEvent_ValidObject(t *testing.T) {
+	srv := newTestServerWithHost(t)
+	body := bytes.NewBufferString(`{"event_type":"session.start","session_id":"s1","data":{"foo":"bar"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/events", body)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid event, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestIsKnownEmitEventType covers the normalization + allowlist lookup for
+// both canonical Nanite names and Claude Code aliases.
+func TestIsKnownEmitEventType(t *testing.T) {
+	cases := []struct {
+		name string
+		ok   bool
+	}{
+		{"session.start", true},
+		{"tool.executing", true},
+		{"PreToolUse", true},        // alias -> tool.executing
+		{"totally.invented", false}, // unknown
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := isKnownEmitEventType(c.name); got != c.ok {
+			t.Errorf("isKnownEmitEventType(%q) = %v, want %v", c.name, got, c.ok)
+		}
+	}
+}
+
+// TestCORSAllowlist_ExactMatch verifies that the CORS allowlist performs
+// exact-string matching: allowlisted origins get their Origin reflected with
+// credentials, while similar-looking but not-listed origins receive no ACAO.
+// This is the regression guard for the audit Critical finding that the prior
+// isOriginAllowed stub reflected any origin.
+func TestCORSAllowlist_ExactMatch(t *testing.T) {
+	cfg := config.HTTPConfig{
+		CORSAllowedOrigins: []string{"http://allowed.example"},
+	}
+	srv := newTestServer(t, cfg)
+	ts := httptest.NewServer(srv.testChain())
+	defer ts.Close()
+
+	// Allowed.
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/ping", nil)
+	req.Header.Set("Origin", "http://allowed.example")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://allowed.example" {
+		t.Fatalf("allowed origin: expected ACAO mirror, got %q", got)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("allowed origin: expected ACAC=true, got %q", got)
+	}
+	if got := resp.Header.Get("Vary"); !strings.Contains(got, "Origin") {
+		t.Fatalf("expected Vary: Origin, got %q", got)
+	}
+
+	// Disallowed (sub-origin mismatch): suffix/substring variant.
+	req2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/ping", nil)
+	req2.Header.Set("Origin", "http://evil.allowed.example")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	resp2.Body.Close()
+	if got := resp2.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("disallowed origin: expected no ACAO, got %q", got)
+	}
+	if got := resp2.Header.Get("Vary"); !strings.Contains(got, "Origin") {
+		t.Fatalf("disallowed origin: Vary: Origin must still be set, got %q", got)
+	}
+	// Response must still succeed — CORS is advisory, the browser enforces.
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("disallowed origin: expected 200, got %d", resp2.StatusCode)
+	}
+}
+
+// TestCORSAllowlist_DefaultDev verifies that a zero-valued config falls back
+// to the dev-oriented default allowlist (localhost:5173 / 127.0.0.1:5173).
+func TestCORSAllowlist_DefaultDev(t *testing.T) {
+	srv := newTestServer(t, config.HTTPConfig{})
+	ts := httptest.NewServer(srv.testChain())
+	defer ts.Close()
+
+	for _, origin := range []string{"http://localhost:5173", "http://127.0.0.1:5173"} {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/ping", nil)
+		req.Header.Set("Origin", origin)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("do %s: %v", origin, err)
+		}
+		resp.Body.Close()
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != origin {
+			t.Fatalf("default allowlist: %s expected mirror ACAO, got %q", origin, got)
+		}
+	}
+
+	// A non-default origin must not be reflected under default config.
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/ping", nil)
+	req.Header.Set("Origin", "http://somewhere-else.example")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("default allowlist: non-default origin must not be reflected, got %q", got)
+	}
+}
+
+// TestCORSAllowlist_Wildcard verifies that "*" reflects any origin but drops
+// Access-Control-Allow-Credentials per CORS spec.
+func TestCORSAllowlist_Wildcard(t *testing.T) {
+	cfg := config.HTTPConfig{CORSAllowedOrigins: []string{"*"}}
+	srv := newTestServer(t, cfg)
+	ts := httptest.NewServer(srv.testChain())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/ping", nil)
+	req.Header.Set("Origin", "http://anything.example")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("wildcard: expected ACAO=*, got %q", got)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("wildcard: ACAC must be dropped, got %q", got)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -204,7 +206,19 @@ func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	target := filepath.Join(pms.pluginsDir, req.Name)
+	// Confine the plugin target path under pluginsDir. A name like
+	// "../../etc/passwd" would otherwise place the cloned repo outside the
+	// plugins directory (audit finding: Critical — path traversal in install).
+	target, err := pathsafe.ResolveUnder(pms.pluginsDir, req.Name)
+	if err != nil {
+		var escErr *pathsafe.EscapeError
+		if errors.As(err, &escErr) {
+			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", escErr))
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", err))
+		return
+	}
 
 	// Check if already installed.
 	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err == nil {
@@ -280,7 +294,20 @@ func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http
 		return
 	}
 
-	target := filepath.Join(pms.pluginsDir, manifest.Name)
+	// Confine the plugin target path under pluginsDir. A manifest whose name
+	// includes ".." would otherwise copy the plugin contents outside the
+	// configured plugins directory (audit finding: Critical — path traversal
+	// via local-install manifest name).
+	target, err := pathsafe.ResolveUnder(pms.pluginsDir, manifest.Name)
+	if err != nil {
+		var escErr *pathsafe.EscapeError
+		if errors.As(err, &escErr) {
+			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", escErr))
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", err))
+		return
+	}
 	if fileExists(filepath.Join(target, "plugin.yaml")) {
 		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", manifest.Name))
 		return
@@ -391,7 +418,17 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 		return
 	}
 
-	target := filepath.Join(pms.pluginsDir, manifest.Name)
+	// Confine archive-derived plugin target under pluginsDir.
+	target, err := pathsafe.ResolveUnder(pms.pluginsDir, manifest.Name)
+	if err != nil {
+		var escErr *pathsafe.EscapeError
+		if errors.As(err, &escErr) {
+			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", escErr))
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", err))
+		return
+	}
 	if fileExists(filepath.Join(target, "plugin.yaml")) {
 		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", manifest.Name))
 		return

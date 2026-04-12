@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -155,7 +155,7 @@ func (s *Server) ListenAndServe() error {
 		),
 	)
 	addr := fmt.Sprintf(":%d", s.port)
-	log.Printf("nanite listening on %s (dev=%v)", addr, s.dev)
+	slog.Info("nanite listening", "addr", addr, "dev", s.dev)
 
 	httpSrv := &http.Server{
 		Addr:              addr,
@@ -346,7 +346,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
+		slog.Info("http request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start).String())
 	})
 }
 
@@ -357,7 +357,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 // Shape is modelled on internal/safego.recoverAndReport but kept inline
 // because the middleware must write an HTTP response in addition to the
 // log + span event. The parallel slog-migration session will convert the
-// log.Printf call below to structured slog attributes.
+// slog.Error emission below carries panic + stack + method + path as
 func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -369,7 +369,12 @@ func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
 			if len(stack) > maxRecoveredStackBytes {
 				stack = stack[:maxRecoveredStackBytes]
 			}
-			log.Printf("PANIC: %v\nstack:\n%s\n", err, stack)
+			slog.Error("http handler panic",
+				"panic", fmt.Sprintf("%v", err),
+				"stack", string(stack),
+				"method", r.Method,
+				"path", r.URL.Path,
+			)
 
 			// OTel span event: only recorded when the request already has
 			// a span in context. When OTel is disabled (no-op provider)

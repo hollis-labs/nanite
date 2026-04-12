@@ -1,9 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,26 +14,25 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
+// installTestSlog swaps slog.Default for the duration of a test and
+// returns a buffer capturing its JSON output. The previous default is
+// restored via t.Cleanup.
+func installTestSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
 // TestRecoverMiddleware_EmitsStackAndSpanEvent asserts that when a
 // downstream handler panics:
 //   - HTTP response is 500
-//   - logged output contains both "PANIC:" and "stack:"
+//   - slog output carries panic and stack attributes
 //   - an OTel span event is recorded on the request's span
 func TestRecoverMiddleware_EmitsStackAndSpanEvent(t *testing.T) {
-	// Redirect the stdlib logger used by recoverMiddleware so we can
-	// assert on the emitted line. Restored on t.Cleanup.
-	var logBuf strings.Builder
-	origOut := log.Writer()
-	origFlags := log.Flags()
-	origPrefix := log.Prefix()
-	log.SetOutput(&logBuf)
-	log.SetFlags(0)
-	log.SetPrefix("")
-	t.Cleanup(func() {
-		log.SetOutput(origOut)
-		log.SetFlags(origFlags)
-		log.SetPrefix(origPrefix)
-	})
+	logBuf := installTestSlog(t)
 
 	// In-memory span recorder attached to an SDK tracer provider. The
 	// request handler starts a span with this provider's tracer so
@@ -72,12 +72,17 @@ func TestRecoverMiddleware_EmitsStackAndSpanEvent(t *testing.T) {
 		t.Errorf("body = %q, want to contain %q", body, "internal server error")
 	}
 
+	// slog JSON output — assert structured attrs rather than stdlib
+	// prefix text. Keys: msg, panic, stack.
 	logged := logBuf.String()
-	if !strings.Contains(logged, "PANIC:") {
-		t.Errorf("log output missing \"PANIC:\":\n%s", logged)
+	if !strings.Contains(logged, `"msg":"http handler panic"`) {
+		t.Errorf("slog output missing panic msg:\n%s", logged)
 	}
-	if !strings.Contains(logged, "stack:") {
-		t.Errorf("log output missing \"stack:\":\n%s", logged)
+	if !strings.Contains(logged, `"panic":"kaboom"`) {
+		t.Errorf("slog output missing panic attr:\n%s", logged)
+	}
+	if !strings.Contains(logged, `"stack":`) {
+		t.Errorf("slog output missing stack attr:\n%s", logged)
 	}
 
 	// Span event assertion. End happens via defer in spanStarter, but
@@ -94,7 +99,6 @@ func TestRecoverMiddleware_EmitsStackAndSpanEvent(t *testing.T) {
 	for _, ev := range events {
 		if ev.Name == "http.panic" {
 			found = true
-			// Verify key attributes are present.
 			attrs := map[string]string{}
 			for _, kv := range ev.Attributes {
 				attrs[string(kv.Key)] = kv.Value.AsString()
@@ -124,15 +128,7 @@ func TestRecoverMiddleware_EmitsStackAndSpanEvent(t *testing.T) {
 // middleware above), the recover middleware still responds 500 and
 // logs, without panicking on the no-op span path.
 func TestRecoverMiddleware_NoSpanInContext(t *testing.T) {
-	var logBuf strings.Builder
-	origOut := log.Writer()
-	origFlags := log.Flags()
-	log.SetOutput(&logBuf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(origOut)
-		log.SetFlags(origFlags)
-	})
+	logBuf := installTestSlog(t)
 
 	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("no-span boom")
@@ -147,7 +143,7 @@ func TestRecoverMiddleware_NoSpanInContext(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
-	if !strings.Contains(logBuf.String(), "PANIC:") {
-		t.Errorf("log output missing PANIC:\n%s", logBuf.String())
+	if !strings.Contains(logBuf.String(), `"panic":"no-span boom"`) {
+		t.Errorf("slog output missing panic attr:\n%s", logBuf.String())
 	}
 }

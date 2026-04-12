@@ -1,5 +1,6 @@
-// Package install contains the installer service used by the `nanite install`
-// CLI entry point. This file implements the scaffolding step that initializes
+// Package install contains the installer service used by the `nanite-agent init`
+// CLI entry point (formerly `nanite install`; the legacy subcommand now exits
+// with a deprecation notice). This file implements the scaffolding step that initializes
 // a project directory with a `.nanite/` config tree and a root `NANITE.md`
 // boot prompt.
 package install

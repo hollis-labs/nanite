@@ -118,7 +118,7 @@ Agents compose domain + stack: `[backend, go]`, `[frontend, react]`, `[auditor, 
 └── commands → ../.nanite/commands
 ```
 
-Plus a CLAUDE.md loader block in the project root. The `templates/CLAUDE.md` template contains the canonical Nanite loader block — this is what `nanite install` writes during setup.
+Plus a CLAUDE.md loader block in the project root. The `templates/CLAUDE.md` template contains the canonical Nanite loader block — this is what `nanite-agent init` writes during setup.
 
 ### Legacy archive (`<project>/.agentrc-legacy/`)
 

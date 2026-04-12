@@ -153,7 +153,7 @@ func (a *Adapter) SyncProjectRoot(projectDir string, agents []store.AgentProfile
 
 const placeholderContent = `## Nanite Agents
 
-No agents configured for this project yet. See NANITE.md for setup help, or add an agent definition to ` + "`.nanite/config.yaml`" + ` and re-run ` + "`nanite install --project .`" + `.`
+No agents configured for this project yet. See NANITE.md for setup help, or add an agent definition to ` + "`.nanite/config.yaml`" + ` and re-run ` + "`nanite-agent init --project .`" + `.`
 
 // ---------------------------------------------------------------------------
 // Content generation

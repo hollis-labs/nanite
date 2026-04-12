@@ -1,7 +1,7 @@
 # Project
 
 <!-- DEPRECATED: legacy loader-block template inherited from agentrc.
-     Marked for retirement in plan Task 2.2 Phase 1. The nanite install
+     Marked for retirement in plan Task 2.2 Phase 1. The nanite-agent init
      CLI and the claude adapter now write managed sections directly; this
      template is kept only as a reference during the transition. Do not
      scaffold new projects from this file. -->

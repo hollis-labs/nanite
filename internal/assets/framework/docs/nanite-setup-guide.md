@@ -19,7 +19,7 @@ Concretely:
 - `<project>/.nanite/config.yaml` defines named agents that compose roles + skills + context.
 - For Claude: `<project>/.claude/` points through `<project>/.nanite/`, plus a CLAUDE.md loader block.
 
-The `nanite install` command sets up all symlinks and scaffolding automatically.
+The `nanite-agent init` command sets up all symlinks and scaffolding automatically.
 
 **Context beats instructions.** "Use `Panel` for card containers — see `components/ui/panel.tsx`" is more useful than "use appropriate components."
 
@@ -166,7 +166,7 @@ After context compaction, role and context files are re-read automatically (~500
 1. Install Nanite:
 
 ```
-nanite install --project .
+nanite-agent init --project .
 ```
 
 Creates `.nanite/` with symlinks and wires the LLM adapter.

@@ -96,6 +96,6 @@ shadcn setup complete:
 ## Notes
 
 - The shadcn-ui vendor skill is stored at `~/.nanite/vendor/shadcn-ui/` (not in `~/.nanite/skills/`) to prevent auto-loading in all projects.
-- Converting `.claude/skills/` from a directory symlink to per-file symlinks is a one-way operation for that project. The `nanite install` command should not revert this — it should detect per-file symlinks with vendor additions and leave them intact.
+- Converting `.claude/skills/` from a directory symlink to per-file symlinks is a one-way operation for that project. The `nanite-agent init` command should not revert this — it should detect per-file symlinks with vendor additions and leave them intact.
 - The MCP server version should be pinned. Update by editing `.mcp.json` when upgrading.
 - To upgrade the vendor skill: re-run `pnpm dlx skills add shadcn/ui` in a temp directory, copy output to `~/.nanite/vendor/shadcn-ui/`, and symlinks propagate automatically.

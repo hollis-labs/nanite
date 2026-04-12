@@ -43,7 +43,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, install, a2a, version")
+		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, a2a, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 

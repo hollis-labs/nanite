@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/scaffold"
+	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -236,7 +236,7 @@ func pluginList() {
 			fmt.Println("No plugins installed.")
 			return
 		}
-		log.Fatalf("read plugins dir: %v", err)
+		slogx.Fatal("read plugins dir", "err", err)
 	}
 
 	found := false

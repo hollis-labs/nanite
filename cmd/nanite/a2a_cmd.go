@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/service"
 	a2asvc "github.com/hollis-labs/nanite/internal/service/a2a"
+	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -46,13 +47,13 @@ func cmdA2A(args []string) {
 
 	s, err := store.New(dbPath)
 	if err != nil {
-		log.Fatalf("a2a: open db %q: %v", dbPath, err)
+		slogx.Fatal("a2a: open db", "path", dbPath, "err", err)
 	}
 	defer s.Close()
 
 	svc, err := newA2AServiceForCLI(s)
 	if err != nil {
-		log.Fatalf("a2a: init service: %v", err)
+		slogx.Fatal("a2a: init service", "err", err)
 	}
 
 	switch sub {
@@ -111,7 +112,7 @@ func a2aSend(svc *a2asvc.Service, args []string) {
 	}
 	out, err := svc.SendMessage(context.Background(), msg)
 	if err != nil {
-		log.Fatalf("a2a send: %v", err)
+		slogx.Fatal("a2a send", "err", err)
 	}
 	fmt.Printf("sent: %s\n", out.ID)
 }
@@ -138,12 +139,12 @@ func a2aInbox(svc *a2asvc.Service, args []string) {
 
 	inbox, err := svc.Inbox(context.Background(), *session, *agentID, *status)
 	if err != nil {
-		log.Fatalf("a2a inbox: %v", err)
+		slogx.Fatal("a2a inbox", "err", err)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(inbox); err != nil {
-		log.Fatalf("a2a inbox: encode: %v", err)
+		slogx.Fatal("a2a inbox: encode", "err", err)
 	}
 }
 
@@ -154,12 +155,12 @@ func a2aThread(svc *a2asvc.Service, args []string) {
 	}
 	messages, err := svc.Thread(context.Background(), args[0])
 	if err != nil {
-		log.Fatalf("a2a thread: %v", err)
+		slogx.Fatal("a2a thread", "err", err)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(messages); err != nil {
-		log.Fatalf("a2a thread: encode: %v", err)
+		slogx.Fatal("a2a thread: encode", "err", err)
 	}
 }
 
@@ -177,7 +178,7 @@ func a2aAck(svc *a2asvc.Service, args []string) {
 		os.Exit(1)
 	}
 	if err := svc.Ack(context.Background(), *session, *agentID, fs.Arg(0)); err != nil {
-		log.Fatalf("a2a ack: %v", err)
+		slogx.Fatal("a2a ack", "err", err)
 	}
 	fmt.Printf("acked: %s\n", fs.Arg(0))
 }
@@ -196,7 +197,7 @@ func a2aResolve(svc *a2asvc.Service, args []string) {
 		os.Exit(1)
 	}
 	if err := svc.Resolve(context.Background(), *session, *agentID, fs.Arg(0)); err != nil {
-		log.Fatalf("a2a resolve: %v", err)
+		slogx.Fatal("a2a resolve", "err", err)
 	}
 	fmt.Printf("resolved: %s\n", fs.Arg(0))
 }
@@ -218,12 +219,12 @@ func a2aCatchUp(svc *a2asvc.Service, args []string) {
 
 	messages, err := svc.RecentForSession(context.Background(), *session, *last)
 	if err != nil {
-		log.Fatalf("a2a catch-up: %v", err)
+		slogx.Fatal("a2a catch-up", "err", err)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(messages); err != nil {
-		log.Fatalf("a2a catch-up: encode: %v", err)
+		slogx.Fatal("a2a catch-up: encode", "err", err)
 	}
 }
 
@@ -256,7 +257,7 @@ func a2aHandoff(svc *a2asvc.Service, args []string) {
 
 		id, err := svc.RequestHandoff(context.Background(), *session, *from, *to, *reqBy)
 		if err != nil {
-			log.Fatalf("a2a handoff request: %v", err)
+			slogx.Fatal("a2a handoff request", "err", err)
 		}
 		fmt.Printf("handoff requested: %s\n", id)
 	case "approve":
@@ -265,7 +266,7 @@ func a2aHandoff(svc *a2asvc.Service, args []string) {
 			os.Exit(1)
 		}
 		if err := svc.ApproveHandoff(context.Background(), rest[0]); err != nil {
-			log.Fatalf("a2a handoff approve: %v", err)
+			slogx.Fatal("a2a handoff approve", "err", err)
 		}
 		fmt.Printf("approved: %s\n", rest[0])
 	case "reject":
@@ -277,7 +278,7 @@ func a2aHandoff(svc *a2asvc.Service, args []string) {
 			os.Exit(1)
 		}
 		if err := svc.RejectHandoff(context.Background(), fs.Arg(0), *reason); err != nil {
-			log.Fatalf("a2a handoff reject: %v", err)
+			slogx.Fatal("a2a handoff reject", "err", err)
 		}
 		fmt.Printf("rejected: %s\n", fs.Arg(0))
 	default:
@@ -301,7 +302,7 @@ func newA2AServiceForCLI(s *store.Store) (*a2asvc.Service, error) {
 	if err != nil {
 		// Non-fatal: CLI can still address the "user" sentinel and DB
 		// agents even if file discovery hits a parse error on one tier.
-		log.Printf("a2a: agent discovery warning: %v", err)
+		slog.Warn("a2a: agent discovery", "err", err)
 	}
 	if defaultDef, defErr := builtin.DefaultAgent(); defErr == nil {
 		agentDefs = append(agentDefs, defaultDef)

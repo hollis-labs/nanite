@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -86,9 +86,8 @@ func cmdServe(args []string) {
 	}
 
 	// Install the structured logging handler before anything else
-	// emits a log record. Every subsequent log.Printf (until migrated)
-	// still goes to stdlib stderr, but slog-based sites flow through
-	// the PII redactor and JSON handler.
+	// emits a log record. All slog-based sites flow through the PII
+	// redactor and JSON handler.
 	_, logCloser, logErr := slogx.Init(slogx.Config{
 		Format:    slogx.ParseFormat(appCfg.Logging.Format),
 		Level:     slogx.ParseLevel(appCfg.Logging.Level),
@@ -96,7 +95,7 @@ func cmdServe(args []string) {
 		AddSource: appCfg.Logging.AddSource,
 	})
 	if logErr != nil {
-		log.Printf("warning: slog handler init failed: %v (continuing with stdlib log)", logErr)
+		slog.Warn("slog handler init failed, continuing with stdlib log", "err", logErr)
 	} else {
 		defer logCloser.Close()
 	}
@@ -104,17 +103,17 @@ func cmdServe(args []string) {
 	// Load agentrc config (user-level + project-level, merged).
 	cfg, cfgErr := config.Load()
 	if cfgErr != nil {
-		log.Printf("warning: failed to load agentrc config: %v", cfgErr)
+		slog.Warn("failed to load agentrc config", "err", cfgErr)
 	} else {
 		name := cfg.Project.Name
 		if name == "" {
 			name = "(unnamed)"
 		}
-		log.Printf("config loaded — project: %s, role: %s, root: %s", name, cfg.Role, cfg.ProjectRoot())
+		slog.Info("config loaded", "project", name, "role", cfg.Role, "root", cfg.ProjectRoot())
 	}
 
 	if appCfgErr != nil {
-		log.Printf("warning: failed to load app config: %v (using defaults)", appCfgErr)
+		slog.Warn("failed to load app config, using defaults", "err", appCfgErr)
 	}
 
 	// Initialise OpenTelemetry tracing via the internal/otel wrapper.
@@ -127,7 +126,7 @@ func cmdServe(args []string) {
 		Disabled:    appCfg.OTel.Disabled,
 	})
 	if otelErr != nil {
-		log.Printf("warning: OTel init failed: %v", otelErr)
+		slog.Warn("OTel init failed", "err", otelErr)
 	} else {
 		defer otelShutdown(otelCtx)
 	}
@@ -135,43 +134,44 @@ func cmdServe(args []string) {
 	// Open store and run migrations.
 	s, err := store.New(*dbPath)
 	if err != nil {
-		log.Fatalf("failed to open store: %v", err)
+		slogx.Fatal("failed to open store", "err", err)
 	}
 	defer s.Close()
 
 	// Seed default data.
 	if err := s.Seed(); err != nil {
-		log.Fatalf("failed to seed database: %v", err)
+		slogx.Fatal("failed to seed database", "err", err)
 	}
 	if err := s.SeedProviders(); err != nil {
-		log.Fatalf("failed to seed providers: %v", err)
+		slogx.Fatal("failed to seed providers", "err", err)
 	}
 	if err := s.SeedBuiltinTemplates(); err != nil {
-		log.Fatalf("failed to seed templates: %v", err)
+		slogx.Fatal("failed to seed templates", "err", err)
 	}
 	if err := s.SeedBuiltinPromptTemplates(); err != nil {
-		log.Fatalf("failed to seed prompt templates: %v", err)
+		slogx.Fatal("failed to seed prompt templates", "err", err)
 	}
 	if err := s.SeedBuiltinModes(); err != nil {
-		log.Fatalf("failed to seed modes: %v", err)
+		slogx.Fatal("failed to seed modes", "err", err)
 	}
 
 	// Load core envelope types from manifest.
 	if coreTypes := loadEnvelopeManifest("config/envelopes.yaml"); len(coreTypes) > 0 {
 		chat.InitCoreTypes(coreTypes)
-		log.Printf("envelope manifest: loaded %d core type(s)", len(coreTypes))
+		slog.Info("envelope manifest loaded", "count", len(coreTypes))
 	}
 
 	// Set up provider registry (API keys, Ollama, CLI adapters).
 	registry := initProviders()
 
-	log.Printf("app config loaded (cli_active_throttle=%ds, auto_detect_tools=%d)",
-		appCfg.Presence.CLIActiveThrottleSeconds, len(appCfg.Artifacts.AutoDetectTools))
+	slog.Info("app config loaded",
+		"cli_active_throttle_seconds", appCfg.Presence.CLIActiveThrottleSeconds,
+		"auto_detect_tools", len(appCfg.Artifacts.AutoDetectTools))
 
 	// Configure output filters. Default: strip emoji from LLM responses.
 	outputFilters := filter.NewChain()
 	outputFilters.Add("no_emoji", filter.NoEmoji)
-	log.Printf("output filters: %v", outputFilters.Names())
+	slog.Info("output filters registered", "filters", outputFilters.Names())
 
 	// Set up MCP manager, tool broker, and self-service tools.
 	mcpManager, tb, selfTools := initMCP(s)
@@ -207,17 +207,17 @@ func cmdServe(args []string) {
 	pluginHost.RegisterService("store", s)
 	pluginHost.RegisterService("mcp", mcpManager)
 	pluginHost.RegisterService("toolclient", tb)
-	log.Println("plugin host initialized")
+	slog.Info("plugin host initialized")
 
 	// --- Coordination store (Badger KV for multi-agent state) ---
 	coordDir := filepath.Join(filepath.Dir(*dbPath), "coordination")
 	coordStore, coordErr := coordination.NewBadgerStore(coordDir)
 	if coordErr != nil {
-		log.Printf("WARNING: coordination store failed to open: %v — multi-agent features disabled", coordErr)
+		slog.Warn("coordination store failed to open, multi-agent features disabled", "err", coordErr)
 		coordStore = nil
 	} else {
 		defer coordStore.Close()
-		log.Println("coordination store: badger initialized at", coordDir)
+		slog.Info("coordination store: badger initialized", "dir", coordDir)
 	}
 	var coord coordination.CoordStore
 	if coordStore != nil {
@@ -230,10 +230,10 @@ func cmdServe(args []string) {
 	wtBaseDir := filepath.Join(filepath.Dir(*dbPath), "worktrees")
 	wtMgr, wtErr := worktree.NewManager(wtBaseDir)
 	if wtErr != nil {
-		log.Printf("WARNING: worktree manager init failed: %v — worktree isolation disabled", wtErr)
+		slog.Warn("worktree manager init failed, worktree isolation disabled", "err", wtErr)
 		wtMgr = worktree.NewNoopManager()
 	} else {
-		log.Println("worktree manager: initialized at", wtBaseDir)
+		slog.Info("worktree manager initialized", "dir", wtBaseDir)
 	}
 
 	// --- Service container: single wiring point ---
@@ -253,7 +253,7 @@ func cmdServe(args []string) {
 		Worktrees:       wtMgr,
 	})
 	if err != nil {
-		log.Fatalf("failed to create service container: %v", err)
+		slogx.Fatal("failed to create service container", "err", err)
 	}
 
 	// Wire todo/plan store into the self-tools transport.
@@ -263,16 +263,16 @@ func cmdServe(args []string) {
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {
 		if err := container.Tasks.Restore(context.Background()); err != nil {
-			log.Printf("WARNING: task restore: %v", err)
+			slog.Warn("task restore", "err", err)
 		}
 	}
 
 	// Clean up orphaned worktrees from previous runs.
 	if container.Worktrees != nil {
 		if cleaned, wtCleanErr := container.Worktrees.CleanupOrphaned(nil); wtCleanErr != nil {
-			log.Printf("WARNING: worktree orphan cleanup: %v", wtCleanErr)
+			slog.Warn("worktree orphan cleanup", "err", wtCleanErr)
 		} else if cleaned > 0 {
-			log.Printf("worktree cleanup: removed %d orphaned worktrees", cleaned)
+			slog.Info("worktree cleanup: removed orphaned worktrees", "count", cleaned)
 		}
 	}
 
@@ -306,9 +306,9 @@ func cmdServe(args []string) {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		log.Println("shutting down...")
+		slog.Info("shutting down")
 		if err := daemonLifecycle.Shutdown(10 * time.Second); err != nil {
-			log.Printf("daemon lifecycle shutdown: %v", err)
+			slog.Error("daemon lifecycle shutdown", "err", err)
 		}
 		container.Shutdown()
 		os.Exit(0)
@@ -325,7 +325,7 @@ func cmdServe(args []string) {
 	srv.SetPluginsDir(pluginsDir)
 
 	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("server error: %v", err)
+		slogx.Fatal("server error", "err", err)
 	}
 }
 
@@ -371,7 +371,7 @@ func initProviders() *provider.Registry {
 			p := spec.create()
 			spec.setKey(p, key)
 			registry.Register(spec.name, p)
-			log.Printf("%s provider registered (key from keychain)", spec.name)
+			slog.Info("provider registered (key from keychain)", "provider", spec.name)
 			registeredAPI = append(registeredAPI, spec.name)
 		} else {
 			missingAPI = append(missingAPI, spec.name)
@@ -384,20 +384,17 @@ func initProviders() *provider.Registry {
 		p := provider.NewAzureOpenAI()
 		p.SetAPIKey(azureKey)
 		registry.Register("azure-openai", p)
-		log.Println("azure-openai provider registered")
+		slog.Info("provider registered", "provider", "azure-openai")
 		registeredAPI = append(registeredAPI, "azure-openai")
 	}
 
 	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
-		log.Println("╔══════════════════════════════════════════════════════════════╗")
-		log.Println("║  WARNING: No API providers configured — chat will not work! ║")
-		log.Println("║  Set API keys in Settings → Providers or via environment.   ║")
-		log.Println("╚══════════════════════════════════════════════════════════════╝")
+		slog.Warn("no API providers configured — chat will not work")
 	}
 
 	// Always register Ollama — it requires no API key (local service).
 	registry.Register("ollama", provider.NewOllama())
-	log.Println("ollama provider registered (default host: http://localhost:11434)")
+	slog.Info("provider registered", "provider", "ollama", "host", "http://localhost:11434")
 
 	// Register CLI adapters — PTY (unix) and subprocess (all platforms).
 	cliAdapters := []provider.CLIAdapter{
@@ -414,11 +411,11 @@ func initProviders() *provider.Registry {
 		if path, ok := adapter.Detect(); ok {
 			ptyName := "pty-" + adapter.Name()
 			registry.Register(ptyName, provider.NewPTYBridgeWithAdapter(adapter, path))
-			log.Printf("pty provider registered: %s (%s)", ptyName, path)
+			slog.Info("pty provider registered", "name", ptyName, "path", path)
 
 			subName := "sub-" + adapter.Name()
 			registry.Register(subName, provider.NewSubprocessBridge(adapter, path))
-			log.Printf("subprocess provider registered: %s (%s)", subName, path)
+			slog.Info("subprocess provider registered", "name", subName, "path", path)
 		}
 	}
 	// Backwards-compat alias: "pty" → Claude adapter (if available).
@@ -447,20 +444,22 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	loadPersistedMCPServers(s, mcpManager)
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
 	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
-		log.Printf("WARNING: MCP auto-discovery failed: %v", err)
+		slog.Warn("MCP auto-discovery failed", "err", err)
 	} else {
-		log.Printf("MCP auto-discovery: %d tools total, %d added, %d removed",
-			diff.Total, len(diff.Added), len(diff.Removed))
+		slog.Info("MCP auto-discovery",
+			"total", diff.Total,
+			"added", len(diff.Added),
+			"removed", len(diff.Removed))
 	}
 
 	tb := toolclient.New(mcpManager, s, nil)
 	if mcpManager.Broker != nil {
 		tb.LocalBroker = mcpManager.Broker
-		log.Printf("toolclient: sharing MCPManager broker (%d tool summaries)", len(mcpManager.Broker.AllTools()))
+		slog.Info("toolclient: sharing MCPManager broker", "tool_summaries", len(mcpManager.Broker.AllTools()))
 	}
 	selfToolDefs := mcp.SelfToolProviderDefinitions()
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
-	log.Printf("registered %d self-service built-in tools", len(selfToolDefs))
+	slog.Info("registered self-service built-in tools", "count", len(selfToolDefs))
 
 	return mcpManager, tb, selfTools
 }
@@ -495,7 +494,7 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 					return
 				case <-ticker.C:
 					if err := container.Tasks.Snapshot(ctx); err != nil {
-						log.Printf("task snapshot: %v", err)
+						slog.Warn("task snapshot", "err", err)
 					}
 				}
 			}
@@ -512,7 +511,7 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 				return
 			case <-ticker.C:
 				if killed := container.ProcessTracker.KillStale(5 * time.Minute); killed > 0 {
-					log.Printf("stale process reaper: killed %d hung CLI processes", killed)
+					slog.Info("stale process reaper: killed hung CLI processes", "count", killed)
 				}
 			}
 		}
@@ -529,7 +528,7 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 					return
 				case <-ticker.C:
 					if stale := container.Workers.ReapStale(60 * time.Second); len(stale) > 0 {
-						log.Printf("stale worker reaper: reaped %d workers", len(stale))
+						slog.Info("stale worker reaper: reaped workers", "count", len(stale))
 					}
 				}
 			}
@@ -545,26 +544,26 @@ func discoverAndLoadPlugins(pluginHost *plugin.Host, dbPath string, mcpManager *
 		pluginsDir = envDir
 	}
 	if discovered, discErr := plugin.DiscoverPlugins(pluginsDir); discErr != nil {
-		log.Printf("WARNING: plugin discovery failed: %v", discErr)
+		slog.Warn("plugin discovery failed", "err", discErr)
 	} else {
 		loaded, loadErrs := plugin.LoadDiscovered(pluginHost, discovered)
 		for _, e := range loadErrs {
-			log.Printf("WARNING: %v", e)
+			slog.Warn("plugin load", "err", e)
 		}
-		log.Printf("plugins: discovered %d, loaded %d", len(discovered), len(loaded))
+		slog.Info("plugins discovered", "discovered", len(discovered), "loaded", len(loaded))
 	}
 	if builtins, builtinErrs := plugin.LoadRegisteredBuiltins(pluginHost); len(builtins) > 0 {
 		for _, e := range builtinErrs {
-			log.Printf("WARNING: %v", e)
+			slog.Warn("plugin builtin load", "err", e)
 		}
-		log.Printf("plugins: loaded %d builtin(s)", len(builtins))
+		slog.Info("plugins: loaded builtins", "count", len(builtins))
 	}
 
 	// Re-discover tools after plugins (they may register new MCP servers).
 	if postDiff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
-		log.Printf("WARNING: post-plugin MCP discovery failed: %v", err)
+		slog.Warn("post-plugin MCP discovery failed", "err", err)
 	} else if len(postDiff.Added) > 0 {
-		log.Printf("post-plugin MCP discovery: %d new tools added: %v", len(postDiff.Added), postDiff.Added)
+		slog.Info("post-plugin MCP discovery: new tools added", "count", len(postDiff.Added), "tools", postDiff.Added)
 	}
 
 	return pluginsDir
@@ -582,12 +581,12 @@ func loadEnvelopeManifest(path string) []string {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Fatalf("failed to read envelope manifest %s: %v", path, err)
+		slogx.Fatal("failed to read envelope manifest", "path", path, "err", err)
 	}
 
 	var m manifest
 	if err := yaml.Unmarshal(data, &m); err != nil {
-		log.Fatalf("failed to parse envelope manifest %s: %v", path, err)
+		slogx.Fatal("failed to parse envelope manifest", "path", path, "err", err)
 	}
 
 	types := make([]string, 0, len(m.Core))
@@ -605,7 +604,7 @@ func loadEnvelopeManifest(path string) []string {
 func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 	servers, err := s.ListMCPServers()
 	if err != nil {
-		log.Printf("WARNING: failed to load persisted MCP servers: %v", err)
+		slog.Warn("failed to load persisted MCP servers", "err", err)
 		return
 	}
 
@@ -627,12 +626,12 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 		case "sse":
 			m.AddHTTPServer(cfg.Name, cfg.URL)
 		default:
-			log.Printf("mcp: unknown transport type %q for server %s, skipping", cfg.TransportType, cfg.Name)
+			slog.Warn("mcp: unknown transport type, skipping", "transport", cfg.TransportType, "server", cfg.Name)
 		}
 	}
 
 	if len(servers) > 0 {
-		log.Printf("mcp: loaded %d user-configured server(s) from database", len(servers))
+		slog.Info("mcp: loaded user-configured servers from database", "count", len(servers))
 	}
 }
 

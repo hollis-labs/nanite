@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 const (
@@ -30,7 +32,7 @@ func WriteManagedSection(path string, content string) error {
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return os.WriteFile(path, []byte(block), 0o644)
+		return fsutil.AtomicWriteFile(path, []byte(block), 0o644)
 	}
 	if err != nil {
 		return err
@@ -45,7 +47,7 @@ func WriteManagedSection(path string, content string) error {
 		if len(existing) > 0 && !strings.HasSuffix(existing, "\n") {
 			sep = "\n"
 		}
-		return os.WriteFile(path, []byte(existing+sep+block), 0o644)
+		return fsutil.AtomicWriteFile(path, []byte(existing+sep+block), 0o644)
 	}
 
 	// Find managedEnd *after* managedStart to ensure correct pairing.
@@ -56,7 +58,7 @@ func WriteManagedSection(path string, content string) error {
 		if len(existing) > 0 && !strings.HasSuffix(existing, "\n") {
 			sep = "\n"
 		}
-		return os.WriteFile(path, []byte(existing+sep+block), 0o644)
+		return fsutil.AtomicWriteFile(path, []byte(existing+sep+block), 0o644)
 	}
 	endIdx += startIdx // convert to absolute index
 
@@ -75,7 +77,7 @@ func WriteManagedSection(path string, content string) error {
 		b.WriteString(after)
 	}
 
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	return fsutil.AtomicWriteFile(path, []byte(b.String()), 0o644)
 }
 
 // ReadManagedSection returns the content between the Nanite-managed markers in the
@@ -171,13 +173,13 @@ func RemoveManagedSection(path string) (removedAny bool, becameEmpty bool, err e
 	trimmed := strings.TrimSpace(combined)
 	if trimmed == "" {
 		// Whole file is empty after removal.
-		if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		if err := fsutil.AtomicWriteFile(path, []byte{}, 0o644); err != nil {
 			return false, false, fmt.Errorf("truncate %s: %w", path, err)
 		}
 		return true, true, nil
 	}
 
-	if err := os.WriteFile(path, []byte(combined), 0o644); err != nil {
+	if err := fsutil.AtomicWriteFile(path, []byte(combined), 0o644); err != nil {
 		return false, false, fmt.Errorf("write %s: %w", path, err)
 	}
 	return true, false, nil

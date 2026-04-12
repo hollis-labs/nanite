@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/fsutil"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 
@@ -190,7 +191,7 @@ No agents configured for this project yet. See NANITE.md for setup help, or add 
 
 func writeFile(dir, name, content string) error {
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := fsutil.AtomicWriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("adapter-claude: write %s: %w", name, err)
 	}
 	return nil

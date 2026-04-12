@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/fsutil"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 
@@ -297,7 +298,7 @@ func (a *Adapter) PopulateSandbox(sandboxDir string, ap store.AgentProfile, sess
 		return fmt.Errorf("adapter-nanite-native: marshal sandbox config: %w", err)
 	}
 
-	return os.WriteFile(filepath.Join(naniteDir, "config.yaml"), data, 0o644)
+	return fsutil.AtomicWriteFile(filepath.Join(naniteDir, "config.yaml"), data, 0o644)
 }
 
 // SyncProjectRoot is a no-op for nanite-native — it manages its own files.

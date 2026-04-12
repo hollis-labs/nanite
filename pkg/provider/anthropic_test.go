@@ -128,39 +128,35 @@ func TestMarshalMessagesCacheControl(t *testing.T) {
 }
 
 func TestAnthropicRequestJSON(t *testing.T) {
-	// Verify the anthropicRequest marshals correctly with structured system blocks.
-	req := anthropicRequest{
-		Model:     "claude-sonnet-4-20250514",
-		MaxTokens: 1024,
-		System:    buildSystemBlocks("test system"),
-		Messages:  marshalMessages([]ChatMessage{{Role: "user", Content: "hi"}}),
-		Stream:    true,
-	}
-
-	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal error: %v", err)
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-
-	// System should be an array, not a string.
-	system, ok := parsed["system"].([]any)
-	if !ok {
-		t.Fatalf("system should be array, got %T", parsed["system"])
-	}
+	// Verify that the SDK-param system block marshals with cache_control.
+	// (Previously this test constructed an anthropicRequest struct; the SDK
+	// replaces that with anthropic.MessageNewParams. The semantic being
+	// checked — system blocks carry cache_control ephemeral — is preserved.)
+	a := NewAnthropic()
+	a.SetCacheHints(DefaultCacheStrategy())
+	system := a.buildSDKSystem("test system")
 	if len(system) != 1 {
 		t.Fatalf("expected 1 system block, got %d", len(system))
 	}
-	block := system[0].(map[string]any)
+	data, err := json.Marshal(system[0])
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var block map[string]any
+	if err := json.Unmarshal(data, &block); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
 	if block["type"] != "text" {
 		t.Errorf("expected type=text, got %v", block["type"])
 	}
-	cc := block["cache_control"].(map[string]any)
+	if block["text"] != "test system" {
+		t.Errorf("expected text=test system, got %v", block["text"])
+	}
+	cc, ok := block["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatalf("cache_control missing: %v", block["cache_control"])
+	}
 	if cc["type"] != "ephemeral" {
-		t.Errorf("expected ephemeral cache_control")
+		t.Errorf("expected ephemeral cache_control, got %v", cc["type"])
 	}
 }

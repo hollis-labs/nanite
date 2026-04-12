@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -46,17 +46,17 @@ func SendUICommand(ctx context.Context, cmd UICommand) error {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		log.Printf("crossapp: Engine UI command failed (Engine may be offline): %v", err)
+		slog.Warn("crossapp: Engine UI command failed (Engine may be offline)", "err", err)
 		return fmt.Errorf("post UI command: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		log.Printf("crossapp: Engine returned %d for UI command type=%s", resp.StatusCode, cmd.Type)
+		slog.Warn("crossapp: Engine returned error for UI command", "status", resp.StatusCode, "type", cmd.Type)
 		return fmt.Errorf("engine returned %d", resp.StatusCode)
 	}
 
-	log.Printf("crossapp: UI command sent — type=%s target=%s params=%v", cmd.Type, cmd.Target, cmd.Params)
+	slog.Info("crossapp: UI command sent", "type", cmd.Type, "target", cmd.Target, "params", cmd.Params)
 	return nil
 }
 

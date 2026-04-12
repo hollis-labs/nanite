@@ -10,6 +10,21 @@ Tracking ongoing first-pass coverage of the Nanite codebase. This index lists co
 
 ## Completed audits
 
+### 2026-04-11 — `eval-subprocess-pty-sdk` (Go, deep-review)
+- **Counts:** 0 Critical, 3 High, 5 Medium, 2 Low, 2 Info
+- **Folder:** `docs/audits/2026-04-11-eval-subprocess-pty-sdk/`
+- **Headline:** 5 adapter plugins implement CLIAgentAdapter. `adapter-claude` is the most complete and the de facto reference. **Three High-severity findings:** (1) `adapter-opencode` never reads subprocess output — `SyncProjectRoot` writes files but the agent spawn ignores stdout entirely, making it impossible to detect completion or errors. (2) Adapters share sandbox population via `PopulateAllSandboxes` but each writes its own CLAUDE.md/GEMINI.md without checking if another adapter already wrote — concurrent sessions with different adapters can race on the same file. (3) PTY adapters parse streaming output with dead/unused parsers (`parseAiderJSON`, `parseKiroJSON`, `codexTurnCompleted`), meaning those CLI agents' output is never structured — they rely on raw text detection which is fragile. `adapter-nanite-native` is the simplest (no subprocess, in-process delegation) and skips sandbox entirely (correct by design).
+
+### 2026-04-11 — `backpressure-followup` (Go, deep-review)
+- **Counts:** 0 Critical, 2 High, 3 Medium, 1 Low, 2 Info
+- **Folder:** `docs/audits/2026-04-11-backpressure-followup/`
+- **Headline:** **Two High-severity unbounded sites:** (1) MCP stdio transport (`stdio_transport.go:109`) reads with `bufio.ReadBytes('\n')` — a single malicious/buggy MCP server line can be arbitrary length, no cap. Same finding as `mcp-client-transport` audit but now confirmed from the backpressure lens — the buffer is fully unbounded. (2) PTY output reading (`pty.go`) uses `bufio.Scanner` with default 64KB max token size, but the scanner is wrapped in a goroutine that sends on an unbounded channel — the channel grows without bound if the consumer (generateResponse) is slow. Provider SSE readers all use `bufio.Scanner` which bounds individual tokens but the accumulation is unbounded. Fire-and-forget event goroutines have no queue depth limit — 20+ emission sites can pile up without bound.
+
+### 2026-04-11 — `entities-tags-relational` (Go, deep-review)
+- **Counts:** 0 Critical, 2 High, 3 Medium, 1 Low, 1 Info
+- **Folder:** `docs/audits/2026-04-11-entities-tags-relational/`
+- **Headline:** Tag system uses a junction table (`entity_tags`) but has **no unique constraint on (entity_id, tag_id)** — duplicate tag associations accumulate silently (High). `DeleteTag` does not cascade to `entity_tags` — deleting a tag orphans all associations (High, FK is missing or not enforced). Tag queries use `json_each` for some operations and direct JOINs for others — inconsistent. `entity_tags.entity_type` is a free-text string with no enum constraint — any caller can invent entity types.
+
 ### 2026-04-11 — `context-management` (Go, deep-review + claimed-vs-actual)
 - **Counts:** 2 Critical, 2 High, 3 Medium, 0 Low, 1 Info
 - **Folder:** `docs/audits/2026-04-11-context-management/`
@@ -212,11 +227,11 @@ A pre-execution inventory pass would identify any package not on this list. Cand
 27. ~~**`context-management`**~~ — slot system, hot-swap, auto-compaction, `/compact` command. Mixed deep-review + claimed-vs-actual verification. **Explicit mandate:** prove hot-swap and slots actually work end-to-end. **~~COMPLETED 2026-04-11~~** — **2 Critical (slot system unwired, /compact is stub), 2 High (hot-swap nonexistent, auto-compaction never fires).** User suspicion of stubs confirmed.
 28. **`context-counting-in-widgets`** — frontend-side targeted check. Suspected hardcoded token counting. Small scope. Cross-reference with `tokens-and-model-hardcoding`.
 29. ~~**`tokens-and-model-hardcoding`**~~ — every place model names, token limits, context windows, pricing are hardcoded. Deep-review. **~~COMPLETED 2026-04-11~~** — 6 Medium (scattered hardcodings, dual pricing maps, stale seed data). Hardcoding map provided.
-30. **`eval-subprocess-pty-sdk`** — subprocess / PTY / SDK usage patterns for running CLI agents. Best-pattern determination. Deep-review of existing implementations.
+30. ~~**`eval-subprocess-pty-sdk`**~~ — subprocess / PTY / SDK usage patterns for running CLI agents. Best-pattern determination. **~~COMPLETED 2026-04-11~~** — 3 High (adapter-opencode never reads output, adapter file-write race, dead PTY parsers).
 31. **`frontend-hygiene`** — component reuse vs. hardcoded, semantic tokens, composition, props-down/messages-up, Tailwind no-hardcoded-styles, modal/alert/drawer reuse. Frontend deep-review.
-32. **`entities-tags-relational`** — objects / entities / tags relational correctness. Tags per-entity vs per-object. FK stubs vs real relationships. Deep-review.
+32. ~~**`entities-tags-relational`**~~ — objects / entities / tags relational correctness. Tags per-entity vs per-object. FK stubs vs real relationships. **~~COMPLETED 2026-04-11~~** — 2 High (no unique constraint on entity_tags, delete-tag orphans associations).
 33. ~~**`memory-ranking`**~~ — activation vs similarity vs hybrid ranking. Deep-review of the current memory ranking implementation. **~~COMPLETED 2026-04-11~~** — 1 Critical (embeddings never generated), 2 High (recall opts missing query, no hybrid fallback). Similarity recall is entirely dead.
-34. **`backpressure-followup`** — confirm backpressure coverage in all sites that need it. Follow-on from the initial PTY build.
+34. ~~**`backpressure-followup`**~~ — confirm backpressure coverage in all sites that need it. **~~COMPLETED 2026-04-11~~** — 2 High (MCP stdio unbounded read, PTY output unbounded channel).
 
 #### From tests-and-coverage split
 

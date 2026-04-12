@@ -14,12 +14,12 @@ import (
 	"syscall"
 	"time"
 
-	feotel "github.com/hollis-labs/go-otel"
 	"gopkg.in/yaml.v3"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
+	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
 	"github.com/hollis-labs/go-providers/provider"
@@ -88,9 +88,22 @@ func cmdServe(args []string) {
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
 	fs.Parse(args)
 
-	// Initialise OpenTelemetry tracing (otel).
+	// Load app-level config early so OTel init can honour OTel.Disabled.
+	// Full app-config logging happens at the later (post-provider) site.
+	otelAppCfg, otelAppCfgErr := config.LoadAppConfig("config/" + brand.ConfigFileName + ".yaml")
+	if otelAppCfgErr != nil {
+		otelAppCfg = config.DefaultAppConfig()
+	}
+
+	// Initialise OpenTelemetry tracing via the internal/otel wrapper.
+	// The wrapper honours NANITE_OTEL_DISABLED=1 (env takes precedence)
+	// and AppConfig.OTel.Disabled — either installs a no-op tracer
+	// provider and returns a no-op shutdown.
 	otelCtx := context.Background()
-	otelShutdown, otelErr := feotel.Init(otelCtx, feotel.WithServiceName(brand.OTelService))
+	otelShutdown, otelErr := naniteotel.Init(otelCtx, naniteotel.Config{
+		ServiceName: brand.OTelService,
+		Disabled:    otelAppCfg.OTel.Disabled,
+	})
 	if otelErr != nil {
 		log.Printf("warning: OTel init failed: %v", otelErr)
 	} else {

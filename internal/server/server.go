@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -15,6 +19,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
 )
+
+// maxRecoveredStackBytes caps the stack trace emitted by recoverMiddleware.
+// 8 KiB holds a deep goroutine stack while bounding log volume on repeat
+// panics. debug.Stack() is truncated to this length before logging and
+// before being copied into the OTel span event.
+const maxRecoveredStackBytes = 8 * 1024
 
 // Timeout + body-cap defaults. Used when the injected HTTPConfig leaves a
 // field at its zero value. Chosen conservatively:
@@ -340,13 +350,44 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// recoverMiddleware recovers from panics in downstream handlers, logs the
+// panic value + a capped stack, records an OTel span event on the request
+// span (if one is present in r.Context()), and returns HTTP 500.
+//
+// Shape is modelled on internal/safego.recoverAndReport but kept inline
+// because the middleware must write an HTTP response in addition to the
+// log + span event. The parallel slog-migration session will convert the
+// log.Printf call below to structured slog attributes.
 func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if err := recover(); err != nil {
-				log.Printf("PANIC: %v", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+			err := recover()
+			if err == nil {
+				return
 			}
+			stack := debug.Stack()
+			if len(stack) > maxRecoveredStackBytes {
+				stack = stack[:maxRecoveredStackBytes]
+			}
+			log.Printf("PANIC: %v\nstack:\n%s\n", err, stack)
+
+			// OTel span event: only recorded when the request already has
+			// a span in context. When OTel is disabled (no-op provider)
+			// or no tracing middleware runs above this one, SpanFromContext
+			// returns a non-recording span and AddEvent is a cheap no-op.
+			span := trace.SpanFromContext(r.Context())
+			if span.SpanContext().IsValid() {
+				span.AddEvent("http.panic",
+					trace.WithAttributes(
+						attribute.String("panic", fmt.Sprintf("%v", err)),
+						attribute.String("stack", string(stack)),
+						attribute.String("http.method", r.Method),
+						attribute.String("http.target", r.URL.Path),
+					),
+				)
+			}
+
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}()
 		next.ServeHTTP(w, r)
 	})

@@ -13,6 +13,20 @@ type AppConfig struct {
 	Presence  PresenceConfig  `yaml:"presence"`
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
 	HTTP      HTTPConfig      `yaml:"http"`
+	OTel      OTelConfig      `yaml:"otel"`
+}
+
+// OTelConfig controls OpenTelemetry initialisation.
+//
+// The NANITE_OTEL_DISABLED=1 environment variable takes precedence over
+// OTelConfig.Disabled — either set installs the no-op tracer provider
+// via internal/otel.Init and skips exporter initialisation.
+type OTelConfig struct {
+	// Disabled, when true, installs a no-op tracer provider instead of
+	// delegating to the external feotel exporter. Env var
+	// NANITE_OTEL_DISABLED=1 wins over this field.
+	Disabled bool `yaml:"disabled"`
+	// Future: Endpoint, SamplingRate, etc.
 }
 
 // HTTPConfig controls HTTP server timeouts and body-size limits. All values

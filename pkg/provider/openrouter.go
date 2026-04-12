@@ -1,225 +1,162 @@
 package provider
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
+	"os"
+
+	feotel "github.com/hollis-labs/go-otel"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/packages/param"
+	"github.com/openai/openai-go/shared"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
-const openrouterAPI = "https://openrouter.ai/api/v1/chat/completions"
+const (
+	openrouterBaseURL          = "https://openrouter.ai/api/v1/"
+	openrouterDefaultChatModel = "anthropic/claude-sonnet-4"
+)
 
 // OpenRouter implements the Provider interface for the OpenRouter API.
-// OpenRouter is an OpenAI-compatible gateway that routes to 200+ models
-// from Anthropic, Google, Meta, Mistral, and others.
+// OpenRouter is an OpenAI-compatible gateway that routes to 200+ models.
+// Transport is the official openai-go SDK configured with OpenRouter's base
+// URL; the HTTP-Referer and X-Title headers are forwarded so OpenRouter's
+// dashboard attribution works correctly.
 type OpenRouter struct {
-	apiKey string
-	client *http.Client
+	apiKey         string
+	httpReferer    string
+	xTitle         string
+	httpClient     *http.Client
+	client         *openai.Client
+	Retry          RetryConfig
+	OnStatus       StatusCallback
+	CircuitBreaker *CircuitBreaker
+	OnCircuitOpen  func()
+	RateTracker    *TokenRateTracker
 }
 
-// NewOpenRouter creates a new OpenRouter provider. It reads OPENROUTER_API_KEY from the environment.
+// NewOpenRouter creates a new OpenRouter provider.
+// Optional env vars OPENROUTER_HTTP_REFERER and OPENROUTER_X_TITLE are used
+// to populate the attribution headers OpenRouter documents.
 func NewOpenRouter() *OpenRouter {
 	return &OpenRouter{
-		apiKey: "",
-		client: &http.Client{},
+		httpReferer:    os.Getenv("OPENROUTER_HTTP_REFERER"),
+		xTitle:         os.Getenv("OPENROUTER_X_TITLE"),
+		httpClient:     &http.Client{},
+		Retry:          DefaultRetryConfig(),
+		CircuitBreaker: NewCircuitBreaker(3),
+		RateTracker:    NewTokenRateTracker(30000),
 	}
 }
 
-// StreamChat implements Provider.StreamChat using OpenRouter's OpenAI-compatible streaming API.
+func (o *OpenRouter) ensureClient() {
+	if o.client != nil || o.apiKey == "" {
+		return
+	}
+	opts := []option.RequestOption{
+		option.WithAPIKey(o.apiKey),
+		option.WithBaseURL(openrouterBaseURL),
+		option.WithHTTPClient(o.httpClient),
+		option.WithMaxRetries(0),
+	}
+	if o.httpReferer != "" {
+		opts = append(opts, option.WithHeader("HTTP-Referer", o.httpReferer))
+	}
+	if o.xTitle != "" {
+		opts = append(opts, option.WithHeader("X-Title", o.xTitle))
+	}
+	c := openai.NewClient(opts...)
+	o.client = &c
+}
+
+// StreamChat implements Provider.StreamChat.
 func (o *OpenRouter) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+	return o.streamChatInternal(ctx, systemPrompt, messages, model, nil)
+}
+
+// StreamChatWithTools delegates through the same SDK path.
+func (o *OpenRouter) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+	return o.streamChatInternal(ctx, systemPrompt, messages, model, tools)
+}
+
+func (o *OpenRouter) streamChatInternal(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+	ctx, span := feotel.StartSpan(ctx, "nanite.provider.openrouter.stream")
+	span.SetAttributes(
+		attribute.String("nanite.provider", "openrouter"),
+		attribute.String("nanite.model", model),
+		attribute.Int("nanite.messages.count", len(messages)),
+		attribute.Int("nanite.tools.count", len(tools)),
+	)
+
 	if o.apiKey == "" {
+		span.SetStatus(codes.Error, "OPENROUTER_API_KEY not set")
+		span.End()
 		return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
 	}
+	o.ensureClient()
 
 	if model == "" {
-		model = "anthropic/claude-sonnet-4"
+		model = openrouterDefaultChatModel
 	}
 
-	msgs := make([]openaiMessage, 0, len(messages)+1)
-	if systemPrompt != "" {
-		msgs = append(msgs, openaiMessage{Role: "system", Content: systemPrompt})
-	}
-	for _, msg := range messages {
-		msgs = append(msgs, openaiMessage{Role: msg.Role, Content: msg.Content})
+	if o.CircuitBreaker != nil && o.CircuitBreaker.IsOpen() {
+		span.SetStatus(codes.Error, "circuit breaker open")
+		span.End()
+		return nil, fmt.Errorf("circuit breaker open: provider rate limited after multiple retries")
 	}
 
-	body := openaiRequest{
-		Model:    model,
-		Messages: msgs,
-		Stream:   true,
+	params := openai.ChatCompletionNewParams{
+		Model:    shared.ChatModel(model),
+		Messages: buildCompatMessages(systemPrompt, messages),
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: param.NewOpt(true),
+		},
+	}
+	if len(tools) > 0 {
+		params.Tools = buildCompatTools(tools)
 	}
 
-	payload, err := json.Marshal(body)
+	if o.RateTracker != nil {
+		waitForRateBudget(ctx, o.RateTracker, o.OnStatus, systemPrompt, messages)
+	}
+
+	stream, err := runCompatStreamRetry(ctx, o.client, params, o.Retry, o.CircuitBreaker, o.OnStatus, o.OnCircuitOpen, span)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", openrouterAPI, bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
-
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openrouter API error %d: %s", resp.StatusCode, string(errBody))
+		return nil, err
 	}
 
 	ch := make(chan StreamEvent, 64)
-	go o.readSSE(ctx, resp.Body, ch)
+	go bridgeCompatStream(ctx, stream, ch, o.RateTracker, span)
 	return ch, nil
 }
 
-// readSSE parses the OpenAI-compatible SSE stream from OpenRouter.
-func (o *OpenRouter) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
-	defer close(ch)
-	defer body.Close()
-
-	scanner := bufio.NewScanner(body)
-
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			ch <- StreamEvent{Type: "error", Error: "context cancelled"}
-			return
-		default:
-		}
-
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			ch <- StreamEvent{Type: "done"}
-			return
-		}
-
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-				FinishReason *string `json:"finish_reason"`
-			} `json:"choices"`
-			Usage *struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-			} `json:"usage"`
-		}
-
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
-		}
-
-		if len(chunk.Choices) > 0 {
-			delta := chunk.Choices[0].Delta.Content
-			if delta != "" {
-				ch <- StreamEvent{Type: "delta", Content: delta}
-			}
-			if chunk.Choices[0].FinishReason != nil {
-				ch <- StreamEvent{
-					Type:  "usage",
-					Usage: &Usage{StopReason: *chunk.Choices[0].FinishReason},
-				}
-			}
-		}
-
-		if chunk.Usage != nil {
-			ch <- StreamEvent{
-				Type: "usage",
-				Usage: &Usage{
-					InputTokens:  chunk.Usage.PromptTokens,
-					OutputTokens: chunk.Usage.CompletionTokens,
-				},
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("read stream: %v", err)}
-	}
-}
-
-// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for OpenRouter).
-func (o *OpenRouter) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return o.StreamChat(ctx, systemPrompt, messages, model)
-}
-
-// Complete makes a non-streaming completion call to OpenRouter.
+// Complete makes a non-streaming completion call.
 func (o *OpenRouter) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+	ctx, span := feotel.StartSpan(ctx, "nanite.provider.openrouter.complete")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("nanite.provider", "openrouter"),
+		attribute.String("nanite.model", model),
+	)
+
 	if o.apiKey == "" {
 		return "", fmt.Errorf("OPENROUTER_API_KEY not set")
 	}
+	o.ensureClient()
 
 	if model == "" {
-		model = "anthropic/claude-sonnet-4"
+		model = openrouterDefaultChatModel
 	}
 
-	msgs := make([]openaiMessage, 0, len(messages)+1)
-	if systemPrompt != "" {
-		msgs = append(msgs, openaiMessage{Role: "system", Content: systemPrompt})
-	}
-	for _, msg := range messages {
-		msgs = append(msgs, openaiMessage{Role: msg.Role, Content: msg.Content})
+	params := openai.ChatCompletionNewParams{
+		Model:    shared.ChatModel(model),
+		Messages: buildCompatMessages(systemPrompt, messages),
 	}
 
-	body := openaiRequest{
-		Model:    model,
-		Messages: msgs,
-		Stream:   false,
-	}
-
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", openrouterAPI, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
-
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("openrouter API error %d: %s", resp.StatusCode, string(errBody))
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(result.Choices) > 0 {
-		return strings.TrimSpace(result.Choices[0].Message.Content), nil
-	}
-	return "", nil
+	return runCompatComplete(ctx, o.client, params, o.Retry)
 }
 
 // Capabilities returns the capabilities supported by the OpenRouter provider.
@@ -227,8 +164,8 @@ func (o *OpenRouter) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{
 		SupportsStreamJSON:  true,
 		SupportsToolCalling: false,
-		SupportsImageInput:  true, // Depends on underlying model, but most top models support it
-		MaxTokens:           0,      // Variable — depends on routed model
+		SupportsImageInput:  true,   // Depends on routed model; upper-bound claim
+		MaxTokens:           0,      // Variable
 		ContextWindowSize:   200000, // Upper bound for supported models
 	}
 }

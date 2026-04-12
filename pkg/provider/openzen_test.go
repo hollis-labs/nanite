@@ -7,7 +7,7 @@ import (
 )
 
 func TestOpenZen_NoAPIKey(t *testing.T) {
-	oz := &OpenZen{apiKey: "", baseURL: openzenAPI, client: http.DefaultClient}
+	oz := &OpenZen{apiKey: "", baseURL: openzenAPI, sdkBaseURL: openzenDefaultBaseURL, httpClient: http.DefaultClient}
 	_, err := oz.StreamChat(context.Background(), "", nil, "")
 	if err == nil {
 		t.Error("expected error for missing API key")
@@ -53,11 +53,41 @@ func TestOpenZen_BaseURLOverride(t *testing.T) {
 	if oz.baseURL != "https://custom.example.com/v1/chat/completions" {
 		t.Errorf("expected custom base URL, got %s", oz.baseURL)
 	}
+	// SDK base URL should drop the /chat/completions suffix.
+	if oz.sdkBaseURL != "https://custom.example.com/v1/" {
+		t.Errorf("expected sdkBaseURL 'https://custom.example.com/v1/', got %s", oz.sdkBaseURL)
+	}
+}
+
+func TestOpenZen_BaseURLOverride_BaseShape(t *testing.T) {
+	// Non-legacy form: a plain base URL without the /chat/completions suffix.
+	t.Setenv("OPENZEN_BASE_URL", "https://custom.example.com/v1/")
+	oz := NewOpenZen()
+	if oz.sdkBaseURL != "https://custom.example.com/v1/" {
+		t.Errorf("expected sdkBaseURL 'https://custom.example.com/v1/', got %s", oz.sdkBaseURL)
+	}
 }
 
 func TestOpenZen_DefaultBaseURL(t *testing.T) {
-	oz := &OpenZen{apiKey: "test", baseURL: openzenAPI, client: http.DefaultClient}
+	oz := &OpenZen{apiKey: "test", baseURL: openzenAPI, sdkBaseURL: openzenDefaultBaseURL, httpClient: http.DefaultClient}
 	if oz.baseURL != openzenAPI {
 		t.Errorf("expected default base URL, got %s", oz.baseURL)
+	}
+	if oz.sdkBaseURL != openzenDefaultBaseURL {
+		t.Errorf("expected sdkBaseURL %q, got %q", openzenDefaultBaseURL, oz.sdkBaseURL)
+	}
+}
+
+// TestOpenZen_EnsureClient verifies lazy client construction.
+func TestOpenZen_EnsureClient(t *testing.T) {
+	oz := NewOpenZen()
+	oz.ensureClient()
+	if oz.client != nil {
+		t.Error("client should not be constructed without API key")
+	}
+	oz.SetAPIKey("test-key")
+	oz.ensureClient()
+	if oz.client == nil {
+		t.Error("client should be constructed after SetAPIKey")
 	}
 }

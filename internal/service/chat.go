@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -198,7 +198,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 		if prov, ok := s.providers.Get(provName); ok {
 			if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil {
 				ap.CircuitBreaker.Reset()
-				log.Printf("chat-service: circuit breaker reset for retry on session %s", sessionID)
+				slog.Info("chat-service: circuit breaker reset for retry", "session_id", sessionID)
 			}
 		}
 	}
@@ -314,7 +314,7 @@ func (s *chatServiceImpl) Shutdown() {
 	}
 	if s.lifecycle != nil {
 		if err := s.lifecycle.Shutdown(chatShutdownMaxWait); err != nil {
-			log.Printf("chat-service: lifecycle shutdown: %v", err)
+			slog.Warn("chat-service: lifecycle shutdown", "err", err)
 		}
 	}
 }
@@ -350,7 +350,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		if p, ok := s.providers.Get(sessionProvider); ok {
 			return sessionProvider, p
 		}
-		log.Printf("chat-service: session provider %q not registered, falling through", sessionProvider)
+		slog.Warn("chat-service: session provider not registered, falling through", "provider", sessionProvider)
 	}
 
 	if agentProvider != "" {
@@ -360,7 +360,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 			}
 			return agentProvider, p
 		}
-		log.Printf("chat-service: agent provider %q not registered, falling through", agentProvider)
+		slog.Warn("chat-service: agent provider not registered, falling through", "provider", agentProvider)
 	}
 
 	if us, err := s.store.GetUserSettings(); err == nil && len(us.ProviderFallbackChain) > 0 {

@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
@@ -86,8 +86,9 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 
 	blocks := cw.Assemble()
 
-	log.Printf("context-service: slot assembly — %d blocks, %d/%d tokens, compaction=%v",
-		len(blocks), cw.UsedTokens(), cw.TotalBudget, cw.NeedsCompaction())
+	slog.Debug("context-service: slot assembly",
+		"blocks", len(blocks), "used_tokens", cw.UsedTokens(),
+		"budget", cw.TotalBudget, "compaction", cw.NeedsCompaction())
 
 	return &SlotAssemblyResult{
 		Blocks:          blocks,

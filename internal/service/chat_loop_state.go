@@ -2,7 +2,7 @@ package service
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -226,7 +226,7 @@ func (ls *loopState) recordToolCall(toolName string, success bool) bool {
 	if max, ok := ls.limits.perToolMax[toolName]; ok && max > 0 {
 		if ls.toolCallCounts[toolName] >= max {
 			ls.blockedTools[toolName] = true
-			log.Printf("chat-loop: tool %s exhausted after %d calls (max=%d)", toolName, ls.toolCallCounts[toolName], max)
+			slog.Warn("chat-loop: tool exhausted", "tool", toolName, "calls", ls.toolCallCounts[toolName], "max", max)
 			return true
 		}
 	}
@@ -258,7 +258,7 @@ func (ls *loopState) touchActivity() {
 func (ls *loopState) continueWith(site ContinueSite, reason string) {
 	ls.lastSite = site
 	ls.lastReason = reason
-	log.Printf("chat-loop: continue site=%s reason=%s iter=%d", site, reason, ls.iteration)
+	slog.Debug("chat-loop: continue", "site", site, "reason", reason, "iter", ls.iteration)
 }
 
 // captureSnapshot records a TurnSnapshot if debug mode is active.

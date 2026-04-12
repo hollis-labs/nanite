@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/override"
@@ -190,7 +190,7 @@ func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID stri
 	// Auto-assign to session if we had to fall back.
 	if autoAssigned {
 		if err := s.writers.EnsureSessionAgent(sessionID, resolved.ID, modeName, true); err != nil {
-			log.Printf("agent-service: failed to auto-assign agent %s to session %s: %v", resolved.ID, sessionID, err)
+			slog.Warn("agent-service: failed to auto-assign agent", "agent", resolved.ID, "session_id", sessionID, "err", err)
 		}
 		if s.events != nil {
 			s.events.EmitAgentAssigned(ctx, sessionID, resolved.ID, modeName)
@@ -200,7 +200,7 @@ func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID stri
 	// Load mode — check file-based modes first, then DB.
 	mode, err := s.resolveMode(ctx, resolved.ID, modeName)
 	if err != nil {
-		log.Printf("agent-service: could not load mode %s/%s: %v (using base prompt)", resolved.ID, modeName, err)
+		slog.Warn("agent-service: could not load mode (using base prompt)", "agent", resolved.ID, "mode", modeName, "err", err)
 		mode = &store.AgentMode{}
 	}
 
@@ -218,13 +218,13 @@ func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName s
 	// No binding — check user settings for a configured default.
 	if s.settings != nil {
 		if us, err := s.settings.GetUserSettings(); err == nil && us.DefaultAgent != "" {
-			log.Printf("agent-service: no primary agent for session %s, using settings default %s", sessionID, us.DefaultAgent)
+			slog.Info("agent-service: no primary agent, using settings default", "session_id", sessionID, "agent", us.DefaultAgent)
 			return us.DefaultAgent, "default", true
 		}
 	}
 
 	// Ultimate fallback.
-	log.Printf("agent-service: no primary agent for session %s, falling back to %s", sessionID, defaultFallbackAgent)
+	slog.Info("agent-service: no primary agent, falling back", "session_id", sessionID, "agent", defaultFallbackAgent)
 	return defaultFallbackAgent, "default", true
 }
 

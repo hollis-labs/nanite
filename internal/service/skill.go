@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -150,7 +150,7 @@ func RegisterSkillCommands(registry SkillCommandRegistrar, svc SkillService) {
 		d := def // capture for closure
 		registry.RegisterSkillCommand(d.Slug, d.Name, d.Description, d.ArgumentHint)
 	}
-	log.Printf("skill-service: registered %d skill commands", len(defs))
+	slog.Info("skill-service: registered skill commands", "count", len(defs))
 }
 
 // SkillCommandRegistrar is the interface for registering skill-based slash

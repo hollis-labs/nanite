@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -80,8 +80,8 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		return nil, fmt.Errorf("assign agent to worker: %w", err)
 	}
 
-	log.Printf("delegation: created worker session %s (agent=%s, mode=%s) for %q",
-		workerSession.ShortCode, agentID, mode, req.Title)
+	slog.Info("delegation: created worker session",
+		"short_code", workerSession.ShortCode, "agent", agentID, "mode", mode, "title", req.Title)
 
 	// Track task lifecycle if task service is available.
 	var trackedTask *task.Task
@@ -94,7 +94,7 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 			AssigneeAgentID: agentID,
 		}
 		if err := s.tasks.Create(ctx, trackedTask); err != nil {
-			log.Printf("delegation: failed to create task: %v", err)
+			slog.Warn("delegation: failed to create task", "err", err)
 			trackedTask = nil
 		} else {
 			_ = s.tasks.Transition(ctx, trackedTask.ID, task.StatusInProgress)
@@ -148,8 +148,8 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 					result.Success = false
 					result.Error = "worker produced no output"
 				}
-				log.Printf("delegation: worker %s completed — %d chars",
-					workerSession.ShortCode, len(result.Content))
+				slog.Info("delegation: worker completed",
+					"short_code", workerSession.ShortCode, "chars", len(result.Content))
 
 				// Update task tracking.
 				if trackedTask != nil && s.tasks != nil {
@@ -189,7 +189,7 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 			result.Content = content.String()
 			result.Success = false
 			result.Error = "delegation timed out after 5 minutes"
-			log.Printf("delegation: worker %s timed out", workerSession.ShortCode)
+			slog.Warn("delegation: worker timed out", "short_code", workerSession.ShortCode)
 			if trackedTask != nil && s.tasks != nil {
 				trackedTask.Error = result.Error
 				_ = s.tasks.Update(ctx, trackedTask)
@@ -225,7 +225,7 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 		return nil, fmt.Errorf("task is not complex enough for delegation")
 	}
 
-	log.Printf("delegation: decomposed into %d sub-tasks", len(decomposition.SubTasks))
+	slog.Info("delegation: decomposed into sub-tasks", "count", len(decomposition.SubTasks))
 
 	// Create parent task for orchestration tracking.
 	var parentTask *task.Task
@@ -236,7 +236,7 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 			Description: userMessage,
 		}
 		if err := s.tasks.Create(ctx, parentTask); err != nil {
-			log.Printf("delegation: failed to create parent task: %v", err)
+			slog.Warn("delegation: failed to create parent task", "err", err)
 			parentTask = nil
 		} else {
 			_ = s.tasks.Transition(ctx, parentTask.ID, task.StatusInProgress)
@@ -268,7 +268,7 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 			idx := i
 			sub := st
 			safego.Go(ctx, "service.delegation.delegateAndAggregate.spawnWorker", func() {
-				log.Printf("delegation: spawning worker %d/%d: %s", idx+1, len(decomposition.SubTasks), sub.Title)
+				slog.Info("delegation: spawning worker", "idx", idx+1, "total", len(decomposition.SubTasks), "title", sub.Title)
 				wr, err := s.workers.SpawnFull(ctx, worker.SpawnRequest{
 					ParentSessionID: parentSessionID,
 					Title:           sub.Title,
@@ -297,7 +297,7 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 	} else {
 		// Sequential fallback via direct delegation.
 		for i, st := range decomposition.SubTasks {
-			log.Printf("delegation: executing sub-task %d/%d: %s", i+1, len(decomposition.SubTasks), st.Title)
+			slog.Info("delegation: executing sub-task", "idx", i+1, "total", len(decomposition.SubTasks), "title", st.Title)
 
 			delegResult, delegErr := s.DelegateTask(ctx, chat.DelegationRequest{
 				ParentSessionID: parentSessionID,

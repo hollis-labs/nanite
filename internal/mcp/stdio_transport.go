@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -196,6 +196,6 @@ func (t *StdioTransport) Close() error {
 	err := t.cmd.Process.Kill()
 	t.cmd.Wait()
 	t.started = false
-	log.Printf("mcp: stopped stdio transport for %s", t.command)
+	slog.Info("mcp: stopped stdio transport", "command", t.command)
 	return err
 }

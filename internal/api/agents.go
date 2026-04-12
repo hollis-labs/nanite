@@ -1,7 +1,7 @@
 package api
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/agentvalidation"
@@ -62,7 +62,7 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if len(vr.Warnings) > 0 {
 		for _, w := range vr.Warnings {
-			log.Printf("agent %q config warning: %s", agent.Slug, w)
+			slog.Warn("agent config warning", "slug", agent.Slug, "warning", w)
 		}
 	}
 
@@ -173,7 +173,7 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if len(vr.Warnings) > 0 {
 		for _, w := range vr.Warnings {
-			log.Printf("agent %q config warning: %s", existing.Slug, w)
+			slog.Warn("agent config warning", "slug", existing.Slug, "warning", w)
 		}
 	}
 

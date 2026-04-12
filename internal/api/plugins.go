@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -592,7 +592,7 @@ func (pms *pluginManagerState) runPluginUninstallCleanup(manifestPath string) {
 		// Use a minimal host backed by the live store
 		host := naniteplugin.NewHostWithStore(pms.store)
 		if err := u.Uninstall(host); err != nil {
-			log.Printf("plugin-api: uninstall cleanup for %s: %v", manifest.Name, err)
+			slog.Warn("plugin-api: uninstall cleanup failed", "name", manifest.Name, "err", err)
 		}
 	}
 }
@@ -608,7 +608,7 @@ func (pms *pluginManagerState) unloadPluginFromHost(manifestPath string) {
 		return
 	}
 	if err := pms.pluginHost.UnloadPlugin(manifest.Name); err != nil {
-		log.Printf("plugin-api: unload %s: %v", manifest.Name, err)
+		slog.Warn("plugin-api: unload failed", "name", manifest.Name, "err", err)
 	}
 }
 
@@ -627,7 +627,7 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 	// Build config.
 	cfg, err := naniteplugin.NewPluginConfig(manifest.Name, pluginDir)
 	if err != nil {
-		log.Printf("plugin-api: config for %s: %v", manifest.Name, err)
+		slog.Warn("plugin-api: config failed", "name", manifest.Name, "err", err)
 		return
 	}
 	pms.pluginHost.SetPluginConfig(manifest.Name, cfg)
@@ -637,7 +637,7 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 	if manifest.Runtime == "subprocess" {
 		// Subprocess plugin: create a SubprocessPlugin bridge.
 		if manifest.Entrypoint == "" {
-			log.Printf("plugin-api: subprocess plugin %s has no entrypoint", manifest.Name)
+			slog.Warn("plugin-api: subprocess plugin has no entrypoint", "name", manifest.Name)
 			return
 		}
 		command := manifest.Entrypoint
@@ -672,16 +672,16 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 		// Builtin plugin: use compiled-in constructor.
 		constructor, ok := naniteplugin.LookupConstructor(manifest.Name)
 		if !ok {
-			log.Printf("plugin-api: no constructor for %s (not compiled in)", manifest.Name)
+			slog.Warn("plugin-api: no constructor (not compiled in)", "name", manifest.Name)
 			return
 		}
 		p = constructor()
 	}
 
 	if err := pms.pluginHost.LoadPlugin(p); err != nil {
-		log.Printf("plugin-api: hot-load %s: %v", manifest.Name, err)
+		slog.Warn("plugin-api: hot-load failed", "name", manifest.Name, "err", err)
 	} else {
-		log.Printf("plugin-api: hot-loaded plugin %s", manifest.Name)
+		slog.Info("plugin-api: hot-loaded plugin", "name", manifest.Name)
 	}
 }
 

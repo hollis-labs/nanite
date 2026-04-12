@@ -376,8 +376,14 @@ Universal agent harness with plugin-per-adapter model. Spec: `docs/superpowers/s
 
 - **Build:** `make build` (builds UI first, then Go binary) or `go build -o nanite ./cmd/nanite`
 - **Install:** `make install` (builds UI, then `go install ./cmd/nanite` to `~/go/bin/`)
-- **Test:** `make test` or `go test ./...`
-- **Lint:** `golangci-lint run --new --timeout 30s` (via lefthook pre-commit)
+- **Test:** `make test` (runs `go test -race ./...`)
+- **Lint (full pipeline):** `make lint` — runs `go vet`, `golangci-lint` (uncapped: `--max-issues-per-linter=0 --max-same-issues=0`), `staticcheck`, `errcheck`, `govulncheck`. All four external tools must be installed via:
+  - `go install honnef.co/go/tools/cmd/staticcheck@latest`
+  - `go install github.com/kisielk/errcheck@latest`
+  - `go install golang.org/x/vuln/cmd/govulncheck@latest`
+  - `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest` (or Homebrew)
+- **Vulnerability scan only:** `make vuln` (runs `govulncheck ./...`)
+- **Legacy pre-commit lint:** `golangci-lint run --new --timeout 30s` (lefthook pre-commit — changed lines only; use `make lint` for whole-repo)
 - **Vet:** `go vet ./...` (via lefthook pre-commit)
 - **Format:** `gofmt` + `goimports` (via lefthook pre-commit)
 - **Run:** `./nanite serve --port 8090 --db ./nanite.db` or `make run`

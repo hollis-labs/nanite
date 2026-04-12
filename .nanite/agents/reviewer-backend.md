@@ -19,7 +19,7 @@
 - **DB:** SQLite via `modernc.org/sqlite` (WAL, foreign keys, busy_timeout=5000)
 - **Tracing:** OpenTelemetry via `hollis-labs/otel` wrapper
 - **MCP:** `mark3labs/mcp-go` (indirect, via tool-broker)
-- **Tooling:** `gofmt`, `goimports`, `golangci-lint`, `go vet`, `lefthook` pre-commit, `go test -race`
+- **Tooling:** `gofmt`, `goimports`, `golangci-lint` (uncapped via `make lint`), `staticcheck`, `errcheck`, `govulncheck`, `go vet`, `lefthook` pre-commit, `go test -race` (via `make test`). All four static-analysis binaries are installed via `go install` into `$GOBIN` — see `.nanite/agents/backend.md` §Build & Run for the canonical invocations.
 
 Local `replace` directives point to sibling libs (`go-plugin`, `go-toolbroker`, `go-otel`, `go-providers`, `vanta-conduit`). Build fails without them — verify `go.mod` replace block is satisfied before running `go build`.
 
@@ -216,13 +216,14 @@ When `nanite-reviewer-backend` is booted with a scope:
 2. Read `.nanite/agents/backend.md` for the general stack, package inventory, and resolved tech debt.
 3. Read `.nanite/agents/plugin-dev.md` ONLY if the scope touches plugins.
 4. Invoke the `deep-review` skill with the scope. The skill's methodology section drives the rest of the review.
-5. Collect tooling evidence:
+5. Collect tooling evidence. The preferred path is `make lint` (full uncapped pipeline) and `make test` (race-enabled). Individual invocations for targeted passes:
    - `go vet ./...` — always
-   - `go test -race ./...` — for concurrency-heavy scopes
-   - `golangci-lint run --new --timeout 30s` — project's preferred settings
-   - `staticcheck ./...` and `errcheck ./...` if in scope
-   - `govulncheck ./...` for the security category
-   - `go mod tidy` diff check for the tooling category
+   - `make test` (== `go test -race ./...`) — for concurrency-heavy scopes
+   - `make lint` — full pipeline: `go vet` + `golangci-lint run --max-issues-per-linter=0 --max-same-issues=0` + `staticcheck ./...` + `errcheck ./...` + `govulncheck ./...`. Default caps in golangci-lint suppressed ~70% of findings in a prior audit (283 vs 956 issues); uncapped is the canonical reviewer setting.
+   - `golangci-lint run --new --timeout 30s` — legacy pre-commit invocation (changed lines only); use only when reproducing the pre-commit hook, not for audits.
+   - `staticcheck ./...` and `errcheck ./...` — targeted; both are run by `make lint`.
+   - `govulncheck ./...` — targeted; also available as `make vuln`. Required for the security category.
+   - `go mod tidy` diff check for the tooling category.
 6. Write findings to `docs/audits/<date>-<slug>/` per the skill's output contract.
 7. Return the one-line confirmation. Do NOT dump findings into the chat.
 

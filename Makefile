@@ -1,4 +1,4 @@
-.PHONY: build install dev clean test generate-envelopes
+.PHONY: build install dev clean test lint vuln generate-envelopes
 
 # Build React SPA then embed in Go binary
 build: generate-envelopes build-ui
@@ -30,9 +30,24 @@ clean:
 	rm -f nanite
 	rm -rf ui/dist
 
-# Run Go tests
+# Run Go tests with the race detector (matches pre-push hook behavior)
 test:
-	go test ./...
+	go test -race ./...
+
+# Full lint pass: go vet + uncapped golangci-lint + staticcheck + errcheck +
+# govulncheck. All four external tools must resolve on PATH
+# (`go install` via the canonical invocations — see .nanite/agents/backend.md).
+# Each step is run in sequence; the first failure aborts the pipeline.
+lint:
+	go vet ./...
+	golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
+	staticcheck ./...
+	errcheck ./...
+	govulncheck ./...
+
+# Standalone vulnerability scan (also included in `make lint`).
+vuln:
+	govulncheck ./...
 
 # Run with default settings
 run: build

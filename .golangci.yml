@@ -169,10 +169,12 @@ linters:
 # Issue output
 # ---------------------------------------------------------------------------
 issues:
-  # Cap output so CI logs stay readable. Developers can re-run without caps
-  # locally if they want the full list.
-  max-issues-per-linter: 50
-  max-same-issues: 5
+  # Uncapped by default. Capping hides signal — a prior audit showed 283 vs 956
+  # issues when caps were applied (70% of findings suppressed). CI or local runs
+  # that want truncation can pass --max-issues-per-linter=N --max-same-issues=N
+  # explicitly.
+  max-issues-per-linter: 0
+  max-same-issues: 0
 
 # ---------------------------------------------------------------------------
 # Formatters

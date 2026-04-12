@@ -2,7 +2,7 @@ package store
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/hollis-labs/nanite/pkg/models"
 )
@@ -330,7 +330,7 @@ func (s *Store) SeedProviders() error {
 		}
 	}
 
-	log.Printf("seed: upserted %d providers and %d models", len(providers), len(seeded))
+	slog.Info("seed: upserted providers and models", "providers", len(providers), "models", len(seeded))
 	return tx.Commit()
 }
 

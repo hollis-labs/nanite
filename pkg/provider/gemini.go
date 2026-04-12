@@ -1,3 +1,37 @@
+// Audit trail — Engine TASK-20260412-007 (2026-04-12).
+//
+// SDK adoption deferred. This adapter remains the hand-rolled HTTP client
+// rather than swapping to google/generative-ai-go. Rationale:
+//
+// generative-ai-go v0.20.1's genai.NewClient path (REST) internally wraps
+// requests with googleapi/transport.APIKey, which sets the API key as a
+// ?key=<value> URL query parameter. Swapping to the SDK would preserve the
+// audit finding we need to close (credential leak via URL query strings in
+// logs/proxies).
+//
+// Evidence (pinned module versions):
+//   - github.com/google/generative-ai-go@v0.20.1/genai/client.go:65
+//     genai.NewClient → NewGenerativeRESTClient.
+//   - cloud.google.com/go/ai@v0.8.0/generativelanguage/apiv1beta/generative_client.go:398-402
+//     NewGenerativeRESTClient → httptransport.NewClient.
+//   - google.golang.org/api@v0.189.0/transport/http/dial.go:174-179
+//     httptransport wraps the client with googleapi/transport.APIKey.
+//   - google.golang.org/api@v0.189.0/googleapi/transport/apikey.go:18-44
+//     RoundTripper sets ?key= in the URL query. Package doc marks it Deprecated.
+//
+// The gRPC path (genai.NewGenerativeClient) correctly uses x-goog-api-key
+// gRPC metadata, but it is not reachable through the high-level
+// genai.NewClient entry point.
+//
+// Mitigation in this file: send the API key via the x-goog-api-key HTTP
+// header (an accepted alternative documented by the Gemini REST API) and
+// never append ?key= to outgoing URLs. Error-response bodies are capped via
+// io.LimitReader to match the Anthropic adapter's pattern (see ADAPTER_PATTERN.md).
+//
+// Revisit criterion: retry the SDK swap once google.golang.org/api ships an
+// HTTP transport that sends API keys via x-goog-api-key by default, or once
+// generative-ai-go exposes a REST client that does.
+
 package provider
 
 import (
@@ -12,6 +46,13 @@ import (
 )
 
 const geminiAPI = "https://generativelanguage.googleapis.com/v1beta/models"
+
+// maxGeminiErrBody caps forwarded API-error response bytes. The hand-rolled
+// client does not cap response bodies by default; we cap what we decode from
+// error paths ourselves to prevent a hostile response from OOMing the process.
+// Matches the Anthropic adapter's classifyAnthropicError pattern — see
+// ADAPTER_PATTERN.md §8.
+const maxGeminiErrBody = 1 << 20 // 1 MiB
 
 var _ Embedder = (*Gemini)(nil)
 
@@ -67,12 +108,13 @@ func (g *Gemini) StreamChat(ctx context.Context, systemPrompt string, messages [
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse&key=%s", geminiAPI, model, g.apiKey)
+	url := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse", geminiAPI, model)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", g.apiKey)
 
 	resp, err := g.client.Do(req)
 	if err != nil {
@@ -81,7 +123,7 @@ func (g *Gemini) StreamChat(ctx context.Context, systemPrompt string, messages [
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxGeminiErrBody))
 		return nil, fmt.Errorf("gemini API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
@@ -236,12 +278,13 @@ func (g *Gemini) Complete(ctx context.Context, systemPrompt string, messages []C
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/%s:generateContent?key=%s", geminiAPI, model, g.apiKey)
+	url := fmt.Sprintf("%s/%s:generateContent", geminiAPI, model)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", g.apiKey)
 
 	resp, err := g.client.Do(req)
 	if err != nil {
@@ -250,7 +293,7 @@ func (g *Gemini) Complete(ctx context.Context, systemPrompt string, messages []C
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxGeminiErrBody))
 		return "", fmt.Errorf("gemini API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
@@ -347,12 +390,13 @@ func (g *Gemini) EmbedBatch(ctx context.Context, texts []string, model string) (
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/%s:batchEmbedContents?key=%s", geminiAPI, model, g.apiKey)
+	url := fmt.Sprintf("%s/%s:batchEmbedContents", geminiAPI, model)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", g.apiKey)
 
 	resp, err := g.client.Do(req)
 	if err != nil {
@@ -361,7 +405,7 @@ func (g *Gemini) EmbedBatch(ctx context.Context, texts []string, model string) (
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxGeminiErrBody))
 		return nil, fmt.Errorf("gemini embeddings error %d: %s", resp.StatusCode, string(errBody))
 	}
 

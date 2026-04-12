@@ -3,7 +3,7 @@ package contextbroker
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/memory"
@@ -116,7 +116,7 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 		usedTokens += tokens
 	}
 
-	log.Printf("contextbroker/memory: recalled %d memories (%d tokens)", len(items), usedTokens)
+	slog.Debug("contextbroker/memory: recalled memories", "count", len(items), "tokens", usedTokens)
 	return items, nil
 }
 

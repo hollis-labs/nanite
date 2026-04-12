@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -55,14 +55,14 @@ func (g *HadronBlueprintGate) Name() string {
 
 func (g *HadronBlueprintGate) SessionStart(ctx context.Context, intent Intent) (bool, error) {
 	if g.MCP == nil {
-		log.Printf("hadron-blueprint-gate: no MCP caller configured, skipping gracefully")
+		slog.Info("hadron-blueprint-gate: no MCP caller configured, skipping gracefully")
 		return false, nil
 	}
 
 	// Fetch and cache blueprints for session
 	items, err := g.fetchBlueprints(ctx, intent, 500) // Hard cap at 500 tokens
 	if err != nil {
-		log.Printf("hadron-blueprint-gate: session start failed: %v", err)
+		slog.Warn("hadron-blueprint-gate: session start failed", "err", err)
 		return false, nil // Graceful no-op on error
 	}
 

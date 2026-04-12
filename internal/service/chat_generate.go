@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // generateResponseTimeout is the maximum wall-clock time a single
@@ -117,7 +118,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		model = agent.DefaultModel
 	}
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = models.DefaultChatModel()
 	}
 
 	// --- Resolve provider ---

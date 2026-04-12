@@ -161,11 +161,5 @@ func (o *OpenRouter) Complete(ctx context.Context, systemPrompt string, messages
 
 // Capabilities returns the capabilities supported by the OpenRouter provider.
 func (o *OpenRouter) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:  true,
-		SupportsToolCalling: false,
-		SupportsImageInput:  true,   // Depends on routed model; upper-bound claim
-		MaxTokens:           0,      // Variable
-		ContextWindowSize:   200000, // Upper bound for supported models
-	}
+	return capabilitiesFromRegistry("openrouter")
 }

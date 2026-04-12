@@ -43,6 +43,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 const geminiAPI = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -101,7 +103,7 @@ func (g *Gemini) StreamChat(ctx context.Context, systemPrompt string, messages [
 		model = "gemini-2.5-flash"
 	}
 
-	body := g.buildRequest(systemPrompt, messages)
+	body := g.buildRequest(model, systemPrompt, messages)
 
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -132,11 +134,18 @@ func (g *Gemini) StreamChat(ctx context.Context, systemPrompt string, messages [
 	return ch, nil
 }
 
-// buildRequest converts Nanite messages to Gemini API format.
-func (g *Gemini) buildRequest(systemPrompt string, messages []ChatMessage) geminiRequest {
+// buildRequest converts Nanite messages to Gemini API format. Callers pass
+// the model name so the per-model max_output from the canonical registry is
+// honoured — previously every request was capped at 8192 regardless of the
+// model's actual capability (audit 04).
+func (g *Gemini) buildRequest(model, systemPrompt string, messages []ChatMessage) geminiRequest {
+	maxOut := models.MaxOutputFor(model)
+	if maxOut <= 0 {
+		maxOut = 8192 // provider default
+	}
 	req := geminiRequest{
 		GenerationConfig: &geminiGenerationConfig{
-			MaxOutputTokens: 8192,
+			MaxOutputTokens: maxOut,
 		},
 	}
 
@@ -271,7 +280,7 @@ func (g *Gemini) Complete(ctx context.Context, systemPrompt string, messages []C
 		model = "gemini-2.5-flash"
 	}
 
-	body := g.buildRequest(systemPrompt, messages)
+	body := g.buildRequest(model, systemPrompt, messages)
 
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -324,16 +333,7 @@ func (g *Gemini) Complete(ctx context.Context, systemPrompt string, messages []C
 
 // Capabilities returns the capabilities supported by the Gemini provider.
 func (g *Gemini) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:          true,
-		SupportsToolCalling:         false, // Not yet implemented for Gemini HTTP
-		SupportsImageInput:          true,
-		SupportsSystemPromptCaching: true, // Gemini supports context caching
-		SupportsEmbedding:           true,
-		DefaultEmbeddingModel:       "text-embedding-004",
-		MaxTokens:                   65536,   // Gemini 2.5 Pro max output tokens
-		ContextWindowSize:           1048576, // Gemini 2.5 Pro context window
-	}
+	return capabilitiesFromRegistry("gemini")
 }
 
 // gemini embedding types (unexported)
@@ -431,10 +431,5 @@ func (g *Gemini) EmbedBatch(ctx context.Context, texts []string, model string) (
 // EmbeddingDimensions returns the output dimensions for the given model.
 // Returns 0 if the model is unknown.
 func (g *Gemini) EmbeddingDimensions(model string) int {
-	switch model {
-	case "text-embedding-004":
-		return 768
-	default:
-		return 0
-	}
+	return models.EmbeddingDimensionsFor(model)
 }

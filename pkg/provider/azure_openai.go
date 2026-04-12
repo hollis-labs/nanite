@@ -13,6 +13,7 @@ import (
 	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/shared"
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/pkg/models"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -184,15 +185,7 @@ func (az *AzureOpenAI) Complete(ctx context.Context, systemPrompt string, messag
 
 // Capabilities returns the capabilities supported by the Azure OpenAI provider.
 func (az *AzureOpenAI) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:    true,
-		SupportsToolCalling:   false, // Not yet wired end-to-end
-		SupportsImageInput:    true,  // GPT-4o/Turbo on Azure support vision
-		SupportsEmbedding:     true,
-		DefaultEmbeddingModel: "text-embedding-3-small",
-		MaxTokens:             16384,
-		ContextWindowSize:     128000,
-	}
+	return capabilitiesFromRegistry("azure-openai")
 }
 
 // Embed generates an embedding vector for a single text input.
@@ -251,14 +244,5 @@ func (az *AzureOpenAI) EmbedBatch(ctx context.Context, texts []string, model str
 
 // EmbeddingDimensions returns the output dimensions for the given model.
 func (az *AzureOpenAI) EmbeddingDimensions(model string) int {
-	switch model {
-	case "text-embedding-3-small":
-		return 1536
-	case "text-embedding-3-large":
-		return 3072
-	case "text-embedding-ada-002":
-		return 1536
-	default:
-		return 0
-	}
+	return models.EmbeddingDimensionsFor(model)
 }

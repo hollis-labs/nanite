@@ -28,6 +28,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
+	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/nanite/internal/secrets"
@@ -154,10 +155,10 @@ func cmdServe(args []string) {
 		utilityModel = settings.UtilityModel
 	}
 	if utilityProvider == "" {
-		utilityProvider = "anthropic"
+		utilityProvider = models.DefaultProvider()
 	}
 	if utilityModel == "" {
-		utilityModel = "claude-sonnet-4-20250514"
+		utilityModel = models.DefaultChatModel()
 	}
 
 	// CLI process concurrency limit.

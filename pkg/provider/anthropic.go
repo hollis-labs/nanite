@@ -18,6 +18,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // maxAnthropicErrBody caps forwarded API-error response bytes.
@@ -392,7 +394,7 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 	a.ensureClient()
 
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = models.DefaultChatModel()
 	}
 
 	if a.CircuitBreaker != nil && a.CircuitBreaker.IsOpen() {
@@ -401,9 +403,16 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		return nil, fmt.Errorf("circuit breaker open: provider rate limited after multiple retries")
 	}
 
+	// Per-model max-output cap sourced from the registry. Prior versions
+	// hardcoded 16384 here which silently truncated Opus (32000) and other
+	// longer-output models — see audit 2026-04-11 finding 04.
+	maxOut := models.MaxOutputFor(model)
+	if maxOut <= 0 {
+		maxOut = 16384 // provider-level historical default
+	}
 	params := anthropic.MessageNewParams{
 		Model:     model,
-		MaxTokens: 16384,
+		MaxTokens: int64(maxOut),
 		System:    a.buildSDKSystem(systemPrompt),
 		Messages:  a.buildSDKMessages(messages),
 	}
@@ -669,7 +678,7 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 	a.ensureClient()
 
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = models.DefaultChatModel()
 	}
 
 	params := anthropic.MessageNewParams{
@@ -711,18 +720,11 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 }
 
 // Capabilities returns the capabilities supported by the Anthropic provider.
+// Per-provider defaults come from pkg/models.ProviderDefaults so token
+// limits and pricing stay co-located with the model catalog. Per-model
+// overrides are available via models.MaxOutputFor / ContextWindowFor.
 func (a *Anthropic) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:          true,
-		SupportsPreToolHooks:        false,
-		SupportsPostToolHooks:       false,
-		SupportsSystemPromptCaching: true,
-		SupportsToolCalling:         true,
-		SupportsBatch:               false,
-		SupportsImageInput:          true,
-		MaxTokens:                   16384,
-		ContextWindowSize:           200000,
-	}
+	return capabilitiesFromRegistry("anthropic")
 }
 
 // -----------------------------------------------------------------------------

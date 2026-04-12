@@ -11,6 +11,7 @@ import (
 	"time"
 
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
@@ -163,15 +164,7 @@ func (m *Mistral) Complete(ctx context.Context, systemPrompt string, messages []
 
 // Capabilities returns the capabilities supported by the Mistral provider.
 func (m *Mistral) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:    true,
-		SupportsToolCalling:   false, // Not yet wired end-to-end
-		SupportsImageInput:    true,  // Pixtral models support vision
-		SupportsEmbedding:     true,
-		DefaultEmbeddingModel: mistralDefaultEmbedding,
-		MaxTokens:             16384,
-		ContextWindowSize:     131072,
-	}
+	return capabilitiesFromRegistry("mistral")
 }
 
 // Embed generates an embedding vector for a single text input.
@@ -222,12 +215,7 @@ func (m *Mistral) EmbedBatch(ctx context.Context, texts []string, model string) 
 
 // EmbeddingDimensions returns the output dimensions for the given model.
 func (m *Mistral) EmbeddingDimensions(model string) int {
-	switch model {
-	case "mistral-embed":
-		return 1024
-	default:
-		return 0
-	}
+	return models.EmbeddingDimensionsFor(model)
 }
 
 // -----------------------------------------------------------------------------

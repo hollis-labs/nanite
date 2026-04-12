@@ -3,6 +3,8 @@ package provider
 import (
 	"fmt"
 	"sync"
+
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // BudgetViolation represents a detected budget violation.
@@ -19,19 +21,28 @@ func (bv *BudgetViolation) Error() string {
 		bv.Type, bv.Description, bv.Current, bv.Limit)
 }
 
-// CostMonitor tracks token usage and cost to ensure operations stay within budget.
+// CostMonitor tracks token usage and cost to ensure operations stay within
+// budget. Pricing is drawn from pkg/models — the same source of truth used by
+// internal/store.estimateCost — so budget enforcement and usage reporting
+// agree on rates per-model. The legacy provider-keyed costRates map is kept
+// only for backwards-compat overrides via SetCostRate.
 type CostMonitor struct {
-	tokenBudget       int     // Maximum tokens allowed
-	costBudgetUSD     float64 // Maximum cost in USD
+	tokenBudget        int     // Maximum tokens allowed
+	costBudgetUSD      float64 // Maximum cost in USD
 	budgetExceededMode string  // "log" or "kill"
 
+	// Default model used when the caller does not pass a model ID through
+	// the event pipeline. Falls back to models.DefaultChatModel().
+	defaultModel string
+
 	// Tracking state
-	mu               sync.RWMutex
+	mu                sync.RWMutex
 	totalInputTokens  int
 	totalOutputTokens int
 	totalCostUSD      float64
 
-	// Provider-specific cost rates (tokens per dollar)
+	// Legacy per-provider override map. Only consulted if the model is not
+	// in the canonical registry.
 	costRates map[string]CostRate
 }
 
@@ -48,31 +59,19 @@ func NewCostMonitor(tokenBudget int, costBudgetUSD float64, budgetExceededMode s
 		tokenBudget:        tokenBudget,
 		costBudgetUSD:      costBudgetUSD,
 		budgetExceededMode: budgetExceededMode,
-		costRates:          getDefaultCostRates(),
+		defaultModel:       models.DefaultChatModel(),
+		costRates:          map[string]CostRate{},
 	}
 	return cm
 }
 
-// getDefaultCostRates returns default cost rates for common providers.
-// These are approximate rates as of 2026 and should be updated periodically.
-func getDefaultCostRates() map[string]CostRate {
-	return map[string]CostRate{
-		"anthropic": {
-			InputTokensPerDollar:  333333, // ~$3.00 per 1M input tokens
-			OutputTokensPerDollar: 66667,  // ~$15.00 per 1M output tokens
-			Name:                  "Anthropic Claude",
-		},
-		"openai": {
-			InputTokensPerDollar:  200000, // ~$5.00 per 1M input tokens
-			OutputTokensPerDollar: 66667,  // ~$15.00 per 1M output tokens
-			Name:                  "OpenAI GPT-4",
-		},
-		"ollama": {
-			InputTokensPerDollar:  1000000000, // Essentially free for local models
-			OutputTokensPerDollar: 1000000000, // Essentially free for local models
-			Name:                  "Ollama (Local)",
-		},
-	}
+// SetDefaultModel changes the model ID used for cost estimation when the
+// event pipeline does not attach one. Useful for tests and for sessions
+// scoped to a non-default model.
+func (cm *CostMonitor) SetDefaultModel(model string) {
+	cm.mu.Lock()
+	cm.defaultModel = model
+	cm.mu.Unlock()
 }
 
 // CheckEvent examines a stream event for budget violations.
@@ -99,9 +98,12 @@ func (cm *CostMonitor) updateUsageAndCheck(event StreamEvent) *BudgetViolation {
 	cm.totalInputTokens += usage.InputTokens
 	cm.totalOutputTokens += usage.OutputTokens
 
-	// Estimate cost (we'd need provider context for accurate rates)
-	// For now, use a reasonable default rate
-	estimatedCost := cm.estimateCost(usage.InputTokens, usage.OutputTokens, "anthropic")
+	// Use per-model pricing from the canonical registry. Previous versions
+	// hardcoded "anthropic" here which overestimated cost for every other
+	// provider (see audit 03). The event carries no explicit model today,
+	// so the monitor's defaultModel is used — sessions that need precise
+	// cost tracking should call SetDefaultModel from the chat service.
+	estimatedCost := cm.estimateCostForModel(usage.InputTokens, usage.OutputTokens, cm.defaultModel)
 	cm.totalCostUSD += estimatedCost
 
 	// Check token budget
@@ -130,18 +132,24 @@ func (cm *CostMonitor) updateUsageAndCheck(event StreamEvent) *BudgetViolation {
 	return nil
 }
 
-// estimateCost calculates the estimated cost for the given token usage.
-func (cm *CostMonitor) estimateCost(inputTokens, outputTokens int, provider string) float64 {
-	rate, exists := cm.costRates[provider]
-	if !exists {
-		// Use anthropic as default
-		rate = cm.costRates["anthropic"]
+// estimateCostForModel calculates the estimated cost for the given token
+// usage using per-model pricing from the canonical registry. Legacy
+// provider-keyed overrides (set via SetCostRate) are consulted only if the
+// model is not in the registry.
+func (cm *CostMonitor) estimateCostForModel(inputTokens, outputTokens int, model string) float64 {
+	if inP, outP := models.Pricing(model); inP > 0 || outP > 0 {
+		return float64(inputTokens)*inP/1_000_000 + float64(outputTokens)*outP/1_000_000
 	}
-
-	inputCost := float64(inputTokens) / rate.InputTokensPerDollar
-	outputCost := float64(outputTokens) / rate.OutputTokensPerDollar
-
-	return inputCost + outputCost
+	// Fall back to a legacy per-provider override, keyed by provider type.
+	providerType := models.ProviderFor(model)
+	if providerType == "" {
+		providerType = models.DefaultProvider()
+	}
+	if rate, ok := cm.costRates[providerType]; ok && rate.InputTokensPerDollar > 0 && rate.OutputTokensPerDollar > 0 {
+		return float64(inputTokens)/rate.InputTokensPerDollar +
+			float64(outputTokens)/rate.OutputTokensPerDollar
+	}
+	return 0
 }
 
 // GetUsageSummary returns a summary of current usage and costs.

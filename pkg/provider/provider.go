@@ -3,7 +3,34 @@ package provider
 import (
 	"context"
 	"os"
+
+	"github.com/hollis-labs/nanite/pkg/models"
 )
+
+// capabilitiesFromRegistry materialises the provider-level capability
+// defaults stored in the canonical model registry. Adapters call this from
+// their Capabilities() method instead of hardcoding token/window constants.
+// Per-model overrides are available via models.MaxOutputFor /
+// models.ContextWindowFor — adapter request builders consult those directly.
+func capabilitiesFromRegistry(providerType string) ProviderCapabilities {
+	d, ok := models.ProviderDefaults[providerType]
+	if !ok {
+		return ProviderCapabilities{}
+	}
+	return ProviderCapabilities{
+		SupportsStreamJSON:          d.SupportsStreamJSON,
+		SupportsPreToolHooks:        d.SupportsPreToolHooks,
+		SupportsPostToolHooks:       d.SupportsPostToolHooks,
+		SupportsSystemPromptCaching: d.SupportsSystemPromptCaching,
+		SupportsToolCalling:         d.SupportsToolCalling,
+		SupportsBatch:               d.SupportsBatch,
+		SupportsImageInput:          d.SupportsImageInput,
+		SupportsEmbedding:           d.SupportsEmbedding,
+		DefaultEmbeddingModel:       d.DefaultEmbeddingModel,
+		MaxTokens:                   d.DefaultMaxOutput,
+		ContextWindowSize:           d.DefaultContextWindow,
+	}
+}
 
 // ProviderCapabilities describes the capabilities supported by a provider.
 type ProviderCapabilities struct {

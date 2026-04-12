@@ -10,7 +10,7 @@ func TestGeminiBuildRequest(t *testing.T) {
 	g := &Gemini{}
 
 	t.Run("system prompt becomes systemInstruction", func(t *testing.T) {
-		req := g.buildRequest("You are helpful.", []ChatMessage{
+		req := g.buildRequest("gemini-2.5-flash", "You are helpful.", []ChatMessage{
 			{Role: "user", Content: "Hello"},
 		})
 		if req.SystemInstruct == nil {
@@ -22,7 +22,7 @@ func TestGeminiBuildRequest(t *testing.T) {
 	})
 
 	t.Run("empty system prompt omits systemInstruction", func(t *testing.T) {
-		req := g.buildRequest("", []ChatMessage{
+		req := g.buildRequest("gemini-2.5-flash", "", []ChatMessage{
 			{Role: "user", Content: "Hello"},
 		})
 		if req.SystemInstruct != nil {
@@ -31,7 +31,7 @@ func TestGeminiBuildRequest(t *testing.T) {
 	})
 
 	t.Run("assistant role maps to model", func(t *testing.T) {
-		req := g.buildRequest("", []ChatMessage{
+		req := g.buildRequest("gemini-2.5-flash", "", []ChatMessage{
 			{Role: "user", Content: "Hello"},
 			{Role: "assistant", Content: "Hi there"},
 		})
@@ -44,7 +44,7 @@ func TestGeminiBuildRequest(t *testing.T) {
 	})
 
 	t.Run("content blocks are joined", func(t *testing.T) {
-		req := g.buildRequest("", []ChatMessage{
+		req := g.buildRequest("gemini-2.5-flash", "", []ChatMessage{
 			{Role: "user", ContentBlocks: []ContentBlock{
 				{Type: "text", Text: "Part 1"},
 				{Type: "text", Text: "Part 2"},
@@ -59,7 +59,7 @@ func TestGeminiBuildRequest(t *testing.T) {
 	})
 
 	t.Run("empty messages are skipped", func(t *testing.T) {
-		req := g.buildRequest("", []ChatMessage{
+		req := g.buildRequest("gemini-2.5-flash", "", []ChatMessage{
 			{Role: "user", Content: ""},
 			{Role: "user", Content: "Real message"},
 		})

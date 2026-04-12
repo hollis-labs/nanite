@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
@@ -17,9 +18,12 @@ import (
 )
 
 const (
-	openzenDefaultBaseURL   = "https://api.open-zen.com/v1/"
-	openzenDefaultChatModel = "claude-sonnet-4-20250514"
+	openzenDefaultBaseURL = "https://api.open-zen.com/v1/"
 )
+
+// openzenDefaultChatModel resolves to the system default at call time so the
+// gateway mirrors whichever model the rest of the app treats as canonical.
+func openzenDefaultChatModel() string { return models.DefaultChatModel() }
 
 // openzenAPI is retained for test compatibility. It is the chat-completions
 // URL under the default base; tests compare against this literal.
@@ -111,7 +115,7 @@ func (oz *OpenZen) streamChatInternal(ctx context.Context, systemPrompt string, 
 	oz.ensureClient()
 
 	if model == "" {
-		model = openzenDefaultChatModel
+		model = openzenDefaultChatModel()
 	}
 
 	if oz.CircuitBreaker != nil && oz.CircuitBreaker.IsOpen() {
@@ -160,7 +164,7 @@ func (oz *OpenZen) Complete(ctx context.Context, systemPrompt string, messages [
 	oz.ensureClient()
 
 	if model == "" {
-		model = openzenDefaultChatModel
+		model = openzenDefaultChatModel()
 	}
 
 	params := openai.ChatCompletionNewParams{
@@ -173,11 +177,5 @@ func (oz *OpenZen) Complete(ctx context.Context, systemPrompt string, messages [
 
 // Capabilities returns the capabilities supported by the OpenZen provider.
 func (oz *OpenZen) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:  true,
-		SupportsToolCalling: false,
-		SupportsImageInput:  true,
-		MaxTokens:           0,      // Variable
-		ContextWindowSize:   200000, // Upper bound for supported models
-	}
+	return capabilitiesFromRegistry("openzen")
 }

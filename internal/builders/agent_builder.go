@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // slugRegexp validates URL-safe slugs: lowercase letters, digits, and hyphens.
@@ -58,9 +59,9 @@ func NewAgentBuilder(s *store.Store) *Builder {
 			},
 			{
 				Name:    "model",
-				Prompt:  "Default model (leave blank for claude-sonnet-4-20250514):",
+				Prompt:  fmt.Sprintf("Default model (leave blank for %s):", models.DefaultChatModel()),
 				Field:   "model",
-				Default: "claude-sonnet-4-20250514",
+				Default: models.DefaultChatModel(),
 			},
 			{
 				Name:   "description",
@@ -80,7 +81,7 @@ func NewAgentBuilder(s *store.Store) *Builder {
 
 			model := strings.TrimSpace(inputs["model"])
 			if model == "" {
-				model = "claude-sonnet-4-20250514"
+				model = models.DefaultChatModel()
 			}
 
 			agent := &store.AgentProfile{

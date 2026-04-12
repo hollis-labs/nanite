@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/worker"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // DelegateTask implements ChatService. It spawns a worker session, sends the
@@ -51,7 +52,7 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		model = parentSession.Model
 	}
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = models.DefaultChatModel()
 	}
 	workspaceID := req.WorkspaceID
 	if workspaceID == "" {

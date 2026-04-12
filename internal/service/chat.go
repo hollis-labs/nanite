@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/worker"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // ChatService is the top-level orchestrator for message handling. It composes
@@ -109,11 +110,11 @@ type chatServiceImpl struct {
 func NewChatService(cfg ChatServiceConfig) ChatService {
 	up := cfg.UtilityProvider
 	if up == "" {
-		up = "anthropic"
+		up = models.DefaultProvider()
 	}
 	um := cfg.UtilityModel
 	if um == "" {
-		um = "claude-sonnet-4-20250514"
+		um = models.DefaultChatModel()
 	}
 	return &chatServiceImpl{
 		sessions:       cfg.Sessions,

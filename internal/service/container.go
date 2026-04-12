@@ -32,6 +32,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/worker"
 	"github.com/hollis-labs/nanite/internal/workflow"
 	"github.com/hollis-labs/nanite/internal/worktree"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // Container holds all service instances and shared subsystems. It is the
@@ -410,11 +411,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// Build a utility call function for memory extraction.
 		utilityProvider := cfg.UtilityProvider
 		if utilityProvider == "" {
-			utilityProvider = "anthropic"
+			utilityProvider = models.DefaultProvider()
 		}
 		utilityModel := cfg.UtilityModel
 		if utilityModel == "" {
-			utilityModel = "claude-sonnet-4-20250514"
+			utilityModel = models.DefaultChatModel()
 		}
 
 		var utilityCall memory.UtilityCallFunc

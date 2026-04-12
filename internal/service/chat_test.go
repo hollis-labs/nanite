@@ -331,7 +331,11 @@ func TestInferProvider(t *testing.T) {
 		{"o1-preview", "openai"},
 		{"o3-mini", "openai"},
 		{"llama3.1", "ollama"},
-		{"mistral-large", "ollama"},
+		// Registered Mistral model resolves through the canonical registry
+		// (audit 2026-04-11 finding 02 — prior prefix match sent Mistral
+		// API models to ollama).
+		{"mistral-large", "mistral"},
+		{"mistral-large-latest", "mistral"},
 		{"claude-sonnet-4-20250514", "anthropic"},
 		{"unknown-model", "anthropic"},
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/ollama/ollama/api"
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/pkg/models"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -452,18 +453,7 @@ func (o *Ollama) Complete(ctx context.Context, systemPrompt string, messages []C
 // default. The SDK *does* forward tool_calls when a tool-capable model
 // returns them — see streamChatInternal.
 func (o *Ollama) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:          true,
-		SupportsPreToolHooks:        false,
-		SupportsPostToolHooks:       false,
-		SupportsSystemPromptCaching: false,
-		SupportsToolCalling:         false,
-		SupportsBatch:               false,
-		SupportsImageInput:          false,
-		MaxTokens:                   0, // variable per model
-		SupportsEmbedding:           true,
-		DefaultEmbeddingModel:       "nomic-embed-text",
-	}
+	return capabilitiesFromRegistry("ollama")
 }
 
 // -----------------------------------------------------------------------------
@@ -528,16 +518,7 @@ func (o *Ollama) EmbedBatch(ctx context.Context, texts []string, model string) (
 // EmbeddingDimensions returns the output dimensions for the given embedding
 // model. Returns 0 if the model is unknown.
 func (o *Ollama) EmbeddingDimensions(model string) int {
-	switch model {
-	case "nomic-embed-text":
-		return 768
-	case "all-minilm":
-		return 384
-	case "mxbai-embed-large":
-		return 1024
-	default:
-		return 0
-	}
+	return models.EmbeddingDimensionsFor(model)
 }
 
 // -----------------------------------------------------------------------------

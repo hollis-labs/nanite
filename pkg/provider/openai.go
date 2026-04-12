@@ -17,6 +17,7 @@ import (
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/openai/openai-go/shared"
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/nanite/pkg/models"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -585,19 +586,7 @@ func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []C
 // tools through the SDK, but the capability claim stays off until a follow-up
 // task wires tool calling through the orchestrator end-to-end.
 func (o *OpenAI) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:          true,
-		SupportsPreToolHooks:        false,
-		SupportsPostToolHooks:       false,
-		SupportsSystemPromptCaching: false,
-		SupportsToolCalling:         false,
-		SupportsBatch:               false,
-		SupportsImageInput:          true,
-		SupportsEmbedding:           true,
-		DefaultEmbeddingModel:       "text-embedding-3-small",
-		MaxTokens:                   16384,
-		ContextWindowSize:           128000,
-	}
+	return capabilitiesFromRegistry("openai")
 }
 
 // -----------------------------------------------------------------------------
@@ -654,16 +643,7 @@ func (o *OpenAI) EmbedBatch(ctx context.Context, texts []string, model string) (
 // EmbeddingDimensions returns the output dimensions for the given model.
 // Returns 0 if the model is unknown.
 func (o *OpenAI) EmbeddingDimensions(model string) int {
-	switch model {
-	case "text-embedding-3-small":
-		return 1536
-	case "text-embedding-3-large":
-		return 3072
-	case "text-embedding-ada-002":
-		return 1536
-	default:
-		return 0
-	}
+	return models.EmbeddingDimensionsFor(model)
 }
 
 // -----------------------------------------------------------------------------

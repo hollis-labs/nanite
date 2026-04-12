@@ -77,6 +77,11 @@ type Container struct {
 	Orchestrator   *chat.Orchestrator
 	Activity       *chat.ActivityEmitter
 
+	// AppConfig exposes the parsed nanite.yaml app config to handlers that
+	// need it (artifact storage root, http caps, etc.). May be nil in
+	// lightweight test setups — handlers must nil-check.
+	AppConfig *config.AppConfig
+
 	// Utility provider/model for lightweight calls (autotitle, etc.).
 	UtilityProvider string
 	UtilityModel    string
@@ -494,6 +499,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AdapterRegistry:     adapterRegistry,
 		RunStore:            runStore,
 		WorkflowBroadcaster: workflowBroadcaster,
+		AppConfig:           cfg.AppConfig,
 	}, nil
 }
 

@@ -289,7 +289,7 @@ func cmdServe(args []string) {
 	startBackgroundWorkers(daemonLifecycle, container)
 
 	// Start HTTP server.
-	srv := server.New(s, a, *port, *dev, pluginHost)
+	srv := server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP)
 
 	// Discover, load plugins, and re-discover MCP tools.
 	pluginsDir := discoverAndLoadPlugins(pluginHost, *dbPath, mcpManager, s)

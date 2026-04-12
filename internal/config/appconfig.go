@@ -12,6 +12,25 @@ import (
 type AppConfig struct {
 	Presence  PresenceConfig  `yaml:"presence"`
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
+	HTTP      HTTPConfig      `yaml:"http"`
+}
+
+// HTTPConfig controls HTTP server timeouts and body-size limits. All values
+// are optional; zero or unset values fall back to conservative defaults at
+// Server construction time. See server.New for the fallback policy.
+type HTTPConfig struct {
+	ReadTimeoutSeconds       int `yaml:"read_timeout_seconds"`
+	ReadHeaderTimeoutSeconds int `yaml:"read_header_timeout_seconds"`
+	WriteTimeoutSeconds      int `yaml:"write_timeout_seconds"`
+	IdleTimeoutSeconds       int `yaml:"idle_timeout_seconds"`
+	// MaxRequestBodyBytes caps the body of any mutating (POST/PUT/PATCH/DELETE)
+	// request that is not explicitly whitelisted for a larger cap (e.g.
+	// multipart artifact upload). A value <=0 falls back to the default.
+	MaxRequestBodyBytes int64 `yaml:"max_request_body_bytes"`
+	// MaxUploadBodyBytes caps the body of multipart artifact/plugin uploads.
+	// Override separately from MaxRequestBodyBytes so routine JSON endpoints
+	// stay tight while file-upload endpoints get the headroom they need.
+	MaxUploadBodyBytes int64 `yaml:"max_upload_body_bytes"`
 }
 
 // PresenceConfig controls presence broadcast behavior.
@@ -36,6 +55,14 @@ func DefaultAppConfig() *AppConfig {
 			AutoDetectTools: []string{"Write", "write", "write_file", "create_file", "Edit", "edit"},
 			PathKeys:        []string{"file_path", "path", "filename"},
 			StorageDir:      "data/artifacts",
+		},
+		HTTP: HTTPConfig{
+			ReadTimeoutSeconds:       30,
+			ReadHeaderTimeoutSeconds: 10,
+			WriteTimeoutSeconds:      60,
+			IdleTimeoutSeconds:       120,
+			MaxRequestBodyBytes:      10 << 20, // 10 MiB
+			MaxUploadBodyBytes:       32 << 20, // 32 MiB (matches pre-existing multipart cap)
 		},
 	}
 }

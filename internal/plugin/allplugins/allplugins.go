@@ -22,5 +22,4 @@ import (
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/oembed"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/sessionstats"
 	_ "github.com/hollis-labs/nanite/plugins/fragments-engine"
-	_ "github.com/hollis-labs/nanite/plugins/support-ticket"
 )

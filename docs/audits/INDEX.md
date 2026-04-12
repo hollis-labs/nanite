@@ -10,6 +10,23 @@ Tracking ongoing first-pass coverage of the Nanite codebase. This index lists co
 
 ## Completed audits
 
+### 2026-04-11 — `context-management` (Go, deep-review + claimed-vs-actual)
+- **Counts:** 2 Critical, 2 High, 3 Medium, 0 Low, 1 Info
+- **Folder:** `docs/audits/2026-04-11-context-management/`
+- **Claimed-vs-actual verdict:** **Slot system, hot-swap, auto-compaction, and /compact are all stubs.** Only `PruneAfterTurn` and `EnforceTokenBudget` work end-to-end. The slot system (`ContextWindow`, `ContextSlot` types in `internal/chat/context_window.go`) is a data structure with no production wiring — `AssembleSlots` is never called from any code path. Hot-swap does not exist as a feature — no function, API, or command implements it. Auto-compaction (`chat_generate.go`'s `shouldAutoCompact` check) has the conditional but the branch was never reached in a code trace — the trigger threshold is never exceeded because `PruneAfterTurn` already reduces context below the threshold. `/compact` command exists as an API handler but is a minimal stub (calls `PruneMessages` which is `PruneAfterTurn`'s inner function, not the designed "summarize + replace" compaction).
+- **Headline:** Two claimed-complete features are Critical stubs: (1) Slot system is unwired — the `ContextWindow` type, `AssembleSlots`, and `ContextSlot` structs compile but have zero production callers. Context assembly uses `AssembleContext` (flat list) not `AssembleSlots` (slot-based). (2) `/compact` API handler calls `PruneMessages` (drop oldest), not a summarize-and-replace compaction. Hot-swap (High) does not exist in any form. Auto-compaction (High) never fires because `PruneAfterTurn` preempts its threshold.
+
+### 2026-04-11 — `tokens-and-model-hardcoding` (Go, deep-review)
+- **Counts:** 0 Critical, 0 High, 6 Medium, 2 Low, 2 Info
+- **Folder:** `docs/audits/2026-04-11-tokens-and-model-hardcoding/`
+- **Headline:** Model names, token limits, and pricing are scattered across 6+ files with `seed.go` as the intended single source of truth but multiple rogue hardcodings that bypass it. `InferProvider` uses model-name substring matching (Medium). Cost monitor hardcodes `"anthropic"` as default provider (Medium). Provider capabilities (streaming, tool use, vision) are hardcoded per-provider rather than per-model (Medium). Dual pricing maps (`usage.go:modelPricing` and `seed.go:SeedProviders`) can drift (Medium). `seed.go` data is stale for several models (Medium). No Criticals — the hardcoding is inconvenient maintenance debt, not a correctness or security issue. A comprehensive hardcoding map is provided in `10-info-hardcoding-map.md`.
+
+### 2026-04-11 — `memory-ranking` (Go, deep-review)
+- **Counts:** 1 Critical, 2 High, 4 Medium, 1 Low, 1 Info
+- **Folder:** `docs/audits/2026-04-11-memory-ranking/`
+- **Headline:** **Embeddings are never generated** (Critical). The Conduit `EmbedHandler` is registered and the queue infrastructure exists, but when nanite calls `conduit.StoreRevision()`, the revision is stored without triggering an embed job because `StoreRevision` does not enqueue an embed task — it relies on a separate `EmbedRevision` call that is never made from nanite's memory extraction path. This confirms and deepens the `contextbroker` finding 01 (similarity ranking always fails): the failure is not just at the query side (missing `EmbedQuery: true`) but at the storage side (revisions are never embedded). The entire similarity-based recall path is dead. **Recall options missing query field** (High) — `SimilarRevisions` receives empty `RecallOpts.Query` from the broker because the broker doesn't populate it. **No hybrid ranking fallback** (High) — when similarity fails (always, currently), there is no BM25 or keyword fallback; recall returns an empty set. Plus: extraction fire-and-forget goroutines with no ctx (Medium), no PII scrubbing in memory extraction (Medium), no BM25 keyword recall exists (Medium), relevance scoring ignores Conduit-side score (Medium).
+- **Cross-audit update:** `contextbroker` finding 01 (similarity ranking always fails) is now understood as a two-sided failure: query side (broker doesn't set EmbedQuery) AND storage side (embeddings never generated). Both must be fixed for similarity recall to work.
+
 ### 2026-04-11 — `worker-lifecycle-regression` (Go, deep-review)
 - **Counts:** 0 Critical, 0 High, 0 Medium, 1 Low, 2 Info
 - **Folder:** `docs/audits/2026-04-11-worker-lifecycle-regression/`
@@ -192,13 +209,13 @@ A pre-execution inventory pass would identify any package not on this list. Cand
 
 25. ~~**`toolbroker`**~~ — `internal/toolclient/` (broker, tool_knowledge, permissions). Deep-review. **~~COMPLETED 2026-04-11~~** — 3 High (permission bypass via MCPManager fallback, builtin tools bypass, request_tools meta-tool bypass). See Completed audits above.
 26. ~~**`contextbroker`**~~ — `internal/contextbroker/`. Deep-review of the broker subsystem as code. **Not** about token counting, compaction, or context-window management — those are separate scopes. **~~COMPLETED 2026-04-11~~** — 2 High (similarity ranking always fails, Conduit truncation splits multibyte). See Completed audits above.
-27. **`context-management`** — slot system, hot-swap, auto-compaction, `/compact` command. Mixed deep-review + claimed-vs-actual verification. **Explicit mandate:** prove hot-swap and slots actually work end-to-end. Reviewer should verify behavior, not just code presence. Suspected stubs/partials per user report.
+27. ~~**`context-management`**~~ — slot system, hot-swap, auto-compaction, `/compact` command. Mixed deep-review + claimed-vs-actual verification. **Explicit mandate:** prove hot-swap and slots actually work end-to-end. **~~COMPLETED 2026-04-11~~** — **2 Critical (slot system unwired, /compact is stub), 2 High (hot-swap nonexistent, auto-compaction never fires).** User suspicion of stubs confirmed.
 28. **`context-counting-in-widgets`** — frontend-side targeted check. Suspected hardcoded token counting. Small scope. Cross-reference with `tokens-and-model-hardcoding`.
-29. **`tokens-and-model-hardcoding`** — every place model names, token limits, context windows, pricing are hardcoded. Deep-review. (The models.dev integration design is deferred to a backend-agent scoping session; see `.nanite/agents/backend.md` deferred section.)
+29. ~~**`tokens-and-model-hardcoding`**~~ — every place model names, token limits, context windows, pricing are hardcoded. Deep-review. **~~COMPLETED 2026-04-11~~** — 6 Medium (scattered hardcodings, dual pricing maps, stale seed data). Hardcoding map provided.
 30. **`eval-subprocess-pty-sdk`** — subprocess / PTY / SDK usage patterns for running CLI agents. Best-pattern determination. Deep-review of existing implementations.
 31. **`frontend-hygiene`** — component reuse vs. hardcoded, semantic tokens, composition, props-down/messages-up, Tailwind no-hardcoded-styles, modal/alert/drawer reuse. Frontend deep-review.
 32. **`entities-tags-relational`** — objects / entities / tags relational correctness. Tags per-entity vs per-object. FK stubs vs real relationships. Deep-review.
-33. **`memory-ranking`** — activation vs similarity vs hybrid ranking. Deep-review of the current memory ranking implementation; pair with a hybrid BM25+vector recall audit at dispatch time.
+33. ~~**`memory-ranking`**~~ — activation vs similarity vs hybrid ranking. Deep-review of the current memory ranking implementation. **~~COMPLETED 2026-04-11~~** — 1 Critical (embeddings never generated), 2 High (recall opts missing query, no hybrid fallback). Similarity recall is entirely dead.
 34. **`backpressure-followup`** — confirm backpressure coverage in all sites that need it. Follow-on from the initial PTY build.
 
 #### From tests-and-coverage split

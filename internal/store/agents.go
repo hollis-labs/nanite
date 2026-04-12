@@ -178,19 +178,18 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 
 // DeleteAgent removes an agent profile by slug, including related records
 // (modes, skills, session associations). Returns nil if the agent doesn't exist.
+//
+// All deletes run inside a single transaction — no PRAGMA toggling. Junction
+// tables (agent_modes, agent_skills, agent_prompt_templates,
+// agent_mode_assignments, session_agents) intentionally have no FK back to
+// agent_profiles (they may reference file-based agents), so deleting them
+// explicitly is both correct and FK-safe. Messages have their agent_id
+// nullified to preserve user data.
 func (s *Store) DeleteAgent(slug string) error {
-	// Look up the agent ID first
 	agent, err := s.GetAgentBySlug(slug)
 	if err != nil {
 		return nil // agent doesn't exist — nothing to delete
 	}
-
-	// Disable FK checks temporarily — agent_profiles is referenced by
-	// session_agents, messages, agent_modes, agent_skills, agent_prompt_templates,
-	// and agent_mode_assignments. We want to remove the profile without
-	// cascading deletes to messages (user data should be preserved).
-	s.DB.Exec("PRAGMA foreign_keys=OFF")
-	defer s.DB.Exec("PRAGMA foreign_keys=ON")
 
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -198,17 +197,24 @@ func (s *Store) DeleteAgent(slug string) error {
 	}
 	defer tx.Rollback()
 
-	// Clean up direct references (except messages — preserve user data)
-	refs := []string{"session_agents", "agent_modes", "agent_skills",
-		"agent_prompt_templates", "agent_mode_assignments"}
-	for _, table := range refs {
-		_, _ = tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE agent_id = ?", table), agent.ID)
+	cleanups := []string{
+		"DELETE FROM session_agents WHERE agent_id = ?",
+		"DELETE FROM agent_modes WHERE agent_id = ?",
+		"DELETE FROM agent_skills WHERE agent_id = ?",
+		"DELETE FROM agent_prompt_templates WHERE agent_id = ?",
+		"DELETE FROM agent_mode_assignments WHERE agent_id = ?",
+	}
+	for _, q := range cleanups {
+		if _, err := tx.Exec(q, agent.ID); err != nil {
+			return fmt.Errorf("cleanup agent references (%s): %w", q, err)
+		}
 	}
 
-	// Nullify agent_id on messages (preserve messages, just unlink the agent)
-	_, _ = tx.Exec("UPDATE messages SET agent_id = NULL WHERE agent_id = ?", agent.ID)
+	// Nullify agent_id on messages (preserve messages, just unlink the agent).
+	if _, err := tx.Exec("UPDATE messages SET agent_id = NULL WHERE agent_id = ?", agent.ID); err != nil {
+		return fmt.Errorf("nullify messages for agent %s: %w", slug, err)
+	}
 
-	// Remove the agent profile
 	if _, err := tx.Exec("DELETE FROM agent_profiles WHERE id = ?", agent.ID); err != nil {
 		return fmt.Errorf("delete agent %s: %w", slug, err)
 	}

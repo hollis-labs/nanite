@@ -208,6 +208,95 @@ func TestListSessionAgents(t *testing.T) {
 	}
 }
 
+// TestDeleteAgent_NoPragmaToggle verifies DeleteAgent removes the profile and
+// its junction-table references atomically. Regression guard for the audit
+// finding where PRAGMA foreign_keys=OFF was applied pool-wide around the
+// operation. Asserts:
+//   - agent_profiles row is gone
+//   - agent_modes, agent_skills, agent_prompt_templates rows are gone
+//   - messages rows remain with agent_id NULLed (user data preserved)
+//   - FK enforcement is still ON after the operation (run an FK-violating
+//     INSERT and expect it to fail).
+func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
+	s := newTestStore(t)
+	seedWorkspace(t, s, "ws1")
+	agent := makeTestAgent(t, s, "del-agent")
+
+	// mode + skill + prompt-template assignments
+	mode := &AgentMode{AgentID: agent.ID, Slug: "m", Name: "m", PromptAddendum: "x"}
+	if err := s.CreateAgentMode(mode); err != nil {
+		t.Fatalf("CreateAgentMode: %v", err)
+	}
+	sk := &Skill{Name: "S", Slug: "s-del", Description: "d", Category: "t", ToolBindings: `[]`}
+	if err := s.CreateSkill(sk); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+	if err := s.AssignSkillToAgent(agent.ID, sk.ID, ""); err != nil {
+		t.Fatalf("AssignSkillToAgent: %v", err)
+	}
+	pt := &PromptTemplate{Name: "T", Slug: "t-del", Scope: "system", Template: "hi", Priority: 1}
+	if err := s.CreatePromptTemplate(pt); err != nil {
+		t.Fatalf("CreatePromptTemplate: %v", err)
+	}
+	if err := s.AssignPromptTemplateToAgent(agent.ID, pt.ID); err != nil {
+		t.Fatalf("AssignPromptTemplateToAgent: %v", err)
+	}
+
+	// session + message referencing the agent
+	sess := &Session{WorkspaceID: "ws1"}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := s.EnsureSessionAgent(sess.ID, agent.ID, "default", true); err != nil {
+		t.Fatalf("EnsureSessionAgent: %v", err)
+	}
+	msg := &Message{SessionID: sess.ID, AgentID: agent.ID, Role: "assistant", Content: "hi"}
+	if err := s.CreateMessage(msg); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	if err := s.DeleteAgent("del-agent"); err != nil {
+		t.Fatalf("DeleteAgent: %v", err)
+	}
+
+	// agent_profiles row gone
+	var n int
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM agent_profiles WHERE id = ?", agent.ID).Scan(&n); err != nil {
+		t.Fatalf("count agent_profiles: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected agent_profiles row to be gone, got %d", n)
+	}
+
+	// junctions cleared
+	for _, table := range []string{"agent_modes", "agent_skills", "agent_prompt_templates", "session_agents"} {
+		if err := s.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE agent_id = ?", agent.ID).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("expected %s rows cleared, got %d", table, n)
+		}
+	}
+
+	// message preserved, agent_id nulled
+	var agentIDVal *string
+	if err := s.DB.QueryRow("SELECT agent_id FROM messages WHERE id = ?", msg.ID).Scan(&agentIDVal); err != nil {
+		t.Fatalf("select message after delete: %v", err)
+	}
+	if agentIDVal != nil {
+		t.Errorf("expected message.agent_id to be NULL, got %q", *agentIDVal)
+	}
+
+	// FK enforcement still ON — insert with bogus session_id should fail.
+	_, err := s.DB.Exec(
+		`INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
+		 VALUES ('no-such-session', 'no-such-agent', 'default', '2026-01-01', 0)`,
+	)
+	if err == nil {
+		t.Error("expected FK failure after DeleteAgent; FK enforcement appears disabled")
+	}
+}
+
 func TestCreateAgent_RejectsUserSlug(t *testing.T) {
 	s := newTestStore(t)
 	profile := &AgentProfile{

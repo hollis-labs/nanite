@@ -106,6 +106,26 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 						Name: "Test Widget",
 					},
 				},
+				ConfigSchema: []sdkplugin.ConfigFieldDef{
+					{
+						Key:         "api_key",
+						Type:        "secret",
+						Label:       "API Key",
+						Description: "Auth token for upstream service",
+						Default:     "",
+						Required:    true,
+						Component:   "SecretInput",
+					},
+					{
+						Key:         "mode",
+						Type:        "select",
+						Label:       "Mode",
+						Description: "Operating mode",
+						Default:     "fast",
+						Required:    false,
+						Options:     []string{"fast", "accurate"},
+					},
+				},
 				Keybindings: []KeybindingDef{
 					{
 						ID:          "test.action",
@@ -192,6 +212,43 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 	}
 	if host.components[0].ID != "test-widget" {
 		t.Errorf("expected component 'test-widget', got %q", host.components[0].ID)
+	}
+	// Verify the plugin-sdk → go-plugin UIComponentType cast produced the
+	// right go-plugin typed value. Comparing against the go-plugin constant
+	// (not the sdk one) proves the bridge landed the correct type family.
+	if host.components[0].Type != plugin.UIComponentTypeWidget {
+		t.Errorf("expected UIComponent Type %q (go-plugin), got %q",
+			plugin.UIComponentTypeWidget, host.components[0].Type)
+	}
+	if string(host.components[0].Type) != string(sdkplugin.UIComponentTypeWidget) {
+		t.Errorf("expected UIComponent Type string to match sdk value %q, got %q",
+			sdkplugin.UIComponentTypeWidget, host.components[0].Type)
+	}
+
+	// Verify the ConfigSchema bridge: each plugin-sdk ConfigFieldDef should
+	// land on the host as a go-plugin ConfigFieldDef with all fields copied
+	// through intact (Key, Type, Label, Description, Default, Required,
+	// Options, Component).
+	if len(host.configSchema) != 2 {
+		t.Fatalf("expected 2 config fields, got %d", len(host.configSchema))
+	}
+	apiKey := host.configSchema[0]
+	if apiKey.Key != "api_key" || apiKey.Type != "secret" || apiKey.Label != "API Key" ||
+		apiKey.Description != "Auth token for upstream service" ||
+		apiKey.Default != "" || !apiKey.Required || apiKey.Component != "SecretInput" {
+		t.Errorf("api_key config field did not survive bridge intact: %+v", apiKey)
+	}
+	if len(apiKey.Options) != 0 {
+		t.Errorf("expected no options for api_key, got %v", apiKey.Options)
+	}
+	mode := host.configSchema[1]
+	if mode.Key != "mode" || mode.Type != "select" || mode.Label != "Mode" ||
+		mode.Description != "Operating mode" || mode.Default != "fast" ||
+		mode.Required != false || mode.Component != "" {
+		t.Errorf("mode config field did not survive bridge intact: %+v", mode)
+	}
+	if len(mode.Options) != 2 || mode.Options[0] != "fast" || mode.Options[1] != "accurate" {
+		t.Errorf("expected mode options [fast accurate], got %v", mode.Options)
 	}
 
 	if len(host.eventHooks) != 1 {

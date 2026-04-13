@@ -117,7 +117,9 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 			// Subprocess plugin: create a SubprocessPlugin that bridges via JSON-RPC.
 			p, err = newSubprocessPluginFromManifest(dp)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("create subprocess plugin %s: %w", pluginID, err))
+				wrapped := fmt.Errorf("create subprocess plugin %s: %w", pluginID, err)
+				errs = append(errs, wrapped)
+				host.EmitPluginLoadFailed(pluginID, err.Error())
 				continue
 			}
 		} else {
@@ -127,6 +129,7 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 
 		if err := host.LoadPlugin(p); err != nil {
 			errs = append(errs, fmt.Errorf("load %s: %w", pluginID, err))
+			host.EmitPluginLoadFailed(pluginID, err.Error())
 			continue
 		}
 
@@ -136,6 +139,7 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 		// builtin and subprocess plugins flow through the same wiring.
 		if err := applyManifestRegistrations(host, dp.Manifest, p); err != nil {
 			errs = append(errs, fmt.Errorf("apply manifest for %s: %w", pluginID, err))
+			host.EmitPluginLoadFailed(pluginID, err.Error())
 		}
 
 		loaded = append(loaded, p)
@@ -221,6 +225,7 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 		p := constructor()
 		if err := host.LoadPlugin(p); err != nil {
 			errs = append(errs, fmt.Errorf("load builtin %s: %w", id, err))
+			host.EmitPluginLoadFailed(id, err.Error())
 			continue
 		}
 
@@ -231,6 +236,7 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 			if manifest := mp.Manifest(); manifest != nil {
 				if err := applyManifestRegistrations(host, manifest, p); err != nil {
 					errs = append(errs, fmt.Errorf("apply manifest for builtin %s: %w", id, err))
+					host.EmitPluginLoadFailed(id, err.Error())
 				}
 			}
 		}

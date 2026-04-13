@@ -1136,7 +1136,10 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 
 	h.logger.Info("loaded plugin", "id", id, "name", p.Name(), "version", p.Version())
 
-	// Emit plugin.installed event (fire-and-forget).
+	// Emit plugin.installed event (fire-and-forget). Bump registry version so
+	// /api/plugins/registry cache invalidates even if the Load path didn't
+	// touch any registry-visible struct.
+	h.BumpRegistryVersion()
 	pName := p.Name()
 	pVer := p.Version()
 	safego.Go(h.ctx, "plugin.host.emit.plugin-installed", func() {
@@ -1527,7 +1530,9 @@ func (h *Host) UnloadPlugin(id string) error {
 
 	h.logger.Info("unloaded plugin", "id", id)
 
-	// Emit plugin.uninstalled event (fire-and-forget).
+	// Emit plugin.uninstalled event (fire-and-forget). Bump registry version
+	// so /api/plugins/registry invalidates.
+	h.BumpRegistryVersion()
 	safego.Go(h.ctx, "plugin.host.emit.plugin-uninstalled", func() {
 		h.EmitPluginUninstalled(id)
 	})

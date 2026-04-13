@@ -100,6 +100,11 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 	// keeps the envelope/slot/component/widget aggregation logic isolated from
 	// the install/uninstall lifecycle handlers above.
 	registerPluginsRegistryRoute(mux, host, pluginsDir)
+
+	// B.8 plugin lifecycle SSE stream. Replaces the deleted dead endpoint
+	// GET /api/plugins/events/stream. Filters the host event bus down to
+	// the six lifecycle event types per plan §B.8.
+	registerPluginsEventsRoute(mux, host)
 }
 
 func (pms *pluginManagerState) jsonResp(w http.ResponseWriter, status int, data any) {
@@ -545,6 +550,14 @@ func (pms *pluginManagerState) handleDisable(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// B.8: emit plugin.disabled for lifecycle SSE subscribers and invalidate
+	// the B.7 registry cache. The unload above already bumped the version, so
+	// this is a second bump — cheap and idempotent from cache's perspective.
+	if pms.pluginHost != nil {
+		pms.pluginHost.BumpRegistryVersion()
+		pms.pluginHost.EmitPluginDisabled(req.Name)
+	}
+
 	pms.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "disabled",
 		"plugin":  req.Name,
@@ -567,6 +580,15 @@ func (pms *pluginManagerState) handleEnable(w http.ResponseWriter, r *http.Reque
 	// Hot-load the plugin into the running host so agent profile appears immediately.
 	target := filepath.Join(pms.pluginsDir, req.Name)
 	pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
+
+	// B.8: emit plugin.enabled and bump registry version. LoadPlugin inside
+	// runPluginLoadIntoHost already bumped it on success; we bump again to
+	// guarantee the cache key moves even if the load path was a no-op (e.g.
+	// plugin had no binary and runPluginLoadIntoHost returned early).
+	if pms.pluginHost != nil {
+		pms.pluginHost.BumpRegistryVersion()
+		pms.pluginHost.EmitPluginEnabled(req.Name)
+	}
 
 	pms.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "enabled",

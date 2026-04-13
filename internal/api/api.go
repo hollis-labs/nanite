@@ -223,9 +223,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/connectors", a.handleListConnectors)
 	mux.HandleFunc("GET /api/connectors/{name}/health", a.handleCheckConnectorHealth)
 
-	// Event Stream (SSE for external consumers)
-	mux.HandleFunc("GET /api/plugins/events/stream", a.handleEventStream)
-
 	// Keybindings (plugin-registered keyboard shortcuts)
 	mux.HandleFunc("GET /api/plugins/keybindings", a.handleListKeybindings)
 

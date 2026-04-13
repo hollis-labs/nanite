@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/assets"
@@ -37,9 +38,33 @@ type InstallHomeOptions struct {
 }
 
 // InstallHome extracts the embedded framework assets into the target
-// directory (typically ~/.nanite). Skips user-modified files unless
-// Force is set. Returns the extract report from assets.ExtractTo.
+// directory (typically ~/.nanite).
+//
+// BLG-20260412-002 staging flow:
+//
+//  1. If the target does not exist yet, extract directly into it — there is
+//     nothing to protect and no atomicity concern.
+//  2. If the target exists, extract into a sibling staging dir
+//     (<target>.staging.<pid>-<nanos>) so a crash mid-extract cannot leave
+//     the live install in a mixed-version state.
+//  3. ExtractTo preserves user-modified files by default (it skips when
+//     bytes differ). For the staging path we pre-seed the staging dir with
+//     a copy of the current install so those "skip" decisions can still be
+//     observed, then ExtractTo runs against the staging copy.
+//  4. On success, os.Rename(target -> target.bak.<ts>) then
+//     os.Rename(staging -> target). Both renames are single-directory
+//     operations so they are atomic on POSIX.
+//  5. On any failure the staging dir is removed (best effort) and the
+//     live install is left untouched. If the pre-rename backup succeeds
+//     but the staging rename fails, the backup is preserved for manual
+//     recovery and a wrapped error is returned.
+//
+// Skips user-modified files unless Force is set. Returns the extract report
+// from assets.ExtractTo.
 func (s *Service) InstallHome(opts InstallHomeOptions) (*assets.ExtractReport, error) {
+	if err := Preflight(); err != nil {
+		return nil, err
+	}
 	target := opts.Target
 	if target == "" {
 		home, err := os.UserHomeDir()
@@ -48,7 +73,113 @@ func (s *Service) InstallHome(opts InstallHomeOptions) (*assets.ExtractReport, e
 		}
 		target = filepath.Join(home, ".nanite")
 	}
-	return assets.ExtractTo(target, assets.ExtractOptions{Force: opts.Force})
+
+	// Fast path: no existing install → extract directly.
+	if _, err := os.Stat(target); os.IsNotExist(err) {
+		return assets.ExtractTo(target, assets.ExtractOptions{Force: opts.Force})
+	} else if err != nil {
+		return nil, fmt.Errorf("stat target %s: %w", target, err)
+	}
+
+	// Staging path: extract into a sibling dir, then atomic-rename.
+	parent := filepath.Dir(target)
+	basename := filepath.Base(target)
+	ts := time.Now().UTC()
+	staging := filepath.Join(parent,
+		fmt.Sprintf("%s.staging.%d-%d", basename, os.Getpid(), ts.UnixNano()))
+
+	// Seed staging with a snapshot of the current install so ExtractTo's
+	// "skip user-modified files" semantics apply to the live set. copyTree
+	// is best-effort on mode preservation and returns early on errors.
+	if err := copyTree(target, staging); err != nil {
+		_ = os.RemoveAll(staging)
+		return nil, fmt.Errorf("seed staging dir: %w", err)
+	}
+
+	report, err := assets.ExtractTo(staging, assets.ExtractOptions{Force: opts.Force})
+	if err != nil {
+		_ = os.RemoveAll(staging)
+		return nil, fmt.Errorf("extract into staging: %w", err)
+	}
+
+	// Swap: rename live → backup, then staging → live.
+	backup := filepath.Join(parent,
+		fmt.Sprintf("%s.bak.%s", basename, ts.Format("20060102-150405")+"."+strconv.Itoa(os.Getpid())))
+	if err := os.Rename(target, backup); err != nil {
+		_ = os.RemoveAll(staging)
+		return nil, fmt.Errorf("move existing install aside (%s -> %s): %w", target, backup, err)
+	}
+	if err := os.Rename(staging, target); err != nil {
+		// Best effort: try to put the original back. If that fails too,
+		// surface both paths so the operator can recover by hand.
+		if rbErr := os.Rename(backup, target); rbErr != nil {
+			return nil, fmt.Errorf(
+				"promote staging failed (%w); rollback of backup also failed (%v); "+
+					"manual recovery: backup=%s staging=%s",
+				err, rbErr, backup, staging,
+			)
+		}
+		_ = os.RemoveAll(staging)
+		return nil, fmt.Errorf("promote staging %s -> %s: %w", staging, target, err)
+	}
+
+	// Swap succeeded — remove the backup. Keep it around if removal fails;
+	// it's recoverable state rather than a correctness issue.
+	_ = os.RemoveAll(backup)
+	return report, nil
+}
+
+// copyTree recursively copies src to dst, creating dst if needed. Files
+// are copied with their existing mode; directories are created with 0o755.
+// Symlinks are recreated as symlinks (not followed) so the staging dir
+// mirrors the live tree's link structure.
+func copyTree(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return fmt.Errorf("mkdir dst: %w", err)
+	}
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+
+		// Symlinks: recreate rather than follow.
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("readlink %s: %w", path, err)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return fmt.Errorf("mkdir parent of %s: %w", target, err)
+			}
+			if err := os.Symlink(link, target); err != nil {
+				return fmt.Errorf("symlink %s -> %s: %w", target, link, err)
+			}
+			return nil
+		}
+
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
+		}
+		if err := os.WriteFile(target, data, info.Mode()); err != nil { //nolint:forbidigo // staging seed copy, atomic rename applied at tree level
+			return fmt.Errorf("write %s: %w", target, err)
+		}
+		return nil
+	})
 }
 
 // InstallProjectOptions controls InstallProject.
@@ -101,6 +232,9 @@ type InstallProjectReport struct {
 // InstallProject scaffolds .nanite/, NANITE.md, and CLAUDE.md managed sections
 // in projectDir. Dispatches to a branch based on detected state.
 func (s *Service) InstallProject(opts InstallProjectOptions) (*InstallProjectReport, error) {
+	if err := Preflight(); err != nil {
+		return nil, err
+	}
 	opts = opts.normalized()
 	if opts.ProjectDir == "" {
 		return nil, errors.New("empty project dir")

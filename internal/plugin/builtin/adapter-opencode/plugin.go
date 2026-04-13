@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/fsutil"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 
@@ -131,7 +132,7 @@ func (a *Adapter) Discover(projectDir string) ([]agent.Definition, error) {
 func (a *Adapter) PopulateSandbox(sandboxDir string, ap store.AgentProfile, session agent.SandboxContext) error {
 	content := buildOpencodeMD(ap)
 	path := filepath.Join(sandboxDir, "OPENCODE.md")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := fsutil.AtomicWriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("adapter-opencode: write OPENCODE.md: %w", err)
 	}
 	return nil
@@ -153,7 +154,7 @@ func (a *Adapter) SyncProjectRoot(projectDir string, agents []store.AgentProfile
 
 const placeholderContent = `## Nanite Agents
 
-No agents configured for this project yet. See NANITE.md for setup help, or add an agent definition to ` + "`.nanite/config.yaml`" + ` and re-run ` + "`nanite install --project .`" + `.`
+No agents configured for this project yet. See NANITE.md for setup help, or add an agent definition to ` + "`.nanite/config.yaml`" + ` and re-run ` + "`nanite-agent init --project .`" + `.`
 
 // ---------------------------------------------------------------------------
 // Content generation

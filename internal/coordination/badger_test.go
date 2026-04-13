@@ -1,6 +1,8 @@
 package coordination
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -35,7 +37,7 @@ func TestBadgerGetNotFound(t *testing.T) {
 	s := newTestStore(t)
 
 	_, err := s.Get("nonexistent")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("got %v, want ErrNotFound", err)
 	}
 }
@@ -49,7 +51,7 @@ func TestBadgerDelete(t *testing.T) {
 	}
 
 	_, err := s.Get("key1")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("after delete: got %v, want ErrNotFound", err)
 	}
 }
@@ -99,7 +101,7 @@ func TestBadgerTTLExpiry(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	_, err = s.Get("ephemeral")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("after TTL: got %v, want ErrNotFound", err)
 	}
 }
@@ -137,6 +139,30 @@ func TestBadgerConcurrentWrites(t *testing.T) {
 	}
 }
 
+// TestBadgerGetWrappedErrNotFound is a regression test for the errorlint fix:
+// ensures that callers using errors.Is still classify ErrNotFound correctly
+// when the error returned by Get is wrapped further upstream. The old
+// `err == ErrNotFound` comparisons silently returned false on wrapped errors,
+// which would have let lock-state callers mis-classify a missing-key outcome.
+func TestBadgerGetWrappedErrNotFound(t *testing.T) {
+	s := newTestStore(t)
+
+	_, err := s.Get("nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("direct: got %v, want ErrNotFound", err)
+	}
+
+	wrapped := fmt.Errorf("acquire lock: %w", err)
+	if !errors.Is(wrapped, ErrNotFound) {
+		t.Errorf("wrapped: got %v, errors.Is should classify as ErrNotFound", wrapped)
+	}
+	// Sanity: the pre-fix pattern `err == ErrNotFound` would have been false
+	// against the wrapped error, silently mis-handling the lock state.
+	if wrapped == ErrNotFound { //nolint:errorlint // explicit documentation of the regressed pattern
+		t.Error("pre-fix == comparison unexpectedly matched wrapped error")
+	}
+}
+
 func TestNoopStore(t *testing.T) {
 	s := NewNoopStore()
 
@@ -147,7 +173,7 @@ func TestNoopStore(t *testing.T) {
 		t.Errorf("Put: %v", err)
 	}
 	_, err := s.Get("k")
-	if err != ErrNotFound {
+	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get: got %v, want ErrNotFound", err)
 	}
 	if err := s.Delete("k"); err != nil {

@@ -4,7 +4,7 @@ package secrets
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/zalando/go-keyring"
@@ -32,7 +32,7 @@ func Get(key string) string {
 // Delete removes a secret from the OS keychain. No error if not found.
 func Delete(key string) {
 	if err := keyring.Delete(serviceName, key); err != nil {
-		log.Printf("secrets: delete %q: %v", key, err)
+		slog.Warn("secrets: delete failed", "key", key, "err", err)
 	}
 }
 

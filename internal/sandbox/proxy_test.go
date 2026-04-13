@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -10,9 +11,27 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// testProxyResolver builds a ProxyResolver that returns the supplied IPs
+// for any hostname. Mirrors internal/mcp/testResolver so the sandbox SSRF
+// regression tests follow the same shape as web_fetch's.
+func testProxyResolver(ips ...string) ProxyResolver {
+	return func(_ context.Context, _ string) ([]net.IP, error) {
+		parsed := make([]net.IP, 0, len(ips))
+		for _, s := range ips {
+			ip := net.ParseIP(s)
+			if ip == nil {
+				return nil, fmt.Errorf("test bug: invalid IP %q", s)
+			}
+			parsed = append(parsed, ip)
+		}
+		return parsed, nil
+	}
+}
 
 func TestProxy_AllowedHTTP(t *testing.T) {
 	// Start a target server pretending to be httpbin.org.
@@ -25,6 +44,7 @@ func TestProxy_AllowedHTTP(t *testing.T) {
 	targetURL, _ := url.Parse(target.URL)
 
 	proxy := NewProxy([]string{targetURL.Hostname()})
+	proxy.AllowLocalhost = true // httptest binds to 127.0.0.1
 	if err := proxy.Start(); err != nil {
 		t.Fatalf("proxy.Start() error: %v", err)
 	}
@@ -93,6 +113,8 @@ func TestProxy_CONNECTAllowed(t *testing.T) {
 
 	// Allow the target's hostname (without port for domain check).
 	proxy := NewProxy([]string{targetURL.Hostname()})
+	proxy.AllowLocalhost = true // httptest TLS server binds to 127.0.0.1
+	proxy.ExtraCONNECTPorts = []string{targetURL.Port()}
 	if err := proxy.Start(); err != nil {
 		t.Fatalf("proxy.Start() error: %v", err)
 	}
@@ -219,6 +241,189 @@ func TestProxy_StopCleansUp(t *testing.T) {
 	if err == nil {
 		conn.Close()
 		t.Error("proxy still accepting connections after Stop")
+	}
+}
+
+// TestProxy_CONNECT_BlocksIMDS verifies that a stub resolver returning the
+// EC2 IMDS link-local address for an allowlisted hostname causes the
+// CONNECT dial to be refused. This is the core DNS-based SSRF regression.
+func TestProxy_CONNECT_BlocksIMDS(t *testing.T) {
+	proxy := NewProxy([]string{"meta.example.com"})
+	proxy.Resolver = testProxyResolver("169.254.169.254")
+	if err := proxy.Start(); err != nil {
+		t.Fatalf("proxy.Start(): %v", err)
+	}
+	defer proxy.Stop()
+
+	conn, err := net.DialTimeout("tcp", proxy.Addr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT meta.example.com:443 HTTP/1.1\r\nHost: meta.example.com:443\r\n\r\n")
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (blocked)", resp.StatusCode)
+	}
+}
+
+// TestProxy_CONNECT_RejectsNonTLSPort verifies that CONNECT is restricted
+// to the TLS port allowlist even when the hostname is otherwise allowed.
+// Before the fix, CONNECT allowed.example.com:22 tunneled raw SSH.
+func TestProxy_CONNECT_RejectsNonTLSPort(t *testing.T) {
+	proxy := NewProxy([]string{"allowed.example.com"})
+	if err := proxy.Start(); err != nil {
+		t.Fatalf("proxy.Start(): %v", err)
+	}
+	defer proxy.Stop()
+
+	conn, err := net.DialTimeout("tcp", proxy.Addr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT allowed.example.com:22 HTTP/1.1\r\nHost: allowed.example.com:22\r\n\r\n")
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (non-TLS port)", resp.StatusCode)
+	}
+}
+
+// TestProxy_CONNECT_AllowsPublicResolvedIP verifies that a validated public
+// IP is actually dialed. The stub resolver claims the allowlisted hostname
+// resolves to 203.0.113.9 (TEST-NET-3), and a stub dialer redirects that
+// pinned address to a real httptest TLS server so the end-to-end path
+// succeeds. The dialer records the pinned addr so the test can assert the
+// dial pinned to the validated IP, not the original hostname.
+func TestProxy_CONNECT_AllowsPublicResolvedIP(t *testing.T) {
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "public ok")
+	}))
+	defer target.Close()
+
+	targetURL, _ := url.Parse(target.URL)
+
+	var dialed atomic.Value // string
+	proxy := NewProxy([]string{"public.example.com"})
+	proxy.ExtraCONNECTPorts = []string{targetURL.Port()}
+	proxy.Resolver = testProxyResolver("203.0.113.9")
+	proxy.Dialer = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialed.Store(addr)
+		// Redirect to the real httptest TLS server.
+		return (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, network, targetURL.Host)
+	}
+	if err := proxy.Start(); err != nil {
+		t.Fatalf("proxy.Start(): %v", err)
+	}
+	defer proxy.Stop()
+
+	conn, err := net.DialTimeout("tcp", proxy.Addr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT public.example.com:%s HTTP/1.1\r\nHost: public.example.com:%s\r\n\r\n",
+		targetURL.Port(), targetURL.Port())
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT status = %d, want 200", resp.StatusCode)
+	}
+
+	got, _ := dialed.Load().(string)
+	if !strings.HasPrefix(got, "203.0.113.9:") {
+		t.Errorf("dial pinned addr = %q, want prefix 203.0.113.9:", got)
+	}
+}
+
+// TestProxy_CONNECT_PinsToPublicIPWhenMixed verifies that a resolver
+// returning both a private and a public IP short-circuits on the private
+// entry: we fail closed if *any* returned IP is in the SSRF denylist,
+// rather than silently pinning to the first public one. This matches the
+// validate-all-then-pin-first policy used by web_fetch.
+func TestProxy_CONNECT_PinsToPublicIPWhenMixed(t *testing.T) {
+	proxy := NewProxy([]string{"mixed.example.com"})
+	proxy.Resolver = testProxyResolver("10.0.0.5", "203.0.113.9")
+	if err := proxy.Start(); err != nil {
+		t.Fatalf("proxy.Start(): %v", err)
+	}
+	defer proxy.Stop()
+
+	conn, err := net.DialTimeout("tcp", proxy.Addr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT mixed.example.com:443 HTTP/1.1\r\nHost: mixed.example.com:443\r\n\r\n")
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (any private IP fails closed)", resp.StatusCode)
+	}
+}
+
+// TestProxy_HTTP_BlocksRFC1918 verifies that a plain HTTP request to an
+// allowlisted domain whose DNS points at an RFC1918 address is refused at
+// dial time.
+func TestProxy_HTTP_BlocksRFC1918(t *testing.T) {
+	proxy := NewProxy([]string{"intranet.example.com"})
+	proxy.Resolver = testProxyResolver("10.0.0.5")
+	if err := proxy.Start(); err != nil {
+		t.Fatalf("proxy.Start(): %v", err)
+	}
+	defer proxy.Stop()
+
+	proxyURL, _ := url.Parse("http://" + proxy.Addr)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		Timeout:   5 * time.Second,
+	}
+	resp, err := client.Get("http://intranet.example.com/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestProxy_HTTP_RejectsLocalhostByName verifies that a literal `localhost`
+// hostname is blocked before DNS resolution, unless AllowLocalhost is set.
+func TestProxy_HTTP_RejectsLocalhostByName(t *testing.T) {
+	proxy := NewProxy([]string{"localhost"})
+	if err := proxy.Start(); err != nil {
+		t.Fatalf("proxy.Start(): %v", err)
+	}
+	defer proxy.Stop()
+
+	proxyURL, _ := url.Parse("http://" + proxy.Addr)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		Timeout:   5 * time.Second,
+	}
+	resp, err := client.Get("http://localhost:6379/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (localhost)", resp.StatusCode)
 	}
 }
 

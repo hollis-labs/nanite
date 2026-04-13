@@ -8,7 +8,7 @@ package contextbroker
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"time"
 )
@@ -160,12 +160,12 @@ func (b *Broker) Fetch(ctx context.Context, intent Intent) (*ContextPacket, erro
 		timings[src.Name()] = elapsed.String()
 
 		if err != nil {
-			log.Printf("contextbroker: source %s error: %v", src.Name(), err)
+			slog.Warn("contextbroker: source error", "source", src.Name(), "err", err)
 			continue
 		}
 
-		log.Printf("contextbroker: source %s returned %d items in %s (budget=%d)",
-			src.Name(), len(items), elapsed, srcBudget)
+		slog.Debug("contextbroker: source returned",
+			"source", src.Name(), "items", len(items), "duration", elapsed, "budget", srcBudget)
 		allItems = append(allItems, items...)
 	}
 
@@ -178,8 +178,9 @@ func (b *Broker) Fetch(ctx context.Context, intent Intent) (*ContextPacket, erro
 	packet := b.trimToBudget(allItems, intent)
 	packet.Manifest.Timings = timings
 
-	log.Printf("contextbroker: assembled packet — %d items, ~%d tokens (budget=%d, truncated=%v)",
-		packet.Manifest.ItemCount, packet.TokenEstimate, b.budget.MaxTokens, packet.Manifest.Truncated)
+	slog.Info("contextbroker: assembled packet",
+		"items", packet.Manifest.ItemCount, "tokens", packet.TokenEstimate,
+		"budget", b.budget.MaxTokens, "truncated", packet.Manifest.Truncated)
 
 	return packet, nil
 }

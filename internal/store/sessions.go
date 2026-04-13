@@ -477,7 +477,9 @@ func (s *Store) UpdateSessionCompaction(id, summary string) error {
 	return nil
 }
 
-// ForkSession creates a new session based on a source session, copying agents and optionally messages.
+// ForkSession creates a new session based on a source session, copying agents
+// and optionally messages. The entire operation runs inside a single
+// transaction — if any step fails, no partial child session is left behind.
 func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bool) (*Session, error) {
 	src, err := s.GetSession(sourceID)
 	if err != nil {
@@ -518,38 +520,117 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 		}
 	}
 
-	if err := s.CreateSession(newSess); err != nil {
-		return nil, fmt.Errorf("create forked session: %w", err)
-	}
-
-	// Copy session agents.
+	// Read-side lookups (agents, messages) happen before the tx to keep the
+	// write transaction short and avoid read/write interleaving on the same
+	// connection.
 	agents, err := s.ListSessionAgents(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("list source agents: %w", err)
 	}
+
+	var msgs []Message
+	if copyMessages {
+		const maxMessages = 10000
+		msgs, err = s.ListMessages(sourceID, maxMessages)
+		if err != nil {
+			return nil, fmt.Errorf("list source messages: %w", err)
+		}
+		if len(msgs) >= maxMessages {
+			return nil, fmt.Errorf("source session has too many messages (>=%d); fork/clone is not supported for sessions this large", maxMessages)
+		}
+	}
+
+	// Assign new session ID + short code before opening tx; short_code
+	// generation requires its own read and is safely idempotent.
+	if newSess.ID == "" {
+		newSess.ID = uuid.New().String()
+	}
+	code, err := s.NextShortCode()
+	if err != nil {
+		return nil, fmt.Errorf("generate short code: %w", err)
+	}
+	newSess.ShortCode = code
+	if newSess.Status == "" {
+		newSess.Status = "active"
+	}
+	if newSess.Metadata == "" {
+		newSess.Metadata = "{}"
+	}
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin fork tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if _, err := tx.Exec(
+		`INSERT INTO sessions (id, short_code, title, custom_name, workspace_id, project_id,
+		                       context_type, context_id, provider, model,
+		                       status, is_pinned, sort_order, message_count,
+		                       metadata, last_activity, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+		newSess.ID, newSess.ShortCode, nullIfEmpty(newSess.Title), nullIfEmpty(newSess.CustomName),
+		nullIfEmpty(newSess.WorkspaceID), nullIfEmpty(newSess.ProjectID),
+		nullIfEmpty(newSess.ContextType), nullIfEmpty(newSess.ContextID),
+		nullIfEmpty(newSess.Provider), nullIfEmpty(newSess.Model),
+		newSess.Status, newSess.IsPinned, newSess.SortOrder,
+		newSess.Metadata, now, now, now,
+	); err != nil {
+		return nil, fmt.Errorf("create forked session: %w", err)
+	}
+
+	// Copy session agents inside the tx.
 	for _, sa := range agents {
-		if err := s.EnsureSessionAgent(newSess.ID, sa.AgentID, sa.Mode, sa.IsPrimary); err != nil {
+		if _, err := tx.Exec(
+			`INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(session_id, agent_id) DO UPDATE SET mode = excluded.mode, is_primary = excluded.is_primary`,
+			newSess.ID, sa.AgentID, sa.Mode, now, sa.IsPrimary,
+		); err != nil {
 			return nil, fmt.Errorf("copy agent %s: %w", sa.AgentID, err)
 		}
 	}
 
-	// Copy messages if requested.
-	if copyMessages {
-		if err := s.CopyMessages(sourceID, newSess.ID); err != nil {
-			return nil, fmt.Errorf("copy messages: %w", err)
+	// Copy messages inside the same tx. Bulk-insert one statement per row,
+	// but all under a single tx + single final message_count update.
+	if copyMessages && len(msgs) > 0 {
+		for _, m := range msgs {
+			if _, err := tx.Exec(
+				`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				uuid.New().String(), newSess.ID, nullIfEmpty(m.AgentID), m.Role, m.Content,
+				nullIfEmpty(m.Envelope), m.Metadata, nullIfEmpty(m.ParentID), m.IsCompacted, now,
+			); err != nil {
+				return nil, fmt.Errorf("copy message: %w", err)
+			}
 		}
-		// Reload to get accurate message_count.
-		newSess, err = s.GetSession(newSess.ID)
-		if err != nil {
-			return nil, fmt.Errorf("reload forked session: %w", err)
+		// One UPDATE to set message_count to the actual copied count, avoiding
+		// N separate +1 updates.
+		if _, err := tx.Exec(
+			`UPDATE sessions SET message_count = ?, last_activity = ?, updated_at = ? WHERE id = ?`,
+			len(msgs), now, now, newSess.ID,
+		); err != nil {
+			return nil, fmt.Errorf("update forked session message_count: %w", err)
 		}
+		newSess.MessageCount = len(msgs)
 	}
 
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit fork tx: %w", err)
+	}
+
+	newSess.LastActivity = now
+	newSess.CreatedAt = now
+	newSess.UpdatedAt = now
 	return newSess, nil
 }
 
 // CopyMessages copies all messages from one session to another, assigning new IDs.
 // Returns an error if the source session exceeds the 10,000 message limit.
+// All inserts plus the final message_count update run inside a single
+// transaction, so a mid-copy failure leaves the target session unchanged.
 func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
 	const maxMessages = 10000
 	msgs, err := s.ListMessages(sourceSessionID, maxMessages)
@@ -559,22 +640,36 @@ func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
 	if len(msgs) >= maxMessages {
 		return fmt.Errorf("source session has too many messages (>=%d); fork/clone is not supported for sessions this large", maxMessages)
 	}
+	if len(msgs) == 0 {
+		return nil
+	}
 
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin copy tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339)
 	for _, m := range msgs {
-		newMsg := &Message{
-			ID:        uuid.New().String(),
-			SessionID: targetSessionID,
-			AgentID:   m.AgentID,
-			Role:      m.Role,
-			Content:   m.Content,
-			Envelope:  m.Envelope,
-			Metadata:  m.Metadata,
-		}
-		if err := s.CreateMessage(newMsg); err != nil {
+		if _, err := tx.Exec(
+			`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			uuid.New().String(), targetSessionID, nullIfEmpty(m.AgentID), m.Role, m.Content,
+			nullIfEmpty(m.Envelope), m.Metadata, nullIfEmpty(m.ParentID), m.IsCompacted, now,
+		); err != nil {
 			return fmt.Errorf("copy message: %w", err)
 		}
 	}
-	return nil
+
+	if _, err := tx.Exec(
+		`UPDATE sessions SET message_count = message_count + ?, last_activity = ?, updated_at = ? WHERE id = ?`,
+		len(msgs), now, now, targetSessionID,
+	); err != nil {
+		return fmt.Errorf("update target session counts: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // SearchResult represents a single search hit with context.

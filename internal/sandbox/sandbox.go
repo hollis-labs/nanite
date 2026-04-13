@@ -4,23 +4,48 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
 var baseDirName = "." + brand.ID + "/sandboxes"
 const sandboxSubDir = ".sandbox"
 
+// sessionIDRe is the character class allowed for session IDs when they are
+// used as filesystem path components under the sandbox base dir. Matches
+// UUIDs, slugs, and short test names; excludes every byte that has meaning
+// to path resolution (`/`, `.`) or sandbox-exec profile tokenizing
+// (quotes, parens, semicolons, whitespace, control chars).
+var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
 // Dir returns the sandbox directory path for a session, creating it and
-// the .sandbox/ subdirectory if needed.
+// the .sandbox/ subdirectory if needed. The session ID is validated against
+// a strict character class and the resolved path is verified to stay under
+// the sandbox base dir via pathsafe.ResolveUnder. An attempt to escape the
+// base dir returns a *pathsafe.EscapeError.
 func Dir(sessionID string) (string, error) {
+	if !sessionIDRe.MatchString(sessionID) {
+		return "", fmt.Errorf("sandbox: invalid session id (want %s)", sessionIDRe.String())
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("sandbox: resolve home dir: %w", err)
 	}
-	dir := filepath.Join(home, baseDirName, sessionID)
+	base := filepath.Join(home, baseDirName)
+	if err := os.MkdirAll(base, 0755); err != nil {
+		return "", fmt.Errorf("sandbox: create base dir: %w", err)
+	}
+	// Defense-in-depth: re-validate through pathsafe so a symlinked base dir
+	// or a future caller passing a novel session id shape still cannot
+	// escape the sandbox root.
+	dir, err := pathsafe.ResolveUnder(base, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("sandbox: resolve session dir: %w", err)
+	}
 	subDir := filepath.Join(dir, sandboxSubDir)
 	if err := os.MkdirAll(subDir, 0755); err != nil {
 		return "", fmt.Errorf("sandbox: create dir: %w", err)
@@ -54,11 +79,3 @@ func Populate(dir string, agent *store.AgentProfile, mode *store.AgentMode, opts
 	return nil
 }
 
-// writeFile is a convenience helper for writing a single file into a directory.
-func writeFile(dir, name, content string) error {
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return fmt.Errorf("sandbox: write %s: %w", name, err)
-	}
-	return nil
-}

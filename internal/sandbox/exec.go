@@ -136,6 +136,14 @@ func AgentExec(opts AgentExecOpts) (*ExecResult, error) {
 	}
 	defer cleanup()
 
+	// Start the command in its own process group, and on ctx cancel send
+	// SIGTERM to the whole group before Go's internal SIGKILL. This reaps
+	// grandchildren that sandbox-exec (macOS) or a shell interpreter
+	// forks — the audit's orphan-process finding (07). WaitDelay bounds
+	// the cleanup window so Wait() cannot block forever on an orphaned
+	// stdio pipe.
+	setProcessGroupKill(cmd)
+
 	return runCmd(ctx, cmd, timeout)
 }
 
@@ -171,6 +179,9 @@ func UserExec(opts UserExecOpts) (*ExecResult, error) {
 		}
 		defer cleanup()
 	}
+
+	// See AgentExec: process group + signal cascade to reap grandchildren.
+	setProcessGroupKill(cmd)
 
 	return runCmd(ctx, cmd, timeout)
 }

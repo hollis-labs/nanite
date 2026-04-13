@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 )
 
@@ -43,7 +43,7 @@ func (s *ConduitSource) Fetch(ctx context.Context, intent Intent, budget int) ([
 	// Try context_broker_fetch first for structured retrieval.
 	items, err := s.fetchViaBroker(ctx, conduitIntent, intent, budget)
 	if err != nil {
-		log.Printf("contextbroker/conduit: broker_fetch failed: %v — falling back to search", err)
+		slog.Warn("contextbroker/conduit: broker_fetch failed — falling back to search", "err", err)
 		// Fall back to keyword search.
 		return s.fetchViaSearch(ctx, intent, budget)
 	}

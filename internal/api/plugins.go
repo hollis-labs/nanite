@@ -5,9 +5,10 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,10 +16,29 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/pathsafe"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	fplugin "github.com/hollis-labs/go-plugin"
+)
+
+// Archive extraction caps — defense against zip-bomb / tar-bomb plugin
+// archives uploaded via handleInstallArchive. Breaches return a
+// *archiveLimitError wrapping fmt.Errorf with exact bytes/counts so
+// operators can raise caps deliberately if a legitimate plugin trips them.
+const (
+	// maxArchiveFileSize bounds a single decompressed file (100 MiB). A
+	// Nanite plugin shipping a binary over this cap should split or
+	// externalize it.
+	maxArchiveFileSize int64 = 100 * 1024 * 1024
+	// maxArchiveTotalSize bounds cumulative decompressed bytes across all
+	// entries (500 MiB). Defends against many-small-files bombs that slip
+	// under the per-file cap.
+	maxArchiveTotalSize int64 = 500 * 1024 * 1024
+	// maxArchiveFileCount bounds entry count (10,000). Defends against
+	// inode-exhaustion bombs (millions of 0-byte entries).
+	maxArchiveFileCount = 10_000
 )
 
 // PluginInfo is the JSON representation of a plugin in the management API.
@@ -204,7 +224,19 @@ func (pms *pluginManagerState) handleInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	target := filepath.Join(pms.pluginsDir, req.Name)
+	// Confine the plugin target path under pluginsDir. A name like
+	// "../../etc/passwd" would otherwise place the cloned repo outside the
+	// plugins directory (audit finding: Critical — path traversal in install).
+	target, err := pathsafe.ResolveUnder(pms.pluginsDir, req.Name)
+	if err != nil {
+		var escErr *pathsafe.EscapeError
+		if errors.As(err, &escErr) {
+			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", escErr))
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", err))
+		return
+	}
 
 	// Check if already installed.
 	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err == nil {
@@ -280,7 +312,20 @@ func (pms *pluginManagerState) handleInstallLocal(w http.ResponseWriter, r *http
 		return
 	}
 
-	target := filepath.Join(pms.pluginsDir, manifest.Name)
+	// Confine the plugin target path under pluginsDir. A manifest whose name
+	// includes ".." would otherwise copy the plugin contents outside the
+	// configured plugins directory (audit finding: Critical — path traversal
+	// via local-install manifest name).
+	target, err := pathsafe.ResolveUnder(pms.pluginsDir, manifest.Name)
+	if err != nil {
+		var escErr *pathsafe.EscapeError
+		if errors.As(err, &escErr) {
+			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", escErr))
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", err))
+		return
+	}
 	if fileExists(filepath.Join(target, "plugin.yaml")) {
 		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", manifest.Name))
 		return
@@ -391,7 +436,17 @@ func (pms *pluginManagerState) handleInstallArchive(w http.ResponseWriter, r *ht
 		return
 	}
 
-	target := filepath.Join(pms.pluginsDir, manifest.Name)
+	// Confine archive-derived plugin target under pluginsDir.
+	target, err := pathsafe.ResolveUnder(pms.pluginsDir, manifest.Name)
+	if err != nil {
+		var escErr *pathsafe.EscapeError
+		if errors.As(err, &escErr) {
+			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", escErr))
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name in manifest: %v", err))
+		return
+	}
 	if fileExists(filepath.Join(target, "plugin.yaml")) {
 		pms.errorResp(w, http.StatusConflict, fmt.Sprintf("plugin %q is already installed", manifest.Name))
 		return
@@ -537,7 +592,7 @@ func (pms *pluginManagerState) runPluginUninstallCleanup(manifestPath string) {
 		// Use a minimal host backed by the live store
 		host := naniteplugin.NewHostWithStore(pms.store)
 		if err := u.Uninstall(host); err != nil {
-			log.Printf("plugin-api: uninstall cleanup for %s: %v", manifest.Name, err)
+			slog.Warn("plugin-api: uninstall cleanup failed", "name", manifest.Name, "err", err)
 		}
 	}
 }
@@ -553,7 +608,7 @@ func (pms *pluginManagerState) unloadPluginFromHost(manifestPath string) {
 		return
 	}
 	if err := pms.pluginHost.UnloadPlugin(manifest.Name); err != nil {
-		log.Printf("plugin-api: unload %s: %v", manifest.Name, err)
+		slog.Warn("plugin-api: unload failed", "name", manifest.Name, "err", err)
 	}
 }
 
@@ -572,7 +627,7 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 	// Build config.
 	cfg, err := naniteplugin.NewPluginConfig(manifest.Name, pluginDir)
 	if err != nil {
-		log.Printf("plugin-api: config for %s: %v", manifest.Name, err)
+		slog.Warn("plugin-api: config failed", "name", manifest.Name, "err", err)
 		return
 	}
 	pms.pluginHost.SetPluginConfig(manifest.Name, cfg)
@@ -582,7 +637,7 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 	if manifest.Runtime == "subprocess" {
 		// Subprocess plugin: create a SubprocessPlugin bridge.
 		if manifest.Entrypoint == "" {
-			log.Printf("plugin-api: subprocess plugin %s has no entrypoint", manifest.Name)
+			slog.Warn("plugin-api: subprocess plugin has no entrypoint", "name", manifest.Name)
 			return
 		}
 		command := manifest.Entrypoint
@@ -617,16 +672,16 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 		// Builtin plugin: use compiled-in constructor.
 		constructor, ok := naniteplugin.LookupConstructor(manifest.Name)
 		if !ok {
-			log.Printf("plugin-api: no constructor for %s (not compiled in)", manifest.Name)
+			slog.Warn("plugin-api: no constructor (not compiled in)", "name", manifest.Name)
 			return
 		}
 		p = constructor()
 	}
 
 	if err := pms.pluginHost.LoadPlugin(p); err != nil {
-		log.Printf("plugin-api: hot-load %s: %v", manifest.Name, err)
+		slog.Warn("plugin-api: hot-load failed", "name", manifest.Name, "err", err)
 	} else {
-		log.Printf("plugin-api: hot-loaded plugin %s", manifest.Name)
+		slog.Info("plugin-api: hot-loaded plugin", "name", manifest.Name)
 	}
 }
 
@@ -686,6 +741,12 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// extractedFileClose is the hook used by extractTarGz / extractZip to close
+// the per-entry destination file. Tests override this to simulate a close
+// failure (e.g. a buffered-fs flush error) without needing to mock the
+// kernel. Production path just calls the file's Close method.
+var extractedFileClose = func(f *os.File) error { return f.Close() }
+
 // extractTarGz extracts a .tar.gz archive to the given directory.
 func extractTarGz(archivePath, destDir string) error {
 	f, err := os.Open(archivePath)
@@ -701,6 +762,10 @@ func extractTarGz(archivePath, destDir string) error {
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
+	var (
+		totalBytes int64
+		entryCount int
+	)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -710,11 +775,16 @@ func extractTarGz(archivePath, destDir string) error {
 			return fmt.Errorf("tar: %w", err)
 		}
 
-		target := filepath.Join(destDir, hdr.Name)
+		entryCount++
+		if entryCount > maxArchiveFileCount {
+			return fmt.Errorf("archive too many entries: %d > %d", entryCount, maxArchiveFileCount)
+		}
 
-		// Guard against zip-slip (path traversal).
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("illegal path in archive: %s", hdr.Name)
+		// Path confinement via pathsafe.ResolveUnder. Defends against
+		// absolute paths, `..` segments, and symlink-pointed entries.
+		target, err := pathsafe.ResolveUnder(destDir, hdr.Name)
+		if err != nil {
+			return fmt.Errorf("illegal path in archive: %s: %w", hdr.Name, err)
 		}
 
 		switch hdr.Typeflag {
@@ -723,6 +793,15 @@ func extractTarGz(archivePath, destDir string) error {
 				return err
 			}
 		case tar.TypeReg:
+			// Per-file size cap using the declared header size. tar
+			// headers carry Size; reject obvious bombs before opening
+			// the destination file.
+			if hdr.Size > maxArchiveFileSize {
+				return fmt.Errorf("archive file too large: %s declared %d > %d", hdr.Name, hdr.Size, maxArchiveFileSize)
+			}
+			if totalBytes+hdr.Size > maxArchiveTotalSize {
+				return fmt.Errorf("archive total size too large: %d + %d > %d", totalBytes, hdr.Size, maxArchiveTotalSize)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
@@ -730,11 +809,25 @@ func extractTarGz(archivePath, destDir string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
+			// Defense-in-depth against mismatched-header bombs (Size in
+			// header underreports actual stream length): cap the copy at
+			// maxArchiveFileSize + 1 so a liar trips the per-file cap.
+			//nolint:gosec // G110: copy is explicitly bounded by io.LimitReader below; bomb is rejected before it can exhaust disk/memory.
+			written, err := io.Copy(out, io.LimitReader(tr, maxArchiveFileSize+1))
+			closeErr := extractedFileClose(out)
+			if err != nil {
 				return err
 			}
-			out.Close()
+			if closeErr != nil {
+				return fmt.Errorf("close extracted file: %w", closeErr)
+			}
+			if written > maxArchiveFileSize {
+				return fmt.Errorf("archive file too large: %s exceeded %d during decompress", hdr.Name, maxArchiveFileSize)
+			}
+			totalBytes += written
+			if totalBytes > maxArchiveTotalSize {
+				return fmt.Errorf("archive total size too large: %d > %d", totalBytes, maxArchiveTotalSize)
+			}
 		}
 	}
 	return nil
@@ -748,12 +841,16 @@ func extractZip(archivePath, destDir string) error {
 	}
 	defer zr.Close()
 
-	for _, f := range zr.File {
-		target := filepath.Join(destDir, f.Name)
+	if len(zr.File) > maxArchiveFileCount {
+		return fmt.Errorf("archive too many entries: %d > %d", len(zr.File), maxArchiveFileCount)
+	}
 
-		// Guard against zip-slip.
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("illegal path in archive: %s", f.Name)
+	var totalBytes int64
+	for _, f := range zr.File {
+		// Path confinement via pathsafe.ResolveUnder.
+		target, err := pathsafe.ResolveUnder(destDir, f.Name)
+		if err != nil {
+			return fmt.Errorf("illegal path in archive: %s: %w", f.Name, err)
 		}
 
 		if f.FileInfo().IsDir() {
@@ -761,6 +858,19 @@ func extractZip(archivePath, destDir string) error {
 				return err
 			}
 			continue
+		}
+
+		// Per-file cap on declared uncompressed size. zip header
+		// UncompressedSize64 is authoritative for zip; an archive with a
+		// mismatched header is rejected by the io.LimitReader sentinel
+		// below.
+		//nolint:gosec // G115: UncompressedSize64 is uint64; cap is 100 MiB so any value above maxArchiveFileSize trips the >= check before any int64 conversion risk.
+		declared := f.UncompressedSize64
+		if declared > uint64(maxArchiveFileSize) {
+			return fmt.Errorf("archive file too large: %s declared %d > %d", f.Name, declared, maxArchiveFileSize)
+		}
+		if totalBytes+int64(declared) > maxArchiveTotalSize {
+			return fmt.Errorf("archive total size too large: %d + %d > %d", totalBytes, declared, maxArchiveTotalSize)
 		}
 
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
@@ -776,11 +886,25 @@ func extractZip(archivePath, destDir string) error {
 			rc.Close()
 			return err
 		}
-		_, err = io.Copy(out, rc)
-		out.Close()
+		// Bounded copy: reject at maxArchiveFileSize+1 bytes. Defends
+		// against a compressed entry whose actual expansion exceeds the
+		// declared UncompressedSize64 (header mismatch bombs).
+		//nolint:gosec // G110: copy is explicitly bounded by io.LimitReader; bomb is rejected before disk/memory exhaustion.
+		written, err := io.Copy(out, io.LimitReader(rc, maxArchiveFileSize+1))
+		closeErr := extractedFileClose(out)
 		rc.Close()
 		if err != nil {
 			return err
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close extracted file: %w", closeErr)
+		}
+		if written > maxArchiveFileSize {
+			return fmt.Errorf("archive file too large: %s exceeded %d during decompress", f.Name, maxArchiveFileSize)
+		}
+		totalBytes += written
+		if totalBytes > maxArchiveTotalSize {
+			return fmt.Errorf("archive total size too large: %d > %d", totalBytes, maxArchiveTotalSize)
 		}
 	}
 	return nil

@@ -2,7 +2,7 @@ package broker
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,8 +64,8 @@ func LoadRules(workingDir string) *RuleSet {
 	}
 
 	if len(merged.Rules) > 0 || len(merged.Presets) > 0 {
-		log.Printf("broker/rules: loaded %d rules, %d presets, %d always-available",
-			len(merged.Rules), len(merged.Presets), len(merged.AlwaysAvailable))
+		slog.Info("broker/rules: loaded",
+			"rules", len(merged.Rules), "presets", len(merged.Presets), "always_available", len(merged.AlwaysAvailable))
 	}
 
 	return merged

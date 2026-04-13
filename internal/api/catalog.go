@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -349,7 +349,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		}
 	} else if sourcePublicKey != "" && entry.Signature == "" {
 		// Source has a key but plugin is unsigned — warn but allow.
-		log.Printf("catalog: WARNING plugin %q from %s is unsigned (source has a trusted key)", entry.Name, entry.SourceName)
+		slog.Warn("catalog: plugin is unsigned (source has a trusted key)", "name", entry.Name, "source", entry.SourceName)
 	}
 
 	// Extract the archive.

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // AgentConstraints holds parsed runtime constraints from AgentProfile.Constraints.
@@ -106,22 +107,41 @@ func IsPTYProvider(name string) bool {
 }
 
 // InferProvider maps a model name to a provider when the session has no
-// explicit provider set.
+// explicit provider set. Resolution order:
+//
+//  1. Exact lookup in the canonical registry (pkg/models). This covers
+//     every seeded model including o4-mini, gemini-*, mistral-*, codestral,
+//     and gateway-prefixed IDs — none of which the old prefix-based switch
+//     handled correctly.
+//  2. Gateway-prefix helper for bare prefixed IDs not yet registered.
+//  3. DefaultProvider (anthropic) as the terminal fallback.
+//
+// See audit 2026-04-11 finding 02 for the misroutes this replaces.
 func InferProvider(model string) string {
-	switch {
-	case model == "claude-cli":
-		return "pty"
-	case model == "codex-cli":
-		return "pty-codex"
-	case model == "gemini-cli":
-		return "pty-gemini"
-	case strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "o1-") || strings.HasPrefix(model, "o3-"):
-		return "openai"
-	case strings.HasPrefix(model, "llama") || strings.HasPrefix(model, "mistral") || strings.HasPrefix(model, "gemma"):
-		return "ollama"
-	default:
-		return "anthropic"
+	if p := models.ProviderFor(model); p != "" {
+		return p
 	}
+	if p, ok := models.ProviderHasPrefix(model); ok {
+		return p
+	}
+	// Unregistered-model fallbacks. Keep OpenAI GPT family and
+	// Ollama-style local names routable until the registry is expanded or
+	// the operator registers the row explicitly. Mistral API models are
+	// intentionally not prefix-matched here (see audit 02): Mistral API
+	// IDs end with "-latest" and must be registered to resolve correctly.
+	switch {
+	case strings.HasPrefix(model, "gpt-"),
+		strings.HasPrefix(model, "o1-"),
+		strings.HasPrefix(model, "o3-"),
+		strings.HasPrefix(model, "o4-"):
+		return "openai"
+	case strings.HasPrefix(model, "llama"),
+		strings.HasPrefix(model, "gemma"),
+		strings.HasPrefix(model, "mistral-7b"),
+		strings.Contains(model, ":"): // "model:tag" is an ollama-ism
+		return "ollama"
+	}
+	return models.DefaultProvider()
 }
 
 // TruncateStr truncates a string to maxLen, appending "..." if truncated.

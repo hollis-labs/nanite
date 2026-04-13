@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
-	feotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/truncate"
 )
 
@@ -93,7 +94,7 @@ func (s *chatServiceImpl) preCheckTools(
 			ls.recordToolCall(tu.Name, false)
 			blockedResult := fmt.Sprintf("BLOCKED: Tool %q has been hard-blocked due to repeated identical results or iteration limit. "+
 				"Do NOT call this tool again. Use a different approach or inform the user.", tu.Name)
-			log.Printf("chat-service: tool %s SKIPPED (blocked)", tu.Name)
+			slog.Warn("chat-service: tool SKIPPED (blocked)", "tool", tu.Name)
 			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult}
 			block := provider.ContentBlock{
@@ -116,10 +117,12 @@ func (s *chatServiceImpl) preCheckTools(
 			}
 			permResult := s.permissions.Check(ctx, sessionID, tu.Name, tu.Input, meta)
 			switch permResult.Decision {
+			case permission.DecisionAllow:
+				// Allow: fall through to tool execution below.
 			case permission.DecisionDeny:
 				ls.recordToolCall(tu.Name, false)
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
-				log.Printf("chat-service: tool %s denied: %s", tu.Name, permResult.Reason)
+				slog.Warn("chat-service: tool denied", "tool", tu.Name, "reason", permResult.Reason)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
 				block := provider.ContentBlock{
@@ -152,7 +155,7 @@ func (s *chatServiceImpl) preCheckTools(
 						denyReason = "approval timed out"
 					}
 					denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, denyReason)
-					log.Printf("chat-service: tool %s denied (%s, scope: %s)", tu.Name, denyReason, resp.Scope)
+					slog.Warn("chat-service: tool denied", "tool", tu.Name, "reason", denyReason, "scope", resp.Scope)
 					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 					ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
 					// Warn user when consecutive failures approach the stop threshold.
@@ -177,8 +180,28 @@ func (s *chatServiceImpl) preCheckTools(
 					plans = append(plans, plan)
 					continue
 				}
-				log.Printf("chat-service: tool %s approved (scope: %s)", tu.Name, resp.Scope)
+				slog.Info("chat-service: tool approved", "tool", tu.Name, "scope", resp.Scope)
 				ls.continueWith(ContinuePermission, fmt.Sprintf("tool %s approved (scope: %s)", tu.Name, resp.Scope))
+
+			default:
+				// Fail closed on any unknown Decision value (defence against future
+				// enum additions that might otherwise silently fall through to tool
+				// execution).
+				ls.recordToolCall(tu.Name, false)
+				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — unknown permission decision %q", tu.Name, permResult.Decision)
+				slog.Warn("chat-service: tool denied, unknown permission decision", "tool", tu.Name, "decision", permResult.Decision)
+				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
+				block := provider.ContentBlock{
+					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
+				}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+				plan.status = toolPlanDenied
+				plan.denyReason = fmt.Sprintf("unknown permission decision %q", permResult.Decision)
+				plan.resultBlock = &block
+				plan.ref = &ref
+				plans = append(plans, plan)
+				continue
 			}
 		}
 
@@ -194,7 +217,7 @@ func (s *chatServiceImpl) preCheckTools(
 			if cancelled {
 				ls.recordToolCall(tu.Name, false)
 				blockMsg := fmt.Sprintf("BLOCKED: Tool %q was blocked by a plugin policy hook. Do NOT retry this tool call with the same input.", tu.Name)
-				log.Printf("chat-service: tool %s blocked by plugin pre-hook", tu.Name)
+				slog.Info("chat-service: tool blocked by plugin pre-hook", "tool", tu.Name)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockMsg}
 				block := provider.ContentBlock{
@@ -257,11 +280,12 @@ func (s *chatServiceImpl) executeToolBatch(
 		var mu sync.Mutex // protects ch sends ordering (presence events)
 		for _, ip := range concurrent {
 			wg.Add(1)
-			go func(ip indexedPlan) {
+			ipc := ip
+			safego.Go(ctx, "service.chat.executeSingleTool.concurrent", func() {
 				defer wg.Done()
-				result := s.executeSingleTool(ctx, ip.plan.tu, agentID, sessionID, ch, &mu)
-				results[ip.planIdx] = result
-			}(ip)
+				result := s.executeSingleTool(ctx, ipc.plan.tu, agentID, sessionID, ch, &mu)
+				results[ipc.planIdx] = result
+			})
 		}
 		wg.Wait()
 	}
@@ -314,7 +338,7 @@ func (s *chatServiceImpl) executeSingleTool(
 			Metadata:  map[string]interface{}{"tool_name": tu.Name},
 		}
 		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterToolResult, resultText, fctx); err != nil {
-			log.Printf("chat-service: tool_result filter error for %s: %v", tu.Name, err)
+			slog.Warn("chat-service: tool_result filter error", "tool", tu.Name, "err", err)
 		} else if fs, ok := filtered.(string); ok {
 			resultText = fs
 		}
@@ -323,7 +347,7 @@ func (s *chatServiceImpl) executeSingleTool(
 	if toolIsError {
 		toolSpan.RecordError(fmt.Errorf("%s", resultText))
 		toolSpan.SetStatus(codes.Error, resultText)
-		log.Printf("chat-service: tool %s failed: %s", tu.Name, resultText)
+		slog.Warn("chat-service: tool failed", "tool", tu.Name, "content", resultText)
 		s.store.LogEvent(sessionID, "tool_error", "error",
 			fmt.Sprintf("%s: %s", tu.Name, resultText), "{}")
 		if s.events != nil {
@@ -453,8 +477,9 @@ func (s *chatServiceImpl) postProcessToolResults(
 		}
 
 		if tr.Truncated {
-			log.Printf("chat-service: tool %s result truncated: %d → %d chars (saved to %s)",
-				tu.Name, tr.OriginalLen, len(tr.Content), tr.OutputPath)
+			slog.Info("chat-service: tool result truncated",
+				"tool", tu.Name, "original_len", tr.OriginalLen,
+				"truncated_len", len(tr.Content), "path", tr.OutputPath)
 			s.store.LogEvent(sessionID, "tool_truncated", "context",
 				tu.Name, fmt.Sprintf(`{"original_len":%d,"truncated_len":%d,"output_path":%q}`,
 					tr.OriginalLen, len(tr.Content), tr.OutputPath))

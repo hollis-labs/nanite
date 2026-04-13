@@ -3,7 +3,7 @@ package context
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/go-providers/provider"
@@ -114,7 +114,7 @@ func stageDropEnrichment(ctx context.Context, p *CompactionPipeline) (bool, erro
 	savedTokens := slot.TokenCount
 	p.Window.SetContent(SlotContext, "")
 	p.Window.SetFlags(SlotContext, SlotFlags{EnrichmentActive: false})
-	log.Printf("compaction: dropped context enrichment, saved ~%d tokens", savedTokens)
+	slog.Info("compaction: dropped context enrichment", "saved_tokens", savedTokens)
 	return true, nil
 }
 
@@ -122,7 +122,7 @@ func stageDropEnrichment(ctx context.Context, p *CompactionPipeline) (bool, erro
 
 func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, error) {
 	if p.Summarizer == nil {
-		log.Printf("compaction: no summarizer configured, skipping summary stage")
+		slog.Warn("compaction: no summarizer configured, skipping summary stage")
 		return false, nil
 	}
 	msgs := p.ConversationMessages
@@ -170,8 +170,9 @@ func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, err
 
 	p.ConversationMessages = append([]provider.ChatMessage{summaryMsg}, keepSpan...)
 
-	log.Printf("compaction: summarized %d messages (%d→%d tokens, saved ~%d)",
-		len(compactSpan), oldTokens, newTokens, oldTokens-newTokens)
+	slog.Info("compaction: summarized messages",
+		"count", len(compactSpan), "old_tokens", oldTokens, "new_tokens", newTokens,
+		"saved", oldTokens-newTokens)
 
 	return true, nil
 }
@@ -221,7 +222,7 @@ func stageStripToolBlocks(ctx context.Context, p *CompactionPipeline) (bool, err
 	}
 
 	if stripped > 0 {
-		log.Printf("compaction: stripped %d tool blocks from conversation", stripped)
+		slog.Info("compaction: stripped tool blocks from conversation", "count", stripped)
 	}
 	return stripped > 0, nil
 }

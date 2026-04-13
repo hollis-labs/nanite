@@ -1,7 +1,7 @@
 package skill
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,7 +77,7 @@ func discoverDir(dir, source string) []*Definition {
 		path := filepath.Join(dir, e.Name())
 		def, err := ParseMDFile(path)
 		if err != nil {
-			log.Printf("skill: skipping %s: %v", path, err)
+			slog.Warn("skill: skipping", "path", path, "err", err)
 			continue
 		}
 		def.Source = source

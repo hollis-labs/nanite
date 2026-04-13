@@ -1,9 +1,12 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // FilterView specifies what context subset a filter receives.
@@ -144,7 +147,17 @@ func (r *FilterRegistry) Apply(name string, data interface{}, ctx FilterContext)
 	for _, entry := range handlers {
 		// Apply the view: strip data the handler should not see.
 		visible := stripForView(current, entry.View)
-		result, err := entry.Fn(visible, ctx)
+		var (
+			result interface{}
+			err    error
+		)
+		// Plugin-code invocation boundary: recover panics from filter Fn.
+		// No ctx in scope — use Background; Apply has no context.Context parameter
+		// in its signature, and adding one is a signature change per TASK-013 policy.
+		e := entry
+		safego.Call(context.Background(), "plugin-hook.filter-apply."+name, func() {
+			result, err = e.Fn(visible, ctx)
+		})
 		if err != nil {
 			return nil, fmt.Errorf("filter %q (plugin %q, priority %d): %w",
 				name, entry.PluginID, entry.Priority, err)

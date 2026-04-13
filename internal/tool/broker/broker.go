@@ -13,7 +13,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/tool"
@@ -76,28 +76,28 @@ func (b *Broker) Select(ctx context.Context, signals IntentSignals) *Selection {
 	// Layer 1: Explicit.
 	if sel := b.layerExplicit(signals); sel != nil {
 		sel.Signals = string(sigJSON)
-		log.Printf("broker: layer 1 (explicit) resolved %d tools in %v", len(sel.Tools), time.Since(start))
+		slog.Debug("broker: layer 1 (explicit) resolved", "count", len(sel.Tools), "duration", time.Since(start))
 		return sel
 	}
 
 	// Layer 2: Rule-based.
 	if sel := b.layerRules(signals); sel != nil {
 		sel.Signals = string(sigJSON)
-		log.Printf("broker: layer 2 (rules) resolved %d tools in %v", len(sel.Tools), time.Since(start))
+		slog.Debug("broker: layer 2 (rules) resolved", "count", len(sel.Tools), "duration", time.Since(start))
 		return sel
 	}
 
 	// Layer 3: Classifier.
 	if sel := b.layerClassifier(signals); sel != nil {
 		sel.Signals = string(sigJSON)
-		log.Printf("broker: layer 3 (classifier) resolved %d tools in %v", len(sel.Tools), time.Since(start))
+		slog.Debug("broker: layer 3 (classifier) resolved", "count", len(sel.Tools), "duration", time.Since(start))
 		return sel
 	}
 
 	// Fallback: always-available set + top tools by category diversity.
 	sel := b.fallback(signals)
 	sel.Signals = string(sigJSON)
-	log.Printf("broker: fallback resolved %d tools in %v", len(sel.Tools), time.Since(start))
+	slog.Debug("broker: fallback resolved", "count", len(sel.Tools), "duration", time.Since(start))
 	return sel
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -101,7 +102,10 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 	// Emit plugin event: plugin config changed.
 	if a.Services.Plugins != nil {
 		for key := range incoming {
-			go a.Services.Plugins.EmitConfigChanged(pluginID, key, "")
+			k := key
+			safego.Go(r.Context(), "api.plugin_config.emit.config-changed", func() {
+				a.Services.Plugins.EmitConfigChanged(pluginID, k, "")
+			})
 		}
 	}
 

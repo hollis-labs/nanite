@@ -1,7 +1,7 @@
 package chat
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -93,11 +93,11 @@ func (pt *ProcessTracker) KillSession(sessionID string) int {
 		if err := tp.process.Kill(); err != nil {
 			// Process may have already exited — that's fine.
 			if !isProcessDone(err) {
-				log.Printf("proctrack: failed to kill pid %d for session %s: %v", tp.process.Pid, sessionID, err)
+				slog.Warn("proctrack: failed to kill pid", "pid", tp.process.Pid, "session_id", sessionID, "err", err)
 			}
 		} else {
 			killed++
-			log.Printf("proctrack: killed orphan pid %d for session %s (ran %s)", tp.process.Pid, sessionID, time.Since(tp.startedAt).Round(time.Second))
+			slog.Info("proctrack: killed orphan pid", "pid", tp.process.Pid, "session_id", sessionID, "ran", time.Since(tp.startedAt).Round(time.Second))
 		}
 	}
 	return killed
@@ -118,7 +118,7 @@ func (pt *ProcessTracker) KillAll() int {
 		for _, tp := range procs {
 			if err := tp.process.Kill(); err != nil {
 				if !isProcessDone(err) {
-					log.Printf("proctrack: shutdown kill failed for pid %d (session %s): %v", tp.process.Pid, sessionID, err)
+					slog.Warn("proctrack: shutdown kill failed", "pid", tp.process.Pid, "session_id", sessionID, "err", err)
 				}
 			} else {
 				killed++
@@ -126,7 +126,7 @@ func (pt *ProcessTracker) KillAll() int {
 		}
 	}
 	if killed > 0 {
-		log.Printf("proctrack: shutdown killed %d orphan processes", killed)
+		slog.Info("proctrack: shutdown killed orphan processes", "count", killed)
 	}
 	return killed
 }
@@ -211,14 +211,14 @@ func (pt *ProcessTracker) KillStale(staleThreshold time.Duration) int {
 	for _, entry := range stale {
 		if err := entry.tp.process.Kill(); err != nil {
 			if !isProcessDone(err) {
-				log.Printf("proctrack: failed to kill stale pid %d for session %s: %v",
-					entry.tp.process.Pid, entry.sessionID, err)
+				slog.Warn("proctrack: failed to kill stale pid",
+					"pid", entry.tp.process.Pid, "session_id", entry.sessionID, "err", err)
 			}
 		} else {
 			killed++
-			log.Printf("proctrack: killed stale pid %d for session %s (idle %s)",
-				entry.tp.process.Pid, entry.sessionID,
-				now.Sub(entry.tp.lastActivity).Round(time.Second))
+			slog.Info("proctrack: killed stale pid",
+				"pid", entry.tp.process.Pid, "session_id", entry.sessionID,
+				"idle", now.Sub(entry.tp.lastActivity).Round(time.Second))
 		}
 		// Remove from tracking.
 		pt.Untrack(entry.sessionID, entry.tp.process)

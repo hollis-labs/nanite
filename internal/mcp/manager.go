@@ -3,17 +3,17 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 
-	feotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/tool-broker/broker"
+	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 // MCPTransport is the interface for MCP server connections (stdio or HTTP).
@@ -57,7 +57,7 @@ func (m *Manager) AddServer(name string, transport MCPTransport) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.servers[name] = transport
-	log.Printf("mcp: added server %q", name)
+	slog.Info("mcp: added server", "name", name)
 }
 
 // DiscoverServerTools returns tools from a specific named server without affecting the global tool list.
@@ -97,19 +97,19 @@ func (m *Manager) RemoveServer(name string) {
 	}
 	m.tools = filtered
 
-	log.Printf("mcp: removed server %q", name)
+	slog.Info("mcp: removed server", "name", name)
 }
 
 // AddHTTPServer registers an HTTP-based MCP server.
 func (m *Manager) AddHTTPServer(name, url string) {
 	m.AddServer(name, NewHTTPTransport(url))
-	log.Printf("mcp: server %q using HTTP transport at %s", name, url)
+	slog.Info("mcp: server using HTTP transport", "name", name, "url", url)
 }
 
 // AddStdioServer registers a stdio-based MCP server (subprocess).
 func (m *Manager) AddStdioServer(name, command string, args []string, env []string) {
 	m.AddServer(name, NewStdioTransport(command, args, env))
-	log.Printf("mcp: server %q using stdio transport: %s %s", name, command, strings.Join(args, " "))
+	slog.Info("mcp: server using stdio transport", "name", name, "command", command, "args", strings.Join(args, " "))
 }
 
 // DiscoverTools queries all registered servers for their tools.
@@ -126,7 +126,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	for name, transport := range m.servers {
 		tools, err := transport.ListTools(ctx)
 		if err != nil {
-			log.Printf("mcp: failed to discover tools from %s: %v", name, err)
+			slog.Warn("mcp: failed to discover tools", "server", name, "err", err)
 			continue
 		}
 		for _, t := range tools {
@@ -136,7 +136,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 			})
 		}
 		totalTools += len(tools)
-		log.Printf("mcp: discovered %d tools from %s", len(tools), name)
+		slog.Info("mcp: discovered tools", "count", len(tools), "server", name)
 	}
 
 	// Register tools with the broker if available.
@@ -151,7 +151,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 			})
 		}
 		m.Broker.RegisterTools(brokerTools)
-		log.Printf("mcp: registered %d tools with broker", len(brokerTools))
+		slog.Info("mcp: registered tools with broker", "count", len(brokerTools))
 	}
 
 	span.SetAttributes(
@@ -159,7 +159,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 		attribute.Int("nanite.mcp.servers.count", len(m.servers)),
 	)
 
-	log.Printf("mcp: total %d tools from %d servers", totalTools, len(m.servers))
+	slog.Info("mcp: discovery complete", "total_tools", totalTools, "servers", len(m.servers))
 	return nil
 }
 
@@ -182,7 +182,7 @@ func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.To
 
 	result, err := m.Broker.SelectTools(context.Background(), intent, hints)
 	if err != nil {
-		log.Printf("mcp: broker SelectTools error: %v — returning all tools", err)
+		slog.Warn("mcp: broker SelectTools error — returning all tools", "err", err)
 		return m.getAllToolsLocked()
 	}
 
@@ -196,7 +196,7 @@ func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.To
 		})
 	}
 
-	log.Printf("mcp: broker selected %d/%d tools for intent %q (%s)", result.Count, result.Total, intent, result.Rationale)
+	slog.Debug("mcp: broker selected tools", "count", result.Count, "total", result.Total, "intent", intent, "rationale", result.Rationale)
 	return defs
 }
 
@@ -404,11 +404,11 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 			Settings:     fmt.Sprintf(`{"server":%q,"auto_discovered":true}`, entry.serverName),
 		}
 		if err := s.CreateSkill(sk); err != nil {
-			log.Printf("mcp: auto-discover failed to create skill %s: %v", slug, err)
+			slog.Warn("mcp: auto-discover failed to create skill", "slug", slug, "err", err)
 			continue
 		}
 		diff.Added = append(diff.Added, prefixed)
-		log.Printf("mcp: auto-discovered new tool → skill %s", slug)
+		slog.Info("mcp: auto-discovered new tool → skill", "slug", slug)
 	}
 
 	// Flag removed tools by updating their settings.
@@ -428,15 +428,15 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 			// Mark as removed in settings.
 			sk.Settings = strings.Replace(sk.Settings, `"auto_discovered":true`, `"auto_discovered":true,"removed":true`, 1)
 			if err := s.UpdateSkill(sk); err != nil {
-				log.Printf("mcp: auto-discover failed to flag removed skill %s: %v", slug, err)
+				slog.Warn("mcp: auto-discover failed to flag removed skill", "slug", slug, "err", err)
 			}
 			diff.Removed = append(diff.Removed, slug)
-			log.Printf("mcp: auto-discover flagged removed tool: %s", slug)
+			slog.Info("mcp: auto-discover flagged removed tool", "slug", slug)
 		}
 	}
 
-	log.Printf("mcp: auto-discovery complete — %d total, %d added, %d removed",
-		diff.Total, len(diff.Added), len(diff.Removed))
+	slog.Info("mcp: auto-discovery complete",
+		"total", diff.Total, "added", len(diff.Added), "removed", len(diff.Removed))
 	return diff, nil
 }
 
@@ -448,13 +448,28 @@ func toolNameToSlug(name string) string {
 }
 
 // Close shuts down all transports that implement io.Closer.
+//
+// Inner transport Close() calls are made WITHOUT holding m.mu — the transport
+// Close may block on subprocess exit, and holding the manager mutex across it
+// would deadlock any concurrent RLock caller (GetTools, ExecuteTool, etc.).
+// We snapshot the transport list under lock, then release and call Close on
+// each one.
 func (m *Manager) Close() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	for name, transport := range m.servers {
-		if closer, ok := transport.(interface{ Close() error }); ok {
+	type namedTransport struct {
+		name      string
+		transport MCPTransport
+	}
+	snapshot := make([]namedTransport, 0, len(m.servers))
+	for name, t := range m.servers {
+		snapshot = append(snapshot, namedTransport{name: name, transport: t})
+	}
+	m.mu.Unlock()
+
+	for _, nt := range snapshot {
+		if closer, ok := nt.transport.(interface{ Close() error }); ok {
 			closer.Close()
-			log.Printf("mcp: closed transport for %s", name)
+			slog.Info("mcp: closed transport", "server", nt.name)
 		}
 	}
 }

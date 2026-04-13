@@ -4,20 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/otel"
+	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // generateResponseTimeout is the maximum wall-clock time a single
@@ -117,7 +119,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		model = agent.DefaultModel
 	}
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = models.DefaultChatModel()
 	}
 
 	// --- Resolve provider ---
@@ -150,7 +152,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// --- Tool selection via ToolService ---
 	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID)
 	if err != nil {
-		log.Printf("chat-service: tool selection failed: %v", err)
+		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}
 	}
 	tools := selection.Tools
@@ -183,7 +185,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// Filter: system_prompt — plugins can inject persona rules, disclaimers, etc.
 	if s.pluginHost != nil {
 		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterSystemPrompt, systemPrompt, fctx); err != nil {
-			log.Printf("chat-service: system_prompt filter error: %v", err)
+			slog.Warn("chat-service: system_prompt filter error", "err", err)
 		} else if fs, ok := filtered.(string); ok {
 			systemPrompt = fs
 		}
@@ -192,7 +194,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// Filter: user_message — PII redaction, input sanitization, expansion.
 	if s.pluginHost != nil && userContent != "" {
 		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterUserMessage, userContent, fctx); err != nil {
-			log.Printf("chat-service: user_message filter error: %v", err)
+			slog.Warn("chat-service: user_message filter error", "err", err)
 		} else if fs, ok := filtered.(string); ok {
 			userContent = fs
 		}
@@ -200,7 +202,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Emit context.assembled event after tool selection and filters are applied.
 	if s.pluginHost != nil {
-		go s.pluginHost.EmitContextAssembled(sessionID, len(systemPrompt), len(chatMessages), len(tools))
+		safego.Go(ctx, "service.chat.emit.context-assembled", func() {
+			s.pluginHost.EmitContextAssembled(sessionID, len(systemPrompt), len(chatMessages), len(tools))
+		})
 	}
 
 	// --- Stream start ---
@@ -220,7 +224,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 	// Emit agent.loaded plugin event (fire-and-forget).
 	if s.pluginHost != nil {
-		go s.pluginHost.EmitAgentLoaded(sessionID, agent.ID, agent.Name, fmt.Sprintf("%d", agent.Version))
+		safego.Go(ctx, "service.chat.emit.agent-loaded", func() {
+			s.pluginHost.EmitAgentLoaded(sessionID, agent.ID, agent.Name, fmt.Sprintf("%d", agent.Version))
+		})
 	}
 
 	// --- Loop state ---
@@ -240,13 +246,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	for ls.iteration = 0; ; ls.iteration++ {
 		// Check layered iteration limits.
 		if stop, reason := ls.shouldStop(); stop {
-			log.Printf("[WARN] chat-loop stopped: %s (session=%s agent=%s iter=%d)", reason, sessionID, agent.ID, ls.iteration)
+			slog.Warn("chat-loop stopped", "reason", reason, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
 			ch <- chat.StreamEvent{Type: "status", Content: fmt.Sprintf("Stopped: %s", reason)}
 			break
 		}
 		// Deadline check.
 		if ctx.Err() != nil {
-			log.Printf("[WARN] generateResponse context cancelled: %v (session=%s)", ctx.Err(), sessionID)
+			slog.Warn("generateResponse context cancelled", "err", ctx.Err(), "session_id", sessionID)
 			ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
@@ -264,7 +270,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		var budgetErr error
 		chatMessages, tools, breakdown, budgetErr = chat.EnforceTokenBudget(systemPrompt, chatMessages, tools, 0)
 		if budgetErr != nil {
-			log.Printf("chat-service: token budget enforcement refused: %v", budgetErr)
+			slog.Warn("chat-service: token budget enforcement refused", "err", budgetErr)
 			if s.events != nil {
 				s.events.EmitContextBudgetExceeded(ctx, sessionID, breakdown.Total, breakdown.Ceiling)
 			}
@@ -313,7 +319,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			})
 			if cancelled {
 				provSpan.End()
-				log.Printf("chat-service: message.sending cancelled by plugin hook (session=%s iter=%d)", sessionID, ls.iteration)
+				slog.Info("chat-service: message.sending cancelled by plugin hook", "session_id", sessionID, "iter", ls.iteration)
 				blockMsg := "Message blocked by plugin policy."
 				ch <- chat.StreamEvent{Type: "delta", Content: blockMsg}
 				fullContent.WriteString(blockMsg)
@@ -324,7 +330,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// Filter: context_window — plugin prunes or injects context blocks.
 		if s.pluginHost != nil {
 			if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterContextWindow, chatMessages, fctx); err != nil {
-				log.Printf("chat-service: context_window filter error: %v", err)
+				slog.Warn("chat-service: context_window filter error", "err", err)
 			} else if fm, ok := filtered.([]provider.ChatMessage); ok {
 				chatMessages = fm
 			}
@@ -332,8 +338,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 		var provCh <-chan provider.StreamEvent
 		if len(tools) > 0 {
-			log.Printf("chat-service: tool-use iteration %d — %d tools, %d messages, ~%d tokens (ceiling=%d)",
-				ls.iteration, len(tools), len(chatMessages), breakdown.Total, breakdown.Ceiling)
+			slog.Debug("chat-service: tool-use iteration",
+				"iter", ls.iteration, "tools", len(tools), "messages", len(chatMessages),
+				"tokens", breakdown.Total, "ceiling", breakdown.Ceiling)
 			provCh, err = prov.StreamChatWithTools(provCtx, systemPrompt, chatMessages, model, tools)
 		} else {
 			provCh, err = prov.StreamChat(provCtx, systemPrompt, chatMessages, model)
@@ -342,7 +349,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			provSpan.RecordError(err)
 			provSpan.SetStatus(codes.Error, err.Error())
 			provSpan.End()
-			log.Printf("chat-service: provider stream error on iteration %d: %v", ls.iteration, err)
+			slog.Error("chat-service: provider stream error", "iter", ls.iteration, "err", err)
 			s.store.LogEvent(sessionID, "provider_error", "error",
 				fmt.Sprintf("iteration %d: %v", ls.iteration, err),
 				fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d}`, model, len(tools), len(chatMessages)))
@@ -355,7 +362,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			}
 			// Emit provider.error plugin event.
 			if s.pluginHost != nil {
-				go s.pluginHost.EmitProviderError(sessionID, providerName, model, err.Error())
+				errMsg := err.Error()
+				safego.Go(ctx, "service.chat.emit.provider-error", func() {
+					s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
+				})
 			}
 			if ls.retryBudget > 0 {
 				ls.retryBudget--
@@ -462,7 +472,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if stopReason != "tool_use" || len(toolUseBlocks) == 0 {
 			if stopReason == "max_tokens" {
 				ls.wasTruncated = true
-				log.Printf("chat-service: response truncated by max_tokens on iteration %d", ls.iteration)
+				slog.Warn("chat-service: response truncated by max_tokens", "iter", ls.iteration)
 				ch <- chat.StreamEvent{Type: "status", Content: "Response was cut short due to length limits. Some content may be missing."}
 				s.store.LogEvent(sessionID, "max_tokens_truncation", "warning",
 					fmt.Sprintf("iteration %d: response truncated by max_tokens", ls.iteration),
@@ -561,7 +571,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 		// Check circuit breaker.
 		if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil && ap.CircuitBreaker.IsOpen() {
-			log.Printf("chat-service: circuit breaker open, stopping at iteration %d", ls.iteration)
+			slog.Warn("chat-service: circuit breaker open, stopping", "iter", ls.iteration)
 			if s.events != nil {
 				s.events.EmitCircuitBreakerTripped(ctx, sessionID, "anthropic")
 			}
@@ -581,7 +591,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// Filter: assistant_response — tone filter, brand voice, compliance scrubbing.
 	if s.pluginHost != nil {
 		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterAssistantResponse, responseContent, fctx); err != nil {
-			log.Printf("chat-service: assistant_response filter error: %v", err)
+			slog.Warn("chat-service: assistant_response filter error", "err", err)
 		} else if fs, ok := filtered.(string); ok {
 			responseContent = fs
 		}
@@ -611,7 +621,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// Parse envelopes.
 	envelopes, cleanContent, envErrors := chat.ParseEnvelopes(responseContent)
 	for _, envErr := range envErrors {
-		log.Printf("chat-service: envelope error (%s): %s", envErr.Reason, chat.TruncateStr(envErr.Raw, 200))
+		slog.Warn("chat-service: envelope error", "reason", envErr.Reason, "content", chat.TruncateStr(envErr.Raw, 200))
 		s.store.LogEvent(sessionID, "envelope_error", "warning",
 			envErr.Reason, fmt.Sprintf(`{"raw":%q}`, chat.TruncateStr(envErr.Raw, 500)))
 	}
@@ -643,7 +653,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// Filter: envelope_data — enrich card data, add links, transform fields.
 		if s.pluginHost != nil && env.Data != nil {
 			if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterEnvelopeData, env.Data, fctx); err != nil {
-				log.Printf("chat-service: envelope_data filter error for %s: %v", env.Type, err)
+				slog.Warn("chat-service: envelope_data filter error", "type", env.Type, "err", err)
 			} else if fd, ok := filtered.(map[string]interface{}); ok {
 				envelopes[i].Data = fd
 				env = envelopes[i]
@@ -653,7 +663,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		envRefs = append(envRefs, chat.EnvelopeRef{Type: env.Type, Data: json.RawMessage(innerData)})
 		// Emit envelope.rendered plugin event for each envelope attached to the response.
 		if s.pluginHost != nil {
-			go s.pluginHost.EmitEnvelopeRendered(sessionID, env.Type, env.Data)
+			envType := env.Type
+			envData := env.Data
+			safego.Go(ctx, "service.chat.emit.envelope-rendered", func() {
+				s.pluginHost.EmitEnvelopeRendered(sessionID, envType, envData)
+			})
 		}
 	}
 
@@ -681,14 +695,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		Role: "assistant", Content: structuredJSON, Envelope: envelopeJSON,
 	}
 	if err := s.store.CreateMessage(assistantMsg); err != nil {
-		log.Printf("chat-service: failed to save assistant message: %v", err)
+		slog.Error("chat-service: failed to save assistant message", "err", err)
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to save response", map[string]interface{}{"raw": err.Error()})
 		return
 	}
 
 	// Prune old tool messages.
 	if err := s.context.PruneAfterTurn(ctx, sessionID); err != nil {
-		log.Printf("chat-service: prune after turn failed: %v", err)
+		slog.Warn("chat-service: prune after turn failed", "err", err)
 	}
 
 	// Record token usage.
@@ -700,7 +714,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if err := s.store.RecordUsage(sessionID, assistantMsgID, model,
 			finalUsage.InputTokens, finalUsage.OutputTokens, toolInputTokens,
 			finalUsage.CacheCreationTokens, finalUsage.CacheReadTokens); err != nil {
-			log.Printf("chat-service: failed to record token usage: %v", err)
+			slog.Warn("chat-service: failed to record token usage", "err", err)
 		}
 	}
 
@@ -736,7 +750,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 	if err := s.store.RecordExecutionMetrics(metrics); err != nil {
-		log.Printf("chat-service: failed to record execution metrics: %v", err)
+		slog.Warn("chat-service: failed to record execution metrics", "err", err)
 	}
 
 	// Stream end.
@@ -757,9 +771,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Auto-title and auto-tags.
 	if session.Title == "" {
-		go s.autoTitle(sessionID, userContent)
+		safego.Go(ctx, "service.chat.autoTitle", func() {
+			s.autoTitle(sessionID, userContent)
+		})
 	}
-	go s.autoTags(sessionID)
+	safego.Go(ctx, "service.chat.autoTags", func() {
+		s.autoTags(sessionID)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -786,7 +804,7 @@ func (s *chatServiceImpl) handleRequestTools(
 	if *totalCalls > maxCalls || *consecutiveEmpty >= 2 {
 		reason := fmt.Sprintf("consecutive_empty=%d, total_calls=%d", *consecutiveEmpty, *totalCalls)
 		rtResult := "Tool discovery limit reached (" + reason + "). No more request_tools calls will be processed. Proceed with the tools you already have — do NOT call request_tools again."
-		log.Printf("chat-service: request_tools halted — %s", reason)
+		slog.Warn("chat-service: request_tools halted", "reason", reason)
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 		resultBlocks = append(resultBlocks, provider.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: rtResult,
@@ -815,7 +833,7 @@ func (s *chatServiceImpl) handleRequestTools(
 		*consecutiveEmpty = 0
 	}
 
-	log.Printf("chat-service: request_tools loaded %d tools (consecutive_empty=%d): %v", len(loaded), *consecutiveEmpty, loaded)
+	slog.Info("chat-service: request_tools loaded", "count", len(loaded), "consecutive_empty", *consecutiveEmpty, "tools", loaded)
 
 	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 	resultBlocks = append(resultBlocks, provider.ContentBlock{
@@ -844,13 +862,13 @@ func (s *chatServiceImpl) detectStuckLoop(
 				"You MUST stop calling this tool and either try a completely different approach "+
 				"or tell the user: \"I was unable to complete this task because the tool returned the same result repeatedly.\"",
 				toolName, repeats+1)
-			log.Printf("chat-service: tool %s BLOCKED after %d identical results", toolName, repeats+1)
+			slog.Warn("chat-service: tool BLOCKED after identical results", "tool", toolName, "count", repeats+1)
 		} else {
 			resultText += "\n\nWARNING: This tool has returned the same result " +
 				fmt.Sprintf("%d times in a row. You are likely stuck in a loop. ", repeats+1) +
 				"Do NOT call this tool again with the same arguments. " +
 				"Either provide different arguments or inform the user that this task cannot be completed."
-			log.Printf("chat-service: tool %s repeat detected (%d times)", toolName, repeats+1)
+			slog.Warn("chat-service: tool repeat detected", "tool", toolName, "count", repeats+1)
 		}
 	} else {
 		repeatCount[toolName] = 0
@@ -889,13 +907,13 @@ func (s *chatServiceImpl) setupCLIContext(ctx context.Context, sessionID string,
 
 	// Sandbox.
 	if sbDir, err := sandbox.Dir(sessionID); err != nil {
-		log.Printf("chat-service: sandbox dir error: %v", err)
+		slog.Warn("chat-service: sandbox dir error", "err", err)
 	} else {
 		if err := sandbox.Populate(sbDir, agent, mode, sandbox.PopulateOpts{
 			SessionID: sessionID,
 			DBPath:    "", // Store interface doesn't expose DBPath; will be wired in container
 		}); err != nil {
-			log.Printf("chat-service: sandbox populate error: %v", err)
+			slog.Warn("chat-service: sandbox populate error", "err", err)
 		}
 		ctx = provider.WithSandboxDir(ctx, sbDir)
 	}
@@ -937,7 +955,7 @@ func (s *chatServiceImpl) persistCLISessionID(sessionID string, session *store.S
 	metaJSON, _ := json.Marshal(meta)
 	session.Metadata = string(metaJSON)
 	if err := s.store.UpdateSessionMetadata(sessionID, session.Metadata); err != nil {
-		log.Printf("chat-service: failed to persist CLI session ID: %v", err)
+		slog.Warn("chat-service: failed to persist CLI session ID", "err", err)
 	}
 }
 
@@ -968,7 +986,7 @@ func (s *chatServiceImpl) maybeCreateAutoArtifact(sessionID, messageID, agentID 
 		SourceToolCallID: tu.ID, SourceAgentID: agentID,
 	}
 	if err := s.store.CreateArtifact(artifact); err != nil {
-		log.Printf("chat-service: auto-artifact creation failed for %s: %v", filePath, err)
+		slog.Warn("chat-service: auto-artifact creation failed", "path", filePath, "err", err)
 	}
 }
 
@@ -999,7 +1017,7 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 		chat.TruncateStr(errDetail.Raw, 1000), errDetail.Reason,
 	)
 
-	log.Printf("chat-service: envelope retry for session %s", sessionID)
+	slog.Info("chat-service: envelope retry", "session_id", sessionID)
 	s.store.LogEvent(sessionID, "envelope_retry", "info",
 		"sending correction prompt", fmt.Sprintf(`{"reason":%q}`, errDetail.Reason))
 
@@ -1017,7 +1035,7 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 	correctionMsgs := []provider.ChatMessage{{Role: "user", Content: correction}}
 	retryCh, err := prov.StreamChat(retryCtx, "", correctionMsgs, model)
 	if err != nil {
-		log.Printf("chat-service: envelope retry stream error: %v", err)
+		slog.Warn("chat-service: envelope retry stream error", "err", err)
 		return nil
 	}
 
@@ -1028,17 +1046,17 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 			retryContent.WriteString(evt.Content)
 			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
 		case "error":
-			log.Printf("chat-service: envelope retry error: %s", evt.Error)
+			slog.Warn("chat-service: envelope retry error", "err", evt.Error)
 			return nil
 		}
 	}
 
 	retryEnvelopes, _, retryErrors := chat.ParseEnvelopes(retryContent.String())
 	if len(retryErrors) > 0 {
-		log.Printf("chat-service: envelope retry still had %d errors — giving up", len(retryErrors))
+		slog.Warn("chat-service: envelope retry still had errors — giving up", "count", len(retryErrors))
 	}
 	if len(retryEnvelopes) > 0 {
-		log.Printf("chat-service: envelope retry recovered %d envelope(s)", len(retryEnvelopes))
+		slog.Info("chat-service: envelope retry recovered envelopes", "count", len(retryEnvelopes))
 	}
 	return retryEnvelopes
 }
@@ -1061,7 +1079,7 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 	s.recordUtilityMetrics(sessionID, "autoTitle", duration, err)
 
 	if err != nil {
-		log.Printf("chat-service: auto-title failed: %v", err)
+		slog.Warn("chat-service: auto-title failed", "err", err)
 		return
 	}
 	title = strings.TrimSpace(title)

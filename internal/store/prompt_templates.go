@@ -146,7 +146,7 @@ func (s *Store) DeletePromptTemplate(id string) error {
 func (s *Store) ListPromptTemplatesForAgent(agentID string) ([]PromptTemplate, error) {
 	rows, err := s.DB.Query(
 		`SELECT pt.id, pt.name, pt.slug, pt.scope, pt.template, pt.variables, pt.priority,
-		        pt.is_builtin, pt.created_at, pt.updated_at
+		        pt.is_builtin, COALESCE(pt.icon,''), pt.created_at, pt.updated_at
 		 FROM prompt_templates pt
 		 JOIN agent_prompt_templates apt ON pt.id = apt.template_id
 		 WHERE apt.agent_id = ?

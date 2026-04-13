@@ -1,57 +1,79 @@
 package provider
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/otel"
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
+	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
 
-const anthropicAPI = "https://api.anthropic.com/v1/messages"
+// maxAnthropicErrBody caps forwarded API-error response bytes.
+// The official SDK does NOT apply a body limit — see ADAPTER_PATTERN.md.
+// We cap what we forward into APIError.Message ourselves.
+const maxAnthropicErrBody = 1 << 20 // 1 MiB
 
-// Anthropic implements the Provider and CacheableProvider interfaces for the Anthropic Messages API.
+// Anthropic implements the Provider and CacheableProvider interfaces for the
+// Anthropic Messages API. The underlying transport is the official
+// anthropic-sdk-go client; this type adapts its types to nanite's Provider
+// interface (StreamEvent, ToolDefinition, ChatMessage, Usage).
 type Anthropic struct {
 	apiKey         string
-	client         *http.Client
+	httpClient     *http.Client
+	client         *anthropic.Client // lazily constructed when apiKey is set
 	Retry          RetryConfig
-	OnStatus       StatusCallback // optional; called during retries to report status
+	OnStatus       StatusCallback
 	CircuitBreaker *CircuitBreaker
-	OnCircuitOpen  func() // called when the circuit breaker trips
+	OnCircuitOpen  func()
 	RateTracker    *TokenRateTracker
-	cacheHints     []CacheHint // set via SetCacheHints before each request
+	cacheHints     []CacheHint
 }
 
-// NewAnthropic creates a new Anthropic provider. It reads ANTHROPIC_API_KEY from the environment.
+// NewAnthropic creates a new Anthropic provider. API key is injected later via
+// SetAPIKey (see pkg/provider/api_key.go). SDK client construction is deferred
+// until the key is present.
 func NewAnthropic() *Anthropic {
 	return &Anthropic{
-		apiKey:         "",
-		client:         &http.Client{},
+		httpClient:     &http.Client{},
 		Retry:          DefaultRetryConfig(),
 		CircuitBreaker: NewCircuitBreaker(3),
 		RateTracker:    NewTokenRateTracker(30000),
 	}
 }
 
-// SetCacheHints implements CacheableProvider. It stores the hints so that
-// subsequent calls to buildSystemBlocks, buildToolsWithCacheControl, and
-// marshalMessages apply cache_control markers accordingly.
-func (a *Anthropic) SetCacheHints(hints []CacheHint) {
-	a.cacheHints = hints
+// ensureClient lazily builds the SDK client once an API key is set.
+// The SDK's own retry is disabled (WithMaxRetries(0)) because the retry
+// decorator layer (retry.go, circuit.go) owns that policy.
+func (a *Anthropic) ensureClient() {
+	if a.client != nil || a.apiKey == "" {
+		return
+	}
+	c := anthropic.NewClient(
+		option.WithAPIKey(a.apiKey),
+		option.WithHTTPClient(a.httpClient),
+		option.WithMaxRetries(0),
+	)
+	a.client = &c
 }
 
-// hasCacheHint checks whether the stored hints include one matching the given position.
+// SetCacheHints implements CacheableProvider.
+func (a *Anthropic) SetCacheHints(hints []CacheHint) { a.cacheHints = hints }
+
 func (a *Anthropic) hasCacheHint(position string) bool {
 	for _, h := range a.cacheHints {
 		if h.Position == position {
@@ -61,69 +83,55 @@ func (a *Anthropic) hasCacheHint(position string) bool {
 	return false
 }
 
-// recentMessageCacheCount returns the number of "recent_message" hints,
-// which controls how many trailing user messages get cache_control markers.
 func (a *Anthropic) recentMessageCacheCount() int {
-	count := 0
+	n := 0
 	for _, h := range a.cacheHints {
 		if h.Position == "recent_message" {
-			count++
+			n++
 		}
 	}
-	return count
+	return n
 }
 
-// anthropicRequest is the request body for the Anthropic Messages API.
-type anthropicRequest struct {
-	Model     string `json:"model"`
-	MaxTokens int    `json:"max_tokens"`
-	System    any    `json:"system,omitempty"`
-	Messages  []any  `json:"messages"`
-	Stream    bool   `json:"stream"`
-	Tools     []any  `json:"tools,omitempty"`
-}
+// -----------------------------------------------------------------------------
+// Cache-hint shape helpers
+//
+// These produce map[string]any / []any shapes that the existing unit tests in
+// anthropic_test.go and cache_test.go assert against. They are pure mappers —
+// the live request path translates cache hints directly onto SDK param types
+// (see buildSDKSystem / buildSDKTools / buildSDKMessages below).
+// -----------------------------------------------------------------------------
 
-// buildSystemBlocks wraps a system prompt in a content block.
-// If the provider has a "system" cache hint, the block gets cache_control ephemeral.
 func (a *Anthropic) buildSystemBlocks(systemPrompt string) []map[string]any {
 	if systemPrompt == "" {
 		return nil
 	}
-	block := map[string]any{
-		"type": "text",
-		"text": systemPrompt,
-	}
+	block := map[string]any{"type": "text", "text": systemPrompt}
 	if a.hasCacheHint("system") {
 		block["cache_control"] = map[string]string{"type": "ephemeral"}
 	}
 	return []map[string]any{block}
 }
 
-// buildSystemBlocksStatic is the legacy static version used by tests and non-method callers.
+// buildSystemBlocks (package-level) is the legacy static form used by some tests.
 // It always applies cache_control for backwards compatibility.
 func buildSystemBlocks(systemPrompt string) []map[string]any {
 	if systemPrompt == "" {
 		return nil
 	}
-	return []map[string]any{
-		{
-			"type": "text",
-			"text": systemPrompt,
-			"cache_control": map[string]string{
-				"type": "ephemeral",
-			},
-		},
-	}
+	return []map[string]any{{
+		"type":          "text",
+		"text":          systemPrompt,
+		"cache_control": map[string]string{"type": "ephemeral"},
+	}}
 }
 
-// buildToolsWithCacheControl converts tool definitions to []any.
-// If the provider has a "tools" cache hint, the last tool gets cache_control ephemeral.
 func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {
 		return nil
 	}
 	shouldCache := a.hasCacheHint("tools")
-	result := make([]any, len(tools))
+	out := make([]any, len(tools))
 	for i, t := range tools {
 		entry := map[string]any{
 			"name":         t.Name,
@@ -133,18 +141,16 @@ func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 		if shouldCache && i == len(tools)-1 {
 			entry["cache_control"] = map[string]string{"type": "ephemeral"}
 		}
-		result[i] = entry
+		out[i] = entry
 	}
-	return result
+	return out
 }
 
-// buildToolsWithCacheControlStatic is the legacy static version for tests.
-// It always marks the last tool with cache_control.
 func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {
 		return nil
 	}
-	result := make([]any, len(tools))
+	out := make([]any, len(tools))
 	for i, t := range tools {
 		entry := map[string]any{
 			"name":         t.Name,
@@ -154,29 +160,20 @@ func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 		if i == len(tools)-1 {
 			entry["cache_control"] = map[string]string{"type": "ephemeral"}
 		}
-		result[i] = entry
+		out[i] = entry
 	}
-	return result
+	return out
 }
 
-// marshalMessages converts ChatMessage slice to the Anthropic API format.
-// The number of trailing user messages that receive cache_control is driven
-// by the "recent_message" cache hints.
 func (a *Anthropic) marshalMessages(messages []ChatMessage) []any {
-	cacheCount := a.recentMessageCacheCount()
-	return marshalMessagesWithCacheCount(messages, cacheCount)
+	return marshalMessagesWithCacheCount(messages, a.recentMessageCacheCount())
 }
 
-// marshalMessages is the legacy static version used by existing tests.
-// It always caches the last 2 user messages for backwards compatibility.
 func marshalMessages(messages []ChatMessage) []any {
 	return marshalMessagesWithCacheCount(messages, 2)
 }
 
-// marshalMessagesWithCacheCount is the shared implementation.
-// cacheCount controls how many of the trailing user messages get cache_control.
 func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any {
-	// Find the indices of the last N user messages for cache marking.
 	userIndices := make([]int, 0, cacheCount)
 	for i := len(messages) - 1; i >= 0 && len(userIndices) < cacheCount; i-- {
 		if messages[i].Role == "user" {
@@ -188,13 +185,11 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 		cacheSet[idx] = true
 	}
 
-	result := make([]any, len(messages))
+	out := make([]any, len(messages))
 	for i, m := range messages {
 		shouldCache := cacheSet[i]
 
 		if len(m.ContentBlocks) > 0 {
-			// Multi-block message (tool results, tool use responses).
-			// If caching, add cache_control to the last block.
 			if shouldCache {
 				blocks := make([]map[string]any, len(m.ContentBlocks))
 				for j, b := range m.ContentBlocks {
@@ -225,53 +220,164 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 					}
 					blocks[j] = block
 				}
-				result[i] = map[string]any{
-					"role":    m.Role,
-					"content": blocks,
-				}
+				out[i] = map[string]any{"role": m.Role, "content": blocks}
 			} else {
-				result[i] = map[string]any{
-					"role":    m.Role,
-					"content": m.ContentBlocks,
-				}
+				out[i] = map[string]any{"role": m.Role, "content": m.ContentBlocks}
+			}
+			continue
+		}
+
+		if shouldCache {
+			out[i] = map[string]any{
+				"role": m.Role,
+				"content": []map[string]any{{
+					"type":          "text",
+					"text":          m.Content,
+					"cache_control": map[string]string{"type": "ephemeral"},
+				}},
 			}
 		} else {
-			// Simple text message.
-			if shouldCache {
-				result[i] = map[string]any{
-					"role": m.Role,
-					"content": []map[string]any{
-						{
-							"type": "text",
-							"text": m.Content,
-							"cache_control": map[string]string{
-								"type": "ephemeral",
-							},
-						},
-					},
-				}
-			} else {
-				result[i] = map[string]any{
-					"role":    m.Role,
-					"content": m.Content,
-				}
-			}
+			out[i] = map[string]any{"role": m.Role, "content": m.Content}
 		}
 	}
-	return result
+	return out
 }
 
-// StreamChat implements Provider.StreamChat using Anthropic's streaming SSE API.
+// -----------------------------------------------------------------------------
+// SDK request builders — translate nanite's types into anthropic-sdk-go params.
+// -----------------------------------------------------------------------------
+
+func (a *Anthropic) buildSDKSystem(systemPrompt string) []anthropic.TextBlockParam {
+	if systemPrompt == "" {
+		return nil
+	}
+	b := anthropic.TextBlockParam{Text: systemPrompt}
+	if a.hasCacheHint("system") {
+		b.CacheControl = ephemeralCache()
+	}
+	return []anthropic.TextBlockParam{b}
+}
+
+func (a *Anthropic) buildSDKTools(tools []ToolDefinition) []anthropic.ToolUnionParam {
+	if len(tools) == 0 {
+		return nil
+	}
+	shouldCache := a.hasCacheHint("tools")
+	out := make([]anthropic.ToolUnionParam, len(tools))
+	for i, t := range tools {
+		tp := anthropic.ToolParam{
+			Name:        t.Name,
+			InputSchema: anthropic.ToolInputSchemaParam{Properties: t.InputSchema},
+		}
+		if t.Description != "" {
+			tp.Description = param.NewOpt(t.Description)
+		}
+		if shouldCache && i == len(tools)-1 {
+			tp.CacheControl = ephemeralCache()
+		}
+		out[i] = anthropic.ToolUnionParam{OfTool: &tp}
+	}
+	return out
+}
+
+func (a *Anthropic) buildSDKMessages(messages []ChatMessage) []anthropic.MessageParam {
+	cacheCount := a.recentMessageCacheCount()
+	userIndices := make(map[int]bool, cacheCount)
+	found := 0
+	for i := len(messages) - 1; i >= 0 && found < cacheCount; i-- {
+		if messages[i].Role == "user" {
+			userIndices[i] = true
+			found++
+		}
+	}
+
+	out := make([]anthropic.MessageParam, 0, len(messages))
+	for i, m := range messages {
+		role := anthropic.MessageParamRoleUser
+		if m.Role == "assistant" {
+			role = anthropic.MessageParamRoleAssistant
+		}
+
+		var blocks []anthropic.ContentBlockParamUnion
+		if len(m.ContentBlocks) > 0 {
+			blocks = make([]anthropic.ContentBlockParamUnion, 0, len(m.ContentBlocks))
+			for j, b := range m.ContentBlocks {
+				cb := chatBlockToSDK(b)
+				// cache_control on the last block of a cacheable message.
+				if userIndices[i] && j == len(m.ContentBlocks)-1 {
+					applyCacheControl(&cb)
+				}
+				blocks = append(blocks, cb)
+			}
+		} else {
+			tb := anthropic.TextBlockParam{Text: m.Content}
+			if userIndices[i] {
+				tb.CacheControl = ephemeralCache()
+			}
+			blocks = []anthropic.ContentBlockParamUnion{{OfText: &tb}}
+		}
+
+		out = append(out, anthropic.MessageParam{Role: role, Content: blocks})
+	}
+	return out
+}
+
+// chatBlockToSDK maps a nanite ContentBlock to an SDK ContentBlockParamUnion.
+func chatBlockToSDK(b ContentBlock) anthropic.ContentBlockParamUnion {
+	switch b.Type {
+	case "tool_use":
+		var input any = map[string]any{}
+		if b.Input != nil {
+			input = *b.Input
+		}
+		tu := anthropic.ToolUseBlockParam{
+			ID:    b.ID,
+			Name:  b.Name,
+			Input: input,
+		}
+		return anthropic.ContentBlockParamUnion{OfToolUse: &tu}
+	case "tool_result":
+		tr := anthropic.ToolResultBlockParam{ToolUseID: b.ToolUseID}
+		if b.IsError {
+			tr.IsError = param.NewOpt(true)
+		}
+		if b.Content != "" {
+			tr.Content = []anthropic.ToolResultBlockParamContentUnion{{
+				OfText: &anthropic.TextBlockParam{Text: b.Content},
+			}}
+		}
+		return anthropic.ContentBlockParamUnion{OfToolResult: &tr}
+	default: // "text" and fallback
+		tb := anthropic.TextBlockParam{Text: b.Text}
+		return anthropic.ContentBlockParamUnion{OfText: &tb}
+	}
+}
+
+// applyCacheControl sets cache_control on whichever variant of the union is set.
+func applyCacheControl(u *anthropic.ContentBlockParamUnion) {
+	cc := ephemeralCache()
+	switch {
+	case u.OfText != nil:
+		u.OfText.CacheControl = cc
+	case u.OfToolUse != nil:
+		u.OfToolUse.CacheControl = cc
+	case u.OfToolResult != nil:
+		u.OfToolResult.CacheControl = cc
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Provider interface
+// -----------------------------------------------------------------------------
+
 func (a *Anthropic) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
 	return a.streamChatInternal(ctx, systemPrompt, messages, model, nil)
 }
 
-// StreamChatWithTools implements Provider.StreamChatWithTools using Anthropic's streaming SSE API with tool definitions.
 func (a *Anthropic) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
 	return a.streamChatInternal(ctx, systemPrompt, messages, model, tools)
 }
 
-// streamChatInternal is the shared implementation for StreamChat and StreamChatWithTools.
 func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
 	ctx, span := feotel.StartSpan(ctx, "nanite.provider.anthropic.stream")
 	span.SetAttributes(
@@ -286,49 +392,58 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		span.End()
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
 	}
+	a.ensureClient()
 
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = models.DefaultChatModel()
 	}
 
-	body := anthropicRequest{
-		Model:     model,
-		MaxTokens: 16384,
-		System:    a.buildSystemBlocks(systemPrompt),
-		Messages:  a.marshalMessages(messages),
-		Stream:    true,
-	}
-	if len(tools) > 0 {
-		body.Tools = a.buildToolsWithCacheControl(tools)
-	}
-
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	// Check if the circuit breaker is open before attempting.
 	if a.CircuitBreaker != nil && a.CircuitBreaker.IsOpen() {
 		span.SetStatus(codes.Error, "circuit breaker open")
 		span.End()
 		return nil, fmt.Errorf("circuit breaker open: provider rate limited after multiple retries")
 	}
 
-	requestStart := time.Now()
+	// Per-model max-output cap sourced from the registry. Prior versions
+	// hardcoded 16384 here which silently truncated Opus (32000) and other
+	// longer-output models — see audit 2026-04-11 finding 04.
+	maxOut := models.MaxOutputFor(model)
+	if maxOut <= 0 {
+		maxOut = 16384 // provider-level historical default
+	}
+	params := anthropic.MessageNewParams{
+		Model:     model,
+		MaxTokens: int64(maxOut),
+		System:    a.buildSDKSystem(systemPrompt),
+		Messages:  a.buildSDKMessages(messages),
+	}
+	if len(tools) > 0 {
+		params.Tools = a.buildSDKTools(tools)
+	}
 
-	// Rate-limit pacing: estimate request tokens and wait if necessary.
+	// Rate-limit pacing. Estimate is coarse; SDK marshals the body itself so
+	// we don't have the exact byte count, but this preserves previous behavior.
 	if a.RateTracker != nil {
-		estimatedTokens := len(payload) / 4
+		estimatedTokens := estimatePromptTokens(systemPrompt, messages)
 		if wait := a.RateTracker.WaitTime(estimatedTokens); wait > 0 {
 			avail, limit := a.RateTracker.Remaining()
 			if estimatedTokens > limit {
-				log.Printf("provider: request ~%d tokens exceeds per-minute rate limit %d, proceeding anyway", estimatedTokens, limit)
+				slog.Warn("provider: request exceeds per-minute rate limit, proceeding anyway",
+					"provider", "anthropic",
+					"estimated_tokens", estimatedTokens,
+					"rate_limit", limit,
+				)
 			}
 			if a.OnStatus != nil {
 				a.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
 			}
-			log.Printf("provider: pacing — waiting %s for rate limit budget (est. %d tokens, available %d/%d)",
-				wait.Round(time.Millisecond), estimatedTokens, avail, limit)
+			slog.Info("provider: pacing for rate limit budget",
+				"provider", "anthropic",
+				"wait", wait.Round(time.Millisecond).String(),
+				"estimated_tokens", estimatedTokens,
+				"available", avail,
+				"rate_limit", limit,
+			)
 			select {
 			case <-ctx.Done():
 				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
@@ -337,48 +452,34 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		}
 	}
 
-	// Retry loop with exponential backoff for rate limits and server errors.
-	var resp *http.Response
+	requestStart := time.Now()
+
+	// Retry loop — our decorator chain; the SDK's own retry is disabled.
+	var stream *anthropicStreamHandle
 	var lastErr error
 	for attempt := 0; attempt <= a.Retry.MaxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, "POST", anthropicAPI, bytes.NewReader(payload))
-		if err != nil {
-			return nil, fmt.Errorf("create request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-api-key", a.apiKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+		// Use option.WithHeader for cache-control header if needed (prompt caching).
+		// The beta header is no longer required for the stable prompt-caching feature,
+		// but we send it for compatibility with older model versions.
+		s := a.client.Messages.NewStreaming(ctx, params,
+			option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"),
+		)
 
-		resp, err = a.client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("send request: %w", err)
-		}
-
-		if resp.StatusCode == http.StatusOK {
+		// The SDK defers HTTP work until Next() is called. Peek the first event
+		// so retry-on-start-error still works.
+		handle, apiErr, retryAfter := peekStream(s)
+		if apiErr == nil {
+			stream = handle
 			if a.CircuitBreaker != nil {
 				a.CircuitBreaker.RecordSuccess()
 			}
-			// Calibrate rate tracker from response headers.
-			a.calibrateRateTracker(resp)
-			break // success
+			break
 		}
 
-		// Read the error body.
-		errBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		apiErr := &APIError{
-			StatusCode: resp.StatusCode,
-			Message:    string(errBody),
-			RetryAfter: ParseRetryAfter(resp.Header.Get("Retry-After")),
-		}
-
-		if !RetryableStatusCode(resp.StatusCode) || attempt == a.Retry.MaxRetries {
-			// Record failure on circuit breaker when retries are exhausted.
+		if !RetryableStatusCode(apiErr.StatusCode) || attempt == a.Retry.MaxRetries {
 			if a.CircuitBreaker != nil && attempt == a.Retry.MaxRetries {
 				if tripped := a.CircuitBreaker.RecordFailure(); tripped {
-					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					slog.Warn("provider: circuit breaker tripped after consecutive failures", "provider", "anthropic")
 					if a.OnCircuitOpen != nil {
 						a.OnCircuitOpen()
 					}
@@ -386,69 +487,106 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 			}
 			span.RecordError(apiErr)
 			span.SetStatus(codes.Error, apiErr.Error())
-			span.SetAttributes(attribute.Int("nanite.http.status", resp.StatusCode))
+			span.SetAttributes(attribute.Int("nanite.http.status", apiErr.StatusCode))
 			span.End()
 			return nil, apiErr
 		}
 
-		// Calculate delay.
-		delay := a.Retry.BackoffDelay(attempt, apiErr.RetryAfter)
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			resp.StatusCode, attempt+1, a.Retry.MaxRetries, delay)
-
+		delay := a.Retry.BackoffDelay(attempt, retryAfter)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "anthropic",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", a.Retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		if a.OnStatus != nil {
 			a.OnStatus(fmt.Sprintf("Rate limited, retrying in %s... (attempt %d/%d)",
 				delay.Round(time.Millisecond), attempt+1, a.Retry.MaxRetries))
 		}
-
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
 		case <-time.After(delay):
 		}
-
 		lastErr = apiErr
 	}
 	_ = lastErr
 
 	span.SetAttributes(
 		attribute.Int64("nanite.provider.latency_ms", time.Since(requestStart).Milliseconds()),
-		attribute.Int("nanite.http.status", resp.StatusCode),
 	)
 
 	ch := make(chan StreamEvent, 64)
-	go a.readSSEWithTracking(ctx, resp.Body, ch, span)
+	safego.Go(ctx, "provider.anthropic.bridgeStream", func() {
+		a.bridgeStream(ctx, stream, ch, span)
+	})
 	return ch, nil
 }
 
-// calibrateRateTracker reads Anthropic rate-limit headers and updates the tracker.
-func (a *Anthropic) calibrateRateTracker(resp *http.Response) {
-	if a.RateTracker == nil {
-		return
-	}
-	if limitStr := resp.Header.Get("x-ratelimit-limit-input-tokens"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
-			a.RateTracker.UpdateLimit(limit)
-			log.Printf("provider: rate limit calibrated to %d input tokens/min", limit)
-		}
-	}
-	if remainStr := resp.Header.Get("x-ratelimit-remaining-input-tokens"); remainStr != "" {
-		log.Printf("provider: rate limit remaining: %s input tokens", remainStr)
-	}
-	if resetStr := resp.Header.Get("x-ratelimit-reset-input-tokens"); resetStr != "" {
-		log.Printf("provider: rate limit resets at: %s", resetStr)
-	}
+// anthropicStreamHandle carries the SDK stream plus the peeked first event.
+type anthropicStreamHandle struct {
+	stream *ssestreamHandle
 }
 
-// readSSEWithTracking wraps readSSE to record input tokens via the rate tracker
-// and finalize the provider span with token counts.
-func (a *Anthropic) readSSEWithTracking(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent, span trace.Span) {
-	// Create an intermediary channel to intercept usage events.
-	inner := make(chan StreamEvent, 64)
-	go a.readSSE(ctx, body, inner)
+// ssestreamHandle is a local alias to avoid generic mess in callers.
+type ssestreamHandle = struct {
+	underlying anthropicStreamIface
+	primed     bool
+	primedOK   bool
+}
 
+// anthropicStreamIface is the subset of ssestream.Stream we use; defining it as
+// an interface keeps the bridge test-friendly.
+type anthropicStreamIface interface {
+	Next() bool
+	Current() anthropic.MessageStreamEventUnion
+	Err() error
+	Close() error
+}
+
+// peekStream does Next() once to surface start-time API errors so the retry
+// loop can catch them. On success it returns a handle carrying the primed state.
+func peekStream(s anthropicSDKStream) (*anthropicStreamHandle, *APIError, time.Duration) {
+	adapter := &sdkStreamAdapter{s: s}
+	primedOK := adapter.Next()
+	if !primedOK {
+		if err := adapter.Err(); err != nil {
+			return nil, classifyAnthropicError(err), parseRetryAfterFromErr(err)
+		}
+		// Empty stream — treat as success; bridge will close immediately.
+	}
+	return &anthropicStreamHandle{stream: &ssestreamHandle{
+		underlying: adapter,
+		primed:     true,
+		primedOK:   primedOK,
+	}}, nil, 0
+}
+
+// anthropicSDKStream is the concrete generic stream type from the SDK.
+type anthropicSDKStream interface {
+	Next() bool
+	Current() anthropic.MessageStreamEventUnion
+	Err() error
+	Close() error
+}
+
+type sdkStreamAdapter struct {
+	s anthropicSDKStream
+}
+
+func (a *sdkStreamAdapter) Next() bool                                  { return a.s.Next() }
+func (a *sdkStreamAdapter) Current() anthropic.MessageStreamEventUnion  { return a.s.Current() }
+func (a *sdkStreamAdapter) Err() error                                  { return a.s.Err() }
+func (a *sdkStreamAdapter) Close() error                                { return a.s.Close() }
+
+// bridgeStream pumps SDK MessageStreamEventUnion values into nanite StreamEvents.
+func (a *Anthropic) bridgeStream(ctx context.Context, handle *anthropicStreamHandle, ch chan<- StreamEvent, span trace.Span) {
 	var totalInput, totalOutput int
 	defer func() {
+		if handle != nil && handle.stream != nil && handle.stream.underlying != nil {
+			_ = handle.stream.underlying.Close()
+		}
 		close(ch)
 		if span != nil {
 			span.SetAttributes(
@@ -458,204 +596,94 @@ func (a *Anthropic) readSSEWithTracking(ctx context.Context, body io.ReadCloser,
 			span.End()
 		}
 	}()
-	for ev := range inner {
-		// Record input tokens in the rate tracker when we see usage from message_start.
-		if ev.Type == "usage" && ev.Usage != nil {
-			if ev.Usage.InputTokens > 0 {
-				totalInput += ev.Usage.InputTokens
-				if a.RateTracker != nil {
-					a.RateTracker.Record(ev.Usage.InputTokens)
-					avail, limit := a.RateTracker.Remaining()
-					log.Printf("provider: recorded %d input tokens (rate budget: %d/%d)", ev.Usage.InputTokens, avail, limit)
-				}
-			}
-			if ev.Usage.OutputTokens > 0 {
-				totalOutput += ev.Usage.OutputTokens
-			}
-		}
-		ch <- ev
+
+	if handle == nil || handle.stream == nil {
+		return
 	}
-}
+	s := handle.stream.underlying
+	toolAcc := map[int64]*toolUseAccumulator{}
 
-// toolUseAccumulator tracks state for an in-progress tool_use content block.
-type toolUseAccumulator struct {
-	id        string
-	name      string
-	inputJSON strings.Builder
-}
-
-// readSSE parses the SSE stream from Anthropic and emits StreamEvents.
-func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
-	defer close(ch)
-	defer body.Close()
-
-	scanner := bufio.NewScanner(body)
-	// Increase buffer size for large tool input JSON.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	var eventType string
-	var currentToolUse *toolUseAccumulator
-	var currentBlockIdx int
-	_ = currentBlockIdx // tracked for correlation
-
-	for scanner.Scan() {
+	step := func(ev anthropic.MessageStreamEventUnion) bool {
 		select {
 		case <-ctx.Done():
 			ch <- StreamEvent{Type: "error", Error: "context cancelled"}
-			return
+			return false
 		default:
 		}
-
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "event: ") {
-			eventType = strings.TrimPrefix(line, "event: ")
-			continue
-		}
-
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
-			a.handleSSEData(eventType, data, ch, &currentToolUse, &currentBlockIdx)
-			continue
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("read stream: %v", err)}
-	}
-}
-
-// handleSSEData processes a single SSE data payload based on event type.
-func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent, currentToolUse **toolUseAccumulator, currentBlockIdx *int) {
-	switch eventType {
-	case "content_block_start":
-		var payload struct {
-			Index        int `json:"index"`
-			ContentBlock struct {
-				Type  string `json:"type"`
-				ID    string `json:"id,omitempty"`
-				Name  string `json:"name,omitempty"`
-				Text  string `json:"text,omitempty"`
-			} `json:"content_block"`
-		}
-		if err := json.Unmarshal([]byte(data), &payload); err != nil {
-			return
-		}
-		*currentBlockIdx = payload.Index
-		if payload.ContentBlock.Type == "tool_use" {
-			*currentToolUse = &toolUseAccumulator{
-				id:   payload.ContentBlock.ID,
-				name: payload.ContentBlock.Name,
+		switch variant := ev.AsAny().(type) {
+		case anthropic.MessageStartEvent:
+			u := variant.Message.Usage
+			if u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 {
+				slog.Debug("provider: prompt cache usage",
+					"provider", "anthropic",
+					"cache_creation", u.CacheCreationInputTokens,
+					"cache_read", u.CacheReadInputTokens,
+					"input_tokens", u.InputTokens,
+				)
 			}
-		} else {
-			*currentToolUse = nil
-		}
-
-	case "content_block_delta":
-		var payload struct {
-			Index int `json:"index"`
-			Delta struct {
-				Type           string `json:"type"`
-				Text           string `json:"text"`
-				PartialJSON    string `json:"partial_json,omitempty"`
-			} `json:"delta"`
-		}
-		if err := json.Unmarshal([]byte(data), &payload); err != nil {
-			return
-		}
-
-		switch payload.Delta.Type {
-		case "text_delta":
-			ch <- StreamEvent{Type: "delta", Content: payload.Delta.Text}
-		case "input_json_delta":
-			if *currentToolUse != nil {
-				(*currentToolUse).inputJSON.WriteString(payload.Delta.PartialJSON)
+			in := int(u.InputTokens)
+			totalInput += in
+			if a.RateTracker != nil && in > 0 {
+				a.RateTracker.Record(in)
+				avail, limit := a.RateTracker.Remaining()
+				slog.Debug("provider: recorded input tokens",
+					"provider", "anthropic",
+					"input_tokens", in,
+					"available", avail,
+					"rate_limit", limit,
+				)
 			}
-		}
-
-	case "content_block_stop":
-		if *currentToolUse != nil {
-			tu := *currentToolUse
-			var input map[string]any
-			raw := tu.inputJSON.String()
-			if raw != "" {
-				if err := json.Unmarshal([]byte(raw), &input); err != nil {
-					// If JSON parsing fails, send the raw string as a single "input" key.
-					input = map[string]any{"_raw": raw}
+			ch <- StreamEvent{Type: "usage", Usage: &Usage{
+				InputTokens:         in,
+				CacheCreationTokens: int(u.CacheCreationInputTokens),
+				CacheReadTokens:     int(u.CacheReadInputTokens),
+			}}
+		case anthropic.ContentBlockStartEvent:
+			block := variant.ContentBlock
+			if block.Type == "tool_use" {
+				toolAcc[variant.Index] = &toolUseAccumulator{id: block.ID, name: block.Name}
+			}
+		case anthropic.ContentBlockDeltaEvent:
+			switch variant.Delta.Type {
+			case "text_delta":
+				ch <- StreamEvent{Type: "delta", Content: variant.Delta.Text}
+			case "input_json_delta":
+				if acc, ok := toolAcc[variant.Index]; ok {
+					acc.inputJSON.WriteString(variant.Delta.PartialJSON)
 				}
-			} else {
-				input = map[string]any{}
 			}
-			ch <- StreamEvent{
-				Type: "tool_use",
-				ToolUse: &ToolUseBlock{
-					ID:    tu.id,
-					Name:  tu.name,
-					Input: input,
-				},
+		case anthropic.ContentBlockStopEvent:
+			if acc, ok := toolAcc[variant.Index]; ok {
+				ch <- StreamEvent{Type: "tool_use", ToolUse: acc.finalize()}
+				delete(toolAcc, variant.Index)
 			}
-			*currentToolUse = nil
+		case anthropic.MessageDeltaEvent:
+			totalOutput += int(variant.Usage.OutputTokens)
+			ch <- StreamEvent{Type: "usage", Usage: &Usage{
+				OutputTokens: int(variant.Usage.OutputTokens),
+				StopReason:   string(variant.Delta.StopReason),
+			}}
+		case anthropic.MessageStopEvent:
+			ch <- StreamEvent{Type: "done"}
 		}
+		return true
+	}
 
-	case "message_delta":
-		var payload struct {
-			Delta struct {
-				StopReason string `json:"stop_reason"`
-			} `json:"delta"`
-			Usage struct {
-				OutputTokens int `json:"output_tokens"`
-			} `json:"usage"`
+	// Process the primed event (if peekStream got one).
+	if handle.stream.primed && handle.stream.primedOK {
+		if !step(s.Current()) {
+			return
 		}
-		if err := json.Unmarshal([]byte(data), &payload); err == nil {
-			ch <- StreamEvent{
-				Type: "usage",
-				Usage: &Usage{
-					OutputTokens: payload.Usage.OutputTokens,
-					StopReason:   payload.Delta.StopReason,
-				},
-			}
-		}
+	}
 
-	case "message_start":
-		var payload struct {
-			Message struct {
-				Usage struct {
-					InputTokens         int `json:"input_tokens"`
-					CacheCreationTokens int `json:"cache_creation_input_tokens"`
-					CacheReadTokens     int `json:"cache_read_input_tokens"`
-				} `json:"usage"`
-			} `json:"message"`
+	for s.Next() {
+		if !step(s.Current()) {
+			return
 		}
-		if err := json.Unmarshal([]byte(data), &payload); err == nil {
-			u := payload.Message.Usage
-			if u.CacheCreationTokens > 0 || u.CacheReadTokens > 0 {
-				log.Printf("provider: prompt cache — creation=%d read=%d input=%d",
-					u.CacheCreationTokens, u.CacheReadTokens, u.InputTokens)
-			}
-			ch <- StreamEvent{
-				Type: "usage",
-				Usage: &Usage{
-					InputTokens:         u.InputTokens,
-					CacheCreationTokens: u.CacheCreationTokens,
-					CacheReadTokens:     u.CacheReadTokens,
-				},
-			}
-		}
+	}
 
-	case "message_stop":
-		ch <- StreamEvent{Type: "done"}
-
-	case "error":
-		var payload struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(data), &payload); err == nil {
-			ch <- StreamEvent{Type: "error", Error: payload.Error.Message}
-		} else {
-			ch <- StreamEvent{Type: "error", Error: data}
-		}
+	if err := s.Err(); err != nil && !isStreamClosedErr(err) {
+		ch <- StreamEvent{Type: "error", Error: err.Error()}
 	}
 }
 
@@ -673,81 +701,48 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 		span.SetStatus(codes.Error, "ANTHROPIC_API_KEY not set")
 		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
 	}
+	a.ensureClient()
 
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = models.DefaultChatModel()
 	}
 
-	body := anthropicRequest{
+	params := anthropic.MessageNewParams{
 		Model:     model,
 		MaxTokens: 128,
-		System:    a.buildSystemBlocks(systemPrompt),
-		Messages:  a.marshalMessages(messages),
-		Stream:    false,
+		System:    a.buildSDKSystem(systemPrompt),
+		Messages:  a.buildSDKMessages(messages),
 	}
 
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
-	}
-
-	// Retry loop with exponential backoff for rate limits and server errors.
-	var resp *http.Response
+	var resp *anthropic.Message
 	for attempt := 0; attempt <= a.Retry.MaxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, "POST", anthropicAPI, bytes.NewReader(payload))
-		if err != nil {
-			return "", fmt.Errorf("create request: %w", err)
+		var err error
+		resp, err = a.client.Messages.New(ctx, params,
+			option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"),
+		)
+		if err == nil {
+			break
 		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-api-key", a.apiKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
-
-		resp, err = a.client.Do(req)
-		if err != nil {
-			return "", fmt.Errorf("send request: %w", err)
-		}
-
-		if resp.StatusCode == http.StatusOK {
-			break // success — fall through to decode
-		}
-
-		errBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		apiErr := &APIError{
-			StatusCode: resp.StatusCode,
-			Message:    string(errBody),
-			RetryAfter: ParseRetryAfter(resp.Header.Get("Retry-After")),
-		}
-
-		if !RetryableStatusCode(resp.StatusCode) || attempt == a.Retry.MaxRetries {
+		apiErr := classifyAnthropicError(err)
+		if !RetryableStatusCode(apiErr.StatusCode) || attempt == a.Retry.MaxRetries {
 			return "", apiErr
 		}
-
-		delay := a.Retry.BackoffDelay(attempt, apiErr.RetryAfter)
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			resp.StatusCode, attempt+1, a.Retry.MaxRetries, delay)
-
+		delay := a.Retry.BackoffDelay(attempt, parseRetryAfterFromErr(err))
+		slog.Info("provider: retryable error, retrying",
+			"provider", "anthropic",
+			"status", apiErr.StatusCode,
+			"attempt", attempt+1,
+			"max_attempts", a.Retry.MaxRetries,
+			"delay", delay.String(),
+		)
 		select {
 		case <-ctx.Done():
 			return "", fmt.Errorf("context cancelled during retry: %w", ctx.Err())
 		case <-time.After(delay):
 		}
 	}
-	defer resp.Body.Close()
 
-	var result struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
-	}
-
-	for _, block := range result.Content {
+	for _, block := range resp.Content {
 		if block.Type == "text" {
 			return strings.TrimSpace(block.Text), nil
 		}
@@ -756,16 +751,96 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 }
 
 // Capabilities returns the capabilities supported by the Anthropic provider.
+// Per-provider defaults come from pkg/models.ProviderDefaults so token
+// limits and pricing stay co-located with the model catalog. Per-model
+// overrides are available via models.MaxOutputFor / ContextWindowFor.
 func (a *Anthropic) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsStreamJSON:          true,  // Anthropic supports streaming with tool use
-		SupportsPreToolHooks:        false, // No direct pre-tool hook support
-		SupportsPostToolHooks:       false, // No direct post-tool hook support
-		SupportsSystemPromptCaching: true,  // Anthropic supports prompt caching
-		SupportsToolCalling:         true,  // Anthropic supports function calling
-		SupportsBatch:               false, // No batch API support in current implementation
-		SupportsImageInput:          true,  // Anthropic supports image inputs
-		MaxTokens:                   16384,  // Claude max output tokens (default)
-		ContextWindowSize:           200000, // Claude models support 200k context window
+	return capabilitiesFromRegistry("anthropic")
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+// toolUseAccumulator tracks state for an in-progress tool_use content block.
+type toolUseAccumulator struct {
+	id        string
+	name      string
+	inputJSON strings.Builder
+}
+
+func (acc *toolUseAccumulator) finalize() *ToolUseBlock {
+	raw := acc.inputJSON.String()
+	var input map[string]any
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &input); err != nil {
+			input = map[string]any{"_raw": raw}
+		}
+	} else {
+		input = map[string]any{}
 	}
+	return &ToolUseBlock{ID: acc.id, Name: acc.name, Input: input}
+}
+
+// classifyAnthropicError maps an SDK error to an APIError. The SDK's typed
+// Error carries StatusCode; anything else is wrapped as status 0 (unknown),
+// which RetryableStatusCode treats as non-retryable.
+func classifyAnthropicError(err error) *APIError {
+	if err == nil {
+		return nil
+	}
+	var sdkErr *anthropic.Error
+	if errors.As(err, &sdkErr) {
+		raw := sdkErr.RawJSON()
+		if len(raw) > maxAnthropicErrBody {
+			raw = raw[:maxAnthropicErrBody]
+		}
+		return &APIError{
+			StatusCode: sdkErr.StatusCode,
+			Message:    raw,
+			RetryAfter: parseRetryAfterFromErr(err),
+		}
+	}
+	return &APIError{StatusCode: 0, Message: err.Error()}
+}
+
+// parseRetryAfterFromErr extracts Retry-After from the SDK error's Response.
+func parseRetryAfterFromErr(err error) time.Duration {
+	var sdkErr *anthropic.Error
+	if errors.As(err, &sdkErr) && sdkErr.Response != nil {
+		return ParseRetryAfter(sdkErr.Response.Header.Get("Retry-After"))
+	}
+	return 0
+}
+
+// isStreamClosedErr returns true when the error is a benign stream termination
+// (context cancelled while we were already exiting, or an io.EOF on graceful close).
+func isStreamClosedErr(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	return false
+}
+
+// ephemeralCache returns a non-zero CacheControlEphemeralParam. The zero value
+// is omitted at marshal time (paramObj "omitzero" semantics), so we must set at
+// least one field; TTL=5m is the API default.
+func ephemeralCache() anthropic.CacheControlEphemeralParam {
+	return anthropic.CacheControlEphemeralParam{TTL: anthropic.CacheControlEphemeralTTLTTL5m}
+}
+
+// estimatePromptTokens is a coarse token estimator used for rate-limit pacing
+// when we no longer marshal the body ourselves. ~4 chars per token.
+func estimatePromptTokens(systemPrompt string, messages []ChatMessage) int {
+	total := len(systemPrompt)
+	for _, m := range messages {
+		total += len(m.Content)
+		for _, b := range m.ContentBlocks {
+			total += len(b.Text) + len(b.Content)
+		}
+	}
+	return total / 4
 }

@@ -3,7 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -30,7 +30,7 @@ func assembleSystemPrompt(agent *store.AgentProfile, mode *store.AgentMode, work
 	}
 
 	prompt := b.String()
-	log.Printf("chat: assembled system prompt (%d chars)", len(prompt))
+	slog.Debug("chat: assembled system prompt", "chars", len(prompt))
 	return prompt
 }
 
@@ -66,7 +66,7 @@ func assembleSystemPromptFromTemplates(s *store.Store, agent *store.AgentProfile
 
 	composed, err := s.ComposePromptForAgent(agent.ID, vars)
 	if err != nil {
-		log.Printf("chat: ComposePromptForAgent failed: %v — falling back to legacy", err)
+		slog.Warn("chat: ComposePromptForAgent failed — falling back to legacy", "err", err)
 		return assembleSystemPrompt(agent, mode, workspace)
 	}
 
@@ -74,7 +74,7 @@ func assembleSystemPromptFromTemplates(s *store.Store, agent *store.AgentProfile
 		// No templates assigned — use legacy path.
 		composed = assembleSystemPrompt(agent, mode, workspace)
 	} else {
-		log.Printf("chat: assembled system prompt from templates (%d chars)", len(composed))
+		slog.Debug("chat: assembled system prompt from templates", "chars", len(composed))
 	}
 
 	// Append think tool guidance.
@@ -97,7 +97,7 @@ Use the think tool to organize your reasoning before acting:
 func buildSkillList(s *store.Store, agentID string) string {
 	skills, err := s.ListAgentSkills(agentID)
 	if err != nil {
-		log.Printf("chat: failed to load agent skills: %v", err)
+		slog.Warn("chat: failed to load agent skills", "err", err)
 		return ""
 	}
 

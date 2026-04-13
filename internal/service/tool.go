@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -98,7 +98,7 @@ func (s *toolServiceImpl) SetDecisionLogger(dl BrokerDecisionLogger) {
 // SelectForAgent implements ToolService.
 func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string) (*ToolSelection, error) {
 	intent, hints := extractIntent(userMessage)
-	log.Printf("service/tool: extracted intent=%q hints=%v", intent, hints)
+	slog.Debug("service/tool: extracted intent", "intent", intent, "hints", hints)
 
 	// Collect tools via broker selection.
 	var allTools []provider.ToolDefinition
@@ -107,7 +107,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	if s.toolClient != nil {
 		selected, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
 		if err != nil {
-			log.Printf("service/tool: broker selection failed: %v — falling back to MCP manager", err)
+			slog.Warn("service/tool: broker selection failed — falling back to MCP manager", "err", err)
 		} else {
 			for _, t := range selected {
 				if !seen[t.Name] {
@@ -135,9 +135,9 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	}
 
 	if len(allTools) == 0 {
-		log.Printf("service/tool: WARNING 0 tools for agent %s — proceeding without tools", agentID)
+		slog.Warn("service/tool: 0 tools for agent — proceeding without tools", "agent", agentID)
 	} else {
-		log.Printf("service/tool: selected %d tools for agent %s", len(allTools), agentID)
+		slog.Info("service/tool: selected tools for agent", "count", len(allTools), "agent", agentID)
 	}
 
 	// Check if progressive discovery should be used.
@@ -154,8 +154,8 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 			}
 		}
 
-		log.Printf("service/tool: progressive discovery active — %d MCP tools, %d builtins kept, %d catalog entries",
-			mcpToolCount, len(builtinTools)-1, len(summaries))
+		slog.Info("service/tool: progressive discovery active",
+			"mcp_tools", mcpToolCount, "builtins", len(builtinTools)-1, "catalog_entries", len(summaries))
 
 		s.logDecision(sessionID, intent, "progressive", builtinTools)
 		return &ToolSelection{
@@ -183,7 +183,7 @@ func (s *toolServiceImpl) logDecision(sessionID, intent, layer string, tools []p
 		names[i] = t.Name
 	}
 	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, layer, names, ""); err != nil {
-		log.Printf("service/tool: failed to log broker decision: %v", err)
+		slog.Warn("service/tool: failed to log broker decision", "err", err)
 	}
 }
 
@@ -307,7 +307,7 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 	}
 	afterCount := countMCPTools(allTools)
 	if afterCount > beforeCount {
-		log.Printf("service/tool: direct MCP discovery added %d tools from configured servers", afterCount-beforeCount)
+		slog.Info("service/tool: direct MCP discovery added tools from configured servers", "added", afterCount-beforeCount)
 	}
 	return allTools, seen
 }
@@ -342,7 +342,7 @@ func filterToolsByAllowlist(tools []provider.ToolDefinition, allowlistJSON strin
 			}
 		}
 	}
-	log.Printf("service/tool: allowlist filtered %d → %d tools", len(tools), len(filtered))
+	slog.Debug("service/tool: allowlist filtered", "before", len(tools), "after", len(filtered))
 	return filtered
 }
 

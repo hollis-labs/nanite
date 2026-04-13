@@ -3,7 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -239,6 +239,6 @@ func (s *Store) SeedBuiltinModes() error {
 			return fmt.Errorf("seed mode %s: %w", m.Slug, err)
 		}
 	}
-	log.Println("seed: ensured built-in modes exist")
+	slog.Info("seed: ensured built-in modes exist")
 	return nil
 }

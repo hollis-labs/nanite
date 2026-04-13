@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 // StructuredMessage is the universal wrapper for all assistant messages.
@@ -90,7 +90,7 @@ func ValidateStructured(sm StructuredMessage) []string {
 func LogStructuredWarnings(sm StructuredMessage) {
 	if warnings := ValidateStructured(sm); len(warnings) > 0 {
 		for _, w := range warnings {
-			log.Printf("chat: structured message warning: %s", w)
+			slog.Warn("chat: structured message warning", "warning", w)
 		}
 	}
 }

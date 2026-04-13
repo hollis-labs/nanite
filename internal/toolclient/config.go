@@ -1,9 +1,9 @@
 package toolclient
 
 import (
-	"log"
+	"log/slog"
 
-	"github.com/hollis-labs/tool-broker/broker"
+	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 // DefaultToolTokenBudgetPct is the default fraction of the context window reserved for tool definitions.
@@ -51,7 +51,7 @@ func LoadConfig(path string) *Config {
 
 	rules, err := broker.LoadRulesFromFile(path)
 	if err != nil {
-		log.Printf("toolclient: failed to load rules from %s: %v (using defaults)", path, err)
+		slog.Warn("toolclient: failed to load rules (using defaults)", "path", path, "err", err)
 		return DefaultConfig()
 	}
 

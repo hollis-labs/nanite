@@ -163,7 +163,8 @@ func (s *Store) DeleteSkill(id string) error {
 func (s *Store) ListAgentSkills(agentID string) ([]Skill, error) {
 	rows, err := s.DB.Query(
 		`SELECT sk.id, sk.name, sk.slug, sk.description, sk.category, sk.tool_bindings,
-		        sk.input_schema, sk.is_builtin, sk.settings, sk.created_at, sk.updated_at
+		        sk.input_schema, sk.is_builtin, sk.settings, COALESCE(sk.icon,''),
+		        sk.created_at, sk.updated_at
 		 FROM skills sk
 		 JOIN agent_skills ags ON sk.id = ags.skill_id
 		 WHERE ags.agent_id = ?

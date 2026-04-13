@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // Event represents a workflow execution event.
@@ -229,7 +231,11 @@ func (e *Executor) Run(ctx context.Context, pipeline *Pipeline, input map[string
 			}
 
 			wg.Add(1)
-			go func(s *Step, ss *StepState) {
+			stepArg := step
+			ssArg := ss
+			safego.Go(ctx, "workflow.executor.step", func() {
+				s := stepArg
+				ss := ssArg
 				defer wg.Done()
 
 				timeout := s.Timeout
@@ -297,7 +303,7 @@ func (e *Executor) Run(ctx context.Context, pipeline *Pipeline, input map[string
 						Timestamp:  time.Now(),
 					})
 				}
-			}(step, ss)
+			})
 		}
 		wg.Wait()
 	}

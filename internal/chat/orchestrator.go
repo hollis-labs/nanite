@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -71,24 +71,24 @@ func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *Decompositi
 	// If no MCP manager, return plan only.
 	if o.MCPManager == nil {
 		plan.PlanOnly = true
-		log.Printf("orchestrator: no MCP manager — returning plan only")
+		slog.Info("orchestrator: no MCP manager — returning plan only")
 		return plan, nil
 	}
 
 	// Check Vanta Conduit for relevant knowledge before creating tasks.
 	if plan.HasCortex {
-		log.Printf("orchestrator: conduit available — sub-tasks can leverage agent knowledge")
+		slog.Info("orchestrator: conduit available — sub-tasks can leverage agent knowledge")
 	}
 
 	// Create Engine sprint + tasks if available.
 	if plan.HasEngine && projectID != "" {
 		sprintID, taskIDs, err := o.createEngineSprint(ctx, projectID, decomposition)
 		if err != nil {
-			log.Printf("orchestrator: failed to create Engine sprint: %v (continuing without tracking)", err)
+			slog.Warn("orchestrator: failed to create Engine sprint (continuing without tracking)", "err", err)
 		} else {
 			plan.SprintID = sprintID
 			plan.TaskIDs = taskIDs
-			log.Printf("orchestrator: created Engine sprint %s with %d tasks", sprintID, len(taskIDs))
+			slog.Info("orchestrator: created Engine sprint", "sprint_id", sprintID, "tasks", len(taskIDs))
 		}
 	}
 
@@ -135,7 +135,7 @@ func (o *Orchestrator) Aggregate(ctx context.Context, plan *OrchestrationPlan, r
 
 	finalOutput, err := prov.Complete(ctx, aggregatePrompt, messages, model)
 	if err != nil {
-		log.Printf("orchestrator: aggregation LLM call failed: %v — using raw concatenation", err)
+		slog.Warn("orchestrator: aggregation LLM call failed — using raw concatenation", "err", err)
 		orchResult.FinalOutput = sb.String()
 		return orchResult, nil
 	}
@@ -180,7 +180,7 @@ func (o *Orchestrator) createEngineSprint(ctx context.Context, projectID string,
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal([]byte(sprintResult), &sprintResp); err != nil {
-		log.Printf("orchestrator: could not parse sprint response: %v", err)
+		slog.Warn("orchestrator: could not parse sprint response", "err", err)
 		return "", nil, fmt.Errorf("parse sprint response: %w", err)
 	}
 
@@ -194,7 +194,7 @@ func (o *Orchestrator) createEngineSprint(ctx context.Context, projectID string,
 			"description": st.Description,
 		})
 		if err != nil {
-			log.Printf("orchestrator: failed to create Engine task for %q: %v", st.Title, err)
+			slog.Warn("orchestrator: failed to create Engine task", "title", st.Title, "err", err)
 			continue
 		}
 
@@ -202,7 +202,7 @@ func (o *Orchestrator) createEngineSprint(ctx context.Context, projectID string,
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal([]byte(taskResult), &taskResp); err != nil {
-			log.Printf("orchestrator: could not parse task response: %v", err)
+			slog.Warn("orchestrator: could not parse task response", "err", err)
 			continue
 		}
 		taskIDs = append(taskIDs, taskResp.ID)

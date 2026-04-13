@@ -11,6 +11,8 @@ import (
 	"time"
 
 	pluginsdk "github.com/hollis-labs/go-plugin"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // TriggerDispatcher evaluates trigger rules after events fire and calls
@@ -77,7 +79,11 @@ func (td *TriggerDispatcher) Dispatch(event pluginsdk.Event) {
 			continue
 		}
 
-		go td.sendWithRetry(connector, payload, rule.ID)
+		conn := connector
+		ruleID := rule.ID
+		safego.Go(td.host.ctx, "plugin.triggers.sendWithRetry", func() {
+			td.sendWithRetry(conn, payload, ruleID)
+		})
 	}
 }
 
@@ -151,7 +157,10 @@ func (td *TriggerDispatcher) sendWithRetry(connector pluginsdk.Connector, payloa
 	connName := connector.Name()
 	for attempt := 0; attempt <= td.MaxRetries; attempt++ {
 		ctx, cancel := context.WithTimeout(td.host.ctx, 30*time.Second)
-		err := connector.Send(ctx, payload)
+		var err error
+		safego.Call(ctx, "plugin-hook.connector-send", func() {
+			err = connector.Send(ctx, payload)
+		})
 		cancel()
 
 		if err == nil {

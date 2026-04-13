@@ -2,7 +2,7 @@ package truncate
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +81,7 @@ func Output(text string, toolName string, opts ...OutputOption) Result {
 	outPath := filepath.Join(outputDir(), id+".txt")
 
 	if err := os.WriteFile(outPath, []byte(text), 0644); err != nil {
-		log.Printf("truncate: failed to save output to %s: %v", outPath, err)
+		slog.Warn("truncate: failed to save output", "path", outPath, "err", err)
 		// Fall back to simple truncation without file pointer.
 		fallbackHint := "Use more specific queries to narrow the results."
 		if cfg.canDelegate {
@@ -163,6 +163,6 @@ func Cleanup() {
 		}
 	}
 	if removed > 0 {
-		log.Printf("truncate: cleaned up %d expired tool outputs", removed)
+		slog.Info("truncate: cleaned up expired tool outputs", "removed", removed)
 	}
 }

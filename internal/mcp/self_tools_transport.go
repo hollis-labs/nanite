@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -579,7 +579,7 @@ The portfolio is on track. Two blocked items require attention from the platform
 		"data":    envData,
 	})
 
-	log.Printf("crossapp: report %s generated (type=%s, len=%d)", runID, reportType, len(content))
+	slog.Info("crossapp: report generated", "run_id", runID, "type", reportType, "len", len(content))
 
 	result := fmt.Sprintf("Report %s is ready. %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", runID, description, string(envJSON))
 	return textResult(result), nil

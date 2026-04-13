@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -48,7 +48,7 @@ func WithSchemaMap(s map[string]any) ToolOption {
 	return func(t *toolImpl) {
 		data, err := json.Marshal(s)
 		if err != nil {
-			log.Printf("tool: WithSchemaMap marshal error for tool %q: %v", t.name, err)
+			slog.Error("tool: WithSchemaMap marshal error", "name", t.name, "err", err)
 			return
 		}
 		t.inputSchema = data

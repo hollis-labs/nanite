@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -48,7 +49,9 @@ func (a *API) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 
 	// Emit plugin event: message bookmarked.
 	if a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitMessageBookmarked(b.SessionID, b.MessageID, b.ID)
+		safego.Go(r.Context(), "api.bookmarks.emit.bookmarked", func() {
+			a.Services.Plugins.EmitMessageBookmarked(b.SessionID, b.MessageID, b.ID)
+		})
 	}
 
 	a.jsonResp(w, http.StatusCreated, b)
@@ -71,7 +74,9 @@ func (a *API) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 
 	// Emit plugin event: message unbookmarked.
 	if a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitMessageUnbookmarked(bookmark.SessionID, bookmark.MessageID, bookmark.ID)
+		safego.Go(r.Context(), "api.bookmarks.emit.unbookmarked", func() {
+			a.Services.Plugins.EmitMessageUnbookmarked(bookmark.SessionID, bookmark.MessageID, bookmark.ID)
+		})
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]string{"deleted": id})
@@ -96,7 +101,9 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 
 		// Emit plugin event: message unbookmarked.
 		if a.Services.Plugins != nil {
-			go a.Services.Plugins.EmitMessageUnbookmarked(existing.SessionID, existing.MessageID, existing.ID)
+			safego.Go(r.Context(), "api.bookmarks.emit.toggle-unbookmarked", func() {
+				a.Services.Plugins.EmitMessageUnbookmarked(existing.SessionID, existing.MessageID, existing.ID)
+			})
 		}
 
 		a.jsonResp(w, http.StatusOK, map[string]any{
@@ -124,7 +131,9 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 
 	// Emit plugin event: message bookmarked.
 	if a.Services.Plugins != nil {
-		go a.Services.Plugins.EmitMessageBookmarked(b.SessionID, b.MessageID, b.ID)
+		safego.Go(r.Context(), "api.bookmarks.emit.toggle-bookmarked", func() {
+			a.Services.Plugins.EmitMessageBookmarked(b.SessionID, b.MessageID, b.ID)
+		})
 	}
 
 	a.jsonResp(w, http.StatusCreated, map[string]any{

@@ -2,7 +2,7 @@
 # {{.ProjectName}}
 
 > Agent configuration for this project is managed by [Nanite](https://github.com/hollis-labs/nanite).
-> This file is owned by humans. Edit freely. Run `nanite install --project . --refresh` to pick up new framework content.
+> This file is owned by humans. Edit freely. Run `nanite-agent init --project . --refresh` to pick up new framework content.
 
 ## Agents
 
@@ -14,18 +14,18 @@ If `.nanite/config.yaml` has an empty `agents:` block, this project hasn't been
 configured yet. As the agent reading this file: please offer to help the user
 define their first agent. Ask about the project's purpose and tech stack,
 suggest roles from `~/.nanite/roles/` (browse domain/, stack/, meta/), then
-edit `agents:` and re-run `nanite install --project .` to refresh the managed
+edit `agents:` and re-run `nanite-agent init --project .` to refresh the managed
 sections.
 
 ## How to boot
 
-- **Claude Code:** Open this directory. Claude reads `CLAUDE.md` (managed section written by `nanite install`) and discovers agents from `.nanite/`.
-- **Codex / Copilot CLI:** reads `AGENTS.md` (managed section written by `nanite install`).
-- **Gemini CLI:** reads `GEMINI.md` (managed section written by `nanite install`).
-- **Opencode CLI:** reads `OPENCODE.md` (managed section written by `nanite install`).
+- **Claude Code:** Open this directory. Claude reads `CLAUDE.md` (managed section written by `nanite-agent init`) and discovers agents from `.nanite/`.
+- **Codex / Copilot CLI:** reads `AGENTS.md` (managed section written by `nanite-agent init`).
+- **Gemini CLI:** reads `GEMINI.md` (managed section written by `nanite-agent init`).
+- **Opencode CLI:** reads `OPENCODE.md` (managed section written by `nanite-agent init`).
 - **Direct CLI:** `nanite serve --project .` starts the Nanite agent server for this project.
 
-The four CLI files above are managed by `nanite install` based on the `adapters:` list in `.nanite/config.yaml`. Only the listed adapters' files are created or updated. Edit your project content outside the `<!-- nanite:start --> ... <!-- nanite:end -->` markers — anything inside will be overwritten on the next install or refresh. Run `nanite install --project . --reconfigure` to change which adapters are managed.
+The four CLI files above are managed by `nanite-agent init` based on the `adapters:` list in `.nanite/config.yaml`. Only the listed adapters' files are created or updated. Edit your project content outside the `<!-- nanite:start --> ... <!-- nanite:end -->` markers — anything inside will be overwritten on the next install or refresh. Run `nanite-agent init --project . --reconfigure` to change which adapters are managed.
 
 ## Project-specific notes
 

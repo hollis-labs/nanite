@@ -3,11 +3,13 @@ package subprocess
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // ProcessState tracks the current state of a subprocess.
@@ -146,8 +148,16 @@ func (m *Manager) Start(ctx context.Context) (*Transport, error) {
 	stderr := &ringBuffer{buf: make([]byte, 4096)}
 	cmd.Stderr = stderr
 
-	// Set process group so we can kill the whole tree on shutdown.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Process group + WaitDelay: the subprocess plugin binary may fork
+	// helper processes (language runtimes, e.g. a Node wrapper spawning
+	// its own workers). Setpgid places the whole tree in a new process
+	// group so Stop's -pid SIGKILL below reaches every descendant. The
+	// audit's finding 07 calls this out specifically for orphan
+	// grandchildren that outlive the direct child. WaitDelay bounds
+	// cmd.Wait so a grandchild holding an inherited stdout pipe cannot
+	// pin cmdWait forever.
+	configureSubprocAttr(cmd)
+	cmd.WaitDelay = 10 * time.Second
 
 	if err := cmd.Start(); err != nil {
 		m.state = StateStopped
@@ -164,16 +174,20 @@ func (m *Manager) Start(ctx context.Context) (*Transport, error) {
 	m.waitCh = waitCh
 
 	// Single goroutine calls cmd.Wait(); both waitForExit and Stop observe waitCh.
-	go func() {
+	safego.Go(context.Background(), "plugin.subprocess.manager.cmdWait", func() {
 		waitCh <- cmd.Wait()
-	}()
-	go m.waitForExit(stderr)
+	})
+	safego.Go(context.Background(), "plugin.subprocess.manager.waitForExit", func() {
+		m.waitForExit(stderr)
+	})
 
 	// Start periodic health checks if configured.
 	if m.cfg.HealthInterval > 0 {
 		hctx, hcancel := context.WithCancel(context.Background())
 		m.healthCancel = hcancel
-		go m.healthLoop(hctx)
+		safego.Go(hctx, "plugin.subprocess.manager.healthLoop", func() {
+			m.healthLoop(hctx)
+		})
 	}
 
 	return transport, nil
@@ -265,10 +279,12 @@ func (m *Manager) waitForExit(stderr *ringBuffer) {
 	m.mu.Unlock()
 
 	exitErr := fmt.Errorf("plugin process exited unexpectedly: %w (stderr: %s)", err, stderr.String())
-	log.Printf("subprocess: %s", exitErr)
+	slog.Error("subprocess: exited unexpectedly", "err", exitErr)
 
 	if m.onCrash != nil {
-		m.onCrash(exitErr)
+		safego.Call(context.Background(), "plugin-hook.subprocess.onCrash", func() {
+			m.onCrash(exitErr)
+		})
 	}
 
 	// Attempt restart if within limits.
@@ -288,7 +304,7 @@ func (m *Manager) attemptRestart(attempt int) {
 		}
 	}
 
-	log.Printf("subprocess: restarting in %s (attempt %d/%d)", backoff, attempt+1, m.cfg.MaxRestarts)
+	slog.Warn("subprocess: restarting", "backoff", backoff, "attempt", attempt+1, "max_restarts", m.cfg.MaxRestarts)
 	time.Sleep(backoff)
 
 	ctx, cancel := context.WithTimeout(context.Background(), m.cfg.StartupTimeout)
@@ -296,7 +312,7 @@ func (m *Manager) attemptRestart(attempt int) {
 
 	_, err := m.Start(ctx)
 	if err != nil {
-		log.Printf("subprocess: restart failed: %v", err)
+		slog.Error("subprocess: restart failed", "err", err)
 		m.mu.Lock()
 		m.state = StateCrashed
 		m.mu.Unlock()
@@ -307,7 +323,7 @@ func (m *Manager) attemptRestart(attempt int) {
 	m.restarts++
 	m.mu.Unlock()
 
-	log.Printf("subprocess: restart successful (attempt %d/%d)", attempt+1, m.cfg.MaxRestarts)
+	slog.Info("subprocess: restart successful", "attempt", attempt+1, "max_restarts", m.cfg.MaxRestarts)
 }
 
 // healthLoop periodically checks the subprocess health.
@@ -341,12 +357,12 @@ func (m *Manager) healthCheck() {
 
 	result, err := CallResult[HealthResult](transport, ctx, MethodHealth, nil)
 	if err != nil {
-		log.Printf("subprocess: health check failed: %v", err)
+		slog.Warn("subprocess: health check failed", "err", err)
 		return
 	}
 
 	if !result.OK {
-		log.Printf("subprocess: health check unhealthy: %s", result.Message)
+		slog.Warn("subprocess: health check unhealthy", "message", result.Message)
 	}
 }
 

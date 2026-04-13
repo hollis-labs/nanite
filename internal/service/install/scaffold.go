@@ -1,5 +1,6 @@
-// Package install contains the installer service used by the `nanite install`
-// CLI entry point. This file implements the scaffolding step that initializes
+// Package install contains the installer service used by the `nanite-agent init`
+// CLI entry point (formerly `nanite install`; the legacy subcommand now exits
+// with a deprecation notice). This file implements the scaffolding step that initializes
 // a project directory with a `.nanite/` config tree and a root `NANITE.md`
 // boot prompt.
 package install
@@ -14,6 +15,7 @@ import (
 	"text/template"
 
 	"github.com/hollis-labs/nanite/internal/assets"
+	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 // ScaffoldSource holds values used to render scaffold templates.
@@ -45,7 +47,7 @@ func ScaffoldNaniteDir(projectDir, globalHome string, src ScaffoldSource) error 
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(cfgPath, []byte(rendered), 0o644); err != nil {
+		if err := fsutil.AtomicWriteFile(cfgPath, []byte(rendered), 0o644); err != nil {
 			return fmt.Errorf("write config.yaml: %w", err)
 		}
 	} else if err != nil {
@@ -59,6 +61,15 @@ func ScaffoldNaniteDir(projectDir, globalHome string, src ScaffoldSource) error 
 
 	// Symlinks into globalHome. Anything already present at the link path is
 	// left alone to preserve the idempotency contract.
+	//
+	// Atomicity note (BLG-20260412-002): os.Symlink is a single syscall, so
+	// the symlink is observed either not-yet-created or fully-created — never
+	// partial. The install's state marker is written after each phase, so a
+	// crash between symlink creation and the state write just means the
+	// symlink exists without a phase-complete marker. The --resume flow calls
+	// ScaffoldNaniteDir, which re-checks each link via os.Lstat and skips
+	// anything already present; the net effect is "symlink first, mark after;
+	// resume is tolerant of double-application."
 	for _, sub := range []string{"roles", "skills", "commands"} {
 		link := filepath.Join(naniteDir, sub)
 		target := filepath.Join(globalHome, sub)
@@ -93,7 +104,7 @@ func ScaffoldNaniteMD(projectDir string, src ScaffoldSource) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(rendered), 0o644); err != nil {
+	if err := fsutil.AtomicWriteFile(path, []byte(rendered), 0o644); err != nil {
 		return fmt.Errorf("write NANITE.md: %w", err)
 	}
 	return nil

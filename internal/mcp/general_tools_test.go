@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	//nolint:gosec // G501: md5 is a user-selectable algorithm in the hash
+	// tool contract; test validates that round-trip, not any security claim.
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
@@ -26,7 +28,10 @@ func TestWebFetch_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// httptest binds to 127.0.0.1; flip the opt-in flag so the SSRF guard
+	// allows loopback for this positive-path test.
 	gt := newGeneralTools()
+	gt.AllowLocalhost = true
 	result, err := gt.CallTool(context.Background(), "web_fetch", map[string]any{
 		"url": srv.URL,
 	})
@@ -250,6 +255,7 @@ func TestHash_MD5(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	//nolint:gosec // G401: test fixture for user-selectable md5 algorithm.
 	expected := md5.Sum([]byte("test"))
 	if result.Content[0].Text != hex.EncodeToString(expected[:]) {
 		t.Errorf("md5 mismatch: got %s", result.Content[0].Text)

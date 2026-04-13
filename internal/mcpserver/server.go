@@ -2,7 +2,7 @@ package mcpserver
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -38,7 +38,7 @@ func (s *Server) Run(ctx context.Context) error {
 		server.WithToolCapabilities(true),
 	)
 	s.registerTools(srv)
-	log.Printf("mcpserver: starting stdio server (session=%s)", s.sessionID)
+	slog.Info("mcpserver: starting stdio server", "session_id", s.sessionID)
 	ctxFunc := func(_ context.Context) context.Context { return ctx }
 	return server.ServeStdio(srv, server.WithStdioContextFunc(ctxFunc))
 }
@@ -47,7 +47,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) registerTools(srv *server.MCPServer) {
 	tools, err := s.self.ListTools(context.Background())
 	if err != nil {
-		log.Printf("mcpserver: failed to list tools: %v", err)
+		slog.Error("mcpserver: failed to list tools", "err", err)
 		return
 	}
 
@@ -56,7 +56,7 @@ func (s *Server) registerTools(srv *server.MCPServer) {
 		name := t.Name
 		srv.AddTool(tool, s.makeHandler(name))
 	}
-	log.Printf("mcpserver: registered %d tools", len(tools))
+	slog.Info("mcpserver: registered tools", "count", len(tools))
 }
 
 // buildMCPTool converts a Nanite Tool definition to a mcp-go Tool.

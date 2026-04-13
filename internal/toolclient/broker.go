@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/tool-broker/broker"
+	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 // MaxSelectedTools is the maximum number of tools returned by SelectTools.
@@ -49,7 +49,7 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 // RegisterTools registers tool definitions with the underlying broker.
 func (tb *ToolClient) RegisterTools(tools []broker.ToolDefinition) {
 	tb.LocalBroker.RegisterTools(tools)
-	log.Printf("toolclient: registered %d tools", len(tools))
+	slog.Info("toolclient: registered tools", "count", len(tools))
 }
 
 // isWildcardIntent returns true if the intent is a wildcard or empty string.
@@ -63,8 +63,8 @@ func isWildcardIntent(intent string) bool {
 func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]broker.ToolDefinition, error) {
 	// Reject wildcard intent — fall back to a minimal safe set.
 	if isWildcardIntent(intent) {
-		log.Printf("toolclient: WARNING wildcard/empty intent received (workspace=%s, agent=%s) — returning fallback set of %d tools",
-			workspaceID, agentID, DefaultFallbackToolCount)
+		slog.Warn("toolclient: wildcard/empty intent received — returning fallback set",
+			"workspace", workspaceID, "agent", agentID, "count", DefaultFallbackToolCount)
 		intent = "general"
 	}
 
@@ -98,12 +98,14 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 	beforeCount := len(tools)
 	tools = PruneToolsToTokenBudget(tools, tokenBudget)
 	if len(tools) < beforeCount {
-		log.Printf("toolclient: pruned %d tools to %d due to token budget (%d tokens)",
-			beforeCount, len(tools), tokenBudget)
+		slog.Info("toolclient: pruned tools due to token budget",
+			"before", beforeCount, "after", len(tools), "budget", tokenBudget)
 	}
 
-	log.Printf("toolclient: selected %d/%d tools for intent %q (workspace=%s, agent=%s, tool_tokens=%d, budget=%d)",
-		len(tools), result.Total, intent, workspaceID, agentID, EstimateToolTokens(tools), tokenBudget)
+	slog.Info("toolclient: selected tools for intent",
+		"selected", len(tools), "total", result.Total, "intent", intent,
+		"workspace", workspaceID, "agent", agentID,
+		"tool_tokens", EstimateToolTokens(tools), "budget", tokenBudget)
 
 	return tools, nil
 }
@@ -117,11 +119,20 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	}
 
 	// Start with built-in tools — always available regardless of MCP status.
+	// Builtins must pass the same permission check as MCP tools; a blanket
+	// prepend would bypass deny/allow lists for sensitive builtins (e.g.,
+	// dev_bash, dev_write) and let the LLM call them before the execution-
+	// time check in CallTool denies them.
 	var defs []provider.ToolDefinition
 	if tb.Builtins != nil {
 		builtins := tb.Builtins.GetBuiltins()
 		defs = make([]provider.ToolDefinition, 0, len(builtins)+len(tools))
-		defs = append(defs, builtins...)
+		for _, bt := range builtins {
+			if !tb.CheckPermission(agentID, bt.Name) {
+				continue
+			}
+			defs = append(defs, bt)
+		}
 	} else {
 		defs = make([]provider.ToolDefinition, 0, len(tools))
 	}
@@ -147,10 +158,17 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 // CallTool executes a tool call after checking permissions. Routes through the MCP Manager.
 // Tools with the mcp__ prefix are routed directly. Unprefixed tools (builtins, native tools)
 // are resolved to their owning server via the Manager's tool registry.
+//
+// Permission enforcement runs twice: once against the caller-supplied name
+// and, for unprefixed tools, once more against the resolved mcp__server__tool
+// name. Policies written as "mcp__server__*" patterns would otherwise miss
+// the bare-name fallback path that resolves via MCPManager.ResolveToolServer
+// — an agent with deny_list: ["mcp__dev__*"] could still invoke "dev_bash"
+// by omitting the prefix. Structured deny errors are returned for both.
 func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
-	// Check permissions.
+	// Check permissions against the caller-supplied name first.
 	if !tb.CheckPermission(agentID, toolName) {
-		return "", fmt.Errorf("tool %q denied for agent %q", toolName, agentID)
+		return "", fmt.Errorf("permission denied: tool %q not permitted for agent %q", toolName, agentID)
 	}
 
 	if tb.MCPManager == nil {
@@ -158,17 +176,84 @@ func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, ar
 	}
 
 	// Tools with mcp__ prefix already have routing info — pass through.
-	// Unprefixed tools (native/builtin) need server resolution.
+	// Unprefixed tools (native/builtin) need server resolution; re-check the
+	// resolved prefixed name so deny patterns targeting "mcp__server__*" catch
+	// the bare-name bypass route.
 	execName := toolName
 	if !strings.HasPrefix(toolName, "mcp__") {
 		if server, prefixed := tb.MCPManager.ResolveToolServer(toolName); server != "" {
 			execName = prefixed
+			if !tb.CheckPermission(agentID, execName) {
+				return "", fmt.Errorf("permission denied: tool %q (resolved to %q) not permitted for agent %q", toolName, execName, agentID)
+			}
 		} else {
 			return "", fmt.Errorf("tool %q not found in any registered server", toolName)
 		}
 	}
 
 	return tb.MCPManager.ExecuteTool(ctx, execName, args)
+}
+
+// CallToolWithPolicyCheck is a convenience that additionally rejects argument
+// shapes matching known escalation patterns (see
+// permissions.ArgsContainEscalationPattern) before delegating to CallTool.
+// Callers that accept LLM-shaped arguments (e.g., request_tools) should
+// prefer this entry point; the base CallTool keeps its existing contract.
+func (tb *ToolClient) CallToolWithPolicyCheck(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
+	if ArgsContainEscalationPattern(args) {
+		return "", fmt.Errorf("permission denied: tool %q arguments contain escalation pattern (\"..\")", toolName)
+	}
+	return tb.CallTool(ctx, agentID, toolName, args)
+}
+
+// HandleRequestToolsForAgent wraps HandleRequestTools with per-agent
+// permission filtering and argument-level escalation checks. The meta-tool
+// itself is name-checked elsewhere; this routine closes the gap where the
+// requested inner tool names (and their arguments, when provided) were
+// previously returned to the LLM without enforcement.
+//
+// Behaviour:
+//   - If args contain a known escalation pattern (e.g., a path with ".."),
+//     return an empty result and a deny summary.
+//   - Inner tool names that fail CheckPermission for agentID are dropped
+//     from the returned slice; the summary reports denied names.
+//
+// Policies today do not expose arg-level predicates per tool, so the arg
+// check is a conservative global safety net rather than per-tool policy.
+func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[string]any) ([]provider.ToolDefinition, string) {
+	if ArgsContainEscalationPattern(input) {
+		return nil, fmt.Sprintf("permission denied: request_tools arguments contain escalation pattern (\"..\") for agent %q", agentID)
+	}
+
+	merged, summary := tb.HandleRequestTools(input)
+	if len(merged) == 0 {
+		return merged, summary
+	}
+
+	permitted := make([]provider.ToolDefinition, 0, len(merged))
+	var denied []string
+	for _, t := range merged {
+		if tb.CheckPermission(agentID, t.Name) {
+			permitted = append(permitted, t)
+			continue
+		}
+		denied = append(denied, t.Name)
+	}
+
+	if len(denied) == 0 {
+		return permitted, summary
+	}
+
+	if len(permitted) == 0 {
+		return permitted, fmt.Sprintf("permission denied: no requested tools permitted for agent %q (denied: %s)", agentID, strings.Join(denied, ", "))
+	}
+
+	var names []string
+	for _, t := range permitted {
+		names = append(names, t.Name)
+	}
+	return permitted, fmt.Sprintf("Loaded %d tool(s) for agent %q: %s. Denied: %s.",
+		len(permitted), agentID, strings.Join(names, ", "), strings.Join(denied, ", "))
 }
 
 // GetPermissions loads tool permissions for an agent from the store.
@@ -179,7 +264,7 @@ func (tb *ToolClient) GetPermissions(agentID string) ToolPermissions {
 
 	agent, err := tb.Store.GetAgent(agentID)
 	if err != nil {
-		log.Printf("toolclient: could not load agent %s for permissions: %v", agentID, err)
+		slog.Warn("toolclient: could not load agent for permissions", "agent", agentID, "err", err)
 		return ToolPermissions{MaxCallsPerTurn: DefaultMaxCallsPerTurn}
 	}
 

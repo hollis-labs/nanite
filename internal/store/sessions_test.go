@@ -199,6 +199,86 @@ func TestListMessages(t *testing.T) {
 	}
 }
 
+// TestForkSession_AtomicMessages verifies that ForkSession copies source
+// messages into the new session as a single atomic unit: on success, all
+// messages are present and message_count matches.
+func TestForkSession_AtomicMessages(t *testing.T) {
+	s := newTestStore(t)
+	seedWorkspace(t, s, "ws1")
+
+	src := &Session{WorkspaceID: "ws1", Title: "Source"}
+	if err := s.CreateSession(src); err != nil {
+		t.Fatalf("CreateSession src: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := s.CreateMessage(&Message{SessionID: src.ID, Role: "user", Content: "m"}); err != nil {
+			t.Fatalf("CreateMessage %d: %v", i, err)
+		}
+	}
+
+	forked, err := s.ForkSession(src.ID, nil, true)
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	if forked.ID == src.ID {
+		t.Fatal("forked session should have a new ID")
+	}
+	if forked.MessageCount != 5 {
+		t.Errorf("expected MessageCount=5, got %d", forked.MessageCount)
+	}
+
+	got, err := s.ListMessages(forked.ID, 100)
+	if err != nil {
+		t.Fatalf("ListMessages on fork: %v", err)
+	}
+	if len(got) != 5 {
+		t.Errorf("expected 5 messages in fork, got %d", len(got))
+	}
+
+	// Persisted message_count matches.
+	reloaded, err := s.GetSession(forked.ID)
+	if err != nil {
+		t.Fatalf("GetSession fork: %v", err)
+	}
+	if reloaded.MessageCount != 5 {
+		t.Errorf("persisted MessageCount=5 expected, got %d", reloaded.MessageCount)
+	}
+}
+
+// TestCopyMessages_AtomicOnFailure is a regression guard for the audit
+// finding that message copy was non-atomic. Attempts to copy into a
+// nonexistent target session, which fails the FK on messages.session_id, and
+// verifies no partial messages leaked into the messages table.
+func TestCopyMessages_AtomicOnFailure(t *testing.T) {
+	s := newTestStore(t)
+	seedWorkspace(t, s, "ws1")
+
+	src := &Session{WorkspaceID: "ws1"}
+	if err := s.CreateSession(src); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := s.CreateMessage(&Message{SessionID: src.ID, Role: "user", Content: "m"}); err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+	}
+
+	bogusTarget := "no-such-session-id"
+	err := s.CopyMessages(src.ID, bogusTarget)
+	if err == nil {
+		t.Fatal("expected CopyMessages to fail for nonexistent target")
+	}
+
+	// No partial messages should have been written to the bogus target.
+	var n int
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id = ?", bogusTarget).Scan(&n); err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 messages for bogus target, got %d — CopyMessages was not atomic", n)
+	}
+}
+
 func TestListSessionsReturnsEmptyArray(t *testing.T) {
 	s := newTestStore(t)
 	seedWorkspace(t, s, "ws1")

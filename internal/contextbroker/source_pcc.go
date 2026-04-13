@@ -3,7 +3,7 @@ package contextbroker
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -98,7 +98,7 @@ func (s *PCCSource) Fetch(ctx context.Context, intent Intent, budget int) ([]Con
 		filePath := filepath.Join(projectDir, entry.Name())
 		content, err := os.ReadFile(filePath)
 		if err != nil {
-			log.Printf("contextbroker/pcc: failed to read %s: %v", filePath, err)
+			slog.Warn("contextbroker/pcc: failed to read", "path", filePath, "err", err)
 			continue
 		}
 

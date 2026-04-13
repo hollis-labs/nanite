@@ -88,6 +88,10 @@ func buildErrorEnvelope(code ErrorCode, message string, details map[string]inter
 		Code:       string(code),
 		Message:    message,
 		Details:    details,
+		// math/rand is appropriate here: the Giphy query is cosmetic UI garnish
+		// embedded in the error envelope. No security decision, identity, or
+		// secret depends on this selection.
+		//nolint:gosec // G404: cosmetic Giphy-query selection, non-security.
 		GiphyQuery: errorGiphyQueries[rand.Intn(len(errorGiphyQueries))],
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 	}

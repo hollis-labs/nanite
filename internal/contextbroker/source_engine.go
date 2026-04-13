@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 )
 
@@ -37,7 +37,7 @@ func (s *EngineSource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 	if intent.Scope != "" {
 		taskItems, err := s.fetchTasks(ctx, intent.Scope, budget-usedTokens)
 		if err != nil {
-			log.Printf("contextbroker/engine: tasks fetch failed: %v", err)
+			slog.Warn("contextbroker/engine: tasks fetch failed", "err", err)
 		} else {
 			for _, item := range taskItems {
 				if usedTokens+item.TokenEstimate > budget {
@@ -53,7 +53,7 @@ func (s *EngineSource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 	if intent.Scope != "" && usedTokens < budget {
 		sprintItems, err := s.fetchSprints(ctx, intent.Scope, budget-usedTokens)
 		if err != nil {
-			log.Printf("contextbroker/engine: sprints fetch failed: %v", err)
+			slog.Warn("contextbroker/engine: sprints fetch failed", "err", err)
 		} else {
 			for _, item := range sprintItems {
 				if usedTokens+item.TokenEstimate > budget {

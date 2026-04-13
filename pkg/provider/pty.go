@@ -6,13 +6,15 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/hollis-labs/nanite/internal/safego"
 )
 
 // PTYBridge is a provider that wraps CLI tools in pseudo-terminals.
@@ -100,7 +102,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 	args := p.adapter.BuildArgs(prompt, systemPrompt, cliSessionID)
 
 	// Avoid logging full CLI arguments to prevent leaking user prompts or other sensitive data.
-	log.Printf("pty[%s]: launching CLI with %d args", p.adapter.Name(), len(args))
+	slog.Info("pty: launching CLI", "adapter", p.adapter.Name(), "args", len(args))
 
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
 
@@ -123,7 +125,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 	ch := make(chan StreamEvent, 64)
 	activityCb, hasActivity := ActivityCallbackFromContext(ctx)
 
-	go func() {
+	safego.Go(ctx, "provider.pty.readLoop", func() {
 		defer close(ch)
 		defer ptmx.Close()
 
@@ -147,7 +149,10 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 
 			events, err := p.adapter.ParseLine(line)
 			if err != nil {
-				log.Printf("pty[%s]: parse error: %v (line: %s)", p.adapter.Name(), err, string(line))
+				// Raw CLI output line can contain user prompt / assistant
+				// response text. Name attr "content" so the PII redactor
+				// scrubs it in production; debug builds can see it.
+				slog.Warn("pty: parse error", "adapter", p.adapter.Name(), "err", err, "content", string(line))
 				continue
 			}
 
@@ -164,7 +169,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		if err := scanner.Err(); err != nil {
 			// PTY read errors on process exit are expected (EIO).
 			if !strings.Contains(err.Error(), "input/output error") {
-				log.Printf("pty: scanner error: %v", err)
+				slog.Warn("pty: scanner error", "err", err)
 			}
 		}
 
@@ -172,7 +177,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		if err := cmd.Wait(); err != nil {
 			if ctx.Err() == nil {
 				// Only log if not a context cancellation.
-				log.Printf("pty: process exited: %v", err)
+				slog.Info("pty: process exited", "err", err)
 			}
 		}
 
@@ -180,7 +185,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		if cb, ok := ProcessCallbackFromContext(ctx); ok && cmd.Process != nil {
 			cb(cmd.Process, false)
 		}
-	}()
+	})
 
 	return ch, nil
 }
@@ -192,10 +197,10 @@ func (p *PTYBridge) killProcess(cmd *exec.Cmd) {
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	done := make(chan struct{})
-	go func() {
+	safego.Go(context.Background(), "provider.pty.killProcess.wait", func() {
 		cmd.Wait()
 		close(done)
-	}()
+	})
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):

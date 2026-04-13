@@ -1,7 +1,7 @@
 package api
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -49,7 +49,7 @@ func (a *API) handleSyncWork(w http.ResponseWriter, r *http.Request) {
 	done := "done"
 	for _, id := range diff.TodosChecked {
 		if _, err := svc.UpdateTodo(ctx, id, service.TodoUpdates{Status: &done}); err != nil {
-			log.Printf("work/sync: check todo %s: %v", id, err)
+			slog.Warn("work/sync: check todo failed", "id", id, "err", err)
 		}
 	}
 
@@ -57,21 +57,21 @@ func (a *API) handleSyncWork(w http.ResponseWriter, r *http.Request) {
 	pending := "pending"
 	for _, entry := range diff.TodosUnchecked {
 		if _, err := svc.UpdateTodo(ctx, entry.ID, service.TodoUpdates{Status: &pending}); err != nil {
-			log.Printf("work/sync: uncheck todo %s: %v", entry.ID, err)
+			slog.Warn("work/sync: uncheck todo failed", "id", entry.ID, "err", err)
 		}
 	}
 
 	// Apply plan step checks (mark done).
 	for _, ref := range diff.PlanStepsChecked {
 		if err := svc.UpdatePlanStep(ctx, ref.PlanID, ref.StepID, store.PlanStep{Status: "done"}); err != nil {
-			log.Printf("work/sync: check plan step %s/%s: %v", ref.PlanID, ref.StepID, err)
+			slog.Warn("work/sync: check plan step failed", "plan_id", ref.PlanID, "step_id", ref.StepID, "err", err)
 		}
 	}
 
 	// Apply plan step unchecks (reopen to pending).
 	for _, ref := range diff.PlanStepsUnchecked {
 		if err := svc.UpdatePlanStep(ctx, ref.PlanID, ref.StepID, store.PlanStep{Status: "pending"}); err != nil {
-			log.Printf("work/sync: uncheck plan step %s/%s: %v", ref.PlanID, ref.StepID, err)
+			slog.Warn("work/sync: uncheck plan step failed", "plan_id", ref.PlanID, "step_id", ref.StepID, "err", err)
 		}
 	}
 

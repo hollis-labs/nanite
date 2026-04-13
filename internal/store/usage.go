@@ -1,44 +1,19 @@
 package store
 
-import "fmt"
+import (
+	"fmt"
 
-// Model pricing: cost per million tokens (input, output) in USD.
-var modelPricing = map[string][2]float64{
-	// Anthropic
-	"claude-sonnet-4-20250514":    {3.0, 15.0},
-	"claude-opus-4-20250514":      {15.0, 75.0},
-	"claude-haiku-3-20250307":     {0.25, 1.25},
-	"claude-3-5-sonnet-20241022":  {3.0, 15.0},
-	"claude-3-5-haiku-20241022":   {1.0, 5.0},
-	"claude-3-opus-20240229":      {15.0, 75.0},
-	"claude-3-sonnet-20240229":    {3.0, 15.0},
-	"claude-3-haiku-20240307":     {0.25, 1.25},
-	// OpenAI
-	"gpt-4o":      {2.5, 10.0},
-	"gpt-4o-mini": {0.15, 0.60},
-	"gpt-4-turbo": {10.0, 30.0},
-	"o3":          {2.0, 8.0},
-	"o4-mini":     {1.10, 4.40},
-	// Google Gemini
-	"gemini-2.5-flash": {0.15, 0.60},
-	"gemini-2.5-pro":   {1.25, 10.0},
-	"gemini-2.0-flash": {0.10, 0.40},
-	// Mistral
-	"mistral-large-latest":  {2.0, 6.0},
-	"mistral-medium-latest": {0.40, 2.0},
-	"mistral-small-latest":  {0.10, 0.30},
-	"codestral-latest":      {0.30, 0.90},
-}
+	"github.com/hollis-labs/nanite/pkg/models"
+)
 
-// estimateCost returns the estimated cost in USD for the given model and token counts.
+// estimateCost returns the estimated cost in USD for the given model and
+// token counts. Pricing is sourced from pkg/models (single source of truth);
+// historical model IDs are represented as IsLegacy rows there so usage
+// records for archived sessions remain numerically accurate.
 func estimateCost(model string, inputTokens, outputTokens int) float64 {
-	pricing, ok := modelPricing[model]
-	if !ok {
-		// Default to Sonnet pricing if model unknown.
-		pricing = [2]float64{3.0, 15.0}
-	}
-	inputCost := float64(inputTokens) * pricing[0] / 1_000_000
-	outputCost := float64(outputTokens) * pricing[1] / 1_000_000
+	inputPerM, outputPerM := models.Pricing(model)
+	inputCost := float64(inputTokens) * inputPerM / 1_000_000
+	outputCost := float64(outputTokens) * outputPerM / 1_000_000
 	return inputCost + outputCost
 }
 

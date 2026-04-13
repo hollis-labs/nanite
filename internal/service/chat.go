@@ -3,18 +3,26 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/filter"
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/worker"
+	"github.com/hollis-labs/nanite/pkg/models"
 )
+
+// chatShutdownMaxWait bounds how long chatServiceImpl.Shutdown waits for
+// in-flight generateResponse goroutines to observe cancellation and exit.
+const chatShutdownMaxWait = 10 * time.Second
 
 // ChatService is the top-level orchestrator for message handling. It composes
 // all Wave 1–2 services and replaces the monolithic Engine for chat operations.
@@ -103,17 +111,21 @@ type chatServiceImpl struct {
 	utilityProvider string
 	utilityModel    string
 	permissions    *permission.Engine
+
+	// lifecycle tracks async generateResponse goroutines so Shutdown can
+	// cancel them and wait for them to drain rather than orphan them.
+	lifecycle *lifecycle.Manager
 }
 
 // NewChatService creates a ChatService from its dependencies.
 func NewChatService(cfg ChatServiceConfig) ChatService {
 	up := cfg.UtilityProvider
 	if up == "" {
-		up = "anthropic"
+		up = models.DefaultProvider()
 	}
 	um := cfg.UtilityModel
 	if um == "" {
-		um = "claude-sonnet-4-20250514"
+		um = models.DefaultChatModel()
 	}
 	return &chatServiceImpl{
 		sessions:       cfg.Sessions,
@@ -134,6 +146,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		utilityProvider: up,
 		utilityModel:    um,
 		permissions:    cfg.Permissions,
+		lifecycle:      lifecycle.NewManager("service.chat"),
 	}
 }
 
@@ -152,18 +165,23 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 
 	// Emit message.sent plugin event with the real user message ID.
 	if s.pluginHost != nil {
-		go s.pluginHost.EmitMessageSent(sessionID, userMsg.ID, content, "user", 0)
+		safego.Go(ctx, "service.chat.emit.message-sent", func() {
+			s.pluginHost.EmitMessageSent(sessionID, userMsg.ID, content, "user", 0)
+		})
 	}
 
 	// Create assistant message ID and stream.
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	// Start async generation with a detached context. The HTTP request context
-	// is cancelled when the handler returns (202 Accepted), but generateResponse
-	// runs in the background and must not be tied to the request lifecycle.
-	bgCtx := context.WithoutCancel(ctx)
-	go s.generateResponse(bgCtx, sessionID, assistantMsgID, content, ch)
+	// Start async generation on the service's lifecycle-owned context. The
+	// HTTP request context is cancelled when the handler returns
+	// (202 Accepted), so we cannot use it — but we also must not orphan the
+	// goroutine. The lifecycle manager's context is detached from the
+	// request and cancelled on Shutdown, giving us both properties.
+	s.lifecycle.Go("handleMessage.generateResponse", func(bgCtx context.Context) {
+		s.generateResponse(bgCtx, sessionID, assistantMsgID, content, ch)
+	})
 
 	return assistantMsgID, nil
 }
@@ -180,7 +198,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 		if prov, ok := s.providers.Get(provName); ok {
 			if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil {
 				ap.CircuitBreaker.Reset()
-				log.Printf("chat-service: circuit breaker reset for retry on session %s", sessionID)
+				slog.Info("chat-service: circuit breaker reset for retry", "session_id", sessionID)
 			}
 		}
 	}
@@ -206,8 +224,9 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	bgCtx := context.WithoutCancel(ctx)
-	go s.generateResponse(bgCtx, sessionID, assistantMsgID, userContent, ch)
+	s.lifecycle.Go("retryLastMessage.generateResponse", func(bgCtx context.Context) {
+		s.generateResponse(bgCtx, sessionID, assistantMsgID, userContent, ch)
+	})
 
 	return assistantMsgID, nil
 }
@@ -237,8 +256,9 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, toSessionID)
 
-	bgCtx := context.WithoutCancel(ctx)
-	go s.generateResponse(bgCtx, toSessionID, assistantMsgID, content, ch)
+	s.lifecycle.Go("sendAgentMessage.generateResponse", func(bgCtx context.Context) {
+		s.generateResponse(bgCtx, toSessionID, assistantMsgID, content, ch)
+	})
 
 	return assistantMsgID, nil
 }
@@ -284,10 +304,18 @@ func (s *chatServiceImpl) GetStream(messageID string) (<-chan chat.StreamEvent, 
 	return s.streams.GetStream(messageID)
 }
 
-// Shutdown implements ChatService.
+// Shutdown implements ChatService. It kills tracked CLI processes and then
+// cancels the service's lifecycle context, waiting up to chatShutdownMaxWait
+// for in-flight generateResponse goroutines to exit. Any goroutines still
+// running after the timeout are logged; see lifecycle.ShutdownTimeoutError.
 func (s *chatServiceImpl) Shutdown() {
 	if s.processTracker != nil {
 		s.processTracker.KillAll()
+	}
+	if s.lifecycle != nil {
+		if err := s.lifecycle.Shutdown(chatShutdownMaxWait); err != nil {
+			slog.Warn("chat-service: lifecycle shutdown", "err", err)
+		}
 	}
 }
 
@@ -322,7 +350,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		if p, ok := s.providers.Get(sessionProvider); ok {
 			return sessionProvider, p
 		}
-		log.Printf("chat-service: session provider %q not registered, falling through", sessionProvider)
+		slog.Warn("chat-service: session provider not registered, falling through", "provider", sessionProvider)
 	}
 
 	if agentProvider != "" {
@@ -332,7 +360,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 			}
 			return agentProvider, p
 		}
-		log.Printf("chat-service: agent provider %q not registered, falling through", agentProvider)
+		slog.Warn("chat-service: agent provider not registered, falling through", "provider", agentProvider)
 	}
 
 	if us, err := s.store.GetUserSettings(); err == nil && len(us.ProviderFallbackChain) > 0 {
@@ -349,14 +377,18 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	inferred := chat.InferProvider(model)
 	if p, ok := s.providers.Get(inferred); ok {
 		if requested != "" && requested != inferred && s.pluginHost != nil {
-			go s.pluginHost.EmitProviderFallback(sessionID, requested, inferred)
+			safego.Go(context.Background(), "service.chat.emit.provider-fallback-inferred", func() {
+				s.pluginHost.EmitProviderFallback(sessionID, requested, inferred)
+			})
 		}
 		return inferred, p
 	}
 
 	if p, ok := s.providers.Get("anthropic"); ok {
 		if requested != "" && requested != "anthropic" && s.pluginHost != nil {
-			go s.pluginHost.EmitProviderFallback(sessionID, requested, "anthropic")
+			safego.Go(context.Background(), "service.chat.emit.provider-fallback-anthropic", func() {
+				s.pluginHost.EmitProviderFallback(sessionID, requested, "anthropic")
+			})
 		}
 		return "anthropic", p
 	}

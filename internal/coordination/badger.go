@@ -1,16 +1,20 @@
 package coordination
 
 import (
-	"log"
+	"context"
+	"errors"
+	"log/slog"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
+
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 )
 
 // BadgerStore implements CoordStore using Badger v4.
 type BadgerStore struct {
-	db     *badger.DB
-	stopGC chan struct{}
+	db        *badger.DB
+	lifecycle *lifecycle.Manager
 }
 
 // NewBadgerStore opens a Badger database at dir and starts a background
@@ -27,10 +31,10 @@ func NewBadgerStore(dir string) (*BadgerStore, error) {
 	}
 
 	s := &BadgerStore{
-		db:     db,
-		stopGC: make(chan struct{}),
+		db:        db,
+		lifecycle: lifecycle.NewManager("coordination.badger"),
 	}
-	go s.gcLoop()
+	s.lifecycle.Go("gc", s.gcLoop)
 	return s, nil
 }
 
@@ -48,7 +52,7 @@ func (s *BadgerStore) Get(key string) ([]byte, error) {
 	var val []byte
 	err := s.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(key))
-		if err == badger.ErrKeyNotFound {
+		if errors.Is(err, badger.ErrKeyNotFound) {
 			return ErrNotFound
 		}
 		if err != nil {
@@ -63,7 +67,7 @@ func (s *BadgerStore) Get(key string) ([]byte, error) {
 func (s *BadgerStore) Delete(key string) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		err := txn.Delete([]byte(key))
-		if err == badger.ErrKeyNotFound {
+		if errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
 		}
 		return err
@@ -101,24 +105,27 @@ func (s *BadgerStore) List(prefix string) ([]KVEntry, error) {
 func (s *BadgerStore) Available() bool { return true }
 
 func (s *BadgerStore) Close() error {
-	close(s.stopGC)
+	// Cancel and wait for the GC loop before closing the DB. Closing the DB
+	// while gcLoop is mid-RunValueLogGC would race; lifecycle.Shutdown
+	// guarantees the goroutine has exited before we proceed.
+	_ = s.lifecycle.Shutdown(10 * time.Second)
 	return s.db.Close()
 }
 
 // gcLoop runs Badger's value log garbage collection periodically.
-func (s *BadgerStore) gcLoop() {
+func (s *BadgerStore) gcLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-s.stopGC:
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			for {
 				if err := s.db.RunValueLogGC(0.5); err != nil {
 					break // nothing more to GC
 				}
-				log.Println("coordination: badger value log GC completed")
+				slog.Debug("coordination: badger value log GC completed")
 			}
 		}
 	}

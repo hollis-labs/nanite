@@ -1,7 +1,7 @@
 package service
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -82,7 +82,7 @@ func (sm *StreamManager) RegisterSSE(sessionID string) <-chan struct{} {
 	if prev, loaded := sm.sessionSSE.Swap(sessionID, conn); loaded {
 		old := prev.(*sseConn)
 		close(old.done)
-		log.Printf("stream: SSE session takeover for session %s", sessionID)
+		slog.Info("stream: SSE session takeover", "session_id", sessionID)
 	}
 	return conn.done
 }
@@ -112,7 +112,7 @@ func (sm *StreamManager) RegisterPresenceClient() (string, <-chan chat.PresenceE
 	clientID := uuid.New().String()
 	ch := make(chan chat.PresenceEvent, 32)
 	sm.presenceClient.Store(clientID, ch)
-	log.Printf("presence: client %s registered", clientID)
+	slog.Debug("presence: client registered", "client_id", clientID)
 	return clientID, ch
 }
 
@@ -120,7 +120,7 @@ func (sm *StreamManager) RegisterPresenceClient() (string, <-chan chat.PresenceE
 func (sm *StreamManager) UnregisterPresenceClient(clientID string) {
 	if val, ok := sm.presenceClient.LoadAndDelete(clientID); ok {
 		close(val.(chan chat.PresenceEvent))
-		log.Printf("presence: client %s unregistered", clientID)
+		slog.Debug("presence: client unregistered", "client_id", clientID)
 	}
 }
 
@@ -132,7 +132,7 @@ func (sm *StreamManager) BroadcastPresence(event chat.PresenceEvent) {
 		select {
 		case ch <- event:
 		default:
-			log.Printf("presence: dropped event for slow client %s", key.(string))
+			slog.Debug("presence: dropped event for slow client", "client_id", key.(string))
 		}
 		return true
 	})

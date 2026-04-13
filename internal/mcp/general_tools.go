@@ -2,30 +2,100 @@ package mcp
 
 import (
 	"context"
+	//nolint:gosec // G501: md5 is exposed as a user-selectable option in the
+	// `hash` MCP tool (algorithm=md5). It is not used for any security
+	// decision inside nanite; callers who opt in are responsible for their
+	// use case. See callHash below.
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 )
 
+// ssrfResolver resolves a hostname to IP addresses. Tests replace this to
+// control what IPs the dialer pins against without real DNS lookups.
+type ssrfResolver func(ctx context.Context, host string) ([]net.IP, error)
+
+// defaultSSRFResolver uses the system resolver.
+func defaultSSRFResolver(ctx context.Context, host string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
+
 // GeneralToolsTransport provides general-purpose utility tools
 // that are not path-scoped.
-type GeneralToolsTransport struct{}
+type GeneralToolsTransport struct {
+	// AllowLocalhost permits connections to 127.0.0.0/8 and `localhost`. Off
+	// by default; enable explicitly via configuration when the host process
+	// legitimately needs to reach localhost services.
+	AllowLocalhost bool
+
+	// resolver is the DNS hook used by the SSRF guard. Nil falls back to
+	// the system resolver. Tests install a stub here.
+	resolver ssrfResolver
+
+	// dialer is the low-level dial function used once the IP has been
+	// validated. Nil uses net.Dialer with a short connect timeout. Tests
+	// install a stub that records the dial target without opening a socket.
+	dialer func(ctx context.Context, network, addr string) (net.Conn, error)
+}
 
 // NewGeneralToolsTransport creates a GeneralToolsTransport.
 func NewGeneralToolsTransport() *GeneralToolsTransport {
 	return &GeneralToolsTransport{}
 }
+
+// ssrfDeniedCIDRs is the set of IP ranges that web_fetch refuses to dial.
+// Covers loopback, link-local (AWS/GCP/Azure IMDS at 169.254.169.254),
+// RFC1918 private ranges, CGNAT, unspecified, IPv6 loopback, ULA, and IPv6
+// link-local. Localhost is handled separately so AllowLocalhost can override.
+var ssrfDeniedCIDRs = mustParseCIDRs([]string{
+	"169.254.0.0/16", // link-local incl. cloud IMDS
+	"10.0.0.0/8",     // RFC1918
+	"172.16.0.0/12",  // RFC1918
+	"192.168.0.0/16", // RFC1918
+	"0.0.0.0/8",      // unspecified
+	"100.64.0.0/10",  // CGNAT
+	"fc00::/7",       // IPv6 ULA
+	"fe80::/10",      // IPv6 link-local
+	"::/128",         // IPv6 unspecified
+})
+
+// ssrfLoopbackCIDRs covers 127.0.0.0/8 and ::1/128. Separated so the allow
+// flag can gate them.
+var ssrfLoopbackCIDRs = mustParseCIDRs([]string{
+	"127.0.0.0/8",
+	"::1/128",
+})
+
+func mustParseCIDRs(cidrs []string) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		_, block, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(fmt.Sprintf("ssrf: invalid CIDR %q: %v", c, err))
+		}
+		out = append(out, block)
+	}
+	return out
+}
+
+// errSSRFBlocked is the sentinel used for every SSRF-class rejection so
+// callers (and tests) can distinguish validator errors from transport errors
+// via errors.Is.
+var errSSRFBlocked = errors.New("ssrf: blocked destination")
 
 // ListTools returns the general utility tools.
 func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
@@ -144,11 +214,39 @@ func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	}, nil
 }
 
+// Tunable bounds for general tools.
+const (
+	// webFetchBodyCap bounds the response body returned to the LLM in bytes.
+	// This is the post-sanitization cap applied before assembling the text
+	// result. An upstream server cannot force the nanite process to allocate
+	// more than this for a single web_fetch call.
+	webFetchBodyCap = 1 << 20 // 1 MiB
+
+	// webFetchExposedCap is the chars-of-body shown to the LLM. The body is
+	// read up to webFetchBodyCap, then sliced to this for the result payload.
+	// Separating "dialed-in cap" from "exposed cap" keeps the LLM context
+	// reasonable while still letting us detect and flag truncation.
+	webFetchExposedCap = 8000
+
+	// maxMathDepth is the recursion depth limit for the math_eval parser.
+	// Crossing it returns an error rather than risking a stack-overflow
+	// fatal from deeply-nested input.
+	maxMathDepth = 100
+
+	// maxMathExprLen is the byte cap for a user-supplied math expression.
+	// 1 KiB is far above any legitimate arithmetic input and rules out the
+	// length-based variant of the same DoS.
+	maxMathExprLen = 1024
+)
+
 // CallTool dispatches to the appropriate handler.
-func (g *GeneralToolsTransport) CallTool(_ context.Context, name string, args map[string]any) (*ToolResult, error) {
+func (g *GeneralToolsTransport) CallTool(ctx context.Context, name string, args map[string]any) (*ToolResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	switch name {
 	case "web_fetch":
-		return g.callWebFetch(args)
+		return g.callWebFetch(ctx, args)
 	case "json_parse":
 		return g.callJSONParse(args)
 	case "datetime":
@@ -172,28 +270,246 @@ func (g *GeneralToolsTransport) CallTool(_ context.Context, name string, args ma
 	}
 }
 
-func (g *GeneralToolsTransport) callWebFetch(args map[string]any) (*ToolResult, error) {
-	url, _ := args["url"].(string)
-	if url == "" {
+func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+	}
+	rawURL, _ := args["url"].(string)
+	if rawURL == "" {
 		return errorResult("url is required"), nil
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	parsed, err := url.Parse(rawURL)
 	if err != nil {
+		return errorResult(fmt.Sprintf("invalid url: %v", err)), nil
+	}
+
+	// Scheme allowlist. Reject file://, ftp://, gopher://, etc. Go's default
+	// transport handles only http/https anyway, but we reject explicitly so
+	// the error message is informative and no clever transport injection
+	// reaches the dialer.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errorResult(fmt.Sprintf("unsupported scheme %q (http/https only)", parsed.Scheme)), nil
+	}
+	if parsed.Host == "" {
+		return errorResult("url missing host"), nil
+	}
+
+	// Build a Transport whose DialContext resolves the hostname once, checks
+	// every returned IP against the SSRF denylist, and pins the connection
+	// to the validated IP. This is the standard defense against DNS
+	// rebinding: the DNS answer we checked is the exact IP we dial.
+	resolver := g.resolver
+	if resolver == nil {
+		resolver = defaultSSRFResolver
+	}
+	innerDial := g.dialer
+	if innerDial == nil {
+		d := &net.Dialer{Timeout: 5 * time.Second}
+		innerDial = d.DialContext
+	}
+	allowLocal := g.AllowLocalhost
+
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, splitErr := net.SplitHostPort(addr)
+		if splitErr != nil {
+			return nil, splitErr
+		}
+		// Reject `localhost` and `*.localhost` unless explicitly allowed.
+		if !allowLocal && isLocalhostName(host) {
+			return nil, fmt.Errorf("%w: localhost name %q", errSSRFBlocked, host)
+		}
+		ips, resolveErr := resolver(ctx, host)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("%w: no IPs for %q", errSSRFBlocked, host)
+		}
+		for _, ip := range ips {
+			if !allowLocal {
+				for _, block := range ssrfLoopbackCIDRs {
+					if block.Contains(ip) {
+						return nil, fmt.Errorf("%w: loopback %s", errSSRFBlocked, ip)
+					}
+				}
+			}
+			for _, block := range ssrfDeniedCIDRs {
+				if block.Contains(ip) {
+					return nil, fmt.Errorf("%w: %s in %s", errSSRFBlocked, ip, block)
+				}
+			}
+			if ip.IsUnspecified() {
+				return nil, fmt.Errorf("%w: unspecified %s", errSSRFBlocked, ip)
+			}
+		}
+		// Pin to the first validated IP. DNS cannot rebind between the
+		// resolver call above and the dial below because we supply a literal
+		// address, not a name.
+		pinned := ips[0].String()
+		return innerDial(ctx, network, net.JoinHostPort(pinned, port))
+	}
+
+	transport := &http.Transport{
+		DialContext:           dial,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 8 * time.Second,
+		DisableKeepAlives:     true,
+	}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+		// Cap redirects at 3 and re-validate scheme on each hop. The dialer
+		// re-runs the IP check for each new request so redirect targets get
+		// the same protection as the original URL.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to unsupported scheme %q", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid request: %v", err)), nil
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		if errors.Is(err, errSSRFBlocked) {
+			return errorResult(fmt.Sprintf("fetch blocked: %v", err)), nil
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		}
 		return errorResult(fmt.Sprintf("fetch error: %v", err)), nil
 	}
 	defer resp.Body.Close()
 
-	// Read up to 8000 chars.
-	limited := io.LimitReader(resp.Body, 8000)
-	body, err := io.ReadAll(limited)
+	// Read up to webFetchBodyCap bytes from the upstream. This caps the
+	// envelope allocation regardless of what Content-Length the peer sent or
+	// whether the peer sent chunked data without a length header.
+	limited := io.LimitReader(resp.Body, int64(webFetchBodyCap)+1)
+	raw, err := io.ReadAll(limited)
 	if err != nil {
 		return errorResult(fmt.Sprintf("read error: %v", err)), nil
 	}
+	truncatedByBody := len(raw) > webFetchBodyCap
+	if truncatedByBody {
+		raw = raw[:webFetchBodyCap]
+	}
 
-	result := fmt.Sprintf("Status: %d %s\n\n%s", resp.StatusCode, resp.Status, string(body))
-	return textResult(result), nil
+	// Sanitize upstream bytes before they are stitched into the tool
+	// envelope. Three concerns:
+	//   1. Envelope markers (<!--ENVELOPE_DATA:...-->) a malicious upstream
+	//      may plant in the body to smuggle forged UI primitives into the
+	//      conversation. Strip them with a neutralized tag.
+	//   2. Control characters that the MCP text envelope cannot represent
+	//      cleanly — most notably ANSI escape sequences and NUL bytes.
+	//      Strip ASCII control bytes other than \t, \n, \r.
+	//   3. Invalid UTF-8 sequences that would break downstream JSON encoding.
+	//      strings.ToValidUTF8 replaces them with U+FFFD.
+	sanitized := sanitizeWebBody(raw)
+
+	// Limit the exposed slice to webFetchExposedCap characters. Runes outside
+	// ASCII count as multi-byte here; the cap is defensive rather than precise.
+	displayed := sanitized
+	truncatedByExposed := false
+	if len(displayed) > webFetchExposedCap {
+		displayed = displayed[:webFetchExposedCap]
+		truncatedByExposed = true
+	}
+
+	// Compose a status line that sanitizes the upstream response text as well.
+	// A peer can smuggle control bytes via a bespoke Status string; scrub it
+	// the same way the body is scrubbed.
+	statusText := sanitizeEnvelopeField(resp.Status)
+
+	var out strings.Builder
+	fmt.Fprintf(&out, "Status: %d %s\n", resp.StatusCode, statusText)
+
+	// Expose a minimal, sanitized Content-Type so the LLM can reason about
+	// the payload without the full untrusted header set flowing through.
+	ct := sanitizeEnvelopeField(resp.Header.Get("Content-Type"))
+	if ct != "" {
+		fmt.Fprintf(&out, "Content-Type: %s\n", ct)
+	}
+	out.WriteString("\n")
+	out.WriteString(displayed)
+
+	if truncatedByExposed || truncatedByBody {
+		fmt.Fprintf(&out, "\n[truncated: %d chars shown; body cap %d bytes]", webFetchExposedCap, webFetchBodyCap)
+	}
+
+	return textResult(out.String()), nil
+}
+
+// envelopeMarkerRE matches the <!--ENVELOPE_DATA:...:ENVELOPE_DATA--> marker
+// the chat engine uses to capture structured UI data from tool output. Any
+// upstream response that embeds such a marker (deliberately or otherwise)
+// would be treated as a trusted envelope by the chat engine, so web_fetch
+// scrubs them on the way in.
+var envelopeMarkerRE = regexp.MustCompile(`(?s)<!--\s*ENVELOPE_DATA:.*?:ENVELOPE_DATA\s*-->`)
+
+// sanitizeWebBody applies the web_fetch defense-in-depth output filter.
+func sanitizeWebBody(b []byte) string {
+	// 1. Valid UTF-8.
+	s := strings.ToValidUTF8(string(b), "\uFFFD")
+	// 2. Strip envelope markers.
+	s = envelopeMarkerRE.ReplaceAllString(s, "[envelope marker removed]")
+	// 3. Strip ASCII control chars except tab, newline, CR. This removes
+	// ANSI escape sequences (ESC = 0x1B) and NUL without mangling normal
+	// text or unicode content.
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\t', '\n', '\r':
+			sb.WriteRune(r)
+		default:
+			if r < 0x20 || r == 0x7f {
+				continue
+			}
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
+// sanitizeEnvelopeField scrubs a single header-like string: collapses control
+// characters and runs the envelope-marker scrub so a crafted header cannot
+// smuggle structural content into the tool result envelope.
+func sanitizeEnvelopeField(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	s = envelopeMarkerRE.ReplaceAllString(s, "[envelope marker removed]")
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for _, r := range s {
+		if r == '\t' {
+			sb.WriteRune(' ')
+			continue
+		}
+		if r == '\n' || r == '\r' {
+			sb.WriteRune(' ')
+			continue
+		}
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// isLocalhostName matches "localhost" and any subdomain of ".localhost"
+// (RFC 6761 reserves both). Case-insensitive.
+func isLocalhostName(host string) bool {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	return h == "localhost" || strings.HasSuffix(h, ".localhost")
 }
 
 func (g *GeneralToolsTransport) callJSONParse(args map[string]any) (*ToolResult, error) {
@@ -396,6 +712,10 @@ func (g *GeneralToolsTransport) callHash(args map[string]any) (*ToolResult, erro
 		h := sha256.Sum256([]byte(input))
 		return textResult(hex.EncodeToString(h[:])), nil
 	case "md5":
+		// md5 is offered as an explicit, user-requested algorithm choice in
+		// the tool contract. Not used internally for any security purpose
+		// (integrity, authentication, cache-key collision-resistance).
+		//nolint:gosec // G401: user-requested algorithm, non-security use.
 		h := md5.Sum([]byte(input))
 		return textResult(hex.EncodeToString(h[:])), nil
 	default:
@@ -407,6 +727,9 @@ func (g *GeneralToolsTransport) callMathEval(args map[string]any) (*ToolResult, 
 	expr, _ := args["expression"].(string)
 	if expr == "" {
 		return errorResult("expression is required"), nil
+	}
+	if len(expr) > maxMathExprLen {
+		return errorResult(fmt.Sprintf("expression too long: %d bytes (max %d)", len(expr), maxMathExprLen)), nil
 	}
 
 	result, err := evalExpr(expr)
@@ -441,7 +764,25 @@ func (g *GeneralToolsTransport) callThink(args map[string]any) (*ToolResult, err
 type mathParser struct {
 	input string
 	pos   int
+	depth int
 }
+
+// errMathDepthExceeded is the sentinel returned when the parser's recursion
+// depth exceeds maxMathDepth. Surfaced to tests so they can assert on the
+// exact failure mode.
+var errMathDepthExceeded = fmt.Errorf("expression too deeply nested (max depth %d)", maxMathDepth)
+
+// enter increments the recursion-depth counter and returns an error when the
+// cap is exceeded. The caller is responsible for calling leave() on return.
+func (p *mathParser) enter() error {
+	p.depth++
+	if p.depth > maxMathDepth {
+		return errMathDepthExceeded
+	}
+	return nil
+}
+
+func (p *mathParser) leave() { p.depth-- }
 
 func evalExpr(expr string) (float64, error) {
 	p := &mathParser{input: strings.TrimSpace(expr)}
@@ -457,6 +798,10 @@ func evalExpr(expr string) (float64, error) {
 }
 
 func (p *mathParser) parseExpr() (float64, error) {
+	if err := p.enter(); err != nil {
+		return 0, err
+	}
+	defer p.leave()
 	return p.parseAddSub()
 }
 
@@ -518,6 +863,10 @@ func (p *mathParser) parseMulDiv() (float64, error) {
 }
 
 func (p *mathParser) parsePower() (float64, error) {
+	if err := p.enter(); err != nil {
+		return 0, err
+	}
+	defer p.leave()
 	base, err := p.parseUnary()
 	if err != nil {
 		return 0, err
@@ -535,6 +884,10 @@ func (p *mathParser) parsePower() (float64, error) {
 }
 
 func (p *mathParser) parseUnary() (float64, error) {
+	if err := p.enter(); err != nil {
+		return 0, err
+	}
+	defer p.leave()
 	p.skipSpaces()
 	if p.pos < len(p.input) && p.input[p.pos] == '-' {
 		p.pos++
@@ -552,6 +905,10 @@ func (p *mathParser) parseUnary() (float64, error) {
 }
 
 func (p *mathParser) parseAtom() (float64, error) {
+	if err := p.enter(); err != nil {
+		return 0, err
+	}
+	defer p.leave()
 	p.skipSpaces()
 	if p.pos >= len(p.input) {
 		return 0, fmt.Errorf("unexpected end of expression")

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 // agentrcHeading matches any markdown heading ("#" through "######") whose
@@ -117,7 +118,7 @@ func UpdateCLAUDEmd(path string, managedContent string, snap *CLAUDESnapshotOpts
 				return nil, fmt.Errorf("mkdir snapshot dir: %w", err)
 			}
 			snapshotPath := filepath.Join(snap.Dir, "removed-claude-section.md")
-			if err := os.WriteFile(snapshotPath, []byte(removed), 0o644); err != nil {
+			if err := fsutil.AtomicWriteFile(snapshotPath, []byte(removed), 0o644); err != nil {
 				return nil, fmt.Errorf("write removed-claude-section snapshot: %w", err)
 			}
 		}
@@ -125,7 +126,7 @@ func UpdateCLAUDEmd(path string, managedContent string, snap *CLAUDESnapshotOpts
 
 	// Write cleaned content back only if it changed.
 	if cleaned != content {
-		if err := os.WriteFile(path, []byte(cleaned), 0o644); err != nil {
+		if err := fsutil.AtomicWriteFile(path, []byte(cleaned), 0o644); err != nil {
 			return nil, fmt.Errorf("write cleaned CLAUDE.md: %w", err)
 		}
 	}

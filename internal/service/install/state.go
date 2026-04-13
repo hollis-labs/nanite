@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
 // Phase names track progress through an install.
@@ -67,7 +69,7 @@ func WriteState(path string, s *State) error {
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	return fsutil.AtomicWriteFile(path, data, 0o644)
 }
 
 // ReadState reads and deserializes a State from the given path.

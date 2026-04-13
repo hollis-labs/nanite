@@ -3,9 +3,11 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,13 +43,15 @@ type CommandRegistrar interface {
 // during yaml-driven registration without importing internal/mcp (which
 // would create a cycle via internal/service/install).
 type MCPRegistrar interface {
-	AddPluginServer(name string, transport *subprocess.Transport) error
+	AddPluginServer(pluginID, name string, transport *subprocess.Transport) error
+	RemoveServersByPlugin(pluginID string) int
 }
 
 // pendingRoute is an HTTP route registration deferred until the router is available.
 type pendingRoute struct {
-	pattern string
-	handler http.Handler
+	pattern  string
+	handler  http.Handler
+	pluginID string
 }
 
 // ConnectorStatus tracks the health state of a registered connector.
@@ -79,10 +83,13 @@ type Host struct {
 	kbOwners      map[string]string                 // keybinding ID → plugin ID
 	slots         map[UISlotName][]UISlotEntry // slot name → entries, sorted by priority
 	services      map[string]interface{}
+	serviceOwners map[string]string // service name → plugin ID (only non-core, plugin-registered services)
 	configs       map[string]*PluginConfig // per-plugin config, keyed by plugin ID
 	activePlugin  string                   // ID of the plugin currently being loaded
 	store         *store.Store             // DB-backed plugin settings (nil if unavailable)
 	router        *http.ServeMux
+	pluginMux     *MutablePluginMux // mutable wrapper that owns all plugin-registered routes
+	routePatterns map[string]bool   // patterns already wired on core router (forwarder installed)
 	pendingRoutes []pendingRoute // routes queued before router was set
 	triggers      *TriggerDispatcher // event → connector dispatch
 	filters       *FilterRegistry    // named filter chains
@@ -109,9 +116,12 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		kbOwners:        make(map[string]string),
 		slots:           make(map[UISlotName][]UISlotEntry),
 		services:        make(map[string]interface{}),
+		serviceOwners:   make(map[string]string),
 		configs:         make(map[string]*PluginConfig),
 		envelopes:       make(map[string]EnvelopeRegistryEntry),
 		router:          router,
+		pluginMux:       NewMutablePluginMux(),
+		routePatterns:   make(map[string]bool),
 		logger:          logger,
 		ctx:             ctx,
 		ctxCancel:       cancel,
@@ -139,9 +149,12 @@ func NewHostWithStore(store interface{}) *Host {
 		kbOwners:        make(map[string]string),
 		slots:           make(map[UISlotName][]UISlotEntry),
 		services:        make(map[string]interface{}),
+		serviceOwners:   make(map[string]string),
 		configs:         make(map[string]*PluginConfig),
 		envelopes:       make(map[string]EnvelopeRegistryEntry),
 		router:          http.NewServeMux(),
+		pluginMux:       NewMutablePluginMux(),
+		routePatterns:   make(map[string]bool),
 		logger:          NewLogger("plugin-cli"),
 		ctx:             ctx,
 		ctxCancel:       cancel,
@@ -154,6 +167,13 @@ func NewHostWithStore(store interface{}) *Host {
 
 // SetRouter sets the HTTP router for the plugin host and replays any
 // route registrations that were queued while the router was nil.
+//
+// Plugin-owned routes live in h.pluginMux (a MutablePluginMux) so that
+// UnloadPlugin can drop them. To integrate with the core *http.ServeMux, we
+// install a thin forwarder handler on the core mux — one per distinct pattern
+// — that delegates to h.pluginMux.ServeHTTP. Forwarders stay in place for the
+// server's lifetime (ServeMux forbids re-registration), but the plugin mux
+// behind them is mutable.
 func (h *Host) SetRouter(router *http.ServeMux) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -161,22 +181,52 @@ func (h *Host) SetRouter(router *http.ServeMux) {
 
 	// Replay any routes that were queued before the router was available.
 	for _, pr := range h.pendingRoutes {
-		router.Handle(pr.pattern, pr.handler)
-		h.logger.Info("replayed pending route", "pattern", pr.pattern)
+		h.installForwarderLocked(pr.pattern)
+		h.pluginMux.Handle(pr.pluginID, pr.pattern, pr.handler)
+		h.logger.Info("replayed pending route", "pattern", pr.pattern, "plugin", pr.pluginID)
 	}
 	h.pendingRoutes = nil
 }
 
-// registerRoute registers an HTTP route on the router, or queues it if the
-// router isn't available yet. Caller must hold h.mu (at least RLock for read,
-// Lock if appending to pendingRoutes).
-func (h *Host) registerRoute(pattern string, handler http.Handler) {
-	if h.router != nil {
-		h.router.Handle(pattern, handler)
+// installForwarderLocked installs a stable forwarder on the core router for
+// the given pattern, if one isn't already installed. Caller must hold h.mu.
+// Safe when the core router is nil (pending-route path calls this after
+// router set).
+func (h *Host) installForwarderLocked(pattern string) {
+	if h.router == nil {
 		return
 	}
-	h.pendingRoutes = append(h.pendingRoutes, pendingRoute{pattern: pattern, handler: handler})
-	h.logger.Info("queued route (router not yet available)", "pattern", pattern)
+	if h.routePatterns[pattern] {
+		return
+	}
+	h.routePatterns[pattern] = true
+	// The forwarder is a single handler per pattern that delegates into the
+	// mutable plugin mux. Route lookup inside pluginMux happens at request
+	// time, so removing a plugin's routes from the mux causes this forwarder
+	// to 404 — which is the correct behavior for a removed handler.
+	pluginMux := h.pluginMux
+	h.router.Handle(pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pluginMux.ServeHTTP(w, r)
+	}))
+}
+
+// registerRoute registers an HTTP route owned by the currently-loading plugin.
+// The route is stored in h.pluginMux (so UnloadPlugin can remove it) and a
+// forwarder is installed on the core router if one isn't already in place.
+// If the core router isn't set yet, the registration is queued; the queue is
+// flushed by SetRouter.
+//
+// Caller is expected to hold h.mu (at least the write path, since routes may
+// be appended to pendingRoutes).
+func (h *Host) registerRoute(pattern string, handler http.Handler) {
+	pluginID := h.activePlugin
+	if h.router == nil {
+		h.pendingRoutes = append(h.pendingRoutes, pendingRoute{pattern: pattern, handler: handler, pluginID: pluginID})
+		h.logger.Info("queued route (router not yet available)", "pattern", pattern, "plugin", pluginID)
+		return
+	}
+	h.installForwarderLocked(pattern)
+	h.pluginMux.Handle(pluginID, pattern, handler)
 }
 
 // RegisterHTTPHandler registers a custom HTTP route on the plugin host's
@@ -401,12 +451,22 @@ func (h *Host) GetService(name string) (interface{}, error) {
 	return service, nil
 }
 
-// RegisterService registers a core service for plugin access.
+// RegisterService registers a service for plugin access.
+//
+// If called during a plugin's Load() — i.e. while h.activePlugin is non-empty
+// — the service is tagged as plugin-owned and dropped on UnloadPlugin. Core
+// services registered from main.go (before any plugin loads) leave
+// h.activePlugin == "" and are therefore treated as permanent. This lets us
+// keep the single RegisterService method without a signature change and
+// without breaking the five existing core-service call sites.
 func (h *Host) RegisterService(name string, service interface{}) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.services[name] = service
-	h.logger.Info("registered service", "name", name)
+	if h.activePlugin != "" {
+		h.serviceOwners[name] = h.activePlugin
+	}
+	h.logger.Info("registered service", "name", name, "plugin", h.activePlugin)
 }
 
 // taskBackendRegistrar is the subset of task.Service needed to register backends.
@@ -719,8 +779,14 @@ func (h *Host) RegisterCLIAdapter(name string, adapter interface{}) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	// Store as a service so the bridge layer can discover plugin-registered adapters.
-	h.services["cli-adapter:"+name] = adapter
-	h.logger.Info("registered plugin CLI adapter", "name", name)
+	// Ownership is tracked via serviceOwners using the same cli-adapter: key prefix,
+	// so UnloadPlugin can sweep CLI adapters alongside other plugin-owned services.
+	key := "cli-adapter:" + name
+	h.services[key] = adapter
+	if h.activePlugin != "" {
+		h.serviceOwners[key] = h.activePlugin
+	}
+	h.logger.Info("registered plugin CLI adapter", "name", name, "plugin", h.activePlugin)
 	return nil
 }
 
@@ -1075,43 +1141,151 @@ func (h *Host) UnloadPlugin(id string) error {
 		return fmt.Errorf("failed to unload plugin %q: %w", id, err)
 	}
 
+	// MCP servers are removed OUTSIDE h.mu because Manager.RemoveServer takes
+	// its own lock and may call Close() on the transport which can block.
+	// Snapshot the registrar reference under h.mu first.
+	h.mu.RLock()
+	mcpReg := h.mcpRegistrar
+	h.mu.RUnlock()
+	if mcpReg != nil {
+		if n := mcpReg.RemoveServersByPlugin(id); n > 0 {
+			slog.Debug("plugin unload: removed mcp servers", "plugin", id, "count", n)
+		}
+	}
+
 	// Re-acquire to mutate host state.
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	delete(h.plugins, id)
 
-	// Clean up plugin-owned registrations: filters, event hooks, UI components,
-	// slots, keybindings. This prevents stale handlers from running after unload.
-	if removed := h.filters.RemoveByPlugin(id); removed > 0 {
-		h.logger.Info("removed plugin filters on unload", "id", id, "count", removed)
+	// B.6a hot-unload sweep — 10 of 14 register categories. The remaining 4
+	// (commands, event hooks, CRUD handlers, provider registry) land in B.6b.
+	var envelopeTypesToUnregister []string
+
+	// 1. Filters.
+	if n := h.filters.RemoveByPlugin(id); n > 0 {
+		slog.Debug("plugin unload: removed filters", "plugin", id, "count", n)
 	}
-	// Remove event hooks owned by this plugin.
-	for eventType, hooks := range h.eventHooks {
-		filtered := hooks[:0]
-		for _, hook := range hooks {
-			// EventHook interface doesn't expose plugin ID, so we can't selectively
-			// remove per-plugin hooks here without extending the interface. This is
-			// a known limitation — tracked for future cleanup.
-			filtered = append(filtered, hook)
-		}
-		h.eventHooks[eventType] = filtered
-	}
-	// Remove UI components owned by this plugin.
+
+	// 2. Event hooks — interface doesn't expose plugin ID, so this category
+	// is the B.6b work item. Leave the loop in place as a no-op placeholder
+	// so the sweep order is explicit.
+	// (see B.6b: extend EventHook interface or track hooks in an owner map)
+
+	// 3. UI components.
+	n := 0
 	cleaned := h.uiComponents[:0]
 	for _, comp := range h.uiComponents {
 		if h.uiOwners[comp.ID] != id {
 			cleaned = append(cleaned, comp)
 		} else {
 			delete(h.uiOwners, comp.ID)
+			n++
 		}
 	}
 	h.uiComponents = cleaned
-	// Remove keybindings owned by this plugin.
+	if n > 0 {
+		slog.Debug("plugin unload: removed ui components", "plugin", id, "count", n)
+	}
+
+	// 4. UI slots.
+	slotCount := 0
+	for slot, entries := range h.slots {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.PluginID != id {
+				kept = append(kept, e)
+			} else {
+				slotCount++
+			}
+		}
+		if len(kept) == 0 {
+			delete(h.slots, slot)
+		} else {
+			h.slots[slot] = kept
+		}
+	}
+	if slotCount > 0 {
+		slog.Debug("plugin unload: removed ui slots", "plugin", id, "count", slotCount)
+	}
+
+	// 5. Keybindings.
+	kbCount := 0
 	for kbID, owner := range h.kbOwners {
 		if owner == id {
 			delete(h.keybindings, kbID)
 			delete(h.kbOwners, kbID)
+			kbCount++
 		}
+	}
+	if kbCount > 0 {
+		slog.Debug("plugin unload: removed keybindings", "plugin", id, "count", kbCount)
+	}
+
+	// 6. Connectors.
+	connCount := 0
+	for name, owner := range h.connectorOwners {
+		if owner == id {
+			delete(h.connectors, name)
+			delete(h.connectorOwners, name)
+			delete(h.connectorHealth, name)
+			connCount++
+		}
+	}
+	if connCount > 0 {
+		slog.Debug("plugin unload: removed connectors", "plugin", id, "count", connCount)
+	}
+
+	// 7+8. Services (includes CLI adapters under the cli-adapter: key prefix).
+	svcCount := 0
+	cliCount := 0
+	for name, owner := range h.serviceOwners {
+		if owner == id {
+			delete(h.services, name)
+			delete(h.serviceOwners, name)
+			if strings.HasPrefix(name, "cli-adapter:") {
+				cliCount++
+			} else {
+				svcCount++
+			}
+		}
+	}
+	if svcCount > 0 {
+		slog.Debug("plugin unload: removed services", "plugin", id, "count", svcCount)
+	}
+	if cliCount > 0 {
+		slog.Debug("plugin unload: removed cli adapters", "plugin", id, "count", cliCount)
+	}
+
+	// 9. Envelope types (side-map + chat validation registry).
+	envCount := 0
+	for t, entry := range h.envelopes {
+		if entry.PluginID == id {
+			delete(h.envelopes, t)
+			envelopeTypesToUnregister = append(envelopeTypesToUnregister, t)
+			envCount++
+		}
+	}
+	if envCount > 0 {
+		slog.Debug("plugin unload: removed envelope types", "plugin", id, "count", envCount)
+	}
+
+	// 10. HTTP routes — remove from mutable plugin mux. Forwarder entries on
+	// the core router stay in place (http.ServeMux forbids re-registration),
+	// but they delegate to the plugin mux which now returns 404 for this
+	// plugin's patterns.
+	if h.pluginMux != nil {
+		if n := h.pluginMux.RemoveByPlugin(id); n > 0 {
+			slog.Debug("plugin unload: removed http routes", "plugin", id, "count", n)
+		}
+	}
+
+	h.mu.Unlock()
+
+	// Drop envelope types from chat validation registry OUTSIDE h.mu —
+	// unregisterEnvelopeType takes the chat package lock and there's no need
+	// to hold our own while doing so.
+	for _, t := range envelopeTypesToUnregister {
+		unregisterEnvelopeType(t)
 	}
 
 	h.logger.Info("unloaded plugin", "id", id)

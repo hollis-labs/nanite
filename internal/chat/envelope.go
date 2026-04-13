@@ -30,6 +30,16 @@ func RegisterEnvelopeType(envelopeType string) {
 	registeredTypesMu.Unlock()
 }
 
+// UnregisterEnvelopeType removes an envelope type from the registry. Used by
+// the plugin host during UnloadPlugin to drop plugin-owned envelope types so
+// stale validation entries don't survive a hot-unload. Safe to call for a
+// type that was never registered (no-op).
+func UnregisterEnvelopeType(envelopeType string) {
+	registeredTypesMu.Lock()
+	delete(registeredTypes, envelopeType)
+	registeredTypesMu.Unlock()
+}
+
 // InitCoreTypes populates the registry with core envelope types loaded from
 // the config/envelopes.yaml manifest. Called once at startup before plugins load.
 func InitCoreTypes(types []string) {

@@ -214,12 +214,10 @@ const claudeMDBody = `## Envelope Format
 Emit structured envelopes as fenced code blocks with the ` + "`nanite-envelope`" + ` language tag.
 ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
 
-Registered types: giphy-modal, document-viewer, report-card,
-kb-result, ticket-confirmation, ticket-form, resolution-capture, error-report
-
-Unregistered types are silently dropped by the UI — no error, no warning.
-
-For full schema, field reference, and examples per type, read ` + "`.sandbox/envelope-schema.md`" + `.
+For the current registered envelope types and per-type schemas, consult
+` + "`config/envelopes.yaml`" + ` and ` + "`internal/envelope/schemas/*.schema.json`" + ` —
+those are the runtime source of truth. Unregistered types are silently dropped
+by the UI — no error, no warning.
 
 ## Rules
 1. ALWAYS use envelopes for data collection — never ask users to type structured data

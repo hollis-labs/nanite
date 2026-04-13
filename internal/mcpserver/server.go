@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -68,8 +67,14 @@ func buildMCPTool(t condmcp.Tool) *mcp.Tool {
 	raw := mustMarshalSchema(t.InputSchema)
 	var schema *jsonschema.Schema
 	if err := json.Unmarshal(raw, &schema); err != nil {
-		// Fallback: empty object schema.
-		_ = json.Unmarshal([]byte(`{"type":"object","properties":{}}`), &schema)
+		slog.Warn("mcpserver: failed to unmarshal tool input schema, using fallback", "tool", t.Name, "err", err)
+		if fallbackErr := json.Unmarshal([]byte(`{"type":"object","properties":{}}`), &schema); fallbackErr != nil {
+			slog.Error("mcpserver: failed to unmarshal fallback schema", "tool", t.Name, "err", fallbackErr)
+			schema = &jsonschema.Schema{}
+		}
+	}
+	if schema == nil {
+		schema = &jsonschema.Schema{}
 	}
 	tool.InputSchema = schema
 	return tool
@@ -81,12 +86,12 @@ func (s *Server) makeHandler(name string) mcp.ToolHandler {
 		args := map[string]any{}
 		if len(req.Params.Arguments) > 0 {
 			if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-				return newErrorResult(err.Error()), nil
+				return newErrorResult(err), nil
 			}
 		}
 		result, err := s.self.CallTool(ctx, name, args)
 		if err != nil {
-			return newErrorResult(err.Error()), nil
+			return newErrorResult(err), nil
 		}
 		text := extractText(result)
 		text = convertEnvelopeMarkers(text)
@@ -97,12 +102,15 @@ func (s *Server) makeHandler(name string) mcp.ToolHandler {
 }
 
 // newErrorResult builds a CallToolResult flagged as an error, carrying
-// the given text as its content. Matches the prior mark3labs
-// NewToolResultError wire semantics (isError:true + text content).
-func newErrorResult(msg string) *mcp.CallToolResult {
+// the given error's message as its content. The error value is also
+// preserved on the result via SetError so server-side middleware can
+// observe the original type/unwrap chain via GetError(). Matches the
+// prior mark3labs NewToolResultError wire semantics (isError:true +
+// text content).
+func newErrorResult(err error) *mcp.CallToolResult {
 	r := &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+		Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
 	}
-	r.SetError(errors.New(msg))
+	r.SetError(err)
 	return r
 }

@@ -69,6 +69,8 @@ github.com/hollis-labs/go-queue v0.1.2 h1:FT0te+K0gLM3wvhnZc+nGBIcSW5ebgkhPw4ja/
 github.com/hollis-labs/go-queue v0.1.2/go.mod h1:wAP95gDz9kxAhcCWaR4e07Jz54OvFpiNEq+5ERgt2/E=
 github.com/hollis-labs/go-toolbroker v0.0.2 h1:ZLRw8XJiAy5AOCASESfIcNJSAHh8jeX/FqxKLa67/l0=
 github.com/hollis-labs/go-toolbroker v0.0.2/go.mod h1:OWsxhIzSjtbVRDXANuyfLQ/NjaQt9jSWEGxBLtAKD4U=
+github.com/hollis-labs/plugin-sdk v0.1.0 h1:zhNDIcwOdJzSn/lgfBRicbRPiGoQtQINklA7AgOLYSQ=
+github.com/hollis-labs/plugin-sdk v0.1.0/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
 github.com/hollis-labs/vanta-conduit v0.0.1 h1:uPk7InUbMwfBn1cHubrfuXMeSNWcNWKQcu4NR7yEMqg=
 github.com/hollis-labs/vanta-conduit v0.0.1/go.mod h1:y2EjvvmMW+THIDLIzEoL2gMZJ60ZTDvXJwfSK2VK2PQ=
 github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=

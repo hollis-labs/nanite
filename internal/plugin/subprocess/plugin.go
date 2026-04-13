@@ -198,18 +198,36 @@ func (sp *SubprocessPlugin) Unload() error {
 func (sp *SubprocessPlugin) registerManifest(host plugin.Host, lr *LoadResult, transport *Transport) error {
 	logger := host.Logger()
 
-	// Register config schema.
+	// Register config schema. Bridge plugin-sdk ConfigFieldDef values
+	// (wire types) into go-plugin ConfigFieldDef values (what the host
+	// expects today). Track I will delete go-plugin and this conversion
+	// collapses to a direct pass-through.
 	if len(lr.ConfigSchema) > 0 {
-		if err := host.RegisterConfigSchema(lr.ConfigSchema); err != nil {
+		hostFields := make([]plugin.ConfigFieldDef, 0, len(lr.ConfigSchema))
+		for _, f := range lr.ConfigSchema {
+			hostFields = append(hostFields, plugin.ConfigFieldDef{
+				Key:         f.Key,
+				Type:        f.Type,
+				Label:       f.Label,
+				Description: f.Description,
+				Default:     f.Default,
+				Required:    f.Required,
+				Options:     f.Options,
+				Component:   f.Component,
+			})
+		}
+		if err := host.RegisterConfigSchema(hostFields); err != nil {
 			return fmt.Errorf("register config schema: %w", err)
 		}
 	}
 
-	// Register UI components.
+	// Register UI components. Same bridging rationale as ConfigSchema —
+	// plugin-sdk UIComponentType is a different named type from the
+	// go-plugin one even though the string values match.
 	for _, comp := range lr.Components {
 		uiComp := plugin.UIComponent{
 			ID:          comp.ID,
-			Type:        comp.Type,
+			Type:        plugin.UIComponentType(comp.Type),
 			Name:        comp.Name,
 			Description: comp.Description,
 			Props:       comp.Props,

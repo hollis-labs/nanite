@@ -318,3 +318,76 @@ func TestEventCatalog(t *testing.T) {
 		t.Errorf("Expected session ID 'test-session', got '%s'", event.SessionID)
 	}
 }
+
+// reentrantUnloadPlugin is a test plugin whose Unload() calls back into a
+// host method that takes the host mutex (ListPlugins acquires h.mu.RLock).
+// Before the Shutdown deadlock fix, Shutdown held h.mu across Unload, so the
+// re-entrant RLock attempt blocked forever on the held write lock.
+type reentrantUnloadPlugin struct {
+	TestPlugin
+	host       *Host
+	unloadDone chan struct{}
+}
+
+func (p *reentrantUnloadPlugin) Load(host plugin.Host) error {
+	p.loaded = true
+	return nil
+}
+
+func (p *reentrantUnloadPlugin) Unload() error {
+	// Re-enter the host from within Unload. If Shutdown is holding h.mu,
+	// this RLock acquisition will deadlock.
+	_ = p.host.ListPlugins()
+	p.loaded = false
+	close(p.unloadDone)
+	return nil
+}
+
+// TestShutdown_UnloadReentrancyDoesNotDeadlock regresses the Host.Shutdown
+// deadlock where h.mu was held across p.Unload(). A plugin whose Unload
+// re-enters the host (common pattern: unregister routes, query state) would
+// hang the process on exit. The fix snapshots the plugin list under lock,
+// releases the lock, and iterates Unload() without it held.
+//
+// Test strategy: register a plugin whose Unload() calls a host method that
+// requires h.mu, then run Shutdown in a goroutine with a timeout. Without
+// the fix, the goroutine never completes and the test fails the deadline.
+func TestShutdown_UnloadReentrancyDoesNotDeadlock(t *testing.T) {
+	logger := NewLogger("test")
+	mux := http.NewServeMux()
+	host := NewHost(mux, logger)
+
+	p := &reentrantUnloadPlugin{
+		TestPlugin: TestPlugin{
+			id:      "reentrant-unload",
+			name:    "Reentrant Unload",
+			version: "0.0.1",
+		},
+		host:       host,
+		unloadDone: make(chan struct{}),
+	}
+
+	if err := host.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin failed: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- host.Shutdown()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Shutdown returned error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Shutdown deadlocked (3s timeout) — Unload re-entered host method under h.mu")
+	}
+
+	select {
+	case <-p.unloadDone:
+	default:
+		t.Fatal("reentrant Unload did not complete")
+	}
+}

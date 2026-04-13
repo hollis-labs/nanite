@@ -1,12 +1,19 @@
 import { Suspense, Component, useSyncExternalStore, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import type { Envelope } from '@/lib/types'
 import { getEnvelopeComponent } from '@/generated/plugin-envelopes'
-import { subscribeRegistry, getRegistryVersion } from '@/lib/plugin-loader'
+import {
+  subscribeRegistry,
+  getRegistryVersion,
+  getEnvelopePluginId,
+  getPluginLoadError,
+} from '@/lib/plugin-loader'
 import { useSettings } from '@/hooks/useSettings'
 import { ProposalCard } from './ProposalCard'
 import { QuestionForm } from './QuestionForm'
 import { ApprovalCard } from './ApprovalCard'
+import { PluginLoadErrorCard } from './PluginLoadErrorCard'
 
 /** Error boundary scoped to a single envelope — prevents a broken plugin from crashing the chat. */
 class EnvelopeErrorBoundary extends Component<
@@ -47,6 +54,7 @@ interface EnvelopeRendererProps {
 export function EnvelopeRenderer({ envelope, onSendMessage }: EnvelopeRendererProps) {
   const { data: settings } = useSettings()
   const recoverMode = settings?.recover_mode ?? false
+  const queryClient = useQueryClient()
 
   // Re-render when dynamic plugins register new envelope components.
   useSyncExternalStore(subscribeRegistry, getRegistryVersion)
@@ -62,6 +70,27 @@ export function EnvelopeRenderer({ envelope, onSendMessage }: EnvelopeRendererPr
         </Suspense>
       </EnvelopeErrorBoundary>
     )
+  }
+
+  // No component resolved. If the type belongs to a plugin whose bundle
+  // failed to load, surface the failure with a retry button instead of
+  // falling through to the default renderer.
+  if (!recoverMode) {
+    const pluginId = getEnvelopePluginId(envelope.type)
+    if (pluginId) {
+      const reason = getPluginLoadError(pluginId)
+      if (reason) {
+        return (
+          <PluginLoadErrorCard
+            pluginId={pluginId}
+            reason={reason}
+            onRetry={() => {
+              void queryClient.invalidateQueries({ queryKey: ['plugins', 'registry'] })
+            }}
+          />
+        )
+      }
+    }
   }
 
   // Default envelope rendering — proposals, questions, approval

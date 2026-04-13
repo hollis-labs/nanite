@@ -18,7 +18,8 @@ import { MemoryModal } from './memory/MemoryModal'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import { usePresence } from '@/hooks/usePresence'
 import { useHashRoute } from '@/hooks/useHashRoute'
-import { usePluginModules } from '@/hooks/usePluginModules'
+import { usePluginRegistry } from '@/hooks/usePluginRegistry'
+import { usePluginEvents } from '@/hooks/usePluginEvents'
 
 export function AppShell() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
@@ -64,8 +65,10 @@ export function AppShell() {
   // Sync navigation state with URL hash
   useHashRoute()
 
-  // Load dynamic plugin UI bundles (ESM) at startup
-  usePluginModules()
+  // Plugin registry: fetch + reconcile into dynamic registry, and invalidate
+  // the query whenever a plugin lifecycle event fires.
+  usePluginRegistry()
+  usePluginEvents()
 
   // Set default workspace on load
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)

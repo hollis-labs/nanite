@@ -1,6 +1,8 @@
 // Widget registry — maps widget IDs to lazy-loaded React components.
-// Follows ADR-002: single registry with `source` field. Core entries use source: "core",
-// plugin entries use source: pluginId. Recover mode filters to source === "core".
+// Follows ADR-002: single registry with `source` field. Core entries use source: "core";
+// compiled-in widgets carried over from legacy plugins retain their original `source` so
+// recover mode (which filters to source === "core") continues to exclude them.
+// Runtime plugin widgets are resolved via getDynamicWidget from plugin-loader.ts.
 //
 // Widget IDs must match the IDs registered via RegisterUIComponent()
 // on the backend. IDs are validated: alphanumeric + hyphens only, max 64 chars.
@@ -19,7 +21,10 @@ export interface WidgetRegistryEntry {
 // Valid widget ID pattern — enforced on both frontend lookup and backend registration.
 const WIDGET_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/;
 
-// --- CORE WIDGETS (hardcoded, not generated) ---
+// --- CORE WIDGETS (compiled-in, hand-maintained) ---
+// Entries with source !== "core" are compiled-in fallbacks that predated the
+// dynamic plugin registry; their `source` is preserved so recover mode excludes
+// them. When their owning plugin loads dynamically it wins via getDynamicWidget.
 const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
   "session-info": {
     component: lazy(() =>
@@ -77,11 +82,6 @@ const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
     ),
     source: "core",
   },
-};
-
-// --- PLUGIN ENTRIES (auto-generated, safe to overwrite below this line) ---
-// @PLUGIN_WIDGET_ENTRIES_START
-const PLUGIN_ENTRIES: Record<string, WidgetRegistryEntry> = {
   bookmarks: {
     component: lazy(() =>
       import("@/components/plugins/bookmarks/BookmarksWidget").then((m) => ({
@@ -115,11 +115,9 @@ const PLUGIN_ENTRIES: Record<string, WidgetRegistryEntry> = {
     source: "debug",
   },
 };
-// @PLUGIN_WIDGET_ENTRIES_END
 
-// Single merged registry — core takes precedence on ID collision.
+// Compiled-in registry. Runtime plugin widgets resolve via getDynamicWidget.
 export const WIDGET_REGISTRY: Record<string, WidgetRegistryEntry> = {
-  ...PLUGIN_ENTRIES,
   ...CORE_ENTRIES,
 };
 

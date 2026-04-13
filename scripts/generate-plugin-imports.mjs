@@ -1,23 +1,22 @@
 #!/usr/bin/env node
 // generate-plugin-imports.mjs
-// Generates ui/src/generated/plugin-envelopes.ts from:
-//   - config/envelopes.yaml (core envelope types)
-//   - plugins/*/plugin.yaml (plugin envelope types)
+// Generates ui/src/generated/plugin-envelopes.ts from config/envelopes.yaml.
 //
-// Validates the core manifest using built-in checks (pattern, required fields, duplicates).
+// After Phase 2 Track D.3, all compiled-in envelopes are core. Runtime plugin
+// envelopes are registered dynamically via the plugin registry (see
+// ui/src/lib/plugin-loader.ts) — they do not participate in codegen.
 //
 // Usage:
 //   node scripts/generate-plugin-imports.mjs          # generate
 //   node scripts/generate-plugin-imports.mjs --check  # validate only (CI)
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
-const PLUGINS_DIR = join(ROOT, 'plugins');
 const OUTPUT_FILE = join(ROOT, 'ui', 'src', 'generated', 'plugin-envelopes.ts');
 const UI_SRC = join(ROOT, 'ui', 'src');
 const MANIFEST_PATH = join(ROOT, 'config', 'envelopes.yaml');
@@ -35,12 +34,10 @@ function parseYamlList(content, sectionKey) {
   for (const line of lines) {
     const trimmed = line.trimEnd();
 
-    // Detect target section
     if (new RegExp(`^${sectionKey}:\\s*$`).test(trimmed)) {
       inSection = true;
       continue;
     }
-    // Another top-level key ends the section
     if (/^\S/.test(trimmed) && !trimmed.startsWith('#') && trimmed !== '') {
       if (inSection) {
         break;
@@ -51,7 +48,6 @@ function parseYamlList(content, sectionKey) {
     if (!inSection) continue;
     if (trimmed.trim() === '' || trimmed.trim().startsWith('#')) continue;
 
-    // List item start: "  - key: value"
     const listMatch = trimmed.match(/^\s+-\s+(\w+):\s*(.+)$/);
     if (listMatch) {
       if (currentEntry) entries.push({ ...currentEntry });
@@ -60,7 +56,6 @@ function parseYamlList(content, sectionKey) {
       continue;
     }
 
-    // List item start without value: "  - key:"  (shouldn't happen but handle)
     const listStartOnly = trimmed.match(/^\s+-\s+(\w+):\s*$/);
     if (listStartOnly) {
       if (currentEntry) entries.push({ ...currentEntry });
@@ -69,7 +64,6 @@ function parseYamlList(content, sectionKey) {
       continue;
     }
 
-    // Continuation key: "    key: value"
     const kvMatch = trimmed.match(/^\s+(\w+):\s*(.+)$/);
     if (kvMatch && currentEntry) {
       currentEntry[kvMatch[1]] = kvMatch[2].trim();
@@ -109,7 +103,6 @@ function validateManifest(entries) {
     }
     seen.add(e.type);
 
-    // component and export are co-required
     if (e.component && !e.export) {
       errors.push(`${prefix} (${e.type}): "component" requires "export"`);
     }
@@ -124,65 +117,6 @@ function validateManifest(entries) {
   return errors;
 }
 
-// --- Plugin YAML parser (reused from original script) ---
-
-function parsePluginEnvelopes(pluginName, content) {
-  const entries = [];
-  const lines = content.split('\n');
-  let inRegisters = false;
-  let inEnvelopes = false;
-  let currentEntry = null;
-
-  for (const line of lines) {
-    const trimmed = line.trimEnd();
-
-    if (/^registers:\s*$/.test(trimmed)) {
-      inRegisters = true;
-      inEnvelopes = false;
-      continue;
-    }
-    if (/^\S/.test(trimmed) && !trimmed.startsWith('#') && trimmed !== '') {
-      if (inRegisters) inRegisters = false;
-      inEnvelopes = false;
-      continue;
-    }
-    if (inRegisters && /^\s+envelopes:\s*$/.test(trimmed)) {
-      inEnvelopes = true;
-      continue;
-    }
-    if (inRegisters && /^\s{2}\S/.test(trimmed) && !/^\s+envelopes:/.test(trimmed) && !trimmed.trim().startsWith('#') && !trimmed.trim().startsWith('-')) {
-      inEnvelopes = false;
-      continue;
-    }
-    if (!inEnvelopes) continue;
-
-    const listMatch = trimmed.match(/^\s+-\s+(\w+):\s*(.+)$/);
-    if (listMatch) {
-      if (currentEntry && currentEntry.type && currentEntry.component) {
-        entries.push({ ...currentEntry });
-      }
-      currentEntry = {};
-      currentEntry[listMatch[1]] = listMatch[2].trim();
-      continue;
-    }
-    const kvMatch = trimmed.match(/^\s+(\w+):\s*(.+)$/);
-    if (kvMatch && currentEntry) {
-      currentEntry[kvMatch[1]] = kvMatch[2].trim();
-    }
-  }
-
-  if (currentEntry && currentEntry.type && currentEntry.component) {
-    entries.push({ ...currentEntry });
-  }
-
-  return entries.map(e => ({
-    type: e.type,
-    component: e.component,
-    exportName: e.export || e.component.split('/').pop(),
-    plugin: pluginName,
-  }));
-}
-
 // --- Code generation ---
 
 function generateLazyImport(type, component, exportName) {
@@ -194,7 +128,7 @@ function generateLazyImport(type, component, exportName) {
     ),`;
 }
 
-function generateOutput(coreEntries, pluginEntries) {
+function generateOutput(coreEntries) {
   const coreWithComponents = coreEntries.filter(e => e.component && e.export);
   const coreWithoutComponents = coreEntries.filter(e => !e.component);
 
@@ -204,19 +138,14 @@ function generateOutput(coreEntries, pluginEntries) {
   },`;
   });
 
-  const pluginLines = pluginEntries.map(e => {
-    return `${generateLazyImport(e.type, e.component, e.exportName)}
-    source: "${e.plugin}",
-  },`;
-  });
-
   let coreComment = '';
   if (coreWithoutComponents.length > 0) {
     coreComment = `\n  // Backend-only types (no frontend component): ${coreWithoutComponents.map(e => e.type).join(', ')}`;
   }
 
   return `// AUTO-GENERATED by scripts/generate-plugin-imports.mjs — do not edit manually.
-// Core entries from config/envelopes.yaml, plugin entries from plugins/*/plugin.yaml.
+// Core entries from config/envelopes.yaml. Runtime plugin envelopes are
+// registered dynamically via plugin-loader.ts and resolved by getDynamicEnvelope.
 // Run \`npm run generate:plugins\` to regenerate.
 import { lazy } from "react";
 import type { ComponentType } from "react";
@@ -235,14 +164,8 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {${coreComment}
 ${coreLines.join('\n')}
 };
 
-// --- PLUGIN ENVELOPES (generated from plugins/*/plugin.yaml) ---
-const PLUGIN_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
-${pluginLines.join('\n')}
-};
-
-// Single merged registry — core takes precedence on name collision.
+// Compiled-in registry — core only. Runtime plugins resolve via getDynamicEnvelope.
 export const ENVELOPE_REGISTRY: Record<string, EnvelopeRegistryEntry> = {
-  ...PLUGIN_ENTRIES,
   ...CORE_ENTRIES,
 };
 
@@ -265,21 +188,6 @@ export function getEnvelopeComponent(
   const dynamic = getDynamicEnvelope(type);
   return dynamic?.component;
 }
-
-// Legacy exports — kept for backward compat with EnvelopeRenderer.
-// biome-ignore lint/suspicious/noExplicitAny: legacy export shape
-export const PLUGIN_ENVELOPE_REGISTRY: Record<string, React.LazyExoticComponent<ComponentType<any>>> =
-  Object.fromEntries(
-    Object.entries(ENVELOPE_REGISTRY).map(([k, v]) => [k, v.component]),
-  );
-
-// biome-ignore lint/suspicious/noExplicitAny: legacy export shape
-export const CORE_ONLY_ENVELOPE_REGISTRY: Record<string, React.LazyExoticComponent<ComponentType<any>>> =
-  Object.fromEntries(
-    Object.entries(ENVELOPE_REGISTRY)
-      .filter(([, v]) => v.source === "core")
-      .map(([k, v]) => [k, v.component]),
-  );
 `;
 }
 
@@ -288,7 +196,6 @@ export const CORE_ONLY_ENVELOPE_REGISTRY: Record<string, React.LazyExoticCompone
 function main() {
   console.log('Envelope codegen: generating plugin-envelopes.ts');
 
-  // 1. Load and validate core manifest
   if (!existsSync(MANIFEST_PATH)) {
     console.error(`ERROR: Core envelope manifest not found: ${MANIFEST_PATH}`);
     process.exit(1);
@@ -306,7 +213,6 @@ function main() {
     process.exit(1);
   }
 
-  // Verify component files exist for entries that declare them
   for (const e of coreEntries) {
     if (e.component) {
       const componentPath = join(UI_SRC, e.component + '.tsx');
@@ -319,37 +225,8 @@ function main() {
 
   console.log(`  Core: ${coreEntries.length} type(s) from config/envelopes.yaml`);
 
-  // 2. Load plugin envelopes
-  const pluginEntries = [];
-  if (existsSync(PLUGINS_DIR)) {
-    const pluginDirs = readdirSync(PLUGINS_DIR).filter(name => {
-      const full = join(PLUGINS_DIR, name);
-      return statSync(full).isDirectory();
-    });
-
-    for (const pluginName of pluginDirs) {
-      const yamlPath = join(PLUGINS_DIR, pluginName, 'plugin.yaml');
-      if (!existsSync(yamlPath)) continue;
-
-      const content = readFileSync(yamlPath, 'utf-8');
-      const envelopes = parsePluginEnvelopes(pluginName, content);
-
-      for (const env of envelopes) {
-        const componentPath = join(UI_SRC, env.component + '.tsx');
-        if (!existsSync(componentPath)) {
-          console.warn(`  SKIP ${env.type} — component not found: ${componentPath}`);
-          continue;
-        }
-        pluginEntries.push(env);
-      }
-    }
-  }
-
-  console.log(`  Plugins: ${pluginEntries.length} type(s) from ${new Set(pluginEntries.map(e => e.plugin)).size} plugin(s)`);
-
-  // 3. Check mode — validate only, don't write
   if (CHECK_MODE) {
-    const output = generateOutput(coreEntries, pluginEntries);
+    const output = generateOutput(coreEntries);
     if (existsSync(OUTPUT_FILE)) {
       const existing = readFileSync(OUTPUT_FILE, 'utf-8');
       if (existing === output) {
@@ -365,18 +242,13 @@ function main() {
     }
   }
 
-  // 4. Generate and write
-  const output = generateOutput(coreEntries, pluginEntries);
+  const output = generateOutput(coreEntries);
   writeFileSync(OUTPUT_FILE, output, 'utf-8');
   console.log(`  Written: ${OUTPUT_FILE}`);
 
-  // Summary
   for (const e of coreEntries) {
     const status = e.component ? `-> ${e.component}` : '(backend-only)';
     console.log(`    [core] ${e.type} ${status}`);
-  }
-  for (const e of pluginEntries) {
-    console.log(`    [${e.plugin}] ${e.type} -> ${e.component}`);
   }
 }
 

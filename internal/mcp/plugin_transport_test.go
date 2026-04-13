@@ -96,7 +96,7 @@ func TestPluginMCPTransport_ListAndCall(t *testing.T) {
 				return nil, &subprocess.RPCError{Code: subprocess.ErrCodeInvalidParams, Message: "wrong server: " + p.Server}
 			}
 			return pluginListToolsResult{Tools: []Tool{wantTool}}, nil
-		case sdksub.MethodCallTool:
+		case sdksub.MethodMCPCallTool:
 			var p pluginCallToolParams
 			_ = json.Unmarshal(params, &p)
 			if p.Server != "echo-srv" || p.Tool != "echo" {

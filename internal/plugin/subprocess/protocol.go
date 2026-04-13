@@ -29,15 +29,17 @@ type (
 )
 
 // --- Load manifest ---
+//
+// As of plugin-sdk v0.2.0 (Track B.10) declarative registrations are
+// yaml-authoritative: the host reads commands/slots/components/keybindings
+// /config_schema/events/crud/dependencies from plugin.yaml and applies them
+// directly. LoadResult is now an ack-only envelope; the only payload is
+// SkippedRegistrations (runtime opt-outs the plugin surfaces back to the host).
 
 type (
-	LoadParams            = sdksub.LoadParams
-	LoadResult            = sdksub.LoadResult
-	CommandRegistration   = sdksub.CommandRegistration
-	ComponentRegistration = sdksub.ComponentRegistration
-	UISlotEntry           = sdksub.UISlotEntry
-	KeybindingDef         = sdksub.KeybindingDef
-	CommandArg            = sdksub.CommandArg
+	LoadParams          = sdksub.LoadParams
+	LoadResult          = sdksub.LoadResult
+	SkippedRegistration = sdksub.SkippedRegistration
 )
 
 // --- Runtime request/response payloads ---
@@ -51,6 +53,16 @@ type (
 	CRUDResult        = sdksub.CRUDResult
 	CRUDListResult    = sdksub.CRUDListResult
 	HealthResult      = sdksub.HealthResult
+
+	// B.10: new wire types for host->plugin methods beyond the
+	// command/event/CRUD set. Stub-wired in Track B.10; downstream B.11/B.12
+	// flesh out the surrounding policy + streaming.
+	MCPCallRequest = sdksub.MCPCallRequest
+	MCPCallResult  = sdksub.MCPCallResult
+	HTTPRequest    = sdksub.HTTPRequest
+	HTTPResponse   = sdksub.HTTPResponse
+	MigrateParams  = sdksub.MigrateParams
+	MigrateResult  = sdksub.MigrateResult
 )
 
 // --- Method constants ---
@@ -67,6 +79,11 @@ const (
 	MethodCRUDUpdate     = sdksub.MethodCRUDUpdate
 	MethodCRUDDelete     = sdksub.MethodCRUDDelete
 	MethodCRUDList       = sdksub.MethodCRUDList
+
+	// B.10 additions.
+	MethodMCPCallTool = sdksub.MethodMCPCallTool
+	MethodHTTPHandle  = sdksub.MethodHTTPHandle
+	MethodMigrate     = sdksub.MethodMigrate
 )
 
 // --- Error codes ---

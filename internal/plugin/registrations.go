@@ -1,14 +1,38 @@
 package plugin
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 
 	goplugin "github.com/hollis-labs/go-plugin"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
+
+// maxPluginHTTPBodyBytes caps incoming request bodies on subprocess
+// plugin HTTP routes. Chosen conservatively; plugins needing more should
+// stream over a different channel. A future manifest field may expose
+// this per-route — not wired today.
+const maxPluginHTTPBodyBytes = 10 << 20 // 10 MiB
+
+// sensitivePluginHTTPHeaders names request headers that must NOT be
+// forwarded to untrusted plugin subprocesses. Keys are in
+// http.CanonicalHeaderKey form. Denylist approach for expedience; a
+// future manifest opt-in will let plugins receive specific auth headers.
+var sensitivePluginHTTPHeaders = map[string]struct{}{
+	"Authorization":       {},
+	"Cookie":              {},
+	"Set-Cookie":          {},
+	"Proxy-Authorization": {},
+	"X-Csrf-Token":        {},
+	"X-Xsrf-Token":        {},
+	"X-Api-Key":           {},
+}
 
 // envelopeTypeRE mirrors the plugin.schema.v1 pattern for envelope types.
 // Runtime registration must enforce it directly because compiled-in builtins
@@ -275,13 +299,15 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		}
 	}
 
-	// 5. Categories deferred to B.5 / B.6 — no-op with TODO log.
-	// These need handler-proxy construction (subprocess RPC or in-process
-	// bridge) that the B.4 scope explicitly leaves to the next tasks.
+	// 5. Commands — build a SlashCommandDef per manifest entry and wire a
+	// subprocess proxy handler that forwards to MethodCommandExecute.
+	// Builtins that expose commands register them directly from their Load;
+	// this path only fires for subprocess plugins.
 	skipped := 0
 	if len(reg.Commands) > 0 {
-		host.logger.Info("manifest commands: yaml-driven registration deferred to B.5/B.6 proxy work", "plugin", pluginID, "count", len(reg.Commands))
-		skipped += len(reg.Commands)
+		if err := registerManifestCommands(host, pluginID, reg.Commands, p); err != nil {
+			return err
+		}
 	}
 	if len(reg.Events) > 0 {
 		host.logger.Info("manifest events: yaml-driven registration deferred to B.5/B.6 proxy work", "plugin", pluginID, "count", len(reg.Events))
@@ -292,8 +318,9 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		skipped += len(reg.Crud)
 	}
 	if len(reg.HttpRoutes) > 0 {
-		host.logger.Info("manifest http_routes: yaml-driven registration deferred to B.6 mutable-mux", "plugin", pluginID, "count", len(reg.HttpRoutes))
-		skipped += len(reg.HttpRoutes)
+		if err := registerManifestHTTPRoutes(host, pluginID, reg.HttpRoutes, p); err != nil {
+			return err
+		}
 	}
 	if len(reg.McpServers) > 0 {
 		if err := registerManifestMCPServers(host, pluginID, reg.McpServers, p); err != nil {
@@ -306,6 +333,50 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 	}
 	if skipped > 0 {
 		host.logger.Info("manifest registrations applied (subset)", "plugin", pluginID, "deferred", skipped)
+	}
+	return nil
+}
+
+// registerManifestCommands wires each manifest commands entry into the host's
+// slash-command registry. For subprocess plugins each command becomes a
+// SlashCommandDef whose Handler proxies execution over JSON-RPC via
+// SubprocessPlugin.MakeCommandHandler (MethodCommandExecute). Builtins that
+// expose commands register them directly from their own Load (they have the
+// in-process Go handler); this path only fires for subprocess plugins.
+//
+// This restores the behavior that B.10 accidentally removed along with the
+// old registerSubprocessExtensions helper — without this, subprocess-plugin
+// slash commands declared in plugin.yaml never reach the command registry.
+func registerManifestCommands(host *Host, pluginID string, entries []CommandRegistration, p goplugin.Plugin) error {
+	sp, isSubprocess := p.(*subprocess.SubprocessPlugin)
+	if !isSubprocess {
+		host.logger.Info("manifest commands: builtin plugin — skipping (builtins register commands directly)",
+			"plugin", pluginID, "count", len(entries))
+		return nil
+	}
+
+	for _, entry := range entries {
+		if entry.Name == "" {
+			return fmt.Errorf("plugin %q: commands entry missing name", pluginID)
+		}
+		args := make([]goplugin.CommandArg, 0, len(entry.Args))
+		for _, a := range entry.Args {
+			args = append(args, goplugin.CommandArg{
+				Name:        a.Name,
+				Description: a.Description,
+				Required:    a.Required,
+				Type:        a.Type,
+			})
+		}
+		def := goplugin.SlashCommandDef{
+			Name:        entry.Name,
+			Description: entry.Description,
+			Args:        args,
+			Handler:     sp.MakeCommandHandler(entry.Name),
+		}
+		if err := host.RegisterCommand(def); err != nil {
+			return fmt.Errorf("plugin %q: register command %q: %w", pluginID, entry.Name, err)
+		}
 	}
 	return nil
 }
@@ -351,6 +422,128 @@ func registerManifestMCPServers(host *Host, pluginID string, entries []MCPServer
 		host.logger.Info("registered plugin mcp server", "plugin", pluginID, "server", entry.Name, "tools", len(entry.Tools))
 	}
 	return nil
+}
+
+// registerManifestHTTPRoutes wires each manifest http_routes entry into the
+// host's MutablePluginMux. For subprocess plugins each route becomes an
+// http.Handler that proxies the request over JSON-RPC via the plugin's
+// Transport using MethodHTTPHandle (B.10). Builtins that want to serve
+// plugin-owned HTTP routes call host.RegisterHTTPRoute directly from their
+// Load — this path only handles yaml-declared routes for subprocess plugins.
+func registerManifestHTTPRoutes(host *Host, pluginID string, entries []HTTPRouteRegistration, p goplugin.Plugin) error {
+	sp, isSubprocess := p.(*subprocess.SubprocessPlugin)
+	if !isSubprocess {
+		host.logger.Info("manifest http_routes: builtin plugin — skipping (builtins register HTTP routes directly)",
+			"plugin", pluginID, "count", len(entries))
+		return nil
+	}
+
+	transport := sp.Transport()
+	if transport == nil {
+		return fmt.Errorf("plugin %q: subprocess transport not ready for http_routes registration", pluginID)
+	}
+
+	for _, entry := range entries {
+		if entry.Pattern == "" {
+			return fmt.Errorf("plugin %q: http_routes entry missing pattern", pluginID)
+		}
+		handler := newSubprocessHTTPHandler(transport, entry.Handler)
+		pattern := entry.Pattern
+		if entry.Method != "" {
+			pattern = strings.ToUpper(entry.Method) + " " + entry.Pattern
+		}
+		host.RegisterHTTPHandler(pattern, handler)
+		host.logger.Info("registered plugin http route",
+			"plugin", pluginID, "pattern", pattern, "handler", entry.Handler)
+	}
+	return nil
+}
+
+// newSubprocessHTTPHandler builds an http.Handler that forwards the HTTP
+// request to a subprocess plugin via MethodHTTPHandle and writes the plugin's
+// HTTPResponse back to the ResponseWriter. Streaming is not supported on this
+// path (documented in plugin-sdk); plugins wanting streaming use SSE envelopes
+// via EventHandleResult. B.11 hardens policy (timeouts, body caps, header
+// allowlists); B.10 only lands the wire path.
+func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body []byte
+		if r.Body != nil {
+			// Cap the request body so a hostile/malformed client can't
+			// OOM the host by streaming arbitrary bytes into a plugin
+			// route. MaxBytesReader surfaces the overflow as an error
+			// on the next Read, which we translate to 413.
+			limited := http.MaxBytesReader(w, r.Body, maxPluginHTTPBodyBytes)
+			b, err := io.ReadAll(limited)
+			if err != nil {
+				if _, ok := err.(*http.MaxBytesError); ok {
+					http.Error(w, "request body exceeds plugin route limit", http.StatusRequestEntityTooLarge)
+					return
+				}
+				http.Error(w, "read request body: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(b))
+			body = b
+		}
+
+		query := make(map[string]string, len(r.URL.Query()))
+		for k, vs := range r.URL.Query() {
+			if len(vs) > 0 {
+				query[k] = vs[0]
+			}
+		}
+		// Filter and flatten request headers before forwarding to the
+		// subprocess. Sensitive headers (auth, cookies, CSRF tokens)
+		// are dropped — plugins are untrusted. Multi-value headers are
+		// joined with ", " (HTTP-standard combining) so information
+		// isn't silently lost; the wire shape is still map[string]string
+		// per plugin-sdk v0.2.0 HTTPRequest.
+		headers := make(map[string]string, len(r.Header))
+		for k, vs := range r.Header {
+			ck := http.CanonicalHeaderKey(k)
+			if _, sensitive := sensitivePluginHTTPHeaders[ck]; sensitive {
+				continue
+			}
+			if len(vs) == 0 {
+				continue
+			}
+			headers[ck] = strings.Join(vs, ", ")
+		}
+
+		req := &subprocess.HTTPRequest{
+			Method:  r.Method,
+			Path:    r.URL.Path,
+			Query:   query,
+			Headers: headers,
+			Body:    body,
+		}
+		// handlerName is intentionally unused here today — the plugin
+		// side dispatches on Method+Path and handlerName is preserved
+		// on the wire registration for future per-route handler
+		// identifiers landing downstream.
+		_ = handlerName
+
+		resp, err := subprocess.CallResult[subprocess.HTTPResponse](
+			transport, r.Context(), subprocess.MethodHTTPHandle, req,
+		)
+		if err != nil {
+			http.Error(w, "plugin http handler: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		for k, v := range resp.Headers {
+			w.Header().Set(k, v)
+		}
+		status := resp.Status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		w.WriteHeader(status)
+		if len(resp.Body) > 0 {
+			_, _ = w.Write(resp.Body)
+		}
+	})
 }
 
 func firstNonEmpty(vals ...string) string {

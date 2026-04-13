@@ -4,12 +4,39 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"regexp"
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/version"
 	"github.com/hollis-labs/go-plugin"
 )
+
+// safePluginIDRE mirrors the manifest schema (internal/plugin/schemas/
+// plugin.schema.v1.json) so buildInitParams cannot be coerced into
+// assembling a DataDir/CacheDir outside the user's brand directory when
+// the caller passes an attacker-controlled id (e.g. a malicious
+// plugin.yaml with id: "../../etc"). The regex is intentionally a
+// strict subset — any id rejected here should also be rejected at
+// install time by the manifest validator.
+var safePluginIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
+
+// validatePluginID returns an error if id does not match the safe
+// plugin-id pattern. Empty ids are allowed so buildInitParams retains
+// its "no per-plugin dirs" fallback; callers that require an id must
+// check separately.
+func validatePluginID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if !safePluginIDRE.MatchString(id) {
+		return fmt.Errorf("invalid plugin id %q: must match %s", id, safePluginIDRE)
+	}
+	return nil
+}
 
 
 // SubprocessPlugin implements plugin.Plugin by proxying all operations over
@@ -38,17 +65,32 @@ type SubprocessPlugin struct {
 
 	// pluginDir is the directory containing plugin.yaml and the executable.
 	pluginDir string
+
+	// manifestID is the canonical plugin identifier resolved from the
+	// plugin.yaml before the init handshake. It is used to derive the
+	// DataDir and CacheDir paths that get sent over plugin/init. May be
+	// empty when the caller has no pre-handshake identity (e.g. legacy
+	// test harnesses); buildInitParams treats an empty id as "no
+	// per-plugin dirs" and omits DataDir/CacheDir.
+	manifestID string
 }
 
 // NewSubprocessPlugin creates a new subprocess plugin with the given manager config.
 // The plugin is not started until Load() is called.
-func NewSubprocessPlugin(pluginDir string, config map[string]string, mgrCfg ManagerConfig) *SubprocessPlugin {
+//
+// manifestID is the plugin identifier read from plugin.yaml (preferred
+// over the init-handshake ID because it is known before the subprocess
+// is started, and is used to derive per-plugin DataDir/CacheDir paths
+// that are handed to the plugin during plugin/init). Pass "" only from
+// test harnesses that do not need per-plugin directories.
+func NewSubprocessPlugin(pluginDir string, manifestID string, config map[string]string, mgrCfg ManagerConfig) *SubprocessPlugin {
 	mgr := NewManager(mgrCfg)
 
 	sp := &SubprocessPlugin{
-		pluginDir: pluginDir,
-		config:    config,
-		mgr:       mgr,
+		pluginDir:  pluginDir,
+		manifestID: manifestID,
+		config:     config,
+		mgr:        mgr,
 		status: plugin.PluginStatus{
 			Enabled: true,
 		},
@@ -117,14 +159,12 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	defer cancel()
 
 	// 2. Init handshake — send config, receive identity.
-	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, &InitParams{
-		PluginDir: sp.pluginDir,
-		Config:    sp.config,
-		HostInfo: HostInfo{
-			Version:  version.Version,
-			Protocol: ProtocolVersion,
-		},
-	})
+	initParams, err := buildInitParams(sp.pluginDir, sp.manifestID, sp.config)
+	if err != nil {
+		sp.mgr.Stop()
+		return fmt.Errorf("build init params: %w", err)
+	}
+	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, initParams)
 	if err != nil {
 		sp.mgr.Stop()
 		return fmt.Errorf("init handshake: %w", err)
@@ -155,13 +195,29 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	sp.mu.Lock()
 	sp.manifest = loadResult
 	sp.transport = transport
-	sp.deps = loadResult.Dependencies
 	sp.mu.Unlock()
 
-	// 4. Register everything from the manifest with the host.
-	if err := sp.registerManifest(host, loadResult, transport); err != nil {
-		sp.mgr.Stop()
-		return fmt.Errorf("register manifest: %w", err)
+	// Declarative registrations are yaml-authoritative as of plugin-sdk v0.2.0
+	// (Track B.10). The host applies them from plugin.yaml via
+	// applyManifestRegistrations; the plugin no longer returns them on Load.
+	// The only runtime payload on LoadResult is SkippedRegistrations, which
+	// the host propagates up via GetSkippedRegistrations so the parent loader
+	// can emit informational logs. Today the parent's Load() only LOGS the
+	// declined entries — it does NOT remove the yaml-applied host
+	// registration for each skipped item. True removal requires the
+	// per-category unregister primitives and is tracked under
+	// BLG-20260413-008 ("subprocess skipped-registration unregister").
+
+	if len(loadResult.SkippedRegistrations) > 0 {
+		logger := host.Logger()
+		for _, sr := range loadResult.SkippedRegistrations {
+			logger.Info("plugin declined registration",
+				"plugin_id", sp.id,
+				"kind", sr.Kind,
+				"registration_id", sr.ID,
+				"reason", sr.Reason,
+			)
+		}
 	}
 
 	sp.mu.Lock()
@@ -171,6 +227,49 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	sp.mu.Unlock()
 
 	return nil
+}
+
+// buildInitParams assembles the InitParams payload sent on plugin/init.
+// It resolves the per-plugin DataDir/CacheDir under the user's brand
+// directory, creates them with 0o755 so the plugin can write into them,
+// and pulls the host-current log level from slogx. pluginID is the
+// canonical id from plugin.yaml; when empty, per-plugin DataDir and
+// CacheDir are left unset (v0.1.1-style behavior).
+func buildInitParams(pluginDir, pluginID string, config map[string]string) (*InitParams, error) {
+	if err := validatePluginID(pluginID); err != nil {
+		return nil, err
+	}
+	ip := &InitParams{
+		PluginDir: pluginDir,
+		Config:    config,
+		LogLevel:  slogx.CurrentLevelString(),
+		HostInfo: HostInfo{
+			Version:  version.Version,
+			Protocol: ProtocolVersion,
+		},
+	}
+
+	if pluginID != "" {
+		dataDir, err := brand.PluginDataDir(pluginID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve plugin data dir: %w", err)
+		}
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create plugin data dir %q: %w", dataDir, err)
+		}
+		ip.DataDir = dataDir
+
+		cacheDir, err := brand.PluginCacheDir(pluginID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve plugin cache dir: %w", err)
+		}
+		if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create plugin cache dir %q: %w", cacheDir, err)
+		}
+		ip.CacheDir = cacheDir
+	}
+
+	return ip, nil
 }
 
 // checkProtocolVersion returns an error if the plugin's reported protocol
@@ -191,83 +290,81 @@ func (sp *SubprocessPlugin) Unload() error {
 	return sp.mgr.Stop()
 }
 
-// registerManifest translates the LoadResult into host Register* calls.
-// Only registers generic SDK types (config, components, events, CRUD).
-// Nanite-specific registrations (commands, slots, keybindings) are handled
-// by the parent Host.LoadPlugin after this returns.
-func (sp *SubprocessPlugin) registerManifest(host plugin.Host, lr *LoadResult, transport *Transport) error {
-	logger := host.Logger()
-
-	// Register config schema. Bridge plugin-sdk ConfigFieldDef values
-	// (wire types) into go-plugin ConfigFieldDef values (what the host
-	// expects today). Track I will delete go-plugin and this conversion
-	// collapses to a direct pass-through.
-	if len(lr.ConfigSchema) > 0 {
-		hostFields := make([]plugin.ConfigFieldDef, 0, len(lr.ConfigSchema))
-		for _, f := range lr.ConfigSchema {
-			hostFields = append(hostFields, plugin.ConfigFieldDef{
-				Key:         f.Key,
-				Type:        f.Type,
-				Label:       f.Label,
-				Description: f.Description,
-				Default:     f.Default,
-				Required:    f.Required,
-				Options:     f.Options,
-				Component:   f.Component,
-			})
-		}
-		if err := host.RegisterConfigSchema(hostFields); err != nil {
-			return fmt.Errorf("register config schema: %w", err)
-		}
-	}
-
-	// Register UI components. Same bridging rationale as ConfigSchema —
-	// plugin-sdk UIComponentType is a different named type from the
-	// go-plugin one even though the string values match.
-	for _, comp := range lr.Components {
-		uiComp := plugin.UIComponent{
-			ID:          comp.ID,
-			Type:        plugin.UIComponentType(comp.Type),
-			Name:        comp.Name,
-			Description: comp.Description,
-			Props:       comp.Props,
-			// No Handler — subprocess plugins provide UI via frontend ESM loading.
-		}
-		if err := host.RegisterUIComponent(uiComp); err != nil {
-			logger.Warn("failed to register component", "id", comp.ID, "error", err)
-		}
-	}
-
-	// Register event subscriptions as a proxy EventHook.
-	if len(lr.EventSubscriptions) > 0 {
-		hook := &subprocessEventHook{
-			eventTypes: lr.EventSubscriptions,
-			transport:  transport,
-		}
-		if err := host.RegisterEventHook(lr.EventSubscriptions, hook); err != nil {
-			return fmt.Errorf("register event hook: %w", err)
-		}
-	}
-
-	// Register CRUD handlers.
-	for _, resourceType := range lr.CRUDResources {
-		handler := &subprocessCRUDHandler{
-			resourceType: resourceType,
-			transport:    transport,
-		}
-		if err := host.RegisterCRUDHandler(resourceType, handler); err != nil {
-			logger.Warn("failed to register CRUD handler", "resource", resourceType, "error", err)
-		}
-	}
-
-	return nil
-}
-
-// Manifest returns the load manifest (nil if not loaded).
+// Manifest returns the load manifest (nil if not loaded). Post-B.10 this only
+// carries SkippedRegistrations; all declarative registrations are applied by
+// the host from the plugin.yaml before/after Load.
 func (sp *SubprocessPlugin) Manifest() *LoadResult {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 	return sp.manifest
+}
+
+// SkippedRegistrations returns the list of yaml-declared registrations the
+// plugin declined at load time. Empty unless the plugin populated them on
+// plugin/load. Callers use this to surface the shortfall and (where possible)
+// drop the corresponding yaml-applied host registration.
+func (sp *SubprocessPlugin) SkippedRegistrations() []SkippedRegistration {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	if sp.manifest == nil {
+		return nil
+	}
+	return sp.manifest.SkippedRegistrations
+}
+
+// CallTool proxies an MCP tool invocation to the subprocess plugin using
+// plugin-sdk's canonical MCPCallRequest/MCPCallResult (B.10). This is the
+// method constants added in v0.2.0; the internal/mcp package has a parallel
+// PluginMCPTransport that wraps the older Server/Tool-namespaced wire shape
+// used by Nanite's multi-server-per-plugin model. This helper is the
+// single-server path any consumer can call when they already know the
+// plugin owns exactly one namespace.
+//
+// Envelope propagation: MCPCallResult carries Envelopes — this method
+// returns them alongside the content. Validation + chat-stream plumbing
+// is B.11/B.12.
+func (sp *SubprocessPlugin) CallTool(ctx context.Context, req *MCPCallRequest) (*MCPCallResult, error) {
+	sp.mu.RLock()
+	t := sp.transport
+	sp.mu.RUnlock()
+	if t == nil {
+		return nil, fmt.Errorf("subprocess plugin %q: transport not ready", sp.id)
+	}
+	return CallResult[MCPCallResult](t, ctx, MethodMCPCallTool, req)
+}
+
+// Migrate invokes plugin/migrate on the subprocess. Callers pass the
+// installed-manifest version (FromVersion) and the target version
+// (ToVersion). An empty result is equivalent to "no-op migration
+// succeeded"; plugins that don't implement migration simply return an
+// empty MigrateResult.
+//
+// B.10 lands only the wire path. There is no installed-version tracking
+// in the host yet, so the loader cannot currently decide whether to call
+// Migrate on each load — see backlog item plugin-version-history-tracking.
+func (sp *SubprocessPlugin) Migrate(ctx context.Context, fromVersion, toVersion, dataDir string) (*MigrateResult, error) {
+	sp.mu.RLock()
+	t := sp.transport
+	sp.mu.RUnlock()
+	if t == nil {
+		return nil, fmt.Errorf("subprocess plugin %q: transport not ready", sp.id)
+	}
+	return CallResult[MigrateResult](t, ctx, MethodMigrate, &MigrateParams{
+		FromVersion: fromVersion,
+		ToVersion:   toVersion,
+		DataDir:     dataDir,
+	})
+}
+
+// SetDependencies overrides the dependency list reported by the plugin's
+// Plugin.Dependencies method. Post-B.10 LoadResult no longer carries
+// dependencies; the caller (loader) populates them from the yaml manifest
+// before invoking host.LoadPlugin so the host's dependency-order checks see
+// the same values as the topological sort.
+func (sp *SubprocessPlugin) SetDependencies(deps []string) {
+	sp.mu.Lock()
+	sp.deps = deps
+	sp.mu.Unlock()
 }
 
 // Transport returns the subprocess JSON-RPC transport, or nil if the plugin
@@ -281,6 +378,18 @@ func (sp *SubprocessPlugin) Transport() *Transport {
 }
 
 // MakeCommandHandler creates a slash command handler that proxies to the subprocess.
+//
+// Post-B.10 the plugin may return structured Envelopes alongside Action/Content
+// on CommandExecResult. We pass them through on the result map under the
+// "envelopes" key so the chat engine can decide how to route them. Strict
+// validation of envelope shape against the plugin's declared envelope schemas
+// is B.11; propagation into the chat stream SSE is B.12. This site only
+// plumbs the data through — no schema lookup, no rendering.
+//
+// TODO(B.12): propagate result.Envelopes into chat stream — today the chat
+// engine consumes the returned map's "content" and parses fenced envelopes
+// from it via chat.ParseEnvelopes; structured Envelopes flow through as an
+// opaque payload that downstream tasks will route to the envelope pipeline.
 func (sp *SubprocessPlugin) MakeCommandHandler(name string) func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
 	return func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
 		result, err := CallResult[CommandExecResult](sp.transport, ctx, MethodCommandExecute, &CommandExecParams{
@@ -294,10 +403,14 @@ func (sp *SubprocessPlugin) MakeCommandHandler(name string) func(ctx context.Con
 				"content": fmt.Sprintf("subprocess plugin error: %v", err),
 			}, nil
 		}
-		return map[string]interface{}{
+		out := map[string]interface{}{
 			"action":  result.Action,
 			"content": result.Content,
-		}, nil
+		}
+		if len(result.Envelopes) > 0 {
+			out["envelopes"] = result.Envelopes
+		}
+		return out, nil
 	}
 }
 
@@ -336,6 +449,12 @@ func (h *subprocessEventHook) Handle(ctx context.Context, event plugin.Event) er
 		// If the subprocess is unreachable, don't block the action.
 		return nil
 	}
+
+	// TODO(B.12): propagate result.Envelopes into chat stream. Today the
+	// event-hook path returns only a cancel/allow signal; structured
+	// envelopes emitted by pre-hook handlers have no downstream consumer
+	// yet. B.11 wires validation; B.12 wires the SSE plumbing.
+	_ = result.Envelopes
 
 	if result.Cancel {
 		return plugin.ErrCancelled

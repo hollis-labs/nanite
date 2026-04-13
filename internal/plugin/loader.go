@@ -59,7 +59,7 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 		// Subprocess plugins don't need a compiled-in constructor.
 		if manifest.Runtime == "subprocess" {
 			if manifest.Entrypoint == "" {
-				return nil, fmt.Errorf("plugin %q: runtime is subprocess but no entrypoint specified", manifest.Name)
+				return nil, fmt.Errorf("plugin %q: runtime is subprocess but no entrypoint specified", manifest.Identifier())
 			}
 			discovered = append(discovered, DiscoveredPlugin{
 				Manifest: manifest,
@@ -68,8 +68,8 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 			continue
 		}
 
-		// Builtin (default): look up the compiled-in constructor.
-		constructor, ok := LookupConstructor(manifest.Name)
+		// Builtin (default): look up the compiled-in constructor by canonical id.
+		constructor, ok := LookupConstructor(manifest.Identifier())
 		if !ok {
 			// Plugin directory exists but no Go code registered — skip.
 			continue
@@ -99,15 +99,17 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 	var errs []error
 
 	for _, dp := range sorted {
+		pluginID := dp.Manifest.Identifier()
+
 		// Build config for this plugin.
-		cfg, err := NewPluginConfig(dp.Manifest.Name, dp.Dir)
+		cfg, err := NewPluginConfig(pluginID, dp.Dir)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("config for %s: %w", dp.Manifest.Name, err))
+			errs = append(errs, fmt.Errorf("config for %s: %w", pluginID, err))
 			continue
 		}
 
 		// Store config on host so GetConfig works during Load.
-		host.SetPluginConfig(dp.Manifest.Name, cfg)
+		host.SetPluginConfig(pluginID, cfg)
 
 		var p fplugin.Plugin
 
@@ -115,7 +117,7 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 			// Subprocess plugin: create a SubprocessPlugin that bridges via JSON-RPC.
 			p, err = newSubprocessPluginFromManifest(dp)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("create subprocess plugin %s: %w", dp.Manifest.Name, err))
+				errs = append(errs, fmt.Errorf("create subprocess plugin %s: %w", pluginID, err))
 				continue
 			}
 		} else {
@@ -124,13 +126,32 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 		}
 
 		if err := host.LoadPlugin(p); err != nil {
-			errs = append(errs, fmt.Errorf("load %s: %w", dp.Manifest.Name, err))
+			errs = append(errs, fmt.Errorf("load %s: %w", pluginID, err))
 			continue
 		}
+
+		// Apply yaml-authoritative declarative registrations from the manifest.
+		// This is the B.4 unification path — the host registers envelopes /
+		// slots / keybindings / components on behalf of the plugin so that
+		// builtin and subprocess plugins flow through the same wiring.
+		if err := applyManifestRegistrations(host, dp.Manifest, p); err != nil {
+			errs = append(errs, fmt.Errorf("apply manifest for %s: %w", pluginID, err))
+		}
+
 		loaded = append(loaded, p)
 	}
 
 	return loaded, errs
+}
+
+// ManifestProvider is an optional interface that compiled-in builtins can
+// implement to expose their plugin.yaml to the host via //go:embed. When a
+// builtin implements this interface, LoadRegisteredBuiltins runs the same
+// yaml-authoritative registration path as DiscoverPlugins, allowing the
+// builtin's plugin.yaml to drive host registrations instead of the builtin's
+// Load() method making direct Register* calls. See plan §B.4.
+type ManifestProvider interface {
+	Manifest() *PluginManifest
 }
 
 // newSubprocessPluginFromManifest creates a SubprocessPlugin from a discovered
@@ -202,6 +223,18 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 			errs = append(errs, fmt.Errorf("load builtin %s: %w", id, err))
 			continue
 		}
+
+		// If this builtin ships an embedded plugin.yaml via ManifestProvider,
+		// apply the same yaml-authoritative registrations so builtin and
+		// discovered plugins share the wiring path (B.4).
+		if mp, ok := p.(ManifestProvider); ok {
+			if manifest := mp.Manifest(); manifest != nil {
+				if err := applyManifestRegistrations(host, manifest, p); err != nil {
+					errs = append(errs, fmt.Errorf("apply manifest for builtin %s: %w", id, err))
+				}
+			}
+		}
+
 		loaded = append(loaded, p)
 	}
 
@@ -212,10 +245,10 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 // plugins are loaded after all of their dependencies.  Returns an error
 // if a dependency cycle is detected.
 func sortByDeps(plugins []DiscoveredPlugin) ([]DiscoveredPlugin, error) {
-	// Build index: plugin name → DiscoveredPlugin.
+	// Build index: canonical plugin id → DiscoveredPlugin.
 	byName := make(map[string]int, len(plugins))
 	for i, p := range plugins {
-		byName[p.Manifest.Name] = i
+		byName[p.Manifest.Identifier()] = i
 	}
 
 	// In-degree: how many (present) deps each plugin has.
@@ -260,7 +293,7 @@ func sortByDeps(plugins []DiscoveredPlugin) ([]DiscoveredPlugin, error) {
 		var cycled []string
 		for i, d := range inDeg {
 			if d > 0 {
-				cycled = append(cycled, plugins[i].Manifest.Name)
+				cycled = append(cycled, plugins[i].Manifest.Identifier())
 			}
 		}
 		return nil, fmt.Errorf("dependency cycle detected among plugins: %v", cycled)

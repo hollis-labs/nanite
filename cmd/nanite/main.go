@@ -161,6 +161,11 @@ func cmdServe(args []string) {
 		slog.Info("envelope manifest loaded", "count", len(coreTypes))
 	}
 
+	// Wire the plugin→chat envelope registrar hook (B.4). Without this, the
+	// yaml-authoritative loader still records envelopes in the host side-map
+	// but chat validation won't accept them until the plugin calls through.
+	plugin.SetEnvelopeTypeRegistrar(chat.RegisterEnvelopeType)
+
 	// Set up provider registry (API keys, Ollama, CLI adapters).
 	registry := initProviders()
 

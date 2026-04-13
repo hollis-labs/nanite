@@ -38,6 +38,16 @@ func GetRegistered() map[string]PluginConstructor {
 	return out
 }
 
+// UnregisterPluginForTest removes a plugin constructor from the registry.
+// Intended for test cleanup only (see t.Cleanup usage in package tests).
+// The registry intentionally lacks a production Unregister to avoid
+// accidental removal of compiled-in plugins.
+func UnregisterPluginForTest(id string) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	delete(pluginRegistry, id)
+}
+
 // LookupConstructor returns the constructor for a plugin ID, if registered.
 func LookupConstructor(id string) (PluginConstructor, bool) {
 	registryMu.RLock()

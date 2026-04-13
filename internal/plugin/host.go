@@ -77,6 +77,7 @@ type Host struct {
 	triggers      *TriggerDispatcher // event → connector dispatch
 	filters       *FilterRegistry    // named filter chains
 	eventSubs     []chan plugin.Event // SSE subscribers for event streaming
+	envelopes     map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
 	logger        plugin.Logger
 	ctx           context.Context
 	ctxCancel     context.CancelFunc
@@ -99,6 +100,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		slots:           make(map[UISlotName][]UISlotEntry),
 		services:        make(map[string]interface{}),
 		configs:         make(map[string]*PluginConfig),
+		envelopes:       make(map[string]EnvelopeRegistryEntry),
 		router:          router,
 		logger:          logger,
 		ctx:             ctx,
@@ -128,6 +130,7 @@ func NewHostWithStore(store interface{}) *Host {
 		slots:           make(map[UISlotName][]UISlotEntry),
 		services:        make(map[string]interface{}),
 		configs:         make(map[string]*PluginConfig),
+		envelopes:       make(map[string]EnvelopeRegistryEntry),
 		router:          http.NewServeMux(),
 		logger:          NewLogger("plugin-cli"),
 		ctx:             ctx,

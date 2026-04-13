@@ -114,6 +114,69 @@ func (h *Host) GetEnvelopes() []EnvelopeRegistryEntry {
 	return out
 }
 
+// recordManifest stores the plugin's parsed manifest in the host side-map and
+// bumps the registry version counter. Called at the top of
+// applyManifestRegistrations so GetManifest / GetManifests can serve the B.7
+// endpoint without re-reading plugin.yaml off disk.
+func (h *Host) recordManifest(pluginID string, m *PluginManifest) {
+	h.mu.Lock()
+	if h.manifests == nil {
+		h.manifests = make(map[string]*PluginManifest)
+	}
+	h.manifests[pluginID] = m
+	h.registryVersion++
+	h.mu.Unlock()
+}
+
+// GetManifest returns the parsed plugin.yaml for pluginID, or nil if not
+// recorded (e.g. builtin plugins that don't implement ManifestProvider).
+func (h *Host) GetManifest(pluginID string) *PluginManifest {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.manifests[pluginID]
+}
+
+// GetManifests returns a shallow copy of the plugin ID → manifest map. The
+// returned pointers still reference the same underlying structs — callers must
+// not mutate them.
+func (h *Host) GetManifests() map[string]*PluginManifest {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make(map[string]*PluginManifest, len(h.manifests))
+	for k, v := range h.manifests {
+		out[k] = v
+	}
+	return out
+}
+
+// RegistryVersion returns the monotonic counter that bumps on every change to
+// what GET /api/plugins/registry would return (plugin load, manifest record,
+// plugin unload). The B.7 handler uses this as a cache key. B.8 lifecycle
+// event emitters should call BumpRegistryVersion when they fire events that
+// affect the exposed shape (e.g., enable/disable toggles that don't go through
+// Load/UnloadPlugin).
+func (h *Host) RegistryVersion() uint64 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.registryVersion
+}
+
+// BumpRegistryVersion increments the registry version counter. Intended for
+// the B.8 lifecycle event layer; internal load/unload paths bump directly
+// under the host lock.
+func (h *Host) BumpRegistryVersion() {
+	h.mu.Lock()
+	h.registryVersion++
+	h.mu.Unlock()
+}
+
+// bumpRegistryVersionLocked increments the registry version counter. Callers
+// MUST already hold h.mu (write). Used by internal load/unload paths that
+// mutate registry-visible state inside the host lock.
+func (h *Host) bumpRegistryVersionLocked() {
+	h.registryVersion++
+}
+
 // applyManifestRegistrations iterates manifest.Registers.* and performs the
 // declarative host registrations on behalf of the plugin. This is the
 // yaml-authoritative path per plan §B.4 — builtins and subprocess plugins
@@ -134,6 +197,12 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		return nil
 	}
 	pluginID := p.ID()
+
+	// Record the manifest for the B.7 /api/plugins/registry endpoint. Done
+	// before registrations so the side-map reflects the plugin even if a
+	// later registration fails and surfaces an error — UnloadPlugin cleans
+	// up on rollback.
+	host.recordManifest(pluginID, manifest)
 
 	// Set activePlugin so downstream Register* calls pick up ownership.
 	host.mu.Lock()

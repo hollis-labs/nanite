@@ -55,6 +55,10 @@ const (
 	// Plugin Lifecycle Events
 	EventPluginInstalled   = "plugin.installed"
 	EventPluginUninstalled = "plugin.uninstalled"
+	EventPluginUpdated     = "plugin.updated"
+	EventPluginEnabled     = "plugin.enabled"
+	EventPluginDisabled    = "plugin.disabled"
+	EventPluginLoadFailed  = "plugin.load_failed"
 
 	// Session Lifecycle Events
 	EventSessionArchived = "session.archived"
@@ -384,6 +388,50 @@ func (h *Host) EmitPluginInstalled(pluginID, pluginName, version string) {
 func (h *Host) EmitPluginUninstalled(pluginID string) {
 	event := NewEvent(EventPluginUninstalled, brand.ID, EventData{})
 	event.Data["plugin_id"] = pluginID
+	h.EmitEvent(event)
+}
+
+// EmitPluginEnabled emits a plugin.enabled event.
+// Emitted after a previously-disabled plugin manifest is re-enabled AND
+// hot-loaded back into the host. B.8 callers must also call
+// BumpRegistryVersion so the /api/plugins/registry cache invalidates.
+func (h *Host) EmitPluginEnabled(pluginID string) {
+	event := NewEvent(EventPluginEnabled, brand.ID, EventData{})
+	event.Data["plugin_id"] = pluginID
+	h.EmitEvent(event)
+}
+
+// EmitPluginDisabled emits a plugin.disabled event.
+// Emitted after a plugin manifest is renamed to .disabled AND unloaded from
+// the running host. Callers must also call BumpRegistryVersion.
+func (h *Host) EmitPluginDisabled(pluginID string) {
+	event := NewEvent(EventPluginDisabled, brand.ID, EventData{})
+	event.Data["plugin_id"] = pluginID
+	h.EmitEvent(event)
+}
+
+// EmitPluginLoadFailed emits a plugin.load_failed event when the loader
+// fails to bring a plugin online (host.LoadPlugin error, manifest apply error,
+// etc.). Caller is responsible for deciding whether to bump the registry
+// version — failures before any registry-visible mutation don't need it;
+// failures after must have already unloaded the plugin (UnloadPlugin bumps
+// on its own).
+func (h *Host) EmitPluginLoadFailed(pluginID, reason string) {
+	event := NewEvent(EventPluginLoadFailed, brand.ID, EventData{})
+	event.Data["plugin_id"] = pluginID
+	event.Data["reason"] = reason
+	h.EmitEvent(event)
+}
+
+// EmitPluginUpdated emits a plugin.updated event with before/after version
+// metadata. TODO(B.8): wire when an update path lands — no caller today
+// because install→uninstall→install is the only update flow and it emits
+// install/uninstall as a pair.
+func (h *Host) EmitPluginUpdated(pluginID, fromVersion, toVersion string) {
+	event := NewEvent(EventPluginUpdated, brand.ID, EventData{})
+	event.Data["plugin_id"] = pluginID
+	event.Data["from_version"] = fromVersion
+	event.Data["to_version"] = toVersion
 	h.EmitEvent(event)
 }
 

@@ -167,6 +167,21 @@ func cmdServe(args []string) {
 	plugin.SetEnvelopeTypeRegistrar(chat.RegisterEnvelopeType)
 	plugin.SetEnvelopeTypeUnregistrar(chat.UnregisterEnvelopeType)
 
+	// B.11 strict envelope validation: cache developer_mode once at startup
+	// rather than querying the settings store on every FilterPluginEnvelopes
+	// call. Envelope filtering runs on every plugin command / event / MCP
+	// response, so a DB hit per envelope would be avoidable latency. Changes
+	// to developer_mode require a process restart to take effect in the
+	// envelope validator — acceptable because this is a developer-tooling
+	// knob, not a runtime-tunable behavior.
+	envelopeValidatorDevMode := false
+	if settings, err := s.GetUserSettings(); err != nil {
+		slog.Warn("envelope validator dev mode: failed to read user settings at startup; defaulting to production-strict", "error", err)
+	} else {
+		envelopeValidatorDevMode = settings.DeveloperMode
+	}
+	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
+
 	// Set up provider registry (API keys, Ollama, CLI adapters).
 	registry := initProviders()
 

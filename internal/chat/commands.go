@@ -2,10 +2,12 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 
+	sdkplugin "github.com/hollis-labs/plugin-sdk"
 	nplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
 
@@ -123,6 +125,13 @@ func (r *CommandRegistry) Register(cmd SlashCommand, handler CommandHandler) {
 
 // RegisterPluginCommand registers a slash command from a plugin into the unified
 // registry. Satisfies the plugin.CommandRegistrar interface.
+//
+// B.12: when the plugin handler returns an "envelopes" key carrying
+// []sdkplugin.EnvelopeOut values (already filtered by B.11's strict validator
+// at the subprocess emission site), each validated envelope is rendered as a
+// fenced `nanite-envelope` block appended to the result content. Downstream
+// consumers (frontend, chat.ParseEnvelopes) then pick them up through the
+// existing envelope pipeline — no new transport is introduced.
 func (r *CommandRegistry) RegisterPluginCommand(cmd nplugin.SlashCommandDef, source string) {
 	var h CommandHandler
 	if cmd.Handler != nil {
@@ -133,6 +142,14 @@ func (r *CommandRegistry) RegisterPluginCommand(cmd nplugin.SlashCommandDef, sou
 			}
 			action, _ := out["action"].(string)
 			content, _ := out["content"].(string)
+			content = appendPluginEnvelopeBlocks(content, out["envelopes"])
+			// A command that emits only envelopes (no textual content and
+			// action unset) should still surface to the chat as a rendered
+			// message so the envelopes flow through the system-message
+			// persistence path in handleExecuteCommand.
+			if action == "" && content != "" {
+				action = "message"
+			}
 			return &CommandResult{Action: action, Content: content}, nil
 		}
 	}
@@ -238,6 +255,66 @@ func (r *CommandRegistry) Execute(ctx context.Context, name, sessionID, args str
 		return &CommandResult{Action: "client", Content: name}, nil
 	}
 	return rc.handler(ctx, sessionID, args)
+}
+
+// appendPluginEnvelopeBlocks renders each validated plugin envelope into a
+// fenced `nanite-envelope` block and appends it to content. The raw value is
+// whatever lives at the "envelopes" key of the plugin command result map; it
+// is either a `[]sdkplugin.EnvelopeOut` (from the subprocess path after B.11
+// filtering) or a pre-marshaled `[]map[string]interface{}` (legacy shape).
+// Any envelope whose payload cannot be marshaled is skipped without an error
+// — the B.11 filter has already logged the fault and the absence of the
+// rendered block is the visible failure mode.
+func appendPluginEnvelopeBlocks(content string, raw any) string {
+	if raw == nil {
+		return content
+	}
+	typed, ok := raw.([]sdkplugin.EnvelopeOut)
+	if !ok {
+		// Tolerate the legacy map-shaped envelope payload. Everything else
+		// is ignored; an unrecognized shape here indicates a plugin bug
+		// that should already be flagged by the B.11 filter.
+		items, ok := raw.([]map[string]interface{})
+		if !ok {
+			return content
+		}
+		for _, m := range items {
+			t, _ := m["type"].(string)
+			d, _ := m["data"].(map[string]interface{})
+			typed = append(typed, sdkplugin.EnvelopeOut{Type: t, Data: d})
+		}
+	}
+	var b strings.Builder
+	b.WriteString(content)
+	for _, env := range typed {
+		block, err := renderEnvelopeBlock(env)
+		if err != nil {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(block)
+	}
+	return b.String()
+}
+
+// renderEnvelopeBlock formats a plugin-emitted EnvelopeOut as a
+// `nanite-envelope` fenced block matching the chat.Envelope wire shape so
+// chat.ParseEnvelopes can extract it downstream. The wire shape is kind=
+// "envelope", version=1, type=<EnvelopeOut.Type>, data=<EnvelopeOut.Data>.
+func renderEnvelopeBlock(env sdkplugin.EnvelopeOut) (string, error) {
+	wire := map[string]any{
+		"kind":    "envelope",
+		"version": 1,
+		"type":    env.Type,
+		"data":    env.Data,
+	}
+	payload, err := json.Marshal(wire)
+	if err != nil {
+		return "", err
+	}
+	return "```nanite-envelope\n" + string(payload) + "\n```", nil
 }
 
 // ParseCommand extracts the command name and arguments from a slash command string.

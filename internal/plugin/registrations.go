@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -216,7 +217,7 @@ func (h *Host) bumpRegistryVersionLocked() {
 // Purely declarative categories (envelopes, slots, keybindings, components)
 // are fully wired here — that is enough to migrate bookmarks off direct
 // Register calls as the B.4 acceptance proof.
-func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin) error {
+func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin, pluginDir string) error {
 	if manifest == nil {
 		return nil
 	}
@@ -241,7 +242,13 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 
 	reg := manifest.Registers
 
-	// 1. Envelopes — record side-map + chat.RegisterEnvelopeType.
+	// 1. Envelopes — record side-map + chat.RegisterEnvelopeType. When the
+	// manifest declares a schema file and the plugin dir is known, compile
+	// the JSON Schema and register it for B.11 strict validation. Missing
+	// schema files are logged and skipped; if a plugin-dir isn't available
+	// (compiled-in builtins without on-disk assets) schema loading is a
+	// no-op and validation for those types degrades to "declared but
+	// schema-less" which ValidatePluginEnvelope treats as pass-through.
 	for _, e := range reg.Envelopes {
 		if err := host.RegisterEnvelope(EnvelopeRegistryEntry{
 			Type:       e.Type,
@@ -251,6 +258,22 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 			SchemaPath: e.Schema,
 		}); err != nil {
 			return fmt.Errorf("envelope %q: %w", e.Type, err)
+		}
+		if e.Schema != "" && pluginDir != "" {
+			schemaFile, err := resolvePluginAssetPath(pluginDir, e.Schema)
+			if err != nil {
+				host.logger.Warn("envelope schema path rejected",
+					"plugin", pluginID, "type", e.Type, "schema", e.Schema, "error", err.Error())
+				continue
+			}
+			if err := host.registerPluginEnvelopeSchemaFromFile(pluginID, e.Type, schemaFile); err != nil {
+				// Log and continue — install-time validation already catches
+				// missing schema files; a late failure here shouldn't block
+				// plugin load, but the envelope type will only have advisory
+				// validation until the schema resolves.
+				host.logger.Warn("envelope schema load failed",
+					"plugin", pluginID, "type", e.Type, "schema", schemaFile, "error", err.Error())
+			}
 		}
 	}
 
@@ -544,6 +567,37 @@ func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName strin
 			_, _ = w.Write(resp.Body)
 		}
 	})
+}
+
+// resolvePluginAssetPath resolves a manifest-declared plugin asset (e.g. an
+// envelope JSON Schema) to an absolute filesystem path confined to pluginDir.
+// Absolute paths and relative paths that escape pluginDir via ".." segments
+// are rejected so a hostile plugin.yaml cannot coerce the host into reading
+// arbitrary files at load time. Install-time validation catches the same
+// class of issue, but this is defense-in-depth — dev-mode installs only warn
+// on suspicious schema paths, and a compiled-in builtin path with a crafted
+// manifest would otherwise bypass that check.
+func resolvePluginAssetPath(pluginDir, rel string) (string, error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("absolute asset path %q not permitted", rel)
+	}
+	cleaned := filepath.Clean(rel)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "..\\") {
+		return "", fmt.Errorf("asset path %q escapes plugin directory", rel)
+	}
+	absPluginDir, err := filepath.Abs(pluginDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve plugin dir: %w", err)
+	}
+	joined := filepath.Join(absPluginDir, cleaned)
+	relToPlugin, err := filepath.Rel(absPluginDir, joined)
+	if err != nil {
+		return "", fmt.Errorf("relate asset to plugin dir: %w", err)
+	}
+	if relToPlugin == ".." || strings.HasPrefix(relToPlugin, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("asset path %q escapes plugin directory", rel)
+	}
+	return joined, nil
 }
 
 func firstNonEmpty(vals ...string) string {

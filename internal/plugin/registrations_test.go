@@ -51,7 +51,7 @@ func TestApplyManifestRegistrations_Envelopes(t *testing.T) {
 			},
 		},
 	}
-	if err := applyManifestRegistrations(host, m, p); err != nil {
+	if err := applyManifestRegistrations(host, m, p, ""); err != nil {
 		t.Fatalf("applyManifestRegistrations: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestApplyManifestRegistrations_Components(t *testing.T) {
 			},
 		},
 	}
-	if err := applyManifestRegistrations(host, m, p); err != nil {
+	if err := applyManifestRegistrations(host, m, p, ""); err != nil {
 		t.Fatalf("applyManifestRegistrations: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestApplyManifestRegistrations_Slots(t *testing.T) {
 			},
 		},
 	}
-	if err := applyManifestRegistrations(host, m, p); err != nil {
+	if err := applyManifestRegistrations(host, m, p, ""); err != nil {
 		t.Fatalf("applyManifestRegistrations: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func TestApplyManifestRegistrations_Keybindings(t *testing.T) {
 			},
 		},
 	}
-	if err := applyManifestRegistrations(host, m, p); err != nil {
+	if err := applyManifestRegistrations(host, m, p, ""); err != nil {
 		t.Fatalf("applyManifestRegistrations: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestApplyManifestRegistrations_DeferredCategoriesNoOp(t *testing.T) {
 			AgentProfiles: []AgentProfileRegistration{{ID: "agent-foo", File: "agents/foo.yaml"}},
 		},
 	}
-	if err := applyManifestRegistrations(host, m, p); err != nil {
+	if err := applyManifestRegistrations(host, m, p, ""); err != nil {
 		t.Fatalf("applyManifestRegistrations with deferred categories returned error: %v", err)
 	}
 }
@@ -168,11 +168,11 @@ func TestApplyManifestRegistrations_EnvelopeOwnershipCollision(t *testing.T) {
 	p2 := &fakePlugin{id: "plug-b"}
 
 	m1 := &PluginManifest{Name: p1.id, Registers: ManifestRegisters{Envelopes: []EnvelopeRegistration{{Type: "shared", Component: "A", Version: 1}}}}
-	if err := applyManifestRegistrations(host, m1, p1); err != nil {
+	if err := applyManifestRegistrations(host, m1, p1, ""); err != nil {
 		t.Fatalf("first apply: %v", err)
 	}
 	m2 := &PluginManifest{Name: p2.id, Registers: ManifestRegisters{Envelopes: []EnvelopeRegistration{{Type: "shared", Component: "B", Version: 1}}}}
-	if err := applyManifestRegistrations(host, m2, p2); err == nil {
+	if err := applyManifestRegistrations(host, m2, p2, ""); err == nil {
 		t.Fatal("expected envelope collision error for second plugin, got nil")
 	}
 }

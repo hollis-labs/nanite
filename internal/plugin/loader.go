@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	fplugin "github.com/hollis-labs/go-plugin"
+	sdkplugin "github.com/hollis-labs/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
 
@@ -140,11 +141,23 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 			continue
 		}
 
+		// B.11: install the envelope strict-validation filter on subprocess
+		// plugins. The filter closes over the owning pluginID so the host can
+		// resolve the plugin's declared envelope types + compiled schemas.
+		// Builtin plugins don't flow envelopes back through this path (they
+		// call chat APIs directly), so there's no equivalent hook for them.
+		if sp, ok := p.(*subprocess.SubprocessPlugin); ok {
+			id := pluginID
+			sp.SetEnvelopeFilter(func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut {
+				return host.FilterPluginEnvelopes(id, envs)
+			})
+		}
+
 		// Apply yaml-authoritative declarative registrations from the manifest.
 		// This is the B.4 unification path — the host registers envelopes /
 		// slots / keybindings / components on behalf of the plugin so that
 		// builtin and subprocess plugins flow through the same wiring.
-		if err := applyManifestRegistrations(host, dp.Manifest, p); err != nil {
+		if err := applyManifestRegistrations(host, dp.Manifest, p, dp.Dir); err != nil {
 			errs = append(errs, fmt.Errorf("apply manifest for %s: %w", pluginID, err))
 			// The manifest was already recorded and some registrations may have
 			// partially applied. Best-effort UnloadPlugin to clean up the manifest
@@ -252,7 +265,11 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 		// discovered plugins share the wiring path (B.4).
 		if mp, ok := p.(ManifestProvider); ok {
 			if manifest := mp.Manifest(); manifest != nil {
-				if err := applyManifestRegistrations(host, manifest, p); err != nil {
+				// Builtin plugins have no on-disk plugin dir — pass "" so
+				// envelope schema loading is a no-op. Builtins that want
+				// strict envelope validation can embed schemas via
+				// RegisterPluginEnvelopeSchema during their Load.
+				if err := applyManifestRegistrations(host, manifest, p, ""); err != nil {
 					errs = append(errs, fmt.Errorf("apply manifest for builtin %s: %w", id, err))
 					// Best-effort rollback: remove manifest side-map + partial
 					// registrations so load_failed accurately reflects the

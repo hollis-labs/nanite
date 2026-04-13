@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/version"
 	"github.com/hollis-labs/go-plugin"
+	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // safePluginIDRE mirrors the manifest schema (internal/plugin/schemas/
@@ -65,6 +66,14 @@ type SubprocessPlugin struct {
 
 	// pluginDir is the directory containing plugin.yaml and the executable.
 	pluginDir string
+
+	// envelopeFilter runs plugin-emitted envelopes through the host's B.11
+	// strict validator before they fan out to chat/event consumers. Set by
+	// the plugin loader via SetEnvelopeFilter after LoadPlugin so the closure
+	// can bind the owning plugin id. Nil means "no filter installed" which
+	// degrades to pass-through — expected in tests that construct a plugin
+	// without a host.
+	envelopeFilter func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut
 
 	// manifestID is the canonical plugin identifier resolved from the
 	// plugin.yaml before the init handshake. It is used to derive the
@@ -320,9 +329,11 @@ func (sp *SubprocessPlugin) SkippedRegistrations() []SkippedRegistration {
 // single-server path any consumer can call when they already know the
 // plugin owns exactly one namespace.
 //
-// Envelope propagation: MCPCallResult carries Envelopes — this method
-// returns them alongside the content. Validation + chat-stream plumbing
-// is B.11/B.12.
+// Envelope propagation: MCPCallResult carries Envelopes; this method runs
+// them through the B.11 strict validator (sp.filterEnvelopes) so the returned
+// result holds only the envelopes that passed. Chat-stream injection for
+// tool-result envelopes is out of scope for B.12 — callers that want to
+// render them can pull from result.Envelopes directly.
 func (sp *SubprocessPlugin) CallTool(ctx context.Context, req *MCPCallRequest) (*MCPCallResult, error) {
 	sp.mu.RLock()
 	t := sp.transport
@@ -330,7 +341,14 @@ func (sp *SubprocessPlugin) CallTool(ctx context.Context, req *MCPCallRequest) (
 	if t == nil {
 		return nil, fmt.Errorf("subprocess plugin %q: transport not ready", sp.id)
 	}
-	return CallResult[MCPCallResult](t, ctx, MethodMCPCallTool, req)
+	result, err := CallResult[MCPCallResult](t, ctx, MethodMCPCallTool, req)
+	if err != nil {
+		return result, err
+	}
+	if len(result.Envelopes) > 0 {
+		result.Envelopes = sp.filterEnvelopes(result.Envelopes)
+	}
+	return result, nil
 }
 
 // Migrate invokes plugin/migrate on the subprocess. Callers pass the
@@ -377,6 +395,30 @@ func (sp *SubprocessPlugin) Transport() *Transport {
 	return sp.transport
 }
 
+// SetEnvelopeFilter installs the host-provided strict validator that runs on
+// envelopes emitted by this plugin. The loader calls this after LoadPlugin so
+// the filter closes over the owning plugin id and the host's envelope schema
+// registry. Called at most once per SubprocessPlugin lifetime.
+func (sp *SubprocessPlugin) SetEnvelopeFilter(fn func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut) {
+	sp.mu.Lock()
+	sp.envelopeFilter = fn
+	sp.mu.Unlock()
+}
+
+// filterEnvelopes runs the installed envelope filter (B.11), returning the
+// validated envelopes to forward downstream. When no filter is installed —
+// e.g. in tests, or before the loader wires the plugin — envelopes pass
+// through unchanged.
+func (sp *SubprocessPlugin) filterEnvelopes(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut {
+	sp.mu.RLock()
+	fn := sp.envelopeFilter
+	sp.mu.RUnlock()
+	if fn == nil {
+		return envs
+	}
+	return fn(envs)
+}
+
 // MakeCommandHandler creates a slash command handler that proxies to the subprocess.
 //
 // Post-B.10 the plugin may return structured Envelopes alongside Action/Content
@@ -386,10 +428,10 @@ func (sp *SubprocessPlugin) Transport() *Transport {
 // is B.11; propagation into the chat stream SSE is B.12. This site only
 // plumbs the data through — no schema lookup, no rendering.
 //
-// TODO(B.12): propagate result.Envelopes into chat stream — today the chat
-// engine consumes the returned map's "content" and parses fenced envelopes
-// from it via chat.ParseEnvelopes; structured Envelopes flow through as an
-// opaque payload that downstream tasks will route to the envelope pipeline.
+// B.11 strict validation runs via sp.filterEnvelopes before Envelopes reach
+// the chat registry adapter. B.12 propagation happens in the chat layer — the
+// registry's RegisterPluginCommand adapter pulls the "envelopes" key off this
+// map and injects fenced envelope blocks into the assistant message.
 func (sp *SubprocessPlugin) MakeCommandHandler(name string) func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
 	return func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
 		result, err := CallResult[CommandExecResult](sp.transport, ctx, MethodCommandExecute, &CommandExecParams{
@@ -407,8 +449,9 @@ func (sp *SubprocessPlugin) MakeCommandHandler(name string) func(ctx context.Con
 			"action":  result.Action,
 			"content": result.Content,
 		}
-		if len(result.Envelopes) > 0 {
-			out["envelopes"] = result.Envelopes
+		filtered := sp.filterEnvelopes(result.Envelopes)
+		if len(filtered) > 0 {
+			out["envelopes"] = filtered
 		}
 		return out, nil
 	}
@@ -418,8 +461,9 @@ func (sp *SubprocessPlugin) MakeCommandHandler(name string) func(ctx context.Con
 
 // subprocessEventHook implements plugin.EventHook by forwarding events to the subprocess.
 type subprocessEventHook struct {
-	eventTypes []string
-	transport  *Transport
+	eventTypes     []string
+	transport      *Transport
+	envelopeFilter func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut
 }
 
 func (h *subprocessEventHook) EventTypes() []string {
@@ -450,11 +494,15 @@ func (h *subprocessEventHook) Handle(ctx context.Context, event plugin.Event) er
 		return nil
 	}
 
-	// TODO(B.12): propagate result.Envelopes into chat stream. Today the
-	// event-hook path returns only a cancel/allow signal; structured
-	// envelopes emitted by pre-hook handlers have no downstream consumer
-	// yet. B.11 wires validation; B.12 wires the SSE plumbing.
-	_ = result.Envelopes
+	// Pre-hook envelopes are validated via B.11 (log+drop invalid in prod,
+	// warn+pass in dev). There is no chat-stream consumer for event-emitted
+	// envelopes today — the pre-hook API returns only a cancel/allow signal
+	// to the dispatcher. Future work (beyond B.12) can route validated
+	// envelopes to a session-scoped SSE consumer once the chat engine
+	// exposes that channel.
+	if filter := h.envelopeFilter; filter != nil && len(result.Envelopes) > 0 {
+		_ = filter(result.Envelopes)
+	}
 
 	if result.Cancel {
 		return plugin.ErrCancelled

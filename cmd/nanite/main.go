@@ -167,6 +167,18 @@ func cmdServe(args []string) {
 	plugin.SetEnvelopeTypeRegistrar(chat.RegisterEnvelopeType)
 	plugin.SetEnvelopeTypeUnregistrar(chat.UnregisterEnvelopeType)
 
+	// B.11 strict envelope validation: surface developer_mode from the user
+	// settings store so plugin-sourced envelopes that fail schema validation
+	// pass through with a warning marker during development and are silently
+	// dropped (with an error log) in production.
+	plugin.SetEnvelopeValidatorDevModeFunc(func() bool {
+		settings, err := s.GetUserSettings()
+		if err != nil {
+			return false
+		}
+		return settings.DeveloperMode
+	})
+
 	// Set up provider registry (API keys, Ollama, CLI adapters).
 	registry := initProviders()
 

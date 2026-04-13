@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/go-plugin"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // validComponentID matches alphanumeric + hyphens, 2-64 chars, no leading/trailing hyphens.
@@ -126,6 +127,12 @@ type Host struct {
 	filters       *FilterRegistry    // named filter chains
 	eventSubs     []chan plugin.Event // SSE subscribers for event streaming
 	envelopes     map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
+	// envelopeSchemas stores compiled JSON Schemas for plugin-owned envelope
+	// types, keyed by plugin ID then envelope type. Populated at plugin load
+	// via applyManifestRegistrations when the manifest declares a schema path;
+	// cleared on UnloadPlugin via unregisterPluginEnvelopeSchemasLocked. Used
+	// by FilterPluginEnvelopes (B.11) to enforce envelope shape at emission.
+	envelopeSchemas map[string]map[string]*jsonschema.Schema
 	// manifests holds the parsed plugin.yaml for each loaded plugin, keyed by
 	// plugin ID. Populated by applyManifestRegistrations and cleared by
 	// UnloadPlugin. Consumed by the B.7 /api/plugins/registry endpoint to
@@ -165,6 +172,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		configSchemaOwners: make(map[string]struct{}),
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
+		envelopeSchemas:    make(map[string]map[string]*jsonschema.Schema),
 		manifests:          make(map[string]*PluginManifest),
 		router:             router,
 		pluginMux:          NewMutablePluginMux(),
@@ -202,6 +210,7 @@ func NewHostWithStore(store interface{}) *Host {
 		configSchemaOwners: make(map[string]struct{}),
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
+		envelopeSchemas:    make(map[string]map[string]*jsonschema.Schema),
 		manifests:          make(map[string]*PluginManifest),
 		router:             http.NewServeMux(),
 		pluginMux:          NewMutablePluginMux(),
@@ -1342,6 +1351,13 @@ func (h *Host) UnloadPlugin(id string) error {
 	}
 	if envCount > 0 {
 		h.logger.Debug("plugin unload: removed envelope types", "plugin", id, "count", envCount)
+	}
+
+	// 9b. Envelope schemas (B.11 strict validation). Drop all compiled
+	// schemas owned by this plugin so a stale schema can't validate a
+	// re-registered envelope type after hot-unload + reload.
+	if n := h.unregisterPluginEnvelopeSchemasLocked(id); n > 0 {
+		h.logger.Debug("plugin unload: removed envelope schemas", "plugin", id, "count", n)
 	}
 
 	// 10. HTTP routes — remove from mutable plugin mux. Forwarder entries on

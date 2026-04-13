@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -216,7 +217,7 @@ func (h *Host) bumpRegistryVersionLocked() {
 // Purely declarative categories (envelopes, slots, keybindings, components)
 // are fully wired here — that is enough to migrate bookmarks off direct
 // Register calls as the B.4 acceptance proof.
-func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin) error {
+func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin, pluginDir string) error {
 	if manifest == nil {
 		return nil
 	}
@@ -241,7 +242,13 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 
 	reg := manifest.Registers
 
-	// 1. Envelopes — record side-map + chat.RegisterEnvelopeType.
+	// 1. Envelopes — record side-map + chat.RegisterEnvelopeType. When the
+	// manifest declares a schema file and the plugin dir is known, compile
+	// the JSON Schema and register it for B.11 strict validation. Missing
+	// schema files are logged and skipped; if a plugin-dir isn't available
+	// (compiled-in builtins without on-disk assets) schema loading is a
+	// no-op and validation for those types degrades to "declared but
+	// schema-less" which ValidatePluginEnvelope treats as pass-through.
 	for _, e := range reg.Envelopes {
 		if err := host.RegisterEnvelope(EnvelopeRegistryEntry{
 			Type:       e.Type,
@@ -251,6 +258,20 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 			SchemaPath: e.Schema,
 		}); err != nil {
 			return fmt.Errorf("envelope %q: %w", e.Type, err)
+		}
+		if e.Schema != "" && pluginDir != "" {
+			schemaFile := e.Schema
+			if !filepath.IsAbs(schemaFile) {
+				schemaFile = filepath.Join(pluginDir, e.Schema)
+			}
+			if err := host.registerPluginEnvelopeSchemaFromFile(pluginID, e.Type, schemaFile); err != nil {
+				// Log and continue — install-time validation already catches
+				// missing schema files; a late failure here shouldn't block
+				// plugin load, but the envelope type will only have advisory
+				// validation until the schema resolves.
+				host.logger.Warn("envelope schema load failed",
+					"plugin", pluginID, "type", e.Type, "schema", schemaFile, "error", err.Error())
+			}
 		}
 	}
 

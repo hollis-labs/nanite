@@ -92,6 +92,24 @@ func (s *Store) UpsertPluginSchema(pluginID string, schema []ConfigField) error 
 	return nil
 }
 
+// ClearPluginSchema resets the persisted config schema for a plugin to the
+// empty array, leaving settings values intact. Called by the plugin host on
+// UnloadPlugin so a hot-reloaded plugin starts with a fresh schema and the
+// admin UI stops advertising fields from the old (now-unloaded) build. We
+// don't DELETE the row because user-entered settings live in the same row
+// and a reinstall should be able to re-associate them with a new schema.
+func (s *Store) ClearPluginSchema(pluginID string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(
+		`UPDATE plugin_settings SET schema = '[]', updated_at = ? WHERE plugin_id = ?`,
+		now, pluginID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear plugin schema: %w", err)
+	}
+	return nil
+}
+
 // ListPluginSettings returns settings for all plugins that have saved config.
 func (s *Store) ListPluginSettings() ([]*PluginSettings, error) {
 	rows, err := s.DB.Query(

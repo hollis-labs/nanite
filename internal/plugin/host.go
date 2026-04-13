@@ -33,8 +33,15 @@ var validComponentTypes = map[plugin.UIComponentType]bool{
 // CommandRegistrar is the interface for registering slash commands into a
 // unified registry. Implemented by chat.CommandRegistry. Defined here to
 // avoid importing the chat package.
+//
+// RemoveByPlugin drops every command whose Source equals pluginID and returns
+// the number removed. Plugin-registered commands carry their owning pluginID
+// in SlashCommand.Source (set by RegisterPluginCommand), so the registry can
+// perform the sweep without an extra side map. Builtin/skill/file commands
+// use reserved Source values ("builtin", "skill", "file") and are unaffected.
 type CommandRegistrar interface {
 	RegisterPluginCommand(cmd SlashCommandDef, source string)
+	RemoveByPlugin(pluginID string) int
 }
 
 // MCPRegistrar is the interface for registering MCP servers backed by a
@@ -67,11 +74,28 @@ type ConnectorStatus struct {
 
 // Host implements the plugin.Host interface for Nanite.
 // It provides the runtime environment and services for plugins.
+// eventHookEntry wraps a registered EventHook with the plugin ID that owns it
+// so UnloadPlugin can sweep plugin-scoped hooks without requiring the external
+// go-plugin.EventHook interface to expose owner information. Core (non-plugin)
+// event hook registrations leave pluginID == "" and are never swept.
+type eventHookEntry struct {
+	hook     plugin.EventHook
+	pluginID string
+}
+
+// crudHandlerEntry wraps a CRUDHandler with its owning plugin ID. Same
+// rationale as eventHookEntry — keep plugin-ownership on the host side because
+// go-plugin.CRUDHandler is plugin-agnostic.
+type crudHandlerEntry struct {
+	handler  plugin.CRUDHandler
+	pluginID string
+}
+
 type Host struct {
 	mu            sync.RWMutex
 	plugins       map[string]plugin.Plugin
-	eventHooks    map[string][]plugin.EventHook
-	crudHandlers  map[string]plugin.CRUDHandler
+	eventHooks    map[string][]eventHookEntry
+	crudHandlers  map[string]crudHandlerEntry
 	uiComponents  []plugin.UIComponent
 	uiOwners      map[string]string // component ID → plugin ID that registered it
 	connectors    map[string]plugin.Connector
@@ -84,6 +108,13 @@ type Host struct {
 	slots         map[UISlotName][]UISlotEntry // slot name → entries, sorted by priority
 	services      map[string]interface{}
 	serviceOwners map[string]string // service name → plugin ID (only non-core, plugin-registered services)
+	// B.6b host-side owner maps for categories whose underlying registry cannot
+	// carry plugin-ID context (interfaces live in external/pinned modules, or
+	// are plugin-agnostic by design — task.Service, store.Store). Event hooks
+	// and CRUD handlers carry their owner inline via eventHookEntry /
+	// crudHandlerEntry; see those types above.
+	taskBackendOwners  map[string]string   // task backend name → plugin ID
+	configSchemaOwners map[string]struct{} // plugin IDs with a persisted config schema (clear on unload)
 	configs       map[string]*PluginConfig // per-plugin config, keyed by plugin ID
 	activePlugin  string                   // ID of the plugin currently being loaded
 	store         *store.Store             // DB-backed plugin settings (nil if unavailable)
@@ -104,27 +135,29 @@ type Host struct {
 func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{
-		plugins:         make(map[string]plugin.Plugin),
-		eventHooks:      make(map[string][]plugin.EventHook),
-		crudHandlers:    make(map[string]plugin.CRUDHandler),
-		uiComponents:    []plugin.UIComponent{},
-		uiOwners:        make(map[string]string),
-		connectors:      make(map[string]plugin.Connector),
-		connectorOwners: make(map[string]string),
-		connectorHealth: make(map[string]*ConnectorStatus),
-		keybindings:     make(map[string]KeybindingDef),
-		kbOwners:        make(map[string]string),
-		slots:           make(map[UISlotName][]UISlotEntry),
-		services:        make(map[string]interface{}),
-		serviceOwners:   make(map[string]string),
-		configs:         make(map[string]*PluginConfig),
-		envelopes:       make(map[string]EnvelopeRegistryEntry),
-		router:          router,
-		pluginMux:       NewMutablePluginMux(),
-		routePatterns:   make(map[string]bool),
-		logger:          logger,
-		ctx:             ctx,
-		ctxCancel:       cancel,
+		plugins:            make(map[string]plugin.Plugin),
+		eventHooks:         make(map[string][]eventHookEntry),
+		crudHandlers:       make(map[string]crudHandlerEntry),
+		uiComponents:       []plugin.UIComponent{},
+		uiOwners:           make(map[string]string),
+		connectors:         make(map[string]plugin.Connector),
+		connectorOwners:    make(map[string]string),
+		connectorHealth:    make(map[string]*ConnectorStatus),
+		keybindings:        make(map[string]KeybindingDef),
+		kbOwners:           make(map[string]string),
+		slots:              make(map[UISlotName][]UISlotEntry),
+		services:           make(map[string]interface{}),
+		serviceOwners:      make(map[string]string),
+		taskBackendOwners:  make(map[string]string),
+		configSchemaOwners: make(map[string]struct{}),
+		configs:            make(map[string]*PluginConfig),
+		envelopes:          make(map[string]EnvelopeRegistryEntry),
+		router:             router,
+		pluginMux:          NewMutablePluginMux(),
+		routePatterns:      make(map[string]bool),
+		logger:             logger,
+		ctx:                ctx,
+		ctxCancel:          cancel,
 	}
 	h.triggers = NewTriggerDispatcher(h)
 	h.filters = NewFilterRegistry()
@@ -137,27 +170,29 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 func NewHostWithStore(store interface{}) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{
-		plugins:         make(map[string]plugin.Plugin),
-		eventHooks:      make(map[string][]plugin.EventHook),
-		crudHandlers:    make(map[string]plugin.CRUDHandler),
-		uiComponents:    []plugin.UIComponent{},
-		uiOwners:        make(map[string]string),
-		connectors:      make(map[string]plugin.Connector),
-		connectorOwners: make(map[string]string),
-		connectorHealth: make(map[string]*ConnectorStatus),
-		keybindings:     make(map[string]KeybindingDef),
-		kbOwners:        make(map[string]string),
-		slots:           make(map[UISlotName][]UISlotEntry),
-		services:        make(map[string]interface{}),
-		serviceOwners:   make(map[string]string),
-		configs:         make(map[string]*PluginConfig),
-		envelopes:       make(map[string]EnvelopeRegistryEntry),
-		router:          http.NewServeMux(),
-		pluginMux:       NewMutablePluginMux(),
-		routePatterns:   make(map[string]bool),
-		logger:          NewLogger("plugin-cli"),
-		ctx:             ctx,
-		ctxCancel:       cancel,
+		plugins:            make(map[string]plugin.Plugin),
+		eventHooks:         make(map[string][]eventHookEntry),
+		crudHandlers:       make(map[string]crudHandlerEntry),
+		uiComponents:       []plugin.UIComponent{},
+		uiOwners:           make(map[string]string),
+		connectors:         make(map[string]plugin.Connector),
+		connectorOwners:    make(map[string]string),
+		connectorHealth:    make(map[string]*ConnectorStatus),
+		keybindings:        make(map[string]KeybindingDef),
+		kbOwners:           make(map[string]string),
+		slots:              make(map[UISlotName][]UISlotEntry),
+		services:           make(map[string]interface{}),
+		serviceOwners:      make(map[string]string),
+		taskBackendOwners:  make(map[string]string),
+		configSchemaOwners: make(map[string]struct{}),
+		configs:            make(map[string]*PluginConfig),
+		envelopes:          make(map[string]EnvelopeRegistryEntry),
+		router:             http.NewServeMux(),
+		pluginMux:          NewMutablePluginMux(),
+		routePatterns:      make(map[string]bool),
+		logger:             NewLogger("plugin-cli"),
+		ctx:                ctx,
+		ctxCancel:          cancel,
 	}
 	h.triggers = NewTriggerDispatcher(h)
 	h.filters = NewFilterRegistry()
@@ -252,7 +287,7 @@ func (h *Host) RegisterCRUDHandler(resourceType string, handler plugin.CRUDHandl
 	defer h.mu.Unlock()
 
 	_, alreadyRegistered := h.crudHandlers[resourceType]
-	h.crudHandlers[resourceType] = handler
+	h.crudHandlers[resourceType] = crudHandlerEntry{handler: handler, pluginID: h.activePlugin}
 
 	// Only wire HTTP routes the first time — ServeMux doesn't support re-registration,
 	// but the handler closures read from h.crudHandlers so they'll pick up the new handler.
@@ -264,44 +299,45 @@ func (h *Host) RegisterCRUDHandler(resourceType string, handler plugin.CRUDHandl
 	// Uses registerRoute so routes are queued if the router isn't set yet.
 	basePath := fmt.Sprintf("/api/plugins/%s", resourceType)
 
+	// withHandler resolves the current handler under a read lock and invokes fn
+	// with it, or writes 404 if the resource type has been swept (e.g., after
+	// the owning plugin was unloaded). Forwarders stay installed for the
+	// process lifetime, so a missing handler must surface as 404 rather than
+	// panicking on a nil deref.
+	withHandler := func(w http.ResponseWriter, fn func(plugin.CRUDHandler)) {
+		h.mu.RLock()
+		entry, ok := h.crudHandlers[resourceType]
+		h.mu.RUnlock()
+		if !ok {
+			http.NotFound(w, nil)
+			return
+		}
+		fn(entry.handler)
+	}
+
 	// List resources: GET /api/plugins/{resourceType}
 	h.registerRoute(fmt.Sprintf("GET %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDList(w, r, h2)
+		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDList(w, r, h2) })
 	}))
 
 	// Create resource: POST /api/plugins/{resourceType}
 	h.registerRoute(fmt.Sprintf("POST %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDCreate(w, r, h2)
+		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDCreate(w, r, h2) })
 	}))
 
 	// Get resource: GET /api/plugins/{resourceType}/{id}
 	h.registerRoute(fmt.Sprintf("GET %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDRead(w, r, h2)
+		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDRead(w, r, h2) })
 	}))
 
 	// Update resource: PUT /api/plugins/{resourceType}/{id}
 	h.registerRoute(fmt.Sprintf("PUT %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDUpdate(w, r, h2)
+		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDUpdate(w, r, h2) })
 	}))
 
 	// Delete resource: DELETE /api/plugins/{resourceType}/{id}
 	h.registerRoute(fmt.Sprintf("DELETE %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDDelete(w, r, h2)
+		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDDelete(w, r, h2) })
 	}))
 
 	h.logger.Info("registered CRUD handler", "resourceType", resourceType, "basePath", basePath)
@@ -315,13 +351,14 @@ func (h *Host) RegisterEventHook(eventTypes []string, hook plugin.EventHook) err
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	pluginID := h.activePlugin
 	normalized := make([]string, len(eventTypes))
 	for i, eventType := range eventTypes {
 		normalized[i] = NormalizeEventType(eventType)
-		h.eventHooks[normalized[i]] = append(h.eventHooks[normalized[i]], hook)
+		h.eventHooks[normalized[i]] = append(h.eventHooks[normalized[i]], eventHookEntry{hook: hook, pluginID: pluginID})
 	}
 
-	h.logger.Info("registered event hook", "eventTypes", normalized, "hookTypes", hook.EventTypes())
+	h.logger.Info("registered event hook", "eventTypes", normalized, "hookTypes", hook.EventTypes(), "plugin", pluginID)
 	return nil
 }
 
@@ -470,9 +507,13 @@ func (h *Host) RegisterService(name string, service interface{}) {
 }
 
 // taskBackendRegistrar is the subset of task.Service needed to register backends.
-// Defined here to avoid importing the task package.
+// Defined here to avoid importing the task package. UnregisterBackend drops a
+// named backend from the service and returns true if it was present — used by
+// UnloadPlugin to sweep plugin-owned task backends (ownership is tracked in
+// h.taskBackendOwners because the task package itself has no plugin concept).
 type taskBackendRegistrar interface {
 	RegisterBackend(name string, backend interface{})
+	UnregisterBackend(name string) bool
 }
 
 // RegisterTaskBackend registers a named task backend via the task service.
@@ -481,6 +522,7 @@ type taskBackendRegistrar interface {
 func (h *Host) RegisterTaskBackend(name string, backend interface{}) error {
 	h.mu.RLock()
 	svc, ok := h.services["tasks"]
+	pluginID := h.activePlugin
 	h.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("register task backend %q: task service not available", name)
@@ -490,7 +532,15 @@ func (h *Host) RegisterTaskBackend(name string, backend interface{}) error {
 		return fmt.Errorf("register task backend %q: task service does not support backend registration", name)
 	}
 	reg.RegisterBackend(name, backend)
-	h.logger.Info("registered task backend", "name", name)
+	// Tag ownership for UnloadPlugin sweep. Core backends (e.g. "local")
+	// registered at service construction time never go through this path, so
+	// they're absent from taskBackendOwners and survive unload.
+	if pluginID != "" {
+		h.mu.Lock()
+		h.taskBackendOwners[name] = pluginID
+		h.mu.Unlock()
+	}
+	h.logger.Info("registered task backend", "name", name, "plugin", pluginID)
 	return nil
 }
 
@@ -612,7 +662,16 @@ func (h *Host) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
 			Component:   f.Component,
 		}
 	}
-	return s.UpsertPluginSchema(id, storeFields)
+	if err := s.UpsertPluginSchema(id, storeFields); err != nil {
+		return err
+	}
+	// Record that this plugin has a persisted config schema so UnloadPlugin
+	// can clear it. Settings values are preserved (reinstall continues to
+	// read them); only the schema column is reset.
+	h.mu.Lock()
+	h.configSchemaOwners[id] = struct{}{}
+	h.mu.Unlock()
+	return nil
 }
 
 // RegisterConnector registers a named connector for outbound integrations.
@@ -1153,23 +1212,54 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 
+	// Snapshot registrars that must be invoked under/around h.mu. The
+	// command registrar requires no lock coordination (its own mutex), so we
+	// can capture the reference early and call it after dropping h.mu; the
+	// task backend registrar lives in h.services under "tasks", read below.
+	h.mu.RLock()
+	cmdReg := h.commands
+	h.mu.RUnlock()
+
 	// Re-acquire to mutate host state.
 	h.mu.Lock()
 	delete(h.plugins, id)
 
-	// B.6a hot-unload sweep — 10 of 14 register categories. The remaining 4
-	// (commands, event hooks, CRUD handlers, provider registry) land in B.6b.
+	// B.6b full hot-unload sweep — 15 of 15 categories (providers still
+	// blocked: see note below). Categories landed in B.6a retained; new in
+	// B.6b are commands, task backends, config schemas, event hooks,
+	// CRUD handlers. Providers remain uncovered — external go-providers
+	// (v0.0.1) has no Unregister surface; see docs/architecture for the
+	// module release needed to close that gap.
 	var envelopeTypesToUnregister []string
+	var taskBackendsToUnregister []string
+	var clearSchemaPluginID string
 
 	// 1. Filters.
 	if n := h.filters.RemoveByPlugin(id); n > 0 {
 		slog.Debug("plugin unload: removed filters", "plugin", id, "count", n)
 	}
 
-	// 2. Event hooks — interface doesn't expose plugin ID, so this category
-	// is the B.6b work item. Leave the loop in place as a no-op placeholder
-	// so the sweep order is explicit.
-	// (see B.6b: extend EventHook interface or track hooks in an owner map)
+	// 2. Event hooks — sweep eventHookEntry whose pluginID matches. Core
+	// (non-plugin) hooks registered with empty pluginID survive.
+	ehCount := 0
+	for eventType, entries := range h.eventHooks {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.pluginID != id {
+				kept = append(kept, e)
+			} else {
+				ehCount++
+			}
+		}
+		if len(kept) == 0 {
+			delete(h.eventHooks, eventType)
+		} else {
+			h.eventHooks[eventType] = kept
+		}
+	}
+	if ehCount > 0 {
+		slog.Debug("plugin unload: removed event hooks", "plugin", id, "count", ehCount)
+	}
 
 	// 3. UI components.
 	n := 0
@@ -1279,6 +1369,49 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 
+	// 11. CRUD handlers — drop plugin-owned entries from the map. HTTP
+	// forwarders stay in place (see MutablePluginMux rationale) and the
+	// per-route withHandler closures now fall through to 404 via the
+	// map-miss path in RegisterCRUDHandler.
+	crudCount := 0
+	for rt, entry := range h.crudHandlers {
+		if entry.pluginID == id {
+			delete(h.crudHandlers, rt)
+			crudCount++
+		}
+	}
+	if crudCount > 0 {
+		slog.Debug("plugin unload: removed crud handlers", "plugin", id, "count", crudCount)
+	}
+
+	// 12. Task backends — collect names to remove; actual UnregisterBackend
+	// call happens after we drop h.mu to keep consistent with other outside-
+	// lock cleanup (the task service takes its own mutex).
+	for name, owner := range h.taskBackendOwners {
+		if owner == id {
+			taskBackendsToUnregister = append(taskBackendsToUnregister, name)
+			delete(h.taskBackendOwners, name)
+		}
+	}
+
+	// 13. Config schemas — mark for outside-lock clear via store.
+	if _, ok := h.configSchemaOwners[id]; ok {
+		clearSchemaPluginID = id
+		delete(h.configSchemaOwners, id)
+	}
+
+	// Snapshot refs needed for outside-lock work.
+	taskSvc, _ := h.services["tasks"].(taskBackendRegistrar)
+	storeRef := h.store
+
+	// 14. Providers — BLOCKER (B.6b). The external provider registry
+	// (hollis-labs/go-providers@v0.0.1) has no Unregister method, and
+	// nanite consumes it without a local replace directive. Hot-unload of
+	// providers therefore requires a go-providers release adding
+	// Registry.Unregister (and a side map tracking plugin ownership there
+	// or here). Intentionally omitted rather than faking it — see
+	// docs/architecture/plugin-audit-2026-04-10.md.
+
 	h.mu.Unlock()
 
 	// Drop envelope types from chat validation registry OUTSIDE h.mu —
@@ -1286,6 +1419,36 @@ func (h *Host) UnloadPlugin(id string) error {
 	// to hold our own while doing so.
 	for _, t := range envelopeTypesToUnregister {
 		unregisterEnvelopeType(t)
+	}
+
+	// 15. Commands — sweep via CommandRegistrar.RemoveByPlugin, OUTSIDE h.mu
+	// (CommandRegistry takes its own lock).
+	if cmdReg != nil {
+		if n := cmdReg.RemoveByPlugin(id); n > 0 {
+			slog.Debug("plugin unload: removed commands", "plugin", id, "count", n)
+		}
+	}
+
+	// Task backends — invoke UnregisterBackend outside h.mu (task service
+	// has its own mutex). "local" is protected at the service layer; we
+	// never add it to taskBackendOwners, so there's no risk of calling it.
+	if taskSvc != nil {
+		for _, name := range taskBackendsToUnregister {
+			if taskSvc.UnregisterBackend(name) {
+				slog.Debug("plugin unload: removed task backend", "plugin", id, "name", name)
+			}
+		}
+	}
+
+	// Config schema — clear via store outside h.mu. Store call does its
+	// own DB I/O; absent store (CLI host with no store) is fine — the
+	// configSchemaOwners side map was never populated either.
+	if clearSchemaPluginID != "" && storeRef != nil {
+		if err := storeRef.ClearPluginSchema(clearSchemaPluginID); err != nil {
+			h.logger.Warn("plugin unload: clear config schema failed", "plugin", id, "error", err)
+		} else {
+			slog.Debug("plugin unload: cleared config schema", "plugin", id)
+		}
 	}
 
 	h.logger.Info("unloaded plugin", "id", id)
@@ -1309,7 +1472,7 @@ func (h *Host) EmitEvent(event plugin.Event) {
 		var wg sync.WaitGroup
 		for _, hook := range hooks {
 			wg.Add(1)
-			hk := hook
+			hk := hook.hook
 			safego.Go(h.ctx, "plugin.host.emit-event.hook", func() {
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
@@ -1376,7 +1539,7 @@ func (h *Host) GetCRUDHandlers() map[string]plugin.CRUDHandler {
 	// Return a copy to prevent modification
 	handlers := make(map[string]plugin.CRUDHandler)
 	for k, v := range h.crudHandlers {
-		handlers[k] = v
+		handlers[k] = v.handler
 	}
 	return handlers
 }

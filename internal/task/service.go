@@ -25,6 +25,13 @@ type Service interface {
 	// registered at construction time. The backend must implement TaskBackend.
 	// Accepts interface{} so the plugin host can call it without importing this package.
 	RegisterBackend(name string, backend interface{})
+
+	// UnregisterBackend removes a named backend and returns true if it was
+	// present. Used by the plugin host on UnloadPlugin to sweep backends
+	// registered by a now-unloaded plugin. The "local" backend is protected
+	// (callers must not unregister it); the host only invokes this for names
+	// it tracked in taskBackendOwners during RegisterTaskBackend.
+	UnregisterBackend(name string) bool
 }
 
 // SnapshotStore is the subset of the SQLite store needed for task snapshots.
@@ -83,6 +90,25 @@ func (s *serviceImpl) RegisterBackend(name string, backend interface{}) {
 	defer s.mu.Unlock()
 	s.backends[name] = tb
 	slog.Info("task backend registered", "name", name)
+}
+
+// UnregisterBackend removes a named backend. The built-in "local" backend is
+// protected — attempts to unregister it are rejected with a warning so the
+// service always retains its fallback even if a plugin misbehaves. Returns
+// true if the backend was present and removed, false otherwise.
+func (s *serviceImpl) UnregisterBackend(name string) bool {
+	if name == BackendLocal {
+		slog.Warn("task backend unregister rejected: local backend is protected", "name", name)
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.backends[name]; !ok {
+		return false
+	}
+	delete(s.backends, name)
+	slog.Info("task backend unregistered", "name", name)
+	return true
 }
 
 // active resolves the current backend. Falls back to local with a warning

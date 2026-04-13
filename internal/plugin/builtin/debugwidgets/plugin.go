@@ -1,11 +1,33 @@
 package debugwidgets
 
 import (
+	_ "embed"
+	"sync"
 	"time"
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-plugin"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed plugin.yaml
+var manifestYAML []byte
+
+var (
+	parsedManifestOnce sync.Once
+	parsedManifest     *hostplugin.PluginManifest
+)
+
+func loadManifest() *hostplugin.PluginManifest {
+	parsedManifestOnce.Do(func() {
+		var m hostplugin.PluginManifest
+		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
+			panic("debug-widgets: invalid embedded plugin.yaml: " + err.Error())
+		}
+		parsedManifest = &m
+	})
+	return parsedManifest
+}
 
 func init() {
 	hostplugin.RegisterPlugin("debug-widgets", func() plugin.Plugin { return New() })
@@ -20,42 +42,19 @@ type DebugWidgetsPlugin struct {
 
 func New() *DebugWidgetsPlugin { return &DebugWidgetsPlugin{} }
 
-func (p *DebugWidgetsPlugin) ID() string            { return "debug-widgets" }
-func (p *DebugWidgetsPlugin) Name() string          { return "Debug Widgets" }
-func (p *DebugWidgetsPlugin) Version() string       { return "1.0.0" }
-func (p *DebugWidgetsPlugin) Description() string   { return "Broker decisions, slot inspector, and turn snapshot widgets (developer_mode only)" }
+func (p *DebugWidgetsPlugin) ID() string             { return "debug-widgets" }
+func (p *DebugWidgetsPlugin) Name() string           { return "Debug Widgets" }
+func (p *DebugWidgetsPlugin) Version() string        { return "1.0.0" }
+func (p *DebugWidgetsPlugin) Description() string    { return "Broker decisions, slot inspector, and turn snapshot widgets (developer_mode only)" }
 func (p *DebugWidgetsPlugin) Dependencies() []string { return nil }
 
+// Manifest exposes the embedded plugin.yaml so widget UIComponents register
+// through the host's yaml-authoritative loader path (H.3 / B.4).
+func (p *DebugWidgetsPlugin) Manifest() *hostplugin.PluginManifest { return loadManifest() }
+
 func (p *DebugWidgetsPlugin) Load(host plugin.Host) error {
-	widgets := []plugin.UIComponent{
-		{
-			ID:          "broker-decisions",
-			Type:        plugin.UIComponentTypeWidget,
-			Name:        "Broker Decisions",
-			Description: "Tool broker decision log with layer, intent, and selected tools",
-		},
-		{
-			ID:          "slot-inspector",
-			Type:        plugin.UIComponentTypeWidget,
-			Name:        "Context Slots",
-			Description: "Context window slot allocation and token budget breakdown",
-		},
-		{
-			ID:          "turn-snapshots",
-			Type:        plugin.UIComponentTypeWidget,
-			Name:        "Turn Snapshots",
-			Description: "Per-turn execution snapshots with tool call timings",
-		},
-	}
-
-	for _, w := range widgets {
-		if err := host.RegisterUIComponent(w); err != nil {
-			return err
-		}
-	}
-
 	p.status = plugin.PluginStatus{Loaded: true, Enabled: true, LoadedAt: time.Now()}
-	host.Logger().Info("debug-widgets plugin loaded", "widgets", len(widgets))
+	host.Logger().Info("debug-widgets plugin loaded (yaml-authoritative)")
 	return nil
 }
 

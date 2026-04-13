@@ -2,13 +2,35 @@ package sessionstats
 
 import (
 	"database/sql"
+	_ "embed"
 	"fmt"
+	"sync"
 	"time"
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/go-plugin"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed plugin.yaml
+var manifestYAML []byte
+
+var (
+	parsedManifestOnce sync.Once
+	parsedManifest     *hostplugin.PluginManifest
+)
+
+func loadManifest() *hostplugin.PluginManifest {
+	parsedManifestOnce.Do(func() {
+		var m hostplugin.PluginManifest
+		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
+			panic("session-stats: invalid embedded plugin.yaml: " + err.Error())
+		}
+		parsedManifest = &m
+	})
+	return parsedManifest
+}
 
 func init() {
 	hostplugin.RegisterPlugin("session-stats", func() plugin.Plugin { return New() })
@@ -31,6 +53,14 @@ func (p *SessionStatsPlugin) Name() string          { return "Session Stats" }
 func (p *SessionStatsPlugin) Version() string       { return "1.0.0" }
 func (p *SessionStatsPlugin) Description() string   { return "Session statistics tracking and display plugin" }
 func (p *SessionStatsPlugin) Dependencies() []string { return nil }
+
+// Manifest exposes the embedded plugin.yaml so the host loader runs the
+// yaml-authoritative path (H.3 / B.4). session-stats' UIComponents carry
+// Handler http.HandlerFunc values that the declarative ComponentRegistration
+// shape does not yet express, so Load() still performs their direct
+// registration below. Track BLG-20260413-013 to fold these into the loader
+// once the schema grows a handler / http-route surface.
+func (p *SessionStatsPlugin) Manifest() *hostplugin.PluginManifest { return loadManifest() }
 
 func (p *SessionStatsPlugin) Load(host plugin.Host) error {
 	p.host = host

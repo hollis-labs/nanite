@@ -1,11 +1,33 @@
 package agentwidgets
 
 import (
+	_ "embed"
+	"sync"
 	"time"
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-plugin"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed plugin.yaml
+var manifestYAML []byte
+
+var (
+	parsedManifestOnce sync.Once
+	parsedManifest     *hostplugin.PluginManifest
+)
+
+func loadManifest() *hostplugin.PluginManifest {
+	parsedManifestOnce.Do(func() {
+		var m hostplugin.PluginManifest
+		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
+			panic("agent-widgets: invalid embedded plugin.yaml: " + err.Error())
+		}
+		parsedManifest = &m
+	})
+	return parsedManifest
+}
 
 func init() {
 	hostplugin.RegisterPlugin("agent-widgets", func() plugin.Plugin { return New() })
@@ -18,36 +40,19 @@ type AgentWidgetsPlugin struct {
 
 func New() *AgentWidgetsPlugin { return &AgentWidgetsPlugin{} }
 
-func (p *AgentWidgetsPlugin) ID() string            { return "agent-widgets" }
-func (p *AgentWidgetsPlugin) Name() string          { return "Agent & Tools" }
-func (p *AgentWidgetsPlugin) Version() string       { return "1.0.0" }
-func (p *AgentWidgetsPlugin) Description() string   { return "Agent mode switching and MCP tool discovery widgets" }
+func (p *AgentWidgetsPlugin) ID() string             { return "agent-widgets" }
+func (p *AgentWidgetsPlugin) Name() string           { return "Agent & Tools" }
+func (p *AgentWidgetsPlugin) Version() string        { return "1.0.0" }
+func (p *AgentWidgetsPlugin) Description() string    { return "Agent mode switching and MCP tool discovery widgets" }
 func (p *AgentWidgetsPlugin) Dependencies() []string { return nil }
 
+// Manifest exposes the embedded plugin.yaml so widget UIComponents register
+// through the host's yaml-authoritative loader path (H.3 / B.4).
+func (p *AgentWidgetsPlugin) Manifest() *hostplugin.PluginManifest { return loadManifest() }
+
 func (p *AgentWidgetsPlugin) Load(host plugin.Host) error {
-	widgets := []plugin.UIComponent{
-		{
-			ID:          "agent-status",
-			Type:        plugin.UIComponentTypeWidget,
-			Name:        "Agent Status",
-			Description: "Current agent mode and model selection with mode switching",
-		},
-		{
-			ID:          "tools",
-			Type:        plugin.UIComponentTypeWidget,
-			Name:        "Tools",
-			Description: "MCP server health and tool discovery status",
-		},
-	}
-
-	for _, w := range widgets {
-		if err := host.RegisterUIComponent(w); err != nil {
-			return err
-		}
-	}
-
 	p.status = plugin.PluginStatus{Loaded: true, Enabled: true, LoadedAt: time.Now()}
-	host.Logger().Info("agent-widgets plugin loaded", "widgets", len(widgets))
+	host.Logger().Info("agent-widgets plugin loaded (yaml-authoritative)")
 	return nil
 }
 

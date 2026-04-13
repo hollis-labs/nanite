@@ -5,10 +5,12 @@
 package adaptercodex
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/agent"
@@ -17,7 +19,27 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 
 	plugin "github.com/hollis-labs/go-plugin"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed plugin.yaml
+var manifestYAML []byte
+
+var (
+	parsedManifestOnce sync.Once
+	parsedManifest     *hostplugin.PluginManifest
+)
+
+func loadManifest() *hostplugin.PluginManifest {
+	parsedManifestOnce.Do(func() {
+		var m hostplugin.PluginManifest
+		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
+			panic("adapter-codex: invalid embedded plugin.yaml: " + err.Error())
+		}
+		parsedManifest = &m
+	})
+	return parsedManifest
+}
 
 func init() {
 	hostplugin.RegisterPlugin("adapter-codex", func() plugin.Plugin { return New() })
@@ -49,6 +71,11 @@ func (p *Plugin) Name() string           { return "Codex/Copilot Adapter" }
 func (p *Plugin) Version() string        { return "0.1.0" }
 func (p *Plugin) Description() string    { return "Discovers AGENTS.md and populates Codex/Copilot CLI sandboxes" }
 func (p *Plugin) Dependencies() []string { return nil }
+
+// Manifest exposes the embedded plugin.yaml so the host loader runs the
+// yaml-authoritative path (H.3 / B.4). No declarative registrations — the
+// CLIAgentAdapter is wired via internal/service/install/adapters.go.
+func (p *Plugin) Manifest() *hostplugin.PluginManifest { return loadManifest() }
 
 func (p *Plugin) Load(host plugin.Host) error {
 	p.host = host

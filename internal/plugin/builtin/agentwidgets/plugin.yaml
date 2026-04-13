@@ -1,0 +1,17 @@
+schema_version: 1
+name: agent-widgets
+id: agent-widgets
+version: 1.0.0
+description: Agent mode switching and MCP tool discovery widgets
+author: Nanite
+license: Apache-2.0
+protocol: 1
+runtime: builtin
+registers:
+  components:
+    - name: agent-status
+      type: widget
+      description: Current agent mode and model selection with mode switching
+    - name: tools
+      type: widget
+      description: MCP server health and tool discovery status

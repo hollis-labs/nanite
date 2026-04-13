@@ -1,0 +1,9 @@
+schema_version: 1
+name: adapter-nanite-native
+id: adapter-nanite-native
+version: 0.1.0
+description: Reads agent definitions from .nanite/ (with .agentrc/ fallback) and composes role/skill prompts
+author: Nanite
+license: Apache-2.0
+protocol: 1
+runtime: builtin

@@ -5,11 +5,13 @@
 package adapterclaude
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/agent"
@@ -19,7 +21,30 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 
 	plugin "github.com/hollis-labs/go-plugin"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed plugin.yaml
+var manifestYAML []byte
+
+var (
+	parsedManifestOnce sync.Once
+	parsedManifest     *hostplugin.PluginManifest
+)
+
+// loadManifest parses the embedded plugin.yaml exactly once. A parse failure
+// means the builtin was shipped with invalid source metadata — panic so the
+// bug surfaces at boot rather than producing a half-wired plugin at runtime.
+func loadManifest() *hostplugin.PluginManifest {
+	parsedManifestOnce.Do(func() {
+		var m hostplugin.PluginManifest
+		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
+			panic("adapter-claude: invalid embedded plugin.yaml: " + err.Error())
+		}
+		parsedManifest = &m
+	})
+	return parsedManifest
+}
 
 func init() {
 	hostplugin.RegisterPlugin("adapter-claude", func() plugin.Plugin { return New() })
@@ -51,6 +76,12 @@ func (p *Plugin) Name() string           { return "Claude Code Adapter" }
 func (p *Plugin) Version() string        { return "0.1.0" }
 func (p *Plugin) Description() string    { return "Discovers .claude/agents/*.md and populates Claude Code sandboxes" }
 func (p *Plugin) Dependencies() []string { return nil }
+
+// Manifest exposes the embedded plugin.yaml so the host loader runs the same
+// yaml-authoritative path used for subprocess plugins (H.3 / B.4). This
+// adapter has no declarative host registrations — its CLIAgentAdapter is
+// wired externally via internal/service/install/adapters.go.
+func (p *Plugin) Manifest() *hostplugin.PluginManifest { return loadManifest() }
 
 func (p *Plugin) Load(host plugin.Host) error {
 	p.host = host

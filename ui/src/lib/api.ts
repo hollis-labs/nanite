@@ -59,6 +59,7 @@ import type {
   MemoryCreateRequest,
   MemoryUpdateRequest,
 } from "./types";
+import type { PluginRegistryResponse } from "./plugin-loader";
 
 const API_BASE = "/api";
 
@@ -1118,6 +1119,12 @@ export const api = {
   listPlugins: async (): Promise<PluginInfo[]> => {
     const res = await fetch(`${API_BASE}/plugins/managed`);
     if (!res.ok) throw new Error(`Failed to list plugins: ${res.status}`);
+    return res.json();
+  },
+
+  fetchPluginRegistry: async (): Promise<PluginRegistryResponse> => {
+    const res = await fetch(`${API_BASE}/plugins/registry`);
+    if (!res.ok) throw new Error(`Failed to fetch plugin registry: ${res.status}`);
     return res.json();
   },
 

@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	goplugin "github.com/hollis-labs/go-plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // stubMCPRegistrar records per-plugin server tracking without a real
@@ -36,25 +38,130 @@ func (s *stubMCPRegistrar) RemoveServersByPlugin(pluginID string) int {
 	return n
 }
 
-// TestUnloadPlugin_SweepsAllB6aCategories wires up a single host with
-// registrations across every B.6a-covered category, unloads the plugin, and
-// asserts each registry shows zero entries for the unloaded plugin. Categories
-// deferred to B.6b (commands, event hooks, crud handlers, providers) are not
-// exercised here.
-func TestUnloadPlugin_SweepsAllB6aCategories(t *testing.T) {
-	mux := http.NewServeMux()
-	host := NewHost(mux, NewLogger("unload-sweep"))
+// stubCommandRegistrar is a minimal CommandRegistrar that records sources
+// and implements RemoveByPlugin with the same semantics as
+// chat.CommandRegistry. Using a stub keeps this test in-package and avoids
+// the (plugin -> chat) dependency that would require moving the test.
+type stubCommandRegistrar struct {
+	commands map[string]string // name → source (pluginID)
+	removed  map[string]int
+}
 
-	// MCP registrar stub captures server removal.
+func newStubCommandRegistrar() *stubCommandRegistrar {
+	return &stubCommandRegistrar{
+		commands: make(map[string]string),
+		removed:  make(map[string]int),
+	}
+}
+
+func (s *stubCommandRegistrar) RegisterPluginCommand(cmd SlashCommandDef, source string) {
+	s.commands[cmd.Name] = source
+}
+
+func (s *stubCommandRegistrar) RemoveByPlugin(pluginID string) int {
+	if pluginID == "" {
+		return 0
+	}
+	n := 0
+	for name, src := range s.commands {
+		if src == pluginID {
+			delete(s.commands, name)
+			n++
+		}
+	}
+	s.removed[pluginID] = n
+	return n
+}
+
+// stubEventHook implements go-plugin.EventHook for the sweep test.
+type stubEventHook struct{ types []string }
+
+func (s *stubEventHook) Handle(_ context.Context, _ goplugin.Event) error { return nil }
+func (s *stubEventHook) EventTypes() []string                              { return s.types }
+
+// stubCRUDHandler implements go-plugin.CRUDHandler for the sweep test.
+type stubCRUDHandler struct{}
+
+func (stubCRUDHandler) Create(context.Context, interface{}) (interface{}, error) {
+	return nil, nil
+}
+func (stubCRUDHandler) Read(context.Context, string) (interface{}, error) { return nil, nil }
+func (stubCRUDHandler) Update(context.Context, string, interface{}) (interface{}, error) {
+	return nil, nil
+}
+func (stubCRUDHandler) Delete(context.Context, string) error { return nil }
+func (stubCRUDHandler) List(context.Context, map[string]interface{}) ([]interface{}, error) {
+	return nil, nil
+}
+
+// stubTaskService implements taskBackendRegistrar with in-memory ownership
+// so the test doesn't need to spin up the full task.Service (which would
+// pull in its DB dependency). It exposes the backends map for assertions.
+type stubTaskService struct {
+	backends map[string]interface{}
+}
+
+func newStubTaskService() *stubTaskService {
+	return &stubTaskService{backends: map[string]interface{}{"local": struct{}{}}}
+}
+
+func (s *stubTaskService) RegisterBackend(name string, backend interface{}) {
+	s.backends[name] = backend
+}
+
+func (s *stubTaskService) UnregisterBackend(name string) bool {
+	if name == "local" {
+		return false
+	}
+	if _, ok := s.backends[name]; !ok {
+		return false
+	}
+	delete(s.backends, name)
+	return true
+}
+
+// TestUnloadPlugin_FullTeardown wires up a single host with registrations
+// across every B.6 hot-unload category that can be swept, unloads the plugin,
+// and asserts each registry shows zero entries for the unloaded plugin.
+//
+// Categories covered (14): envelopes, components, slots, keybindings, filters,
+// connectors, services, CLI adapters, MCP servers, HTTP routes, commands,
+// task backends, config schemas, event hooks. Plus CRUD handlers (15).
+//
+// Providers are intentionally NOT exercised — the external go-providers
+// v0.0.1 module has no Unregister surface, so hot-unload cannot sweep them
+// without a module release. See UnloadPlugin's sweep comment and B.6b notes.
+func TestUnloadPlugin_FullTeardown(t *testing.T) {
+	mux := http.NewServeMux()
+	host := NewHost(mux, NewLogger("unload-full-teardown"))
+
+	// --- External registrars / services the host sweeps through ---
+
 	mcp := newStubMCPRegistrar()
 	host.SetMCPRegistrar(mcp)
+
+	cmds := newStubCommandRegistrar()
+	host.SetCommandRegistry(cmds)
+
+	tasks := newStubTaskService()
+	// Register as "tasks" service at core scope (pre-plugin) so it survives
+	// the plugin unload — this mirrors how main.go wires task.Service.
+	host.RegisterService("tasks", tasks)
+
+	// Real store-backed config schema path so we exercise ClearPluginSchema
+	// end-to-end (not just a stub).
+	storePath := filepath.Join(t.TempDir(), "nanite-test.db")
+	db, err := store.New(storePath)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	host.SetStore(db)
 
 	const pluginID = "alpha"
 	plug := &TestPlugin{id: pluginID, name: "Alpha", version: "0.1"}
 
-	// Simulate the LoadPlugin path: we set activePlugin, invoke the Register*
-	// methods directly (bypassing yaml loader which would drive these from the
-	// manifest), then commit the plugin to h.plugins.
+	// Enter plugin-load context so Register* tag ownership.
 	host.mu.Lock()
 	host.activePlugin = pluginID
 	host.mu.Unlock()
@@ -99,14 +206,15 @@ func TestUnloadPlugin_SweepsAllB6aCategories(t *testing.T) {
 		t.Fatalf("RegisterConnector: %v", err)
 	}
 
-	// 7. Service + 8. CLI adapter.
+	// 7. Service (non-core; "tasks" stays registered as core).
 	host.RegisterService("alpha-svc", struct{}{})
+
+	// 8. CLI adapter.
 	if err := host.RegisterCLIAdapter("alpha-cli", struct{}{}); err != nil {
 		t.Fatalf("RegisterCLIAdapter: %v", err)
 	}
 
-	// 9. MCP — go through the same hook UnloadPlugin uses to clean up.
-	// We don't need a real subprocess; the stub only tracks ids/names.
+	// 9. MCP server — go through the same hook UnloadPlugin uses.
 	if err := mcp.AddPluginServer(pluginID, "alpha-mcp", nil); err != nil {
 		t.Fatalf("stub AddPluginServer: %v", err)
 	}
@@ -116,13 +224,43 @@ func TestUnloadPlugin_SweepsAllB6aCategories(t *testing.T) {
 		_, _ = w.Write([]byte("pong"))
 	}))
 
+	// 11. CRUD handler (also installs its own HTTP forwarders via pluginMux).
+	if err := host.RegisterCRUDHandler("alpha-resource", stubCRUDHandler{}); err != nil {
+		t.Fatalf("RegisterCRUDHandler: %v", err)
+	}
+
+	// 12. Command.
+	if err := host.RegisterCommand(SlashCommandDef{
+		Name: "alpha-cmd", Description: "Alpha command",
+	}); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+
+	// 13. Task backend.
+	if err := host.RegisterTaskBackend("alpha-backend", &dummyTaskBackend{}); err != nil {
+		t.Fatalf("RegisterTaskBackend: %v", err)
+	}
+
+	// 14. Config schema (persisted via store).
+	if err := host.RegisterConfigSchema([]goplugin.ConfigFieldDef{
+		{Key: "api_key", Type: "secret", Label: "API Key", Required: true},
+	}); err != nil {
+		t.Fatalf("RegisterConfigSchema: %v", err)
+	}
+
+	// 15. Event hook.
+	hook := &stubEventHook{types: []string{"alpha.ping"}}
+	if err := host.RegisterEventHook([]string{"alpha.ping"}, hook); err != nil {
+		t.Fatalf("RegisterEventHook: %v", err)
+	}
+
 	// Commit the plugin so UnloadPlugin finds it.
 	host.mu.Lock()
 	host.plugins[pluginID] = plug
 	host.activePlugin = ""
 	host.mu.Unlock()
 
-	// Sanity: forwarder installed, route answers.
+	// Sanity checks pre-unload.
 	{
 		req := httptest.NewRequest(http.MethodGet, "/api/plugins/alpha/ping", nil)
 		rr := httptest.NewRecorder()
@@ -131,19 +269,27 @@ func TestUnloadPlugin_SweepsAllB6aCategories(t *testing.T) {
 			t.Fatalf("pre-unload ping: status=%d body=%q", rr.Code, rr.Body.String())
 		}
 	}
+	if cmds.commands["alpha-cmd"] != pluginID {
+		t.Fatalf("command source mismatch: want %q got %q", pluginID, cmds.commands["alpha-cmd"])
+	}
+	if _, ok := tasks.backends["alpha-backend"]; !ok {
+		t.Fatalf("task backend not registered")
+	}
 
 	// Unload.
 	if err := host.UnloadPlugin(pluginID); err != nil {
 		t.Fatalf("UnloadPlugin: %v", err)
 	}
 
-	// Assertions — one per category.
+	// Post-unload assertions — one per category.
 	host.mu.RLock()
 	defer host.mu.RUnlock()
 
+	// 1. Envelope.
 	if _, ok := host.envelopes["alpha-envelope"]; ok {
 		t.Error("envelope survived unload")
 	}
+	// 2. UI component.
 	if host.uiOwners["alpha-widget"] != "" {
 		t.Error("ui component owner survived unload")
 	}
@@ -152,6 +298,7 @@ func TestUnloadPlugin_SweepsAllB6aCategories(t *testing.T) {
 			t.Error("ui component survived unload")
 		}
 	}
+	// 3. UI slot.
 	if entries := host.slots["topbar"]; len(entries) > 0 {
 		for _, e := range entries {
 			if e.PluginID == pluginID {
@@ -159,26 +306,72 @@ func TestUnloadPlugin_SweepsAllB6aCategories(t *testing.T) {
 			}
 		}
 	}
+	// 4. Keybinding.
 	if _, ok := host.keybindings["alpha-key"]; ok {
 		t.Error("keybinding survived unload")
 	}
+	// 5. Filter.
 	if host.filters.Len("alpha-filter") != 0 {
 		t.Error("filter survived unload")
 	}
+	// 6. Connector.
 	if _, ok := host.connectors["alpha-conn"]; ok {
 		t.Error("connector survived unload")
 	}
+	// 7. Service.
 	if _, ok := host.services["alpha-svc"]; ok {
 		t.Error("service survived unload")
 	}
+	// Core service stays.
+	if _, ok := host.services["tasks"]; !ok {
+		t.Error("core tasks service was wrongly swept")
+	}
+	// 8. CLI adapter.
 	if _, ok := host.services["cli-adapter:alpha-cli"]; ok {
 		t.Error("cli adapter survived unload")
 	}
+	// 9. MCP.
+	if mcp.removed[pluginID] != 1 {
+		t.Errorf("mcp remove not called correctly: %+v", mcp.removed)
+	}
+	// 10. HTTP routes.
 	if n := host.pluginMux.CountByPlugin(pluginID); n != 0 {
 		t.Errorf("plugin http routes survived unload: %d", n)
 	}
-	if mcp.removed[pluginID] != 1 {
-		t.Errorf("mcp remove not called correctly: %+v", mcp.removed)
+	// 11. CRUD handler.
+	if _, ok := host.crudHandlers["alpha-resource"]; ok {
+		t.Error("crud handler survived unload")
+	}
+	// 12. Command.
+	if _, ok := cmds.commands["alpha-cmd"]; ok {
+		t.Error("command survived unload")
+	}
+	if cmds.removed[pluginID] != 1 {
+		t.Errorf("command remove count = %d, want 1", cmds.removed[pluginID])
+	}
+	// 13. Task backend.
+	if _, ok := tasks.backends["alpha-backend"]; ok {
+		t.Error("task backend survived unload")
+	}
+	if _, ok := tasks.backends["local"]; !ok {
+		t.Error("local task backend was wrongly swept")
+	}
+	if _, ok := host.taskBackendOwners["alpha-backend"]; ok {
+		t.Error("task backend owner entry survived unload")
+	}
+	// 14. Config schema (store-backed).
+	if _, ok := host.configSchemaOwners[pluginID]; ok {
+		t.Error("config schema owner entry survived unload")
+	}
+	settings, err := db.GetPluginSettings(pluginID)
+	if err != nil {
+		t.Errorf("GetPluginSettings after unload: %v", err)
+	} else if len(settings.Schema) != 0 {
+		t.Errorf("config schema survived unload: %+v", settings.Schema)
+	}
+	// 15. Event hook.
+	if hooks := host.eventHooks["alpha.ping"]; len(hooks) > 0 {
+		t.Errorf("event hook survived unload: %d entries", len(hooks))
 	}
 
 	// The core mux still has the forwarder; it now returns 404.
@@ -188,5 +381,19 @@ func TestUnloadPlugin_SweepsAllB6aCategories(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("post-unload ping: status=%d want 404", rr.Code)
 	}
-	_ = context.Background()
+
+	// CRUD forwarder: route stays, handler returns 404 via withHandler fall-through.
+	req2 := httptest.NewRequest(http.MethodGet, "/api/plugins/alpha-resource", nil)
+	rr2 := httptest.NewRecorder()
+	mux.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusNotFound {
+		t.Errorf("post-unload crud list: status=%d want 404", rr2.Code)
+	}
 }
+
+// dummyTaskBackend is a zero-method placeholder. The stubTaskService doesn't
+// type-assert the backend (unlike the real task.Service), so any value works —
+// including something that would fail the real implements-TaskBackend check.
+// For the sweep test we only care that RegisterTaskBackend tags ownership and
+// UnregisterBackend is called on unload.
+type dummyTaskBackend struct{}

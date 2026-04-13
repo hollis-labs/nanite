@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 )
 
@@ -796,7 +797,7 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 		err error
 	}
 	done := make(chan execOutcome, 1)
-	go func() {
+	safego.Go(ctx, "mcp.dev_bash.exec", func() {
 		res, err := execFn(sandbox.AgentExecOpts{
 			SessionID: devBashSessionID,
 			Command:   "sh",
@@ -804,7 +805,7 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 			Timeout:   time.Duration(timeout) * time.Second,
 		})
 		done <- execOutcome{res: res, err: err}
-	}()
+	})
 
 	var result *sandbox.ExecResult
 	var err error

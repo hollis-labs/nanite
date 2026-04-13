@@ -100,6 +100,20 @@ Align hooks with Claude Code lifecycle. HTTP hooks for external services. Per-to
 
 ---
 
+### Plugin HTTP auth opt-in + multi-value header preservation (P3)
+**Decision status:** Open. Filed 2026-04-13 during Copilot review of PR #28 (B.9+B.10).
+
+Today `newSubprocessHTTPHandler` strips a denylist of sensitive request headers (`Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `X-Csrf-Token`, `X-Xsrf-Token`, `X-Api-Key`) before forwarding to untrusted plugin subprocesses, and flattens multi-value headers into a single `", "`-joined string because the plugin-sdk `HTTPRequest.Headers` is `map[string]string`.
+
+**Work items:**
+- Add a per-route opt-in in `plugin.yaml` `http_routes` so specific plugin routes can receive Authorization / Cookie (and document the trust model change).
+- Change `HTTPRequest.Headers` to `map[string][]string` in plugin-sdk so multi-value headers survive intact (breaking wire change — coordinate with SDK version bump).
+- Mirror the change on the response path if plugins need to return multi-value headers (`Set-Cookie` specifically).
+
+**Dependencies:** plugin-sdk minor version bump (wire shape change).
+
+---
+
 ## Medium Priority
 
 ### A2A Messaging & Federation (§10)

@@ -365,6 +365,33 @@ func TestBuildInitParams(t *testing.T) {
 	}
 }
 
+// TestBuildInitParams_RejectsUnsafeID ensures buildInitParams refuses ids
+// that would let a malicious manifest escape ~/.nanite/plugin-data/ via
+// filepath.Join + MkdirAll. The safe-id regex (mirrored from the manifest
+// schema) must reject path-traversal, path-separator, and empty-prefix
+// inputs before any filesystem work happens.
+func TestBuildInitParams_RejectsUnsafeID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	unsafe := []string{
+		"../escape",
+		"foo/bar",
+		"..",
+		".hidden",
+		"/abs",
+		"UPPER",
+		"has space",
+	}
+	for _, id := range unsafe {
+		t.Run(id, func(t *testing.T) {
+			ip, err := buildInitParams("/plugins/x", id, nil)
+			if err == nil {
+				t.Fatalf("expected error for id %q, got %+v", id, ip)
+			}
+		})
+	}
+}
+
 // TestBuildInitParams_NoID covers the legacy path where the host has no
 // pre-handshake plugin id. DataDir/CacheDir stay empty so the plugin
 // falls back to v0.1.2 ResolvedDataDir/ResolvedCacheDir semantics.

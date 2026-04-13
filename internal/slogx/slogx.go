@@ -57,22 +57,28 @@ func DefaultConfig() Config {
 
 // currentLevel tracks the level installed by the most recent Init call
 // so other subsystems (e.g. plugin subprocess init) can surface the
-// host's current log verbosity to downstream components. Access is not
-// synchronized because Init is expected to run once at startup and the
-// value is read-only afterwards.
-var currentLevel = slog.LevelInfo
+// host's current log verbosity to downstream components. Using
+// *slog.LevelVar gives us race-free concurrent reads/writes: Init
+// typically runs once at startup but CurrentLevelString may be called
+// concurrently from plugin load paths, handlers, etc.
+var currentLevel = func() *slog.LevelVar {
+	lv := &slog.LevelVar{}
+	lv.Set(slog.LevelInfo)
+	return lv
+}()
 
 // CurrentLevelString returns the host's current log level as one of
 // "debug", "info", "warn", "error". It reflects the level installed by
 // the most recent Init call; prior to Init it returns "info" (the slog
 // default).
 func CurrentLevelString() string {
+	lvl := currentLevel.Level()
 	switch {
-	case currentLevel <= slog.LevelDebug:
+	case lvl <= slog.LevelDebug:
 		return "debug"
-	case currentLevel <= slog.LevelInfo:
+	case lvl <= slog.LevelInfo:
 		return "info"
-	case currentLevel <= slog.LevelWarn:
+	case lvl <= slog.LevelWarn:
 		return "warn"
 	default:
 		return "error"
@@ -114,7 +120,7 @@ func Init(cfg Config) (*slog.Logger, io.Closer, error) {
 
 	logger := slog.New(base)
 	slog.SetDefault(logger)
-	currentLevel = cfg.Level
+	currentLevel.Set(cfg.Level)
 
 	return logger, noopCloser{}, nil
 }

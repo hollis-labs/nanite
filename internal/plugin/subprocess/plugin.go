@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
@@ -13,6 +14,29 @@ import (
 	"github.com/hollis-labs/nanite/internal/version"
 	"github.com/hollis-labs/go-plugin"
 )
+
+// safePluginIDRE mirrors the manifest schema (internal/plugin/schemas/
+// plugin.schema.v1.json) so buildInitParams cannot be coerced into
+// assembling a DataDir/CacheDir outside the user's brand directory when
+// the caller passes an attacker-controlled id (e.g. a malicious
+// plugin.yaml with id: "../../etc"). The regex is intentionally a
+// strict subset — any id rejected here should also be rejected at
+// install time by the manifest validator.
+var safePluginIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
+
+// validatePluginID returns an error if id does not match the safe
+// plugin-id pattern. Empty ids are allowed so buildInitParams retains
+// its "no per-plugin dirs" fallback; callers that require an id must
+// check separately.
+func validatePluginID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if !safePluginIDRE.MatchString(id) {
+		return fmt.Errorf("invalid plugin id %q: must match %s", id, safePluginIDRE)
+	}
+	return nil
+}
 
 
 // SubprocessPlugin implements plugin.Plugin by proxying all operations over
@@ -178,8 +202,11 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	// applyManifestRegistrations; the plugin no longer returns them on Load.
 	// The only runtime payload on LoadResult is SkippedRegistrations, which
 	// the host propagates up via GetSkippedRegistrations so the parent loader
-	// can emit informational logs and (best-effort) remove yaml-applied
-	// entries the plugin has declined.
+	// can emit informational logs. Today the parent's Load() only LOGS the
+	// declined entries — it does NOT remove the yaml-applied host
+	// registration for each skipped item. True removal requires the
+	// per-category unregister primitives and is tracked under
+	// BLG-20260413-008 ("subprocess skipped-registration unregister").
 
 	if len(loadResult.SkippedRegistrations) > 0 {
 		logger := host.Logger()
@@ -209,6 +236,9 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 // canonical id from plugin.yaml; when empty, per-plugin DataDir and
 // CacheDir are left unset (v0.1.1-style behavior).
 func buildInitParams(pluginDir, pluginID string, config map[string]string) (*InitParams, error) {
+	if err := validatePluginID(pluginID); err != nil {
+		return nil, err
+	}
 	ip := &InitParams{
 		PluginDir: pluginDir,
 		Config:    config,

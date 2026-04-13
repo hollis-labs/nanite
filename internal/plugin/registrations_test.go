@@ -1,11 +1,19 @@
 package plugin
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	goplugin "github.com/hollis-labs/go-plugin"
+
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
 
 // fakePlugin is a minimal plugin.Plugin used for registration tests.
@@ -211,6 +219,158 @@ func TestLoadRegisteredBuiltins_AppliesManifest(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected keybinding from manifest, got %+v", kbs)
+	}
+}
+
+// TestNewSubprocessHTTPHandler verifies the B.10 http_routes proxy:
+//   - bodies are capped (MaxBytesReader → 413 on overflow)
+//   - sensitive headers (Authorization, Cookie, ...) are stripped
+//   - multi-value headers are flattened with ", "
+//   - canned HTTPResponse headers/status/body are written back
+//
+// Uses in-process pipes and a tiny JSON-RPC responder to stand in for the
+// subprocess — no real plugin binary is spawned.
+func TestNewSubprocessHTTPHandler(t *testing.T) {
+	// Set up pipes for a subprocess.Transport pair.
+	hostToPluginR, hostToPluginW := io.Pipe()
+	pluginToHostR, pluginToHostW := io.Pipe()
+	t.Cleanup(func() {
+		hostToPluginW.Close()
+		pluginToHostW.Close()
+	})
+
+	// Capture what the "plugin" sees so we can assert against it after the
+	// handler returns.
+	var gotReq subprocess.HTTPRequest
+	gotReqCh := make(chan struct{}, 1)
+
+	// Minimal JSON-RPC responder — reads one request from hostToPluginR,
+	// writes a canned HTTPResponse back to pluginToHostW.
+	go func() {
+		br := make([]byte, 0, 8192)
+		buf := make([]byte, 4096)
+		for {
+			n, err := hostToPluginR.Read(buf)
+			if n > 0 {
+				br = append(br, buf[:n]...)
+				if i := bytes.IndexByte(br, '\n'); i >= 0 {
+					line := br[:i]
+					var req struct {
+						ID     int64           `json:"id"`
+						Method string          `json:"method"`
+						Params json.RawMessage `json:"params"`
+					}
+					_ = json.Unmarshal(line, &req)
+					_ = json.Unmarshal(req.Params, &gotReq)
+					gotReqCh <- struct{}{}
+					resp := map[string]any{
+						"jsonrpc": "2.0",
+						"id":      req.ID,
+						"result": subprocess.HTTPResponse{
+							Status:  201,
+							Headers: map[string]string{"Content-Type": "application/json", "X-Plugin": "ok"},
+							Body:    []byte(`{"ok":true}`),
+						},
+					}
+					out, _ := json.Marshal(resp)
+					out = append(out, '\n')
+					pluginToHostW.Write(out)
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	transport := subprocess.NewTransport(pluginToHostR, hostToPluginW)
+	handler := newSubprocessHTTPHandler(transport, "my-handler")
+
+	// --- Case 1: happy path — sensitive headers stripped, multi-values flattened.
+	body := []byte(`{"hello":"world"}`)
+	r := httptest.NewRequest(http.MethodPost, "/api/plugin/foo?x=1", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer secret-token")
+	r.Header.Set("Cookie", "session=abc")
+	r.Header.Set("X-Api-Key", "key")
+	r.Header.Add("X-Multi", "a")
+	r.Header.Add("X-Multi", "b")
+	// Respect the request context so the transport read doesn't stall forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, r)
+
+	select {
+	case <-gotReqCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("plugin never received the request")
+	}
+
+	if rec.Code != 201 {
+		t.Errorf("status = %d, want 201", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+	if got := rec.Header().Get("X-Plugin"); got != "ok" {
+		t.Errorf("X-Plugin = %q, want ok", got)
+	}
+	if got := rec.Body.String(); got != `{"ok":true}` {
+		t.Errorf("body = %q, want {\"ok\":true}", got)
+	}
+
+	// Params forwarded to the plugin: sensitive headers must be absent,
+	// multi-value header joined, and the body echoed through.
+	if gotReq.Method != http.MethodPost {
+		t.Errorf("forwarded method = %q", gotReq.Method)
+	}
+	if gotReq.Path != "/api/plugin/foo" {
+		t.Errorf("forwarded path = %q", gotReq.Path)
+	}
+	if gotReq.Query["x"] != "1" {
+		t.Errorf("forwarded query = %v", gotReq.Query)
+	}
+	for _, banned := range []string{"Authorization", "Cookie", "X-Api-Key"} {
+		if _, ok := gotReq.Headers[banned]; ok {
+			t.Errorf("sensitive header %q was forwarded: %q", banned, gotReq.Headers[banned])
+		}
+	}
+	if gotReq.Headers["X-Multi"] != "a, b" {
+		t.Errorf("multi-value header not joined: %q", gotReq.Headers["X-Multi"])
+	}
+	if !bytes.Equal(gotReq.Body, body) {
+		t.Errorf("forwarded body = %q, want %q", gotReq.Body, body)
+	}
+}
+
+// TestNewSubprocessHTTPHandler_BodyTooLarge verifies the MaxBytesReader cap
+// translates an oversized upload into a 413 without calling the plugin.
+func TestNewSubprocessHTTPHandler_BodyTooLarge(t *testing.T) {
+	// Build a transport that will never be called — if it is, the test
+	// fails by timeout on the plugin side. We use closed pipes so any
+	// accidental Call() returns fast.
+	pr1, _ := io.Pipe()
+	_, pw2 := io.Pipe()
+	pr1.Close()
+	pw2.Close()
+	transport := subprocess.NewTransport(pr1, pw2)
+	handler := newSubprocessHTTPHandler(transport, "h")
+
+	// 10 MiB + 1 — one byte over the cap.
+	oversized := bytes.Repeat([]byte("x"), maxPluginHTTPBodyBytes+1)
+	r := httptest.NewRequest(http.MethodPost, "/big", bytes.NewReader(oversized))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "exceeds") {
+		t.Errorf("body = %q, expected 'exceeds' message", rec.Body.String())
 	}
 }
 

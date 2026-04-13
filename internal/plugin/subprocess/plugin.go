@@ -270,6 +270,16 @@ func (sp *SubprocessPlugin) Manifest() *LoadResult {
 	return sp.manifest
 }
 
+// Transport returns the subprocess JSON-RPC transport, or nil if the plugin
+// has not completed Load() yet. Exposed so host wiring (e.g. the MCP
+// registrar in internal/plugin/registrations.go) can build proxy transports
+// that reuse the plugin's existing RPC channel.
+func (sp *SubprocessPlugin) Transport() *Transport {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	return sp.transport
+}
+
 // MakeCommandHandler creates a slash command handler that proxies to the subprocess.
 func (sp *SubprocessPlugin) MakeCommandHandler(name string) func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
 	return func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {

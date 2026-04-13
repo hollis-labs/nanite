@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/go-toolbroker/broker"
 )
@@ -110,6 +111,33 @@ func (m *Manager) AddHTTPServer(name, url string) {
 func (m *Manager) AddStdioServer(name, command string, args []string, env []string) {
 	m.AddServer(name, NewStdioTransport(command, args, env))
 	slog.Info("mcp: server using stdio transport", "name", name, "command", command, "args", strings.Join(args, " "))
+}
+
+// AddPluginServer registers an MCP server backed by a subprocess plugin's
+// existing JSON-RPC transport. The plugin is expected to answer the
+// mcp/list_tools and mcp/call_tool methods defined in plugin-sdk and to
+// dispatch by the server name passed in params.
+//
+// Returns an error if name is empty or already registered, mirroring the
+// validation conventions of the sibling Add*Server helpers.
+func (m *Manager) AddPluginServer(name string, transport *subprocess.Transport) error {
+	if name == "" {
+		return fmt.Errorf("mcp: AddPluginServer: name is required")
+	}
+	if transport == nil {
+		return fmt.Errorf("mcp: AddPluginServer %q: transport is nil", name)
+	}
+
+	m.mu.Lock()
+	if _, exists := m.servers[name]; exists {
+		m.mu.Unlock()
+		return fmt.Errorf("mcp: AddPluginServer %q: server already registered", name)
+	}
+	m.servers[name] = NewPluginMCPTransport(transport, name)
+	m.mu.Unlock()
+
+	slog.Info("mcp: server using plugin transport", "name", name)
+	return nil
 }
 
 // DiscoverTools queries all registered servers for their tools.

@@ -6,16 +6,11 @@
 // Precedence: the NANITE_OTEL_DISABLED=1 environment variable takes
 // precedence over Config.Disabled. Either set disables exporter init.
 //
-// Note on logging: the repo-wide slog handler is not yet installed
-// (see audit 03 — log.Printf is the prevailing pattern). This package
-// uses log.Printf to match the surrounding codebase. The parallel
-// slog-migration session will convert this alongside the rest of the
-// repo.
 package otel
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 
 	feotel "github.com/hollis-labs/go-otel"
@@ -61,11 +56,10 @@ func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error
 		if envDisabled {
 			source = "env"
 		}
-		// env+cfg gate: see internal/otel/otel.go (Init — this block).
-		log.Printf("otel: disabled (source=%s); no-op tracer provider installed", source)
+		slog.Info("otel: disabled, no-op tracer provider installed", "source", source)
 		return noopShutdown, nil
 	}
 
-	log.Printf("otel: enabled; service=%s", cfg.ServiceName)
+	slog.Info("otel: enabled", "service", cfg.ServiceName)
 	return feotel.Init(ctx, feotel.WithServiceName(cfg.ServiceName))
 }

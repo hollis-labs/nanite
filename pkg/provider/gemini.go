@@ -41,7 +41,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -112,13 +112,15 @@ func (g *Gemini) doGeminiRequest(ctx context.Context, method, urlStr string, pay
 		if wait := g.RateTracker.WaitTime(estimatedTokens); wait > 0 {
 			avail, limit := g.RateTracker.Remaining()
 			if estimatedTokens > limit {
-				log.Printf("provider: request ~%d tokens exceeds per-minute rate limit %d, proceeding anyway", estimatedTokens, limit)
+				slog.Warn("provider: request exceeds per-minute rate limit, proceeding anyway",
+					"provider", "gemini", "est_tokens", estimatedTokens, "limit", limit)
 			}
 			if g.OnStatus != nil {
 				g.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
 			}
-			log.Printf("provider: pacing — waiting %s for rate limit budget (est. %d tokens, available %d/%d)",
-				wait.Round(time.Millisecond), estimatedTokens, avail, limit)
+			slog.Info("provider: pacing for rate limit budget",
+				"provider", "gemini", "wait", wait.Round(time.Millisecond),
+				"est_tokens", estimatedTokens, "available", avail, "limit", limit)
 			select {
 			case <-ctx.Done():
 				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
@@ -141,7 +143,7 @@ func (g *Gemini) doGeminiRequest(ctx context.Context, method, urlStr string, pay
 			// Transport-level error — non-retryable here (context/dial).
 			if g.CircuitBreaker != nil && attempt == g.Retry.MaxRetries {
 				if tripped := g.CircuitBreaker.RecordFailure(); tripped {
-					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					slog.Warn("provider: circuit breaker tripped after consecutive failures", "provider", "gemini")
 					if g.OnCircuitOpen != nil {
 						g.OnCircuitOpen()
 					}
@@ -157,7 +159,8 @@ func (g *Gemini) doGeminiRequest(ctx context.Context, method, urlStr string, pay
 			if g.RateTracker != nil && estimatedTokens > 0 {
 				g.RateTracker.Record(estimatedTokens)
 				avail, limit := g.RateTracker.Remaining()
-				log.Printf("provider: recorded %d input tokens (rate budget: %d/%d)", estimatedTokens, avail, limit)
+				slog.Debug("provider: recorded input tokens",
+					"provider", "gemini", "tokens", estimatedTokens, "available", avail, "limit", limit)
 			}
 			if g.OnStatus != nil && attempt > 0 {
 				g.OnStatus(fmt.Sprintf("Recovered after %d retries.", attempt))
@@ -179,7 +182,7 @@ func (g *Gemini) doGeminiRequest(ctx context.Context, method, urlStr string, pay
 		if !RetryableStatusCode(apiErr.StatusCode) || attempt == g.Retry.MaxRetries {
 			if g.CircuitBreaker != nil && attempt == g.Retry.MaxRetries {
 				if tripped := g.CircuitBreaker.RecordFailure(); tripped {
-					log.Printf("provider: circuit breaker tripped after consecutive failures")
+					slog.Warn("provider: circuit breaker tripped after consecutive failures", "provider", "gemini")
 					if g.OnCircuitOpen != nil {
 						g.OnCircuitOpen()
 					}
@@ -192,8 +195,9 @@ func (g *Gemini) doGeminiRequest(ctx context.Context, method, urlStr string, pay
 		}
 
 		delay := g.Retry.BackoffDelay(attempt, retryAfter)
-		log.Printf("provider: retryable error %d (attempt %d/%d), retrying in %s",
-			apiErr.StatusCode, attempt+1, g.Retry.MaxRetries, delay)
+		slog.Info("provider: retryable error, retrying",
+			"provider", "gemini", "status", apiErr.StatusCode,
+			"attempt", attempt+1, "max", g.Retry.MaxRetries, "delay", delay)
 		if g.OnStatus != nil {
 			g.OnStatus(fmt.Sprintf("Rate limited, retrying in %s... (attempt %d/%d)",
 				delay.Round(time.Millisecond), attempt+1, g.Retry.MaxRetries))

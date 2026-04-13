@@ -189,7 +189,7 @@ func (s *chatServiceImpl) preCheckTools(
 				// execution).
 				ls.recordToolCall(tu.Name, false)
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — unknown permission decision %q", tu.Name, permResult.Decision)
-				log.Printf("chat-service: tool %s denied (unknown decision %q)", tu.Name, permResult.Decision)
+				slog.Warn("chat-service: tool denied, unknown permission decision", "tool", tu.Name, "decision", permResult.Decision)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
 				block := provider.ContentBlock{

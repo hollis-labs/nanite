@@ -170,6 +170,13 @@ func (h *Host) BumpRegistryVersion() {
 	h.mu.Unlock()
 }
 
+// bumpRegistryVersionLocked increments the registry version counter. Callers
+// MUST already hold h.mu (write). Used by internal load/unload paths that
+// mutate registry-visible state inside the host lock.
+func (h *Host) bumpRegistryVersionLocked() {
+	h.registryVersion++
+}
+
 // applyManifestRegistrations iterates manifest.Registers.* and performs the
 // declarative host registrations on behalf of the plugin. This is the
 // yaml-authoritative path per plan §B.4 — builtins and subprocess plugins

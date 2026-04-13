@@ -412,8 +412,10 @@ func (h *Host) EmitPluginDisabled(pluginID string) {
 
 // EmitPluginLoadFailed emits a plugin.load_failed event when the loader
 // fails to bring a plugin online (host.LoadPlugin error, manifest apply error,
-// etc.). Does not bump registry version — a failed load doesn't change what
-// /api/plugins/registry exposes.
+// etc.). Caller is responsible for deciding whether to bump the registry
+// version — failures before any registry-visible mutation don't need it;
+// failures after must have already unloaded the plugin (UnloadPlugin bumps
+// on its own).
 func (h *Host) EmitPluginLoadFailed(pluginID, reason string) {
 	event := NewEvent(EventPluginLoadFailed, brand.ID, EventData{})
 	event.Data["plugin_id"] = pluginID

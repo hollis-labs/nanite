@@ -1275,7 +1275,7 @@ func (h *Host) UnloadPlugin(id string) error {
 	// B.7 registry side-map sweep + version bump so GET /api/plugins/registry
 	// cache invalidates as soon as the plugin's manifest goes away.
 	delete(h.manifests, id)
-	h.registryVersion++
+	h.bumpRegistryVersionLocked()
 
 	// B.6 full hot-unload sweep — 16 of 16 categories. Categories landed in
 	// B.6a retained; B.6b added commands, task backends, config schemas,
@@ -1530,9 +1530,8 @@ func (h *Host) UnloadPlugin(id string) error {
 
 	h.logger.Info("unloaded plugin", "id", id)
 
-	// Emit plugin.uninstalled event (fire-and-forget). Bump registry version
-	// so /api/plugins/registry invalidates.
-	h.BumpRegistryVersion()
+	// Emit plugin.uninstalled event (fire-and-forget). The registry version
+	// was already bumped under h.mu alongside the manifests delete above.
 	safego.Go(h.ctx, "plugin.host.emit.plugin-uninstalled", func() {
 		h.EmitPluginUninstalled(id)
 	})

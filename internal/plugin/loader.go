@@ -119,7 +119,7 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 			if err != nil {
 				wrapped := fmt.Errorf("create subprocess plugin %s: %w", pluginID, err)
 				errs = append(errs, wrapped)
-				host.EmitPluginLoadFailed(pluginID, err.Error())
+				host.EmitPluginLoadFailed(pluginID, wrapped.Error())
 				continue
 			}
 		} else {
@@ -139,7 +139,18 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 		// builtin and subprocess plugins flow through the same wiring.
 		if err := applyManifestRegistrations(host, dp.Manifest, p); err != nil {
 			errs = append(errs, fmt.Errorf("apply manifest for %s: %w", pluginID, err))
+			// The manifest was already recorded and some registrations may have
+			// partially applied. Best-effort UnloadPlugin to clean up the manifest
+			// side-map + any registered extensions so we don't leave the plugin
+			// "live" with a load_failed event. UnloadPlugin emits
+			// plugin.uninstalled internally, which is the correct signal that
+			// the plugin is no longer present.
+			if unloadErr := host.UnloadPlugin(pluginID); unloadErr != nil {
+				host.logger.Warn("loader: rollback unload failed",
+					"plugin", pluginID, "error", unloadErr)
+			}
 			host.EmitPluginLoadFailed(pluginID, err.Error())
+			continue
 		}
 
 		loaded = append(loaded, p)
@@ -236,7 +247,15 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 			if manifest := mp.Manifest(); manifest != nil {
 				if err := applyManifestRegistrations(host, manifest, p); err != nil {
 					errs = append(errs, fmt.Errorf("apply manifest for builtin %s: %w", id, err))
+					// Best-effort rollback: remove manifest side-map + partial
+					// registrations so load_failed accurately reflects the
+					// absence of this plugin (see LoadDiscovered for rationale).
+					if unloadErr := host.UnloadPlugin(id); unloadErr != nil {
+						host.logger.Warn("loader: rollback unload failed (builtin)",
+							"plugin", id, "error", unloadErr)
+					}
 					host.EmitPluginLoadFailed(id, err.Error())
+					continue
 				}
 			}
 		}

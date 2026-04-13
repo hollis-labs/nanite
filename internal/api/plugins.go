@@ -543,19 +543,24 @@ func (pms *pluginManagerState) handleDisable(w http.ResponseWriter, r *http.Requ
 	// Clean up agent profile and unload from running host so changes are immediate.
 	manifestPath := filepath.Join(pms.pluginsDir, req.Name, "plugin.yaml")
 	pms.runPluginUninstallCleanup(manifestPath)
-	pms.unloadPluginFromHost(manifestPath)
+	unloaded := pms.unloadPluginFromHost(manifestPath)
 
 	if err := naniteplugin.DisablePlugin(pms.pluginsDir, req.Name); err != nil {
 		pms.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// B.8: emit plugin.disabled for lifecycle SSE subscribers and invalidate
-	// the B.7 registry cache. The unload above already bumped the version, so
-	// this is a second bump — cheap and idempotent from cache's perspective.
-	if pms.pluginHost != nil {
-		pms.pluginHost.BumpRegistryVersion()
+	// B.8: only emit plugin.disabled when runtime state actually changed. The
+	// file rename succeeded (DisablePlugin above), so disk state is "disabled"
+	// either way — but if unloadPluginFromHost was a no-op or failed, the
+	// runtime wasn't cleaned and subscribers would receive a misleading event.
+	// UnloadPlugin already bumps the registry version on success, so no second
+	// bump is needed here.
+	if unloaded && pms.pluginHost != nil {
 		pms.pluginHost.EmitPluginDisabled(req.Name)
+	} else if !unloaded {
+		slog.Warn("plugin-api: disable moved disk state but runtime unload did not occur",
+			"name", req.Name)
 	}
 
 	pms.jsonResp(w, http.StatusOK, map[string]string{
@@ -579,15 +584,19 @@ func (pms *pluginManagerState) handleEnable(w http.ResponseWriter, r *http.Reque
 
 	// Hot-load the plugin into the running host so agent profile appears immediately.
 	target := filepath.Join(pms.pluginsDir, req.Name)
-	pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
+	loaded := pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
 
-	// B.8: emit plugin.enabled and bump registry version. LoadPlugin inside
-	// runPluginLoadIntoHost already bumped it on success; we bump again to
-	// guarantee the cache key moves even if the load path was a no-op (e.g.
-	// plugin had no binary and runPluginLoadIntoHost returned early).
+	// B.8: only emit plugin.enabled when the plugin actually loaded into the
+	// running host. LoadPlugin already bumped the registry version on success.
+	// On failure/no-op, emit plugin.load_failed so subscribers see the
+	// disk-state/runtime-state mismatch — the file was renamed to enabled
+	// but the runtime didn't come up.
 	if pms.pluginHost != nil {
-		pms.pluginHost.BumpRegistryVersion()
-		pms.pluginHost.EmitPluginEnabled(req.Name)
+		if loaded {
+			pms.pluginHost.EmitPluginEnabled(req.Name)
+		} else {
+			pms.pluginHost.EmitPluginLoadFailed(req.Name, "hot-load into host failed or was a no-op")
+		}
 	}
 
 	pms.jsonResp(w, http.StatusOK, map[string]string{
@@ -624,38 +633,49 @@ func (pms *pluginManagerState) runPluginUninstallCleanup(manifestPath string) {
 	}
 }
 
-// unloadPluginFromHost removes a plugin from the running host's registry
-// so it can be re-loaded later (e.g. after disable → enable).
-func (pms *pluginManagerState) unloadPluginFromHost(manifestPath string) {
+// unloadPluginFromHost removes a plugin from the running host's registry so
+// it can be re-loaded later (e.g. after disable → enable). Returns true only
+// when UnloadPlugin actually removed the plugin; returns false on no-op
+// (nil host, manifest parse error) or failure (UnloadPlugin returned error).
+// Callers use the return value to decide whether lifecycle events and
+// registry-version bumps should fire, since those signal runtime state
+// changes and must not fire when runtime state didn't actually change.
+func (pms *pluginManagerState) unloadPluginFromHost(manifestPath string) bool {
 	if pms.pluginHost == nil {
-		return
+		return false
 	}
 	manifest, err := naniteplugin.ParseManifest(manifestPath)
 	if err != nil {
-		return
+		return false
 	}
 	if err := pms.pluginHost.UnloadPlugin(manifest.Name); err != nil {
 		slog.Warn("plugin-api: unload failed", "name", manifest.Name, "err", err)
+		return false
 	}
+	return true
 }
 
 // runPluginLoadIntoHost loads a plugin into the running host so its
-// agent profiles and MCP tools become available immediately.
-// Supports both builtin (compiled-in) and subprocess plugins.
-func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir string) {
+// agent profiles and MCP tools become available immediately. Supports both
+// builtin (compiled-in) and subprocess plugins. Returns true only when the
+// plugin was actually loaded into the host; returns false on no-op (nil
+// host, parse/config error, missing entrypoint, no constructor) or failure
+// (LoadPlugin returned error). Callers use this to decide whether to emit
+// plugin.enabled / bump registry (true) or plugin.load_failed (false).
+func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir string) bool {
 	if pms.pluginHost == nil {
-		return
+		return false
 	}
 	manifest, err := naniteplugin.ParseManifest(manifestPath)
 	if err != nil {
-		return
+		return false
 	}
 
 	// Build config.
 	cfg, err := naniteplugin.NewPluginConfig(manifest.Name, pluginDir)
 	if err != nil {
 		slog.Warn("plugin-api: config failed", "name", manifest.Name, "err", err)
-		return
+		return false
 	}
 	pms.pluginHost.SetPluginConfig(manifest.Name, cfg)
 
@@ -665,7 +685,7 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 		// Subprocess plugin: create a SubprocessPlugin bridge.
 		if manifest.Entrypoint == "" {
 			slog.Warn("plugin-api: subprocess plugin has no entrypoint", "name", manifest.Name)
-			return
+			return false
 		}
 		command := manifest.Entrypoint
 		parts := strings.Fields(command)
@@ -700,16 +720,17 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 		constructor, ok := naniteplugin.LookupConstructor(manifest.Name)
 		if !ok {
 			slog.Warn("plugin-api: no constructor (not compiled in)", "name", manifest.Name)
-			return
+			return false
 		}
 		p = constructor()
 	}
 
 	if err := pms.pluginHost.LoadPlugin(p); err != nil {
 		slog.Warn("plugin-api: hot-load failed", "name", manifest.Name, "err", err)
-	} else {
-		slog.Info("plugin-api: hot-loaded plugin", "name", manifest.Name)
+		return false
 	}
+	slog.Info("plugin-api: hot-loaded plugin", "name", manifest.Name)
+	return true
 }
 
 // --- File and archive helpers ---

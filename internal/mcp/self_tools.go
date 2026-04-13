@@ -168,28 +168,6 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_run_report",
-			Description: "Run a background report and notify the user when it's done. The report generates asynchronously; the user will see a notification card when complete and can click to view the full output.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"report_type": map[string]any{
-						"type":        "string",
-						"description": "Type of report: executive-summary, sprint-progress, portfolio-health",
-					},
-					"description": map[string]any{
-						"type":        "string",
-						"description": "Brief description shown while report generates",
-					},
-					"content": map[string]any{
-						"type":        "string",
-						"description": "Pre-baked report content (HTML or markdown). If provided, used directly instead of calling Hadron. Enables demo mode.",
-					},
-				},
-				"required": []string{"report_type"},
-			},
-		},
-		{
 			Name:        "nanite_show_document",
 			Description: "Display a document in chat as a rich scrollable viewer. Use for executive summaries, reports, meeting notes, or any long-form content the user should read.",
 			InputSchema: map[string]any{
@@ -216,20 +194,6 @@ func selfToolDefinitions() []Tool {
 					"actions": map[string]any{"type": "string", "description": "JSON array of action objects: [{label, action, id?}]. Optional."},
 				},
 				"required": []string{"title", "metrics"},
-			},
-		},
-		{
-			Name:        "nanite_show_task_disposition",
-			Description: "Display an interactive task triage card in chat. Users can set a disposition (Approve, Archive, Pause, Done, Skip) for each task via dropdowns. On submit, a structured message is sent back for you to process.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"title":       map[string]any{"type": "string", "description": "Card title (e.g. 'Sprint Triage — SPR-DEMO')"},
-					"description": map[string]any{"type": "string", "description": "Description text shown above tasks. Optional."},
-					"tasks":       map[string]any{"type": "string", "description": "JSON array of task objects: [{id, title, status, priority}]"},
-					"actions":     map[string]any{"type": "string", "description": "JSON array of action strings. Default: [\"Approve\", \"Archive\", \"Pause\", \"Done\", \"Skip\"]"},
-				},
-				"required": []string{"title", "tasks"},
 			},
 		},
 		// Builder tools — interactive step-by-step creation flows

@@ -42,10 +42,6 @@ var knownTypes = []string{
 	"ticket-form",
 	"ticket-confirmation",
 	"resolution-capture",
-	// Plugin: fragments-engine
-	"task-disposition",
-	"task-complete-notification",
-	"sprint-planning-review",
 }
 
 // examplePayloads provides a valid payload for each envelope type.
@@ -223,38 +219,6 @@ var examplePayloads = map[string]string{
 		"ticket_id": "TKT-2026-0042",
 		"issue_summary": "VPN drops repeatedly during video calls",
 		"categories": ["networking", "hardware", "software", "access"]
-	}`,
-	"task-disposition": `{
-		"title": "Sprint 12 — Task Review",
-		"description": "Review and approve these tasks.",
-		"tasks": [
-			{"id": "T-101", "title": "Implement auth", "status": "todo", "priority": "P1"},
-			{"id": "T-102", "title": "Add logging", "status": "doing", "priority": "P2"}
-		],
-		"actions": ["Approve", "Done", "Request Changes", "Defer", "Skip"]
-	}`,
-	"task-complete-notification": `{
-		"title": "Pipeline run completed",
-		"run_id": "run-abc-123",
-		"blueprint_id": "bp-build-project",
-		"status": "done",
-		"completed_at": "2026-04-05T10:30:00Z",
-		"has_output": true,
-		"output_preview": "Build succeeded: 42 tests passed.",
-		"prompt_text": "View the full report?"
-	}`,
-	"sprint-planning-review": `{
-		"title": "Sprint 13 Planning",
-		"description": "Assign tasks to sprints.",
-		"sprints": [
-			{"id": "sprint-13", "name": "Sprint 13"},
-			{"id": "sprint-14", "name": "Sprint 14"}
-		],
-		"tasks": [
-			{"id": "T-201", "title": "Build API", "suggested_sprint": "sprint-13", "priority": "P1"},
-			{"id": "T-202", "title": "Write docs", "summary": "Document the API endpoints.", "suggested_sprint": "sprint-14", "priority": "P3", "status": "todo"}
-		],
-		"page_size": 10
 	}`,
 }
 

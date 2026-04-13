@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/go-plugin"
@@ -232,6 +233,78 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 	// Clean up.
 	hostToPluginW.Close()
 	pluginToHostW.Close()
+}
+
+// TestCheckProtocolVersion verifies the handshake protocol-version gate
+// rejects any plugin whose reported version differs from the host's.
+func TestCheckProtocolVersion(t *testing.T) {
+	// Matching version is accepted.
+	if err := checkProtocolVersion(ProtocolVersion); err != nil {
+		t.Errorf("expected nil for matching protocol version, got %v", err)
+	}
+
+	// Mismatched versions are rejected.
+	wrongVersions := []int{0, ProtocolVersion + 1, 999}
+	for _, v := range wrongVersions {
+		err := checkProtocolVersion(v)
+		if err == nil {
+			t.Errorf("expected error for protocol version %d, got nil", v)
+			continue
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "protocol version mismatch") {
+			t.Errorf("expected 'protocol version mismatch' in error, got %q", msg)
+		}
+	}
+}
+
+// TestSubprocessPlugin_InitRejectsWrongProtocol spawns a mock plugin that
+// returns a deliberately-wrong protocol version from plugin/init and asserts
+// that the handshake gate rejects it. This covers the regression where Load
+// read initResult.Protocol without enforcing it against ProtocolVersion.
+func TestSubprocessPlugin_InitRejectsWrongProtocol(t *testing.T) {
+	hostToPluginR, hostToPluginW := io.Pipe()
+	pluginToHostR, pluginToHostW := io.Pipe()
+
+	handlers := map[string]func(json.RawMessage) (any, *RPCError){
+		MethodInit: func(params json.RawMessage) (any, *RPCError) {
+			// Deliberately wrong: one higher than the host's.
+			return &InitResult{
+				ID:          "test-plugin",
+				Name:        "Test Plugin",
+				Version:     "1.0.0",
+				Description: "Reports mismatched protocol version",
+				Protocol:    ProtocolVersion + 1,
+			}, nil
+		},
+	}
+
+	go mockPlugin(hostToPluginR, pluginToHostW, handlers)
+	defer func() {
+		hostToPluginW.Close()
+		pluginToHostW.Close()
+	}()
+
+	transport := NewTransport(pluginToHostR, hostToPluginW)
+	ctx := context.Background()
+
+	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, &InitParams{
+		PluginDir: "/tmp/test-plugin",
+		Config:    map[string]string{},
+		HostInfo:  HostInfo{Version: "test", Protocol: ProtocolVersion},
+	})
+	if err != nil {
+		t.Fatalf("init RPC failed: %v", err)
+	}
+
+	// The gate the fix introduces must reject this.
+	checkErr := checkProtocolVersion(initResult.Protocol)
+	if checkErr == nil {
+		t.Fatalf("expected protocol-version mismatch error, got nil (got=%d want=%d)", initResult.Protocol, ProtocolVersion)
+	}
+	if !strings.Contains(checkErr.Error(), "protocol version mismatch") {
+		t.Errorf("expected error message to mention 'protocol version mismatch', got %q", checkErr.Error())
+	}
 }
 
 // TestMapRPCError verifies JSON-RPC error codes map to plugin.PluginError types.

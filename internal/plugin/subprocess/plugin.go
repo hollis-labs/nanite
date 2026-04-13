@@ -130,6 +130,14 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 		return fmt.Errorf("init handshake: %w", err)
 	}
 
+	// Enforce protocol version handshake. If the plugin reports a protocol
+	// version different from the host's, fail fast rather than speak a
+	// mismatched dialect and corrupt later RPC calls.
+	if err := checkProtocolVersion(initResult.Protocol); err != nil {
+		sp.mgr.Stop()
+		return err
+	}
+
 	sp.mu.Lock()
 	sp.id = initResult.ID
 	sp.name = initResult.Name
@@ -162,6 +170,16 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	sp.status.LastError = ""
 	sp.mu.Unlock()
 
+	return nil
+}
+
+// checkProtocolVersion returns an error if the plugin's reported protocol
+// version does not match the host's. Fail fast to avoid speaking a mismatched
+// dialect that would corrupt later RPC calls.
+func checkProtocolVersion(got int) error {
+	if got != ProtocolVersion {
+		return fmt.Errorf("plugin protocol version mismatch: got %d, want %d", got, ProtocolVersion)
+	}
 	return nil
 }
 

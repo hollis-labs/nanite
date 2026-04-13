@@ -214,13 +214,10 @@ const claudeMDBody = `## Envelope Format
 Emit structured envelopes as fenced code blocks with the ` + "`nanite-envelope`" + ` language tag.
 ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
 
-Registered types: task-disposition, giphy-modal, document-viewer, report-card,
-task-complete-notification, sprint-planning-review, kb-result,
-ticket-confirmation, ticket-form, resolution-capture, error-report
-
-Unregistered types are silently dropped by the UI — no error, no warning.
-
-For full schema, field reference, and examples per type, read ` + "`.sandbox/envelope-schema.md`" + `.
+For the current registered envelope types and per-type schemas, consult
+` + "`config/envelopes.yaml`" + ` and ` + "`internal/envelope/schemas/*.schema.json`" + ` —
+those are the runtime source of truth. Unregistered types are silently dropped
+by the UI — no error, no warning.
 
 ## Rules
 1. ALWAYS use envelopes for data collection — never ask users to type structured data
@@ -311,12 +308,9 @@ causes the envelope to be silently dropped — no error, no warning.
 
 | Type | Purpose |
 |------|---------|
-| task-disposition | Task status change proposal |
 | giphy-modal | Giphy search/selection |
 | document-viewer | Document display card |
 | report-card | Summary/report display |
-| task-complete-notification | Task completion notice |
-| sprint-planning-review | Sprint plan review card |
 | kb-result | Knowledge base search result |
 | ticket-confirmation | Support ticket confirmation |
 | ticket-form | Support ticket input form |

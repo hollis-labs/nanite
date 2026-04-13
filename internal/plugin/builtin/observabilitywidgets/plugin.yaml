@@ -1,0 +1,14 @@
+schema_version: 1
+name: observability-widgets
+id: observability-widgets
+version: 1.0.0
+description: LLM execution metrics, duration, cost, and error tracking widget
+author: Nanite
+license: Apache-2.0
+protocol: 1
+runtime: builtin
+registers:
+  components:
+    - name: observability
+      type: widget
+      description: Recent LLM execution metrics (duration, cost, errors)

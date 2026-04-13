@@ -1,0 +1,20 @@
+schema_version: 1
+name: debug-widgets
+id: debug-widgets
+version: 1.0.0
+description: Broker decisions, slot inspector, and turn snapshot widgets (developer_mode only)
+author: Nanite
+license: Apache-2.0
+protocol: 1
+runtime: builtin
+registers:
+  components:
+    - name: broker-decisions
+      type: widget
+      description: Tool broker decision log with layer, intent, and selected tools
+    - name: slot-inspector
+      type: widget
+      description: Context window slot allocation and token budget breakdown
+    - name: turn-snapshots
+      type: widget
+      description: Per-turn execution snapshots with tool call timings

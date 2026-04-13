@@ -1,0 +1,20 @@
+schema_version: 1
+name: context-widgets
+id: context-widgets
+version: 1.0.0
+description: Session info, context budget, and token usage widgets
+author: Nanite
+license: Apache-2.0
+protocol: 1
+runtime: builtin
+registers:
+  components:
+    - name: session-info
+      type: widget
+      description: Active session metadata (title, short code, message count, timestamps)
+    - name: context-budget
+      type: widget
+      description: Context window usage bars, token breakdown, and context inspector
+    - name: token-usage
+      type: widget
+      description: Session and cumulative token costs with per-direction breakdown

@@ -1,0 +1,9 @@
+schema_version: 1
+name: adapter-claude
+id: adapter-claude
+version: 0.1.0
+description: Discovers .claude/agents/*.md and populates Claude Code sandboxes
+author: Nanite
+license: Apache-2.0
+protocol: 1
+runtime: builtin

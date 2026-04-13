@@ -42,8 +42,9 @@ func isEnvelopeValidatorDevMode() bool {
 // file. The schema is used by ValidatePluginEnvelope / FilterPluginEnvelopes
 // at emission time (B.11).
 //
-// Passing schemaBytes == nil is a no-op; register only succeeds when the raw
-// bytes parse as JSON and compile successfully.
+// Empty schemaBytes returns an error — an envelope declared with a schema
+// path but no loadable content is a plugin bug the host should not paper
+// over. Callers that want "no schema" should simply not call this.
 func (h *Host) RegisterPluginEnvelopeSchema(pluginID, envType string, schemaBytes []byte) error {
 	if pluginID == "" || envType == "" {
 		return fmt.Errorf("plugin id and envelope type are required")

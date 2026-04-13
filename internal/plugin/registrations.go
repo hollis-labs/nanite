@@ -260,9 +260,11 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 			return fmt.Errorf("envelope %q: %w", e.Type, err)
 		}
 		if e.Schema != "" && pluginDir != "" {
-			schemaFile := e.Schema
-			if !filepath.IsAbs(schemaFile) {
-				schemaFile = filepath.Join(pluginDir, e.Schema)
+			schemaFile, err := resolvePluginAssetPath(pluginDir, e.Schema)
+			if err != nil {
+				host.logger.Warn("envelope schema path rejected",
+					"plugin", pluginID, "type", e.Type, "schema", e.Schema, "error", err.Error())
+				continue
 			}
 			if err := host.registerPluginEnvelopeSchemaFromFile(pluginID, e.Type, schemaFile); err != nil {
 				// Log and continue — install-time validation already catches
@@ -565,6 +567,37 @@ func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName strin
 			_, _ = w.Write(resp.Body)
 		}
 	})
+}
+
+// resolvePluginAssetPath resolves a manifest-declared plugin asset (e.g. an
+// envelope JSON Schema) to an absolute filesystem path confined to pluginDir.
+// Absolute paths and relative paths that escape pluginDir via ".." segments
+// are rejected so a hostile plugin.yaml cannot coerce the host into reading
+// arbitrary files at load time. Install-time validation catches the same
+// class of issue, but this is defense-in-depth — dev-mode installs only warn
+// on suspicious schema paths, and a compiled-in builtin path with a crafted
+// manifest would otherwise bypass that check.
+func resolvePluginAssetPath(pluginDir, rel string) (string, error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("absolute asset path %q not permitted", rel)
+	}
+	cleaned := filepath.Clean(rel)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "..\\") {
+		return "", fmt.Errorf("asset path %q escapes plugin directory", rel)
+	}
+	absPluginDir, err := filepath.Abs(pluginDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve plugin dir: %w", err)
+	}
+	joined := filepath.Join(absPluginDir, cleaned)
+	relToPlugin, err := filepath.Rel(absPluginDir, joined)
+	if err != nil {
+		return "", fmt.Errorf("relate asset to plugin dir: %w", err)
+	}
+	if relToPlugin == ".." || strings.HasPrefix(relToPlugin, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("asset path %q escapes plugin directory", rel)
+	}
+	return joined, nil
 }
 
 func firstNonEmpty(vals ...string) string {

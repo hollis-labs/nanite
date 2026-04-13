@@ -71,6 +71,16 @@ const dynamicWidgets = new Map<string, DynamicRegistryEntry>()
 const dynamicSlotComponents = new Map<string, DynamicRegistryEntry>()
 
 /**
+ * Maps envelope type → owning plugin id, populated unconditionally from the
+ * registry response. Survives load failures so the UI can resolve a
+ * `plugin_id` for an envelope whose component never loaded.
+ */
+const envelopeTypeToPluginId = new Map<string, string>()
+
+/** Last load error recorded per plugin id. Cleared on successful (re)load. */
+const loadErrors = new Map<string, string>()
+
+/**
  * Tracks what each loaded plugin bundle has registered so `unloadPlugin` can
  * remove exactly those entries without scanning the whole registry, and so
  * `syncPluginRegistry` can skip plugins whose bundle URL is unchanged.
@@ -123,6 +133,21 @@ export function getDynamicSlotComponent(name: string): DynamicRegistryEntry | un
   return dynamicSlotComponents.get(name)
 }
 
+/** Plugin id declared as the owner of an envelope type, regardless of load state. */
+export function getEnvelopePluginId(type: string): string | undefined {
+  return envelopeTypeToPluginId.get(type)
+}
+
+/** Last recorded load-error reason for a plugin, or undefined if the last load succeeded. */
+export function getPluginLoadError(pluginId: string): string | undefined {
+  return loadErrors.get(pluginId)
+}
+
+/** Snapshot of all current plugin load errors. Stable key order. */
+export function getPluginLoadErrors(): Array<{ pluginId: string; reason: string }> {
+  return Array.from(loadErrors, ([pluginId, reason]) => ({ pluginId, reason }))
+}
+
 /** Clear all dynamic entries (used when toggling recover mode). */
 export function clearDynamicRegistry() {
   for (const bundle of loadedBundles.values()) {
@@ -131,6 +156,8 @@ export function clearDynamicRegistry() {
   dynamicEnvelopes.clear()
   dynamicWidgets.clear()
   dynamicSlotComponents.clear()
+  envelopeTypeToPluginId.clear()
+  loadErrors.clear()
   loadedBundles.clear()
   inflight.clear()
   notify()
@@ -152,6 +179,14 @@ export function clearDynamicRegistry() {
  * failures from their own error state.
  */
 export async function syncPluginRegistry(data: PluginRegistryResponse): Promise<void> {
+  // Rebuild the envelope-type → plugin-id map from the registry response.
+  // Done unconditionally so consumers can resolve ownership even when a
+  // plugin's bundle later fails to load.
+  envelopeTypeToPluginId.clear()
+  for (const [type, env] of Object.entries(data.envelopes)) {
+    envelopeTypeToPluginId.set(type, env.plugin_id)
+  }
+
   const desired = new Set<string>()
   const loads: Array<Promise<void>> = []
 
@@ -172,6 +207,10 @@ export async function syncPluginRegistry(data: PluginRegistryResponse): Promise<
   // Unload plugins that vanished from the registry.
   for (const pluginId of Array.from(loadedBundles.keys())) {
     if (!desired.has(pluginId)) unloadPlugin(pluginId)
+  }
+  // Clear stale errors for plugins no longer in the registry.
+  for (const pluginId of Array.from(loadErrors.keys())) {
+    if (!desired.has(pluginId)) loadErrors.delete(pluginId)
   }
 
   await Promise.allSettled(loads)
@@ -202,7 +241,9 @@ function loadPluginBundle(
     try {
       mod = (await import(/* @vite-ignore */ bundleUrl)) as Record<string, any>
     } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
       console.error(`[plugin-loader] Failed to import bundle for "${pluginId}" from ${bundleUrl}:`, err)
+      loadErrors.set(pluginId, reason)
       throw err
     }
 
@@ -268,6 +309,7 @@ function loadPluginBundle(
 
     ensureStylesheet(pluginId, plugin.stylesheet_url, bundle)
     loadedBundles.set(pluginId, bundle)
+    loadErrors.delete(pluginId)
   })()
 
   const tracked = promise.finally(() => {

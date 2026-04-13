@@ -148,30 +148,6 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
 
 // --- PLUGIN ENVELOPES (generated from plugins/*/plugin.yaml) ---
 const PLUGIN_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
-  "sprint-planning-review": {
-    component: lazy(() =>
-      import("@/components/plugins/fragments-engine/SprintPlanningReviewCard").then((m) => ({
-        default: m.SprintPlanningReviewCard,
-      })),
-    ),
-    source: "fragments-engine",
-  },
-  "task-disposition": {
-    component: lazy(() =>
-      import("@/components/plugins/fragments-engine/TaskDispositionCard").then((m) => ({
-        default: m.TaskDispositionCard,
-      })),
-    ),
-    source: "fragments-engine",
-  },
-  "task-complete-notification": {
-    component: lazy(() =>
-      import("@/components/plugins/fragments-engine/TaskCompleteNotificationCard").then((m) => ({
-        default: m.TaskCompleteNotificationCard,
-      })),
-    ),
-    source: "fragments-engine",
-  },
   "giphy-modal": {
     component: lazy(() =>
       import("@/components/chat/envelopes/GiphyModalCard").then((m) => ({
@@ -187,38 +163,6 @@ const PLUGIN_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
       })),
     ),
     source: "oembed",
-  },
-  "kb-result": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/KBResultCard").then((m) => ({
-        default: m.KBResultCard,
-      })),
-    ),
-    source: "support-ticket",
-  },
-  "ticket-form": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/TicketFormCard").then((m) => ({
-        default: m.TicketFormCard,
-      })),
-    ),
-    source: "support-ticket",
-  },
-  "ticket-confirmation": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/TicketConfirmationCard").then((m) => ({
-        default: m.TicketConfirmationCard,
-      })),
-    ),
-    source: "support-ticket",
-  },
-  "resolution-capture": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/ResolutionCaptureCard").then((m) => ({
-        default: m.ResolutionCaptureCard,
-      })),
-    ),
-    source: "support-ticket",
   },
 };
 

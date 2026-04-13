@@ -27,7 +27,7 @@ func (s *Store) Seed() error {
 	for _, w := range []struct {
 		id, name, desc string
 	}{
-		{"fragments-engine", "Fragments Engine", "AI-augmented software development portfolio"},
+		{"default", "Default", "Default workspace"},
 		{"personal", "Personal", "Personal planning and goals"},
 	} {
 		if _, err := tx.Exec(

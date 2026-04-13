@@ -45,13 +45,3 @@ plugins:
     repo: hollis-labs/nanite-plugin-session-stats
     description: "Session statistics tracking and display"
     type: default
-
-  - name: fragments-engine
-    repo: hollis-labs/nanite-plugin-fragments-engine
-    description: "Fragments Engine MCP integration for sprint planning and tasks"
-    type: default
-
-  - name: support-ticket
-    repo: hollis-labs/nanite-plugin-support-ticket
-    description: "IT self-service support with KB search and ticket management"
-    type: default

@@ -21,5 +21,4 @@ import (
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/observabilitywidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/oembed"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/sessionstats"
-	_ "github.com/hollis-labs/nanite/plugins/fragments-engine"
 )

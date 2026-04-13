@@ -14,7 +14,6 @@ import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { api } from '@/lib/api'
 import SettingsPage from './settings/SettingsPage'
-import { SprintPlanningModal } from './plugins/fragments-engine/SprintPlanningModal'
 import { MemoryModal } from './memory/MemoryModal'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import { usePresence } from '@/hooks/usePresence'
@@ -24,32 +23,24 @@ import { usePluginModules } from '@/hooks/usePluginModules'
 export function AppShell() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [sprintOpen, setSprintOpen] = useState(false)
-  const [sprintProjectId, setSprintProjectId] = useState<string | undefined>()
   const [pluginModal, setPluginModal] = useState<{ component: string; props?: Record<string, unknown> } | null>(null)
   const focusRef = useRef<(() => void) | null>(null)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const queryClient = useQueryClient()
   const currentPage = useLayoutStore((s) => s.currentPage)
 
-  // Listen for plugin-modal events (e.g. sprint planning button via slot system)
+  // Listen for plugin-modal events
   useEffect(() => {
     function handlePluginModal(e: Event) {
       const detail = (e as CustomEvent).detail
-      if (detail?.component === 'sprint-planning') {
-        setSprintProjectId(detail.props?.projectId)
-        setSprintOpen(true)
-      } else if (detail?.component) {
+      if (detail?.component) {
         // Generic plugin modal — render via slot component registry
         setPluginModal({ component: detail.component, props: detail.props })
       }
     }
     // Also listen for plugin-action events with handler type (backward compat)
-    function handlePluginAction(e: Event) {
-      const detail = (e as CustomEvent).detail
-      if (detail?.id === 'sprint-planning') {
-        setSprintOpen(true)
-      }
+    function handlePluginAction(_e: Event) {
+      // reserved for future plugin-action handling
     }
     function handleOpenSearch() {
       setSearchOpen(true)
@@ -162,12 +153,6 @@ export function AppShell() {
         renderPluginPage()
       ) : null}
       {currentPage === 'chat' && <RightRail inboxAgentId={inboxAgentId} />}
-      {sprintOpen && (
-        <SprintPlanningModal
-          projectId={sprintProjectId}
-          onClose={() => setSprintOpen(false)}
-        />
-      )}
       <MemoryModal />
       <CommandPalette
         open={commandPaletteOpen}

@@ -38,14 +38,9 @@ const CORE_ENTRIES: Record<string, ConfigComponentRegistryEntry> = {
   // },
 };
 
-// --- PLUGIN ENTRIES (auto-generated, safe to overwrite below this line) ---
-// @PLUGIN_CONFIG_COMPONENT_ENTRIES_START
-const PLUGIN_ENTRIES: Record<string, ConfigComponentRegistryEntry> = {};
-// @PLUGIN_CONFIG_COMPONENT_ENTRIES_END
-
-// Single merged registry — core takes precedence on name collision.
+// Compiled-in registry — core overrides only. Runtime plugin config overrides
+// are handled by the dynamic plugin registry (see plugin-loader.ts).
 export const CONFIG_COMPONENT_REGISTRY: Record<string, ConfigComponentRegistryEntry> = {
-  ...PLUGIN_ENTRIES,
   ...CORE_ENTRIES,
 };
 

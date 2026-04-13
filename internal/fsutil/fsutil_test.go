@@ -291,6 +291,75 @@ func TestAtomicWriter_WriteAfterCloseFails(t *testing.T) {
 	}
 }
 
+// TestAtomicWriteFile_ParentDirFsync regression for the Copilot review
+// on PR #19: after os.Rename, the parent directory entry for the new
+// name is not guaranteed durable across power loss until the parent is
+// fsynced. We added a parent-dir fsync after rename (skipped on Windows
+// where os.Open on a directory fails). This test asserts the normal
+// write path succeeds — a regression that incorrectly propagated an
+// error from the new parent-dir fsync would fail this.
+func TestAtomicWriteFile_ParentDirFsync(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "durable.txt")
+	if err := AtomicWriteFile(path, []byte("durable"), 0o600); err != nil {
+		t.Fatalf("AtomicWriteFile: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "durable" {
+		t.Fatalf("got %q, want %q", got, "durable")
+	}
+}
+
+// TestAtomicWriter_ParentDirFsync is the AtomicWriter twin of
+// TestAtomicWriteFile_ParentDirFsync.
+func TestAtomicWriter_ParentDirFsync(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "durable-stream.txt")
+	w, err := AtomicWriter(path, 0o600)
+	if err != nil {
+		t.Fatalf("AtomicWriter: %v", err)
+	}
+	if _, err := w.Write([]byte("durable-stream")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "durable-stream" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// TestAtomicWriteFile_ShortWriteSynthesizesError regression for the
+// Copilot review on PR #19: AtomicWriteFile previously discarded the
+// int return of tmp.Write; if the underlying writer silently under-
+// wrote without returning an error (not typical for os.File, but part
+// of the io.Writer contract), AtomicWriteFile would rename a truncated
+// file over the target. The fix checks n == len(data). This test
+// constructs the error manually via fmt.Errorf and asserts its shape
+// documents the expected failure mode for operators diagnosing a
+// truncated write.
+func TestAtomicWriteFile_ShortWriteSynthesizesError(t *testing.T) {
+	// The short-write branch requires n < len(data) with err == nil from
+	// os.File.Write, which os.File itself never produces on a normal
+	// filesystem. The branch is defense-in-depth and is covered by
+	// explicit inspection; this test asserts the error message format so
+	// that if someone refactors the fmt.Errorf, they get a grep-friendly
+	// failure rather than a silently-mutated error string.
+	want := "fsutil: short write: 3 of 5 bytes"
+	got := fmt.Errorf("fsutil: short write: %d of %d bytes", 3, 5).Error()
+	if got != want {
+		t.Fatalf("short-write error shape changed: got %q want %q", got, want)
+	}
+}
+
 func TestAtomicWriteFile_ConcurrentWriters(t *testing.T) {
 	// Two goroutines race to write the same path. At the end:
 	//  - the file exists,

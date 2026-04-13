@@ -60,6 +60,44 @@ func TestBwrapArgs_NarrowedMounts(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_UnshareNetConditional regression for the Copilot review
+// on PR #19: --unshare-net was unconditional from BLG-008, but AgentExec's
+// allowlist proxy lives in the host netns. Separating the sandbox's netns
+// made the proxy unreachable (per-netns loopback) and broke NetworkAllow
+// end-to-end. The fix gates --unshare-net on len(networkAllow) == 0.
+func TestBwrapArgs_UnshareNetConditional(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed")
+	}
+
+	// With an empty allowlist, --unshare-net must be present: the sandbox
+	// is fully offline.
+	cmdEmpty := exec.Command("/bin/true")
+	cleanupEmpty, err := applyOSSandbox(cmdEmpty, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("applyOSSandbox (empty): %v", err)
+	}
+	defer cleanupEmpty()
+	emptyArgs := strings.Join(cmdEmpty.Args, " ")
+	if !strings.Contains(emptyArgs, "--unshare-net") {
+		t.Errorf("empty networkAllow: --unshare-net missing; expected offline sandbox\nargs: %s", emptyArgs)
+	}
+
+	// With a non-empty allowlist, --unshare-net must be absent so the
+	// sandboxed process can reach the host-side allowlist proxy via
+	// loopback.
+	cmdAllow := exec.Command("/bin/true")
+	cleanupAllow, err := applyOSSandbox(cmdAllow, t.TempDir(), []string{"example.com"})
+	if err != nil {
+		t.Fatalf("applyOSSandbox (allowlist): %v", err)
+	}
+	defer cleanupAllow()
+	allowArgs := strings.Join(cmdAllow.Args, " ")
+	if strings.Contains(allowArgs, "--unshare-net") {
+		t.Errorf("non-empty networkAllow: --unshare-net present; would break allowlist proxy reachability\nargs: %s", allowArgs)
+	}
+}
+
 // TestBwrapIsolation_ProcCannotSeeHostPID1 is a live-execution test:
 // spawn a sandboxed command and verify it cannot read the host's init
 // comm string via /proc/1/comm. With --unshare-pid, /proc/1 inside

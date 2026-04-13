@@ -14,7 +14,31 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 )
+
+// syncParentDir fsyncs the parent directory of path so the rename is
+// durable across power loss on POSIX. On Windows os.Open on a directory
+// returns an error and directory fsync is not a meaningful operation, so
+// this is a no-op there.
+func syncParentDir(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("fsutil: open parent dir: %w", err)
+	}
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	if syncErr != nil {
+		return fmt.Errorf("fsutil: parent dir fsync: %w", syncErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("fsutil: parent dir close: %w", closeErr)
+	}
+	return nil
+}
 
 // AtomicWriteFile writes data to path atomically. The caller-supplied mode
 // is applied to the destination file.
@@ -41,9 +65,14 @@ func AtomicWriteFile(path string, data []byte, mode os.FileMode) (retErr error) 
 		}
 	}()
 
-	if _, err := tmp.Write(data); err != nil {
+	n, err := tmp.Write(data)
+	if err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("fsutil: write: %w", err)
+	}
+	if n != len(data) {
+		_ = tmp.Close()
+		return fmt.Errorf("fsutil: short write: %d of %d bytes", n, len(data))
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
@@ -58,6 +87,9 @@ func AtomicWriteFile(path string, data []byte, mode os.FileMode) (retErr error) 
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("fsutil: rename: %w", err)
 	}
+	if err := syncParentDir(path); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -67,6 +99,11 @@ func AtomicWriteFile(path string, data []byte, mode os.FileMode) (retErr error) 
 //
 // The returned writer is not safe for concurrent use. Callers may use an
 // Abort method (via the concrete *atomicWriter) to explicitly discard.
+//
+// Write semantics: the returned Write forwards directly to the underlying
+// *os.File and returns (n, err) per io.Writer. Callers are responsible for
+// handling short writes (n < len(p) with err == nil); AtomicWriter does
+// not synthesize a short-write error on their behalf.
 func AtomicWriter(path string, mode os.FileMode) (io.WriteCloser, error) {
 	if path == "" {
 		return nil, errors.New("fsutil: empty path")
@@ -125,6 +162,9 @@ func (w *atomicWriter) Close() (retErr error) {
 	}
 	if err := os.Rename(w.tmp, w.target); err != nil {
 		return fmt.Errorf("fsutil: rename: %w", err)
+	}
+	if err := syncParentDir(w.target); err != nil {
+		return err
 	}
 	return nil
 }

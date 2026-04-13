@@ -1,6 +1,7 @@
 package install
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -35,7 +36,10 @@ func Preflight() error {
 // lookPath. Returns ErrBwrapMissing when the binary is not found.
 func checkBwrap() error {
 	if _, err := lookPath("bwrap"); err != nil {
-		return ErrBwrapMissing
+		if errors.Is(err, exec.ErrNotFound) {
+			return ErrBwrapMissing
+		}
+		return fmt.Errorf("bwrap preflight: %w", err)
 	}
 	return nil
 }

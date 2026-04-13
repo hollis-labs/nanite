@@ -2,6 +2,7 @@ package install
 
 import (
 	"errors"
+	"os/exec"
 	"testing"
 )
 
@@ -13,7 +14,7 @@ func TestCheckBwrap_Missing(t *testing.T) {
 	orig := lookPath
 	defer func() { lookPath = orig }()
 	lookPath = func(string) (string, error) {
-		return "", errors.New("bwrap: not found")
+		return "", exec.ErrNotFound
 	}
 
 	err := checkBwrap()
@@ -22,6 +23,31 @@ func TestCheckBwrap_Missing(t *testing.T) {
 	}
 	if !errors.Is(err, ErrBwrapMissing) {
 		t.Fatalf("err = %v, want ErrBwrapMissing", err)
+	}
+}
+
+// TestCheckBwrap_LookPathPermissionError verifies that non-ErrNotFound
+// errors from lookPath (e.g. an EACCES on a PATH directory) are wrapped
+// and returned rather than being masked as ErrBwrapMissing. Masking such
+// errors misleads operators into running install commands that cannot
+// fix the underlying permission problem.
+func TestCheckBwrap_LookPathPermissionError(t *testing.T) {
+	orig := lookPath
+	defer func() { lookPath = orig }()
+	permErr := errors.New("permission denied")
+	lookPath = func(string) (string, error) {
+		return "", permErr
+	}
+
+	err := checkBwrap()
+	if err == nil {
+		t.Fatal("checkBwrap returned nil, want wrapped permission error")
+	}
+	if errors.Is(err, ErrBwrapMissing) {
+		t.Fatalf("err = %v, want non-ErrBwrapMissing wrapped permission error", err)
+	}
+	if !errors.Is(err, permErr) {
+		t.Fatalf("err = %v, should wrap underlying lookPath error", err)
 	}
 }
 

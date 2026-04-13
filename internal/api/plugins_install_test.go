@@ -463,3 +463,78 @@ func TestExtractZip_RejectsTraversal(t *testing.T) {
 		t.Fatalf("expected illegal-path error, got %v", err)
 	}
 }
+
+// TestExtractTarGz_SurfacesCloseError regression for Copilot review on PR
+// #19: the previous code discarded out.Close()'s return, so any error
+// flushing the extracted file was silently swallowed and extraction
+// reported success on a truncated artifact. The fix captures closeErr
+// and returns it after the io.Copy error-check; this test injects a
+// close failure via the extractedFileClose hook and asserts the error
+// bubbles out.
+func TestExtractTarGz_SurfacesCloseError(t *testing.T) {
+	origClose := extractedFileClose
+	defer func() { extractedFileClose = origClose }()
+	sentinel := fmt.Errorf("injected close failure")
+	extractedFileClose = func(f *os.File) error {
+		_ = f.Close() // still release the fd
+		return sentinel
+	}
+
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "ok.tar.gz")
+	writeTarGzToFile(t, archive, []tarEntry{
+		{name: "a.txt", declaredSize: 5, payload: []byte("hello")},
+	})
+	dst := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := extractTarGz(archive, dst)
+	if err == nil {
+		t.Fatal("expected close error to bubble, got nil")
+	}
+	if !strings.Contains(err.Error(), "injected close failure") {
+		t.Fatalf("error does not wrap close failure: %v", err)
+	}
+}
+
+// TestExtractZip_SurfacesCloseError is the zip-branch twin of
+// TestExtractTarGz_SurfacesCloseError.
+func TestExtractZip_SurfacesCloseError(t *testing.T) {
+	origClose := extractedFileClose
+	defer func() { extractedFileClose = origClose }()
+	sentinel := fmt.Errorf("injected close failure")
+	extractedFileClose = func(f *os.File) error {
+		_ = f.Close()
+		return sentinel
+	}
+
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "ok.zip")
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("a.txt")
+	if err != nil {
+		t.Fatalf("zw.Create: %v", err)
+	}
+	if _, err := w.Write([]byte("hello")); err != nil {
+		t.Fatalf("zw.Write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zw.Close: %v", err)
+	}
+	if err := os.WriteFile(archive, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractZip(archive, dst); err == nil {
+		t.Fatal("expected close error to bubble, got nil")
+	} else if !strings.Contains(err.Error(), "injected close failure") {
+		t.Fatalf("error does not wrap close failure: %v", err)
+	}
+}

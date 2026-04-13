@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,5 +116,30 @@ func TestAgentExec_TimeoutReapsGrandchildren(t *testing.T) {
 		// failed run on developer laptops.
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Fatalf("grandchild pid %d still alive 5s after timeout — Setpgid / group-kill regressed", pid)
+	}
+}
+
+// TestSetProcessGroupKill_CancelReturnsNil regression for the Copilot
+// review on PR #19: cmd.Cancel previously returned os.ErrProcessDone
+// (via a kill-error wrap), which can mislead exec.CommandContext into
+// treating cancellation as completion and short-circuiting Wait. The
+// fix returns nil on a successful group-SIGTERM; only a hard kill
+// failure (EPERM, etc.) should surface as a non-nil error.
+func TestSetProcessGroupKill_CancelReturnsNil(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/bin/sleep", "30")
+	setProcessGroupKill(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Ensure the child is reaped regardless of how the test exits.
+	defer func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	}()
+
+	if err := cmd.Cancel(); err != nil {
+		t.Fatalf("cmd.Cancel returned %v, want nil (returning ErrProcessDone or other errors confuses exec.CommandContext)", err)
 	}
 }

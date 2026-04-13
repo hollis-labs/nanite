@@ -47,7 +47,8 @@ func waitFor(t *testing.T, cond func() bool) {
 
 func TestGo_NoPanicRunsFn(t *testing.T) {
 	c := &capture{}
-	defer SetPanicHook(SetPanicHook(c.hook()))
+	prev := SetPanicHook(c.hook())
+	defer SetPanicHook(prev)
 
 	var ran atomic.Bool
 	done := make(chan struct{})
@@ -77,7 +78,8 @@ func TestGo_RecoversPanic(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &capture{}
-			defer SetPanicHook(SetPanicHook(c.hook()))
+			prev := SetPanicHook(c.hook())
+			defer SetPanicHook(prev)
 
 			Go(context.Background(), tc.name, func() {
 				panic(tc.panic)
@@ -98,7 +100,8 @@ func TestGo_RecoversPanic(t *testing.T) {
 
 func TestCall_NoPanicRunsFn(t *testing.T) {
 	c := &capture{}
-	defer SetPanicHook(SetPanicHook(c.hook()))
+	prev := SetPanicHook(c.hook())
+	defer SetPanicHook(prev)
 
 	var ran bool
 	Call(context.Background(), "test.call.nopanic", func() { ran = true })
@@ -112,7 +115,8 @@ func TestCall_NoPanicRunsFn(t *testing.T) {
 
 func TestCall_RecoversPanicSynchronous(t *testing.T) {
 	c := &capture{}
-	defer SetPanicHook(SetPanicHook(c.hook()))
+	prev := SetPanicHook(c.hook())
+	defer SetPanicHook(prev)
 
 	Call(context.Background(), "test.call.panic", func() {
 		panic("sync-boom")
@@ -136,11 +140,52 @@ func TestSetPanicHook_NilRestoresNoOp(t *testing.T) {
 	}
 }
 
+// TestSetPanicHook_RestoresAcrossSubtests regression for the Copilot
+// review finding on PR #19: the previous pattern
+//
+//	defer SetPanicHook(SetPanicHook(newHook))
+//
+// evaluated the outer SetPanicHook call's argument eagerly, which meant
+// the "restore" fired immediately instead of on defer. Global panic-hook
+// state leaked between tests. The fix is the two-line capture-then-defer
+// pattern used everywhere in this file; this test installs a sentinel
+// hook, runs a subtest that installs a different hook via the correct
+// pattern, and asserts the sentinel is restored after the subtest.
+func TestSetPanicHook_RestoresAcrossSubtests(t *testing.T) {
+	sentinel := &capture{}
+	prev := SetPanicHook(sentinel.hook())
+	defer SetPanicHook(prev)
+
+	t.Run("inner", func(t *testing.T) {
+		inner := &capture{}
+		innerPrev := SetPanicHook(inner.hook())
+		defer SetPanicHook(innerPrev)
+
+		Call(context.Background(), "inner", func() { panic("inner-boom") })
+		if inner.len() != 1 {
+			t.Fatalf("inner hook fired %d, want 1", inner.len())
+		}
+		if sentinel.len() != 0 {
+			t.Fatalf("sentinel fired inside inner: %d", sentinel.len())
+		}
+	})
+
+	// After the subtest defer restores, the sentinel must be the active
+	// hook again. If the buggy `defer SetPanicHook(SetPanicHook(...))`
+	// pattern is reintroduced anywhere in this file, this assertion would
+	// catch the leak either here or in an adjacent test.
+	Call(context.Background(), "outer-after-restore", func() { panic("outer-boom") })
+	if sentinel.len() != 1 {
+		t.Fatalf("sentinel not restored after subtest: %d", sentinel.len())
+	}
+}
+
 func TestGo_ContextNoSpanDoesNotPanic(t *testing.T) {
 	// Background context has no active span. Code must not panic; the
 	// tracer should create a standalone span for the event.
 	c := &capture{}
-	defer SetPanicHook(SetPanicHook(c.hook()))
+	prev := SetPanicHook(c.hook())
+	defer SetPanicHook(prev)
 
 	Go(context.Background(), "no-span-ctx", func() { panic("nospan") })
 	waitFor(t, func() bool { return c.len() == 1 })

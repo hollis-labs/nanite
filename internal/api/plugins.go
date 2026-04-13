@@ -741,6 +741,12 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// extractedFileClose is the hook used by extractTarGz / extractZip to close
+// the per-entry destination file. Tests override this to simulate a close
+// failure (e.g. a buffered-fs flush error) without needing to mock the
+// kernel. Production path just calls the file's Close method.
+var extractedFileClose = func(f *os.File) error { return f.Close() }
+
 // extractTarGz extracts a .tar.gz archive to the given directory.
 func extractTarGz(archivePath, destDir string) error {
 	f, err := os.Open(archivePath)
@@ -808,9 +814,12 @@ func extractTarGz(archivePath, destDir string) error {
 			// maxArchiveFileSize + 1 so a liar trips the per-file cap.
 			//nolint:gosec // G110: copy is explicitly bounded by io.LimitReader below; bomb is rejected before it can exhaust disk/memory.
 			written, err := io.Copy(out, io.LimitReader(tr, maxArchiveFileSize+1))
-			out.Close()
+			closeErr := extractedFileClose(out)
 			if err != nil {
 				return err
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close extracted file: %w", closeErr)
 			}
 			if written > maxArchiveFileSize {
 				return fmt.Errorf("archive file too large: %s exceeded %d during decompress", hdr.Name, maxArchiveFileSize)
@@ -882,10 +891,13 @@ func extractZip(archivePath, destDir string) error {
 		// declared UncompressedSize64 (header mismatch bombs).
 		//nolint:gosec // G110: copy is explicitly bounded by io.LimitReader; bomb is rejected before disk/memory exhaustion.
 		written, err := io.Copy(out, io.LimitReader(rc, maxArchiveFileSize+1))
-		out.Close()
+		closeErr := extractedFileClose(out)
 		rc.Close()
 		if err != nil {
 			return err
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close extracted file: %w", closeErr)
 		}
 		if written > maxArchiveFileSize {
 			return fmt.Errorf("archive file too large: %s exceeded %d during decompress", f.Name, maxArchiveFileSize)

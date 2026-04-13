@@ -98,25 +98,34 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cl
 
 	// Namespace isolation. --unshare-user-try degrades on kernels that
 	// disable unprivileged user namespaces (common in hardened distros);
-	// the rest are always available. --unshare-net is always set: in
-	// proxy mode the Linux coverage is intentionally constrained (see
-	// audit finding 06 gap #3); callers that need host-network egress on
-	// Linux should use macOS seatbelt enforcement or run unprivileged.
+	// the rest are always available.
 	bwrapArgs = append(bwrapArgs,
 		"--unshare-pid",
 		"--unshare-ipc",
 		"--unshare-uts",
 		"--unshare-cgroup-try",
 		"--unshare-user-try",
-		"--unshare-net",
 		"--new-session",
 		"--die-with-parent",
 	)
 
-	// networkAllow is accepted as a parameter for parity with the macOS
-	// seatbelt path but Linux enforcement happens at the namespace level
-	// above. Document the intent so the parameter does not read as dead.
-	_ = networkAllow
+	// --unshare-net is conditional on the absence of a host-side allowlist.
+	// Rationale: AgentExec's allowlist proxy runs in the host network
+	// namespace; once the sandbox gets its own netns, loopback is
+	// per-namespace and the proxy becomes unreachable from inside. When
+	// networkAllow is non-empty the caller has opted in to mediated egress,
+	// so we keep the sandbox in the host netns and rely on the proxy +
+	// HTTP(S)_PROXY env vars for enforcement. With no allowlist we unshare
+	// the network namespace for full offline isolation.
+	//
+	// TODO(network-isolation): move the allowlist proxy into the sandbox
+	// netns (e.g. via a helper socket or a proxy pre-bound to a socket
+	// inherited across unshare) so --unshare-net can be unconditional.
+	// Revisit once the proxy is restructured to run co-located with the
+	// sandboxed process or once a socket-passing handoff is in place.
+	if len(networkAllow) == 0 {
+		bwrapArgs = append(bwrapArgs, "--unshare-net")
+	}
 
 	bwrapArgs = append(bwrapArgs, "--")
 

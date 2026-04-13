@@ -1,0 +1,14 @@
+schema_version: 1
+name: bookmarks-widget
+id: bookmarks-widget
+version: 1.0.0
+description: Quick access to bookmarked messages with scroll-to navigation
+author: Nanite
+license: Apache-2.0
+protocol: 1
+runtime: builtin
+registers:
+  components:
+    - name: bookmarks
+      type: widget
+      description: Quick access to bookmarked messages with scroll-to navigation

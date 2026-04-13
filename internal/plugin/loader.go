@@ -127,10 +127,29 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 			errs = append(errs, fmt.Errorf("load %s: %w", dp.Manifest.Name, err))
 			continue
 		}
+
+		// Apply yaml-authoritative declarative registrations from the manifest.
+		// This is the B.4 unification path — the host registers envelopes /
+		// slots / keybindings / components on behalf of the plugin so that
+		// builtin and subprocess plugins flow through the same wiring.
+		if err := applyManifestRegistrations(host, dp.Manifest, p); err != nil {
+			errs = append(errs, fmt.Errorf("apply manifest for %s: %w", dp.Manifest.Name, err))
+		}
+
 		loaded = append(loaded, p)
 	}
 
 	return loaded, errs
+}
+
+// ManifestProvider is an optional interface that compiled-in builtins can
+// implement to expose their plugin.yaml to the host via //go:embed. When a
+// builtin implements this interface, LoadRegisteredBuiltins runs the same
+// yaml-authoritative registration path as DiscoverPlugins, allowing the
+// builtin's plugin.yaml to drive host registrations instead of the builtin's
+// Load() method making direct Register* calls. See plan §B.4.
+type ManifestProvider interface {
+	Manifest() *PluginManifest
 }
 
 // newSubprocessPluginFromManifest creates a SubprocessPlugin from a discovered
@@ -202,6 +221,18 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 			errs = append(errs, fmt.Errorf("load builtin %s: %w", id, err))
 			continue
 		}
+
+		// If this builtin ships an embedded plugin.yaml via ManifestProvider,
+		// apply the same yaml-authoritative registrations so builtin and
+		// discovered plugins share the wiring path (B.4).
+		if mp, ok := p.(ManifestProvider); ok {
+			if manifest := mp.Manifest(); manifest != nil {
+				if err := applyManifestRegistrations(host, manifest, p); err != nil {
+					errs = append(errs, fmt.Errorf("apply manifest for builtin %s: %w", id, err))
+				}
+			}
+		}
+
 		loaded = append(loaded, p)
 	}
 

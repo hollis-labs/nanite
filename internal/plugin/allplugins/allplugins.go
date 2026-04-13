@@ -17,8 +17,6 @@ import (
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/bookmarks"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/contextwidgets"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/debugwidgets"
-	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/giphy"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/observabilitywidgets"
-	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/oembed"
 	_ "github.com/hollis-labs/nanite/internal/plugin/builtin/sessionstats"
 )

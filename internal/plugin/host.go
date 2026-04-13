@@ -3,7 +3,6 @@ package plugin
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
@@ -249,14 +248,23 @@ func (h *Host) installForwarderLocked(pattern string) {
 }
 
 // registerRoute registers an HTTP route owned by the currently-loading plugin.
-// The route is stored in h.pluginMux (so UnloadPlugin can remove it) and a
-// forwarder is installed on the core router if one isn't already in place.
-// If the core router isn't set yet, the registration is queued; the queue is
-// flushed by SetRouter.
-//
-// Caller is expected to hold h.mu (at least the write path, since routes may
-// be appended to pendingRoutes).
+// It acquires h.mu and delegates to registerRouteLocked; use this variant from
+// public entrypoints or any caller that does not already hold h.mu.
 func (h *Host) registerRoute(pattern string, handler http.Handler) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.registerRouteLocked(pattern, handler)
+}
+
+// registerRouteLocked registers an HTTP route owned by the currently-loading
+// plugin. The route is stored in h.pluginMux (so UnloadPlugin can remove it)
+// and a forwarder is installed on the core router if one isn't already in
+// place. If the core router isn't set yet, the registration is queued; the
+// queue is flushed by SetRouter.
+//
+// Caller MUST hold h.mu (mutates h.pendingRoutes, h.routePatterns, and the
+// core router via installForwarderLocked).
+func (h *Host) registerRouteLocked(pattern string, handler http.Handler) {
 	pluginID := h.activePlugin
 	if h.router == nil {
 		h.pendingRoutes = append(h.pendingRoutes, pendingRoute{pattern: pattern, handler: handler, pluginID: pluginID})
@@ -307,40 +315,40 @@ func (h *Host) RegisterCRUDHandler(resourceType string, handler plugin.CRUDHandl
 	// the owning plugin was unloaded). Forwarders stay installed for the
 	// process lifetime, so a missing handler must surface as 404 rather than
 	// panicking on a nil deref.
-	withHandler := func(w http.ResponseWriter, fn func(plugin.CRUDHandler)) {
+	withHandler := func(w http.ResponseWriter, r *http.Request, fn func(plugin.CRUDHandler)) {
 		h.mu.RLock()
 		entry, ok := h.crudHandlers[resourceType]
 		h.mu.RUnlock()
 		if !ok {
-			http.NotFound(w, nil)
+			http.NotFound(w, r)
 			return
 		}
 		fn(entry.handler)
 	}
 
 	// List resources: GET /api/plugins/{resourceType}
-	h.registerRoute(fmt.Sprintf("GET %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDList(w, r, h2) })
+	h.registerRouteLocked(fmt.Sprintf("GET %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDList(w, r, h2) })
 	}))
 
 	// Create resource: POST /api/plugins/{resourceType}
-	h.registerRoute(fmt.Sprintf("POST %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDCreate(w, r, h2) })
+	h.registerRouteLocked(fmt.Sprintf("POST %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDCreate(w, r, h2) })
 	}))
 
 	// Get resource: GET /api/plugins/{resourceType}/{id}
-	h.registerRoute(fmt.Sprintf("GET %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDRead(w, r, h2) })
+	h.registerRouteLocked(fmt.Sprintf("GET %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDRead(w, r, h2) })
 	}))
 
 	// Update resource: PUT /api/plugins/{resourceType}/{id}
-	h.registerRoute(fmt.Sprintf("PUT %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDUpdate(w, r, h2) })
+	h.registerRouteLocked(fmt.Sprintf("PUT %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDUpdate(w, r, h2) })
 	}))
 
 	// Delete resource: DELETE /api/plugins/{resourceType}/{id}
-	h.registerRoute(fmt.Sprintf("DELETE %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		withHandler(w, func(h2 plugin.CRUDHandler) { h.handleCRUDDelete(w, r, h2) })
+	h.registerRouteLocked(fmt.Sprintf("DELETE %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDDelete(w, r, h2) })
 	}))
 
 	h.logger.Info("registered CRUD handler", "resourceType", resourceType, "basePath", basePath)
@@ -416,7 +424,7 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 	// If the component has a server-side handler, register the route (only once).
 	if component.Handler != nil && !alreadyRegistered {
 		path := fmt.Sprintf("/api/plugins/ui/%s", component.ID)
-		h.registerRoute(path, component.Handler)
+		h.registerRouteLocked(path, component.Handler)
 		h.logger.Info("registered UI component handler", "id", component.ID, "path", path)
 	}
 
@@ -1231,7 +1239,7 @@ func (h *Host) UnloadPlugin(id string) error {
 	h.mu.RUnlock()
 	if mcpReg != nil {
 		if n := mcpReg.RemoveServersByPlugin(id); n > 0 {
-			slog.Debug("plugin unload: removed mcp servers", "plugin", id, "count", n)
+			h.logger.Debug("plugin unload: removed mcp servers", "plugin", id, "count", n)
 		}
 	}
 
@@ -1259,7 +1267,7 @@ func (h *Host) UnloadPlugin(id string) error {
 
 	// 1. Filters.
 	if n := h.filters.RemoveByPlugin(id); n > 0 {
-		slog.Debug("plugin unload: removed filters", "plugin", id, "count", n)
+		h.logger.Debug("plugin unload: removed filters", "plugin", id, "count", n)
 	}
 
 	// 2. Event hooks — sweep eventHookEntry whose pluginID matches. Core
@@ -1281,7 +1289,7 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 	if ehCount > 0 {
-		slog.Debug("plugin unload: removed event hooks", "plugin", id, "count", ehCount)
+		h.logger.Debug("plugin unload: removed event hooks", "plugin", id, "count", ehCount)
 	}
 
 	// 3. UI components.
@@ -1297,7 +1305,7 @@ func (h *Host) UnloadPlugin(id string) error {
 	}
 	h.uiComponents = cleaned
 	if n > 0 {
-		slog.Debug("plugin unload: removed ui components", "plugin", id, "count", n)
+		h.logger.Debug("plugin unload: removed ui components", "plugin", id, "count", n)
 	}
 
 	// 4. UI slots.
@@ -1318,7 +1326,7 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 	if slotCount > 0 {
-		slog.Debug("plugin unload: removed ui slots", "plugin", id, "count", slotCount)
+		h.logger.Debug("plugin unload: removed ui slots", "plugin", id, "count", slotCount)
 	}
 
 	// 5. Keybindings.
@@ -1331,7 +1339,7 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 	if kbCount > 0 {
-		slog.Debug("plugin unload: removed keybindings", "plugin", id, "count", kbCount)
+		h.logger.Debug("plugin unload: removed keybindings", "plugin", id, "count", kbCount)
 	}
 
 	// 6. Connectors.
@@ -1345,7 +1353,7 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 	if connCount > 0 {
-		slog.Debug("plugin unload: removed connectors", "plugin", id, "count", connCount)
+		h.logger.Debug("plugin unload: removed connectors", "plugin", id, "count", connCount)
 	}
 
 	// 7+8. Services (includes CLI adapters under the cli-adapter: key prefix).
@@ -1363,10 +1371,10 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 	if svcCount > 0 {
-		slog.Debug("plugin unload: removed services", "plugin", id, "count", svcCount)
+		h.logger.Debug("plugin unload: removed services", "plugin", id, "count", svcCount)
 	}
 	if cliCount > 0 {
-		slog.Debug("plugin unload: removed cli adapters", "plugin", id, "count", cliCount)
+		h.logger.Debug("plugin unload: removed cli adapters", "plugin", id, "count", cliCount)
 	}
 
 	// 9. Envelope types (side-map + chat validation registry).
@@ -1379,7 +1387,7 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 	if envCount > 0 {
-		slog.Debug("plugin unload: removed envelope types", "plugin", id, "count", envCount)
+		h.logger.Debug("plugin unload: removed envelope types", "plugin", id, "count", envCount)
 	}
 
 	// 10. HTTP routes — remove from mutable plugin mux. Forwarder entries on
@@ -1388,7 +1396,7 @@ func (h *Host) UnloadPlugin(id string) error {
 	// plugin's patterns.
 	if h.pluginMux != nil {
 		if n := h.pluginMux.RemoveByPlugin(id); n > 0 {
-			slog.Debug("plugin unload: removed http routes", "plugin", id, "count", n)
+			h.logger.Debug("plugin unload: removed http routes", "plugin", id, "count", n)
 		}
 	}
 
@@ -1404,7 +1412,7 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 	if crudCount > 0 {
-		slog.Debug("plugin unload: removed crud handlers", "plugin", id, "count", crudCount)
+		h.logger.Debug("plugin unload: removed crud handlers", "plugin", id, "count", crudCount)
 	}
 
 	// 12. Task backends — collect names to remove; actual UnregisterBackend
@@ -1457,9 +1465,9 @@ func (h *Host) UnloadPlugin(id string) error {
 			}
 		}
 		if removed > 0 {
-			slog.Debug("plugin unload: removed providers", "plugin", id, "count", removed)
+			h.logger.Debug("plugin unload: removed providers", "plugin", id, "count", removed)
 		} else {
-			slog.Warn("plugin unload: provider registry lacks Unregister; providers leak until restart",
+			h.logger.Warn("plugin unload: provider registry lacks Unregister; providers leak until restart",
 				"plugin", id, "providers", ownedProviders)
 		}
 	}
@@ -1475,7 +1483,7 @@ func (h *Host) UnloadPlugin(id string) error {
 	// (CommandRegistry takes its own lock).
 	if cmdReg != nil {
 		if n := cmdReg.RemoveByPlugin(id); n > 0 {
-			slog.Debug("plugin unload: removed commands", "plugin", id, "count", n)
+			h.logger.Debug("plugin unload: removed commands", "plugin", id, "count", n)
 		}
 	}
 
@@ -1485,7 +1493,7 @@ func (h *Host) UnloadPlugin(id string) error {
 	if taskSvc != nil {
 		for _, name := range taskBackendsToUnregister {
 			if taskSvc.UnregisterBackend(name) {
-				slog.Debug("plugin unload: removed task backend", "plugin", id, "name", name)
+				h.logger.Debug("plugin unload: removed task backend", "plugin", id, "name", name)
 			}
 		}
 	}
@@ -1497,7 +1505,7 @@ func (h *Host) UnloadPlugin(id string) error {
 		if err := storeRef.ClearPluginSchema(clearSchemaPluginID); err != nil {
 			h.logger.Warn("plugin unload: clear config schema failed", "plugin", id, "error", err)
 		} else {
-			slog.Debug("plugin unload: cleared config schema", "plugin", id)
+			h.logger.Debug("plugin unload: cleared config schema", "plugin", id)
 		}
 	}
 

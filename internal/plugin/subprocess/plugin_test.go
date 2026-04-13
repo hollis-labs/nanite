@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/go-plugin"
+	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // fakeHost implements plugin.Host for testing SubprocessPlugin.registerManifest.
@@ -101,7 +102,7 @@ func TestSubprocessPlugin_LoadLifecycle(t *testing.T) {
 				Components: []ComponentRegistration{
 					{
 						ID:   "test-widget",
-						Type: plugin.UIComponentTypeWidget,
+						Type: sdkplugin.UIComponentTypeWidget,
 						Name: "Test Widget",
 					},
 				},

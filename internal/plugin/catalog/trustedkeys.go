@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"sync"
 )
 
 // CatalogRootKeyPEM is the PEM-encoded Ed25519 public key of the Nanite
@@ -30,15 +31,24 @@ MCowBQYDK2VwAyEAzWSPGfuVmcYwb/OZhm7TeGDj0ixyHa8k5g1bLOhVmLg=
 -----END PUBLIC KEY-----
 `
 
+var (
+	rootKey     ed25519.PublicKey
+	rootKeyOnce sync.Once
+)
+
 // RootKey returns the parsed ed25519.PublicKey for the catalog root.
 // It panics if the embedded PEM fails to parse, since an unbuildable trust
 // root is a compile-time-level defect and there is no sensible fallback.
+// The parse is performed once and cached for the lifetime of the process.
 func RootKey() ed25519.PublicKey {
-	key, err := parseEd25519PublicKeyPEM([]byte(CatalogRootKeyPEM))
-	if err != nil {
-		panic(fmt.Sprintf("catalog: embedded root key is invalid: %v", err))
-	}
-	return key
+	rootKeyOnce.Do(func() {
+		key, err := parseEd25519PublicKeyPEM([]byte(CatalogRootKeyPEM))
+		if err != nil {
+			panic(fmt.Sprintf("catalog: embedded root key is invalid: %v", err))
+		}
+		rootKey = key
+	})
+	return rootKey
 }
 
 func parseEd25519PublicKeyPEM(pemBytes []byte) (ed25519.PublicKey, error) {

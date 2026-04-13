@@ -1,12 +1,15 @@
 package catalog
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestRootKey_Parses ensures the embedded PEM always parses into an
@@ -40,8 +43,13 @@ func TestRootKey_VerifiesLiveSignature(t *testing.T) {
 		t.Skip("op (1Password CLI) not installed; skipping live signature verification")
 	}
 
-	out, err := exec.Command("op", "read", "op://Nanite/nanite-plugin-catalog-signing-key/private-key").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "op", "read", "op://Nanite/nanite-plugin-catalog-signing-key/private-key").Output()
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			t.Skip("op read timed out — 1Password CLI may not be authenticated; skipping live signature test")
+		}
 		t.Skipf("op read failed (likely not authenticated): %v", err)
 	}
 	privPEM := strings.TrimSpace(string(out))

@@ -114,6 +114,7 @@ type Host struct {
 	// and CRUD handlers carry their owner inline via eventHookEntry /
 	// crudHandlerEntry; see those types above.
 	taskBackendOwners  map[string]string   // task backend name → plugin ID
+	providerOwners     map[string]string   // provider name → plugin ID (forward-compat; see providerUnregistrar)
 	configSchemaOwners map[string]struct{} // plugin IDs with a persisted config schema (clear on unload)
 	configs       map[string]*PluginConfig // per-plugin config, keyed by plugin ID
 	activePlugin  string                   // ID of the plugin currently being loaded
@@ -149,6 +150,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		services:           make(map[string]interface{}),
 		serviceOwners:      make(map[string]string),
 		taskBackendOwners:  make(map[string]string),
+		providerOwners:     make(map[string]string),
 		configSchemaOwners: make(map[string]struct{}),
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
@@ -184,6 +186,7 @@ func NewHostWithStore(store interface{}) *Host {
 		services:           make(map[string]interface{}),
 		serviceOwners:      make(map[string]string),
 		taskBackendOwners:  make(map[string]string),
+		providerOwners:     make(map[string]string),
 		configSchemaOwners: make(map[string]struct{}),
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
@@ -810,9 +813,10 @@ func (h *Host) recordConnectorSuccess(name string) {
 // The provider must implement the provider.Provider interface; the host
 // registers it with the provider registry via the "provider-registry" service.
 func (h *Host) RegisterProvider(name string, prov interface{}) error {
-	h.mu.RLock()
+	h.mu.Lock()
 	regSvc, exists := h.services["provider-registry"]
-	h.mu.RUnlock()
+	pluginID := h.activePlugin
+	h.mu.Unlock()
 
 	if !exists {
 		return fmt.Errorf("provider registry service not available")
@@ -827,8 +831,27 @@ func (h *Host) RegisterProvider(name string, prov interface{}) error {
 		return fmt.Errorf("provider registry does not support Register")
 	}
 	reg.Register(name, prov)
-	h.logger.Info("registered plugin provider", "name", name)
+
+	// Track ownership so UnloadPlugin can sweep this provider when the
+	// registry grows an Unregister surface (providerUnregistrar). Only
+	// tag plugin-registered providers; core/boot-time calls with empty
+	// activePlugin are treated as permanent.
+	if pluginID != "" {
+		h.mu.Lock()
+		h.providerOwners[name] = pluginID
+		h.mu.Unlock()
+	}
+	h.logger.Info("registered plugin provider", "name", name, "plugin", pluginID)
 	return nil
+}
+
+// providerUnregistrar is satisfied by future go-providers releases that add
+// Unregister(name) bool to the provider registry. Until then, UnloadPlugin's
+// provider sweep clears only the host-side owner map and logs a warning; once
+// the go.mod bump lands, the type assertion succeeds and real removal happens
+// with no other nanite code change.
+type providerUnregistrar interface {
+	Unregister(name string) bool
 }
 
 // RegisterCLIAdapter registers a runtime CLI adapter from a plugin.
@@ -1224,12 +1247,12 @@ func (h *Host) UnloadPlugin(id string) error {
 	h.mu.Lock()
 	delete(h.plugins, id)
 
-	// B.6b full hot-unload sweep — 15 of 15 categories (providers still
-	// blocked: see note below). Categories landed in B.6a retained; new in
-	// B.6b are commands, task backends, config schemas, event hooks,
-	// CRUD handlers. Providers remain uncovered — external go-providers
-	// (v0.0.1) has no Unregister surface; see docs/architecture for the
-	// module release needed to close that gap.
+	// B.6 full hot-unload sweep — 16 of 16 categories. Categories landed in
+	// B.6a retained; B.6b added commands, task backends, config schemas,
+	// event hooks, CRUD handlers. B.6 final adds providers via forward-
+	// compatible providerUnregistrar adapter: host-side owner map always
+	// cleared; upstream registry cleanup engages automatically once
+	// go-providers ships Unregister (see providerUnregistrar above).
 	var envelopeTypesToUnregister []string
 	var taskBackendsToUnregister []string
 	var clearSchemaPluginID string
@@ -1404,15 +1427,42 @@ func (h *Host) UnloadPlugin(id string) error {
 	taskSvc, _ := h.services["tasks"].(taskBackendRegistrar)
 	storeRef := h.store
 
-	// 14. Providers — BLOCKER (B.6b). The external provider registry
-	// (hollis-labs/go-providers@v0.0.1) has no Unregister method, and
-	// nanite consumes it without a local replace directive. Hot-unload of
-	// providers therefore requires a go-providers release adding
-	// Registry.Unregister (and a side map tracking plugin ownership there
-	// or here). Intentionally omitted rather than faking it — see
-	// docs/architecture/plugin-audit-2026-04-10.md.
+	// 14. Providers — forward-compatible sweep. Host-side providerOwners is
+	// always cleared. Upstream registry removal only happens when the
+	// registry satisfies providerUnregistrar (a future go-providers release
+	// adding Unregister). Until that ships, we warn once per unload if the
+	// plugin had providers registered: they'll leak in the registry until
+	// restart, but the host-side map stays consistent. When go-providers
+	// grows Unregister and nanite bumps the module, this branch activates
+	// with no additional code change.
+	ownedProviders := make([]string, 0)
+	for name, owner := range h.providerOwners {
+		if owner != id {
+			continue
+		}
+		delete(h.providerOwners, name)
+		ownedProviders = append(ownedProviders, name)
+	}
+	providerRegSvc := h.services["provider-registry"]
 
 	h.mu.Unlock()
+
+	if len(ownedProviders) > 0 {
+		removed := 0
+		if un, ok := providerRegSvc.(providerUnregistrar); ok {
+			for _, name := range ownedProviders {
+				if un.Unregister(name) {
+					removed++
+				}
+			}
+		}
+		if removed > 0 {
+			slog.Debug("plugin unload: removed providers", "plugin", id, "count", removed)
+		} else {
+			slog.Warn("plugin unload: provider registry lacks Unregister; providers leak until restart",
+				"plugin", id, "providers", ownedProviders)
+		}
+	}
 
 	// Drop envelope types from chat validation registry OUTSIDE h.mu —
 	// unregisterEnvelopeType takes the chat package lock and there's no need

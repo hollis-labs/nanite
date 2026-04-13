@@ -124,13 +124,17 @@ func (s *stubTaskService) UnregisterBackend(name string) bool {
 // across every B.6 hot-unload category that can be swept, unloads the plugin,
 // and asserts each registry shows zero entries for the unloaded plugin.
 //
-// Categories covered (14): envelopes, components, slots, keybindings, filters,
+// Categories covered (16): envelopes, components, slots, keybindings, filters,
 // connectors, services, CLI adapters, MCP servers, HTTP routes, commands,
-// task backends, config schemas, event hooks. Plus CRUD handlers (15).
+// task backends, config schemas, event hooks, CRUD handlers, providers.
 //
-// Providers are intentionally NOT exercised — the external go-providers
-// v0.0.1 module has no Unregister surface, so hot-unload cannot sweep them
-// without a module release. See UnloadPlugin's sweep comment and B.6b notes.
+// Providers are exercised via a stub provider-registry service. Host-side
+// providerOwners is always cleared on unload. Asymmetry note: we do NOT
+// assert the upstream registry has been emptied — the stub here implements
+// providerUnregistrar so it would pass, but go-providers@v0.0.1 in
+// production does not. When the go-providers Unregister release is pulled
+// in via go.mod bump, tighten this test to also assert registry-level
+// removal on the real registry.
 func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	mux := http.NewServeMux()
 	host := NewHost(mux, NewLogger("unload-full-teardown"))
@@ -142,6 +146,11 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 
 	cmds := newStubCommandRegistrar()
 	host.SetCommandRegistry(cmds)
+
+	providers := newStubProviderRegistry()
+	// Register pre-plugin (activePlugin empty) so it survives the sweep as a
+	// core service. Plugin-registered providers get tracked in providerOwners.
+	host.RegisterService("provider-registry", providers)
 
 	tasks := newStubTaskService()
 	// Register as "tasks" service at core scope (pre-plugin) so it survives
@@ -252,6 +261,11 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	hook := &stubEventHook{types: []string{"alpha.ping"}}
 	if err := host.RegisterEventHook([]string{"alpha.ping"}, hook); err != nil {
 		t.Fatalf("RegisterEventHook: %v", err)
+	}
+
+	// 16. Provider (forward-compatible sweep — host-side owner map + adapter).
+	if err := host.RegisterProvider("alpha-provider", struct{}{}); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
 	}
 
 	// Commit the plugin so UnloadPlugin finds it.
@@ -373,6 +387,17 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	if hooks := host.eventHooks["alpha.ping"]; len(hooks) > 0 {
 		t.Errorf("event hook survived unload: %d entries", len(hooks))
 	}
+	// 16. Provider — host-side owner map always cleared. Registry-level
+	// removal is asserted here only because the stub satisfies
+	// providerUnregistrar; the real go-providers@v0.0.1 registry does not,
+	// and tightening this to unconditionally assert providers.providers
+	// emptiness will come with the go.mod bump that pulls in Unregister.
+	if _, ok := host.providerOwners["alpha-provider"]; ok {
+		t.Error("provider owner entry survived unload")
+	}
+	if _, ok := providers.providers["alpha-provider"]; ok {
+		t.Error("provider survived unload (stub satisfies providerUnregistrar)")
+	}
 
 	// The core mux still has the forwarder; it now returns 404.
 	req := httptest.NewRequest(http.MethodGet, "/api/plugins/alpha/ping", nil)
@@ -389,6 +414,31 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	if rr2.Code != http.StatusNotFound {
 		t.Errorf("post-unload crud list: status=%d want 404", rr2.Code)
 	}
+}
+
+// stubProviderRegistry implements the "provider-registry" service contract
+// used by Host.RegisterProvider (Register) plus the forward-compat
+// providerUnregistrar (Unregister). Registering it ahead of the go-providers
+// SDK release lets the sweep test exercise both the host-side owner map
+// clear and the interface-adapter branch of UnloadPlugin.
+type stubProviderRegistry struct {
+	providers map[string]interface{}
+}
+
+func newStubProviderRegistry() *stubProviderRegistry {
+	return &stubProviderRegistry{providers: make(map[string]interface{})}
+}
+
+func (s *stubProviderRegistry) Register(name string, p interface{}) {
+	s.providers[name] = p
+}
+
+func (s *stubProviderRegistry) Unregister(name string) bool {
+	if _, ok := s.providers[name]; !ok {
+		return false
+	}
+	delete(s.providers, name)
+	return true
 }
 
 // dummyTaskBackend is a zero-method placeholder. The stubTaskService doesn't

@@ -29,18 +29,23 @@ const SPECIFIER_BY_ENTRY: Record<string, string> = Object.fromEntries(
 function hostImportmapPlugin(): Plugin {
   const require = createRequire(import.meta.url)
   const shimsFileName = 'assets/es-module-shims.js'
+  let isBuild = false
 
   return {
     name: 'nanite-host-importmap',
     enforce: 'post',
-    apply: 'build',
+
+    configResolved(config) {
+      isBuild = config.command === 'build'
+    },
 
     buildStart: {
       order: 'pre',
       handler() {
-        // Emit es-module-shims as a static asset with a fixed name so the
-        // built site is self-contained (no CDN dependency) and so
-        // transformIndexHtml can reference it by path.
+        // Only emit the shim as an asset during production builds. In dev,
+        // native importmaps are injected via transformIndexHtml and Vite's
+        // dev server serves _host/*.ts directly — no shim needed.
+        if (!isBuild) return
         const shimsSource = readFileSync(require.resolve('es-module-shims'), 'utf-8')
         // biome-ignore lint/suspicious/noExplicitAny: Vite 7's plugin `this` type omits emitFile; Rollup's PluginContext provides it at runtime.
         ;(this as any).emitFile({
@@ -73,8 +78,10 @@ function hostImportmapPlugin(): Plugin {
           if (spec) imports[spec] = `/${fileName}`
         }
 
+        // `src` without `async` so the shim runs before any module script
+        // that depends on importmap resolution in browsers that need it.
         const tags = [
-          `<script async src="/${shimsFileName}"></script>`,
+          `<script src="/${shimsFileName}"></script>`,
           `<script type="importmap">${JSON.stringify({ imports })}</script>`,
         ].join('\n    ')
 

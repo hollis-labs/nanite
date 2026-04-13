@@ -81,6 +81,16 @@ const envelopeTypeToPluginId = new Map<string, string>()
 const loadErrors = new Map<string, string>()
 
 /**
+ * The registry-declared bundle URL we currently want loaded per plugin,
+ * keyed by plugin id and storing the post-cache-bust "effective" URL.
+ * Updated synchronously at the start of each syncPluginRegistry call;
+ * in-flight loads check this before committing so a load that started
+ * under an older registry view cannot re-register a plugin the latest
+ * view has dropped or moved.
+ */
+const desiredBundles = new Map<string, string>()
+
+/**
  * Tracks what each loaded plugin bundle has registered so `unloadPlugin` can
  * remove exactly those entries without scanning the whole registry, and so
  * `syncPluginRegistry` can skip plugins whose bundle URL is unchanged.
@@ -143,9 +153,11 @@ export function getPluginLoadError(pluginId: string): string | undefined {
   return loadErrors.get(pluginId)
 }
 
-/** Snapshot of all current plugin load errors. Stable key order. */
+/** Snapshot of all current plugin load errors, sorted by plugin id. */
 export function getPluginLoadErrors(): Array<{ pluginId: string; reason: string }> {
-  return Array.from(loadErrors, ([pluginId, reason]) => ({ pluginId, reason }))
+  return Array.from(loadErrors, ([pluginId, reason]) => ({ pluginId, reason })).sort(
+    (a, b) => a.pluginId.localeCompare(b.pluginId),
+  )
 }
 
 /** Clear all dynamic entries (used when toggling recover mode). */
@@ -158,9 +170,35 @@ export function clearDynamicRegistry() {
   dynamicSlotComponents.clear()
   envelopeTypeToPluginId.clear()
   loadErrors.clear()
+  desiredBundles.clear()
   loadedBundles.clear()
   inflight.clear()
   notify()
+}
+
+/**
+ * Build the effective import URL for a plugin bundle. When the registry
+ * carries a `bundle_hash`, append it as a query param so URL-keyed ESM
+ * module caches pick up re-installs/updates that keep the same canonical
+ * path (e.g. `/api/plugins/{id}/ui/dist/index.js`). When no hash is
+ * available yet, fall back to the raw URL — reinstalls at the same path
+ * will continue to be cached until the hash is populated.
+ */
+function effectiveBundleUrl(plugin: PluginRegistryPlugin): string {
+  const url = plugin.bundle_url ?? ''
+  if (!url || !plugin.bundle_hash) return url
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}v=${encodeURIComponent(plugin.bundle_hash)}`
+}
+
+/**
+ * React accepts more than plain functions as valid element types —
+ * React.memo and React.forwardRef both return objects. Accept anything
+ * truthy and either callable or an object; the renderer (Suspense + error
+ * boundary) will surface a sensible error if the export is still invalid.
+ */
+function isComponentLike(value: unknown): boolean {
+  return typeof value === 'function' || (typeof value === 'object' && value !== null)
 }
 
 // --- Public: sync entry point ---
@@ -187,21 +225,28 @@ export async function syncPluginRegistry(data: PluginRegistryResponse): Promise<
     envelopeTypeToPluginId.set(type, env.plugin_id)
   }
 
+  // Snapshot the desired (pluginId → effective URL) view synchronously
+  // before any awaits. In-flight loads validate against this map before
+  // committing so a newer sync that drops or re-URLs a plugin wins over
+  // older loads whose imports resolve out of order.
+  desiredBundles.clear()
   const desired = new Set<string>()
   const loads: Array<Promise<void>> = []
 
   for (const [pluginId, plugin] of Object.entries(data.plugins)) {
     if (!plugin.bundle_url) continue
+    const effectiveUrl = effectiveBundleUrl(plugin)
     desired.add(pluginId)
+    desiredBundles.set(pluginId, effectiveUrl)
+
     const current = loadedBundles.get(pluginId)
-    if (current && current.bundleUrl === plugin.bundle_url) {
+    if (current && current.bundleUrl === effectiveUrl) {
       // Already loaded at this URL — stylesheet + registrations still valid.
-      // Update stylesheet element reference in case the caller cleared DOM.
       ensureStylesheet(pluginId, plugin.stylesheet_url, current)
       continue
     }
     if (current) unloadPlugin(pluginId)
-    loads.push(loadPluginBundle(pluginId, plugin, data))
+    loads.push(loadPluginBundle(pluginId, plugin, effectiveUrl, data))
   }
 
   // Unload plugins that vanished from the registry.
@@ -227,28 +272,46 @@ function wrapComponent(comp: AnyComponent): LazyComponent {
 function loadPluginBundle(
   pluginId: string,
   plugin: PluginRegistryPlugin,
+  effectiveUrl: string,
   data: PluginRegistryResponse,
 ): Promise<void> {
-  const existing = inflight.get(pluginId)
-  if (existing) return existing
+  if (!effectiveUrl) return Promise.resolve()
 
-  const bundleUrl = plugin.bundle_url
-  if (!bundleUrl) return Promise.resolve()
+  // Key inflight entries on (pluginId, effectiveUrl) so a later sync that
+  // retargets the same plugin to a different URL starts a new import
+  // instead of adopting the old in-flight promise.
+  const inflightKey = `${pluginId}::${effectiveUrl}`
+  const existing = inflight.get(inflightKey)
+  if (existing) return existing
 
   const promise = (async () => {
     // biome-ignore lint/suspicious/noExplicitAny: plugin module shape is dynamic
     let mod: Record<string, any>
     try {
-      mod = (await import(/* @vite-ignore */ bundleUrl)) as Record<string, any>
+      mod = (await import(/* @vite-ignore */ effectiveUrl)) as Record<string, any>
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err)
-      console.error(`[plugin-loader] Failed to import bundle for "${pluginId}" from ${bundleUrl}:`, err)
-      loadErrors.set(pluginId, reason)
+      // Only record the error if this load is still wanted. A load that
+      // raced against an unload/retarget should not poison the error state
+      // for the newer desired bundle.
+      if (desiredBundles.get(pluginId) === effectiveUrl) {
+        const reason = err instanceof Error ? err.message : String(err)
+        console.error(
+          `[plugin-loader] Failed to import bundle for "${pluginId}" from ${effectiveUrl}:`,
+          err,
+        )
+        loadErrors.set(pluginId, reason)
+      }
       throw err
     }
 
+    // The registry may have moved on while we awaited. Drop the load if
+    // this plugin is no longer desired at this URL.
+    if (desiredBundles.get(pluginId) !== effectiveUrl) {
+      return
+    }
+
     const bundle: LoadedBundle = {
-      bundleUrl,
+      bundleUrl: effectiveUrl,
       ...(plugin.stylesheet_url ? { stylesheetUrl: plugin.stylesheet_url } : {}),
       envelopeTypes: new Set(),
       widgetIds: new Set(),
@@ -259,7 +322,7 @@ function loadPluginBundle(
     for (const [type, env] of Object.entries(data.envelopes)) {
       if (env.plugin_id !== pluginId) continue
       const comp = mod[env.component]
-      if (typeof comp !== 'function') {
+      if (!isComponentLike(comp)) {
         console.warn(
           `[plugin-loader] Plugin "${pluginId}" bundle is missing named export "${env.component}" for envelope "${type}" — skipping`,
         )
@@ -269,15 +332,15 @@ function loadPluginBundle(
       bundle.envelopeTypes.add(type)
     }
 
-    // Widgets for this plugin.
+    // Widgets for this plugin. The registry carries only `name` (the
+    // widget ID), which is assumed to match a JS export on the bundle.
+    // This asymmetry with envelopes is tracked: the registry should
+    // eventually carry an explicit `export` field so IDs can contain
+    // hyphens without breaking lookup.
     for (const [id, widget] of Object.entries(data.widgets)) {
       if (widget.plugin_id !== pluginId) continue
-      // Widget registry entry doesn't carry a `component` field — it's the
-      // generated frontend registry that maps widget ID → component. For
-      // runtime-registered widgets, the bundle must export a named function
-      // matching the widget's `name` (spec: widget name is the export name).
       const comp = mod[widget.name]
-      if (typeof comp !== 'function') {
+      if (!isComponentLike(comp)) {
         console.warn(
           `[plugin-loader] Plugin "${pluginId}" bundle is missing named export "${widget.name}" for widget "${id}" — skipping`,
         )
@@ -293,7 +356,7 @@ function loadPluginBundle(
         if (entry.plugin_id !== pluginId) continue
         if (!entry.component) continue
         const comp = mod[entry.component]
-        if (typeof comp !== 'function') {
+        if (!isComponentLike(comp)) {
           console.warn(
             `[plugin-loader] Plugin "${pluginId}" bundle is missing named export "${entry.component}" for slot entry "${entry.id}" — skipping`,
           )
@@ -313,9 +376,9 @@ function loadPluginBundle(
   })()
 
   const tracked = promise.finally(() => {
-    inflight.delete(pluginId)
+    if (inflight.get(inflightKey) === tracked) inflight.delete(inflightKey)
   })
-  inflight.set(pluginId, tracked)
+  inflight.set(inflightKey, tracked)
   return tracked
 }
 
@@ -343,7 +406,10 @@ function injectStylesheet(pluginId: string, url: string): HTMLLinkElement {
   const selector = `link[data-plugin="${cssEscape(pluginId)}"]`
   const existing = document.head.querySelector<HTMLLinkElement>(selector)
   if (existing) {
-    if (existing.href !== url) existing.href = url
+    // Compare the attribute directly — `existing.href` is a resolved
+    // absolute URL, so `existing.href !== url` would always fire for the
+    // relative paths we get from the registry.
+    if (existing.getAttribute('href') !== url) existing.href = url
     return existing
   }
   const link = document.createElement('link')

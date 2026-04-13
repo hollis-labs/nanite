@@ -63,8 +63,8 @@ github.com/hollis-labs/go-otel v0.0.2 h1:Pg0IJtRfC/QdXSeZwHpe5pDQy/dnbx49XR5BgJz
 github.com/hollis-labs/go-otel v0.0.2/go.mod h1:E9MbBfbyc+TfJGsaweDIZ8mFq50oTKLONpGbAcaWIQY=
 github.com/hollis-labs/go-plugin v0.0.1 h1:GiM8dM9bQd3yMIhGCBqeIiBh+Ub5fOZ2CLL/g54g/vs=
 github.com/hollis-labs/go-plugin v0.0.1/go.mod h1:5R+2ByUb3ClsYjMj+vmySgAefWAkHxqBJyr159agtHM=
-github.com/hollis-labs/go-providers v0.0.1 h1:Uls/SshYWdH3FM5m9k+uwHKb79erX3mFyiPMFTmuTTc=
-github.com/hollis-labs/go-providers v0.0.1/go.mod h1:0kXt+hcwipHJrzXOvAyKPO6fjp4aHQZexcIYIj5YpvI=
+github.com/hollis-labs/go-providers v0.1.0 h1:1Dxcn9R3CAX6I/Cd6Ffk2GmRY9hH1efQg/hFw+Zq4Mg=
+github.com/hollis-labs/go-providers v0.1.0/go.mod h1:0kXt+hcwipHJrzXOvAyKPO6fjp4aHQZexcIYIj5YpvI=
 github.com/hollis-labs/go-queue v0.1.2 h1:FT0te+K0gLM3wvhnZc+nGBIcSW5ebgkhPw4ja/bJl68=
 github.com/hollis-labs/go-queue v0.1.2/go.mod h1:wAP95gDz9kxAhcCWaR4e07Jz54OvFpiNEq+5ERgt2/E=
 github.com/hollis-labs/go-toolbroker v0.0.2 h1:ZLRw8XJiAy5AOCASESfIcNJSAHh8jeX/FqxKLa67/l0=

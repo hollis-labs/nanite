@@ -128,13 +128,10 @@ func (s *stubTaskService) UnregisterBackend(name string) bool {
 // connectors, services, CLI adapters, MCP servers, HTTP routes, commands,
 // task backends, config schemas, event hooks, CRUD handlers, providers.
 //
-// Providers are exercised via a stub provider-registry service. Host-side
-// providerOwners is always cleared on unload. Asymmetry note: we do NOT
-// assert the upstream registry has been emptied — the stub here implements
-// providerUnregistrar so it would pass, but go-providers@v0.0.1 in
-// production does not. When the go-providers Unregister release is pulled
-// in via go.mod bump, tighten this test to also assert registry-level
-// removal on the real registry.
+// Providers are exercised via a stub provider-registry service that
+// implements the same Register/Unregister contract go-providers v0.1.0+
+// exposes. Host-side providerOwners and registry entries are both asserted
+// empty after unload.
 func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	mux := http.NewServeMux()
 	host := NewHost(mux, NewLogger("unload-full-teardown"))
@@ -387,16 +384,12 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	if hooks := host.eventHooks["alpha.ping"]; len(hooks) > 0 {
 		t.Errorf("event hook survived unload: %d entries", len(hooks))
 	}
-	// 16. Provider — host-side owner map always cleared. Registry-level
-	// removal is asserted here only because the stub satisfies
-	// providerUnregistrar; the real go-providers@v0.0.1 registry does not,
-	// and tightening this to unconditionally assert providers.providers
-	// emptiness will come with the go.mod bump that pulls in Unregister.
+	// 16. Provider — host-side owner map and registry entry both cleared.
 	if _, ok := host.providerOwners["alpha-provider"]; ok {
 		t.Error("provider owner entry survived unload")
 	}
 	if _, ok := providers.providers["alpha-provider"]; ok {
-		t.Error("provider survived unload (stub satisfies providerUnregistrar)")
+		t.Error("provider survived unload")
 	}
 
 	// The core mux still has the forwarder; it now returns 404.
@@ -417,10 +410,11 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 }
 
 // stubProviderRegistry implements the "provider-registry" service contract
-// used by Host.RegisterProvider (Register) plus the forward-compat
-// providerUnregistrar (Unregister). Registering it ahead of the go-providers
-// SDK release lets the sweep test exercise both the host-side owner map
-// clear and the interface-adapter branch of UnloadPlugin.
+// used by Host.RegisterProvider (Register) plus providerUnregistrar
+// (Unregister), mirroring go-providers v0.1.0+ *provider.Registry. Using a
+// stub keeps this unit test isolated from the real registry while still
+// exercising both the host-side owner map clear and the unregister branch
+// of UnloadPlugin.
 type stubProviderRegistry struct {
 	providers map[string]interface{}
 }

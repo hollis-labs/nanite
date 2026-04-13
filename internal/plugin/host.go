@@ -840,10 +840,9 @@ func (h *Host) RegisterProvider(name string, prov interface{}) error {
 	}
 	reg.Register(name, prov)
 
-	// Track ownership so UnloadPlugin can sweep this provider when the
-	// registry grows an Unregister surface (providerUnregistrar). Only
-	// tag plugin-registered providers; core/boot-time calls with empty
-	// activePlugin are treated as permanent.
+	// Track ownership so UnloadPlugin can sweep this provider via the
+	// providerUnregistrar adapter. Only tag plugin-registered providers;
+	// core/boot-time calls with empty activePlugin are treated as permanent.
 	if pluginID != "" {
 		h.mu.Lock()
 		h.providerOwners[name] = pluginID
@@ -853,11 +852,13 @@ func (h *Host) RegisterProvider(name string, prov interface{}) error {
 	return nil
 }
 
-// providerUnregistrar is satisfied by future go-providers releases that add
-// Unregister(name) bool to the provider registry. Until then, UnloadPlugin's
-// provider sweep clears only the host-side owner map and logs a warning; once
-// the go.mod bump lands, the type assertion succeeds and real removal happens
-// with no other nanite code change.
+// providerUnregistrar is the minimal contract UnloadPlugin needs to remove
+// a plugin-owned provider from the registry. go-providers v0.1.0+ satisfies
+// it via *provider.Registry.Unregister. The adapter is retained as a
+// permanent safety net — it keeps the sweep resilient against test fakes
+// and any alternate registry implementations that may be injected via
+// Host.services["provider-registry"]. If the assertion fails, the sweep
+// clears host-side ownership and warns rather than panicking.
 type providerUnregistrar interface {
 	Unregister(name string) bool
 }
@@ -1257,10 +1258,9 @@ func (h *Host) UnloadPlugin(id string) error {
 
 	// B.6 full hot-unload sweep — 16 of 16 categories. Categories landed in
 	// B.6a retained; B.6b added commands, task backends, config schemas,
-	// event hooks, CRUD handlers. B.6 final adds providers via forward-
-	// compatible providerUnregistrar adapter: host-side owner map always
-	// cleared; upstream registry cleanup engages automatically once
-	// go-providers ships Unregister (see providerUnregistrar above).
+	// event hooks, CRUD handlers. B.6 final adds providers via the
+	// providerUnregistrar adapter; with go-providers v0.1.0+ the real
+	// *provider.Registry satisfies it and upstream removal is active.
 	var envelopeTypesToUnregister []string
 	var taskBackendsToUnregister []string
 	var clearSchemaPluginID string
@@ -1435,14 +1435,12 @@ func (h *Host) UnloadPlugin(id string) error {
 	taskSvc, _ := h.services["tasks"].(taskBackendRegistrar)
 	storeRef := h.store
 
-	// 14. Providers — forward-compatible sweep. Host-side providerOwners is
-	// always cleared. Upstream registry removal only happens when the
-	// registry satisfies providerUnregistrar (a future go-providers release
-	// adding Unregister). Until that ships, we warn once per unload if the
-	// plugin had providers registered: they'll leak in the registry until
-	// restart, but the host-side map stays consistent. When go-providers
-	// grows Unregister and nanite bumps the module, this branch activates
-	// with no additional code change.
+	// 14. Providers — host-side providerOwners is always cleared. Upstream
+	// registry removal runs through the providerUnregistrar adapter;
+	// go-providers v0.1.0+ *provider.Registry satisfies it, so this is the
+	// production path. The adapter remains as a safety net: if an alternate
+	// registry impl is injected and lacks Unregister, we warn once per
+	// unload instead of panicking (owner map still stays consistent).
 	ownedProviders := make([]string, 0)
 	for name, owner := range h.providerOwners {
 		if owner != id {

@@ -1122,12 +1122,11 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 		return fmt.Errorf("failed to load plugin %q: %w", id, err)
 	}
 
-	// For subprocess plugins, register Nanite-specific capabilities
-	// (commands, slots, keybindings) that the subprocess can't register
-	// directly because it only sees the generic plugin.Host interface.
-	if sp, ok := p.(*subprocess.SubprocessPlugin); ok {
-		h.registerSubprocessExtensions(sp)
-	}
+	// Subprocess plugins no longer declare commands/slots/keybindings via
+	// LoadResult (Track B.10 — plugin-sdk v0.2.0). Those registrations are
+	// yaml-authoritative and are applied by applyManifestRegistrations from
+	// plugin.yaml. The old registerSubprocessExtensions helper that
+	// translated lr.Commands/Slots/Keybindings has been removed.
 
 	// Store the loaded plugin.
 	h.mu.Lock()
@@ -1146,72 +1145,6 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 		h.EmitPluginInstalled(id, pName, pVer)
 	})
 	return nil
-}
-
-// registerSubprocessExtensions registers Nanite-specific capabilities from a
-// subprocess plugin's manifest. The subprocess only sees plugin.Host (SDK) so
-// it can't call RegisterCommand/Slot/Keybinding directly. We translate its
-// wire types to our local types here.
-func (h *Host) registerSubprocessExtensions(sp *subprocess.SubprocessPlugin) {
-	lr := sp.Manifest()
-	if lr == nil {
-		return
-	}
-
-	for _, cmd := range lr.Commands {
-		var args []CommandArg
-		for _, a := range cmd.Args {
-			args = append(args, CommandArg{
-				Name:        a.Name,
-				Description: a.Description,
-				Required:    a.Required,
-				Type:        a.Type,
-				Options:     a.Options,
-			})
-		}
-		def := SlashCommandDef{
-			Name:        cmd.Name,
-			Description: cmd.Description,
-			Category:    cmd.Category,
-			Args:        args,
-			Permission:  cmd.Permission,
-			Handler:     sp.MakeCommandHandler(cmd.Name),
-		}
-		if err := h.RegisterCommand(def); err != nil {
-			h.logger.Warn("failed to register subprocess command", "name", cmd.Name, "error", err)
-		}
-	}
-
-	for _, slot := range lr.Slots {
-		entry := UISlotEntry{
-			ID:        slot.ID,
-			PluginID:  slot.PluginID,
-			Slot:      UISlotName(slot.Slot),
-			Label:     slot.Label,
-			Icon:      slot.Icon,
-			Priority:  slot.Priority,
-			Component: slot.Component,
-			Action:    slot.Action,
-			Props:     slot.Props,
-		}
-		if err := h.RegisterSlot(entry); err != nil {
-			h.logger.Warn("failed to register subprocess slot", "id", slot.ID, "error", err)
-		}
-	}
-
-	for _, kb := range lr.Keybindings {
-		def := KeybindingDef{
-			ID:          kb.ID,
-			Key:         kb.Key,
-			Action:      kb.Action,
-			ActionValue: kb.ActionValue,
-			Label:       kb.Label,
-			Description: kb.Description,
-		}
-		if err := h.RegisterKeybinding(def); err != nil {
-			h.logger.Warn("failed to register subprocess keybinding", "id", kb.ID, "error", err)
-		}
-	}
 }
 
 // UnloadPlugin unloads a plugin from the host.

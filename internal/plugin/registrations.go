@@ -1,8 +1,12 @@
 package plugin
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 
 	goplugin "github.com/hollis-labs/go-plugin"
@@ -292,8 +296,9 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		skipped += len(reg.Crud)
 	}
 	if len(reg.HttpRoutes) > 0 {
-		host.logger.Info("manifest http_routes: yaml-driven registration deferred to B.6 mutable-mux", "plugin", pluginID, "count", len(reg.HttpRoutes))
-		skipped += len(reg.HttpRoutes)
+		if err := registerManifestHTTPRoutes(host, pluginID, reg.HttpRoutes, p); err != nil {
+			return err
+		}
 	}
 	if len(reg.McpServers) > 0 {
 		if err := registerManifestMCPServers(host, pluginID, reg.McpServers, p); err != nil {
@@ -351,6 +356,107 @@ func registerManifestMCPServers(host *Host, pluginID string, entries []MCPServer
 		host.logger.Info("registered plugin mcp server", "plugin", pluginID, "server", entry.Name, "tools", len(entry.Tools))
 	}
 	return nil
+}
+
+// registerManifestHTTPRoutes wires each manifest http_routes entry into the
+// host's MutablePluginMux. For subprocess plugins each route becomes an
+// http.Handler that proxies the request over JSON-RPC via the plugin's
+// Transport using MethodHTTPHandle (B.10). Builtins that want to serve
+// plugin-owned HTTP routes call host.RegisterHTTPRoute directly from their
+// Load — this path only handles yaml-declared routes for subprocess plugins.
+func registerManifestHTTPRoutes(host *Host, pluginID string, entries []HTTPRouteRegistration, p goplugin.Plugin) error {
+	sp, isSubprocess := p.(*subprocess.SubprocessPlugin)
+	if !isSubprocess {
+		host.logger.Info("manifest http_routes: builtin plugin — skipping (builtins register HTTP routes directly)",
+			"plugin", pluginID, "count", len(entries))
+		return nil
+	}
+
+	transport := sp.Transport()
+	if transport == nil {
+		return fmt.Errorf("plugin %q: subprocess transport not ready for http_routes registration", pluginID)
+	}
+
+	for _, entry := range entries {
+		if entry.Pattern == "" {
+			return fmt.Errorf("plugin %q: http_routes entry missing pattern", pluginID)
+		}
+		handler := newSubprocessHTTPHandler(transport, entry.Handler)
+		pattern := entry.Pattern
+		if entry.Method != "" {
+			pattern = strings.ToUpper(entry.Method) + " " + entry.Pattern
+		}
+		host.RegisterHTTPHandler(pattern, handler)
+		host.logger.Info("registered plugin http route",
+			"plugin", pluginID, "pattern", pattern, "handler", entry.Handler)
+	}
+	return nil
+}
+
+// newSubprocessHTTPHandler builds an http.Handler that forwards the HTTP
+// request to a subprocess plugin via MethodHTTPHandle and writes the plugin's
+// HTTPResponse back to the ResponseWriter. Streaming is not supported on this
+// path (documented in plugin-sdk); plugins wanting streaming use SSE envelopes
+// via EventHandleResult. B.11 hardens policy (timeouts, body caps, header
+// allowlists); B.10 only lands the wire path.
+func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body []byte
+		if r.Body != nil {
+			b, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "read request body: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(b))
+			body = b
+		}
+
+		query := make(map[string]string, len(r.URL.Query()))
+		for k, vs := range r.URL.Query() {
+			if len(vs) > 0 {
+				query[k] = vs[0]
+			}
+		}
+		headers := make(map[string]string, len(r.Header))
+		for k, vs := range r.Header {
+			if len(vs) > 0 {
+				headers[k] = vs[0]
+			}
+		}
+
+		req := &subprocess.HTTPRequest{
+			Method:  r.Method,
+			Path:    r.URL.Path,
+			Query:   query,
+			Headers: headers,
+			Body:    body,
+		}
+		// Silence unused-import for handlerName routing — the plugin side
+		// dispatches on Method+Path today; handlerName is kept on the wire
+		// registration for future fan-out.
+		_ = handlerName
+
+		resp, err := subprocess.CallResult[subprocess.HTTPResponse](
+			transport, r.Context(), subprocess.MethodHTTPHandle, req,
+		)
+		if err != nil {
+			http.Error(w, "plugin http handler: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		for k, v := range resp.Headers {
+			w.Header().Set(k, v)
+		}
+		status := resp.Status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		w.WriteHeader(status)
+		if len(resp.Body) > 0 {
+			_, _ = w.Write(resp.Body)
+		}
+	})
 }
 
 func firstNonEmpty(vals ...string) string {

@@ -64,12 +64,22 @@ func (p *PluginMCPTransport) ListTools(ctx context.Context) ([]Tool, error) {
 }
 
 // CallTool proxies mcp/call_tool to the subprocess plugin.
+//
+// B.10: the method constant was renamed MethodCallTool → MethodMCPCallTool in
+// plugin-sdk v0.2.0 and the canonical wire types are now sdksub.MCPCallRequest
+// / sdksub.MCPCallResult. We keep the pluginCallToolParams shape here because
+// Nanite's plugin MCP servers are namespaced (multiple logical servers per
+// plugin transport) — the plugin dispatches on the Server field. The SDK's
+// MCPCallRequest is single-server; plugin-side routing is an upstream concern
+// if/when SDK adopts namespacing. For now we keep the local param shape and
+// decode into a compatible result (ToolResult covers the IsError/Content pair;
+// envelope propagation is a TODO tracked for B.12).
 func (p *PluginMCPTransport) CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolResult, error) {
 	if p.transport == nil {
 		return nil, fmt.Errorf("plugin mcp transport %q: nil subprocess transport", p.serverName)
 	}
 	result, err := subprocess.CallResult[ToolResult](
-		p.transport, ctx, sdksub.MethodCallTool, &pluginCallToolParams{
+		p.transport, ctx, sdksub.MethodMCPCallTool, &pluginCallToolParams{
 			Server:    p.serverName,
 			Tool:      name,
 			Arguments: arguments,
@@ -78,5 +88,9 @@ func (p *PluginMCPTransport) CallTool(ctx context.Context, name string, argument
 	if err != nil {
 		return nil, fmt.Errorf("mcp/call_tool %s on plugin server %q: %w", name, p.serverName, err)
 	}
+	// TODO(B.12): if the plugin returns structured envelopes on MCPCallResult,
+	// plumb them into the chat stream. Today ToolResult is decoded directly
+	// from the plugin's reply, which is IsError/Content-shaped; any envelopes
+	// field the plugin populates is dropped on the host side.
 	return result, nil
 }

@@ -115,13 +115,20 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 
 		if dp.IsSubprocess() {
 			// Subprocess plugin: create a SubprocessPlugin that bridges via JSON-RPC.
-			p, err = newSubprocessPluginFromManifest(dp)
+			sp, err := newSubprocessPluginFromManifest(dp)
 			if err != nil {
 				wrapped := fmt.Errorf("create subprocess plugin %s: %w", pluginID, err)
 				errs = append(errs, wrapped)
 				host.EmitPluginLoadFailed(pluginID, wrapped.Error())
 				continue
 			}
+			// Post-B.10 LoadResult no longer carries Dependencies; seed them
+			// from the yaml manifest so Plugin.Dependencies() reports the same
+			// list the topological-sort path used above.
+			if len(dp.Manifest.Dependencies) > 0 {
+				sp.SetDependencies(append([]string(nil), dp.Manifest.Dependencies...))
+			}
+			p = sp
 		} else {
 			// Builtin plugin: use the compiled-in constructor.
 			p = dp.Constructor()

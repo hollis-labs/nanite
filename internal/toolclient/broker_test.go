@@ -238,7 +238,9 @@ func newTestBrokerWithTools(tools []provider.ToolDefinition) *ToolClient {
 			InputSchema: t.InputSchema,
 		}
 	}
-	mgr.AddServer("test", &mockTransport{tools: mcpTools})
+	if err := mgr.AddServer("test", &mockTransport{tools: mcpTools}); err != nil {
+		panic(err)
+	}
 	_ = mgr.DiscoverTools(context.Background())
 
 	cfg := DefaultConfig()

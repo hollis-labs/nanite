@@ -35,6 +35,15 @@ type CommandRegistrar interface {
 	RegisterPluginCommand(cmd SlashCommandDef, source string)
 }
 
+// MCPRegistrar is the interface for registering MCP servers backed by a
+// subprocess plugin's JSON-RPC transport. Implemented by *mcp.Manager and
+// declared here so the plugin host can wire subprocess plugin MCP servers
+// during yaml-driven registration without importing internal/mcp (which
+// would create a cycle via internal/service/install).
+type MCPRegistrar interface {
+	AddPluginServer(name string, transport *subprocess.Transport) error
+}
+
 // pendingRoute is an HTTP route registration deferred until the router is available.
 type pendingRoute struct {
 	pattern string
@@ -65,6 +74,7 @@ type Host struct {
 	connectorOwners  map[string]string          // connector name → plugin ID
 	connectorHealth  map[string]*ConnectorStatus // connector name → health status
 	commands      CommandRegistrar // unified command registry (nil-safe)
+	mcpRegistrar  MCPRegistrar     // MCP server registrar (nil-safe; set via SetMCPRegistrar)
 	keybindings   map[string]KeybindingDef   // keybinding ID → definition
 	kbOwners      map[string]string                 // keybinding ID → plugin ID
 	slots         map[UISlotName][]UISlotEntry // slot name → entries, sorted by priority
@@ -720,6 +730,16 @@ func (h *Host) SetCommandRegistry(reg CommandRegistrar) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.commands = reg
+}
+
+// SetMCPRegistrar installs the MCP server registrar (typically *mcp.Manager)
+// so yaml-driven subprocess plugin MCP server registrations can reach it
+// during applyManifestRegistrations. Nil-safe: if never set, mcp_servers
+// entries in a subprocess plugin manifest are logged and skipped.
+func (h *Host) SetMCPRegistrar(reg MCPRegistrar) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.mcpRegistrar = reg
 }
 
 // RegisterCommand registers a slash command from a plugin into the unified

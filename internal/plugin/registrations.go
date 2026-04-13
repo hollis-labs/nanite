@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	goplugin "github.com/hollis-labs/go-plugin"
+
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
 
 // envelopeTypeRE mirrors the plugin.schema.v1 pattern for envelope types.
@@ -206,8 +208,9 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		skipped += len(reg.HttpRoutes)
 	}
 	if len(reg.McpServers) > 0 {
-		host.logger.Info("manifest mcp_servers: yaml-driven registration deferred to B.5 PluginMCPTransport", "plugin", pluginID, "count", len(reg.McpServers))
-		skipped += len(reg.McpServers)
+		if err := registerManifestMCPServers(host, pluginID, reg.McpServers, p); err != nil {
+			return err
+		}
 	}
 	if len(reg.AgentProfiles) > 0 {
 		host.logger.Info("manifest agent_profiles: yaml-driven registration deferred (follow-up B.4 task)", "plugin", pluginID, "count", len(reg.AgentProfiles))
@@ -215,6 +218,49 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 	}
 	if skipped > 0 {
 		host.logger.Info("manifest registrations applied (subset)", "plugin", pluginID, "deferred", skipped)
+	}
+	return nil
+}
+
+// registerManifestMCPServers wires each manifest mcp_servers entry into the
+// host's MCP manager via the MCPRegistrar interface. Only subprocess plugins
+// use this path — builtins that expose MCP servers register directly via
+// mcp.Manager.AddServer during their own Load().
+//
+// If the host has no MCPRegistrar installed (e.g. CLI-only host, tests) or
+// the plugin is a builtin, entries are logged and skipped rather than
+// erroring — the manifest is declarative, and a builtin may register its MCP
+// server through a different path.
+func registerManifestMCPServers(host *Host, pluginID string, entries []MCPServerRegistration, p goplugin.Plugin) error {
+	sp, isSubprocess := p.(*subprocess.SubprocessPlugin)
+	if !isSubprocess {
+		host.logger.Info("manifest mcp_servers: builtin plugin — skipping (builtins register MCP servers directly)",
+			"plugin", pluginID, "count", len(entries))
+		return nil
+	}
+
+	host.mu.RLock()
+	reg := host.mcpRegistrar
+	host.mu.RUnlock()
+	if reg == nil {
+		host.logger.Warn("manifest mcp_servers: host has no MCPRegistrar installed — skipping",
+			"plugin", pluginID, "count", len(entries))
+		return nil
+	}
+
+	transport := sp.Transport()
+	if transport == nil {
+		return fmt.Errorf("plugin %q: subprocess transport not ready for mcp_servers registration", pluginID)
+	}
+
+	for _, entry := range entries {
+		if entry.Name == "" {
+			return fmt.Errorf("plugin %q: mcp_servers entry missing name", pluginID)
+		}
+		if err := reg.AddPluginServer(entry.Name, transport); err != nil {
+			return fmt.Errorf("plugin %q: register mcp server %q: %w", pluginID, entry.Name, err)
+		}
+		host.logger.Info("registered plugin mcp server", "plugin", pluginID, "server", entry.Name, "tools", len(entry.Tools))
 	}
 	return nil
 }

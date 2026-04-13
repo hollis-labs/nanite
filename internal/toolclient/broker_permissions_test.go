@@ -91,9 +91,11 @@ func TestCallTool_FallbackPath_StructuredErrorShape(t *testing.T) {
 	// not execute. This guards against regressions where the resolved-name
 	// check might be skipped.
 	mgr := mcp.NewManager()
-	mgr.AddServer("test", &mockTransport{tools: []mcp.Tool{
+	if err := mgr.AddServer("test", &mockTransport{tools: []mcp.Tool{
 		{Name: "hello", Description: "Hello tool"},
-	}})
+	}}); err != nil {
+		t.Fatalf("AddServer: %v", err)
+	}
 	_ = mgr.DiscoverTools(context.Background())
 
 	tb := New(mgr, nil, DefaultConfig())
@@ -245,9 +247,11 @@ func TestArgsContainEscalationPattern(t *testing.T) {
 
 func TestCallToolWithPolicyCheck_RejectsTraversal(t *testing.T) {
 	mgr := mcp.NewManager()
-	mgr.AddServer("test", &mockTransport{tools: []mcp.Tool{
+	if err := mgr.AddServer("test", &mockTransport{tools: []mcp.Tool{
 		{Name: "dev_read", Description: "Read files"},
-	}})
+	}}); err != nil {
+		t.Fatalf("AddServer: %v", err)
+	}
 	_ = mgr.DiscoverTools(context.Background())
 
 	tb := New(mgr, nil, DefaultConfig())

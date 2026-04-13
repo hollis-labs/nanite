@@ -126,6 +126,18 @@ type Host struct {
 	filters       *FilterRegistry    // named filter chains
 	eventSubs     []chan plugin.Event // SSE subscribers for event streaming
 	envelopes     map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
+	// manifests holds the parsed plugin.yaml for each loaded plugin, keyed by
+	// plugin ID. Populated by applyManifestRegistrations and cleared by
+	// UnloadPlugin. Consumed by the B.7 /api/plugins/registry endpoint to
+	// surface ui.bundle_dir / ui.stylesheet / ui.react_version without
+	// re-reading plugin.yaml off disk.
+	manifests map[string]*PluginManifest
+	// registryVersion increments on every event that changes what GET
+	// /api/plugins/registry would return (plugin load, unload, manifest
+	// record). Consumers (e.g. the B.7 handler cache) read RegistryVersion()
+	// and invalidate when the counter changes. B.8 will additionally bump this
+	// from lifecycle event emitters; for B.7 the load/unload paths are enough.
+	registryVersion uint64
 	logger        plugin.Logger
 	ctx           context.Context
 	ctxCancel     context.CancelFunc
@@ -153,6 +165,7 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		configSchemaOwners: make(map[string]struct{}),
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
+		manifests:          make(map[string]*PluginManifest),
 		router:             router,
 		pluginMux:          NewMutablePluginMux(),
 		routePatterns:      make(map[string]bool),
@@ -189,6 +202,7 @@ func NewHostWithStore(store interface{}) *Host {
 		configSchemaOwners: make(map[string]struct{}),
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
+		manifests:          make(map[string]*PluginManifest),
 		router:             http.NewServeMux(),
 		pluginMux:          NewMutablePluginMux(),
 		routePatterns:      make(map[string]bool),
@@ -1255,6 +1269,10 @@ func (h *Host) UnloadPlugin(id string) error {
 	// Re-acquire to mutate host state.
 	h.mu.Lock()
 	delete(h.plugins, id)
+	// B.7 registry side-map sweep + version bump so GET /api/plugins/registry
+	// cache invalidates as soon as the plugin's manifest goes away.
+	delete(h.manifests, id)
+	h.registryVersion++
 
 	// B.6 full hot-unload sweep — 16 of 16 categories. Categories landed in
 	// B.6a retained; B.6b added commands, task backends, config schemas,

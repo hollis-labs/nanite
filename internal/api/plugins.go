@@ -95,6 +95,11 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 		http.ServeFile(w, r, target)
 	})
 	mux.HandleFunc("POST /api/plugins/enable", pms.handleEnable)
+
+	// B.7 consolidated registry endpoint. Separate file (plugins_registry.go)
+	// keeps the envelope/slot/component/widget aggregation logic isolated from
+	// the install/uninstall lifecycle handlers above.
+	registerPluginsRegistryRoute(mux, host, pluginsDir)
 }
 
 func (pms *pluginManagerState) jsonResp(w http.ResponseWriter, status int, data any) {

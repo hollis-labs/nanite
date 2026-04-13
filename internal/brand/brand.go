@@ -3,6 +3,12 @@
 // module path in go.mod and the cmd/ directory name, which are structural).
 package brand
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
 const (
 	// Name is the human-readable display name used in UI, logs, and docs.
 	Name = "Nanite"
@@ -38,4 +44,40 @@ const (
 // Example: brand.Env("AUTH_USER") → "NANITE_AUTH_USER"
 func Env(suffix string) string {
 	return EnvPrefix + suffix
+}
+
+// UserHomeDir returns the canonical per-user brand directory (e.g.
+// ~/.nanite). The directory is not created — callers that need the path
+// to exist should os.MkdirAll it with the permissions appropriate to
+// their use case.
+func UserHomeDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("brand: resolve user home: %w", err)
+	}
+	return filepath.Join(home, "."+ID), nil
+}
+
+// PluginDataDir returns the absolute, persistent per-plugin data root
+// under the user's brand directory (e.g. ~/.nanite/plugin-data/<id>).
+// The directory is not created by this call; subprocess init code
+// os.MkdirAll's it before sending the path to a plugin.
+func PluginDataDir(pluginID string) (string, error) {
+	base, err := UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "plugin-data", pluginID), nil
+}
+
+// PluginCacheDir returns the absolute, ephemeral per-plugin cache root
+// under the user's brand directory (e.g. ~/.nanite/plugin-cache/<id>).
+// The directory is not created by this call; subprocess init code
+// os.MkdirAll's it before sending the path to a plugin.
+func PluginCacheDir(pluginID string) (string, error) {
+	base, err := UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "plugin-cache", pluginID), nil
 }

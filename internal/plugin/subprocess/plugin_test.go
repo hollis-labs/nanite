@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -414,5 +416,83 @@ func TestRingBuffer(t *testing.T) {
 	s := rb.String()
 	if len(s) != 8 {
 		t.Errorf("expected length 8, got %d: %q", len(s), s)
+	}
+}
+
+// TestBuildInitParams verifies that the host-side InitParams assembly
+// populates the v0.1.2 DataDir/CacheDir/LogLevel fields with absolute
+// paths rooted under the user's brand directory and creates those
+// directories on disk. HOME is redirected to a t.TempDir to keep the
+// test hermetic.
+func TestBuildInitParams(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	cfg := map[string]string{"k": "v"}
+	ip, err := buildInitParams("/plugins/example", "example", cfg)
+	if err != nil {
+		t.Fatalf("buildInitParams: %v", err)
+	}
+
+	if ip.PluginDir != "/plugins/example" {
+		t.Errorf("PluginDir = %q, want /plugins/example", ip.PluginDir)
+	}
+	if ip.DataDir == "" {
+		t.Fatal("DataDir unset")
+	}
+	if ip.CacheDir == "" {
+		t.Fatal("CacheDir unset")
+	}
+	if ip.LogLevel == "" {
+		t.Fatal("LogLevel unset")
+	}
+	switch ip.LogLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		t.Errorf("LogLevel = %q, want one of debug/info/warn/error", ip.LogLevel)
+	}
+	wantData := filepath.Join(tmpHome, ".nanite", "plugin-data", "example")
+	wantCache := filepath.Join(tmpHome, ".nanite", "plugin-cache", "example")
+	if ip.DataDir != wantData {
+		t.Errorf("DataDir = %q, want %q", ip.DataDir, wantData)
+	}
+	if ip.CacheDir != wantCache {
+		t.Errorf("CacheDir = %q, want %q", ip.CacheDir, wantCache)
+	}
+	if fi, err := os.Stat(ip.DataDir); err != nil || !fi.IsDir() {
+		t.Errorf("DataDir not created: err=%v", err)
+	}
+	if fi, err := os.Stat(ip.CacheDir); err != nil || !fi.IsDir() {
+		t.Errorf("CacheDir not created: err=%v", err)
+	}
+	if !filepath.IsAbs(ip.DataDir) || !filepath.IsAbs(ip.CacheDir) {
+		t.Error("expected absolute paths")
+	}
+	if ip.HostInfo.Protocol != ProtocolVersion {
+		t.Errorf("HostInfo.Protocol = %d, want %d", ip.HostInfo.Protocol, ProtocolVersion)
+	}
+	if len(ip.Config) != 1 || ip.Config["k"] != "v" {
+		t.Errorf("Config not passed through: %v", ip.Config)
+	}
+}
+
+// TestBuildInitParams_NoID covers the legacy path where the host has no
+// pre-handshake plugin id. DataDir/CacheDir stay empty so the plugin
+// falls back to v0.1.2 ResolvedDataDir/ResolvedCacheDir semantics.
+func TestBuildInitParams_NoID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	ip, err := buildInitParams("/plugins/x", "", nil)
+	if err != nil {
+		t.Fatalf("buildInitParams: %v", err)
+	}
+	if ip.DataDir != "" {
+		t.Errorf("DataDir = %q, want empty", ip.DataDir)
+	}
+	if ip.CacheDir != "" {
+		t.Errorf("CacheDir = %q, want empty", ip.CacheDir)
+	}
+	if ip.LogLevel == "" {
+		t.Error("LogLevel should still be populated without pluginID")
 	}
 }

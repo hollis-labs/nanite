@@ -204,7 +204,7 @@ func newSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.Subproces
 	mgrCfg := subprocess.DefaultManagerConfig(command, dp.Dir)
 	mgrCfg.Args = args
 
-	return subprocess.NewSubprocessPlugin(dp.Dir, config, mgrCfg), nil
+	return subprocess.NewSubprocessPlugin(dp.Dir, m.Identifier(), config, mgrCfg), nil
 }
 
 // parseEntrypoint splits an entrypoint string like "python3 plugin.py" into

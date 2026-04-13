@@ -714,7 +714,7 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 
 		mgrCfg := subprocess.DefaultManagerConfig(cmd, pluginDir)
 		mgrCfg.Args = args
-		p = subprocess.NewSubprocessPlugin(pluginDir, resolvedConfig, mgrCfg)
+		p = subprocess.NewSubprocessPlugin(pluginDir, manifest.Identifier(), resolvedConfig, mgrCfg)
 	} else {
 		// Builtin plugin: use compiled-in constructor.
 		constructor, ok := naniteplugin.LookupConstructor(manifest.Name)

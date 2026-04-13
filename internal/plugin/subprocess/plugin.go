@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/version"
 	"github.com/hollis-labs/go-plugin"
 )
@@ -38,17 +41,32 @@ type SubprocessPlugin struct {
 
 	// pluginDir is the directory containing plugin.yaml and the executable.
 	pluginDir string
+
+	// manifestID is the canonical plugin identifier resolved from the
+	// plugin.yaml before the init handshake. It is used to derive the
+	// DataDir and CacheDir paths that get sent over plugin/init. May be
+	// empty when the caller has no pre-handshake identity (e.g. legacy
+	// test harnesses); buildInitParams treats an empty id as "no
+	// per-plugin dirs" and omits DataDir/CacheDir.
+	manifestID string
 }
 
 // NewSubprocessPlugin creates a new subprocess plugin with the given manager config.
 // The plugin is not started until Load() is called.
-func NewSubprocessPlugin(pluginDir string, config map[string]string, mgrCfg ManagerConfig) *SubprocessPlugin {
+//
+// manifestID is the plugin identifier read from plugin.yaml (preferred
+// over the init-handshake ID because it is known before the subprocess
+// is started, and is used to derive per-plugin DataDir/CacheDir paths
+// that are handed to the plugin during plugin/init). Pass "" only from
+// test harnesses that do not need per-plugin directories.
+func NewSubprocessPlugin(pluginDir string, manifestID string, config map[string]string, mgrCfg ManagerConfig) *SubprocessPlugin {
 	mgr := NewManager(mgrCfg)
 
 	sp := &SubprocessPlugin{
-		pluginDir: pluginDir,
-		config:    config,
-		mgr:       mgr,
+		pluginDir:  pluginDir,
+		manifestID: manifestID,
+		config:     config,
+		mgr:        mgr,
 		status: plugin.PluginStatus{
 			Enabled: true,
 		},
@@ -117,14 +135,12 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	defer cancel()
 
 	// 2. Init handshake — send config, receive identity.
-	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, &InitParams{
-		PluginDir: sp.pluginDir,
-		Config:    sp.config,
-		HostInfo: HostInfo{
-			Version:  version.Version,
-			Protocol: ProtocolVersion,
-		},
-	})
+	initParams, err := buildInitParams(sp.pluginDir, sp.manifestID, sp.config)
+	if err != nil {
+		sp.mgr.Stop()
+		return fmt.Errorf("build init params: %w", err)
+	}
+	initResult, err := CallResult[InitResult](transport, ctx, MethodInit, initParams)
 	if err != nil {
 		sp.mgr.Stop()
 		return fmt.Errorf("init handshake: %w", err)
@@ -171,6 +187,46 @@ func (sp *SubprocessPlugin) Load(host plugin.Host) error {
 	sp.mu.Unlock()
 
 	return nil
+}
+
+// buildInitParams assembles the InitParams payload sent on plugin/init.
+// It resolves the per-plugin DataDir/CacheDir under the user's brand
+// directory, creates them with 0o755 so the plugin can write into them,
+// and pulls the host-current log level from slogx. pluginID is the
+// canonical id from plugin.yaml; when empty, per-plugin DataDir and
+// CacheDir are left unset (v0.1.1-style behavior).
+func buildInitParams(pluginDir, pluginID string, config map[string]string) (*InitParams, error) {
+	ip := &InitParams{
+		PluginDir: pluginDir,
+		Config:    config,
+		LogLevel:  slogx.CurrentLevelString(),
+		HostInfo: HostInfo{
+			Version:  version.Version,
+			Protocol: ProtocolVersion,
+		},
+	}
+
+	if pluginID != "" {
+		dataDir, err := brand.PluginDataDir(pluginID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve plugin data dir: %w", err)
+		}
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create plugin data dir %q: %w", dataDir, err)
+		}
+		ip.DataDir = dataDir
+
+		cacheDir, err := brand.PluginCacheDir(pluginID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve plugin cache dir: %w", err)
+		}
+		if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create plugin cache dir %q: %w", cacheDir, err)
+		}
+		ip.CacheDir = cacheDir
+	}
+
+	return ip, nil
 }
 
 // checkProtocolVersion returns an error if the plugin's reported protocol

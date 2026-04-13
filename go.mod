@@ -19,7 +19,7 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.35.0
 	github.com/google/jsonschema-go v0.4.2
-	github.com/hollis-labs/go-providers v0.0.1
+	github.com/hollis-labs/go-providers v0.1.0
 	github.com/hollis-labs/vanta-conduit v0.0.1
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/ollama/ollama v0.20.5

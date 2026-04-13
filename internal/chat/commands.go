@@ -159,6 +159,31 @@ func (r *CommandRegistry) RegisterPluginCommand(cmd nplugin.SlashCommandDef, sou
 	}, h)
 }
 
+// RemoveByPlugin drops every command whose Source equals pluginID and returns
+// the count removed. Satisfies plugin.CommandRegistrar so the host's
+// UnloadPlugin sweep can clear plugin-registered slash commands during
+// hot-unload.
+//
+// Built-in commands ("builtin"), skill commands ("skill"), and file-based
+// commands ("file") use reserved Source values that no plugin can assume,
+// so they're safe from this sweep. An empty pluginID is a no-op — we never
+// want to mass-delete commands that happen to have no source attribution.
+func (r *CommandRegistry) RemoveByPlugin(pluginID string) int {
+	if pluginID == "" {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for name, rc := range r.commands {
+		if rc.Source == pluginID {
+			delete(r.commands, name)
+			n++
+		}
+	}
+	return n
+}
+
 // RegisterSkillCommand registers a file-based skill as a slash command.
 // Skills are server-side commands with category "skill".
 func (r *CommandRegistry) RegisterSkillCommand(slug, name, description, argumentHint string) {

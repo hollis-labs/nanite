@@ -23,6 +23,7 @@ var envelopeTypeRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 var (
 	envelopeRegistrarMu sync.RWMutex
 	envelopeRegistrar   func(envelopeType string)
+	envelopeUnregistrar func(envelopeType string)
 )
 
 // SetEnvelopeTypeRegistrar installs a callback that registers an envelope
@@ -35,9 +36,27 @@ func SetEnvelopeTypeRegistrar(fn func(envelopeType string)) {
 	envelopeRegistrarMu.Unlock()
 }
 
+// SetEnvelopeTypeUnregistrar installs the counterpart hook used by
+// UnloadPlugin to remove plugin-owned envelope types from the chat validation
+// registry. Wired from main.go alongside SetEnvelopeTypeRegistrar.
+func SetEnvelopeTypeUnregistrar(fn func(envelopeType string)) {
+	envelopeRegistrarMu.Lock()
+	envelopeUnregistrar = fn
+	envelopeRegistrarMu.Unlock()
+}
+
 func registerEnvelopeType(envelopeType string) {
 	envelopeRegistrarMu.RLock()
 	fn := envelopeRegistrar
+	envelopeRegistrarMu.RUnlock()
+	if fn != nil {
+		fn(envelopeType)
+	}
+}
+
+func unregisterEnvelopeType(envelopeType string) {
+	envelopeRegistrarMu.RLock()
+	fn := envelopeUnregistrar
 	envelopeRegistrarMu.RUnlock()
 	if fn != nil {
 		fn(envelopeType)
@@ -257,7 +276,7 @@ func registerManifestMCPServers(host *Host, pluginID string, entries []MCPServer
 		if entry.Name == "" {
 			return fmt.Errorf("plugin %q: mcp_servers entry missing name", pluginID)
 		}
-		if err := reg.AddPluginServer(entry.Name, transport); err != nil {
+		if err := reg.AddPluginServer(pluginID, entry.Name, transport); err != nil {
 			return fmt.Errorf("plugin %q: register mcp server %q: %w", pluginID, entry.Name, err)
 		}
 		host.logger.Info("registered plugin mcp server", "plugin", pluginID, "server", entry.Name, "tools", len(entry.Tools))

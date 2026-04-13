@@ -575,7 +575,7 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 	for _, hook := range hooks {
 		ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
 		var err error
-		hk := hook
+		hk := hook.hook
 		safego.Call(ctx, "plugin-hook.pre-hook."+eventType, func() {
 			err = hk.Handle(ctx, event)
 		})

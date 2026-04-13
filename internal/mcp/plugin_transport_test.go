@@ -112,20 +112,20 @@ func TestPluginMCPTransport_ListAndCall(t *testing.T) {
 	})
 
 	mgr := NewManager()
-	if err := mgr.AddPluginServer("echo-srv", transport); err != nil {
+	if err := mgr.AddPluginServer("plugin-echo", "echo-srv", transport); err != nil {
 		t.Fatalf("AddPluginServer: %v", err)
 	}
 
 	// Duplicate registration rejected.
-	if err := mgr.AddPluginServer("echo-srv", transport); err == nil {
+	if err := mgr.AddPluginServer("plugin-echo", "echo-srv", transport); err == nil {
 		t.Fatal("expected duplicate registration to fail")
 	}
 	// Empty name rejected.
-	if err := mgr.AddPluginServer("", transport); err == nil {
+	if err := mgr.AddPluginServer("plugin-echo", "", transport); err == nil {
 		t.Fatal("expected empty name to fail")
 	}
 	// Nil transport rejected.
-	if err := mgr.AddPluginServer("nil-srv", nil); err == nil {
+	if err := mgr.AddPluginServer("plugin-echo", "nil-srv", nil); err == nil {
 		t.Fatal("expected nil transport to fail")
 	}
 

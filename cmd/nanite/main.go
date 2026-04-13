@@ -165,6 +165,7 @@ func cmdServe(args []string) {
 	// yaml-authoritative loader still records envelopes in the host side-map
 	// but chat validation won't accept them until the plugin calls through.
 	plugin.SetEnvelopeTypeRegistrar(chat.RegisterEnvelopeType)
+	plugin.SetEnvelopeTypeUnregistrar(chat.UnregisterEnvelopeType)
 
 	// Set up provider registry (API keys, Ollama, CLI adapters).
 	registry := initProviders()

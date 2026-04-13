@@ -32,11 +32,12 @@ type ToolLoadChecker interface {
 
 // Manager holds multiple MCP server connections and provides unified tool access.
 type Manager struct {
-	servers     map[string]MCPTransport // name -> transport
-	tools       []toolEntry            // all discovered tools with server association
-	Broker      *broker.LocalBroker    // intent-aware tool broker
-	LoadChecker ToolLoadChecker        // optional loadType filter
-	mu          sync.RWMutex
+	servers       map[string]MCPTransport // name -> transport
+	pluginServers map[string][]string     // pluginID -> server names (reverse map for hot-unload)
+	tools         []toolEntry             // all discovered tools with server association
+	Broker        *broker.LocalBroker     // intent-aware tool broker
+	LoadChecker   ToolLoadChecker         // optional loadType filter
+	mu            sync.RWMutex
 }
 
 // toolEntry associates a tool with its originating server.
@@ -48,7 +49,8 @@ type toolEntry struct {
 // NewManager creates a new MCP Manager.
 func NewManager() *Manager {
 	return &Manager{
-		servers: make(map[string]MCPTransport),
+		servers:       make(map[string]MCPTransport),
+		pluginServers: make(map[string][]string),
 	}
 }
 
@@ -147,7 +149,11 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 // message than letting NewPluginMCPTransport(nil, ...) wrap into a generic
 // AddServer error; remaining validation is delegated to AddServer to keep the
 // shared registration path in one place.
-func (m *Manager) AddPluginServer(name string, transport *subprocess.Transport) error {
+//
+// The pluginID argument is recorded in a reverse map so the host can drop
+// every server owned by a plugin during UnloadPlugin. An empty pluginID is
+// accepted (tests and ad-hoc callers) and simply skips reverse-map tracking.
+func (m *Manager) AddPluginServer(pluginID, name string, transport *subprocess.Transport) error {
 	if name == "" {
 		return fmt.Errorf("mcp: AddPluginServer: name is required")
 	}
@@ -157,8 +163,31 @@ func (m *Manager) AddPluginServer(name string, transport *subprocess.Transport) 
 	if err := m.AddServer(name, NewPluginMCPTransport(transport, name)); err != nil {
 		return err
 	}
-	slog.Info("mcp: server using plugin transport", "name", name)
+	if pluginID != "" {
+		m.mu.Lock()
+		m.pluginServers[pluginID] = append(m.pluginServers[pluginID], name)
+		m.mu.Unlock()
+	}
+	slog.Info("mcp: server using plugin transport", "name", name, "plugin", pluginID)
 	return nil
+}
+
+// RemoveServersByPlugin removes every MCP server owned by pluginID. Returns
+// the number of servers removed. Safe to call when the plugin registered zero
+// servers (returns 0).
+func (m *Manager) RemoveServersByPlugin(pluginID string) int {
+	if pluginID == "" {
+		return 0
+	}
+	m.mu.Lock()
+	names := m.pluginServers[pluginID]
+	delete(m.pluginServers, pluginID)
+	m.mu.Unlock()
+
+	for _, name := range names {
+		m.RemoveServer(name)
+	}
+	return len(names)
 }
 
 // DiscoverTools queries all registered servers for their tools.

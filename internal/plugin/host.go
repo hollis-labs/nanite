@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,8 +32,15 @@ var validComponentTypes = map[plugin.UIComponentType]bool{
 // CommandRegistrar is the interface for registering slash commands into a
 // unified registry. Implemented by chat.CommandRegistry. Defined here to
 // avoid importing the chat package.
+//
+// RemoveByPlugin drops every command whose Source equals pluginID and returns
+// the number removed. Plugin-registered commands carry their owning pluginID
+// in SlashCommand.Source (set by RegisterPluginCommand), so the registry can
+// perform the sweep without an extra side map. Builtin/skill/file commands
+// use reserved Source values ("builtin", "skill", "file") and are unaffected.
 type CommandRegistrar interface {
 	RegisterPluginCommand(cmd SlashCommandDef, source string)
+	RemoveByPlugin(pluginID string) int
 }
 
 // MCPRegistrar is the interface for registering MCP servers backed by a
@@ -41,13 +49,15 @@ type CommandRegistrar interface {
 // during yaml-driven registration without importing internal/mcp (which
 // would create a cycle via internal/service/install).
 type MCPRegistrar interface {
-	AddPluginServer(name string, transport *subprocess.Transport) error
+	AddPluginServer(pluginID, name string, transport *subprocess.Transport) error
+	RemoveServersByPlugin(pluginID string) int
 }
 
 // pendingRoute is an HTTP route registration deferred until the router is available.
 type pendingRoute struct {
-	pattern string
-	handler http.Handler
+	pattern  string
+	handler  http.Handler
+	pluginID string
 }
 
 // ConnectorStatus tracks the health state of a registered connector.
@@ -63,11 +73,28 @@ type ConnectorStatus struct {
 
 // Host implements the plugin.Host interface for Nanite.
 // It provides the runtime environment and services for plugins.
+// eventHookEntry wraps a registered EventHook with the plugin ID that owns it
+// so UnloadPlugin can sweep plugin-scoped hooks without requiring the external
+// go-plugin.EventHook interface to expose owner information. Core (non-plugin)
+// event hook registrations leave pluginID == "" and are never swept.
+type eventHookEntry struct {
+	hook     plugin.EventHook
+	pluginID string
+}
+
+// crudHandlerEntry wraps a CRUDHandler with its owning plugin ID. Same
+// rationale as eventHookEntry — keep plugin-ownership on the host side because
+// go-plugin.CRUDHandler is plugin-agnostic.
+type crudHandlerEntry struct {
+	handler  plugin.CRUDHandler
+	pluginID string
+}
+
 type Host struct {
 	mu            sync.RWMutex
 	plugins       map[string]plugin.Plugin
-	eventHooks    map[string][]plugin.EventHook
-	crudHandlers  map[string]plugin.CRUDHandler
+	eventHooks    map[string][]eventHookEntry
+	crudHandlers  map[string]crudHandlerEntry
 	uiComponents  []plugin.UIComponent
 	uiOwners      map[string]string // component ID → plugin ID that registered it
 	connectors    map[string]plugin.Connector
@@ -79,10 +106,21 @@ type Host struct {
 	kbOwners      map[string]string                 // keybinding ID → plugin ID
 	slots         map[UISlotName][]UISlotEntry // slot name → entries, sorted by priority
 	services      map[string]interface{}
+	serviceOwners map[string]string // service name → plugin ID (only non-core, plugin-registered services)
+	// B.6b host-side owner maps for categories whose underlying registry cannot
+	// carry plugin-ID context (interfaces live in external/pinned modules, or
+	// are plugin-agnostic by design — task.Service, store.Store). Event hooks
+	// and CRUD handlers carry their owner inline via eventHookEntry /
+	// crudHandlerEntry; see those types above.
+	taskBackendOwners  map[string]string   // task backend name → plugin ID
+	providerOwners     map[string]string   // provider name → plugin ID (forward-compat; see providerUnregistrar)
+	configSchemaOwners map[string]struct{} // plugin IDs with a persisted config schema (clear on unload)
 	configs       map[string]*PluginConfig // per-plugin config, keyed by plugin ID
 	activePlugin  string                   // ID of the plugin currently being loaded
 	store         *store.Store             // DB-backed plugin settings (nil if unavailable)
 	router        *http.ServeMux
+	pluginMux     *MutablePluginMux // mutable wrapper that owns all plugin-registered routes
+	routePatterns map[string]bool   // patterns already wired on core router (forwarder installed)
 	pendingRoutes []pendingRoute // routes queued before router was set
 	triggers      *TriggerDispatcher // event → connector dispatch
 	filters       *FilterRegistry    // named filter chains
@@ -97,24 +135,30 @@ type Host struct {
 func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{
-		plugins:         make(map[string]plugin.Plugin),
-		eventHooks:      make(map[string][]plugin.EventHook),
-		crudHandlers:    make(map[string]plugin.CRUDHandler),
-		uiComponents:    []plugin.UIComponent{},
-		uiOwners:        make(map[string]string),
-		connectors:      make(map[string]plugin.Connector),
-		connectorOwners: make(map[string]string),
-		connectorHealth: make(map[string]*ConnectorStatus),
-		keybindings:     make(map[string]KeybindingDef),
-		kbOwners:        make(map[string]string),
-		slots:           make(map[UISlotName][]UISlotEntry),
-		services:        make(map[string]interface{}),
-		configs:         make(map[string]*PluginConfig),
-		envelopes:       make(map[string]EnvelopeRegistryEntry),
-		router:          router,
-		logger:          logger,
-		ctx:             ctx,
-		ctxCancel:       cancel,
+		plugins:            make(map[string]plugin.Plugin),
+		eventHooks:         make(map[string][]eventHookEntry),
+		crudHandlers:       make(map[string]crudHandlerEntry),
+		uiComponents:       []plugin.UIComponent{},
+		uiOwners:           make(map[string]string),
+		connectors:         make(map[string]plugin.Connector),
+		connectorOwners:    make(map[string]string),
+		connectorHealth:    make(map[string]*ConnectorStatus),
+		keybindings:        make(map[string]KeybindingDef),
+		kbOwners:           make(map[string]string),
+		slots:              make(map[UISlotName][]UISlotEntry),
+		services:           make(map[string]interface{}),
+		serviceOwners:      make(map[string]string),
+		taskBackendOwners:  make(map[string]string),
+		providerOwners:     make(map[string]string),
+		configSchemaOwners: make(map[string]struct{}),
+		configs:            make(map[string]*PluginConfig),
+		envelopes:          make(map[string]EnvelopeRegistryEntry),
+		router:             router,
+		pluginMux:          NewMutablePluginMux(),
+		routePatterns:      make(map[string]bool),
+		logger:             logger,
+		ctx:                ctx,
+		ctxCancel:          cancel,
 	}
 	h.triggers = NewTriggerDispatcher(h)
 	h.filters = NewFilterRegistry()
@@ -127,24 +171,30 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 func NewHostWithStore(store interface{}) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{
-		plugins:         make(map[string]plugin.Plugin),
-		eventHooks:      make(map[string][]plugin.EventHook),
-		crudHandlers:    make(map[string]plugin.CRUDHandler),
-		uiComponents:    []plugin.UIComponent{},
-		uiOwners:        make(map[string]string),
-		connectors:      make(map[string]plugin.Connector),
-		connectorOwners: make(map[string]string),
-		connectorHealth: make(map[string]*ConnectorStatus),
-		keybindings:     make(map[string]KeybindingDef),
-		kbOwners:        make(map[string]string),
-		slots:           make(map[UISlotName][]UISlotEntry),
-		services:        make(map[string]interface{}),
-		configs:         make(map[string]*PluginConfig),
-		envelopes:       make(map[string]EnvelopeRegistryEntry),
-		router:          http.NewServeMux(),
-		logger:          NewLogger("plugin-cli"),
-		ctx:             ctx,
-		ctxCancel:       cancel,
+		plugins:            make(map[string]plugin.Plugin),
+		eventHooks:         make(map[string][]eventHookEntry),
+		crudHandlers:       make(map[string]crudHandlerEntry),
+		uiComponents:       []plugin.UIComponent{},
+		uiOwners:           make(map[string]string),
+		connectors:         make(map[string]plugin.Connector),
+		connectorOwners:    make(map[string]string),
+		connectorHealth:    make(map[string]*ConnectorStatus),
+		keybindings:        make(map[string]KeybindingDef),
+		kbOwners:           make(map[string]string),
+		slots:              make(map[UISlotName][]UISlotEntry),
+		services:           make(map[string]interface{}),
+		serviceOwners:      make(map[string]string),
+		taskBackendOwners:  make(map[string]string),
+		providerOwners:     make(map[string]string),
+		configSchemaOwners: make(map[string]struct{}),
+		configs:            make(map[string]*PluginConfig),
+		envelopes:          make(map[string]EnvelopeRegistryEntry),
+		router:             http.NewServeMux(),
+		pluginMux:          NewMutablePluginMux(),
+		routePatterns:      make(map[string]bool),
+		logger:             NewLogger("plugin-cli"),
+		ctx:                ctx,
+		ctxCancel:          cancel,
 	}
 	h.triggers = NewTriggerDispatcher(h)
 	h.filters = NewFilterRegistry()
@@ -154,6 +204,13 @@ func NewHostWithStore(store interface{}) *Host {
 
 // SetRouter sets the HTTP router for the plugin host and replays any
 // route registrations that were queued while the router was nil.
+//
+// Plugin-owned routes live in h.pluginMux (a MutablePluginMux) so that
+// UnloadPlugin can drop them. To integrate with the core *http.ServeMux, we
+// install a thin forwarder handler on the core mux — one per distinct pattern
+// — that delegates to h.pluginMux.ServeHTTP. Forwarders stay in place for the
+// server's lifetime (ServeMux forbids re-registration), but the plugin mux
+// behind them is mutable.
 func (h *Host) SetRouter(router *http.ServeMux) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -161,22 +218,61 @@ func (h *Host) SetRouter(router *http.ServeMux) {
 
 	// Replay any routes that were queued before the router was available.
 	for _, pr := range h.pendingRoutes {
-		router.Handle(pr.pattern, pr.handler)
-		h.logger.Info("replayed pending route", "pattern", pr.pattern)
+		h.installForwarderLocked(pr.pattern)
+		h.pluginMux.Handle(pr.pluginID, pr.pattern, pr.handler)
+		h.logger.Info("replayed pending route", "pattern", pr.pattern, "plugin", pr.pluginID)
 	}
 	h.pendingRoutes = nil
 }
 
-// registerRoute registers an HTTP route on the router, or queues it if the
-// router isn't available yet. Caller must hold h.mu (at least RLock for read,
-// Lock if appending to pendingRoutes).
-func (h *Host) registerRoute(pattern string, handler http.Handler) {
-	if h.router != nil {
-		h.router.Handle(pattern, handler)
+// installForwarderLocked installs a stable forwarder on the core router for
+// the given pattern, if one isn't already installed. Caller must hold h.mu.
+// Safe when the core router is nil (pending-route path calls this after
+// router set).
+func (h *Host) installForwarderLocked(pattern string) {
+	if h.router == nil {
 		return
 	}
-	h.pendingRoutes = append(h.pendingRoutes, pendingRoute{pattern: pattern, handler: handler})
-	h.logger.Info("queued route (router not yet available)", "pattern", pattern)
+	if h.routePatterns[pattern] {
+		return
+	}
+	h.routePatterns[pattern] = true
+	// The forwarder is a single handler per pattern that delegates into the
+	// mutable plugin mux. Route lookup inside pluginMux happens at request
+	// time, so removing a plugin's routes from the mux causes this forwarder
+	// to 404 — which is the correct behavior for a removed handler.
+	pluginMux := h.pluginMux
+	h.router.Handle(pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pluginMux.ServeHTTP(w, r)
+	}))
+}
+
+// registerRoute registers an HTTP route owned by the currently-loading plugin.
+// It acquires h.mu and delegates to registerRouteLocked; use this variant from
+// public entrypoints or any caller that does not already hold h.mu.
+func (h *Host) registerRoute(pattern string, handler http.Handler) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.registerRouteLocked(pattern, handler)
+}
+
+// registerRouteLocked registers an HTTP route owned by the currently-loading
+// plugin. The route is stored in h.pluginMux (so UnloadPlugin can remove it)
+// and a forwarder is installed on the core router if one isn't already in
+// place. If the core router isn't set yet, the registration is queued; the
+// queue is flushed by SetRouter.
+//
+// Caller MUST hold h.mu (mutates h.pendingRoutes, h.routePatterns, and the
+// core router via installForwarderLocked).
+func (h *Host) registerRouteLocked(pattern string, handler http.Handler) {
+	pluginID := h.activePlugin
+	if h.router == nil {
+		h.pendingRoutes = append(h.pendingRoutes, pendingRoute{pattern: pattern, handler: handler, pluginID: pluginID})
+		h.logger.Info("queued route (router not yet available)", "pattern", pattern, "plugin", pluginID)
+		return
+	}
+	h.installForwarderLocked(pattern)
+	h.pluginMux.Handle(pluginID, pattern, handler)
 }
 
 // RegisterHTTPHandler registers a custom HTTP route on the plugin host's
@@ -202,7 +298,7 @@ func (h *Host) RegisterCRUDHandler(resourceType string, handler plugin.CRUDHandl
 	defer h.mu.Unlock()
 
 	_, alreadyRegistered := h.crudHandlers[resourceType]
-	h.crudHandlers[resourceType] = handler
+	h.crudHandlers[resourceType] = crudHandlerEntry{handler: handler, pluginID: h.activePlugin}
 
 	// Only wire HTTP routes the first time — ServeMux doesn't support re-registration,
 	// but the handler closures read from h.crudHandlers so they'll pick up the new handler.
@@ -214,44 +310,45 @@ func (h *Host) RegisterCRUDHandler(resourceType string, handler plugin.CRUDHandl
 	// Uses registerRoute so routes are queued if the router isn't set yet.
 	basePath := fmt.Sprintf("/api/plugins/%s", resourceType)
 
-	// List resources: GET /api/plugins/{resourceType}
-	h.registerRoute(fmt.Sprintf("GET %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// withHandler resolves the current handler under a read lock and invokes fn
+	// with it, or writes 404 if the resource type has been swept (e.g., after
+	// the owning plugin was unloaded). Forwarders stay installed for the
+	// process lifetime, so a missing handler must surface as 404 rather than
+	// panicking on a nil deref.
+	withHandler := func(w http.ResponseWriter, r *http.Request, fn func(plugin.CRUDHandler)) {
 		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
+		entry, ok := h.crudHandlers[resourceType]
 		h.mu.RUnlock()
-		h.handleCRUDList(w, r, h2)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fn(entry.handler)
+	}
+
+	// List resources: GET /api/plugins/{resourceType}
+	h.registerRouteLocked(fmt.Sprintf("GET %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDList(w, r, h2) })
 	}))
 
 	// Create resource: POST /api/plugins/{resourceType}
-	h.registerRoute(fmt.Sprintf("POST %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDCreate(w, r, h2)
+	h.registerRouteLocked(fmt.Sprintf("POST %s", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDCreate(w, r, h2) })
 	}))
 
 	// Get resource: GET /api/plugins/{resourceType}/{id}
-	h.registerRoute(fmt.Sprintf("GET %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDRead(w, r, h2)
+	h.registerRouteLocked(fmt.Sprintf("GET %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDRead(w, r, h2) })
 	}))
 
 	// Update resource: PUT /api/plugins/{resourceType}/{id}
-	h.registerRoute(fmt.Sprintf("PUT %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDUpdate(w, r, h2)
+	h.registerRouteLocked(fmt.Sprintf("PUT %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDUpdate(w, r, h2) })
 	}))
 
 	// Delete resource: DELETE /api/plugins/{resourceType}/{id}
-	h.registerRoute(fmt.Sprintf("DELETE %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.mu.RLock()
-		h2 := h.crudHandlers[resourceType]
-		h.mu.RUnlock()
-		h.handleCRUDDelete(w, r, h2)
+	h.registerRouteLocked(fmt.Sprintf("DELETE %s/{id}", basePath), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		withHandler(w, r, func(h2 plugin.CRUDHandler) { h.handleCRUDDelete(w, r, h2) })
 	}))
 
 	h.logger.Info("registered CRUD handler", "resourceType", resourceType, "basePath", basePath)
@@ -265,13 +362,14 @@ func (h *Host) RegisterEventHook(eventTypes []string, hook plugin.EventHook) err
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	pluginID := h.activePlugin
 	normalized := make([]string, len(eventTypes))
 	for i, eventType := range eventTypes {
 		normalized[i] = NormalizeEventType(eventType)
-		h.eventHooks[normalized[i]] = append(h.eventHooks[normalized[i]], hook)
+		h.eventHooks[normalized[i]] = append(h.eventHooks[normalized[i]], eventHookEntry{hook: hook, pluginID: pluginID})
 	}
 
-	h.logger.Info("registered event hook", "eventTypes", normalized, "hookTypes", hook.EventTypes())
+	h.logger.Info("registered event hook", "eventTypes", normalized, "hookTypes", hook.EventTypes(), "plugin", pluginID)
 	return nil
 }
 
@@ -326,7 +424,7 @@ func (h *Host) RegisterUIComponent(component plugin.UIComponent) error {
 	// If the component has a server-side handler, register the route (only once).
 	if component.Handler != nil && !alreadyRegistered {
 		path := fmt.Sprintf("/api/plugins/ui/%s", component.ID)
-		h.registerRoute(path, component.Handler)
+		h.registerRouteLocked(path, component.Handler)
 		h.logger.Info("registered UI component handler", "id", component.ID, "path", path)
 	}
 
@@ -401,18 +499,32 @@ func (h *Host) GetService(name string) (interface{}, error) {
 	return service, nil
 }
 
-// RegisterService registers a core service for plugin access.
+// RegisterService registers a service for plugin access.
+//
+// If called during a plugin's Load() — i.e. while h.activePlugin is non-empty
+// — the service is tagged as plugin-owned and dropped on UnloadPlugin. Core
+// services registered from main.go (before any plugin loads) leave
+// h.activePlugin == "" and are therefore treated as permanent. This lets us
+// keep the single RegisterService method without a signature change and
+// without breaking the five existing core-service call sites.
 func (h *Host) RegisterService(name string, service interface{}) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.services[name] = service
-	h.logger.Info("registered service", "name", name)
+	if h.activePlugin != "" {
+		h.serviceOwners[name] = h.activePlugin
+	}
+	h.logger.Info("registered service", "name", name, "plugin", h.activePlugin)
 }
 
 // taskBackendRegistrar is the subset of task.Service needed to register backends.
-// Defined here to avoid importing the task package.
+// Defined here to avoid importing the task package. UnregisterBackend drops a
+// named backend from the service and returns true if it was present — used by
+// UnloadPlugin to sweep plugin-owned task backends (ownership is tracked in
+// h.taskBackendOwners because the task package itself has no plugin concept).
 type taskBackendRegistrar interface {
 	RegisterBackend(name string, backend interface{})
+	UnregisterBackend(name string) bool
 }
 
 // RegisterTaskBackend registers a named task backend via the task service.
@@ -421,6 +533,7 @@ type taskBackendRegistrar interface {
 func (h *Host) RegisterTaskBackend(name string, backend interface{}) error {
 	h.mu.RLock()
 	svc, ok := h.services["tasks"]
+	pluginID := h.activePlugin
 	h.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("register task backend %q: task service not available", name)
@@ -430,7 +543,15 @@ func (h *Host) RegisterTaskBackend(name string, backend interface{}) error {
 		return fmt.Errorf("register task backend %q: task service does not support backend registration", name)
 	}
 	reg.RegisterBackend(name, backend)
-	h.logger.Info("registered task backend", "name", name)
+	// Tag ownership for UnloadPlugin sweep. Core backends (e.g. "local")
+	// registered at service construction time never go through this path, so
+	// they're absent from taskBackendOwners and survive unload.
+	if pluginID != "" {
+		h.mu.Lock()
+		h.taskBackendOwners[name] = pluginID
+		h.mu.Unlock()
+	}
+	h.logger.Info("registered task backend", "name", name, "plugin", pluginID)
 	return nil
 }
 
@@ -552,7 +673,16 @@ func (h *Host) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
 			Component:   f.Component,
 		}
 	}
-	return s.UpsertPluginSchema(id, storeFields)
+	if err := s.UpsertPluginSchema(id, storeFields); err != nil {
+		return err
+	}
+	// Record that this plugin has a persisted config schema so UnloadPlugin
+	// can clear it. Settings values are preserved (reinstall continues to
+	// read them); only the schema column is reset.
+	h.mu.Lock()
+	h.configSchemaOwners[id] = struct{}{}
+	h.mu.Unlock()
+	return nil
 }
 
 // RegisterConnector registers a named connector for outbound integrations.
@@ -691,9 +821,10 @@ func (h *Host) recordConnectorSuccess(name string) {
 // The provider must implement the provider.Provider interface; the host
 // registers it with the provider registry via the "provider-registry" service.
 func (h *Host) RegisterProvider(name string, prov interface{}) error {
-	h.mu.RLock()
+	h.mu.Lock()
 	regSvc, exists := h.services["provider-registry"]
-	h.mu.RUnlock()
+	pluginID := h.activePlugin
+	h.mu.Unlock()
 
 	if !exists {
 		return fmt.Errorf("provider registry service not available")
@@ -708,8 +839,28 @@ func (h *Host) RegisterProvider(name string, prov interface{}) error {
 		return fmt.Errorf("provider registry does not support Register")
 	}
 	reg.Register(name, prov)
-	h.logger.Info("registered plugin provider", "name", name)
+
+	// Track ownership so UnloadPlugin can sweep this provider via the
+	// providerUnregistrar adapter. Only tag plugin-registered providers;
+	// core/boot-time calls with empty activePlugin are treated as permanent.
+	if pluginID != "" {
+		h.mu.Lock()
+		h.providerOwners[name] = pluginID
+		h.mu.Unlock()
+	}
+	h.logger.Info("registered plugin provider", "name", name, "plugin", pluginID)
 	return nil
+}
+
+// providerUnregistrar is the minimal contract UnloadPlugin needs to remove
+// a plugin-owned provider from the registry. go-providers v0.1.0+ satisfies
+// it via *provider.Registry.Unregister. The adapter is retained as a
+// permanent safety net — it keeps the sweep resilient against test fakes
+// and any alternate registry implementations that may be injected via
+// Host.services["provider-registry"]. If the assertion fails, the sweep
+// clears host-side ownership and warns rather than panicking.
+type providerUnregistrar interface {
+	Unregister(name string) bool
 }
 
 // RegisterCLIAdapter registers a runtime CLI adapter from a plugin.
@@ -719,8 +870,14 @@ func (h *Host) RegisterCLIAdapter(name string, adapter interface{}) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	// Store as a service so the bridge layer can discover plugin-registered adapters.
-	h.services["cli-adapter:"+name] = adapter
-	h.logger.Info("registered plugin CLI adapter", "name", name)
+	// Ownership is tracked via serviceOwners using the same cli-adapter: key prefix,
+	// so UnloadPlugin can sweep CLI adapters alongside other plugin-owned services.
+	key := "cli-adapter:" + name
+	h.services[key] = adapter
+	if h.activePlugin != "" {
+		h.serviceOwners[key] = h.activePlugin
+	}
+	h.logger.Info("registered plugin CLI adapter", "name", name, "plugin", h.activePlugin)
 	return nil
 }
 
@@ -1075,42 +1232,278 @@ func (h *Host) UnloadPlugin(id string) error {
 		return fmt.Errorf("failed to unload plugin %q: %w", id, err)
 	}
 
+	// MCP servers are removed OUTSIDE h.mu because Manager.RemoveServer takes
+	// its own lock and may call Close() on the transport which can block.
+	// Snapshot the registrar reference under h.mu first.
+	h.mu.RLock()
+	mcpReg := h.mcpRegistrar
+	h.mu.RUnlock()
+	if mcpReg != nil {
+		if n := mcpReg.RemoveServersByPlugin(id); n > 0 {
+			h.logger.Debug("plugin unload: removed mcp servers", "plugin", id, "count", n)
+		}
+	}
+
+	// Snapshot registrars that must be invoked under/around h.mu. The
+	// command registrar requires no lock coordination (its own mutex), so we
+	// can capture the reference early and call it after dropping h.mu; the
+	// task backend registrar lives in h.services under "tasks", read below.
+	h.mu.RLock()
+	cmdReg := h.commands
+	h.mu.RUnlock()
+
 	// Re-acquire to mutate host state.
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	delete(h.plugins, id)
 
-	// Clean up plugin-owned registrations: filters, event hooks, UI components,
-	// slots, keybindings. This prevents stale handlers from running after unload.
-	if removed := h.filters.RemoveByPlugin(id); removed > 0 {
-		h.logger.Info("removed plugin filters on unload", "id", id, "count", removed)
+	// B.6 full hot-unload sweep — 16 of 16 categories. Categories landed in
+	// B.6a retained; B.6b added commands, task backends, config schemas,
+	// event hooks, CRUD handlers. B.6 final adds providers via the
+	// providerUnregistrar adapter; with go-providers v0.1.0+ the real
+	// *provider.Registry satisfies it and upstream removal is active.
+	var envelopeTypesToUnregister []string
+	var taskBackendsToUnregister []string
+	var clearSchemaPluginID string
+
+	// 1. Filters.
+	if n := h.filters.RemoveByPlugin(id); n > 0 {
+		h.logger.Debug("plugin unload: removed filters", "plugin", id, "count", n)
 	}
-	// Remove event hooks owned by this plugin.
-	for eventType, hooks := range h.eventHooks {
-		filtered := hooks[:0]
-		for _, hook := range hooks {
-			// EventHook interface doesn't expose plugin ID, so we can't selectively
-			// remove per-plugin hooks here without extending the interface. This is
-			// a known limitation — tracked for future cleanup.
-			filtered = append(filtered, hook)
+
+	// 2. Event hooks — sweep eventHookEntry whose pluginID matches. Core
+	// (non-plugin) hooks registered with empty pluginID survive.
+	ehCount := 0
+	for eventType, entries := range h.eventHooks {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.pluginID != id {
+				kept = append(kept, e)
+			} else {
+				ehCount++
+			}
 		}
-		h.eventHooks[eventType] = filtered
+		if len(kept) == 0 {
+			delete(h.eventHooks, eventType)
+		} else {
+			h.eventHooks[eventType] = kept
+		}
 	}
-	// Remove UI components owned by this plugin.
+	if ehCount > 0 {
+		h.logger.Debug("plugin unload: removed event hooks", "plugin", id, "count", ehCount)
+	}
+
+	// 3. UI components.
+	n := 0
 	cleaned := h.uiComponents[:0]
 	for _, comp := range h.uiComponents {
 		if h.uiOwners[comp.ID] != id {
 			cleaned = append(cleaned, comp)
 		} else {
 			delete(h.uiOwners, comp.ID)
+			n++
 		}
 	}
 	h.uiComponents = cleaned
-	// Remove keybindings owned by this plugin.
+	if n > 0 {
+		h.logger.Debug("plugin unload: removed ui components", "plugin", id, "count", n)
+	}
+
+	// 4. UI slots.
+	slotCount := 0
+	for slot, entries := range h.slots {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.PluginID != id {
+				kept = append(kept, e)
+			} else {
+				slotCount++
+			}
+		}
+		if len(kept) == 0 {
+			delete(h.slots, slot)
+		} else {
+			h.slots[slot] = kept
+		}
+	}
+	if slotCount > 0 {
+		h.logger.Debug("plugin unload: removed ui slots", "plugin", id, "count", slotCount)
+	}
+
+	// 5. Keybindings.
+	kbCount := 0
 	for kbID, owner := range h.kbOwners {
 		if owner == id {
 			delete(h.keybindings, kbID)
 			delete(h.kbOwners, kbID)
+			kbCount++
+		}
+	}
+	if kbCount > 0 {
+		h.logger.Debug("plugin unload: removed keybindings", "plugin", id, "count", kbCount)
+	}
+
+	// 6. Connectors.
+	connCount := 0
+	for name, owner := range h.connectorOwners {
+		if owner == id {
+			delete(h.connectors, name)
+			delete(h.connectorOwners, name)
+			delete(h.connectorHealth, name)
+			connCount++
+		}
+	}
+	if connCount > 0 {
+		h.logger.Debug("plugin unload: removed connectors", "plugin", id, "count", connCount)
+	}
+
+	// 7+8. Services (includes CLI adapters under the cli-adapter: key prefix).
+	svcCount := 0
+	cliCount := 0
+	for name, owner := range h.serviceOwners {
+		if owner == id {
+			delete(h.services, name)
+			delete(h.serviceOwners, name)
+			if strings.HasPrefix(name, "cli-adapter:") {
+				cliCount++
+			} else {
+				svcCount++
+			}
+		}
+	}
+	if svcCount > 0 {
+		h.logger.Debug("plugin unload: removed services", "plugin", id, "count", svcCount)
+	}
+	if cliCount > 0 {
+		h.logger.Debug("plugin unload: removed cli adapters", "plugin", id, "count", cliCount)
+	}
+
+	// 9. Envelope types (side-map + chat validation registry).
+	envCount := 0
+	for t, entry := range h.envelopes {
+		if entry.PluginID == id {
+			delete(h.envelopes, t)
+			envelopeTypesToUnregister = append(envelopeTypesToUnregister, t)
+			envCount++
+		}
+	}
+	if envCount > 0 {
+		h.logger.Debug("plugin unload: removed envelope types", "plugin", id, "count", envCount)
+	}
+
+	// 10. HTTP routes — remove from mutable plugin mux. Forwarder entries on
+	// the core router stay in place (http.ServeMux forbids re-registration),
+	// but they delegate to the plugin mux which now returns 404 for this
+	// plugin's patterns.
+	if h.pluginMux != nil {
+		if n := h.pluginMux.RemoveByPlugin(id); n > 0 {
+			h.logger.Debug("plugin unload: removed http routes", "plugin", id, "count", n)
+		}
+	}
+
+	// 11. CRUD handlers — drop plugin-owned entries from the map. HTTP
+	// forwarders stay in place (see MutablePluginMux rationale) and the
+	// per-route withHandler closures now fall through to 404 via the
+	// map-miss path in RegisterCRUDHandler.
+	crudCount := 0
+	for rt, entry := range h.crudHandlers {
+		if entry.pluginID == id {
+			delete(h.crudHandlers, rt)
+			crudCount++
+		}
+	}
+	if crudCount > 0 {
+		h.logger.Debug("plugin unload: removed crud handlers", "plugin", id, "count", crudCount)
+	}
+
+	// 12. Task backends — collect names to remove; actual UnregisterBackend
+	// call happens after we drop h.mu to keep consistent with other outside-
+	// lock cleanup (the task service takes its own mutex).
+	for name, owner := range h.taskBackendOwners {
+		if owner == id {
+			taskBackendsToUnregister = append(taskBackendsToUnregister, name)
+			delete(h.taskBackendOwners, name)
+		}
+	}
+
+	// 13. Config schemas — mark for outside-lock clear via store.
+	if _, ok := h.configSchemaOwners[id]; ok {
+		clearSchemaPluginID = id
+		delete(h.configSchemaOwners, id)
+	}
+
+	// Snapshot refs needed for outside-lock work.
+	taskSvc, _ := h.services["tasks"].(taskBackendRegistrar)
+	storeRef := h.store
+
+	// 14. Providers — host-side providerOwners is always cleared. Upstream
+	// registry removal runs through the providerUnregistrar adapter;
+	// go-providers v0.1.0+ *provider.Registry satisfies it, so this is the
+	// production path. The adapter remains as a safety net: if an alternate
+	// registry impl is injected and lacks Unregister, we warn once per
+	// unload instead of panicking (owner map still stays consistent).
+	ownedProviders := make([]string, 0)
+	for name, owner := range h.providerOwners {
+		if owner != id {
+			continue
+		}
+		delete(h.providerOwners, name)
+		ownedProviders = append(ownedProviders, name)
+	}
+	providerRegSvc := h.services["provider-registry"]
+
+	h.mu.Unlock()
+
+	if len(ownedProviders) > 0 {
+		removed := 0
+		if un, ok := providerRegSvc.(providerUnregistrar); ok {
+			for _, name := range ownedProviders {
+				if un.Unregister(name) {
+					removed++
+				}
+			}
+		}
+		if removed > 0 {
+			h.logger.Debug("plugin unload: removed providers", "plugin", id, "count", removed)
+		} else {
+			h.logger.Warn("plugin unload: provider registry lacks Unregister; providers leak until restart",
+				"plugin", id, "providers", ownedProviders)
+		}
+	}
+
+	// Drop envelope types from chat validation registry OUTSIDE h.mu —
+	// unregisterEnvelopeType takes the chat package lock and there's no need
+	// to hold our own while doing so.
+	for _, t := range envelopeTypesToUnregister {
+		unregisterEnvelopeType(t)
+	}
+
+	// 15. Commands — sweep via CommandRegistrar.RemoveByPlugin, OUTSIDE h.mu
+	// (CommandRegistry takes its own lock).
+	if cmdReg != nil {
+		if n := cmdReg.RemoveByPlugin(id); n > 0 {
+			h.logger.Debug("plugin unload: removed commands", "plugin", id, "count", n)
+		}
+	}
+
+	// Task backends — invoke UnregisterBackend outside h.mu (task service
+	// has its own mutex). "local" is protected at the service layer; we
+	// never add it to taskBackendOwners, so there's no risk of calling it.
+	if taskSvc != nil {
+		for _, name := range taskBackendsToUnregister {
+			if taskSvc.UnregisterBackend(name) {
+				h.logger.Debug("plugin unload: removed task backend", "plugin", id, "name", name)
+			}
+		}
+	}
+
+	// Config schema — clear via store outside h.mu. Store call does its
+	// own DB I/O; absent store (CLI host with no store) is fine — the
+	// configSchemaOwners side map was never populated either.
+	if clearSchemaPluginID != "" && storeRef != nil {
+		if err := storeRef.ClearPluginSchema(clearSchemaPluginID); err != nil {
+			h.logger.Warn("plugin unload: clear config schema failed", "plugin", id, "error", err)
+		} else {
+			h.logger.Debug("plugin unload: cleared config schema", "plugin", id)
 		}
 	}
 
@@ -1135,7 +1528,7 @@ func (h *Host) EmitEvent(event plugin.Event) {
 		var wg sync.WaitGroup
 		for _, hook := range hooks {
 			wg.Add(1)
-			hk := hook
+			hk := hook.hook
 			safego.Go(h.ctx, "plugin.host.emit-event.hook", func() {
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
@@ -1202,7 +1595,7 @@ func (h *Host) GetCRUDHandlers() map[string]plugin.CRUDHandler {
 	// Return a copy to prevent modification
 	handlers := make(map[string]plugin.CRUDHandler)
 	for k, v := range h.crudHandlers {
-		handlers[k] = v
+		handlers[k] = v.handler
 	}
 	return handlers
 }

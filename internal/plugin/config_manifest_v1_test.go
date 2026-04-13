@@ -65,7 +65,7 @@ registers:
       props:
         icon: gif
   components:
-    - name: GiphyModalCard
+    - name: giphy-modal-card
       type: envelope
       description: Renders giphy modal
       export: GiphyModalCard
@@ -149,7 +149,7 @@ tool_overrides:
 	if len(r.Slots) != 1 || r.Slots[0].Slot != "composer-toolbar" || r.Slots[0].Priority != 10 {
 		t.Errorf("slots: %+v", r.Slots)
 	}
-	if len(r.Components) != 1 || r.Components[0].Name != "GiphyModalCard" {
+	if len(r.Components) != 1 || r.Components[0].Name != "giphy-modal-card" {
 		t.Errorf("components: %+v", r.Components)
 	}
 	if len(r.Keybindings) != 1 || r.Keybindings[0].Keys != "cmd+g" {

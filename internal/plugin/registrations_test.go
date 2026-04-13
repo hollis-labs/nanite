@@ -39,7 +39,7 @@ func TestApplyManifestRegistrations_Envelopes(t *testing.T) {
 		Name: p.id,
 		Registers: ManifestRegisters{
 			Envelopes: []EnvelopeRegistration{
-				{Type: "env-plug/card", Component: "EnvPlugCard", Version: 1, Schema: "schemas/card.json"},
+				{Type: "env-plug-card", Component: "EnvPlugCard", Version: 1, Schema: "schemas/card.json"},
 			},
 		},
 	}
@@ -52,10 +52,10 @@ func TestApplyManifestRegistrations_Envelopes(t *testing.T) {
 		t.Fatalf("expected 1 envelope, got %d", len(entries))
 	}
 	e := entries[0]
-	if e.Type != "env-plug/card" || e.PluginID != "env-plug" || e.Component != "EnvPlugCard" || e.Version != 1 || e.SchemaPath != "schemas/card.json" {
+	if e.Type != "env-plug-card" || e.PluginID != "env-plug" || e.Component != "EnvPlugCard" || e.Version != 1 || e.SchemaPath != "schemas/card.json" {
 		t.Errorf("unexpected envelope entry: %+v", e)
 	}
-	if !seen["env-plug/card"] {
+	if !seen["env-plug-card"] {
 		t.Error("envelope registrar hook was not called")
 	}
 }

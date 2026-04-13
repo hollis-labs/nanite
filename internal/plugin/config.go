@@ -46,7 +46,12 @@ type PluginManifest struct {
 	// v1 is the current schema. Unset/0 is treated as legacy (pre-v1).
 	SchemaVersion int `yaml:"schema_version"`
 
-	// Identity
+	// Identity. In the v1 schema ID is the canonical plugin identifier — it
+	// is required, must match ^[a-z0-9][a-z0-9-]*$, and is what the host uses
+	// for registry lookups, config keys, and ownership tracking. Name is a
+	// human-readable display label only. Legacy v0 manifests omit ID, so
+	// identity lookups should go through Identifier() which falls back to
+	// Name when ID is empty.
 	Name        string `yaml:"name"`
 	ID          string `yaml:"id"`
 	Version     string `yaml:"version"`
@@ -237,6 +242,18 @@ type ManifestRelease struct {
 	ChecksumURL  string   `yaml:"checksum_url"`
 	SignatureURL string   `yaml:"signature_url"`
 	Platforms    []string `yaml:"platforms"`
+}
+
+// Identifier returns the canonical plugin identifier: ID when set (v1),
+// otherwise Name (legacy v0 manifests). Use this anywhere the value is
+// consumed for identity — registry lookups, config keys, log messages that
+// reference the plugin, ownership tracking. Display-oriented callers should
+// keep using Name directly.
+func (pm *PluginManifest) Identifier() string {
+	if pm.ID != "" {
+		return pm.ID
+	}
+	return pm.Name
 }
 
 // EffectiveLoadType returns the resolved loadType for a specific tool.

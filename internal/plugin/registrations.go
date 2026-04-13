@@ -2,10 +2,17 @@ package plugin
 
 import (
 	"fmt"
+	"regexp"
 	"sync"
 
 	goplugin "github.com/hollis-labs/go-plugin"
 )
+
+// envelopeTypeRE mirrors the plugin.schema.v1 pattern for envelope types.
+// Runtime registration must enforce it directly because compiled-in builtins
+// bypass install-time schema validation — without this check a bad type would
+// be accepted by RegisterEnvelope and propagated to chat validation.
+var envelopeTypeRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // envelopeTypeRegistrar is the hook the chat package installs so the plugin
 // package can register envelope types without importing chat (which itself
@@ -53,6 +60,9 @@ type EnvelopeRegistryEntry struct {
 func (h *Host) RegisterEnvelope(entry EnvelopeRegistryEntry) error {
 	if entry.Type == "" {
 		return fmt.Errorf("envelope type is required")
+	}
+	if !envelopeTypeRE.MatchString(entry.Type) {
+		return fmt.Errorf("envelope type %q must match %s", entry.Type, envelopeTypeRE)
 	}
 	h.mu.Lock()
 	if h.envelopes == nil {

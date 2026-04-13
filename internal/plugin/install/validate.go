@@ -12,7 +12,6 @@
 package install
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,7 +19,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 
 	plugin "github.com/hollis-labs/nanite/internal/plugin"
@@ -55,8 +53,10 @@ type InstallFailure struct {
 	Severity Severity `json:"severity"`
 }
 
-// InstallError aggregates InstallFailures. Non-nil InstallError indicates
-// at least one refuse-level failure; warnings alone return nil.
+// InstallError aggregates InstallFailures. A non-nil InstallError may contain
+// warning-only failures as well as refuse-level failures; callers should use
+// HasRefusals to determine whether validation must block installation. A nil
+// *InstallError means validation had zero failures of any severity.
 type InstallError struct {
 	Failures []InstallFailure
 }
@@ -110,10 +110,11 @@ type ValidationOptions struct {
 }
 
 // ValidateManifest validates the plugin.yaml at manifestPath and checks
-// cross-references against files on disk rooted at pluginDir. Returns a nil
-// *InstallError if validation passes (no refusals); returns a non-nil
-// *InstallError if there is at least one refuse-level failure. Warnings are
-// surfaced on the returned InstallError.Failures slice regardless.
+// cross-references against files on disk rooted at pluginDir. Returns nil
+// only when there are zero failures of any severity. When either refusals
+// or warnings are present the returned *InstallError carries the full
+// failure list; callers should branch on HasRefusals to decide whether to
+// block installation.
 func ValidateManifest(manifestPath, pluginDir string, opts ValidationOptions) *InstallError {
 	v := &validator{
 		manifestPath: manifestPath,
@@ -213,19 +214,9 @@ func (v *validator) validateSchema(data []byte) (*plugin.PluginManifest, bool) {
 		return nil, false
 	}
 
-	var schemaDoc any
-	if err := json.NewDecoder(bytes.NewReader(plugin.PluginSchemaV1)).Decode(&schemaDoc); err != nil {
-		v.refuse(KindSchema, "", fmt.Sprintf("load embedded schema: %v", err))
-		return nil, false
-	}
-	c := jsonschema.NewCompiler()
-	if err := c.AddResource(plugin.PluginSchemaV1ID, schemaDoc); err != nil {
-		v.refuse(KindSchema, "", fmt.Sprintf("register schema: %v", err))
-		return nil, false
-	}
-	s, err := c.Compile(plugin.PluginSchemaV1ID)
+	s, err := plugin.SchemaV1()
 	if err != nil {
-		v.refuse(KindSchema, "", fmt.Sprintf("compile schema: %v", err))
+		v.refuse(KindSchema, "", fmt.Sprintf("load embedded schema: %v", err))
 		return nil, false
 	}
 	if err := s.Validate(jsonDoc); err != nil {
@@ -365,18 +356,19 @@ func (v *validator) validateBundleAssets(m *plugin.PluginManifest) {
 
 	// Subprocess entrypoint.
 	if m.Runtime == "subprocess" && m.Entrypoint != "" {
-		// Entrypoint may be "./bin", "python3 plugin.py", etc. Only check that
-		// the first token, if relative, exists.
+		// Entrypoint may be "./bin", "python3 plugin.py", etc. Only check
+		// dot-prefixed relative paths for existence; PATH-resolved commands
+		// can't be verified here. Reject parent-directory paths because
+		// entrypoints are expected to stay inside pluginDir.
 		tokens := strings.Fields(m.Entrypoint)
 		if len(tokens) > 0 {
 			t := tokens[0]
-			if strings.HasPrefix(t, "./") || strings.HasPrefix(t, "../") || !strings.Contains(t, "/") && strings.HasSuffix(t, "") && strings.Contains(m.Entrypoint, ".") {
-				// Only check dot-prefixed paths for existence; PATH-resolved
-				// commands can't be verified here.
-				if strings.HasPrefix(t, "./") || strings.HasPrefix(t, "../") {
-					if !v.pathExists(t) {
-						v.refuseOrWarn(KindBundle, "entrypoint", fmt.Sprintf("entrypoint %q not found under plugin dir", t))
-					}
+			switch {
+			case strings.HasPrefix(t, "../") || t == "..":
+				v.refuseOrWarn(KindBundle, "entrypoint", fmt.Sprintf("entrypoint %q must not escape plugin dir", t))
+			case strings.HasPrefix(t, "./"):
+				if !v.pathExists(t) {
+					v.refuseOrWarn(KindBundle, "entrypoint", fmt.Sprintf("entrypoint %q not found under plugin dir", t))
 				}
 			}
 		}
@@ -427,15 +419,28 @@ func (v *validator) validateBundleAssets(m *plugin.PluginManifest) {
 	}
 }
 
+// pathExists reports whether rel, resolved against v.pluginDir, names an
+// existing file or directory. Absolute paths and paths that would escape
+// pluginDir (via ".." segments or symlink-style tricks on the literal path)
+// return false — validator never follows entries outside the plugin sandbox.
 func (v *validator) pathExists(rel string) bool {
 	if rel == "" {
 		return false
 	}
-	p := rel
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(v.pluginDir, rel)
+	cleanRel := filepath.Clean(rel)
+	if filepath.IsAbs(cleanRel) {
+		return false
 	}
-	_, err := os.Stat(p)
+	pluginDir := filepath.Clean(v.pluginDir)
+	p := filepath.Join(pluginDir, cleanRel)
+	resolvedRel, err := filepath.Rel(pluginDir, p)
+	if err != nil {
+		return false
+	}
+	if resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	_, err = os.Stat(p)
 	return err == nil
 }
 

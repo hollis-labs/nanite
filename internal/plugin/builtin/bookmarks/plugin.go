@@ -19,16 +19,17 @@ var (
 )
 
 // loadManifest parses the embedded plugin.yaml exactly once.
+//
+// The manifest is a compiled-in build artifact; a parse failure means the
+// builtin was shipped with invalid source metadata and its yaml-authoritative
+// registrations would silently be skipped, leaving the plugin partially
+// registered. Fail fast so the bug is caught at boot rather than producing a
+// broken, half-wired plugin at runtime.
 func loadManifest() *hostplugin.PluginManifest {
 	parsedManifestOnce.Do(func() {
 		var m hostplugin.PluginManifest
 		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
-			// Manifest is a build artifact; a parse error means a source bug
-			// and we'd rather not mask it than ship a partially-registered
-			// plugin. Leave parsedManifest nil so the loader skips the
-			// yaml-authoritative path and logs a clear "no manifest" signal.
-			parsedManifest = nil
-			return
+			panic("bookmarks-widget: invalid embedded plugin.yaml: " + err.Error())
 		}
 		parsedManifest = &m
 	})

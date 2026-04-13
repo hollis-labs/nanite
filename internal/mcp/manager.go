@@ -54,11 +54,27 @@ func NewManager() *Manager {
 
 // AddServer registers an MCP server with the given transport.
 // Call DiscoverTools() after adding all servers.
-func (m *Manager) AddServer(name string, transport MCPTransport) {
+//
+// Returns an error if name is empty, transport is nil, or a server with the
+// same name is already registered. Silent overwrite is rejected because
+// shadowing an existing MCP server is a footgun regardless of transport type
+// (HTTP, stdio, plugin, or builtin).
+func (m *Manager) AddServer(name string, transport MCPTransport) error {
+	if name == "" {
+		return fmt.Errorf("mcp: AddServer: name is required")
+	}
+	if transport == nil {
+		return fmt.Errorf("mcp: AddServer %q: transport is nil", name)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, exists := m.servers[name]; exists {
+		return fmt.Errorf("mcp: AddServer %q: server already registered", name)
+	}
 	m.servers[name] = transport
 	slog.Info("mcp: added server", "name", name)
+	return nil
 }
 
 // DiscoverServerTools returns tools from a specific named server without affecting the global tool list.
@@ -101,16 +117,24 @@ func (m *Manager) RemoveServer(name string) {
 	slog.Info("mcp: removed server", "name", name)
 }
 
-// AddHTTPServer registers an HTTP-based MCP server.
-func (m *Manager) AddHTTPServer(name, url string) {
-	m.AddServer(name, NewHTTPTransport(url))
+// AddHTTPServer registers an HTTP-based MCP server. Propagates any error from
+// AddServer (empty name, nil transport, duplicate registration).
+func (m *Manager) AddHTTPServer(name, url string) error {
+	if err := m.AddServer(name, NewHTTPTransport(url)); err != nil {
+		return err
+	}
 	slog.Info("mcp: server using HTTP transport", "name", name, "url", url)
+	return nil
 }
 
-// AddStdioServer registers a stdio-based MCP server (subprocess).
-func (m *Manager) AddStdioServer(name, command string, args []string, env []string) {
-	m.AddServer(name, NewStdioTransport(command, args, env))
+// AddStdioServer registers a stdio-based MCP server (subprocess). Propagates
+// any error from AddServer (empty name, nil transport, duplicate registration).
+func (m *Manager) AddStdioServer(name, command string, args []string, env []string) error {
+	if err := m.AddServer(name, NewStdioTransport(command, args, env)); err != nil {
+		return err
+	}
 	slog.Info("mcp: server using stdio transport", "name", name, "command", command, "args", strings.Join(args, " "))
+	return nil
 }
 
 // AddPluginServer registers an MCP server backed by a subprocess plugin's
@@ -118,8 +142,11 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 // mcp/list_tools and mcp/call_tool methods defined in plugin-sdk and to
 // dispatch by the server name passed in params.
 //
-// Returns an error if name is empty or already registered, mirroring the
-// validation conventions of the sibling Add*Server helpers.
+// Returns an error if name is empty, transport is nil, or the name is already
+// registered. The explicit nil-transport guard here gives a clearer error
+// message than letting NewPluginMCPTransport(nil, ...) wrap into a generic
+// AddServer error; remaining validation is delegated to AddServer to keep the
+// shared registration path in one place.
 func (m *Manager) AddPluginServer(name string, transport *subprocess.Transport) error {
 	if name == "" {
 		return fmt.Errorf("mcp: AddPluginServer: name is required")
@@ -127,15 +154,9 @@ func (m *Manager) AddPluginServer(name string, transport *subprocess.Transport) 
 	if transport == nil {
 		return fmt.Errorf("mcp: AddPluginServer %q: transport is nil", name)
 	}
-
-	m.mu.Lock()
-	if _, exists := m.servers[name]; exists {
-		m.mu.Unlock()
-		return fmt.Errorf("mcp: AddPluginServer %q: server already registered", name)
+	if err := m.AddServer(name, NewPluginMCPTransport(transport, name)); err != nil {
+		return err
 	}
-	m.servers[name] = NewPluginMCPTransport(transport, name)
-	m.mu.Unlock()
-
 	slog.Info("mcp: server using plugin transport", "name", name)
 	return nil
 }

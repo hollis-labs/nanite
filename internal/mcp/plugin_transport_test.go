@@ -162,3 +162,38 @@ func TestPluginMCPTransport_NilTransport(t *testing.T) {
 		t.Fatal("expected CallTool on nil transport to fail")
 	}
 }
+
+// stubTransport is a no-op MCPTransport used to exercise Manager.AddServer
+// validation without spinning up a real transport.
+type stubTransport struct{}
+
+func (stubTransport) ListTools(_ context.Context) ([]Tool, error) { return nil, nil }
+func (stubTransport) CallTool(_ context.Context, _ string, _ map[string]any) (*ToolResult, error) {
+	return &ToolResult{}, nil
+}
+
+func TestManager_AddServer_Validation(t *testing.T) {
+	t.Run("rejects empty name", func(t *testing.T) {
+		mgr := NewManager()
+		if err := mgr.AddServer("", stubTransport{}); err == nil {
+			t.Fatal("expected empty name to fail")
+		}
+	})
+
+	t.Run("rejects nil transport", func(t *testing.T) {
+		mgr := NewManager()
+		if err := mgr.AddServer("srv", nil); err == nil {
+			t.Fatal("expected nil transport to fail")
+		}
+	})
+
+	t.Run("rejects duplicate registration", func(t *testing.T) {
+		mgr := NewManager()
+		if err := mgr.AddServer("srv", stubTransport{}); err != nil {
+			t.Fatalf("first AddServer: %v", err)
+		}
+		if err := mgr.AddServer("srv", stubTransport{}); err == nil {
+			t.Fatal("expected duplicate registration to fail")
+		}
+	})
+}

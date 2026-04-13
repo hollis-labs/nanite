@@ -438,14 +438,22 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	mcpManager := mcp.NewManager()
 
 	homeDir, _ := os.UserHomeDir()
-	mcpManager.AddServer("dev", mcp.NewDevToolsTransport([]string{
+	if err := mcpManager.AddServer("dev", mcp.NewDevToolsTransport([]string{
 		filepath.Join(homeDir, "Projects-apps"),
 		filepath.Join(homeDir, "Projects"),
-	}))
-	mcpManager.AddServer("general", mcp.NewGeneralToolsTransport())
-	mcpManager.AddServer("code", mcp.NewCodeExecTransport(""))
+	})); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", "dev", "err", err)
+	}
+	if err := mcpManager.AddServer("general", mcp.NewGeneralToolsTransport()); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", "general", "err", err)
+	}
+	if err := mcpManager.AddServer("code", mcp.NewCodeExecTransport("")); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", "code", "err", err)
+	}
 	selfTools := mcp.NewSelfToolsTransport(s)
-	mcpManager.AddServer("self", selfTools)
+	if err := mcpManager.AddServer("self", selfTools); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
+	}
 
 	loadPersistedMCPServers(s, mcpManager)
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
@@ -628,9 +636,13 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 			if cfg.Env != "" && cfg.Env != "[]" {
 				json.Unmarshal([]byte(cfg.Env), &envVars)
 			}
-			m.AddStdioServer(cfg.Name, cfg.Command, args, envVars)
+			if err := m.AddStdioServer(cfg.Name, cfg.Command, args, envVars); err != nil {
+				slog.Warn("mcp: failed to register persisted stdio server", "name", cfg.Name, "err", err)
+			}
 		case "sse":
-			m.AddHTTPServer(cfg.Name, cfg.URL)
+			if err := m.AddHTTPServer(cfg.Name, cfg.URL); err != nil {
+				slog.Warn("mcp: failed to register persisted http server", "name", cfg.Name, "err", err)
+			}
 		default:
 			slog.Warn("mcp: unknown transport type, skipping", "transport", cfg.TransportType, "server", cfg.Name)
 		}

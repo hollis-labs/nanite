@@ -78,8 +78,7 @@ After Track A: Tracks B, C, and F can run in parallel. See §17 of the execution
 
 | Path | Reason |
 |---|---|
-| `github.com/hollis-labs/go-plugin` (at `framework/libs/go-plugin/`) | Contents split between plugin-sdk and nanite/pkg/plugin. Obsolete after Track I. |
-| `github.com/hollis-labs/plugin` (at `/Users/chrispian/Projects-apps/plugin/`) | Absorbed into plugin-sdk. |
+| `github.com/hollis-labs/plugin` (at `/Users/chrispian/Projects-apps/plugin/`) | Absorbed into plugin-sdk. Deleted in Track I. |
 
 ### Hosting infrastructure
 

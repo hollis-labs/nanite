@@ -14,7 +14,7 @@
 - **Tracing:** OpenTelemetry (`go.opentelemetry.io/otel v1.41.0`) via `github.com/hollis-labs/otel` wrapper
 - **Notable dependencies:**
   - `github.com/hollis-labs/tool-broker` — Tool permission/selection engine (local replace)
-  - `github.com/hollis-labs/go-plugin` — Plugin SDK interface (local replace)
+  - `github.com/hollis-labs/plugin-sdk` — Plugin SDK interface
   - `github.com/hollis-labs/otel` — OTel init wrapper (local replace)
   - `github.com/hollis-labs/go-providers` — Shared LLM provider library (local replace)
   - `github.com/mark3labs/mcp-go v0.44.1` — MCP protocol client (indirect, used by tool-broker)
@@ -424,4 +424,4 @@ The `-dev` flag is **unrelated** to this. It only changes how the SPA is served 
 - **Provider registration:** Anthropic/OpenAI require API keys; Ollama is always registered (local); PTY adapters auto-detect installed CLI binaries (Claude, Codex, Gemini).
 - **Tool broker:** Manages tool permissions and intent-based selection. Progressive discovery kicks in above 5 tools (sends summaries to LLM, LLM requests full schemas via `request_tools` meta-tool).
 - **Output filters:** Configurable via `NANITE_OUTPUT_FILTERS` env var (comma-separated). Default: `no_emoji`.
-- **Local replace directives:** Sibling libraries (`../framework/libs/go-otel`, `go-toolbroker`, `go-plugin`, `go-providers`, `go-queue`, `go-mcp`, `../vanta-conduit`) are referenced via `replace` in `go.mod`. These must be present locally for builds to work.
+- **Local replace directives:** Sibling libraries (`../framework/libs/go-otel`, `go-toolbroker`, `go-providers`, `go-queue`, `go-mcp`, `../vanta-conduit`) are referenced via `replace` in `go.mod`. These must be present locally for builds to work. `plugin-sdk` is now a regular external module — no replace needed.

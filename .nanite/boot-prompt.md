@@ -249,7 +249,7 @@ ARCHITECTURE (post-2026-04-10 target state):
   ack-only (carries only SkippedRegistrations)
 - Plugin SDK lives at NEW repo github.com/hollis-labs/plugin-sdk
 - Nanite-specific extensions live at github.com/hollis-labs/nanite/pkg/plugin
-- Old github.com/hollis-labs/go-plugin module gets DELETED post-migration
+- Legacy universal plugin module (retired) has been deleted post-migration
 - Fragments-engine is REMOVED entirely (deletion is part of Track A)
 - Catalog + archives hosted on Cloudflare R2 + Pages at
   plugins.nanite.hollis-labs.dev and archives.nanite.hollis-labs.dev

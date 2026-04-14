@@ -21,7 +21,7 @@
 - **MCP:** `mark3labs/mcp-go` (indirect, via tool-broker)
 - **Tooling:** `gofmt`, `goimports`, `golangci-lint` (uncapped via `make lint`), `staticcheck`, `errcheck`, `govulncheck`, `go vet`, `lefthook` pre-commit, `go test -race` (via `make test`). All four static-analysis binaries are installed via `go install` into `$GOBIN` — see `.nanite/agents/backend.md` §Build & Run for the canonical invocations.
 
-Local `replace` directives point to sibling libs (`go-plugin`, `go-toolbroker`, `go-otel`, `go-providers`, `vanta-conduit`). Build fails without them — verify `go.mod` replace block is satisfied before running `go build`.
+Local `replace` directives point to sibling libs (`go-toolbroker`, `go-otel`, `go-providers`, `vanta-conduit`). Build fails without them — verify `go.mod` replace block is satisfied before running `go build`. `plugin-sdk` is a regular external module.
 
 ## High-priority review targets
 
@@ -29,7 +29,7 @@ These are the Nanite subsystems a deep review should touch first. They concentra
 
 ### 1. Plugin system — highest priority
 
-**Path:** `internal/plugin/`, `internal/plugin/builtin/`, `plugins/`, `../framework/libs/go-plugin/`
+**Path:** `internal/plugin/`, `internal/plugin/builtin/`, `plugins/`, `pkg/plugin/` (Nanite UI extensions), plus the external `github.com/hollis-labs/plugin-sdk` module for contract types
 
 **Why it matters:**
 - Plugins run in-process with the host (no isolation — explicit design choice).

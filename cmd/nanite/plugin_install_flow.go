@@ -32,22 +32,22 @@ func resolveStagingRoot() string {
 	if d := os.Getenv(brand.Env("PLUGIN_STAGING_DIR")); d != "" {
 		return d
 	}
-	home, err := os.UserHomeDir()
+	home, err := brand.UserHomeDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), brand.BinaryName+"-plugin-staging")
 	}
-	return filepath.Join(home, "."+brand.BinaryName, "plugin-staging")
+	return filepath.Join(home, "plugin-staging")
 }
 
 func resolveCatalogCacheDir() string {
 	if d := os.Getenv(brand.Env("PLUGIN_CATALOG_CACHE")); d != "" {
 		return d
 	}
-	home, err := os.UserHomeDir()
+	home, err := brand.UserHomeDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), brand.BinaryName+"-plugin-catalog")
 	}
-	return filepath.Join(home, "."+brand.BinaryName, "plugin-catalog")
+	return filepath.Join(home, "plugin-catalog")
 }
 
 // localDirSource implements install.Source by wrapping an already-on-disk

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 )
@@ -75,10 +77,7 @@ func (d *HTTPDownloader) Download(ctx context.Context, url, destDir, pluginID st
 	// ContentLength may be -1 (unknown); that's fine — LimitReader handles
 	// the runtime cap.
 
-	fileName := filepath.Base(url)
-	if fileName == "" || fileName == "." || fileName == "/" {
-		fileName = "plugin.tar.gz"
-	}
+	fileName := deriveArchiveName(url)
 	dest := filepath.Join(destDir, fileName)
 
 	out, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -123,6 +122,20 @@ func (d *HTTPDownloader) Download(ctx context.Context, url, destDir, pluginID st
 	}
 	closed = true
 	return dest, nil
+}
+
+// deriveArchiveName extracts a safe file name from rawURL, ignoring query
+// strings and fragments. Falls back to "plugin.tar.gz" when the URL has
+// no usable path component.
+func deriveArchiveName(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err == nil && u.Path != "" {
+		b := path.Base(u.Path)
+		if b != "" && b != "." && b != "/" {
+			return b
+		}
+	}
+	return "plugin.tar.gz"
 }
 
 // progressWriter forwards writes to an underlying file and emits progress

@@ -89,7 +89,6 @@ func (v *SignatureVerifier) Verify(ctx context.Context, h Handle) error {
 	defer f.Close()
 
 	hasher := sha256.New()
-	buf := make([]byte, 0, fi.Size())
 	body, err := io.ReadAll(io.TeeReader(io.LimitReader(f, max+1), hasher))
 	if err != nil {
 		return fmt.Errorf("verify: read: %w", err)
@@ -97,7 +96,6 @@ func (v *SignatureVerifier) Verify(ctx context.Context, h Handle) error {
 	if int64(len(body)) > max {
 		return fmt.Errorf("verify: archive exceeds cap during read")
 	}
-	_ = buf
 
 	gotSum := hex.EncodeToString(hasher.Sum(nil))
 	if !strings.EqualFold(gotSum, h.ExpectedSHA256) {

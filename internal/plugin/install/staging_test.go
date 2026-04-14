@@ -125,6 +125,19 @@ func TestStaging_Commit_RejectsStagingOutsideRoot(t *testing.T) {
 	}
 }
 
+// TestStaging_Commit_RejectsSiblingPrefix covers the sibling-prefix attack
+// — stagingDir like "<StagingRoot>-evil" should be rejected because it
+// shares a string prefix but is not a child. Regression guard for the
+// HasPrefix → filepath.Rel fix.
+func TestStaging_Commit_RejectsSiblingPrefix(t *testing.T) {
+	s, stagingRoot, _ := newStaging(t)
+	evil := stagingRoot + "-evil"
+	_, err := s.Commit(context.Background(), evil, "giphy")
+	if err == nil || !strings.Contains(err.Error(), "not under staging root") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestStaging_Commit_RejectsBadPluginID(t *testing.T) {
 	s, _, _ := newStaging(t)
 	cases := []string{"", "Bad", "has space", "has/slash", "has..dot"}

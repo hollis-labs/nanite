@@ -13,12 +13,12 @@ import (
 // by the subprocess manager under ~/.<brand>/plugin-logs/<id>.stderr.log.
 // This command does not follow — it prints the current contents and exits.
 func pluginLogs(id string) {
-	home, err := os.UserHomeDir()
+	home, err := brand.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "resolve home dir: %v\n", err)
 		os.Exit(1)
 	}
-	logPath := filepath.Join(home, "."+brand.BinaryName, "plugin-logs", id+".stderr.log")
+	logPath := filepath.Join(home, "plugin-logs", id+".stderr.log")
 	f, err := os.Open(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {

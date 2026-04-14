@@ -3,7 +3,6 @@ package install
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,4 +131,3 @@ func TestDownload_EmitsProgress(t *testing.T) {
 	}
 }
 
-var _ = io.EOF // keep import

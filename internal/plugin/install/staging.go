@@ -83,7 +83,7 @@ func (s *DirStaging) Commit(ctx context.Context, stagingDir, pluginID string) (s
 	if stagingDir == "" {
 		return "", errors.New("staging: empty stagingDir")
 	}
-	if !strings.HasPrefix(filepath.Clean(stagingDir), filepath.Clean(s.StagingRoot)) {
+	if !isUnder(s.StagingRoot, stagingDir) {
 		return "", fmt.Errorf("staging: stagingDir %q not under staging root", stagingDir)
 	}
 
@@ -132,17 +132,26 @@ func (s *DirStaging) validate() error {
 	return nil
 }
 
-// validatePluginID guards against path traversal via the pluginID. Only
-// [a-z0-9_-] are accepted, matching the plugin manifest id pattern.
+// validatePluginID guards against path traversal via the pluginID. Pattern
+// matches the v1 manifest schema + subprocess validator:
+// ^[a-z][a-z0-9-]{1,62}$ — must start with a letter, only lowercase
+// alnum and '-', total length 2-63.
 func validatePluginID(id string) error {
 	if id == "" {
 		return errors.New("staging: empty plugin id")
 	}
-	for _, r := range id {
+	if len(id) < 2 || len(id) > 63 {
+		return fmt.Errorf("staging: plugin id %q length %d out of range [2,63]", id, len(id))
+	}
+	first := rune(id[0])
+	if first < 'a' || first > 'z' {
+		return fmt.Errorf("staging: plugin id %q must start with lowercase letter", id)
+	}
+	for _, r := range id[1:] {
 		switch {
 		case r >= 'a' && r <= 'z':
 		case r >= '0' && r <= '9':
-		case r == '-' || r == '_':
+		case r == '-':
 		default:
 			return fmt.Errorf("staging: invalid plugin id %q", id)
 		}
@@ -169,4 +178,20 @@ func isCrossDeviceError(err error) bool {
 
 func timestampSuffix() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// isUnder reports whether child is lexically under parent using a
+// path-aware check (filepath.Rel) that is not fooled by sibling
+// directories whose names share a prefix (e.g. "/root" vs "/root-evil").
+func isUnder(parent, child string) bool {
+	p := filepath.Clean(parent)
+	c := filepath.Clean(child)
+	rel, err := filepath.Rel(p, c)
+	if err != nil {
+		return false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
 }

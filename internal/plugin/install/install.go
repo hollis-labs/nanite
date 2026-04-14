@@ -143,7 +143,9 @@ func (i *Installer) setState(s State) {
 
 // Install runs the full state machine for src: NotInstalled → Downloading →
 // Verifying → Extracting → Validating → Loading → Ready. Every failure
-// rolls back to NotInstalled after running any registered cleanup.
+// drives the installer to StateFailed (observable via State()) and runs
+// any registered staging cleanup to remove half-written artifacts before
+// returning the error.
 //
 // Returns (finalDir, nil) on success, ("", err) on failure. A successful
 // return means the plugin directory is in place under the staging root's

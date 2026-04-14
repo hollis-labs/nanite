@@ -177,9 +177,11 @@ func (e *TarGzExtractor) extractArchive(ctx context.Context, h Handle, targetDir
 			if err != nil {
 				return fmt.Errorf("extract: create %s: %w", destPath, err)
 			}
-			// Cap the per-file read to the declared size + 1 so that a
-			// malicious archive with an understated header size can't
-			// smuggle extra data past our total cap.
+			// Copy exactly hdr.Size bytes. If the tar body runs short
+			// of the declared size, the short-write check below rejects
+			// the entry; if it runs long, subsequent tr.Next() advances
+			// the reader to the next header so extra trailing bytes
+			// never reach disk.
 			n, err := io.CopyN(out, tr, hdr.Size)
 			closeErr := out.Close()
 			if err != nil && !errors.Is(err, io.EOF) {

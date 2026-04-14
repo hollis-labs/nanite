@@ -100,7 +100,6 @@ projects:
       go-directives: { path: libs/go-directives, lang: go }
       go-mcp:        { path: libs/go-mcp, lang: go }
       go-otel:       { path: libs/go-otel, lang: go }
-      go-plugin:     { path: libs/go-plugin, lang: go }
       go-providers:  { path: libs/go-providers, lang: go }
       go-queue:      { path: libs/go-queue, lang: go }
       go-toolbroker: { path: libs/go-toolbroker, lang: go }

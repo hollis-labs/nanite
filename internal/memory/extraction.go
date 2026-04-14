@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	pluginsdk "github.com/hollis-labs/go-plugin"
+	pluginsdk "github.com/hollis-labs/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/safego"
 )
@@ -114,6 +114,8 @@ func (h *perTurnHook) EventTypes() []string {
 	return []string{"message.received"}
 }
 
+func (h *perTurnHook) PluginID() string { return "core.memory.extractor" }
+
 // PerTurnHook returns a pluginsdk.EventHook that can be registered on "message.received".
 // When a received message contains memory signals, it extracts and stores memories.
 func (e *Extractor) PerTurnHook() pluginsdk.EventHook {
@@ -146,6 +148,8 @@ func (h *postCompactHook) Handle(ctx context.Context, event pluginsdk.Event) err
 func (h *postCompactHook) EventTypes() []string {
 	return []string{"context.compacted"}
 }
+
+func (h *postCompactHook) PluginID() string { return "core.memory.extractor" }
 
 // PostCompactHook returns a pluginsdk.EventHook that can be registered on "context.compacted".
 // After compaction, it extracts structured memories from the compacted content.

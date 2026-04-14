@@ -12,7 +12,7 @@ Nanite — AI chat harness with plugin system, tool brokering, and agent coordin
 - **Frontend** — React/TypeScript chat UI
 - **Plugin system** — Plugin SDK, scaffold, catalog
 - **Agent adapters** — CLIAgentAdapter interface, 5 built-in adapters (nanite-native, claude, codex, gemini, opencode)
-- **Dependencies** — tool-broker, go-providers, go-plugin, OTel, vanta-conduit (all local `replace` directives). Nexus removed.
+- **Dependencies** — tool-broker, go-providers, OTel, vanta-conduit (all local `replace` directives); plugin-sdk (external module). Nexus removed.
 - **Storage** — SQLite only (WAL mode). All messaging SQLite-native.
 
 ## Planning Notes

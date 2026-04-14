@@ -21,7 +21,7 @@ import (
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 
-	plugin "github.com/hollis-labs/go-plugin"
+	plugin "github.com/hollis-labs/plugin-sdk"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,7 +49,7 @@ func init() {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin (implements go-plugin.Plugin)
+// Plugin (implements plugin-sdk Plugin)
 // ---------------------------------------------------------------------------
 
 // Plugin is the Opencode CLI adapter plugin.

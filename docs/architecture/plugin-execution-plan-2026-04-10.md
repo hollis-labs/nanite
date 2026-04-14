@@ -839,51 +839,59 @@ Process per core plugin:
 
 ---
 
-## 11. Track I — Cleanup and deletions
+## 11. Track I — Cleanup and deletions — ✅ LANDED (PR #38, 2026-04-14)
 
-After H ships, the old dead code can finally go.
+All 7 tasks complete. PR #38 open awaiting Copilot review. Deltas from the original plan are called out per-task below so future readers can see what the actual migration required.
 
-### I.1 Delete the `go-plugin` module
+### I.1 Delete the `go-plugin` module — ✅ DONE (commit `be575f5`)
 
-- Remove `replace github.com/hollis-labs/go-plugin => ../framework/libs/go-plugin` from `nanite/go.mod:24`
-- Remove `github.com/hollis-labs/go-plugin v0.0.0` from `nanite/go.mod:9`
-- Delete the `framework/libs/go-plugin/` directory
-- All imports of this module should have been migrated to `plugin-sdk` during Track C
+Scope was much larger than the mechanical delete the plan implied. The commit is the real `go-plugin` → `plugin-sdk` migration:
 
-### I.2 Delete the universal `github.com/hollis-labs/plugin` module
+- 36+ importers swapped `"github.com/hollis-labs/go-plugin"` → `"github.com/hollis-labs/plugin-sdk"`.
+- New public package `github.com/hollis-labs/nanite/pkg/plugin` houses Nanite-specific UI primitives (`UISlotName`, `UISlotEntry`, `CommandArg`, `SlashCommandDef`, `KeybindingDef`, slot constants); `internal/plugin/types.go` re-exports them for in-package callers.
+- `plugin-sdk.EventHook` contract gained `PluginID() string`. Every implementation (core + test fakes + subprocess hook) now returns its owning plugin id.
+- `subprocess.NewEventHook` first arg is now `pluginID string`.
+- `go.mod` no longer references `go-plugin`; `go mod tidy`, `go build ./...`, and `go test ./... -race` clean.
+- `framework/libs/go-plugin/` remains physically on disk outside the repo — the frozen audit baseline at `~/Projects-apps/nanite/` still uses a `replace` directive to reach it on its own branch.
 
-At `/Users/chrispian/Projects-apps/plugin/`. Its contents were consolidated into `plugin-sdk` during Track C.
+### I.2 Delete the universal `github.com/hollis-labs/plugin` module — ✅ DONE (out-of-tree)
 
-If other apps in the framework still import this, keep it alive but mark deprecated. Otherwise delete.
+`rm -rf /Users/chrispian/Projects-apps/plugin/`. Not captured by this PR's diff (directory lived outside the nanite repo). User authorized the delete despite `clockwork-manifold` and `hadron` still having stale imports; those will migrate in separate sessions.
 
-### I.3 Delete nanite/pkg/plugin shims that were temporary
+### I.3 Delete nanite/pkg/plugin shims — ✅ NO-OP
 
-Any bridge files created during the migration to keep old code paths working — remove once all callers are migrated.
+The plan assumed `pkg/plugin/` held temporary bridge files. I.1 repurposed it as the *permanent* Nanite public UI extension package. Nothing to delete. `ls pkg/plugin/` shows only `ui.go` (introduced on `be575f5`).
 
-### I.4 Delete dead code from finding #1
+### I.4 Delete dead code from finding #1 — ✅ VERIFICATION-ONLY
 
-- `Host.RegisterProvider` (`internal/plugin/host.go:673`) — zero real callers. Delete.
-- `Host.RegisterCLIAdapter` (`internal/plugin/host.go:698`) — zero real callers. Delete. The adapter-* plugins wire via direct import from `internal/service/install/adapters.go:13-17` which continues to work.
-- `Host.SetStore(*store.Store)` public method signature leak (`internal/plugin/host.go:438`) — move to an unexported initializer.
-- Old `/api/plugins/events/stream` endpoint (`internal/api/event_stream.go`) — already deleted in Track B.8.
-- Old `event.Data["envelope"]` pattern — removed along with the dead giphy/oembed code in Track A.
-- `internal/plugin/types.go:25-30` Nanite-only slot constants — moved to `nanite/pkg/plugin/slot.go` during Track B.
+- `Host.RegisterProvider` — **kept.** `plugin-sdk.Host` interface mandates the method. Test callers live in `unload_sweep_test.go`. Docstring updated to note "intentionally unused by current plugins; interface requires the method."
+- `Host.RegisterCLIAdapter` — **kept.** Same rationale.
+- `Host.SetStore` — **kept.** Live caller at `cmd/nanite/main.go:227`, plus tests. Not dead.
+- `/api/plugins/events/stream` — confirmed absent (deleted in B.8).
+- `event.Data["envelope"]` pattern — confirmed absent (cleaned up in A).
+- `internal/plugin/types.go:25-30` slot constants — handled in I.1 via the `pkg/plugin` split.
 
-### I.5 Delete dead frontend code
+### I.5 Delete dead frontend code — ✅ DONE (commit `bcc00ef`)
 
-- Old `createRegistryAPI` / `PluginRegistryAPI` in `ui/src/lib/plugin-loader.ts` — deleted in Track D.
-- Any React components that are no longer referenced after plugin migrations (Giphy/Oembed/Support-ticket components that moved to plugin repos)
+- `GiphyCard.tsx` — deleted. Rendering now lives in `nanite-plugin-giphy`.
+- Oembed React components — already absent (moved in H.1).
+- `createRegistryAPI` / `PluginRegistryAPI` — already gone in Track D; remaining textual reference in `plugin-loader.ts:11` is a doc comment explaining why Model A won.
+- `support-ticket/` — preserved per plan guidance pending H.2 rebuild.
 
-### I.6 Delete orphaned plugin directories
+### I.6 Delete orphaned plugin directories — ✅ DONE (out-of-tree)
 
-- `framework/plugins/nanite/fragments-engine/` — already deleted in Track A.3
-- `framework/plugins/nanite/giphy/`, `oembed/`, `support-ticket/` — delete after their respective plugins are published via the canonical `hollis-labs/nanite-plugin-*` repos. These were transitional.
+- `rm -rf ~/Projects-apps/framework/plugins/nanite/fragments-engine/`
+- `rm -rf ~/Projects-apps/framework/plugins/nanite/giphy/`
+- `rm -rf ~/Projects-apps/framework/plugins/nanite/oembed/`
+- `framework/plugins/nanite/support-ticket/` — preserved per plan guidance (H.2 rebuild).
 
-### I.7 Gate for leaving Track I
+### I.7 Gate for leaving Track I — ✅ CLOSED
 
-- `git grep -l "go-plugin\|internal/plugin/builtin/giphy\|framework/plugins/nanite/fragments-engine"` returns nothing
-- `go build ./...` clean
-- `go test ./... -race` clean
+Posted as a PR comment on #38. Scrub commits `909fcdc` (code + config) and `6f85a18` (`.nanite/` agent prompts) cleared stale `go-plugin` references from all live paths.
+
+- `git grep -l "go-plugin|internal/plugin/builtin/giphy|framework/plugins/nanite/fragments-engine"` — clean across code, config, and live agent prompts. 10 residual hits under `docs/architecture/`, `docs/audits/`, `docs/handoff/` retained by design as historical records of the migration.
+- `go build ./...` — clean.
+- `go test ./... -race -count=1 -timeout=10m` — 59 packages, all green. No race reports. `internal/mcp` goleak remains pre-existing and tracked separately.
 
 ---
 

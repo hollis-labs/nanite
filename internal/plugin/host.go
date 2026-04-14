@@ -14,7 +14,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -74,10 +74,13 @@ type ConnectorStatus struct {
 
 // Host implements the plugin.Host interface for Nanite.
 // It provides the runtime environment and services for plugins.
-// eventHookEntry wraps a registered EventHook with the plugin ID that owns it
-// so UnloadPlugin can sweep plugin-scoped hooks without requiring the external
-// go-plugin.EventHook interface to expose owner information. Core (non-plugin)
-// event hook registrations leave pluginID == "" and are never swept.
+// eventHookEntry wraps a registered EventHook with the plugin ID that owns it,
+// captured from h.activePlugin at RegisterEventHook time. UnloadPlugin sweeps
+// by this host-side pluginID rather than calling hook.PluginID(); the SDK does
+// expose PluginID() on the interface, but the host tracks ownership at
+// registration so it remains authoritative even for hooks that choose not to
+// report their owner. Core (non-plugin) event hook registrations leave
+// pluginID == "" and are never swept.
 type eventHookEntry struct {
 	hook     plugin.EventHook
 	pluginID string
@@ -85,7 +88,7 @@ type eventHookEntry struct {
 
 // crudHandlerEntry wraps a CRUDHandler with its owning plugin ID. Same
 // rationale as eventHookEntry — keep plugin-ownership on the host side because
-// go-plugin.CRUDHandler is plugin-agnostic.
+// the plugin-sdk CRUDHandler is plugin-agnostic.
 type crudHandlerEntry struct {
 	handler  plugin.CRUDHandler
 	pluginID string

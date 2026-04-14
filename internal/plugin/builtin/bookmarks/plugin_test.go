@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
-	goplugin "github.com/hollis-labs/go-plugin"
+	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // TestManifestYAMLParses verifies the embedded plugin.yaml parses cleanly

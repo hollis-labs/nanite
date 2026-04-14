@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 )
 
 // cancellingHook returns plugin.ErrCancelled to signal cancellation.
@@ -20,6 +20,7 @@ func (h *cancellingHook) Handle(ctx context.Context, event plugin.Event) error {
 }
 
 func (h *cancellingHook) EventTypes() []string { return h.eventTypes }
+func (h *cancellingHook) PluginID() string     { return "test-plugin" }
 
 // passingHook records the call but does not cancel.
 type passingHook struct {
@@ -33,6 +34,7 @@ func (h *passingHook) Handle(ctx context.Context, event plugin.Event) error {
 }
 
 func (h *passingHook) EventTypes() []string { return h.eventTypes }
+func (h *passingHook) PluginID() string     { return "test-plugin" }
 
 func TestEmitPreHook_NoCancel(t *testing.T) {
 	host := NewHost(http.NewServeMux(), NewLogger("test"))
@@ -105,6 +107,7 @@ func (h *mutatingHook) Handle(ctx context.Context, event plugin.Event) error {
 }
 
 func (h *mutatingHook) EventTypes() []string { return h.eventTypes }
+func (h *mutatingHook) PluginID() string     { return "test-plugin" }
 
 func TestNewEventConstantsDefined(t *testing.T) {
 	// Ensure new event constants added for Task 1 are non-empty.

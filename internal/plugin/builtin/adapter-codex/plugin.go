@@ -46,7 +46,7 @@ func init() {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin (implements go-plugin.Plugin)
+// Plugin (implements plugin-sdk Plugin)
 // ---------------------------------------------------------------------------
 
 // Plugin is the Codex/Copilot CLI adapter plugin.

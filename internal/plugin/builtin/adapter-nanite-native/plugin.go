@@ -82,10 +82,10 @@ type roleEntry struct {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin (implements go-plugin.Plugin)
+// Plugin (implements plugin-sdk Plugin)
 // ---------------------------------------------------------------------------
 
-// Plugin is the nanite-native adapter plugin. It implements go-plugin.Plugin.
+// Plugin is the nanite-native adapter plugin. It implements the plugin-sdk Plugin interface.
 // Call Adapter() to obtain the CLIAgentAdapter / AgentComposer implementation.
 type Plugin struct {
 	host    plugin.Host

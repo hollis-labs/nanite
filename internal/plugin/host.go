@@ -76,7 +76,7 @@ type ConnectorStatus struct {
 // It provides the runtime environment and services for plugins.
 // eventHookEntry wraps a registered EventHook with the plugin ID that owns it
 // so UnloadPlugin can sweep plugin-scoped hooks without requiring the external
-// go-plugin.EventHook interface to expose owner information. Core (non-plugin)
+// plugin-sdk EventHook interface to expose owner information. Core (non-plugin)
 // event hook registrations leave pluginID == "" and are never swept.
 type eventHookEntry struct {
 	hook     plugin.EventHook
@@ -85,7 +85,7 @@ type eventHookEntry struct {
 
 // crudHandlerEntry wraps a CRUDHandler with its owning plugin ID. Same
 // rationale as eventHookEntry — keep plugin-ownership on the host side because
-// go-plugin.CRUDHandler is plugin-agnostic.
+// the plugin-sdk CRUDHandler is plugin-agnostic.
 type crudHandlerEntry struct {
 	handler  plugin.CRUDHandler
 	pluginID string

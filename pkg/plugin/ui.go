@@ -7,8 +7,8 @@
 // those surfaces import this package alongside the SDK.
 //
 // This package was introduced during Phase 2 Track I when the legacy
-// github.com/hollis-labs/go-plugin module was retired and its UI surface
-// split out of the SDK into this Nanite-owned package.
+// universal plugin module was retired and its UI surface split out of the
+// SDK into this Nanite-owned package.
 package plugin
 
 import "context"

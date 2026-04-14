@@ -73,14 +73,14 @@ func (s *stubCommandRegistrar) RemoveByPlugin(pluginID string) int {
 	return n
 }
 
-// stubEventHook implements go-plugin.EventHook for the sweep test.
+// stubEventHook implements the plugin-sdk EventHook for the sweep test.
 type stubEventHook struct{ types []string }
 
 func (s *stubEventHook) Handle(_ context.Context, _ goplugin.Event) error { return nil }
 func (s *stubEventHook) EventTypes() []string                              { return s.types }
 func (s *stubEventHook) PluginID() string                                  { return "test-plugin" }
 
-// stubCRUDHandler implements go-plugin.CRUDHandler for the sweep test.
+// stubCRUDHandler implements the plugin-sdk CRUDHandler for the sweep test.
 type stubCRUDHandler struct{}
 
 func (stubCRUDHandler) Create(context.Context, interface{}) (interface{}, error) {

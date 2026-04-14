@@ -51,7 +51,7 @@ func init() {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin (implements go-plugin.Plugin)
+// Plugin (implements plugin-sdk Plugin)
 // ---------------------------------------------------------------------------
 
 // Plugin is the Claude Code adapter plugin.

@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertTriangle,
+  ChevronDown,
   ChevronLeft,
+  ChevronRight,
   Eye,
   Keyboard,
   LayoutGrid,
@@ -11,13 +14,14 @@ import {
   Wrench,
   Zap,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import type {
   PluginInfo,
   PluginUIComponent,
+  SkippedRegistration,
   SlashCommandDef,
   PluginKeybinding,
   UISlotEntry,
@@ -258,6 +262,9 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
               )}
             </div>
           </Card>
+
+          {/* Skipped registrations — runtime opt-outs the plugin declined. */}
+          <SkippedRegistrationsCard skipped={plugin.skipped_registrations ?? []} />
         </TabsContent>
 
         {/* ── Components Tab ───────────────────────────────────────── */}
@@ -450,6 +457,51 @@ function SummaryRow({
       <Icon className="w-3.5 h-3.5 text-fg-muted shrink-0" />
       <span className="text-xs text-fg-secondary flex-1">{label}</span>
       <span className="text-xs font-medium text-fg tabular-nums">{count}</span>
+    </div>
+  );
+}
+
+// ─── Skipped Registrations Card ────────────────────────────────────
+
+function SkippedRegistrationsCard({ skipped }: { skipped: SkippedRegistration[] }) {
+  const collapsible = skipped.length > 3;
+  const [open, setOpen] = useState(!collapsible);
+
+  if (skipped.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-amber-600/40 bg-amber-600/5 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => collapsible && setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2 px-4 py-3 text-sm font-medium text-amber-600 ${
+          collapsible ? "cursor-pointer hover:bg-amber-600/10" : "cursor-default"
+        }`}
+        aria-expanded={open}
+      >
+        <AlertTriangle className="w-4 h-4 shrink-0" />
+        <span className="flex-1 text-left">Skipped registrations ({skipped.length})</span>
+        {collapsible && (
+          open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />
+        )}
+      </button>
+      {open && (
+        <ul className="px-4 pb-3 space-y-1">
+          {skipped.map((sr, i) => (
+            <li key={`${sr.kind}-${sr.id}-${i}`} className="text-[11px] text-amber-600/90 leading-relaxed">
+              <span className="font-mono font-medium">{sr.kind}</span>
+              <span className="text-amber-600/70">: </span>
+              <span className="font-medium">{sr.id}</span>
+              {sr.reason && (
+                <>
+                  <span className="text-amber-600/60"> — </span>
+                  <span className="text-amber-600/80">{sr.reason}</span>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

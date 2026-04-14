@@ -420,6 +420,15 @@ func (sp *SubprocessPlugin) filterEnvelopes(envs []sdkplugin.EnvelopeOut) []sdkp
 	return fn(envs)
 }
 
+// EnvelopeFilter returns the B.11 strict-validation closure, for callers
+// in the parent plugin package that need to pass it to NewEventHook.
+// The returned func is a method value bound to sp, so it picks up any
+// filter swap SetEnvelopeFilter performs — no further locking on the
+// caller side is required.
+func (sp *SubprocessPlugin) EnvelopeFilter() func([]sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut {
+	return sp.filterEnvelopes
+}
+
 // MakeCommandHandler creates a slash command handler that proxies to the subprocess.
 //
 // Post-B.10 the plugin may return structured Envelopes alongside Action/Content
@@ -550,7 +559,15 @@ func (h *subprocessEventHook) Handle(ctx context.Context, event plugin.Event) er
 	// Pre-hook: wait for response to check cancellation.
 	result, err := CallResult[EventHandleResult](h.transport, ctx, MethodEventHandle, params)
 	if err != nil {
-		// If the subprocess is unreachable, don't block the action.
+		// Subprocess unreachable / RPC error: log-and-swallow so operators
+		// can see pre-hook plugin failures instead of them disappearing
+		// silently. The action still proceeds (default allow-on-error
+		// posture) — only an explicit Cancel from a healthy plugin
+		// blocks, and we cannot trust a failed RPC to signal that.
+		slog.Warn("subprocess event hook: pre-hook RPC failed",
+			"event_type", event.Type,
+			"session_id", event.SessionID,
+			"err", err)
 		return nil
 	}
 

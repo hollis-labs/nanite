@@ -333,8 +333,9 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		}
 	}
 	if len(reg.Events) > 0 {
-		host.logger.Info("manifest events: yaml-driven registration deferred to B.5/B.6 proxy work", "plugin", pluginID, "count", len(reg.Events))
-		skipped += len(reg.Events)
+		if err := registerManifestEvents(host, pluginID, reg.Events, p); err != nil {
+			return err
+		}
 	}
 	if len(reg.Crud) > 0 {
 		host.logger.Info("manifest crud: yaml-driven registration deferred to B.5/B.6 proxy work", "plugin", pluginID, "count", len(reg.Crud))
@@ -399,6 +400,45 @@ func registerManifestCommands(host *Host, pluginID string, entries []CommandRegi
 		}
 		if err := host.RegisterCommand(def); err != nil {
 			return fmt.Errorf("plugin %q: register command %q: %w", pluginID, entry.Name, err)
+		}
+	}
+	return nil
+}
+
+// registerManifestEvents wires each manifest events entry into the host's
+// event-hook registry via subprocess.NewEventHook. Only subprocess plugins
+// use this path — builtins that react to events register hooks directly
+// from their own Load().
+//
+// Each hook receives the subprocess's lock-protected transport (sp.Transport())
+// and a closure over sp.EnvelopeFilter so B.11 strict validation runs on
+// any envelopes the plugin returns from post-hook events. The envelope
+// consumer (session-scoped chat SSE delivery, see BLG-20260413-012) is
+// read from the host; when no consumer is installed, validated envelopes
+// are dropped downstream.
+//
+// Each EventRegistration.Types slice is handed to host.RegisterEventHook
+// (which applies NormalizeEventType per entry). EventRegistration.Handler
+// and Priority fields are currently informational — the subprocess
+// dispatches all subscribed event types into a single EventHandle method.
+func registerManifestEvents(host *Host, pluginID string, entries []EventRegistration, p goplugin.Plugin) error {
+	sp, isSubprocess := p.(*subprocess.SubprocessPlugin)
+	if !isSubprocess {
+		host.logger.Info("manifest events: builtin plugin — skipping (builtins register event hooks directly)",
+			"plugin", pluginID, "count", len(entries))
+		return nil
+	}
+
+	consumer := host.envelopeConsumerSnapshot()
+	filter := sp.EnvelopeFilter()
+
+	for i, entry := range entries {
+		if len(entry.Types) == 0 {
+			return fmt.Errorf("plugin %q: events[%d] missing types", pluginID, i)
+		}
+		hook := subprocess.NewEventHook(append([]string(nil), entry.Types...), sp.Transport(), filter, consumer)
+		if err := host.RegisterEventHook(entry.Types, hook); err != nil {
+			return fmt.Errorf("plugin %q: register event hook for %v: %w", pluginID, entry.Types, err)
 		}
 	}
 	return nil

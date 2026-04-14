@@ -459,11 +459,43 @@ func (sp *SubprocessPlugin) MakeCommandHandler(name string) func(ctx context.Con
 
 // --- Event hook proxy ---
 
+// EnvelopeConsumer is the host-side sink for plugin-emitted envelopes that
+// originate from event hooks. The subprocess event-hook proxy delivers the
+// validated envelopes for each post-hook event invocation via Deliver. The
+// consumer decides whether (and how) to surface them — the expected binding
+// is the chat SSE stream scoped to sessionID (BLG-20260413-012). Implementations
+// MUST NOT block the caller: Deliver runs inside the plugin host's event
+// dispatch goroutine and any back-pressure must be handled by the consumer
+// (drop + counter, per BLG-012).
+type EnvelopeConsumer interface {
+	// Deliver hands validated envelopes to the session-scoped SSE consumer.
+	// Returns false when no consumer is attached for sessionID — the caller
+	// treats that as a drop and moves on.
+	Deliver(sessionID string, envs []sdkplugin.EnvelopeOut) bool
+}
+
 // subprocessEventHook implements plugin.EventHook by forwarding events to the subprocess.
 type subprocessEventHook struct {
-	eventTypes     []string
-	transport      *Transport
-	envelopeFilter func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut
+	eventTypes       []string
+	transport        *Transport
+	envelopeFilter   func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut
+	envelopeConsumer EnvelopeConsumer
+}
+
+// NewEventHook builds a subprocess event-hook proxy that forwards the given
+// event types to the plugin subprocess over transport. filter is the B.11
+// strict envelope validator bound to the owning plugin id (nil means
+// pass-through; expected only in tests). consumer is the session-scoped
+// delivery sink for post-hook envelopes (nil means drop — the hook still
+// issues the request/response call so the plugin sees the event and can run
+// its side effects, the returned envelopes are simply discarded).
+func NewEventHook(eventTypes []string, transport *Transport, filter func([]sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut, consumer EnvelopeConsumer) plugin.EventHook {
+	return &subprocessEventHook{
+		eventTypes:       eventTypes,
+		transport:        transport,
+		envelopeFilter:   filter,
+		envelopeConsumer: consumer,
+	}
 }
 
 func (h *subprocessEventHook) EventTypes() []string {
@@ -483,8 +515,29 @@ func (h *subprocessEventHook) Handle(ctx context.Context, event plugin.Event) er
 	}
 
 	if !preHook {
-		// Fire-and-forget notification for regular events.
-		return h.transport.Notify(MethodEventHandle, params)
+		// Post-hook: BLG-20260413-012 — switch from fire-and-forget Notify to a
+		// request/response call so EventHandleResult.Envelopes returned by the
+		// plugin can be validated and routed into the chat SSE stream. Pre-hook
+		// semantics (cancellation) stay in the branch below unchanged.
+		result, err := CallResult[EventHandleResult](h.transport, ctx, MethodEventHandle, params)
+		if err != nil {
+			// Subprocess unreachable / RPC error: log-and-swallow. A failing
+			// post-hook must not block the originating action (message send,
+			// tool call, …) — same contract the previous Notify path offered.
+			return nil
+		}
+		if len(result.Envelopes) > 0 {
+			envs := result.Envelopes
+			if filter := h.envelopeFilter; filter != nil {
+				envs = filter(envs)
+			}
+			if len(envs) > 0 && h.envelopeConsumer != nil {
+				// Deliver is responsible for drop+counter when no SSE
+				// consumer is attached for the session.
+				h.envelopeConsumer.Deliver(event.SessionID, envs)
+			}
+		}
+		return nil
 	}
 
 	// Pre-hook: wait for response to check cancellation.
@@ -494,12 +547,10 @@ func (h *subprocessEventHook) Handle(ctx context.Context, event plugin.Event) er
 		return nil
 	}
 
-	// Pre-hook envelopes are validated via B.11 (log+drop invalid in prod,
-	// warn+pass in dev). There is no chat-stream consumer for event-emitted
-	// envelopes today — the pre-hook API returns only a cancel/allow signal
-	// to the dispatcher. Future work (beyond B.12) can route validated
-	// envelopes to a session-scoped SSE consumer once the chat engine
-	// exposes that channel.
+	// Pre-hook envelopes run through the B.11 filter for validation side
+	// effects (log+drop invalid in prod, warn+pass in dev) but are not routed
+	// downstream — the pre-hook API is a cancel/allow gate. Post-hook events
+	// carry the envelope-delivery semantics (see post-hook branch above).
 	if filter := h.envelopeFilter; filter != nil && len(result.Envelopes) > 0 {
 		_ = filter(result.Envelopes)
 	}

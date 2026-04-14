@@ -14,7 +14,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/version"
 	"github.com/hollis-labs/plugin-sdk"
-	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // safePluginIDRE mirrors the manifest schema (internal/plugin/schemas/
@@ -74,7 +73,7 @@ type SubprocessPlugin struct {
 	// can bind the owning plugin id. Nil means "no filter installed" which
 	// degrades to pass-through — expected in tests that construct a plugin
 	// without a host.
-	envelopeFilter func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut
+	envelopeFilter func(envs []plugin.EnvelopeOut) []plugin.EnvelopeOut
 
 	// manifestID is the canonical plugin identifier resolved from the
 	// plugin.yaml before the init handshake. It is used to derive the
@@ -400,7 +399,7 @@ func (sp *SubprocessPlugin) Transport() *Transport {
 // envelopes emitted by this plugin. The loader calls this after LoadPlugin so
 // the filter closes over the owning plugin id and the host's envelope schema
 // registry. Called at most once per SubprocessPlugin lifetime.
-func (sp *SubprocessPlugin) SetEnvelopeFilter(fn func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut) {
+func (sp *SubprocessPlugin) SetEnvelopeFilter(fn func(envs []plugin.EnvelopeOut) []plugin.EnvelopeOut) {
 	sp.mu.Lock()
 	sp.envelopeFilter = fn
 	sp.mu.Unlock()
@@ -410,7 +409,7 @@ func (sp *SubprocessPlugin) SetEnvelopeFilter(fn func(envs []sdkplugin.EnvelopeO
 // validated envelopes to forward downstream. When no filter is installed —
 // e.g. in tests, or before the loader wires the plugin — envelopes pass
 // through unchanged.
-func (sp *SubprocessPlugin) filterEnvelopes(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut {
+func (sp *SubprocessPlugin) filterEnvelopes(envs []plugin.EnvelopeOut) []plugin.EnvelopeOut {
 	sp.mu.RLock()
 	fn := sp.envelopeFilter
 	sp.mu.RUnlock()
@@ -425,7 +424,7 @@ func (sp *SubprocessPlugin) filterEnvelopes(envs []sdkplugin.EnvelopeOut) []sdkp
 // The returned func is a method value bound to sp, so it picks up any
 // filter swap SetEnvelopeFilter performs — no further locking on the
 // caller side is required.
-func (sp *SubprocessPlugin) EnvelopeFilter() func([]sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut {
+func (sp *SubprocessPlugin) EnvelopeFilter() func([]plugin.EnvelopeOut) []plugin.EnvelopeOut {
 	return sp.filterEnvelopes
 }
 
@@ -481,7 +480,7 @@ type EnvelopeConsumer interface {
 	// Deliver hands validated envelopes to the session-scoped SSE consumer.
 	// Returns false when no consumer is attached for sessionID — the caller
 	// treats that as a drop and moves on.
-	Deliver(sessionID string, envs []sdkplugin.EnvelopeOut) bool
+	Deliver(sessionID string, envs []plugin.EnvelopeOut) bool
 }
 
 // subprocessEventHook implements plugin.EventHook by forwarding events to the subprocess.
@@ -489,20 +488,22 @@ type subprocessEventHook struct {
 	pluginID         string
 	eventTypes       []string
 	transport        *Transport
-	envelopeFilter   func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut
+	envelopeFilter   func(envs []plugin.EnvelopeOut) []plugin.EnvelopeOut
 	envelopeConsumer EnvelopeConsumer
 }
 
 // NewEventHook builds a subprocess event-hook proxy that forwards the given
-// event types to the plugin subprocess over transport. pluginID identifies
-// the owning plugin for PluginID() (used by host unregister sweeps). filter
-// is the B.11 strict envelope validator bound to the owning plugin id (nil
-// means pass-through; expected only in tests). consumer is the
-// session-scoped delivery sink for post-hook envelopes (nil means drop —
-// the hook still issues the request/response call so the plugin sees the
-// event and can run its side effects, the returned envelopes are simply
-// discarded).
-func NewEventHook(pluginID string, eventTypes []string, transport *Transport, filter func([]sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut, consumer EnvelopeConsumer) plugin.EventHook {
+// event types to the plugin subprocess over transport. pluginID is stored on
+// the returned hook and surfaced through the SDK's PluginID() method so
+// non-Nanite hosts (or other tooling) can identify the owner; Nanite's own
+// host tracks ownership independently via eventHookEntry.pluginID captured
+// at registration time. filter is the B.11 strict envelope validator bound
+// to the owning plugin id (nil means pass-through; expected only in tests).
+// consumer is the session-scoped delivery sink for post-hook envelopes (nil
+// means drop — the hook still issues the request/response call so the plugin
+// sees the event and can run its side effects, the returned envelopes are
+// simply discarded).
+func NewEventHook(pluginID string, eventTypes []string, transport *Transport, filter func([]plugin.EnvelopeOut) []plugin.EnvelopeOut, consumer EnvelopeConsumer) plugin.EventHook {
 	return &subprocessEventHook{
 		pluginID:         pluginID,
 		eventTypes:       eventTypes,

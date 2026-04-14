@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/plugin-sdk"
-	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // captureConsumer records every envelope batch handed to Deliver so the test
@@ -22,10 +21,10 @@ type captureConsumer struct {
 
 type captured struct {
 	sessionID string
-	envs      []sdkplugin.EnvelopeOut
+	envs      []plugin.EnvelopeOut
 }
 
-func (c *captureConsumer) Deliver(sessionID string, envs []sdkplugin.EnvelopeOut) bool {
+func (c *captureConsumer) Deliver(sessionID string, envs []plugin.EnvelopeOut) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.delivered = append(c.delivered, captured{sessionID: sessionID, envs: envs})
@@ -42,7 +41,7 @@ func TestEventHook_PostHookDeliversEnvelopesToConsumer(t *testing.T) {
 	hostToPluginR, hostToPluginW := io.Pipe()
 	pluginToHostR, pluginToHostW := io.Pipe()
 
-	wantEnv := sdkplugin.EnvelopeOut{
+	wantEnv := plugin.EnvelopeOut{
 		Type: "oembed-card",
 		Data: map[string]interface{}{"url": "https://example.com/video"},
 	}
@@ -65,7 +64,7 @@ func TestEventHook_PostHookDeliversEnvelopesToConsumer(t *testing.T) {
 			}
 			sawRequest.Store(true)
 			return &EventHandleResult{
-				Envelopes: []sdkplugin.EnvelopeOut{wantEnv},
+				Envelopes: []plugin.EnvelopeOut{wantEnv},
 			}, nil
 		},
 	}
@@ -78,7 +77,7 @@ func TestEventHook_PostHookDeliversEnvelopesToConsumer(t *testing.T) {
 	// through unchanged. Mirrors the "strict validator — plugin id bound"
 	// closure the loader installs in production (SubprocessPlugin.SetEnvelopeFilter).
 	var filterCalls atomic.Int32
-	filter := func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut {
+	filter := func(envs []plugin.EnvelopeOut) []plugin.EnvelopeOut {
 		filterCalls.Add(1)
 		return envs
 	}
@@ -128,7 +127,7 @@ func TestEventHook_PostHookFilterDropsAllEnvelopes(t *testing.T) {
 	handlers := map[string]func(json.RawMessage) (any, *RPCError){
 		MethodEventHandle: func(_ json.RawMessage) (any, *RPCError) {
 			return &EventHandleResult{
-				Envelopes: []sdkplugin.EnvelopeOut{{Type: "bad-shape"}},
+				Envelopes: []plugin.EnvelopeOut{{Type: "bad-shape"}},
 			}, nil
 		},
 	}
@@ -136,7 +135,7 @@ func TestEventHook_PostHookFilterDropsAllEnvelopes(t *testing.T) {
 	transport := NewTransport(pluginToHostR, hostToPluginW)
 	defer transport.Close()
 
-	filter := func(_ []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut { return nil }
+	filter := func(_ []plugin.EnvelopeOut) []plugin.EnvelopeOut { return nil }
 	consumer := &captureConsumer{}
 	hook := NewEventHook("test-plugin", []string{"message.sent"}, transport, filter, consumer)
 

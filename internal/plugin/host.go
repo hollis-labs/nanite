@@ -74,10 +74,13 @@ type ConnectorStatus struct {
 
 // Host implements the plugin.Host interface for Nanite.
 // It provides the runtime environment and services for plugins.
-// eventHookEntry wraps a registered EventHook with the plugin ID that owns it
-// so UnloadPlugin can sweep plugin-scoped hooks without requiring the external
-// plugin-sdk EventHook interface to expose owner information. Core (non-plugin)
-// event hook registrations leave pluginID == "" and are never swept.
+// eventHookEntry wraps a registered EventHook with the plugin ID that owns it,
+// captured from h.activePlugin at RegisterEventHook time. UnloadPlugin sweeps
+// by this host-side pluginID rather than calling hook.PluginID(); the SDK does
+// expose PluginID() on the interface, but the host tracks ownership at
+// registration so it remains authoritative even for hooks that choose not to
+// report their owner. Core (non-plugin) event hook registrations leave
+// pluginID == "" and are never swept.
 type eventHookEntry struct {
 	hook     plugin.EventHook
 	pluginID string

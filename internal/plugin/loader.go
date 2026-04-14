@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	fplugin "github.com/hollis-labs/plugin-sdk"
-	sdkplugin "github.com/hollis-labs/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
 
@@ -148,7 +147,7 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 		// call chat APIs directly), so there's no equivalent hook for them.
 		if sp, ok := p.(*subprocess.SubprocessPlugin); ok {
 			id := pluginID
-			sp.SetEnvelopeFilter(func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut {
+			sp.SetEnvelopeFilter(func(envs []fplugin.EnvelopeOut) []fplugin.EnvelopeOut {
 				return host.FilterPluginEnvelopes(id, envs)
 			})
 		}

@@ -19,7 +19,10 @@ func TestIsLocalPath(t *testing.T) {
 	}
 	// Bare token that names a real directory is local.
 	dir := t.TempDir()
-	oldwd, _ := os.Getwd()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
 	t.Cleanup(func() { _ = os.Chdir(oldwd) })
 	if err := os.Chdir(filepath.Dir(dir)); err != nil {
 		t.Fatal(err)

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,23 +24,36 @@ const pluginGitOrg = "hollis-labs"
 // install/uninstall/disable/enable operations.
 var noRestart bool
 
+// installLink is set via the --link flag to symlink the source directory
+// into the plugins dir instead of copying. Only meaningful for local-path
+// install.
+var installLink bool
+
 func cmdPlugin(args []string) {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "usage: %s plugin <command> [--no-restart]\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: new, install, uninstall, list, disable, enable")
+		fmt.Fprintln(os.Stderr, "commands: new, install <name|path> [--link], uninstall, list, disable, enable")
 		os.Exit(1)
 	}
 
-	// Extract --no-restart flag from anywhere in the args.
+	// Extract --no-restart and --link flags from anywhere in the args.
 	var filtered []string
 	for _, a := range args {
-		if a == "--no-restart" {
+		switch a {
+		case "--no-restart":
 			noRestart = true
-		} else {
+		case "--link":
+			installLink = true
+		default:
 			filtered = append(filtered, a)
 		}
 	}
 	args = filtered
+
+	if installLink && len(args) > 0 && args[0] != "install" {
+		fmt.Fprintf(os.Stderr, "--link is only valid with %s plugin install\n", brand.BinaryName)
+		os.Exit(1)
+	}
 
 	switch args[0] {
 	case "new":
@@ -46,7 +61,10 @@ func cmdPlugin(args []string) {
 		return
 	case "install":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: " + brand.BinaryName + " plugin install <name>")
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin install <name|path> [--link]")
+			fmt.Fprintln(os.Stderr, "  <name>  clone github.com/"+pluginGitOrg+"/<name>.git")
+			fmt.Fprintln(os.Stderr, "  <path>  install from a local directory (./, ../, /, or existing dir name)")
+			fmt.Fprintln(os.Stderr, "  --link  symlink source into plugins dir instead of copying (local path only)")
 			os.Exit(1)
 		}
 		pluginInstall(args[1])
@@ -106,7 +124,101 @@ func triggerRestart() {
 	}
 }
 
-func pluginInstall(name string) {
+// isLocalPath returns true if arg refers to a local filesystem path
+// rather than a plugin name to clone from GitHub. Explicit path
+// prefixes (./, ../, /) are always local; a bare token is local if it
+// names an existing directory (so `nanite plugin install my-plugin`
+// works from a parent dir that has a my-plugin checkout).
+func isLocalPath(arg string) bool {
+	if strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") ||
+		filepath.IsAbs(arg) || arg == "." || arg == ".." {
+		return true
+	}
+	info, err := os.Stat(arg)
+	return err == nil && info.IsDir()
+}
+
+func pluginInstall(arg string) {
+	if installLink && !isLocalPath(arg) {
+		fmt.Fprintln(os.Stderr, "--link requires a local path, not a plugin name")
+		os.Exit(1)
+	}
+	if isLocalPath(arg) {
+		pluginInstallLocal(arg)
+		return
+	}
+	pluginInstallRemote(arg)
+}
+
+// pluginInstallLocal installs a plugin from a local directory by
+// copying (or symlinking with --link) its contents into the resolved
+// plugins dir under the canonical id from plugin.yaml.
+func pluginInstallLocal(src string) {
+	absSrc, err := filepath.Abs(src)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to resolve %q: %v\n", src, err)
+		os.Exit(1)
+	}
+	manifestPath := filepath.Join(absSrc, "plugin.yaml")
+	if _, err := os.Stat(manifestPath); err != nil {
+		fmt.Fprintf(os.Stderr, "No plugin.yaml at %s — not a valid plugin source\n", manifestPath)
+		os.Exit(1)
+	}
+	manifest, err := plugin.ParseManifest(manifestPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse plugin.yaml: %v\n", err)
+		os.Exit(1)
+	}
+	id := manifest.Identifier()
+	if id == "" {
+		fmt.Fprintln(os.Stderr, "plugin.yaml missing id/name — cannot determine install target")
+		os.Exit(1)
+	}
+
+	dir := resolvePluginsDir()
+	target := filepath.Join(dir, id)
+	// Fail fast on any existing state at target — active install
+	// (plugin.yaml), disabled install (plugin.yaml.disabled), or a
+	// leftover partial/empty dir/symlink. Refusing to overwrite avoids
+	// merging fresh source files into stale artifacts.
+	if _, err := os.Lstat(target); err == nil {
+		fmt.Fprintf(os.Stderr, "Target %s already exists. Run `%s plugin uninstall %s` or remove the directory first.\n",
+			target, brand.BinaryName, id)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create plugins dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	if installLink {
+		fmt.Printf("Linking %s → %s...\n", absSrc, target)
+		if err := os.Symlink(absSrc, target); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to symlink: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Printf("Copying %s → %s...\n", absSrc, target)
+		if err := copyPluginDir(absSrc, target); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to copy: %v\n", err)
+			os.RemoveAll(target)
+			os.Exit(1)
+		}
+	}
+
+	if _, ok := plugin.LookupConstructor(id); ok {
+		fmt.Printf("Found compiled-in code for %q\n", id)
+	} else if manifest.Runtime != "subprocess" {
+		fmt.Printf("Warning: no compiled-in code for %q and runtime is not subprocess — plugin will not load\n", id)
+	}
+
+	fmt.Printf("\nPlugin %q installed to %s\n", id, target)
+	triggerRestart()
+}
+
+// pluginInstallRemote installs a plugin by cloning
+// github.com/hollis-labs/<name>.git — the original install flow.
+func pluginInstallRemote(name string) {
 	dir := resolvePluginsDir()
 	target := filepath.Join(dir, name)
 
@@ -155,6 +267,80 @@ func pluginInstall(name string) {
 
 	fmt.Printf("\nPlugin %q installed to %s\n", name, target)
 	triggerRestart()
+}
+
+// skipCopyNames are entry names (directories or files) that are never
+// copied during a local plugin install. Build artifacts, git state,
+// OS metadata — never part of a plugin's runtime surface.
+var skipCopyNames = map[string]bool{
+	".git":         true,
+	"node_modules": true,
+	"dist":         true,
+	".DS_Store":    true,
+}
+
+// copyPluginDir recursively copies src to dst, skipping directories
+// listed in skipCopyDirs and preserving file modes. Symlinks inside
+// src are recreated as symlinks in dst (not resolved).
+func copyPluginDir(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return os.MkdirAll(dst, 0755)
+		}
+		if skipCopyNames[d.Name()] {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		switch {
+		case d.IsDir():
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			return os.MkdirAll(target, info.Mode()&os.ModePerm)
+		case d.Type()&fs.ModeSymlink != 0:
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		default:
+			return copyFile(path, target)
+		}
+	})
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode()&os.ModePerm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		if cerr := out.Close(); cerr != nil {
+			return fmt.Errorf("copy %s: %w (close: %v)", src, err, cerr)
+		}
+		return err
+	}
+	return out.Close()
 }
 
 func pluginUninstall(name string) {

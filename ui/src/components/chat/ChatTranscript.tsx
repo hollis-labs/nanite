@@ -155,6 +155,7 @@ export function ChatTranscript({
     toolCalls.length,
     toolWarnings.length,
     pendingApprovals.length,
+    pluginEnvelopes.length,
     chatErrors.length,
     checkScrollPosition,
   ]);
@@ -313,6 +314,7 @@ export function ChatTranscript({
     toolCalls.length,
     toolWarnings.length,
     pendingApprovals.length,
+    pluginEnvelopes.length,
     chatErrors.length,
     isAtBottom,
     userHasScrolled,

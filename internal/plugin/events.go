@@ -53,12 +53,13 @@ const (
 	EventConfigChanged = "config.changed"
 
 	// Plugin Lifecycle Events
-	EventPluginInstalled   = "plugin.installed"
-	EventPluginUninstalled = "plugin.uninstalled"
-	EventPluginUpdated     = "plugin.updated"
-	EventPluginEnabled     = "plugin.enabled"
-	EventPluginDisabled    = "plugin.disabled"
-	EventPluginLoadFailed  = "plugin.load_failed"
+	EventPluginInstalled       = "plugin.installed"
+	EventPluginUninstalled     = "plugin.uninstalled"
+	EventPluginUpdated         = "plugin.updated"
+	EventPluginEnabled         = "plugin.enabled"
+	EventPluginDisabled        = "plugin.disabled"
+	EventPluginLoadFailed      = "plugin.load_failed"
+	EventPluginInstallProgress = "plugin.install_progress"
 
 	// Session Lifecycle Events
 	EventSessionArchived = "session.archived"
@@ -420,6 +421,18 @@ func (h *Host) EmitPluginLoadFailed(pluginID, reason string) {
 	event := NewEvent(EventPluginLoadFailed, brand.ID, EventData{})
 	event.Data["plugin_id"] = pluginID
 	event.Data["reason"] = reason
+	h.EmitEvent(event)
+}
+
+// EmitPluginInstallProgress emits a plugin.install_progress event for the
+// Plugin Manager UI to drive per-step progress rendering. Emitted by the
+// install state machine's EventFunc bridge in api/catalog.go.
+func (h *Host) EmitPluginInstallProgress(pluginID, state, message string, progress float64) {
+	event := NewEvent(EventPluginInstallProgress, brand.ID, EventData{})
+	event.Data["plugin_id"] = pluginID
+	event.Data["state"] = state
+	event.Data["message"] = message
+	event.Data["progress"] = progress
 	h.EmitEvent(event)
 }
 

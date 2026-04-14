@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -84,7 +84,7 @@ func TestEventHook_PostHookDeliversEnvelopesToConsumer(t *testing.T) {
 	}
 
 	consumer := &captureConsumer{returnOK: true}
-	hook := NewEventHook([]string{"message.sent"}, transport, filter, consumer)
+	hook := NewEventHook("test-plugin", []string{"message.sent"}, transport, filter, consumer)
 
 	err := hook.Handle(context.Background(), plugin.Event{
 		Type:      "message.sent",
@@ -138,7 +138,7 @@ func TestEventHook_PostHookFilterDropsAllEnvelopes(t *testing.T) {
 
 	filter := func(_ []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut { return nil }
 	consumer := &captureConsumer{}
-	hook := NewEventHook([]string{"message.sent"}, transport, filter, consumer)
+	hook := NewEventHook("test-plugin", []string{"message.sent"}, transport, filter, consumer)
 
 	if err := hook.Handle(context.Background(), plugin.Event{
 		Type: "message.sent", SessionID: "s", Source: "t",
@@ -174,7 +174,7 @@ func TestEventHook_PreHookUnchanged(t *testing.T) {
 	defer transport.Close()
 
 	consumer := &captureConsumer{}
-	hook := NewEventHook([]string{"message.sending"}, transport, nil, consumer)
+	hook := NewEventHook("test-plugin", []string{"message.sending"}, transport, nil, consumer)
 
 	err := hook.Handle(context.Background(), plugin.Event{
 		Type: "message.sending", SessionID: "s", Source: "t",

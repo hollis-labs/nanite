@@ -20,7 +20,7 @@ import (
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
-	fplugin "github.com/hollis-labs/go-plugin"
+	fplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // Archive extraction caps — defense against zip-bomb / tar-bomb plugin

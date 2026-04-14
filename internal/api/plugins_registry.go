@@ -6,7 +6,7 @@ import (
 	"path"
 	"sync"
 
-	goplugin "github.com/hollis-labs/go-plugin"
+	goplugin "github.com/hollis-labs/plugin-sdk"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
 

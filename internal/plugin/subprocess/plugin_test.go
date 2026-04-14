@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 	_ "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -52,9 +52,6 @@ func (h *fakeHost) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
 func (h *fakeHost) RegisterConnector(name string, c plugin.Connector) error { return nil }
 func (h *fakeHost) RegisterProvider(name string, p interface{}) error       { return nil }
 func (h *fakeHost) RegisterCLIAdapter(name string, a interface{}) error     { return nil }
-func (h *fakeHost) RegisterCommand(cmd plugin.SlashCommandDef) error        { return nil }
-func (h *fakeHost) RegisterSlot(entry plugin.UISlotEntry) error             { return nil }
-func (h *fakeHost) RegisterKeybinding(kb plugin.KeybindingDef) error        { return nil }
 func (h *fakeHost) Logger() plugin.Logger        { return h.logger }
 func (h *fakeHost) Context() context.Context      { return context.Background() }
 

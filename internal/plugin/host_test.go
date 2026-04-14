@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 )
 
 // TestPlugin implements the plugin.Plugin interface for testing
@@ -59,6 +59,8 @@ func (h *TestEventHook) Handle(ctx context.Context, event plugin.Event) error {
 func (h *TestEventHook) EventTypes() []string {
 	return h.eventTypes
 }
+
+func (h *TestEventHook) PluginID() string { return "test-plugin" }
 
 // TestCRUDHandler implements plugin.CRUDHandler for testing
 type TestCRUDHandler struct {

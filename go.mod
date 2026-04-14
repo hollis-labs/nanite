@@ -7,7 +7,6 @@ require (
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/google/uuid v1.6.0
 	github.com/hollis-labs/go-otel v0.0.2
-	github.com/hollis-labs/go-plugin v0.0.1
 	github.com/hollis-labs/go-toolbroker v0.0.2
 	github.com/zalando/go-keyring v0.2.8
 	go.opentelemetry.io/otel v1.43.0

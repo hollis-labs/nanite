@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	fplugin "github.com/hollis-labs/go-plugin"
+	fplugin "github.com/hollis-labs/plugin-sdk"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )

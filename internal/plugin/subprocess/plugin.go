@@ -13,7 +13,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/version"
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -486,6 +486,7 @@ type EnvelopeConsumer interface {
 
 // subprocessEventHook implements plugin.EventHook by forwarding events to the subprocess.
 type subprocessEventHook struct {
+	pluginID         string
 	eventTypes       []string
 	transport        *Transport
 	envelopeFilter   func(envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut
@@ -493,14 +494,17 @@ type subprocessEventHook struct {
 }
 
 // NewEventHook builds a subprocess event-hook proxy that forwards the given
-// event types to the plugin subprocess over transport. filter is the B.11
-// strict envelope validator bound to the owning plugin id (nil means
-// pass-through; expected only in tests). consumer is the session-scoped
-// delivery sink for post-hook envelopes (nil means drop — the hook still
-// issues the request/response call so the plugin sees the event and can run
-// its side effects, the returned envelopes are simply discarded).
-func NewEventHook(eventTypes []string, transport *Transport, filter func([]sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut, consumer EnvelopeConsumer) plugin.EventHook {
+// event types to the plugin subprocess over transport. pluginID identifies
+// the owning plugin for PluginID() (used by host unregister sweeps). filter
+// is the B.11 strict envelope validator bound to the owning plugin id (nil
+// means pass-through; expected only in tests). consumer is the
+// session-scoped delivery sink for post-hook envelopes (nil means drop —
+// the hook still issues the request/response call so the plugin sees the
+// event and can run its side effects, the returned envelopes are simply
+// discarded).
+func NewEventHook(pluginID string, eventTypes []string, transport *Transport, filter func([]sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut, consumer EnvelopeConsumer) plugin.EventHook {
 	return &subprocessEventHook{
+		pluginID:         pluginID,
 		eventTypes:       eventTypes,
 		transport:        transport,
 		envelopeFilter:   filter,
@@ -510,6 +514,10 @@ func NewEventHook(eventTypes []string, transport *Transport, filter func([]sdkpl
 
 func (h *subprocessEventHook) EventTypes() []string {
 	return h.eventTypes
+}
+
+func (h *subprocessEventHook) PluginID() string {
+	return h.pluginID
 }
 
 func (h *subprocessEventHook) Handle(ctx context.Context, event plugin.Event) error {

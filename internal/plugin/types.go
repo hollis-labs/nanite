@@ -1,31 +1,35 @@
 package plugin
 
 import (
-	goplugin "github.com/hollis-labs/go-plugin"
+	naniteplugin "github.com/hollis-labs/nanite/pkg/plugin"
 )
 
-// Re-export SDK types so existing Nanite code keeps compiling without
-// import-path changes outside this package.
-type UISlotName = goplugin.UISlotName
-type UISlotEntry = goplugin.UISlotEntry
-type CommandArg = goplugin.CommandArg
-type SlashCommandDef = goplugin.SlashCommandDef
-type KeybindingDef = goplugin.KeybindingDef
+// Re-export Nanite-specific UI plugin types so existing callers in this
+// package keep compiling with unqualified names after the Phase 2 Track I
+// split: universal types moved to github.com/hollis-labs/plugin-sdk, while
+// host-specific UI types moved to github.com/hollis-labs/nanite/pkg/plugin.
+type UISlotName = naniteplugin.UISlotName
+type UISlotEntry = naniteplugin.UISlotEntry
+type CommandArg = naniteplugin.CommandArg
+type SlashCommandDef = naniteplugin.SlashCommandDef
+type KeybindingDef = naniteplugin.KeybindingDef
 
-// Extra slot constants defined by Nanite but not (yet) in the SDK.
+// Re-exported slot constants defined in the Nanite public plugin package.
 const (
-	SlotNavRail            = goplugin.SlotNavRail
-	SlotSettingsTab        = goplugin.SlotSettingsTab
-	SlotRightRailTab       = goplugin.SlotRightRailTab
-	SlotComposerToolbar    = goplugin.SlotComposerToolbar
-	SlotChatHeaderAction   = goplugin.SlotChatHeaderAction
-	SlotContextMenuMessage = goplugin.SlotContextMenuMessage
-	SlotContextMenuSession = goplugin.SlotContextMenuSession
-	SlotCommandPalette     = goplugin.SlotCommandPalette
-	SlotComposerAbove      UISlotName = "composer-above"    // info drawers above composer input
-	SlotComposerBelow      UISlotName = "composer-below"    // quick actions, suggestions below composer
-	SlotMessageActions     UISlotName = "message-actions"    // per-message plugin buttons (translate, bookmark, etc.)
-	SlotMessageHeader      UISlotName = "message-header"     // per-message badges/tags (sentiment, cost, etc.)
-	SlotSessionSidebar     UISlotName = "session-sidebar"    // decorations on session list items
-	SlotModal              UISlotName = "modal"              // plugin-triggered modal dialogs
+	SlotNavRail            = naniteplugin.SlotNavRail
+	SlotSettingsTab        = naniteplugin.SlotSettingsTab
+	SlotRightRailTab       = naniteplugin.SlotRightRailTab
+	SlotComposerToolbar    = naniteplugin.SlotComposerToolbar
+	SlotChatHeaderAction   = naniteplugin.SlotChatHeaderAction
+	SlotContextMenuMessage = naniteplugin.SlotContextMenuMessage
+	SlotContextMenuSession = naniteplugin.SlotContextMenuSession
+	SlotCommandPalette     = naniteplugin.SlotCommandPalette
+	// Extra slot constants defined by Nanite for internal-only frontend
+	// mount points not yet exposed to external plugins.
+	SlotComposerAbove  UISlotName = "composer-above"
+	SlotComposerBelow  UISlotName = "composer-below"
+	SlotMessageActions UISlotName = "message-actions"
+	SlotMessageHeader  UISlotName = "message-header"
+	SlotSessionSidebar UISlotName = "session-sidebar"
+	SlotModal          UISlotName = "modal"
 )

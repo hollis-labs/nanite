@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	pluginsdk "github.com/hollis-labs/go-plugin"
+	pluginsdk "github.com/hollis-labs/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )

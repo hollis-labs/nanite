@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	goplugin "github.com/hollis-labs/go-plugin"
+	goplugin "github.com/hollis-labs/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
@@ -383,16 +383,16 @@ func registerManifestCommands(host *Host, pluginID string, entries []CommandRegi
 		if entry.Name == "" {
 			return fmt.Errorf("plugin %q: commands entry missing name", pluginID)
 		}
-		args := make([]goplugin.CommandArg, 0, len(entry.Args))
+		args := make([]CommandArg, 0, len(entry.Args))
 		for _, a := range entry.Args {
-			args = append(args, goplugin.CommandArg{
+			args = append(args, CommandArg{
 				Name:        a.Name,
 				Description: a.Description,
 				Required:    a.Required,
 				Type:        a.Type,
 			})
 		}
-		def := goplugin.SlashCommandDef{
+		def := SlashCommandDef{
 			Name:        entry.Name,
 			Description: entry.Description,
 			Args:        args,
@@ -436,7 +436,7 @@ func registerManifestEvents(host *Host, pluginID string, entries []EventRegistra
 		if len(entry.Types) == 0 {
 			return fmt.Errorf("plugin %q: events[%d] missing types", pluginID, i)
 		}
-		hook := subprocess.NewEventHook(append([]string(nil), entry.Types...), sp.Transport(), filter, consumer)
+		hook := subprocess.NewEventHook(pluginID, append([]string(nil), entry.Types...), sp.Transport(), filter, consumer)
 		if err := host.RegisterEventHook(entry.Types, hook); err != nil {
 			return fmt.Errorf("plugin %q: register event hook for %v: %w", pluginID, entry.Types, err)
 		}

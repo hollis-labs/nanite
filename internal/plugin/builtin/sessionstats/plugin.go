@@ -9,7 +9,7 @@ import (
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 	"gopkg.in/yaml.v3"
 )
 

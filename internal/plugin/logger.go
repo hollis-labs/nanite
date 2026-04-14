@@ -3,7 +3,7 @@ package plugin
 import (
 	"log/slog"
 
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 )
 
 // Logger implements plugin.Logger by delegating to log/slog. The

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/go-plugin"
+	"github.com/hollis-labs/plugin-sdk"
 )
 
 func init() {
@@ -88,6 +88,10 @@ type {{.StructName}}Hook struct {
 
 func (h *{{.StructName}}Hook) EventTypes() []string {
 	return []string{"message.sent", "session.start"}
+}
+
+func (h *{{.StructName}}Hook) PluginID() string {
+	return "{{.PluginID}}"
 }
 
 func (h *{{.StructName}}Hook) Handle(ctx context.Context, event plugin.Event) error {

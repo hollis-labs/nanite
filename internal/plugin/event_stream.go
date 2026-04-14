@@ -1,7 +1,7 @@
 package plugin
 
 import (
-	pluginsdk "github.com/hollis-labs/go-plugin"
+	pluginsdk "github.com/hollis-labs/plugin-sdk"
 )
 
 // SubscribeEvents creates a buffered channel that receives all emitted events.

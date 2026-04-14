@@ -1,42 +1,69 @@
-import { useState, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+// TODO(g5-followup): derive tier from a real CatalogEntry.Tier field once backend adds it.
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Package,
-  Loader2,
   AlertCircle,
-  RefreshCw,
-  Search,
-  Download,
   ArrowUpCircle,
   CheckCircle2,
-  Tag,
+  Download,
   Globe,
+  Loader2,
+  Package,
+  RefreshCw,
+  Search,
   Settings2,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
-import { Skeleton } from '@/components/ui/skeleton'
-import { api } from '@/lib/api'
-import type { CatalogBrowseEntry } from '@/lib/types'
+  Tag,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import type { CatalogBrowseEntry } from "@/lib/types";
+import { PluginInstallProgress } from "./PluginInstallProgress";
+
+type Tier = "all" | "core" | "default" | "available";
+
+function deriveTier(entry: CatalogBrowseEntry): Exclude<Tier, "all"> {
+  const tags = entry.tags ?? [];
+  if (tags.includes("core")) return "core";
+  if (tags.includes("default")) return "default";
+  return "available";
+}
 
 interface Toast {
-  id: number
-  message: string
-  variant?: 'default' | 'success' | 'error'
+  id: number;
+  message: string;
+  variant?: "default" | "success" | "error";
 }
 
-let toastId = 0
+let toastId = 0;
 
 interface CatalogBrowserProps {
-  onManageSources: () => void
+  onManageSources: () => void;
+  /** When set, scrolls the matching catalog row into view after render. */
+  focusEntryName?: string | null;
+  onFocusHandled?: () => void;
 }
 
-export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
-  const [toasts, setToasts] = useState<Toast[]>([])
-  const [search, setSearch] = useState('')
-  const [tagFilter, setTagFilter] = useState<string | null>(null)
-  const [installingName, setInstallingName] = useState<string | null>(null)
-  const queryClient = useQueryClient()
+export function CatalogBrowser({
+  onManageSources,
+  focusEntryName,
+  onFocusHandled,
+}: CatalogBrowserProps) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [search, setSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [tierFilter, setTierFilter] = useState<Tier>("all");
+  const [installingName, setInstallingName] = useState<string | null>(null);
+  const rowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const queryClient = useQueryClient();
 
   const {
     data: entries = [],
@@ -45,68 +72,112 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['catalog-browse'],
+    queryKey: ["catalog-browse"],
     queryFn: api.browseCatalog,
     staleTime: 60_000,
-  })
+  });
 
-  const addToast = useCallback((message: string, variant: Toast['variant'] = 'default') => {
-    const id = ++toastId
-    setToasts((prev) => [...prev, { id, message, variant }])
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000)
-  }, [])
+  const addToast = useCallback((message: string, variant: Toast["variant"] = "default") => {
+    const id = ++toastId;
+    setToasts((prev) => [...prev, { id, message, variant }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
+  }, []);
 
   const refreshMutation = useMutation({
     mutationFn: api.refreshCatalog,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['catalog-browse'] })
-      void refetch()
+      void queryClient.invalidateQueries({ queryKey: ["catalog-browse"] });
+      void refetch();
     },
-  })
+  });
 
   const installMutation = useMutation({
     mutationFn: api.catalogInstall,
     onMutate: (name) => setInstallingName(name),
     onSuccess: (data) => {
-      addToast(data.message || 'Plugin installed.', 'success')
-      setInstallingName(null)
-      void queryClient.invalidateQueries({ queryKey: ['catalog-browse'] })
-      void queryClient.invalidateQueries({ queryKey: ['plugins'] })
-      void queryClient.invalidateQueries({ queryKey: ['plugins-for-esm'] })
+      addToast(data.message || "Plugin installed.", "success");
+      // Intentionally keep installingName set so PluginInstallProgress stays
+      // mounted long enough to render terminal ready/failed states and run
+      // its auto-close behavior. The component calls onClose() when done.
+      void queryClient.invalidateQueries({ queryKey: ["catalog-browse"] });
+      void queryClient.invalidateQueries({ queryKey: ["plugins"] });
+      void queryClient.invalidateQueries({ queryKey: ["plugins-for-esm"] });
     },
     onError: (err: Error) => {
-      addToast(`Install failed: ${err.message}`, 'error')
-      setInstallingName(null)
+      addToast(`Install failed: ${err.message}`, "error");
+      // Same as onSuccess — let PluginInstallProgress render its terminal
+      // state and self-close. If no SSE events arrive, its 10s fallback +
+      // close button handle it.
     },
-  })
+  });
 
   // Collect all unique tags for filtering.
-  const allTags = Array.from(new Set(entries.flatMap((e) => e.tags ?? []))).sort()
+  const allTags = Array.from(new Set(entries.flatMap((e) => e.tags ?? []))).sort();
 
   // Filter entries.
   const filtered = entries.filter((entry) => {
     if (search) {
-      const q = search.toLowerCase()
+      const q = search.toLowerCase();
       const match =
         entry.name.toLowerCase().includes(q) ||
         entry.description?.toLowerCase().includes(q) ||
         entry.author?.toLowerCase().includes(q) ||
-        entry.tags?.some((t) => t.toLowerCase().includes(q))
-      if (!match) return false
+        entry.tags?.some((t) => t.toLowerCase().includes(q));
+      if (!match) return false;
     }
-    if (tagFilter && !entry.tags?.includes(tagFilter)) return false
-    return true
-  })
+    if (tagFilter && !entry.tags?.includes(tagFilter)) return false;
+    if (tierFilter !== "all" && deriveTier(entry) !== tierFilter) return false;
+    return true;
+  });
 
   // Sort: not-installed first, then updates available, then installed.
   const sorted = [...filtered].sort((a, b) => {
-    if (a.installed !== b.installed) return a.installed ? 1 : -1
-    if (a.update_available !== b.update_available) return a.update_available ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
+    if (a.installed !== b.installed) return a.installed ? 1 : -1;
+    if (a.update_available !== b.update_available) return a.update_available ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  // Scroll into view when the parent tab switch requests a focus target.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run after sorted list renders so row refs exist
+  useEffect(() => {
+    if (!focusEntryName) return;
+    const el = rowRefs.current.get(focusEntryName);
+    if (el) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      onFocusHandled?.();
+    }
+  }, [focusEntryName, sorted, onFocusHandled]);
+
+  const tiers: { id: Tier; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "core", label: "Core" },
+    { id: "default", label: "Default" },
+    { id: "available", label: "Available" },
+  ];
 
   return (
     <div className="space-y-4">
+      {/* Tier filter row */}
+      <div className="flex items-center gap-1">
+        {tiers.map((t) => {
+          const active = tierFilter === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTierFilter(t.id)}
+              className={`text-[11px] px-2 py-1 rounded-md border leading-none transition-colors ${
+                active
+                  ? "bg-bg-elevated text-fg border-border-subtle shadow-sm"
+                  : "bg-transparent text-fg-muted border-transparent hover:bg-surface/50"
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Toolbar */}
       <div className="flex items-center gap-3">
         <div className="relative">
@@ -126,8 +197,8 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
               onClick={() => setTagFilter(null)}
               className={`text-[10px] px-1.5 py-0.5 rounded-md border leading-none transition-colors ${
                 tagFilter === null
-                  ? 'bg-bg-elevated text-fg border-border-subtle shadow-sm'
-                  : 'bg-transparent text-fg-muted border-transparent hover:bg-surface/50'
+                  ? "bg-bg-elevated text-fg border-border-subtle shadow-sm"
+                  : "bg-transparent text-fg-muted border-transparent hover:bg-surface/50"
               }`}
             >
               All
@@ -138,8 +209,8 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
                 onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
                 className={`text-[10px] px-1.5 py-0.5 rounded-md border leading-none transition-colors ${
                   tagFilter === tag
-                    ? 'bg-bg-elevated text-fg border-border-subtle shadow-sm'
-                    : 'bg-transparent text-fg-muted border-transparent hover:bg-surface/50'
+                    ? "bg-bg-elevated text-fg border-border-subtle shadow-sm"
+                    : "bg-transparent text-fg-muted border-transparent hover:bg-surface/50"
                 }`}
               >
                 {tag}
@@ -167,7 +238,9 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
           onClick={() => refreshMutation.mutate()}
           disabled={refreshMutation.isPending || isLoading}
         >
-          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
+          <RefreshCw
+            className={`w-3.5 h-3.5 mr-1 ${refreshMutation.isPending ? "animate-spin" : ""}`}
+          />
           Refresh
         </Button>
       </div>
@@ -179,7 +252,7 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
           <div>
             <p className="text-sm font-medium text-fg">Failed to load catalog</p>
             <p className="text-xs text-fg-muted mt-1">
-              {(error as Error)?.message || 'Check that catalog sources are configured.'}
+              {(error as Error)?.message || "Check that catalog sources are configured."}
             </p>
           </div>
         </div>
@@ -189,7 +262,10 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
       {isLoading && !isError && (
         <div className="grid grid-cols-2 gap-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+            <div
+              key={i}
+              className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+            >
               <div className="px-3.5 py-3 flex items-center gap-2.5">
                 <Skeleton className="size-9 rounded-lg" />
                 <div className="flex flex-col gap-1.5 flex-1">
@@ -209,14 +285,16 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
       {!isLoading && !isError && sorted.length === 0 && (
         <Empty className="py-12">
           <EmptyHeader>
-            <EmptyMedia variant="icon"><Globe /></EmptyMedia>
+            <EmptyMedia variant="icon">
+              <Globe />
+            </EmptyMedia>
             <EmptyTitle className="text-sm">
-              {search || tagFilter ? 'No matching plugins' : 'Catalog is empty'}
+              {search || tagFilter ? "No matching plugins" : "Catalog is empty"}
             </EmptyTitle>
             <EmptyDescription className="text-xs">
               {search || tagFilter
-                ? 'Try adjusting your search or filter.'
-                : 'Add a catalog source to browse available plugins.'}
+                ? "Try adjusting your search or filter."
+                : "Add a catalog source to browse available plugins."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -231,9 +309,24 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
               entry={entry}
               installing={installingName === entry.name}
               onInstall={() => installMutation.mutate(entry.name)}
+              rowRef={(el) => {
+                if (el) rowRefs.current.set(entry.name, el);
+                else rowRefs.current.delete(entry.name);
+              }}
+              highlight={focusEntryName === entry.name}
             />
           ))}
         </div>
+      )}
+
+      {/* Install progress — dormant until backend bridges install.Installer
+          events onto /api/plugins/events. Falls back to a spinner otherwise. */}
+      {installingName && (
+        <PluginInstallProgress
+          pluginId={installingName}
+          pending={installMutation.isPending}
+          onClose={() => setInstallingName(null)}
+        />
       )}
 
       {/* Toast container */}
@@ -243,11 +336,11 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
             <div
               key={toast.id}
               className={`px-4 py-3 border rounded-lg shadow-xl text-sm max-w-sm animate-in fade-in slide-in-from-bottom-2 ${
-                toast.variant === 'error'
-                  ? 'bg-danger/20 border-danger/30 text-danger'
-                  : toast.variant === 'success'
-                    ? 'bg-success/5 border-success/30 text-fg'
-                    : 'bg-surface border-border-subtle text-fg'
+                toast.variant === "error"
+                  ? "bg-danger/20 border-danger/30 text-danger"
+                  : toast.variant === "success"
+                    ? "bg-success/5 border-success/30 text-fg"
+                    : "bg-surface border-border-subtle text-fg"
               }`}
             >
               {toast.message}
@@ -256,7 +349,7 @@ export function CatalogBrowser({ onManageSources }: CatalogBrowserProps) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 // --- Entry Card ---
@@ -265,20 +358,27 @@ function CatalogEntryCard({
   entry,
   installing,
   onInstall,
+  rowRef,
+  highlight,
 }: {
-  entry: CatalogBrowseEntry
-  installing: boolean
-  onInstall: () => void
+  entry: CatalogBrowseEntry;
+  installing: boolean;
+  onInstall: () => void;
+  rowRef?: (el: HTMLDivElement | null) => void;
+  highlight?: boolean;
 }) {
-  const isInstalled = entry.installed
-  const hasUpdate = entry.update_available
+  const isInstalled = entry.installed;
+  const hasUpdate = entry.update_available;
 
   return (
     <div
+      ref={rowRef}
       className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
+        highlight ? "ring-2 ring-amber-500/60 " : ""
+      }${
         isInstalled
-          ? 'border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-70'
-          : 'border-border-subtle bg-white dark:bg-bg-elevated/60'
+          ? "border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-70"
+          : "border-border-subtle bg-white dark:bg-bg-elevated/60"
       }`}
     >
       {/* Header */}
@@ -292,9 +392,7 @@ function CatalogEntryCard({
             {isInstalled && !hasUpdate && (
               <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
             )}
-            {hasUpdate && (
-              <ArrowUpCircle className="w-3.5 h-3.5 text-warning shrink-0" />
-            )}
+            {hasUpdate && <ArrowUpCircle className="w-3.5 h-3.5 text-warning shrink-0" />}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="text-[11px] text-fg-muted">v{entry.version}</span>
@@ -341,7 +439,7 @@ function CatalogEntryCard({
       {/* Detail footer */}
       <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
         <p className="text-[11px] text-fg-muted line-clamp-2">
-          {entry.description || 'No description'}
+          {entry.description || "No description"}
         </p>
         {entry.tags && entry.tags.length > 0 && (
           <div className="flex items-center gap-1 mt-1.5">
@@ -358,5 +456,5 @@ function CatalogEntryCard({
         )}
       </div>
     </div>
-  )
+  );
 }

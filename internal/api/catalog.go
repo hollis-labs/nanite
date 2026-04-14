@@ -252,9 +252,22 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	emitProgress := func(state, message string, progress float64) {
+		if cs.pluginHost != nil {
+			cs.pluginHost.EmitPluginInstallProgress(req.Name, state, message, progress)
+		}
+	}
+	emitFailure := func(state string, err error) {
+		emitProgress(state, fmt.Sprintf("failed in %s", state), 0)
+		if cs.pluginHost != nil {
+			cs.pluginHost.EmitPluginLoadFailed(req.Name, fmt.Sprintf("%s: %v", state, err))
+		}
+	}
+
 	// Look up in catalog.
 	sources, err := cs.store.ListCatalogSources()
 	if err != nil {
+		emitFailure("downloading", err)
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -267,6 +280,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 
 	entries, err := cs.fetcher.Fetch(r.Context(), fetcherSources)
 	if err != nil {
+		emitFailure("downloading", err)
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -295,6 +309,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	emitProgress("downloading", "fetching archive", 0)
 	// Download the archive.
 	tmpFile, err := os.CreateTemp("", "nanite-catalog-*.tar.gz")
 	if err != nil {
@@ -307,6 +322,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	dlReq, err := http.NewRequestWithContext(r.Context(), "GET", entry.ArchiveURL, nil)
 	if err != nil {
 		tmpFile.Close()
+		emitFailure("downloading", err)
 		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid archive URL: %v", err))
 		return
 	}
@@ -314,6 +330,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	resp, err := http.DefaultClient.Do(dlReq)
 	if err != nil {
 		tmpFile.Close()
+		emitFailure("downloading", err)
 		cs.errorResp(w, http.StatusBadGateway, fmt.Sprintf("download failed: %v", err))
 		return
 	}
@@ -321,6 +338,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 
 	if resp.StatusCode != http.StatusOK {
 		tmpFile.Close()
+		emitFailure("downloading", fmt.Errorf("http %d", resp.StatusCode))
 		cs.errorResp(w, http.StatusBadGateway, fmt.Sprintf("download returned %d", resp.StatusCode))
 		return
 	}
@@ -329,13 +347,16 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	limited := io.LimitReader(resp.Body, 100<<20)
 	if _, err := io.Copy(tmpFile, limited); err != nil {
 		tmpFile.Close()
+		emitFailure("downloading", err)
 		cs.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("download write failed: %v", err))
 		return
 	}
 	tmpFile.Close()
 
+	emitProgress("verifying", "verifying archive", 0)
 	// Verify checksum if present.
 	if err := naniteplugin.VerifyChecksum(tmpPath, entry.Checksum); err != nil {
+		emitFailure("verifying", err)
 		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("checksum verification failed: %v", err))
 		return
 	}
@@ -344,6 +365,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	sourcePublicKey := findSourcePublicKey(sources, entry.SourceID)
 	if sourcePublicKey != "" && entry.Signature != "" {
 		if err := naniteplugin.VerifySignature(tmpPath, sourcePublicKey, entry.Signature); err != nil {
+			emitFailure("verifying", err)
 			cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("signature verification failed: %v", err))
 			return
 		}
@@ -352,9 +374,11 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		slog.Warn("catalog: plugin is unsigned (source has a trusted key)", "name", entry.Name, "source", entry.SourceName)
 	}
 
+	emitProgress("extracting", "extracting archive", 0)
 	// Extract the archive.
 	extractDir, err := os.MkdirTemp("", "nanite-catalog-extract-*")
 	if err != nil {
+		emitFailure("extracting", err)
 		cs.errorResp(w, http.StatusInternalServerError, "failed to create extract dir")
 		return
 	}
@@ -367,6 +391,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		err = extractTarGz(tmpPath, extractDir)
 	}
 	if err != nil {
+		emitFailure("extracting", err)
 		cs.errorResp(w, http.StatusBadRequest, fmt.Sprintf("extract failed: %v", err))
 		return
 	}
@@ -386,7 +411,9 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	emitProgress("validating", "checking plugin manifest", 0)
 	if !fileExists(filepath.Join(pluginRoot, "plugin.yaml")) {
+		emitFailure("validating", fmt.Errorf("plugin.yaml missing"))
 		cs.errorResp(w, http.StatusBadRequest, "downloaded archive does not contain plugin.yaml")
 		return
 	}
@@ -399,10 +426,12 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	os.MkdirAll(cs.pluginsDir, 0755)
 	if err := copyDir(pluginRoot, target); err != nil {
 		os.RemoveAll(target)
+		emitFailure("validating", err)
 		cs.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("install failed: %v", err))
 		return
 	}
 
+	emitProgress("loading", "loading plugin into host", 0)
 	// Hot-load into running host (reuses the existing helper from plugins.go).
 	pms := &pluginManagerState{
 		pluginsDir: cs.pluginsDir,
@@ -410,6 +439,8 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		store:      cs.store,
 	}
 	pms.runPluginLoadIntoHost(filepath.Join(target, "plugin.yaml"), target)
+
+	emitProgress("ready", "install complete", 1)
 
 	cs.jsonResp(w, http.StatusOK, map[string]string{
 		"status":  "installed",

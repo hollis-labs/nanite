@@ -23,12 +23,13 @@ import (
 //   - plugin.disabled    — { plugin_id }
 //   - plugin.load_failed — { plugin_id, reason }
 var lifecycleEventTypes = map[string]bool{
-	naniteplugin.EventPluginInstalled:   true,
-	naniteplugin.EventPluginUninstalled: true,
-	naniteplugin.EventPluginUpdated:     true,
-	naniteplugin.EventPluginEnabled:     true,
-	naniteplugin.EventPluginDisabled:    true,
-	naniteplugin.EventPluginLoadFailed:  true,
+	naniteplugin.EventPluginInstalled:       true,
+	naniteplugin.EventPluginUninstalled:     true,
+	naniteplugin.EventPluginUpdated:         true,
+	naniteplugin.EventPluginEnabled:         true,
+	naniteplugin.EventPluginDisabled:        true,
+	naniteplugin.EventPluginLoadFailed:      true,
+	naniteplugin.EventPluginInstallProgress: true,
 }
 
 // sseKeepaliveInterval is the cadence at which we send an SSE comment to keep

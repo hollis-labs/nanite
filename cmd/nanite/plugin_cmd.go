@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -32,7 +33,7 @@ var installLink bool
 func cmdPlugin(args []string) {
 	if len(args) < 1 {
 		fmt.Fprintf(os.Stderr, "usage: %s plugin <command> [--no-restart]\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: new, install <name|path> [--link], uninstall, list, disable, enable")
+		fmt.Fprintln(os.Stderr, "commands: new, install <name|path> [--link], update <name>, uninstall, list, disable, enable, logs, reload, watch, release")
 		os.Exit(1)
 	}
 
@@ -74,6 +75,21 @@ func cmdPlugin(args []string) {
 			os.Exit(1)
 		}
 		pluginUninstall(args[1])
+	case "update":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin update <name>")
+			os.Exit(1)
+		}
+		pluginUpdate(args[1])
+	case "logs":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin logs <name>")
+			os.Exit(1)
+		}
+		pluginLogs(args[1])
+	case "reload", "watch", "release":
+		fmt.Fprintf(os.Stderr, "%s plugin %s: not yet implemented — tracked in BLG-20260414-003\n", brand.BinaryName, args[0])
+		os.Exit(2)
 	case "list":
 		pluginList()
 	case "disable":
@@ -216,8 +232,9 @@ func pluginInstallLocal(src string) {
 	triggerRestart()
 }
 
-// pluginInstallRemote installs a plugin by cloning
-// github.com/hollis-labs/<name>.git — the original install flow.
+// pluginInstallRemote installs a plugin. Tries the signed catalog first;
+// if the plugin is not listed there, falls back to the legacy git-clone
+// flow at github.com/hollis-labs/<name>.git.
 func pluginInstallRemote(name string) {
 	dir := resolvePluginsDir()
 	target := filepath.Join(dir, name)
@@ -226,6 +243,22 @@ func pluginInstallRemote(name string) {
 	if _, err := os.Stat(filepath.Join(target, "plugin.yaml")); err == nil {
 		fmt.Printf("Plugin %q is already installed at %s\n", name, target)
 		os.Exit(1)
+	}
+
+	// Try catalog first.
+	if os.Getenv(brand.Env("PLUGIN_SKIP_CATALOG")) == "" {
+		fmt.Printf("Resolving %q in catalog (%s)...\n", name, resolveCatalogURL())
+		final, found, err := installFromCatalog(context.Background(), name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Catalog install failed: %v\n", err)
+			os.Exit(1)
+		}
+		if found {
+			fmt.Printf("\nPlugin %q installed from catalog to %s\n", name, final)
+			triggerRestart()
+			return
+		}
+		fmt.Printf("  %q not in catalog — falling back to git clone.\n", name)
 	}
 
 	// Ensure plugins dir exists

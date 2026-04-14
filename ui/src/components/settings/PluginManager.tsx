@@ -1,57 +1,76 @@
-import { useState, useCallback } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Package,
-  Loader2,
   AlertCircle,
-  RefreshCw,
-  Settings2,
+  ArrowUpCircle,
+  Globe,
+  Loader2,
+  Package,
   Power,
   PowerOff,
-  Globe,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
+  RefreshCw,
+  Settings2,
+  Trash2,
+} from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
-} from '@/components/ui/context-menu'
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
-import { Skeleton } from '@/components/ui/skeleton'
-import { api } from '@/lib/api'
-import { useAppStore } from '@/stores/useAppStore'
-import { PluginConfigPanel } from './PluginConfigPanel'
-import { PluginDetailView } from './PluginDetailView'
-import { CatalogBrowser } from './CatalogBrowser'
-import { CatalogSourceManager } from './CatalogSourceManager'
-import type { PluginInfo } from '@/lib/types'
+} from "@/components/ui/context-menu";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import type { PluginInfo } from "@/lib/types";
+import { useAppStore } from "@/stores/useAppStore";
+import { CatalogBrowser } from "./CatalogBrowser";
+import { CatalogSourceManager } from "./CatalogSourceManager";
+import { PluginConfigPanel } from "./PluginConfigPanel";
+import { PluginDetailView } from "./PluginDetailView";
 
 // --- Toast notification ---
 
 interface Toast {
-  id: number
-  message: string
+  id: number;
+  message: string;
 }
 
-let toastId = 0
+let toastId = 0;
 
-type Tab = 'installed' | 'catalog'
-type SubView = 'list' | 'config' | 'detail' | 'sources'
+type Tab = "installed" | "catalog";
+type SubView = "list" | "config" | "detail" | "sources";
 
 // --- Main Component ---
 
 export function PluginManager() {
-  const [toasts, setToasts] = useState<Toast[]>([])
-  const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null)
-  const [pendingAction, setPendingAction] = useState<string | null>(null)
-  const [configuringPlugin, setConfiguringPlugin] = useState<PluginInfo | null>(null)
-  const [detailPlugin, setDetailPlugin] = useState<PluginInfo | null>(null)
-  const [activeTab, setActiveTab] = useState<Tab>('installed')
-  const [subView, setSubView] = useState<SubView>('list')
-  const queryClient = useQueryClient()
-  const bumpConfigVersion = useAppStore((s) => s.bumpConfigVersion)
-  const configVersion = useAppStore((s) => s.configVersion)
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [configuringPlugin, setConfiguringPlugin] = useState<PluginInfo | null>(null);
+  const [detailPlugin, setDetailPlugin] = useState<PluginInfo | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>("installed");
+  const [subView, setSubView] = useState<SubView>("list");
+  const [catalogFocusEntry, setCatalogFocusEntry] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const bumpConfigVersion = useAppStore((s) => s.bumpConfigVersion);
+  const configVersion = useAppStore((s) => s.configVersion);
 
   const {
     data: plugins = [],
@@ -60,109 +79,118 @@ export function PluginManager() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['plugins', configVersion],
+    queryKey: ["plugins", configVersion],
     queryFn: api.listPlugins,
     retry: 2,
     staleTime: 0,
-  })
+  });
+
+  // Catalog query is reused by the installed tab so we can cross-reference
+  // update_available per installed plugin and show a badge.
+  const { data: catalogEntries = [] } = useQuery({
+    queryKey: ["catalog-browse"],
+    queryFn: api.browseCatalog,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  // Map: plugin name → latest catalog version when update_available.
+  const updateMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of catalogEntries) {
+      if (e.update_available) m.set(e.name, e.version);
+    }
+    return m;
+  }, [catalogEntries]);
 
   const addToast = useCallback((message: string) => {
-    const id = ++toastId
-    setToasts((prev) => [...prev, { id, message }])
+    const id = ++toastId;
+    setToasts((prev) => [...prev, { id, message }]);
     setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id))
-    }, 6000)
-  }, [])
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 6000);
+  }, []);
 
   const handlePostAction = useCallback(
     (actionLabel: string) => {
-      addToast(`Plugin ${actionLabel}.`)
-      bumpConfigVersion()
-      void queryClient.invalidateQueries({ queryKey: ['plugins'] })
-      void queryClient.invalidateQueries({ queryKey: ['agents'] })
-      void queryClient.invalidateQueries({ queryKey: ['catalog-browse'] })
-      void refetch()
-      setPendingAction(null)
+      addToast(`Plugin ${actionLabel}.`);
+      bumpConfigVersion();
+      void queryClient.invalidateQueries({ queryKey: ["plugins"] });
+      void queryClient.invalidateQueries({ queryKey: ["agents"] });
+      void queryClient.invalidateQueries({ queryKey: ["catalog-browse"] });
+      void refetch();
+      setPendingAction(null);
     },
-    [addToast, bumpConfigVersion, queryClient, refetch]
-  )
+    [addToast, bumpConfigVersion, queryClient, refetch],
+  );
 
   const installMutation = useMutation({
     mutationFn: api.installPlugin,
     onMutate: (name) => setPendingAction(name),
-    onSuccess: () => void handlePostAction('installed'),
+    onSuccess: () => void handlePostAction("installed"),
     onError: (err: Error) => {
-      addToast(`Failed to install: ${err.message}`)
-      setPendingAction(null)
+      addToast(`Failed to install: ${err.message}`);
+      setPendingAction(null);
     },
-  })
+  });
 
   const uninstallMutation = useMutation({
     mutationFn: api.uninstallPlugin,
     onMutate: (name) => setPendingAction(name),
-    onSuccess: () => void handlePostAction('uninstalled'),
+    onSuccess: () => void handlePostAction("uninstalled"),
     onError: (err: Error) => {
-      addToast(`Failed to uninstall: ${err.message}`)
-      setPendingAction(null)
+      addToast(`Failed to uninstall: ${err.message}`);
+      setPendingAction(null);
     },
-  })
+  });
 
   const disableMutation = useMutation({
     mutationFn: api.disablePlugin,
     onMutate: (name) => setPendingAction(name),
-    onSuccess: () => void handlePostAction('disabled'),
+    onSuccess: () => void handlePostAction("disabled"),
     onError: (err: Error) => {
-      addToast(`Failed to disable: ${err.message}`)
-      setPendingAction(null)
+      addToast(`Failed to disable: ${err.message}`);
+      setPendingAction(null);
     },
-  })
+  });
 
   const enableMutation = useMutation({
     mutationFn: api.enablePlugin,
     onMutate: (name) => setPendingAction(name),
-    onSuccess: () => void handlePostAction('enabled'),
+    onSuccess: () => void handlePostAction("enabled"),
     onError: (err: Error) => {
-      addToast(`Failed to enable: ${err.message}`)
-      setPendingAction(null)
+      addToast(`Failed to enable: ${err.message}`);
+      setPendingAction(null);
     },
-  })
+  });
 
-  const isActionPending = (name: string) => pendingAction === name
+  const isActionPending = (name: string) => pendingAction === name;
 
   const handleUninstallConfirm = useCallback(() => {
     if (confirmUninstall) {
-      uninstallMutation.mutate(confirmUninstall)
-      setConfirmUninstall(null)
+      uninstallMutation.mutate(confirmUninstall);
+      setConfirmUninstall(null);
     }
-  }, [confirmUninstall, uninstallMutation])
+  }, [confirmUninstall, uninstallMutation]);
 
   // Sort: active first, then disabled, then available
   const sortedPlugins = [...plugins].sort((a, b) => {
-    const order: Record<string, number> = { active: 0, disabled: 1, available: 2, 'no-binary': 3 }
-    const diff = (order[a.status] ?? 4) - (order[b.status] ?? 4)
-    if (diff !== 0) return diff
-    if (a.type === 'core' && b.type !== 'core') return -1
-    if (a.type !== 'core' && b.type === 'core') return 1
-    return a.name.localeCompare(b.name)
-  })
+    const order: Record<string, number> = { active: 0, disabled: 1, available: 2, "no-binary": 3 };
+    const diff = (order[a.status] ?? 4) - (order[b.status] ?? 4);
+    if (diff !== 0) return diff;
+    if (a.type === "core" && b.type !== "core") return -1;
+    if (a.type !== "core" && b.type === "core") return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   // --- Sub-views (detail, config, sources) ---
 
-  if (subView === 'sources') {
-    return (
-      <CatalogSourceManager
-        onBack={() => setSubView('list')}
-      />
-    )
+  if (subView === "sources") {
+    return <CatalogSourceManager onBack={() => setSubView("list")} />;
   }
 
   if (detailPlugin) {
-    return (
-      <PluginDetailView
-        plugin={detailPlugin}
-        onBack={() => setDetailPlugin(null)}
-      />
-    )
+    return <PluginDetailView plugin={detailPlugin} onBack={() => setDetailPlugin(null)} />;
   }
 
   if (configuringPlugin) {
@@ -172,7 +200,7 @@ export function PluginManager() {
         pluginName={configuringPlugin.name}
         onBack={() => setConfiguringPlugin(null)}
       />
-    )
+    );
   }
 
   return (
@@ -181,24 +209,26 @@ export function PluginManager() {
       <div className="flex items-center gap-2">
         <div className="inline-flex items-center bg-surface/50 rounded-lg p-0.5">
           <button
-            onClick={() => setActiveTab('installed')}
+            onClick={() => setActiveTab("installed")}
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-              activeTab === 'installed'
-                ? 'bg-bg-elevated text-fg shadow-sm'
-                : 'text-fg-muted hover:text-fg-secondary'
+              activeTab === "installed"
+                ? "bg-bg-elevated text-fg shadow-sm"
+                : "text-fg-muted hover:text-fg-secondary"
             }`}
           >
             Installed
             {plugins.length > 0 && (
-              <span className="ml-1.5 text-[10px] text-fg-faint">{plugins.filter((p) => p.installed).length}</span>
+              <span className="ml-1.5 text-[10px] text-fg-faint">
+                {plugins.filter((p) => p.installed).length}
+              </span>
             )}
           </button>
           <button
-            onClick={() => setActiveTab('catalog')}
+            onClick={() => setActiveTab("catalog")}
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
-              activeTab === 'catalog'
-                ? 'bg-bg-elevated text-fg shadow-sm'
-                : 'text-fg-muted hover:text-fg-secondary'
+              activeTab === "catalog"
+                ? "bg-bg-elevated text-fg shadow-sm"
+                : "text-fg-muted hover:text-fg-secondary"
             }`}
           >
             <Globe className="w-3 h-3" />
@@ -208,12 +238,16 @@ export function PluginManager() {
       </div>
 
       {/* Catalog tab */}
-      {activeTab === 'catalog' && (
-        <CatalogBrowser onManageSources={() => setSubView('sources')} />
+      {activeTab === "catalog" && (
+        <CatalogBrowser
+          onManageSources={() => setSubView("sources")}
+          focusEntryName={catalogFocusEntry}
+          onFocusHandled={() => setCatalogFocusEntry(null)}
+        />
       )}
 
       {/* Installed tab */}
-      {activeTab === 'installed' && (
+      {activeTab === "installed" && (
         <>
           {/* Toolbar */}
           <div className="flex items-center gap-3">
@@ -242,7 +276,7 @@ export function PluginManager() {
               <div>
                 <p className="text-sm font-medium text-fg">Failed to load plugins</p>
                 <p className="text-xs text-fg-muted mt-1">
-                  {(error as Error)?.message || 'The plugin API may not be available yet.'}
+                  {(error as Error)?.message || "The plugin API may not be available yet."}
                 </p>
               </div>
             </div>
@@ -252,7 +286,10 @@ export function PluginManager() {
           {isLoading && !isError && (
             <div className="grid grid-cols-2 gap-3">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                <div
+                  key={i}
+                  className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+                >
                   <div className="px-3.5 py-3 flex items-center gap-2.5">
                     <Skeleton className="size-9 rounded-lg" />
                     <div className="flex flex-col gap-1.5 flex-1">
@@ -272,9 +309,13 @@ export function PluginManager() {
           {!isLoading && !isError && sortedPlugins.length === 0 && (
             <Empty className="py-12">
               <EmptyHeader>
-                <EmptyMedia variant="icon"><Package /></EmptyMedia>
+                <EmptyMedia variant="icon">
+                  <Package />
+                </EmptyMedia>
                 <EmptyTitle className="text-sm">No plugins found</EmptyTitle>
-                <EmptyDescription className="text-xs">Plugins will appear here once available.</EmptyDescription>
+                <EmptyDescription className="text-xs">
+                  Plugins will appear here once available.
+                </EmptyDescription>
               </EmptyHeader>
             </Empty>
           )}
@@ -283,164 +324,220 @@ export function PluginManager() {
           {!isLoading && !isError && sortedPlugins.length > 0 && (
             <div className="grid gap-3 grid-cols-2">
               {sortedPlugins.map((plugin) => {
-                const isActive = plugin.status === 'active'
-                const isDisabled = plugin.status === 'disabled'
-                const isAvailable = plugin.status === 'available'
+                const isActive = plugin.status === "active";
+                const isDisabled = plugin.status === "disabled";
+                const isAvailable = plugin.status === "available";
                 return (
                   <ContextMenu key={plugin.name}>
                     <ContextMenuTrigger asChild>
-                  <div
-                    className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
-                      isActive
-                        ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
-                        : isDisabled
-                          ? 'border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-55'
-                          : 'border-border bg-white dark:bg-bg/30 opacity-45'
-                    }`}
-                    onClick={() => {
-                      if (isActive || isDisabled) setDetailPlugin(plugin)
-                    }}
-                  >
-                    {/* Header */}
-                    <div className="flex items-center gap-2.5 px-3.5 py-3">
-                      <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                        isActive ? 'bg-surface-hover text-fg-secondary' : 'bg-surface text-fg-muted'
-                      }`}>
-                        <Package className="w-4 h-4" />
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm font-semibold truncate ${isActive ? 'text-fg' : 'text-fg-muted'}`}>
-                            {plugin.name}
-                          </span>
-                          {isActive && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[11px] text-fg-muted">v{plugin.version || '0.0.0'}</span>
-                          {plugin.author && (
-                            <>
-                              <span className="text-fg-faint text-[10px]">&middot;</span>
-                              <span className="text-[11px] text-fg-muted truncate">{plugin.author}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      {/* Actions */}
-                      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        {plugin.type === 'core' ? (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">core</span>
-                        ) : isActive ? (
-                          <>
-                            <button
-                              onClick={() => setConfiguringPlugin(plugin)}
-                              className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
-                            >
-                              <Settings2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => disableMutation.mutate(plugin.name)}
-                              disabled={isActionPending(plugin.name)}
-                              className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
-                            >
-                              {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Disable'}
-                            </button>
-                          </>
-                        ) : isDisabled ? (
-                          <>
-                            <button
-                              onClick={() => setConfiguringPlugin(plugin)}
-                              className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
-                            >
-                              <Settings2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => enableMutation.mutate(plugin.name)}
-                              disabled={isActionPending(plugin.name)}
-                              className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
-                            >
-                              {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Enable'}
-                            </button>
-                          </>
-                        ) : isAvailable ? (
-                          <button
-                            onClick={() => installMutation.mutate(plugin.name)}
-                            disabled={isActionPending(plugin.name)}
-                            className="px-2 py-1 text-[11px] font-medium text-white bg-primary hover:bg-primary-hover rounded-md transition-colors disabled:opacity-40"
+                      <div
+                        className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
+                          isActive
+                            ? "border-border-subtle bg-white dark:bg-bg-elevated/60"
+                            : isDisabled
+                              ? "border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-55"
+                              : "border-border bg-white dark:bg-bg/30 opacity-45"
+                        }`}
+                        onClick={() => {
+                          if (isActive || isDisabled) setDetailPlugin(plugin);
+                        }}
+                      >
+                        {/* Header */}
+                        <div className="flex items-center gap-2.5 px-3.5 py-3">
+                          <span
+                            className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
+                              isActive
+                                ? "bg-surface-hover text-fg-secondary"
+                                : "bg-surface text-fg-muted"
+                            }`}
                           >
-                            {isActionPending(plugin.name) ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Install'}
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
+                            <Package className="w-4 h-4" />
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`text-sm font-semibold truncate ${isActive ? "text-fg" : "text-fg-muted"}`}
+                              >
+                                {plugin.name}
+                              </span>
+                              {isActive && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[11px] text-fg-muted">
+                                v{plugin.version || "0.0.0"}
+                              </span>
+                              {updateMap.has(plugin.name) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCatalogFocusEntry(plugin.name);
+                                    setActiveTab("catalog");
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-amber-600/10 border border-amber-600/40 text-amber-600 leading-none hover:bg-amber-600/20 transition-colors"
+                                  title={`Update available: v${updateMap.get(plugin.name)}`}
+                                >
+                                  <ArrowUpCircle className="w-2.5 h-2.5" />
+                                  Update available
+                                </button>
+                              )}
+                              {plugin.author && (
+                                <>
+                                  <span className="text-fg-faint text-[10px]">&middot;</span>
+                                  <span className="text-[11px] text-fg-muted truncate">
+                                    {plugin.author}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          {/* Actions */}
+                          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+                          <div
+                            className="flex items-center gap-1 shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {plugin.type === "core" ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">
+                                core
+                              </span>
+                            ) : isActive ? (
+                              <>
+                                <button
+                                  onClick={() => setConfiguringPlugin(plugin)}
+                                  className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                                >
+                                  <Settings2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => disableMutation.mutate(plugin.name)}
+                                  disabled={isActionPending(plugin.name)}
+                                  className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
+                                >
+                                  {isActionPending(plugin.name) ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    "Disable"
+                                  )}
+                                </button>
+                              </>
+                            ) : isDisabled ? (
+                              <>
+                                <button
+                                  onClick={() => setConfiguringPlugin(plugin)}
+                                  className="p-1.5 rounded text-fg-faint hover:text-fg-secondary hover:bg-surface transition-colors"
+                                >
+                                  <Settings2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => enableMutation.mutate(plugin.name)}
+                                  disabled={isActionPending(plugin.name)}
+                                  className="px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg-secondary bg-bg-elevated border border-border-subtle rounded-md transition-colors disabled:opacity-40"
+                                >
+                                  {isActionPending(plugin.name) ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    "Enable"
+                                  )}
+                                </button>
+                              </>
+                            ) : isAvailable ? (
+                              <button
+                                onClick={() => installMutation.mutate(plugin.name)}
+                                disabled={isActionPending(plugin.name)}
+                                className="px-2 py-1 text-[11px] font-medium text-white bg-primary hover:bg-primary-hover rounded-md transition-colors disabled:opacity-40"
+                              >
+                                {isActionPending(plugin.name) ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  "Install"
+                                )}
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
 
-                    {/* Detail footer */}
-                    <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
-                      <p className="text-[11px] text-fg-muted line-clamp-2">
-                        {plugin.short_desc || plugin.description || 'No description'}
-                      </p>
-                    </div>
-                  </div>
+                        {/* Detail footer */}
+                        <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                          <p className="text-[11px] text-fg-muted line-clamp-2">
+                            {plugin.short_desc || plugin.description || "No description"}
+                          </p>
+                        </div>
+                      </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       {(isActive || isDisabled) && (
-                        <ContextMenuItem className="gap-2 text-xs" onClick={() => setDetailPlugin(plugin)}>
+                        <ContextMenuItem
+                          className="gap-2 text-xs"
+                          onClick={() => setDetailPlugin(plugin)}
+                        >
                           <Settings2 className="w-3.5 h-3.5" />
                           Details
                         </ContextMenuItem>
                       )}
                       {isActive && (
-                        <ContextMenuItem className="gap-2 text-xs" onClick={() => disableMutation.mutate(plugin.name)} disabled={isActionPending(plugin.name)}>
+                        <ContextMenuItem
+                          className="gap-2 text-xs"
+                          onClick={() => disableMutation.mutate(plugin.name)}
+                          disabled={isActionPending(plugin.name)}
+                        >
                           <PowerOff className="w-3.5 h-3.5" />
                           Disable
                         </ContextMenuItem>
                       )}
                       {isDisabled && (
-                        <ContextMenuItem className="gap-2 text-xs" onClick={() => enableMutation.mutate(plugin.name)} disabled={isActionPending(plugin.name)}>
+                        <ContextMenuItem
+                          className="gap-2 text-xs"
+                          onClick={() => enableMutation.mutate(plugin.name)}
+                          disabled={isActionPending(plugin.name)}
+                        >
                           <Power className="w-3.5 h-3.5" />
                           Enable
                         </ContextMenuItem>
                       )}
+                      {plugin.type !== "core" && (isActive || isDisabled) && (
+                        <ContextMenuItem
+                          className="gap-2 text-xs text-danger focus:text-danger"
+                          onClick={() => setConfirmUninstall(plugin.name)}
+                          disabled={isActionPending(plugin.name)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Uninstall
+                        </ContextMenuItem>
+                      )}
                     </ContextMenuContent>
                   </ContextMenu>
-                )
+                );
               })}
             </div>
           )}
         </>
       )}
 
-      {/* Uninstall confirmation modal */}
-      {confirmUninstall && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-bg-elevated border border-border-subtle rounded-xl shadow-2xl max-w-sm w-full p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <AlertCircle className="w-5 h-5 text-danger" />
-              <h3 className="text-lg font-medium text-fg">Uninstall Plugin</h3>
-            </div>
-            <p className="text-fg-secondary text-sm mb-6">
-              Are you sure you want to uninstall{' '}
-              <span className="font-medium text-fg">{confirmUninstall}</span>?
-              This will remove the plugin and restart Nanite.
-            </p>
-            <div className="flex gap-3">
-              <Button
-                onClick={() => setConfirmUninstall(null)}
-                variant="outline"
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleUninstallConfirm}
-                className="flex-1 bg-danger hover:bg-danger-hover text-white"
-              >
-                Uninstall
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Uninstall confirmation dialog */}
+      <AlertDialog
+        open={confirmUninstall !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmUninstall(null);
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Uninstall {confirmUninstall ?? "plugin"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the plugin from this workspace. You can reinstall from the catalog.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmUninstall(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleUninstallConfirm}>
+              Uninstall
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Toast container */}
       {toasts.length > 0 && (
@@ -456,5 +553,5 @@ export function PluginManager() {
         </div>
       )}
     </div>
-  )
+  );
 }

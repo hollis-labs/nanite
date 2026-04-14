@@ -62,7 +62,7 @@ type ToolWarningPayload struct {
 
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
-	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status, circuit_open, session_takeover, tool_warning
+	Type            string     `json:"type"`                        // stream_start, delta, stream_end, error, tool_call, tool_result, status, circuit_open, session_takeover, tool_warning, plugin_envelope
 	Content         string     `json:"content,omitempty"`
 	MessageID       string     `json:"message_id,omitempty"`
 	AgentID         string     `json:"agent_id,omitempty"`
@@ -72,7 +72,8 @@ type StreamEvent struct {
 	Tool            string     `json:"tool,omitempty"`              // tool name for tool_call/tool_result
 	ToolID          string     `json:"tool_id,omitempty"`           // tool_use_id
 	Summary         string     `json:"summary,omitempty"`           // tool result summary
-	Envelope        string     `json:"envelope,omitempty"`          // JSON envelope data for stream_end
+	Envelope        string     `json:"envelope,omitempty"`          // JSON envelope data for stream_end and plugin_envelope
+	PluginID        string     `json:"plugin_id,omitempty"`         // emitting plugin id for plugin_envelope
 	Data            string     `json:"data,omitempty"`              // JSON payload for tool_warning events
 	Detail          string     `json:"detail,omitempty"`            // Short label for tool_call (e.g., command, path)
 }

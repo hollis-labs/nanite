@@ -126,6 +126,14 @@ export default defineConfig({
         'react-dom-client': path.resolve(__dirname, 'src/_host/react-dom-client.ts'),
         'react-jsx-runtime': path.resolve(__dirname, 'src/_host/react-jsx-runtime.ts'),
       },
+      // Host-side consumers don't reference every React export we want
+      // plugins to see, so Rollup's default `exports-only` signature
+      // preservation tree-shakes them out of the emitted chunks. Plugin
+      // bundles resolve bare `react*` specifiers through the importmap at
+      // runtime, not statically — `strict` keeps the full export surface
+      // intact on the entry chunks so runtime imports find every name
+      // (BLG-20260414-011).
+      preserveEntrySignatures: 'strict',
       output: {
         entryFileNames: (chunk) => {
           if (SPECIFIER_BY_ENTRY[chunk.name]) {

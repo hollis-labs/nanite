@@ -35,8 +35,6 @@ var knownTypes = []string{
 	"diff-card",
 	// Plugin: giphy
 	"giphy-modal",
-	// Plugin: oembed
-	"oembed-card",
 	// Plugin: support-ticket
 	"kb-result",
 	"ticket-form",
@@ -167,17 +165,6 @@ var examplePayloads = map[string]string{
 		"gif_url": "https://media.giphy.com/media/example/giphy.gif",
 		"source": "GIPHY",
 		"query": "celebration"
-	}`,
-	"oembed-card": `{
-		"title": "Rick Astley - Never Gonna Give You Up",
-		"description": "Official video",
-		"thumbnail_url": "https://img.youtube.com/vi/dQw4w9WgXcQ/0.jpg",
-		"provider_name": "YouTube",
-		"provider_url": "https://www.youtube.com/",
-		"type": "video",
-		"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-		"author_name": "Rick Astley",
-		"html": "<iframe src=\"...\"></iframe>"
 	}`,
 	"kb-result": `{
 		"results": [

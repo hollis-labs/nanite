@@ -1,0 +1,26 @@
+# {{.DisplayName}}
+
+{{.Description}}
+
+## Build
+
+```
+make build      # native binary + ui/dist, for `nanite plugin install ./`
+make release    # full cross-platform archives under dist/archives/
+```
+
+## Install from source
+
+```
+nanite plugin install ./ --link
+```
+
+`--link` symlinks the source directory into `$NANITE_PLUGINS_DIR` so iterative
+rebuilds (`make build`) take effect on the next plugin reload.
+
+## Layout
+
+- `main.go` — subprocess entrypoint (speaks JSON-RPC over stdio via plugin-sdk v0.3.0).
+- `plugin.yaml` — manifest; declares the `{{.Name}}` command and `echo` MCP tool.
+- `ui/src/index.tsx` — React envelope components, bundled into `ui/dist/index.js`.
+- `envelopes/` — JSON Schemas for emitted envelopes.

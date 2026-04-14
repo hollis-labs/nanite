@@ -1,0 +1,50 @@
+schema_version: 1
+id: {{.Name}}
+name: {{.DisplayName}}
+version: 0.1.0
+description: {{.Description}}
+author: {{.Author}}
+license: MIT
+protocol: 1
+runtime: subprocess
+entrypoint: ./{{.Name}}
+load_type: opt-in
+
+nanite_compat:
+  min: 0.1.0
+
+registers:
+  envelopes:
+    - type: {{.EnvelopeType}}
+      component: {{.EnvelopeComponent}}
+      version: 1
+      schema: envelopes/example.schema.json
+
+  commands:
+    - name: {{.Name}}
+      description: Echo the provided arguments back via {{.DisplayName}}.
+      args:
+        - name: text
+          type: string
+          required: false
+          description: Text to echo back.
+
+  mcp_servers:
+    - name: {{.Name}}
+      description: {{.DisplayName}} MCP tools.
+      tools:
+        - echo
+
+ui:
+  bundle_dir: ui/dist
+  entry: index.js
+  react_version: ^18.0.0
+  shadcn_version: ^1.0.0
+
+release:
+  platforms:
+    - darwin-arm64
+    - darwin-amd64
+    - linux-amd64
+    - linux-arm64
+    - windows-amd64

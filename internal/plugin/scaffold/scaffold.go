@@ -1,200 +1,247 @@
-// Package scaffold provides plugin scaffolding for the `nanite plugin new` command.
-// It uses embedded Go templates to generate plugin boilerplate that matches
-// the patterns used by existing Nanite plugins (e.g., support-ticket).
+// Package scaffold generates new Nanite plugin skeletons for the
+// `nanite plugin new` command. Two kinds are supported:
+//
+//   - KindSubprocess: out-of-process plugins that speak JSON-RPC over
+//     stdio via plugin-sdk v0.3.0. The generated directory is a
+//     stand-alone Go module + vite UI project with a working Makefile
+//     that produces catalog-installable archives (the BLG-20260414-008
+//     ui/ vs ui/dist/ mismatch is fixed in the generated Makefile and
+//     ui.bundle_dir both target ui/dist).
+//
+//   - KindBuiltin: compiled-in plugins under internal/plugin/builtin/.
+//     Mirrors the bookmarks shape — embedded plugin.yaml, init-time
+//     registration, no subprocess binary, no UI bundle.
+//
+// All templates live under templates/{subprocess,builtin}/ and are
+// embedded into the binary. Output file paths mirror the template path
+// with the .tmpl suffix stripped (gitignore.tmpl → .gitignore is the
+// one exception — hidden-dotfile templates are kept visible in-repo).
 package scaffold
 
 import (
 	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 	"unicode"
 )
 
-//go:embed templates/*.tmpl
+// all:templates is required so hidden directories like .github/ are
+// included in the embedded FS. Plain `embed templates` skips dotfiles.
+//
+//go:embed all:templates
 var templateFS embed.FS
 
-// EnvelopeDef describes an envelope component to generate.
-type EnvelopeDef struct {
-	Type   string // e.g. "card", "form"
-	Export string // e.g. "CardCard", "FormCard"
-}
+// Kind selects which template tree to render.
+type Kind string
 
-// Options configures what the scaffolder generates.
+const (
+	KindSubprocess Kind = "subprocess"
+	KindBuiltin    Kind = "builtin"
+)
+
+// Options configures a scaffold run.
 type Options struct {
-	Name          string        // plugin name/ID (e.g. "my-plugin")
-	Description   string        // human-readable description
-	WithAgent     bool          // generate agents/<name>.yaml
-	Envelopes     []EnvelopeDef // envelope components to generate
-	CRUDResources []string      // CRUD resource names (e.g. "items")
-	OutputDir     string        // base output directory (e.g. "plugins/my-plugin")
-	SchemaDir     string        // directory for envelope schemas (default: "internal/envelope/schemas")
+	// Kind selects the template tree. Required.
+	Kind Kind
+
+	// Name is the plugin id (lowercase kebab-case, e.g. "my-plugin").
+	// Required. Must match the schema pattern ^[a-z][a-z0-9-]{1,62}$.
+	Name string
+
+	// Description is the short manifest description. Defaults to a
+	// placeholder when empty.
+	Description string
+
+	// Author populates the LICENSE copyright and manifest author field.
+	// Defaults to "Plugin Author" when empty.
+	Author string
+
+	// ModulePath is the Go module path for subprocess plugins
+	// (e.g. "github.com/acme/nanite-plugin-foo"). Defaults to
+	// "github.com/example/nanite-plugin-<name>" when empty. Unused for
+	// builtin kind.
+	ModulePath string
+
+	// OutputDir is where the scaffold lands. Required.
+	OutputDir string
 }
 
-// templateData holds all data passed to templates.
+// templateData is the struct exposed to all templates.
 type templateData struct {
-	PluginID          string
-	PluginName        string
-	PackageName       string
-	StructName        string
+	Name              string // plugin id (kebab-case)
+	DisplayName       string // Title Case
+	PackageName       string // Go package name (lowercase, no dashes)
+	StructName        string // Go struct name (PascalCase + "Plugin")
 	Description       string
-	WithAgent         bool
-	Envelopes         []EnvelopeDef
-	CRUDResources     []string
-	CRUDHandlerPrefix string
+	Author            string
+	ModulePath        string
+	Year              string
+	EnvelopeType      string // "<name>-card"
+	EnvelopeComponent string // "<PascalName>Card"
 }
 
-// Run generates the plugin scaffold files in opts.OutputDir.
+// Run renders the templates for opts.Kind into opts.OutputDir.
 func Run(opts Options) error {
 	if opts.Name == "" {
 		return fmt.Errorf("plugin name is required")
 	}
-	if opts.Description == "" {
-		opts.Description = "A Nanite plugin"
+	if opts.Kind == "" {
+		return fmt.Errorf("plugin kind is required (subprocess or builtin)")
 	}
 	if opts.OutputDir == "" {
-		opts.OutputDir = filepath.Join("plugins", opts.Name)
+		return fmt.Errorf("output directory is required")
 	}
 
-	// Check if directory already exists with a plugin.yaml
 	if _, err := os.Stat(filepath.Join(opts.OutputDir, "plugin.yaml")); err == nil {
 		return fmt.Errorf("plugin already exists at %s", opts.OutputDir)
 	}
 
-	data := templateData{
-		PluginID:          opts.Name,
-		PluginName:        toTitle(opts.Name),
+	data := buildTemplateData(opts)
+
+	var root string
+	switch opts.Kind {
+	case KindSubprocess:
+		root = "templates/subprocess"
+	case KindBuiltin:
+		root = "templates/builtin"
+	default:
+		return fmt.Errorf("unknown plugin kind %q (want subprocess or builtin)", opts.Kind)
+	}
+
+	return renderTree(root, opts.OutputDir, data)
+}
+
+// buildTemplateData derives every template variable from Options,
+// applying defaults. Kept separate so tests can assert the derivation
+// rules without touching the filesystem.
+func buildTemplateData(opts Options) templateData {
+	desc := opts.Description
+	if desc == "" {
+		desc = fmt.Sprintf("A Nanite plugin named %s.", opts.Name)
+	}
+	author := opts.Author
+	if author == "" {
+		author = "Plugin Author"
+	}
+	mod := opts.ModulePath
+	if mod == "" {
+		mod = "github.com/example/nanite-plugin-" + opts.Name
+	}
+	envType := opts.Name + "-card"
+
+	return templateData{
+		Name:              opts.Name,
+		DisplayName:       toTitle(opts.Name),
 		PackageName:       toPackageName(opts.Name),
 		StructName:        toStructName(opts.Name),
-		Description:       opts.Description,
-		WithAgent:         opts.WithAgent,
-		Envelopes:         opts.Envelopes,
-		CRUDResources:     opts.CRUDResources,
-		CRUDHandlerPrefix: "",
+		Description:       desc,
+		Author:            author,
+		ModulePath:        mod,
+		Year:              fmt.Sprintf("%d", time.Now().Year()),
+		EnvelopeType:      envType,
+		EnvelopeComponent: toPascal(opts.Name) + "Card",
 	}
-
-	funcMap := template.FuncMap{
-		"title": strings.Title,
-	}
-
-	// Create output directory
-	if err := os.MkdirAll(opts.OutputDir, 0755); err != nil {
-		return fmt.Errorf("create output directory: %w", err)
-	}
-
-	// Generate plugin.yaml
-	if err := renderTemplate(funcMap, "templates/plugin.yaml.tmpl", filepath.Join(opts.OutputDir, "plugin.yaml"), data); err != nil {
-		return fmt.Errorf("generate plugin.yaml: %w", err)
-	}
-
-	// Generate plugin.go
-	if err := renderTemplate(funcMap, "templates/plugin.go.tmpl", filepath.Join(opts.OutputDir, "plugin.go"), data); err != nil {
-		return fmt.Errorf("generate plugin.go: %w", err)
-	}
-
-	// Generate README.md
-	if err := renderTemplate(funcMap, "templates/readme.md.tmpl", filepath.Join(opts.OutputDir, "README.md"), data); err != nil {
-		return fmt.Errorf("generate README.md: %w", err)
-	}
-
-	// Generate agent profile if requested
-	if opts.WithAgent {
-		agentsDir := filepath.Join(opts.OutputDir, "agents")
-		if err := os.MkdirAll(agentsDir, 0755); err != nil {
-			return fmt.Errorf("create agents directory: %w", err)
-		}
-		if err := renderTemplate(funcMap, "templates/agent.yaml.tmpl", filepath.Join(agentsDir, opts.Name+".yaml"), data); err != nil {
-			return fmt.Errorf("generate agent.yaml: %w", err)
-		}
-	}
-
-	// Generate envelope components and schemas if requested
-	if len(opts.Envelopes) > 0 {
-		uiDir := filepath.Join(opts.OutputDir, "ui")
-		if err := os.MkdirAll(uiDir, 0755); err != nil {
-			return fmt.Errorf("create ui directory: %w", err)
-		}
-
-		schemaDir := opts.SchemaDir
-		if schemaDir == "" {
-			schemaDir = filepath.Join("internal", "envelope", "schemas")
-		}
-		if err := os.MkdirAll(schemaDir, 0755); err != nil {
-			return fmt.Errorf("create schema directory: %w", err)
-		}
-
-		for _, env := range opts.Envelopes {
-			envData := struct {
-				Type   string
-				Export string
-			}{
-				Type:   env.Type,
-				Export: env.Export,
-			}
-			if err := renderTemplate(funcMap, "templates/envelope.tsx.tmpl", filepath.Join(uiDir, env.Export+".tsx"), envData); err != nil {
-				return fmt.Errorf("generate envelope %s: %w", env.Export, err)
-			}
-			// Generate a JSON Schema file for the envelope type.
-			// The schema is the source of truth — edit it, then run codegen.
-			schemaPath := filepath.Join(schemaDir, env.Type+".schema.json")
-			if err := renderTemplate(funcMap, "templates/envelope.schema.json.tmpl", schemaPath, envData); err != nil {
-				return fmt.Errorf("generate schema %s: %w", env.Type, err)
-			}
-		}
-	}
-
-	return nil
 }
 
-// renderTemplate parses a template from the embedded FS and writes it to outPath.
-func renderTemplate(funcMap template.FuncMap, tmplName, outPath string, data interface{}) error {
-	content, err := templateFS.ReadFile(tmplName)
-	if err != nil {
-		return fmt.Errorf("read template %s: %w", tmplName, err)
-	}
+// renderTree walks the embedded template root and writes every file
+// to dst, executing .tmpl files through text/template and passing
+// non-.tmpl files through verbatim. Directory structure is preserved.
+// The `gitignore.tmpl` basename is renamed to `.gitignore` on output
+// (Go's embed.FS cannot ship files whose names start with ".").
+func renderTree(root, dst string, data templateData) error {
+	return fs.WalkDir(templateFS, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return os.MkdirAll(dst, 0o755)
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
 
-	tmpl, err := template.New(filepath.Base(tmplName)).Funcs(funcMap).Parse(string(content))
-	if err != nil {
-		return fmt.Errorf("parse template %s: %w", tmplName, err)
-	}
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
 
-	f, err := os.Create(outPath)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", outPath, err)
-	}
-	defer f.Close()
+		// Strip .tmpl suffix, and map bare `gitignore` → `.gitignore`
+		// so the generated tree uses the real dotfile name.
+		base := filepath.Base(target)
+		dir := filepath.Dir(target)
+		base = strings.TrimSuffix(base, ".tmpl")
+		if base == "gitignore" {
+			base = ".gitignore"
+		}
+		outPath := filepath.Join(dir, base)
 
-	if err := tmpl.Execute(f, data); err != nil {
-		return fmt.Errorf("execute template %s: %w", tmplName, err)
-	}
+		content, err := templateFS.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read template %s: %w", path, err)
+		}
 
-	return nil
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+			return err
+		}
+
+		if strings.HasSuffix(path, ".tmpl") {
+			tmpl, err := template.New(filepath.Base(path)).Parse(string(content))
+			if err != nil {
+				return fmt.Errorf("parse %s: %w", path, err)
+			}
+			f, err := os.Create(outPath)
+			if err != nil {
+				return fmt.Errorf("create %s: %w", outPath, err)
+			}
+			if err := tmpl.Execute(f, data); err != nil {
+				f.Close()
+				return fmt.Errorf("execute %s: %w", path, err)
+			}
+			if err := f.Close(); err != nil {
+				return err
+			}
+		} else {
+			if err := os.WriteFile(outPath, content, 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", outPath, err)
+			}
+		}
+		return nil
+	})
 }
 
-// toPackageName converts "my-plugin" to "myplugin" (valid Go package name).
+// toPackageName maps "my-plugin" → "myplugin" (valid Go package name).
 func toPackageName(name string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(name, "-", ""), "_", "")
 }
 
-// toStructName converts "my-plugin" to "MyPluginPlugin".
-func toStructName(name string) string {
+// toPascal maps "my-plugin" → "MyPlugin".
+func toPascal(name string) string {
 	parts := strings.FieldsFunc(name, func(r rune) bool {
 		return r == '-' || r == '_'
 	})
-	var result string
+	var out strings.Builder
 	for _, part := range parts {
 		if len(part) > 0 {
 			runes := []rune(part)
 			runes[0] = unicode.ToUpper(runes[0])
-			result += string(runes)
+			out.WriteString(string(runes))
 		}
 	}
-	return result + "Plugin"
+	return out.String()
 }
 
-// toTitle converts "my-plugin" to "My Plugin".
+// toStructName maps "my-plugin" → "MyPluginPlugin".
+func toStructName(name string) string {
+	return toPascal(name) + "Plugin"
+}
+
+// toTitle maps "my-plugin" → "My Plugin".
 func toTitle(name string) string {
 	parts := strings.FieldsFunc(name, func(r rune) bool {
 		return r == '-' || r == '_'
@@ -208,18 +255,4 @@ func toTitle(name string) string {
 		}
 	}
 	return strings.Join(titled, " ")
-}
-
-// ToEnvelopeDef creates an EnvelopeDef from an envelope type string.
-// e.g. "card" -> EnvelopeDef{Type: "card", Export: "CardCard"}
-func ToEnvelopeDef(envelopeType string) EnvelopeDef {
-	runes := []rune(envelopeType)
-	if len(runes) > 0 {
-		runes[0] = unicode.ToUpper(runes[0])
-	}
-	export := string(runes) + "Card"
-	return EnvelopeDef{
-		Type:   envelopeType,
-		Export: export,
-	}
 }

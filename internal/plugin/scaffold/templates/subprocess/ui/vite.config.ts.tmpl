@@ -1,0 +1,48 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// Externals are resolved by the host at runtime via the importmap. Do
+// NOT bundle these — the host provides them, and double-bundling React
+// breaks hook dispatch.
+//
+// The @nanite/ui/<primitive> entries match the 11 shared shadcn/Radix
+// primitives exposed by the host (J.5 OQ9). Import them from your TSX
+// like `import { Card } from '@nanite/ui/card'`.
+const external = [
+  'react',
+  'react-dom',
+  'react-dom/client',
+  'react/jsx-runtime',
+  '@nanite/ui/button',
+  '@nanite/ui/card',
+  '@nanite/ui/dialog',
+  '@nanite/ui/dropdown-menu',
+  '@nanite/ui/input',
+  '@nanite/ui/popover',
+  '@nanite/ui/scroll-area',
+  '@nanite/ui/select',
+  '@nanite/ui/separator',
+  '@nanite/ui/textarea',
+  '@nanite/ui/tooltip',
+]
+
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    lib: {
+      entry: 'src/index.tsx',
+      formats: ['es'],
+      fileName: () => 'index.js',
+    },
+    rollupOptions: {
+      external,
+      output: {
+        assetFileNames: (info) =>
+          info.name && info.name.endsWith('.css') ? 'style.css' : '[name][extname]',
+      },
+    },
+    cssCodeSplit: false,
+    sourcemap: true,
+    emptyOutDir: true,
+  },
+})

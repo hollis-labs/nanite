@@ -1,0 +1,18 @@
+import React from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@nanite/ui/card'
+
+// {{.EnvelopeComponent}} renders the {{.EnvelopeType}} envelope emitted
+// by the Go plugin. Data shape is validated against
+// envelopes/example.schema.json.
+export function {{.EnvelopeComponent}}({ data }: { data: { text?: string } }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{{.DisplayName}}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p>{data?.text ?? 'hello from {{.DisplayName}}'}</p>
+      </CardContent>
+    </Card>
+  )
+}

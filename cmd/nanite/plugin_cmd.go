@@ -516,35 +516,41 @@ func buildMinimalHost() (*plugin.Host, error) {
 	return plugin.NewHostWithStore(s), nil
 }
 
-// pluginNew scaffolds a new plugin using embedded templates.
+// pluginNew scaffolds a new plugin using embedded templates. Two kinds
+// are supported via mutually-exclusive flags:
+//
+//	--subprocess <name>   out-of-process plugin (stand-alone repo layout)
+//	--builtin <name>      compiled-in plugin under internal/plugin/builtin/
+//
+// A bare positional name (legacy form) still works and defaults to
+// --subprocess for compatibility.
 func pluginNew(args []string) {
-	// Parse flags
 	var (
-		withAgent    bool
-		envelopeType string
-		crudResource string
-		description  string
+		subprocessName string
+		builtinName    string
+		description    string
+		author         string
+		modulePath     string
+		outputDir      string
 	)
 
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--with-agent":
-			withAgent = true
-		case "--with-envelope":
+		case "--subprocess":
 			i++
 			if i >= len(args) {
-				fmt.Fprintln(os.Stderr, "error: --with-envelope requires a value")
+				fmt.Fprintln(os.Stderr, "error: --subprocess requires a name")
 				os.Exit(1)
 			}
-			envelopeType = args[i]
-		case "--with-crud":
+			subprocessName = args[i]
+		case "--builtin":
 			i++
 			if i >= len(args) {
-				fmt.Fprintln(os.Stderr, "error: --with-crud requires a value")
+				fmt.Fprintln(os.Stderr, "error: --builtin requires a name")
 				os.Exit(1)
 			}
-			crudResource = args[i]
+			builtinName = args[i]
 		case "--description":
 			i++
 			if i >= len(args) {
@@ -552,6 +558,27 @@ func pluginNew(args []string) {
 				os.Exit(1)
 			}
 			description = args[i]
+		case "--author":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --author requires a value")
+				os.Exit(1)
+			}
+			author = args[i]
+		case "--module":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --module requires a value")
+				os.Exit(1)
+			}
+			modulePath = args[i]
+		case "--output", "-o":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --output requires a value")
+				os.Exit(1)
+			}
+			outputDir = args[i]
 		case "--help", "-h":
 			pluginNewHelp()
 			return
@@ -565,76 +592,96 @@ func pluginNew(args []string) {
 		}
 	}
 
-	if len(positional) < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s plugin new <name> [flags]\n", brand.BinaryName)
+	if subprocessName != "" && builtinName != "" {
+		fmt.Fprintln(os.Stderr, "error: --subprocess and --builtin are mutually exclusive")
+		os.Exit(1)
+	}
+
+	var (
+		kind scaffold.Kind
+		name string
+	)
+	switch {
+	case subprocessName != "":
+		kind = scaffold.KindSubprocess
+		name = subprocessName
+	case builtinName != "":
+		kind = scaffold.KindBuiltin
+		name = builtinName
+	case len(positional) >= 1:
+		// Legacy form: `nanite plugin new <name>` → subprocess.
+		kind = scaffold.KindSubprocess
+		name = positional[0]
+	default:
+		fmt.Fprintf(os.Stderr, "usage: %s plugin new --subprocess <name> | --builtin <name> [flags]\n", brand.BinaryName)
 		fmt.Fprintf(os.Stderr, "Run '%s plugin new --help' for details.\n", brand.BinaryName)
 		os.Exit(1)
 	}
 
-	name := positional[0]
+	if outputDir == "" {
+		switch kind {
+		case scaffold.KindSubprocess:
+			outputDir = filepath.Join(resolvePluginsDir(), name)
+		case scaffold.KindBuiltin:
+			outputDir = filepath.Join("internal", "plugin", "builtin", strings.ReplaceAll(strings.ReplaceAll(name, "-", ""), "_", ""))
+		}
+	}
 
 	opts := scaffold.Options{
+		Kind:        kind,
 		Name:        name,
 		Description: description,
-		WithAgent:   withAgent,
-		OutputDir:   filepath.Join(resolvePluginsDir(), name),
+		Author:      author,
+		ModulePath:  modulePath,
+		OutputDir:   outputDir,
 	}
 
-	if envelopeType != "" {
-		opts.Envelopes = []scaffold.EnvelopeDef{scaffold.ToEnvelopeDef(envelopeType)}
-	}
-
-	if crudResource != "" {
-		opts.CRUDResources = []string{crudResource}
-	}
-
-	fmt.Printf("Scaffolding plugin %q in %s...\n", name, opts.OutputDir)
+	fmt.Printf("Scaffolding %s plugin %q in %s...\n", kind, name, opts.OutputDir)
 
 	if err := scaffold.Run(opts); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Print summary
 	fmt.Println()
-	fmt.Printf("Plugin %q created successfully!\n", name)
+	fmt.Printf("Plugin %q created.\n", name)
 	fmt.Println()
-	fmt.Println("Generated files:")
-	fmt.Printf("  %s/plugin.yaml\n", opts.OutputDir)
-	fmt.Printf("  %s/plugin.go\n", opts.OutputDir)
-	fmt.Printf("  %s/README.md\n", opts.OutputDir)
-	if withAgent {
-		fmt.Printf("  %s/agents/%s.yaml\n", opts.OutputDir, name)
+	switch kind {
+	case scaffold.KindSubprocess:
+		fmt.Println("Next steps:")
+		fmt.Printf("  1. cd %s\n", opts.OutputDir)
+		fmt.Println("  2. (optional) edit go.mod module path and README")
+		fmt.Println("  3. make build            # native binary + UI bundle")
+		fmt.Printf("  4. %s plugin install ./ --link\n", brand.BinaryName)
+		fmt.Printf("  5. %s plugin release .   # cross-platform archives for catalog\n", brand.BinaryName)
+	case scaffold.KindBuiltin:
+		pkg := strings.ReplaceAll(strings.ReplaceAll(name, "-", ""), "_", "")
+		fmt.Println("Next steps:")
+		fmt.Println("  1. Add the import to internal/plugin/allplugins/allplugins.go:")
+		fmt.Printf("     _ \"github.com/hollis-labs/nanite/internal/plugin/builtin/%s\"\n", pkg)
+		fmt.Printf("  2. go install ./cmd/%s\n", brand.BinaryName)
+		fmt.Printf("  3. cerberus restart %s\n", brand.ServiceName)
 	}
-	if envelopeType != "" {
-		env := scaffold.ToEnvelopeDef(envelopeType)
-		fmt.Printf("  %s/ui/%s.tsx\n", opts.OutputDir, env.Export)
-	}
-
-	fmt.Println()
-	fmt.Println("Next steps:")
-	pkgName := strings.ReplaceAll(strings.ReplaceAll(name, "-", ""), "_", "")
-	fmt.Printf("  1. Copy Go source to internal/plugin/builtin/%s/\n", pkgName)
-	fmt.Printf("  2. Add import to internal/plugin/allplugins/allplugins.go:\n")
-	fmt.Printf("     _ \"github.com/hollis-labs/nanite/internal/plugin/builtin/%s\"\n", pkgName)
-	fmt.Printf("  3. Rebuild: go install ./cmd/%s/\n", brand.BinaryName)
-	fmt.Printf("  4. Restart: cerberus restart %s\n", brand.ServiceName)
 }
 
 func pluginNewHelp() {
-	fmt.Printf("Usage: %s plugin new <name> [flags]\n", brand.BinaryName)
+	fmt.Printf("Usage: %s plugin new --subprocess <name> | --builtin <name> [flags]\n", brand.BinaryName)
 	fmt.Println()
-	fmt.Printf("Scaffold a new %s plugin with boilerplate files.\n", brand.Name)
+	fmt.Printf("Scaffold a new %s plugin.\n", brand.Name)
+	fmt.Println()
+	fmt.Println("Kinds:")
+	fmt.Println("  --subprocess <name>   Stand-alone out-of-process plugin (repo layout with")
+	fmt.Println("                        main.go, ui/, Makefile, GitHub release workflow).")
+	fmt.Println("  --builtin <name>      Compiled-in plugin under internal/plugin/builtin/.")
 	fmt.Println()
 	fmt.Println("Flags:")
-	fmt.Printf("  --description <desc>      Plugin description (default: \"A %s plugin\")\n", brand.Name)
-	fmt.Println("  --with-agent              Generate an agent profile in agents/<name>.yaml")
-	fmt.Println("  --with-envelope <type>    Generate a React envelope component (e.g. card, form)")
-	fmt.Println("  --with-crud <resource>    Generate CRUD handler boilerplate in plugin.go")
-	fmt.Println("  -h, --help                Show this help message")
+	fmt.Println("  --description <desc>  Plugin description (shown in manifest and README).")
+	fmt.Println("  --author <name>       LICENSE copyright + manifest author.")
+	fmt.Println("  --module <path>       Go module path (subprocess only).")
+	fmt.Println("  --output, -o <dir>    Override the output directory.")
+	fmt.Println("  -h, --help            Show this help.")
 	fmt.Println()
 	fmt.Println("Examples:")
-	fmt.Printf("  %s plugin new my-plugin\n", brand.BinaryName)
-	fmt.Printf("  %s plugin new my-plugin --with-agent --description \"My awesome plugin\"\n", brand.BinaryName)
-	fmt.Printf("  %s plugin new my-plugin --with-envelope card --with-crud items\n", brand.BinaryName)
+	fmt.Printf("  %s plugin new --subprocess my-plugin --author \"Jane Doe\"\n", brand.BinaryName)
+	fmt.Printf("  %s plugin new --builtin my-widget --description \"A quick widget\"\n", brand.BinaryName)
 }

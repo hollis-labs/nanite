@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "{{.EnvelopeType}}",
+  "title": "{{.EnvelopeComponent}} envelope",
+  "type": "object",
+  "required": ["text"],
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "Text rendered inside the {{.DisplayName}} card."
+    }
+  }
+}

@@ -1,0 +1,75 @@
+// Package {{.PackageName}} is a compiled-in Nanite plugin scaffolded by
+// `nanite plugin new --builtin {{.Name}}`. It registers its manifest at
+// package init() via the plugin registry so the host loader can apply
+// yaml-authoritative registrations (B.4) without a subprocess.
+package {{.PackageName}}
+
+import (
+	_ "embed"
+	"sync"
+	"time"
+
+	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/plugin-sdk"
+	"gopkg.in/yaml.v3"
+)
+
+//go:embed plugin.yaml
+var manifestYAML []byte
+
+var (
+	parsedManifestOnce sync.Once
+	parsedManifest     *hostplugin.PluginManifest
+)
+
+// loadManifest parses the embedded plugin.yaml exactly once. A parse
+// failure means the builtin was shipped with invalid source metadata —
+// fail fast so the bug is caught at boot rather than producing a
+// half-wired plugin at runtime.
+func loadManifest() *hostplugin.PluginManifest {
+	parsedManifestOnce.Do(func() {
+		var m hostplugin.PluginManifest
+		if err := yaml.Unmarshal(manifestYAML, &m); err != nil {
+			panic("{{.Name}}: invalid embedded plugin.yaml: " + err.Error())
+		}
+		parsedManifest = &m
+	})
+	return parsedManifest
+}
+
+func init() {
+	hostplugin.RegisterPlugin("{{.Name}}", func() plugin.Plugin { return New() })
+}
+
+// {{.StructName}} is the compiled-in plugin implementation.
+type {{.StructName}} struct {
+	status plugin.PluginStatus
+}
+
+func New() *{{.StructName}} { return &{{.StructName}}{} }
+
+func (p *{{.StructName}}) ID() string             { return "{{.Name}}" }
+func (p *{{.StructName}}) Name() string           { return "{{.DisplayName}}" }
+func (p *{{.StructName}}) Version() string        { return "1.0.0" }
+func (p *{{.StructName}}) Description() string    { return "{{.Description}}" }
+func (p *{{.StructName}}) Dependencies() []string { return nil }
+
+// Manifest exposes the embedded plugin.yaml so the host loader applies
+// yaml-authoritative registrations on our behalf (B.4).
+func (p *{{.StructName}}) Manifest() *hostplugin.PluginManifest {
+	return loadManifest()
+}
+
+func (p *{{.StructName}}) Load(host plugin.Host) error {
+	p.status = plugin.PluginStatus{Loaded: true, Enabled: true, LoadedAt: time.Now()}
+	host.Logger().Info("{{.Name}} plugin loaded (yaml-authoritative)")
+	return nil
+}
+
+func (p *{{.StructName}}) Unload() error {
+	p.status.Loaded = false
+	p.status.Enabled = false
+	return nil
+}
+
+func (p *{{.StructName}}) Status() plugin.PluginStatus { return p.status }

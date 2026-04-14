@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/pathsafe"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/plugin/devmode"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	fplugin "github.com/hollis-labs/plugin-sdk"
@@ -52,6 +53,16 @@ type PluginInfo struct {
 	Status      string `json:"status"`
 	Type        string `json:"type"`
 	Installed   bool   `json:"installed"`
+	// TrustTier surfaces the install-time signature-verify outcome for the UI.
+	// Values:
+	//   "signed"    — signature verified against a trusted key.
+	//   "unsigned"  — installed without a signature (only reachable in
+	//                 devmode builds; production refuses install).
+	//   "untrusted" — signature mismatch / verify failed (should be
+	//                 impossible in production; surfaced in case it
+	//                 somehow happens).
+	//   ""          — unknown / not applicable (builtin, not-yet-installed).
+	TrustTier string `json:"trust_tier,omitempty"`
 	// SkippedRegistrations surfaces yaml-declared registrations a subprocess
 	// plugin declined at load time. Populated for loaded subprocess plugins
 	// only; nil/absent for builtin or not-yet-loaded plugins. Shape mirrors
@@ -108,6 +119,9 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 		http.ServeFile(w, r, target)
 	})
 	mux.HandleFunc("POST /api/plugins/enable", pms.handleEnable)
+	// J.3 dev affordance: unload + reload a plugin without restarting the service.
+	// Idempotent — if the plugin isn't loaded, only the load step runs.
+	mux.HandleFunc("POST /api/plugins/reload", pms.handleReload)
 
 	// B.7 consolidated registry endpoint. Separate file (plugins_registry.go)
 	// keeps the envelope/slot/component/widget aggregation logic isolated from
@@ -172,6 +186,7 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 			Status:      status,
 			Type:        "user", // default; overridden below if in repos
 			Installed:   true,
+			TrustTier:   installedPluginTrustTier(),
 		}
 		if pms.pluginHost != nil {
 			// Host keys plugins by manifest.Identifier() (v1 ID when set, else Name),
@@ -200,6 +215,7 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 				Status:               statusStr,
 				Type:                 "core",
 				Installed:            true,
+				TrustTier:            "signed", // core plugins ship in the binary
 				SkippedRegistrations: collectSkippedRegistrations(pms.pluginHost, p.ID()),
 			})
 			seen[p.ID()] = true
@@ -246,6 +262,27 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 // plugin, if one exists for pluginID. Returns nil for builtin/compiled-in
 // plugins (they have no subprocess layer) or when the plugin is not currently
 // loaded. Safe to call unconditionally — all failures return nil.
+// installedPluginTrustTier returns the default trust tier to stamp onto an
+// on-disk plugin directory surfaced by /api/plugins/managed. Rationale:
+//
+//   - In production builds (devmode.HostDevSigningBypass == false) the
+//     install pipeline refuses to land an unsigned or bad-sig plugin, so
+//     an installed directory implies the signature verified: "signed".
+//   - In devmode builds the installer may have accepted an unsigned
+//     archive, and we cannot distinguish after the fact without an
+//     install-record column on disk. We surface "unsigned" as the honest
+//     worst-case so the Plugin Manager badge warns the operator.
+//
+// An "untrusted" tier can only appear if the verifier is somehow bypassed
+// post-install (should be impossible) — left reserved for future use when
+// we persist a per-plugin install record.
+func installedPluginTrustTier() string {
+	if devmode.HostDevSigningBypass {
+		return "unsigned"
+	}
+	return "signed"
+}
+
 func collectSkippedRegistrations(host *naniteplugin.Host, pluginID string) []SkippedRegistrationInfo {
 	if host == nil {
 		return nil
@@ -656,6 +693,68 @@ func (pms *pluginManagerState) handleEnable(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+
+// handleReload unloads and re-loads a plugin in place — the J.3 dev-mode
+// affordance. Useful while iterating on a plugin without restarting the host.
+// Idempotent: if the plugin wasn't loaded (fresh install, or already unloaded)
+// only the load step runs.
+func (pms *pluginManagerState) handleReload(w http.ResponseWriter, r *http.Request) {
+	var req pluginActionReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		pms.errorResp(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	// Confine target under pluginsDir — a name like "../../etc" would
+	// otherwise let the reload handler point the loader at arbitrary
+	// files on disk. Mirrors the pattern used by handleInstall.
+	target, err := pathsafe.ResolveUnder(pms.pluginsDir, req.Name)
+	if err != nil {
+		var escErr *pathsafe.EscapeError
+		if errors.As(err, &escErr) {
+			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", escErr))
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", err))
+		return
+	}
+	manifestPath := filepath.Join(target, "plugin.yaml")
+	if !fileExists(manifestPath) {
+		pms.errorResp(w, http.StatusNotFound, fmt.Sprintf("plugin %q not installed or disabled", req.Name))
+		return
+	}
+
+	// Unload best-effort; a no-op return is fine (plugin may be in a crashed
+	// state or never loaded this session).
+	unloaded := pms.unloadPluginFromHost(manifestPath)
+	loaded := pms.runPluginLoadIntoHost(manifestPath, target)
+
+	if !loaded {
+		// Re-load failed; surface as load_failed so the UI updates.
+		if pms.pluginHost != nil {
+			pms.pluginHost.EmitPluginLoadFailed(req.Name, "reload: hot-load into host failed")
+		}
+		pms.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("reload: failed to load plugin %q", req.Name))
+		return
+	}
+
+	// Successful reload: emit disabled+enabled pair so existing subscribers
+	// (Plugin Manager UI, frontend registry cache) invalidate and re-render.
+	// Keeps the event taxonomy stable without adding a new plugin.reloaded type.
+	if pms.pluginHost != nil {
+		if unloaded {
+			pms.pluginHost.EmitPluginDisabled(req.Name)
+		}
+		pms.pluginHost.EmitPluginEnabled(req.Name)
+	}
+
+	pms.jsonResp(w, http.StatusOK, map[string]any{
+		"status":    "reloaded",
+		"plugin":    req.Name,
+		"unloaded":  unloaded,
+		"message":   fmt.Sprintf("Plugin %q reloaded.", req.Name),
+	})
+}
 
 func fileExists(path string) bool {
 	_, err := os.Stat(path)

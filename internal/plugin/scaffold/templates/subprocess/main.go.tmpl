@@ -1,0 +1,103 @@
+// {{.DisplayName}} is a Nanite subprocess plugin scaffolded by
+// `nanite plugin new --subprocess {{.Name}}`. It speaks JSON-RPC over
+// stdio to the Nanite host via the plugin-sdk v0.3.0 subprocess server.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	plugin "github.com/hollis-labs/plugin-sdk"
+	"github.com/hollis-labs/plugin-sdk/subprocess"
+)
+
+const envelopeType = "{{.EnvelopeType}}"
+
+// {{.StructName}} implements subprocess.Plugin plus the optional
+// CommandHandler and MCPHandler capability interfaces.
+type {{.StructName}} struct{}
+
+func (p *{{.StructName}}) Init(ctx context.Context, params subprocess.InitParams) (subprocess.InitResult, error) {
+	return subprocess.InitResult{
+		ID:          "{{.Name}}",
+		Name:        "{{.DisplayName}}",
+		Version:     "0.1.0",
+		Description: "{{.Description}}",
+		Protocol:    subprocess.ProtocolVersion,
+	}, nil
+}
+
+func (p *{{.StructName}}) Load(ctx context.Context) (subprocess.LoadResult, error) {
+	return subprocess.LoadResult{}, nil
+}
+
+func (p *{{.StructName}}) Unload(ctx context.Context) error { return nil }
+
+// Command handles /{{.Name}} <text>. It echoes the argument back both as
+// message content and as a structured envelope for the chat surface.
+func (p *{{.StructName}}) Command(ctx context.Context, req subprocess.CommandRequest) (subprocess.CommandResult, error) {
+	text := req.Args
+	if text == "" {
+		text = "hello from {{.DisplayName}}"
+	}
+	env := plugin.EnvelopeOut{
+		Type: envelopeType,
+		Data: map[string]interface{}{
+			"text": text,
+		},
+	}
+	return subprocess.CommandResult{
+		Action:    "message",
+		Content:   text,
+		Envelopes: []plugin.EnvelopeOut{env},
+	}, nil
+}
+
+// MCPCallTool services mcp/call_tool invocations. The list of tools
+// available to the host is declarative via plugin.yaml's
+// `registers.mcp_servers[].tools` — the host enumerates tools from the
+// manifest, not by sending `mcp/list_tools` to the plugin.
+//
+// NOTE (BLG-20260414-012): plugin-sdk v0.3.0's subprocess server does
+// NOT dispatch the `mcp/list_tools` protocol method — tool listing is
+// yaml-authoritative. If a future SDK adds a ListTools capability
+// interface, reimplement it here and keep plugin.yaml in sync.
+func (p *{{.StructName}}) MCPCallTool(ctx context.Context, req subprocess.MCPCallRequest) (subprocess.MCPCallResult, error) {
+	switch req.ToolName {
+	case "echo":
+		text, _ := req.Arguments["text"].(string)
+		if text == "" {
+			text = "hello from {{.DisplayName}}"
+		}
+		payload, err := json.Marshal(map[string]interface{}{
+			"echoed": text,
+		})
+		if err != nil {
+			return mcpError(fmt.Sprintf("marshal result: %v", err))
+		}
+		env := plugin.EnvelopeOut{
+			Type: envelopeType,
+			Data: map[string]interface{}{"text": text},
+		}
+		return subprocess.MCPCallResult{
+			Content:   payload,
+			Envelopes: []plugin.EnvelopeOut{env},
+		}, nil
+	default:
+		return mcpError(fmt.Sprintf("unknown tool %q", req.ToolName))
+	}
+}
+
+func mcpError(msg string) (subprocess.MCPCallResult, error) {
+	payload, _ := json.Marshal(map[string]string{"error": msg})
+	return subprocess.MCPCallResult{Content: payload, IsError: true}, nil
+}
+
+func main() {
+	if err := subprocess.Serve(&{{.StructName}}{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

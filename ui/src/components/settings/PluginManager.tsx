@@ -45,6 +45,48 @@ import { CatalogSourceManager } from "./CatalogSourceManager";
 import { PluginConfigPanel } from "./PluginConfigPanel";
 import { PluginDetailView } from "./PluginDetailView";
 
+// --- Trust tier badge (J.2) ---
+
+// TrustTierBadge surfaces the install-time signature outcome per plugin.
+// "signed" is the happy path in production (catalog + per-plugin sig verified);
+// "unsigned" appears in any devmode build (the backend stamps unsigned for all
+// installed plugins under the devmode build tag, regardless of the user's
+// allow_unsigned_plugins setting — the setting only controls what the
+// installer *accepts*, not how the UI labels already-installed plugins);
+// "untrusted" is a defensive-only state and should be unreachable in shipped
+// builds because the installer refuses bad signatures.
+function TrustTierBadge({ tier }: { tier: "signed" | "unsigned" | "untrusted" }) {
+  const style =
+    tier === "signed"
+      ? "bg-emerald-600/10 border-emerald-600/40 text-emerald-700 dark:text-emerald-400"
+      : tier === "unsigned"
+        ? "bg-amber-600/10 border-amber-600/40 text-amber-700 dark:text-amber-400"
+        : "bg-red-600/10 border-red-600/40 text-red-700 dark:text-red-400";
+  const label =
+    tier === "signed"
+      ? "signed \u2713"
+      : tier === "unsigned"
+        ? "unsigned \u26A0"
+        : "untrusted \u{1F6AB}";
+  const title =
+    tier === "signed"
+      ? "Signature verified against a trusted key"
+      : tier === "unsigned"
+        ? "Plugin was installed without a verified signature (devmode build)"
+        : "Signature verification failed — do not trust";
+  return (
+    <>
+      <span className="text-fg-faint text-[10px]">&middot;</span>
+      <span
+        className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-md border leading-none ${style}`}
+        title={title}
+      >
+        {label}
+      </span>
+    </>
+  );
+}
+
 // --- Toast notification ---
 
 interface Toast {
@@ -390,6 +432,9 @@ export function PluginManager() {
                                     {plugin.author}
                                   </span>
                                 </>
+                              )}
+                              {plugin.installed && plugin.trust_tier && (
+                                <TrustTierBadge tier={plugin.trust_tier} />
                               )}
                             </div>
                           </div>

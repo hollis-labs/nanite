@@ -250,11 +250,12 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "bundle_dir":    { "type": "string" },
-        "entry":         { "type": "string" },
-        "stylesheet":    { "type": "string" },
-        "assets_dir":    { "type": "string" },
-        "react_version": { "type": "string" }
+        "bundle_dir":     { "type": "string" },
+        "entry":          { "type": "string" },
+        "stylesheet":     { "type": "string" },
+        "assets_dir":     { "type": "string" },
+        "react_version":  { "type": "string" },
+        "shadcn_version": { "type": "string" }
       }
     },
     "release": {

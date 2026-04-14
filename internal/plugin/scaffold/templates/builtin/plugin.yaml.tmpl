@@ -1,0 +1,18 @@
+schema_version: 1
+id: {{.Name}}
+name: {{.DisplayName}}
+version: 1.0.0
+description: {{.Description}}
+author: {{.Author}}
+license: Apache-2.0
+protocol: 1
+runtime: builtin
+
+nanite_compat:
+  min: 0.1.0
+
+registers:
+  components:
+    - name: {{.Name}}
+      type: widget
+      description: {{.Description}}

@@ -234,6 +234,13 @@ type ManifestUI struct {
 	Stylesheet   string `yaml:"stylesheet"`
 	AssetsDir    string `yaml:"assets_dir"`
 	ReactVersion string `yaml:"react_version"`
+	// ShadcnVersion is a semver range declaring which host shadcn primitive
+	// API the plugin was built against. Plugins that import
+	// `@nanite/ui/<primitive>` via the importmap (J.5 OQ9) should set this
+	// so breaking primitive changes surface at install time rather than as
+	// runtime render errors. Empty means "no shared primitives used" and the
+	// install-time check is skipped.
+	ShadcnVersion string `yaml:"shadcn_version"`
 }
 
 // ManifestRelease describes the published artifact(s) for this plugin version.

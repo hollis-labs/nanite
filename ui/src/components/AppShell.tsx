@@ -20,6 +20,11 @@ import { usePresence } from '@/hooks/usePresence'
 import { useHashRoute } from '@/hooks/useHashRoute'
 import { usePluginRegistry } from '@/hooks/usePluginRegistry'
 import { usePluginEvents } from '@/hooks/usePluginEvents'
+import { installPluginDevHelpers } from '@/lib/plugin-loader'
+
+// J.3: dev-only window helpers (__nanite_reloadPlugin, __nanite_pluginRegistry).
+// No-op in prod builds.
+installPluginDevHelpers()
 
 export function AppShell() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)

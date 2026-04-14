@@ -174,8 +174,13 @@ func (m *Manager) Start(ctx context.Context) (*Transport, error) {
 	m.waitCh = waitCh
 
 	// Single goroutine calls cmd.Wait(); both waitForExit and Stop observe waitCh.
+	// Close after the single write so late readers (e.g. Stop arriving after
+	// waitForExit already drained the err) don't block forever — closed-channel
+	// reads return zero immediately. BLG-20260414-005 fixed this way: without
+	// the close, Stop on clean exit deadlocks because waitCh only buffers 1.
 	safego.Go(context.Background(), "plugin.subprocess.manager.cmdWait", func() {
 		waitCh <- cmd.Wait()
+		close(waitCh)
 	})
 	safego.Go(context.Background(), "plugin.subprocess.manager.waitForExit", func() {
 		m.waitForExit(stderr)
@@ -220,16 +225,25 @@ func (m *Manager) Stop() error {
 		cancel()
 	}
 
-	// Wait for the process to exit, using the single waitCh from Start().
+	// Wait for the process to exit, using waitCh from Start(). The channel
+	// is closed after the single write, so reads always unblock even if
+	// waitForExit drained the err value first.
 	select {
 	case <-waitCh:
-		// Exited cleanly.
+		// Exited cleanly (or already observed by waitForExit).
 	case <-time.After(m.cfg.ShutdownTimeout):
 		// Force kill the process group.
 		if cmd.Process != nil {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
-		<-waitCh
+		// Bounded post-kill wait: if the process somehow still hasn't been
+		// reaped (e.g. grandchild pinning the pipe past cmd.WaitDelay), log
+		// and continue rather than hang the caller.
+		select {
+		case <-waitCh:
+		case <-time.After(2 * time.Second):
+			slog.Warn("subprocess: Stop did not observe process exit after SIGKILL; continuing", "command", m.cfg.Command)
+		}
 	}
 
 	m.mu.Lock()

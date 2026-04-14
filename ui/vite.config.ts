@@ -5,19 +5,50 @@ import path from 'path'
 import { readFileSync } from 'fs'
 import { createRequire } from 'module'
 
+// J.5 OQ9: shared shadcn/Radix primitives. Plugins resolve
+// `@nanite/ui/<primitive>` to the host's compiled component via the
+// importmap — no per-plugin bundling of shadcn internals, no duplicate
+// Radix roots, and a single theme-aware codepath.
+const SHADCN_PRIMITIVES = [
+  'button',
+  'card',
+  'dialog',
+  'dropdown-menu',
+  'popover',
+  'select',
+  'tooltip',
+  'input',
+  'textarea',
+  'scroll-area',
+  'separator',
+] as const
+
+const SHADCN_ENTRIES: Record<string, string> = Object.fromEntries(
+  SHADCN_PRIMITIVES.map((p) => [`@nanite/ui/${p}`, `src/_host/shadcn/${p}.ts`]),
+)
+
 const HOST_ENTRIES = {
   react: 'src/_host/react.ts',
   'react-dom': 'src/_host/react-dom.ts',
   'react-dom/client': 'src/_host/react-dom-client.ts',
   'react/jsx-runtime': 'src/_host/react-jsx-runtime.ts',
+  ...SHADCN_ENTRIES,
 } as const
 
-// Entry-point name → bare specifier reverse lookup.
+// Entry-point name → bare specifier reverse lookup. The rollup build emits
+// an entry per file; its `chunk.name` is the input key we register below.
+// Shadcn entries land under the rollup input name `shadcn-<primitive>` to
+// keep the host chunk filenames flat (assets/_host/shadcn-button-<hash>.js).
+function rollupInputName(file: string): string {
+  // src/_host/shadcn/button.ts → shadcn-button
+  // src/_host/react.ts         → react
+  const base = path.basename(file, path.extname(file))
+  if (file.includes('_host/shadcn/')) return `shadcn-${base}`
+  return base
+}
+
 const SPECIFIER_BY_ENTRY: Record<string, string> = Object.fromEntries(
-  Object.entries(HOST_ENTRIES).map(([spec, file]) => {
-    const base = path.basename(file, path.extname(file)) // e.g. "react-dom-client"
-    return [base, spec]
-  }),
+  Object.entries(HOST_ENTRIES).map(([spec, file]) => [rollupInputName(file), spec]),
 )
 
 /**
@@ -121,10 +152,14 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
-        'react': path.resolve(__dirname, 'src/_host/react.ts'),
-        'react-dom': path.resolve(__dirname, 'src/_host/react-dom.ts'),
-        'react-dom-client': path.resolve(__dirname, 'src/_host/react-dom-client.ts'),
-        'react-jsx-runtime': path.resolve(__dirname, 'src/_host/react-jsx-runtime.ts'),
+        // Derive host-entry inputs from HOST_ENTRIES so the shadcn primitives
+        // and React re-exports stay in one list.
+        ...Object.fromEntries(
+          Object.values(HOST_ENTRIES).map((file) => [
+            rollupInputName(file),
+            path.resolve(__dirname, file),
+          ]),
+        ),
       },
       // Host-side consumers don't reference every React export we want
       // plugins to see, so Rollup's default `exports-only` signature

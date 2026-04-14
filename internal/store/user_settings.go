@@ -22,6 +22,12 @@ type UserSettings struct {
 	ExtSettings           map[string]any    `json:"ext_settings,omitempty"`
 	ToolLoadPreferences   map[string]string `json:"tool_load_preferences,omitempty"`
 	TaskBackend           string            `json:"task_backend"`
+	// AllowUnsignedPlugins permits installing plugin archives that lack a
+	// verified Ed25519 signature. The setting is ONLY honoured in builds
+	// compiled with the `devmode` build tag (see internal/plugin/devmode).
+	// In production binaries this field is intentionally inert: a
+	// compromised row cannot disable signature verification.
+	AllowUnsignedPlugins bool `json:"allow_unsigned_plugins"`
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -33,16 +39,17 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var devMode, recoverMode bool
 	var toolLoadPrefsJSON string
 	var taskBackend string
+	var allowUnsigned bool
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
 		        developer_mode, recover_mode, tool_stream_behavior, tool_drawer_retention,
-		        tool_load_preferences, task_backend
+		        tool_load_preferences, task_backend, allow_unsigned_plugins
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
 		&devMode, &recoverMode, &toolStreamBehavior, &toolDrawerRetention,
-		&toolLoadPrefsJSON, &taskBackend)
+		&toolLoadPrefsJSON, &taskBackend, &allowUnsigned)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -56,9 +63,10 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		ToolCallDisplayMode: toolMode,
 		ToolStreamBehavior:  toolStreamBehavior,
 		ToolDrawerRetention: toolDrawerRetention,
-		DeveloperMode:       devMode,
-		RecoverMode:         recoverMode,
-		TaskBackend:         taskBackend,
+		DeveloperMode:        devMode,
+		RecoverMode:          recoverMode,
+		TaskBackend:          taskBackend,
+		AllowUnsignedPlugins: allowUnsigned,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -125,13 +133,14 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			tool_drawer_retention = ?,
 			tool_load_preferences = ?,
 			task_backend = ?,
+			allow_unsigned_plugins = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
 		us.DefaultAgent, us.UtilityProvider, us.UtilityModel, us.ToolCallDisplayMode,
 		string(extJSON), us.DeveloperMode, us.RecoverMode,
 		us.ToolStreamBehavior, us.ToolDrawerRetention, string(toolPrefsJSON),
-		taskBackend, now,
+		taskBackend, us.AllowUnsignedPlugins, now,
 	)
 	if err != nil {
 		return fmt.Errorf("update user settings: %w", err)

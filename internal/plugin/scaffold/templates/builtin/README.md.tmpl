@@ -1,0 +1,22 @@
+# {{.DisplayName}}
+
+{{.Description}}
+
+## Next steps
+
+1. Add the import to `internal/plugin/allplugins/allplugins.go`:
+
+   ```go
+   _ "github.com/hollis-labs/nanite/internal/plugin/builtin/{{.PackageName}}"
+   ```
+
+2. Rebuild and restart:
+
+   ```
+   go install ./cmd/nanite
+   cerberus restart nanite-api
+   ```
+
+The manifest in `plugin.yaml` is yaml-authoritative — edit it to add
+envelopes, commands, slots, or other registrations. The Go code only
+needs to initialize runtime state in `Load()`.

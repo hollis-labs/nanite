@@ -14,6 +14,15 @@
  */
 import { lazy, type ComponentType } from 'react'
 
+// J.3: verbose dev-mode logging. In prod, devLog is a dead no-op so calls
+// cost nothing. In dev, each major loader transition gets a single line at
+// info level so plugin authors can follow what the registry sync is doing.
+const devLog: (...args: unknown[]) => void =
+  import.meta.env.DEV
+    ? // eslint-disable-next-line no-console
+      (...args) => console.info('[plugin-loader]', ...args)
+    : () => {}
+
 // biome-ignore lint/suspicious/noExplicitAny: plugin components have varied props
 type AnyComponent = ComponentType<any>
 // biome-ignore lint/suspicious/noExplicitAny: matches build-time registry shape
@@ -217,6 +226,10 @@ function isComponentLike(value: unknown): boolean {
  * failures from their own error state.
  */
 export async function syncPluginRegistry(data: PluginRegistryResponse): Promise<void> {
+  devLog('syncPluginRegistry: plugins=', Object.keys(data.plugins).length,
+    'envelopes=', Object.keys(data.envelopes).length,
+    'widgets=', Object.keys(data.widgets).length,
+    'slots=', Object.values(data.slots).reduce((n, arr) => n + arr.length, 0))
   // Rebuild the envelope-type → plugin-id map from the registry response.
   // Done unconditionally so consumers can resolve ownership even when a
   // plugin's bundle later fails to load.
@@ -245,7 +258,12 @@ export async function syncPluginRegistry(data: PluginRegistryResponse): Promise<
       ensureStylesheet(pluginId, plugin.stylesheet_url, current)
       continue
     }
-    if (current) unloadPlugin(pluginId)
+    if (current) {
+      devLog('reload:', pluginId, 'url changed', current.bundleUrl, '→', effectiveUrl)
+      unloadPlugin(pluginId)
+    } else {
+      devLog('load:', pluginId, effectiveUrl)
+    }
     loads.push(loadPluginBundle(pluginId, plugin, effectiveUrl, data))
   }
 
@@ -449,4 +467,113 @@ function cssEscape(value: string): string {
   // Minimal CSS attribute-selector escape: only the characters we expect in
   // plugin IDs can already include `-`; this guards anything else.
   return value.replace(/["\\]/g, '\\$&')
+}
+
+// ---------------------------------------------------------------------------
+// J.3 developer-mode affordances.
+//
+// In dev builds (`import.meta.env.DEV`), attach inspection + reload helpers to
+// `window` so plugin authors can poke at the registry and trigger reloads
+// from devtools. Prod builds skip this entirely so no debug surface leaks.
+// ---------------------------------------------------------------------------
+
+/** Snapshot of the dynamic registry for dev tooling. */
+export interface PluginRegistrySnapshot {
+  envelopes: string[]
+  widgets: string[]
+  slotComponents: string[]
+  loadedPlugins: Array<{
+    id: string
+    bundleUrl: string
+    stylesheetUrl?: string
+    envelopeTypes: string[]
+    widgetIds: string[]
+    slotComponentNames: string[]
+  }>
+  loadErrors: Array<{ pluginId: string; reason: string }>
+}
+
+function snapshotDynamicRegistry(): PluginRegistrySnapshot {
+  const loadedPlugins: PluginRegistrySnapshot['loadedPlugins'] = []
+  for (const [id, bundle] of loadedBundles) {
+    loadedPlugins.push({
+      id,
+      bundleUrl: bundle.bundleUrl,
+      stylesheetUrl: bundle.stylesheetUrl,
+      envelopeTypes: [...bundle.envelopeTypes],
+      widgetIds: [...bundle.widgetIds],
+      slotComponentNames: [...bundle.slotComponentNames],
+    })
+  }
+  return {
+    envelopes: [...dynamicEnvelopes.keys()],
+    widgets: [...dynamicWidgets.keys()],
+    slotComponents: [...dynamicSlotComponents.keys()],
+    loadedPlugins,
+    loadErrors: getPluginLoadErrors(),
+  }
+}
+
+/**
+ * Trigger a server-side reload of `pluginId` and refetch the registry so the
+ * frontend picks up the new bundle. Returns the reload response.
+ *
+ * Exposed as `window.__nanite_reloadPlugin` in dev builds so authors can
+ * iterate without restarting the service or fighting the Plugin Manager UI.
+ */
+async function reloadPluginFromBrowser(pluginId: string): Promise<unknown> {
+  const resp = await fetch('/api/plugins/reload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: pluginId }),
+  })
+  const body = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    throw new Error(`reload ${pluginId}: ${resp.status} ${JSON.stringify(body)}`)
+  }
+  // Nudge the loader to drop the old bundle so syncPluginRegistry's next run
+  // re-imports with the updated bundle_hash.
+  const prev = loadedBundles.get(pluginId)
+  if (prev) {
+    dynamicEnvelopes.forEach((e, t) => {
+      if (e.source === pluginId) dynamicEnvelopes.delete(t)
+    })
+    dynamicWidgets.forEach((w, id) => {
+      if (w.source === pluginId) dynamicWidgets.delete(id)
+    })
+    dynamicSlotComponents.forEach((s, n) => {
+      if (s.source === pluginId) dynamicSlotComponents.delete(n)
+    })
+    removeStylesheet(prev)
+    loadedBundles.delete(pluginId)
+    notify()
+  }
+  return body
+}
+
+/**
+ * Install dev-only helpers on `window`. Safe to call multiple times; later
+ * calls overwrite earlier references (useful across Vite HMR reloads).
+ *
+ * Attaches:
+ *   - `window.__nanite_reloadPlugin(id)` → triggers server reload + UI drop.
+ *   - `window.__nanite_pluginRegistry()` → returns a snapshot of the
+ *     in-memory registry state (callable so it's always fresh).
+ */
+export function installPluginDevHelpers(): void {
+  if (!import.meta.env.DEV) return
+  if (typeof window === 'undefined') return
+  // biome-ignore lint/suspicious/noExplicitAny: window is dynamically extended
+  const w = window as any
+  w.__nanite_reloadPlugin = reloadPluginFromBrowser
+  w.__nanite_pluginRegistry = snapshotDynamicRegistry
+  // Best-effort banner so authors know these are live. Keep it cheap — one
+  // log on install, not per snapshot call.
+  if (!w.__nanite_devHelpersAnnounced) {
+    // eslint-disable-next-line no-console
+    console.info(
+      '[nanite/plugins] dev helpers installed: window.__nanite_reloadPlugin(id), window.__nanite_pluginRegistry()',
+    )
+    w.__nanite_devHelpersAnnounced = true
+  }
 }

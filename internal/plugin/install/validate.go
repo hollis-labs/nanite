@@ -190,6 +190,19 @@ func (v *validator) run(data []byte) {
 	v.validateCrossRefs(manifest)
 	v.validateBundleAssets(manifest)
 	v.validatePlatforms(manifest)
+	v.validateShadcnVersion(manifest)
+}
+
+// validateShadcnVersion enforces ui.shadcn_version compatibility with the
+// host. Empty is treated as "plugin does not use shared primitives" and
+// passes silently. J.5 OQ9.
+func (v *validator) validateShadcnVersion(m *plugin.PluginManifest) {
+	if m == nil {
+		return
+	}
+	if err := plugin.CheckShadcnCompat(m.UI.ShadcnVersion); err != nil {
+		v.refuseOrWarn(KindSchema, "ui.shadcn_version", err.Error())
+	}
 }
 
 // validateSchema decodes the yaml, runs it against the embedded schema, and

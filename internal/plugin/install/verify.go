@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/plugin/devmode"
 )
 
 // KeyLookup resolves a catalog-declared key id to an Ed25519 public key. The
@@ -29,6 +31,18 @@ type SignatureVerifier struct {
 	// Defaults to DefaultMaxArchiveBytes. Archives larger than the cap are
 	// rejected without being fully read.
 	MaxArchiveBytes int64
+
+	// AllowUnsigned, when true AND when the binary was built with the
+	// `devmode` build tag, causes Verify to accept archives without a
+	// signature / signer key and to skip Ed25519 verification entirely.
+	// Shasum verification still runs so archive integrity is preserved.
+	//
+	// In production builds (devmode.HostDevSigningBypass == false) this
+	// field is ignored — signatures are always enforced. Callers wire
+	// this from user_settings.allow_unsigned_plugins, but the production
+	// binary folds the read path out via dead-code elimination on the
+	// compile-time constant.
+	AllowUnsigned bool
 }
 
 // Verify checks that the file at h.Path:
@@ -48,25 +62,40 @@ func (v *SignatureVerifier) Verify(ctx context.Context, h Handle) error {
 	if h.ExpectedSHA256 == "" {
 		return errors.New("verify: missing expected sha256")
 	}
-	if len(h.Signature) == 0 {
-		return errors.New("verify: missing signature")
-	}
-	if h.SignerKeyID == "" {
-		return errors.New("verify: missing signer key id")
-	}
-	if v.KeyLookup == nil {
-		return errors.New("verify: no trusted key lookup configured")
+
+	// J.2: per-plugin signature bypass. Only active when BOTH the binary
+	// was built with `-tags devmode` AND the operator opted in via
+	// user_settings.allow_unsigned_plugins (threaded in as v.AllowUnsigned).
+	// Production binaries compile devmode.HostDevSigningBypass to false,
+	// which folds this whole branch out via dead-code elimination — a
+	// compromised user_settings row cannot disable signature verification.
+	signatureBypassed := devmode.HostDevSigningBypass && v.AllowUnsigned
+
+	if !signatureBypassed {
+		if len(h.Signature) == 0 {
+			return errors.New("verify: missing signature")
+		}
+		if h.SignerKeyID == "" {
+			return errors.New("verify: missing signer key id")
+		}
+		if v.KeyLookup == nil {
+			return errors.New("verify: no trusted key lookup configured")
+		}
 	}
 
-	pub, ok := v.KeyLookup(h.SignerKeyID)
-	if !ok {
-		return fmt.Errorf("verify: unknown signer key id %q", h.SignerKeyID)
-	}
-	if len(pub) != ed25519.PublicKeySize {
-		return fmt.Errorf("verify: key %q has wrong size %d", h.SignerKeyID, len(pub))
-	}
-	if len(h.Signature) != ed25519.SignatureSize {
-		return fmt.Errorf("verify: signature has wrong size %d", len(h.Signature))
+	var pub ed25519.PublicKey
+	if !signatureBypassed {
+		var ok bool
+		pub, ok = v.KeyLookup(h.SignerKeyID)
+		if !ok {
+			return fmt.Errorf("verify: unknown signer key id %q", h.SignerKeyID)
+		}
+		if len(pub) != ed25519.PublicKeySize {
+			return fmt.Errorf("verify: key %q has wrong size %d", h.SignerKeyID, len(pub))
+		}
+		if len(h.Signature) != ed25519.SignatureSize {
+			return fmt.Errorf("verify: signature has wrong size %d", len(h.Signature))
+		}
 	}
 
 	max := v.MaxArchiveBytes
@@ -102,8 +131,10 @@ func (v *SignatureVerifier) Verify(ctx context.Context, h Handle) error {
 		return fmt.Errorf("verify: sha256 mismatch: got %s want %s", gotSum, h.ExpectedSHA256)
 	}
 
-	if !ed25519.Verify(pub, body, h.Signature) {
-		return errors.New("verify: signature check failed")
+	if !signatureBypassed {
+		if !ed25519.Verify(pub, body, h.Signature) {
+			return errors.New("verify: signature check failed")
+		}
 	}
 
 	select {

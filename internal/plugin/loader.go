@@ -196,14 +196,22 @@ func newSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.Subproces
 	// Resolve the entrypoint command and args.
 	command, args := parseEntrypoint(m.Entrypoint, dp.Dir)
 
-	// Verify the command exists.
+	// Resolve to an ABSOLUTE path before handing to Manager. Manager sets
+	// cmd.Dir = dp.Dir, and Go's exec package evaluates a relative cmd.Path
+	// relative to cmd.Dir at fork/exec time. A plugin-dir-joined path like
+	// "plugins/oembed/oembed" paired with Dir="plugins/oembed" would be
+	// re-resolved inside the plugin dir (→ "plugins/oembed/plugins/oembed/oembed"
+	// → ENOENT, surfaced as "fork/exec …: no such file or directory"). Using
+	// an absolute path makes the command unambiguous regardless of Dir.
 	if _, err := exec.LookPath(command); err != nil {
-		// Try as relative path from plugin dir.
 		absCmd := filepath.Join(dp.Dir, command)
 		if _, err := exec.LookPath(absCmd); err != nil {
 			return nil, fmt.Errorf("entrypoint %q not found: %w", m.Entrypoint, err)
 		}
 		command = absCmd
+	}
+	if abs, err := filepath.Abs(command); err == nil {
+		command = abs
 	}
 
 	// Resolve config values for the subprocess.

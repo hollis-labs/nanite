@@ -33,7 +33,7 @@ func apiBaseURL() string {
 }
 
 // apiPost sends a JSON POST to the local nanite API with optional basic-auth
-// pulled from NANITE_AUTH_USER/PASSWORD. When unset, the server's
+// pulled from NANITE_AUTH_USER and NANITE_AUTH_PASSWORD. When unset, the server's
 // basicAuthMiddleware is a no-op (dev default), so this still works.
 func apiPost(path string, payload any) (*http.Response, error) {
 	body, err := json.Marshal(payload)

@@ -49,9 +49,12 @@ import { PluginDetailView } from "./PluginDetailView";
 
 // TrustTierBadge surfaces the install-time signature outcome per plugin.
 // "signed" is the happy path in production (catalog + per-plugin sig verified);
-// "unsigned" only appears in devmode builds where the user opted into
-// allow_unsigned_plugins; "untrusted" is a defensive-only state and should be
-// unreachable in shipped builds because the installer refuses bad signatures.
+// "unsigned" appears in any devmode build (the backend stamps unsigned for all
+// installed plugins under the devmode build tag, regardless of the user's
+// allow_unsigned_plugins setting — the setting only controls what the
+// installer *accepts*, not how the UI labels already-installed plugins);
+// "untrusted" is a defensive-only state and should be unreachable in shipped
+// builds because the installer refuses bad signatures.
 function TrustTierBadge({ tier }: { tier: "signed" | "unsigned" | "untrusted" }) {
   const style =
     tier === "signed"

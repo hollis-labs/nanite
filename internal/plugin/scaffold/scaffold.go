@@ -24,11 +24,17 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
 	"unicode"
 )
+
+// pluginIDPattern mirrors the v1 manifest schema's id regex so scaffold
+// fails fast on invalid names instead of producing a directory tree whose
+// plugin.yaml would later fail schema validation.
+var pluginIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,62}$`)
 
 // all:templates is required so hidden directories like .github/ are
 // included in the embedded FS. Plain `embed templates` skips dotfiles.
@@ -89,6 +95,9 @@ type templateData struct {
 func Run(opts Options) error {
 	if opts.Name == "" {
 		return fmt.Errorf("plugin name is required")
+	}
+	if !pluginIDPattern.MatchString(opts.Name) {
+		return fmt.Errorf("plugin name %q must match %s (lowercase, starts with a letter, kebab-case, 2-63 chars)", opts.Name, pluginIDPattern)
 	}
 	if opts.Kind == "" {
 		return fmt.Errorf("plugin kind is required (subprocess or builtin)")

@@ -319,7 +319,7 @@ Frontend bundle metadata.
 
 `shadcn_version` is validated against the host's `HostShadcnVersion`
 (starts at `1.0.0`) at install time. Accepts exact, caret (`^1.0.0`), or
-tilde (`~1.2`) ranges. Empty means the plugin doesn't use shared primitives
+tilde (`~1.2.0`) ranges. Empty means the plugin doesn't use shared primitives
 and the check is skipped.
 
 ```yaml

@@ -705,8 +705,20 @@ func (pms *pluginManagerState) handleReload(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	manifestPath := filepath.Join(pms.pluginsDir, req.Name, "plugin.yaml")
-	target := filepath.Join(pms.pluginsDir, req.Name)
+	// Confine target under pluginsDir — a name like "../../etc" would
+	// otherwise let the reload handler point the loader at arbitrary
+	// files on disk. Mirrors the pattern used by handleInstall.
+	target, err := pathsafe.ResolveUnder(pms.pluginsDir, req.Name)
+	if err != nil {
+		var escErr *pathsafe.EscapeError
+		if errors.As(err, &escErr) {
+			pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", escErr))
+			return
+		}
+		pms.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid plugin name: %v", err))
+		return
+	}
+	manifestPath := filepath.Join(target, "plugin.yaml")
 	if !fileExists(manifestPath) {
 		pms.errorResp(w, http.StatusNotFound, fmt.Sprintf("plugin %q not installed or disabled", req.Name))
 		return

@@ -269,6 +269,26 @@ func TestRun_RequiresKind(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsInvalidName(t *testing.T) {
+	for _, name := range []string{
+		"Foo",          // uppercase
+		"1foo",         // leading digit
+		"foo_bar",      // underscore
+		"foo.bar",      // dot
+		"foo/bar",      // slash — path-traversal vector
+		"../foo",       // path-traversal
+		"f",            // too short (min 2)
+		strings.Repeat("a", 64), // too long (max 63)
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := Run(Options{Kind: KindSubprocess, Name: name, OutputDir: t.TempDir()})
+			if err == nil {
+				t.Fatalf("expected Run to reject invalid name %q, got nil error", name)
+			}
+		})
+	}
+}
+
 func TestBuildTemplateData_Defaults(t *testing.T) {
 	d := buildTemplateData(Options{Kind: KindSubprocess, Name: "my-plugin"})
 	if d.Author != "Plugin Author" {

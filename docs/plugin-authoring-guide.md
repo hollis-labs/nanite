@@ -46,14 +46,15 @@ CRUD, etc.).
 ## 3. Scaffold a new plugin
 
 ```bash
+# Default output dir is ./plugins/<name>. Pass --output to override.
 nanite plugin new --subprocess my-plugin
-cd my-plugin
+cd plugins/my-plugin
 ```
 
 This generates:
 
 ```
-my-plugin/
+plugins/my-plugin/
 ├── plugin.yaml              # v1 manifest
 ├── main.go                  # subprocess.Serve entrypoint
 ├── go.mod                   # module github.com/you/my-plugin

@@ -2,9 +2,20 @@ package subprocess
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 )
+
+// skipIfWindows skips tests that hardcode POSIX commands like /bin/sh and
+// /bin/cat. The Manager itself is cross-platform; these regression tests
+// just need a shell-ish process to supervise.
+func skipIfWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("regression uses POSIX /bin/sh + /bin/cat; not portable to windows")
+	}
+}
 
 // TestManagerStopAfterCleanExit is the regression for BLG-20260414-005.
 //
@@ -18,6 +29,7 @@ import (
 // unblock immediately. Stop must return promptly when the process has already
 // exited, with or without waitForExit having observed the error.
 func TestManagerStopAfterCleanExit(t *testing.T) {
+	skipIfWindows(t)
 	// /bin/sh -c "exit 0" — spawns, exits immediately, no RPC surface.
 	mgr := NewManager(ManagerConfig{
 		Command:         "/bin/sh",
@@ -54,6 +66,7 @@ func TestManagerStopAfterCleanExit(t *testing.T) {
 // Stop triggers unload attempt (will fail since /bin/cat ignores JSON-RPC)
 // then force-kills after ShutdownTimeout. Must still return bounded.
 func TestManagerStopWhileRunning(t *testing.T) {
+	skipIfWindows(t)
 	mgr := NewManager(ManagerConfig{
 		Command:         "/bin/cat", // stays alive reading stdin
 		HealthInterval:  0,

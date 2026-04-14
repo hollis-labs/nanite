@@ -144,7 +144,8 @@ export interface StreamEvent {
     | "status"
     | "circuit_open"
     | "session_takeover"
-    | "approval_request";
+    | "approval_request"
+    | "plugin_envelope";
   content?: string;
   message_id?: string;
   agent_id?: string;
@@ -162,6 +163,19 @@ export interface StreamEvent {
   summary?: string;
   envelope?: string;
   data?: string;
+  plugin_id?: string;
+}
+
+/**
+ * A plugin-emitted envelope delivered as a standalone chat item (not appended
+ * to the current assistant message). Emitted by subprocess plugin event hooks
+ * via the backend `plugin_envelope` StreamEvent (BLG-20260413-012).
+ */
+export interface PluginEnvelopeItem {
+  id: string;
+  pluginId: string;
+  envelope: Envelope;
+  receivedAt: number;
 }
 
 // --- Context Breakdown ---
@@ -838,6 +852,10 @@ export interface UISlotEntry {
 
 export interface PluginInfo {
   name: string;
+  // Optional human-friendly display name. Backend-yaml schema for this lives
+  // in the rest of BLG-20260414-013 (separate session) — frontend is a
+  // pure pass-through with `name` as the fallback.
+  display_name?: string;
   version: string;
   description: string;
   short_desc: string;

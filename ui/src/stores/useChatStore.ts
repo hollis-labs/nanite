@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo, CLIActiveInfo, PendingApproval } from '@/lib/types'
+import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo, CLIActiveInfo, PendingApproval, PluginEnvelopeItem } from '@/lib/types'
 
 interface ChatState {
   // Streaming
@@ -33,6 +33,15 @@ interface ChatState {
   addPendingApproval: (approval: PendingApproval) => void
   resolvePendingApproval: (requestId: string, decision: PendingApproval['resolved']) => void
   clearPendingApprovals: () => void
+
+  // Plugin envelopes — standalone cards emitted by plugin event hooks
+  // (BLG-20260413-012 / BLG-20260414-010). Session-scoped so switching
+  // sessions does not mix envelopes from different conversations.
+  pluginEnvelopes: PluginEnvelopeItem[]
+  pluginEnvelopesBySession: Map<string, { items: PluginEnvelopeItem[]; lastActivity: number }>
+  addPluginEnvelope: (item: PluginEnvelopeItem, sessionId?: string) => void
+  clearPluginEnvelopes: () => void
+  loadSessionPluginEnvelopes: (sessionId: string | null, retentionMinutes?: number) => void
 
   // Text-only mode (agent has 0 MCP tools)
   textOnlyMode: boolean
@@ -172,6 +181,50 @@ export const useChatStore = create<ChatState>((set) => ({
       ),
     })),
   clearPendingApprovals: () => set({ pendingApprovals: [] }),
+
+  // Plugin envelopes (session-scoped, mirrors toolCallsBySession retention)
+  pluginEnvelopes: [],
+  pluginEnvelopesBySession: new Map(),
+  addPluginEnvelope: (item, sessionId) =>
+    set((state) => {
+      const targetSession = sessionId ?? state.streamingSessionId
+      if (!targetSession) return {}
+      const next = new Map(state.pluginEnvelopesBySession)
+      const existing = next.get(targetSession)?.items ?? []
+      const updated = [...existing, item].slice(-50)
+      next.set(targetSession, { items: updated, lastActivity: Date.now() })
+      const displayUpdate =
+        targetSession === state.streamingSessionId ? { pluginEnvelopes: updated } : {}
+      return { ...displayUpdate, pluginEnvelopesBySession: next }
+    }),
+  clearPluginEnvelopes: () =>
+    set((state) => {
+      const sessionId = state.streamingSessionId
+      if (sessionId) {
+        const next = new Map(state.pluginEnvelopesBySession)
+        next.set(sessionId, { items: [], lastActivity: Date.now() })
+        return { pluginEnvelopes: [], pluginEnvelopesBySession: next }
+      }
+      return { pluginEnvelopes: [] }
+    }),
+  loadSessionPluginEnvelopes: (sessionId, retentionMinutes = 15) =>
+    set((state) => {
+      if (!sessionId) return { pluginEnvelopes: [] }
+      const next = new Map(state.pluginEnvelopesBySession)
+      // Prune stale entries (mirrors loadSessionToolCalls). Negative
+      // retention disables pruning (keep until refresh).
+      if (retentionMinutes >= 0) {
+        const cutoff = Date.now() - retentionMinutes * 60 * 1000
+        for (const [id, entry] of next) {
+          if (entry.lastActivity < cutoff) next.delete(id)
+        }
+      }
+      const entry = next.get(sessionId)
+      return {
+        pluginEnvelopes: entry?.items ?? [],
+        pluginEnvelopesBySession: next,
+      }
+    }),
 
   // Text-only mode
   textOnlyMode: false,

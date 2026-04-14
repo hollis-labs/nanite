@@ -9,6 +9,7 @@ import { useChatStore } from "@/stores/useChatStore";
 import { useSettings } from "@/hooks/useSettings";
 import { ApprovalCard } from "./ApprovalCard";
 import { ChatMessage } from "./ChatMessage";
+import { EnvelopeRenderer } from "./envelopes/EnvelopeRenderer";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
 import { MessageContent } from "./MessageContent";
@@ -52,6 +53,8 @@ export function ChatTranscript({
   const saveToolCallDisplayMode = useChatStore((s) => s.saveToolCallDisplayMode);
   const loadToolCallDisplayMode = useChatStore((s) => s.loadToolCallDisplayMode);
   const pendingApprovals = useChatStore((s) => s.pendingApprovals);
+  const pluginEnvelopes = useChatStore((s) => s.pluginEnvelopes);
+  const loadSessionPluginEnvelopes = useChatStore((s) => s.loadSessionPluginEnvelopes);
   const scrollToMessageId = useChatStore((s) => s.scrollToMessageId);
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId);
   const { data: userSettings } = useSettings();
@@ -65,6 +68,14 @@ export function ChatTranscript({
   useEffect(() => {
     loadToolCallDisplayMode(activeSessionId ?? null);
   }, [activeSessionId, loadToolCallDisplayMode]);
+
+  // Load per-session plugin envelopes when session changes. Plugin envelopes
+  // are delivered by subprocess event hooks via the `plugin_envelope`
+  // StreamEvent (BLG-20260413-012 / BLG-20260414-010) — session-scoped so
+  // envelopes from one session don't bleed into another.
+  useEffect(() => {
+    loadSessionPluginEnvelopes(activeSessionId ?? null);
+  }, [activeSessionId, loadSessionPluginEnvelopes]);
 
   // Track if user is scrolled to bottom - auto-scroll only when at bottom
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -144,6 +155,7 @@ export function ChatTranscript({
     toolCalls.length,
     toolWarnings.length,
     pendingApprovals.length,
+    pluginEnvelopes.length,
     chatErrors.length,
     checkScrollPosition,
   ]);
@@ -302,6 +314,7 @@ export function ChatTranscript({
     toolCalls.length,
     toolWarnings.length,
     pendingApprovals.length,
+    pluginEnvelopes.length,
     chatErrors.length,
     isAtBottom,
     userHasScrolled,
@@ -397,6 +410,18 @@ export function ChatTranscript({
         {/* Approval cards — inline in the message stream */}
         {pendingApprovals.map((approval) => (
           <ApprovalCard key={approval.request_id} approval={approval} />
+        ))}
+
+        {/* Plugin-emitted envelopes (BLG-20260414-010) — standalone cards,
+            not appended to any assistant message content. */}
+        {pluginEnvelopes.map((item) => (
+          <div
+            key={item.id}
+            data-plugin-envelope-id={item.id}
+            data-plugin-id={item.pluginId}
+          >
+            <EnvelopeRenderer envelope={item.envelope} {...(onSendMessage && { onSendMessage })} />
+          </div>
         ))}
 
         {/* Streaming message */}

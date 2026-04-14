@@ -98,6 +98,14 @@ func NewSubprocessPlugin(pluginDir string, manifestID string, config map[string]
 	sp := &SubprocessPlugin{
 		pluginDir:  pluginDir,
 		manifestID: manifestID,
+		// Pre-populate id from manifestID so ID() returns the canonical
+		// plugin id BEFORE the init handshake runs. Host.LoadPlugin reads
+		// p.ID() prior to calling p.Load(), and if the subprocess hasn't
+		// started yet ID() would return "" — causing two subprocess plugins
+		// to collide on an empty map key and the second to fail with
+		// "plugin \"\" already loaded". Load() will overwrite this with
+		// initResult.ID once the handshake completes (they should match).
+		id:         manifestID,
 		config:     config,
 		mgr:        mgr,
 		status: plugin.PluginStatus{

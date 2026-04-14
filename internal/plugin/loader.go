@@ -196,15 +196,33 @@ func newSubprocessPluginFromManifest(dp DiscoveredPlugin) (*subprocess.Subproces
 	// Resolve the entrypoint command and args.
 	command, args := parseEntrypoint(m.Entrypoint, dp.Dir)
 
-	// Verify the command exists.
-	if _, err := exec.LookPath(command); err != nil {
-		// Try as relative path from plugin dir.
+	// Resolve the command so it's unambiguous under Manager's cmd.Dir setting.
+	// Go's exec package evaluates a relative cmd.Path relative to cmd.Dir at
+	// fork/exec time — a plugin-dir-joined relative path like
+	// "plugins/oembed/oembed" paired with Dir="plugins/oembed" would be
+	// re-resolved inside the plugin dir (→ ENOENT, surfaced as
+	// "fork/exec …: no such file or directory").
+	//
+	// Two entrypoint shapes to handle:
+	//   - Filesystem path ("./oembed", "plugins/oembed/oembed", "/usr/bin/x"):
+	//     must end up absolute so cmd.Dir can't re-shift it.
+	//   - PATH lookup name ("python3", "node"): exec.LookPath resolves to an
+	//     absolute path via $PATH — we keep LookPath's return value instead of
+	//     Abs-ing the bare name (which would incorrectly produce "$PWD/python3").
+	resolved, err := exec.LookPath(command)
+	if err != nil {
 		absCmd := filepath.Join(dp.Dir, command)
-		if _, err := exec.LookPath(absCmd); err != nil {
+		resolved, err = exec.LookPath(absCmd)
+		if err != nil {
 			return nil, fmt.Errorf("entrypoint %q not found: %w", m.Entrypoint, err)
 		}
-		command = absCmd
 	}
+	if !filepath.IsAbs(resolved) {
+		if abs, absErr := filepath.Abs(resolved); absErr == nil {
+			resolved = abs
+		}
+	}
+	command = resolved
 
 	// Resolve config values for the subprocess.
 	config := make(map[string]string)

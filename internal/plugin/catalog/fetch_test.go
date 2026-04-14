@@ -78,6 +78,9 @@ func TestSignedFetcher_HappyPath_HexSig(t *testing.T) {
 }
 
 func TestSignedFetcher_BadSig_Rejected(t *testing.T) {
+	if devmodeBypassActive() {
+		t.Skip("devmode build bypasses catalog sig verification")
+	}
 	ring, _ := testRing(t)
 	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
 	body := []byte("version: 1\n")
@@ -92,6 +95,9 @@ func TestSignedFetcher_BadSig_Rejected(t *testing.T) {
 }
 
 func TestSignedFetcher_UnknownSigner_Rejected(t *testing.T) {
+	if devmodeBypassActive() {
+		t.Skip("devmode build bypasses catalog sig verification")
+	}
 	ring, priv := testRing(t)
 	body := []byte("version: 1\n")
 	srv := signedCatalogServer(t, body, priv, false)
@@ -104,6 +110,9 @@ func TestSignedFetcher_UnknownSigner_Rejected(t *testing.T) {
 }
 
 func TestSignedFetcher_RevokedKey_Rejected(t *testing.T) {
+	if devmodeBypassActive() {
+		t.Skip("devmode build bypasses catalog sig verification")
+	}
 	ring, priv := testRing(t)
 	if err := ring.Revoke("test-signer"); err != nil {
 		t.Fatal(err)
@@ -143,6 +152,9 @@ func TestSignedFetcher_CacheFallback(t *testing.T) {
 }
 
 func TestSignedFetcher_CorruptCache_Removed(t *testing.T) {
+	if devmodeBypassActive() {
+		t.Skip("devmode build bypasses catalog sig verification")
+	}
 	ring, priv := testRing(t)
 	body := []byte("version: 1\n")
 	srv := signedCatalogServer(t, body, priv, false)
@@ -179,6 +191,9 @@ func TestSignedFetcher_CorruptCache_Removed(t *testing.T) {
 }
 
 func TestSignedFetcher_NilRing(t *testing.T) {
+	if devmodeBypassActive() {
+		t.Skip("devmode build bypasses KeyRing; covered by TestSignedFetcher_Devmode_*")
+	}
 	f := &SignedFetcher{}
 	_, err := f.Fetch(context.Background(), "http://x")
 	if err == nil || !strings.Contains(err.Error(), "KeyRing is nil") {

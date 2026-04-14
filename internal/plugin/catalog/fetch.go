@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/plugin/devmode"
 )
 
 // DefaultCatalogFetchTimeout caps a single catalog.yaml fetch.
@@ -49,6 +51,16 @@ type SignedFetcher struct {
 // caches both on disk, and returns the YAML bytes alongside the signer key
 // id. Stale caches whose signature no longer verifies are removed.
 func (f *SignedFetcher) Fetch(ctx context.Context, catalogURL string) (*SignedCatalog, error) {
+	// J.2 build-tag bypass. In devmode builds HostDevSigningBypass is true,
+	// and the catalog signature is skipped entirely — including skipping the
+	// KeyRing lookup so a dev build without any trusted keys configured can
+	// still browse a local catalog. In production this branch is dead code
+	// (the constant is a compile-time false) so the verifier below is
+	// unconditionally reached.
+	if devmode.HostDevSigningBypass {
+		return f.fetchUnverified(ctx, catalogURL)
+	}
+
 	if f.Ring == nil {
 		return nil, errors.New("catalog: KeyRing is nil")
 	}
@@ -90,6 +102,43 @@ func (f *SignedFetcher) Fetch(ctx context.Context, catalogURL string) (*SignedCa
 		return nil, fmt.Errorf("catalog: cached catalog signature invalid (removed): %w", err)
 	}
 	return &SignedCatalog{YAML: cy, SignerKeyID: keyID}, nil
+}
+
+// fetchUnverified is the devmode-only shortcut: fetch catalog.yaml without
+// requiring (or verifying) a signature. Cache reads/writes are still
+// best-effort so the dev flow stays offline-friendly. Only reachable when
+// devmode.HostDevSigningBypass is true — the production build folds this
+// whole branch out of the binary via dead-code elimination of the const.
+func (f *SignedFetcher) fetchUnverified(ctx context.Context, catalogURL string) (*SignedCatalog, error) {
+	keyID := f.SignerKeyID
+	if keyID == "" {
+		keyID = "catalog-root"
+	}
+	timeout := f.Timeout
+	if timeout <= 0 {
+		timeout = DefaultCatalogFetchTimeout
+	}
+	client := f.Client
+	if client == nil {
+		client = &http.Client{Timeout: timeout}
+	}
+
+	yamlBytes, err := fetchBytes(ctx, client, catalogURL, MaxCatalogBytes)
+	if err == nil {
+		// Cache the YAML for offline reuse; no .sig written in this path.
+		if yp, _, ok := f.cachePaths(catalogURL); ok {
+			_ = os.MkdirAll(f.CacheDir, 0o755)
+			_ = os.WriteFile(yp, yamlBytes, 0o600)
+		}
+		return &SignedCatalog{YAML: yamlBytes, SignerKeyID: keyID}, nil
+	}
+	// Fall back to the cached YAML if any; signature state is ignored.
+	if yp, _, ok := f.cachePaths(catalogURL); ok {
+		if cy, cerr := os.ReadFile(yp); cerr == nil {
+			return &SignedCatalog{YAML: cy, SignerKeyID: keyID}, nil
+		}
+	}
+	return nil, fmt.Errorf("catalog (devmode): fetch failed and no usable cache: %w", err)
 }
 
 func (f *SignedFetcher) downloadPair(ctx context.Context, client *http.Client, catalogURL string) ([]byte, []byte, error) {

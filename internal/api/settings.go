@@ -112,6 +112,16 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if v, ok := raw["allow_unsigned_plugins"]; ok {
+		// J.2: raw field pass-through. The setting is honoured only in
+		// devmode builds of the host (compile-time gate in
+		// internal/plugin/devmode). In production the field is stored
+		// but never consulted by the signature verifier.
+		if err := json.Unmarshal(v, &existing.AllowUnsignedPlugins); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'allow_unsigned_plugins'")
+			return
+		}
+	}
 	if v, ok := raw["ext_settings"]; ok {
 		var ext map[string]any
 		if err := json.Unmarshal(v, &ext); err != nil {

@@ -846,6 +846,12 @@ export interface PluginInfo {
   status: "active" | "disabled" | "available" | "no-binary";
   type: "core" | "user";
   installed: boolean;
+  // Install-time signature-verify outcome. Populated by the backend from the
+  // devmode build-tag gate: production builds always emit "signed" for
+  // installed plugins (unsigned archives refuse to install); devmode builds
+  // may emit "unsigned". "untrusted" is reserved for future per-install
+  // records and should not appear in practice.
+  trust_tier?: "signed" | "unsigned" | "untrusted";
   // Runtime opt-outs a subprocess plugin declined at load time.
   // Wire shape (from Go /api/plugins/managed):
   //   { kind: string; id: string; reason: string }[]

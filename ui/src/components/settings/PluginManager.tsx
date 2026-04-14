@@ -358,7 +358,7 @@ export function PluginManager() {
                               <span
                                 className={`text-sm font-semibold truncate ${isActive ? "text-fg" : "text-fg-muted"}`}
                               >
-                                {plugin.name}
+                                {plugin.display_name || plugin.name}
                               </span>
                               {isActive && (
                                 <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />

@@ -66,20 +66,27 @@ export function PluginInstallProgress({ pluginId, pending, onClose }: PluginInst
   }, [pluginId]);
 
   // Subscribe to SSE stream while a pluginId is active.
+  //
+  // The backend ships events as named SSE events in the envelope
+  //   { type, source, timestamp, data, session_id }
+  // (plugin.Event from plugin-sdk). Install-progress fields live under `data`:
+  //   data.plugin_id, data.state, data.progress, data.message, data.err
+  // We also accept a top-level shape as a fallback in case the bridge
+  // forwards install.Event directly without wrapping.
   useEffect(() => {
     if (!pluginId) return;
     const es = new EventSource("/api/plugins/events");
 
-    const onMessage = (e: MessageEvent) => {
-      let payload: Record<string, unknown> | null = null;
-      try {
-        payload = JSON.parse(e.data);
-      } catch {
-        return;
-      }
-      if (!payload) return;
-      const rawState = typeof payload.state === "string" ? payload.state : undefined;
-      const rawPluginId = typeof payload.plugin_id === "string" ? payload.plugin_id : undefined;
+    const handlePayload = (payload: Record<string, unknown>) => {
+      const envelopeData =
+        payload.data && typeof payload.data === "object"
+          ? (payload.data as Record<string, unknown>)
+          : payload;
+
+      const rawState =
+        typeof envelopeData.state === "string" ? envelopeData.state : undefined;
+      const rawPluginId =
+        typeof envelopeData.plugin_id === "string" ? envelopeData.plugin_id : undefined;
       if (!rawState || !rawPluginId) return;
       if (rawPluginId !== pluginId) return;
       if (!INSTALL_STATES.has(rawState)) return;
@@ -88,15 +95,39 @@ export function PluginInstallProgress({ pluginId, pending, onClose }: PluginInst
       setEvent({
         plugin_id: rawPluginId,
         state: rawState as InstallState,
-        progress: typeof payload.progress === "number" ? payload.progress : undefined,
-        message: typeof payload.message === "string" ? payload.message : undefined,
-        err: typeof payload.err === "string" ? payload.err : undefined,
+        progress:
+          typeof envelopeData.progress === "number" ? envelopeData.progress : undefined,
+        message:
+          typeof envelopeData.message === "string" ? envelopeData.message : undefined,
+        err: typeof envelopeData.err === "string" ? envelopeData.err : undefined,
       });
     };
 
-    es.onmessage = onMessage;
-    // Named "install" events would come via addEventListener; be tolerant.
-    es.addEventListener("install", onMessage as EventListener);
+    const onEvent = (e: MessageEvent) => {
+      let payload: Record<string, unknown> | null = null;
+      try {
+        payload = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (!payload) return;
+      handlePayload(payload);
+    };
+
+    // Existing lifecycle event types. The G.6 follow-up will add a dedicated
+    // install-progress event type; listen for both the known terminal names
+    // and a forward-looking "plugin.install.progress" name.
+    const eventNames = [
+      "plugin.installed",
+      "plugin.load_failed",
+      "plugin.install.progress",
+      "install",
+    ];
+    for (const name of eventNames) {
+      es.addEventListener(name, onEvent as EventListener);
+    }
+    // Also handle default (unnamed) messages if the bridge emits those.
+    es.onmessage = onEvent;
 
     return () => {
       es.close();

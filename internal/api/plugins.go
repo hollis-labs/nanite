@@ -174,7 +174,9 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 			Installed:   true,
 		}
 		if pms.pluginHost != nil {
-			info.SkippedRegistrations = collectSkippedRegistrations(pms.pluginHost, name)
+			// Host keys plugins by manifest.Identifier() (v1 ID when set, else Name),
+			// which may differ from the on-disk directory name.
+			info.SkippedRegistrations = collectSkippedRegistrations(pms.pluginHost, manifest.Identifier())
 		}
 		result = append(result, info)
 		seen[name] = true

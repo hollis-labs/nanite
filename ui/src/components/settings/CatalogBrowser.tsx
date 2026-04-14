@@ -96,14 +96,18 @@ export function CatalogBrowser({
     onMutate: (name) => setInstallingName(name),
     onSuccess: (data) => {
       addToast(data.message || "Plugin installed.", "success");
-      setInstallingName(null);
+      // Intentionally keep installingName set so PluginInstallProgress stays
+      // mounted long enough to render terminal ready/failed states and run
+      // its auto-close behavior. The component calls onClose() when done.
       void queryClient.invalidateQueries({ queryKey: ["catalog-browse"] });
       void queryClient.invalidateQueries({ queryKey: ["plugins"] });
       void queryClient.invalidateQueries({ queryKey: ["plugins-for-esm"] });
     },
     onError: (err: Error) => {
       addToast(`Install failed: ${err.message}`, "error");
-      setInstallingName(null);
+      // Same as onSuccess — let PluginInstallProgress render its terminal
+      // state and self-close. If no SSE events arrive, its 10s fallback +
+      // close button handle it.
     },
   });
 

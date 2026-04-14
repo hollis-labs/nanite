@@ -20,10 +20,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import type {
   PluginInfo,
+  PluginKeybinding,
   PluginUIComponent,
   SkippedRegistration,
   SlashCommandDef,
-  PluginKeybinding,
   UISlotEntry,
 } from "@/lib/types";
 import { PluginConfigPanel } from "./PluginConfigPanel";
@@ -47,9 +47,7 @@ function Card({ children }: { children: React.ReactNode }) {
 
 function CardHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-fg">
-      {children}
-    </div>
+    <div className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-fg">{children}</div>
   );
 }
 
@@ -148,7 +146,8 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
     return map;
   }, [components]);
 
-  const totalRegistrations = components.length + commands.length + keybindings.length + slots.length;
+  const totalRegistrations =
+    components.length + commands.length + keybindings.length + slots.length;
 
   return (
     <div className="space-y-5">
@@ -254,9 +253,7 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
               {keybindings.length > 0 && (
                 <SummaryRow icon={Keyboard} label="Keybindings" count={keybindings.length} />
               )}
-              {slots.length > 0 && (
-                <SummaryRow icon={Zap} label="UI Slots" count={slots.length} />
-              )}
+              {slots.length > 0 && <SummaryRow icon={Zap} label="UI Slots" count={slots.length} />}
               {totalRegistrations === 0 && (
                 <p className="text-xs text-fg-muted py-2">No registrations</p>
               )}
@@ -281,7 +278,9 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
                 <Card key={type}>
                   <CardHeader>
                     <ComponentTypeIcon type={type} />
-                    <span className="capitalize">{type}s ({items.length})</span>
+                    <span className="capitalize">
+                      {type}s ({items.length})
+                    </span>
                   </CardHeader>
                   <div className="px-4 pb-3 space-y-1">
                     {items.map((item) => (
@@ -361,7 +360,9 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
                         <kbd className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-elevated border border-border-subtle text-fg-secondary">
                           {kb.key}
                         </kbd>
-                        <span className="text-xs text-fg flex-1 truncate">{kb.label || kb.action}</span>
+                        <span className="text-xs text-fg flex-1 truncate">
+                          {kb.label || kb.action}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -481,14 +482,20 @@ function SkippedRegistrationsCard({ skipped }: { skipped: SkippedRegistration[] 
       >
         <AlertTriangle className="w-4 h-4 shrink-0" />
         <span className="flex-1 text-left">Skipped registrations ({skipped.length})</span>
-        {collapsible && (
-          open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />
-        )}
+        {collapsible &&
+          (open ? (
+            <ChevronDown className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5" />
+          ))}
       </button>
       {open && (
         <ul className="px-4 pb-3 space-y-1">
-          {skipped.map((sr, i) => (
-            <li key={`${sr.kind}-${sr.id}-${i}`} className="text-[11px] text-amber-600/90 leading-relaxed">
+          {skipped.map((sr) => (
+            <li
+              key={`${sr.kind}:${sr.id}:${sr.reason}`}
+              className="text-[11px] text-amber-600/90 leading-relaxed"
+            >
               <span className="font-mono font-medium">{sr.kind}</span>
               <span className="text-amber-600/70">: </span>
               <span className="font-medium">{sr.id}</span>

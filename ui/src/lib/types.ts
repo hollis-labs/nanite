@@ -846,6 +846,17 @@ export interface PluginInfo {
   status: "active" | "disabled" | "available" | "no-binary";
   type: "core" | "user";
   installed: boolean;
+  // Runtime opt-outs a subprocess plugin declined at load time.
+  // Wire shape (from Go /api/plugins/managed):
+  //   { kind: string; id: string; reason: string }[]
+  // Only populated for loaded subprocess plugins; absent for core/available.
+  skipped_registrations?: SkippedRegistration[];
+}
+
+export interface SkippedRegistration {
+  kind: string;
+  id: string;
+  reason: string;
 }
 
 // --- Plugin Catalog ---

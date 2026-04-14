@@ -52,6 +52,19 @@ type PluginInfo struct {
 	Status      string `json:"status"`
 	Type        string `json:"type"`
 	Installed   bool   `json:"installed"`
+	// SkippedRegistrations surfaces yaml-declared registrations a subprocess
+	// plugin declined at load time. Populated for loaded subprocess plugins
+	// only; nil/absent for builtin or not-yet-loaded plugins. Shape mirrors
+	// plugin-sdk SkippedRegistration: {kind, id, reason}.
+	SkippedRegistrations []SkippedRegistrationInfo `json:"skipped_registrations,omitempty"`
+}
+
+// SkippedRegistrationInfo is the JSON-wire shape for a skipped registration.
+// Mirrors github.com/hollis-labs/plugin-sdk/subprocess.SkippedRegistration.
+type SkippedRegistrationInfo struct {
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
 }
 
 // pluginManagerState holds the state needed by plugin management handlers.
@@ -160,6 +173,11 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 			Type:        "user", // default; overridden below if in repos
 			Installed:   true,
 		}
+		if pms.pluginHost != nil {
+			// Host keys plugins by manifest.Identifier() (v1 ID when set, else Name),
+			// which may differ from the on-disk directory name.
+			info.SkippedRegistrations = collectSkippedRegistrations(pms.pluginHost, manifest.Identifier())
+		}
 		result = append(result, info)
 		seen[name] = true
 	}
@@ -176,12 +194,13 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 				statusStr = "disabled"
 			}
 			result = append(result, PluginInfo{
-				Name:        p.ID(),
-				Version:     p.Version(),
-				Description: p.Description(),
-				Status:      statusStr,
-				Type:        "core",
-				Installed:   true,
+				Name:                 p.ID(),
+				Version:              p.Version(),
+				Description:          p.Description(),
+				Status:               statusStr,
+				Type:                 "core",
+				Installed:            true,
+				SkippedRegistrations: collectSkippedRegistrations(pms.pluginHost, p.ID()),
 			})
 			seen[p.ID()] = true
 		}
@@ -221,6 +240,37 @@ func (pms *pluginManagerState) handleListManaged(w http.ResponseWriter, r *http.
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// collectSkippedRegistrations pulls runtime opt-outs off a loaded subprocess
+// plugin, if one exists for pluginID. Returns nil for builtin/compiled-in
+// plugins (they have no subprocess layer) or when the plugin is not currently
+// loaded. Safe to call unconditionally — all failures return nil.
+func collectSkippedRegistrations(host *naniteplugin.Host, pluginID string) []SkippedRegistrationInfo {
+	if host == nil {
+		return nil
+	}
+	p, ok := host.GetPlugin(pluginID)
+	if !ok {
+		return nil
+	}
+	sp, ok := p.(*subprocess.SubprocessPlugin)
+	if !ok {
+		return nil
+	}
+	raw := sp.SkippedRegistrations()
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]SkippedRegistrationInfo, 0, len(raw))
+	for _, sr := range raw {
+		out = append(out, SkippedRegistrationInfo{
+			Kind:   sr.Kind,
+			ID:     sr.ID,
+			Reason: sr.Reason,
+		})
+	}
+	return out
 }
 
 type pluginActionReq struct {

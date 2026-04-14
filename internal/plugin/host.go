@@ -145,6 +145,12 @@ type Host struct {
 	// and invalidate when the counter changes. B.8 will additionally bump this
 	// from lifecycle event emitters; for B.7 the load/unload paths are enough.
 	registryVersion uint64
+	// envelopeConsumer routes validated post-hook plugin envelopes to the
+	// session-scoped chat SSE stream (see BLG-20260413-012). Nil means
+	// drop — the subprocess hook still issues the post-hook RPC so the
+	// plugin sees the event; returned envelopes are simply discarded.
+	// Set at startup via SetEnvelopeConsumer before plugins load.
+	envelopeConsumer subprocess.EnvelopeConsumer
 	logger        plugin.Logger
 	ctx           context.Context
 	ctxCancel     context.CancelFunc
@@ -920,6 +926,28 @@ func (h *Host) SetMCPRegistrar(reg MCPRegistrar) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.mcpRegistrar = reg
+}
+
+// SetEnvelopeConsumer installs the session-scoped delivery sink for
+// validated post-hook plugin envelopes (typically *service.StreamManager).
+// Call before plugins load; the hook-proxy binding happens in
+// registerManifestEvents. Nil-safe: if never set, subprocess plugins still
+// receive post-hook events, but returned envelopes are dropped.
+func (h *Host) SetEnvelopeConsumer(c subprocess.EnvelopeConsumer) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.envelopeConsumer = c
+}
+
+// envelopeConsumerSnapshot returns the currently-installed consumer, or
+// nil if none has been set. Used by registerManifestEvents to thread the
+// consumer into the per-plugin subprocess event hook at registration
+// time. The snapshot is safe for the lifetime of the returned interface
+// since StreamManager and friends are long-lived singletons.
+func (h *Host) envelopeConsumerSnapshot() subprocess.EnvelopeConsumer {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.envelopeConsumer
 }
 
 // RegisterCommand registers a slash command from a plugin into the unified

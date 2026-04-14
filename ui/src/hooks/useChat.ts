@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import type { ApprovalRequest, ChatError, ChatErrorCode, Message, StreamEvent, ToolWarning, UserSettings } from "@/lib/types";
+import type { ApprovalRequest, ChatError, ChatErrorCode, Envelope, Message, PluginEnvelopeItem, StreamEvent, ToolWarning, UserSettings } from "@/lib/types";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 
@@ -19,6 +19,7 @@ const SSE = {
   STREAM_END: "stream_end",
   ERROR: "error",
   APPROVAL_REQUEST: "approval_request",
+  PLUGIN_ENVELOPE: "plugin_envelope",
 } as const;
 
 function makeChatError(
@@ -323,6 +324,26 @@ export function useChat(sessionId: string | null) {
             } catch {
               console.warn("[useChat] Failed to parse tool_warning data:", data.data);
             }
+          }
+        });
+
+        es.addEventListener(SSE.PLUGIN_ENVELOPE, (e: MessageEvent) => {
+          try {
+            const evt: StreamEvent = JSON.parse(e.data as string);
+            if (!evt.envelope) return;
+            const envelope = JSON.parse(evt.envelope) as Envelope;
+            const item: PluginEnvelopeItem = {
+              id: `penv-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+              pluginId: evt.plugin_id ?? "",
+              envelope,
+              receivedAt: Date.now(),
+            };
+            store().addPluginEnvelope(item, sessionId);
+            if (import.meta.env?.DEV) {
+              console.debug("[useChat] plugin_envelope", item);
+            }
+          } catch (err) {
+            console.warn("[useChat] Failed to parse plugin_envelope event:", e.data, err);
           }
         });
 

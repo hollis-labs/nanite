@@ -108,6 +108,9 @@ func RegisterPluginManagementRoutes(mux *http.ServeMux, pluginsDir string, s *st
 		http.ServeFile(w, r, target)
 	})
 	mux.HandleFunc("POST /api/plugins/enable", pms.handleEnable)
+	// J.3 dev affordance: unload + reload a plugin without restarting the service.
+	// Idempotent — if the plugin isn't loaded, only the load step runs.
+	mux.HandleFunc("POST /api/plugins/reload", pms.handleReload)
 
 	// B.7 consolidated registry endpoint. Separate file (plugins_registry.go)
 	// keeps the envelope/slot/component/widget aggregation logic isolated from
@@ -656,6 +659,56 @@ func (pms *pluginManagerState) handleEnable(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+
+// handleReload unloads and re-loads a plugin in place — the J.3 dev-mode
+// affordance. Useful while iterating on a plugin without restarting the host.
+// Idempotent: if the plugin wasn't loaded (fresh install, or already unloaded)
+// only the load step runs.
+func (pms *pluginManagerState) handleReload(w http.ResponseWriter, r *http.Request) {
+	var req pluginActionReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		pms.errorResp(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	manifestPath := filepath.Join(pms.pluginsDir, req.Name, "plugin.yaml")
+	target := filepath.Join(pms.pluginsDir, req.Name)
+	if !fileExists(manifestPath) {
+		pms.errorResp(w, http.StatusNotFound, fmt.Sprintf("plugin %q not installed or disabled", req.Name))
+		return
+	}
+
+	// Unload best-effort; a no-op return is fine (plugin may be in a crashed
+	// state or never loaded this session).
+	unloaded := pms.unloadPluginFromHost(manifestPath)
+	loaded := pms.runPluginLoadIntoHost(manifestPath, target)
+
+	if !loaded {
+		// Re-load failed; surface as load_failed so the UI updates.
+		if pms.pluginHost != nil {
+			pms.pluginHost.EmitPluginLoadFailed(req.Name, "reload: hot-load into host failed")
+		}
+		pms.errorResp(w, http.StatusInternalServerError, fmt.Sprintf("reload: failed to load plugin %q", req.Name))
+		return
+	}
+
+	// Successful reload: emit disabled+enabled pair so existing subscribers
+	// (Plugin Manager UI, frontend registry cache) invalidate and re-render.
+	// Keeps the event taxonomy stable without adding a new plugin.reloaded type.
+	if pms.pluginHost != nil {
+		if unloaded {
+			pms.pluginHost.EmitPluginDisabled(req.Name)
+		}
+		pms.pluginHost.EmitPluginEnabled(req.Name)
+	}
+
+	pms.jsonResp(w, http.StatusOK, map[string]any{
+		"status":    "reloaded",
+		"plugin":    req.Name,
+		"unloaded":  unloaded,
+		"message":   fmt.Sprintf("Plugin %q reloaded.", req.Name),
+	})
+}
 
 func fileExists(path string) bool {
 	_, err := os.Stat(path)

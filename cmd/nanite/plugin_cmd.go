@@ -87,9 +87,24 @@ func cmdPlugin(args []string) {
 			os.Exit(1)
 		}
 		pluginLogs(args[1])
-	case "reload", "watch", "release":
-		fmt.Fprintf(os.Stderr, "%s plugin %s: not yet implemented — tracked in BLG-20260414-003\n", brand.BinaryName, args[0])
-		os.Exit(2)
+	case "reload":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin reload <name>")
+			os.Exit(1)
+		}
+		pluginReload(args[1])
+	case "watch":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin watch <plugin-src-dir>")
+			os.Exit(1)
+		}
+		pluginWatch(args[1])
+	case "release":
+		target := "."
+		if len(args) >= 2 {
+			target = args[1]
+		}
+		pluginRelease(target)
 	case "list":
 		pluginList()
 	case "disable":

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"sync"
@@ -524,6 +525,12 @@ func (h *subprocessEventHook) Handle(ctx context.Context, event plugin.Event) er
 			// Subprocess unreachable / RPC error: log-and-swallow. A failing
 			// post-hook must not block the originating action (message send,
 			// tool call, …) — same contract the previous Notify path offered.
+			// Logged so operators can see plugin post-hook failures instead
+			// of them disappearing silently (Copilot review, PR #36).
+			slog.Warn("subprocess event hook: post-hook RPC failed",
+				"event_type", event.Type,
+				"session_id", event.SessionID,
+				"err", err)
 			return nil
 		}
 		if len(result.Envelopes) > 0 {

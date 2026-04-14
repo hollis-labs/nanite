@@ -65,16 +65,39 @@ func (sm *StreamManager) CreateStream(messageID, sessionID string) chan chat.Str
 
 // addSessionMessage records a (sessionID, messageID) pair in the reverse
 // index. Safe for concurrent callers.
+//
+// Retries via LoadOrStore to close the add/remove race Copilot flagged on
+// PR #36: if a concurrent removeSessionMessage CompareAndDeletes the entry
+// we obtained from LoadOrStore before we finish Lock+add, the re-check
+// under ss.mu detects that our pointer is no longer the canonical one and
+// loops. Pairs with removeSessionMessage, which holds ss.mu across its own
+// CompareAndDelete so the re-check here is well-ordered.
 func (sm *StreamManager) addSessionMessage(sessionID, messageID string) {
-	val, _ := sm.sessionToMsgs.LoadOrStore(sessionID, &sessionStreams{ids: make(map[string]struct{})})
-	ss := val.(*sessionStreams)
-	ss.mu.Lock()
-	ss.ids[messageID] = struct{}{}
-	ss.mu.Unlock()
+	for {
+		val, _ := sm.sessionToMsgs.LoadOrStore(sessionID, &sessionStreams{ids: make(map[string]struct{})})
+		ss := val.(*sessionStreams)
+		ss.mu.Lock()
+		// Re-check: did a concurrent removeSessionMessage evict our pointer
+		// from sessionToMsgs between LoadOrStore and Lock? If so, this
+		// *sessionStreams is orphaned — loop to LoadOrStore a fresh one.
+		cur, ok := sm.sessionToMsgs.Load(sessionID)
+		if !ok || cur.(*sessionStreams) != ss {
+			ss.mu.Unlock()
+			continue
+		}
+		ss.ids[messageID] = struct{}{}
+		ss.mu.Unlock()
+		return
+	}
 }
 
 // removeSessionMessage drops messageID from sessionID's reverse index. When
 // the index becomes empty the session entry is deleted to bound memory.
+//
+// Holds ss.mu across CompareAndDelete so addSessionMessage's re-check can
+// observe either the pre-delete or post-delete state coherently — never an
+// interleaving where a new id is written into a *sessionStreams that is
+// about to be unmapped.
 func (sm *StreamManager) removeSessionMessage(sessionID, messageID string) {
 	val, ok := sm.sessionToMsgs.Load(sessionID)
 	if !ok {
@@ -82,10 +105,9 @@ func (sm *StreamManager) removeSessionMessage(sessionID, messageID string) {
 	}
 	ss := val.(*sessionStreams)
 	ss.mu.Lock()
+	defer ss.mu.Unlock()
 	delete(ss.ids, messageID)
-	empty := len(ss.ids) == 0
-	ss.mu.Unlock()
-	if empty {
+	if len(ss.ids) == 0 {
 		sm.sessionToMsgs.CompareAndDelete(sessionID, val)
 	}
 }
@@ -240,6 +262,39 @@ func (sm *StreamManager) ThrottledCLIPresence(sessionID string) {
 
 // --- Plugin envelope delivery (BLG-20260413-012) ---
 
+// sendOutcome classifies the result of a non-blocking envelope send so
+// DeliverSessionEnvelopes can account for drops without conflating the
+// "slow consumer" and "already closed" cases in logs or metrics.
+type sendOutcome int
+
+const (
+	sendDelivered sendOutcome = iota
+	sendFull
+	sendClosed
+)
+
+// trySendEnvelope attempts a non-blocking send on ch and recovers from the
+// "send on closed channel" panic that would otherwise crash the host event
+// dispatcher. The recover is narrowly scoped to this function so it cannot
+// mask unrelated bugs. See Copilot review on PR #36 — the producer
+// (generateResponse) closes the channel before calling CloseStream, so a
+// concurrent Deliver can observe an entry in sm.streams whose channel has
+// already been closed.
+func trySendEnvelope(ch chan chat.StreamEvent, evt chat.StreamEvent) (outcome sendOutcome) {
+	defer func() {
+		if r := recover(); r != nil {
+			outcome = sendClosed
+		}
+	}()
+	select {
+	case ch <- evt:
+		return sendDelivered
+	default:
+		return sendFull
+	}
+}
+
+
 // Deliver fans validated plugin-emitted envelopes into every active chat
 // message stream for sessionID as StreamEvents of type "plugin_envelope".
 // Returns true when at least one envelope reached at least one active stream;
@@ -312,14 +367,24 @@ func (sm *StreamManager) DeliverSessionEnvelopes(sessionID, pluginID string, env
 				continue
 			}
 			ch := chVal.(chan chat.StreamEvent)
-			select {
-			case ch <- evt:
+			outcome := trySendEnvelope(ch, evt)
+			switch outcome {
+			case sendDelivered:
 				anyDelivered = true
-			default:
-				// Slow consumer — drop for this stream but keep going for the
-				// others. This mirrors presence broadcast semantics.
+			case sendFull:
 				sm.pluginEnvelopeDrops.Add(1)
 				slog.Warn("stream: dropped plugin envelope — chat stream full",
+					"session_id", sessionID, "plugin_id", pluginID, "message_id", msgID)
+			case sendClosed:
+				// Window between the producer's close(ch) and CloseStream's
+				// sm.streams.Delete. The producer owns channel closure
+				// (see CloseStream's doc comment) so we can observe a
+				// Load hit on a channel that has already been closed.
+				// Count as a drop — panicking the host event dispatch
+				// would violate BLG-012's "don't block the event
+				// dispatch" contract. Copilot PR #36 flagged this race.
+				sm.pluginEnvelopeDrops.Add(1)
+				slog.Warn("stream: dropped plugin envelope — chat stream closed",
 					"session_id", sessionID, "plugin_id", pluginID, "message_id", msgID)
 			}
 		}

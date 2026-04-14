@@ -90,6 +90,31 @@ func TestStreamManager_DeliverSessionEnvelopes_CloseRemovesSession(t *testing.T)
 	}
 }
 
+// TestStreamManager_DeliverSessionEnvelopes_ClosedChannelRecovers exercises
+// the close/delete race Copilot flagged on PR #36: a producer in
+// generateResponse closes the channel before calling CloseStream, so a
+// concurrent Deliver can observe an entry in sm.streams whose channel has
+// already been closed. trySendEnvelope must recover from the panic and
+// count the event as a drop rather than crash the host event dispatcher.
+func TestStreamManager_DeliverSessionEnvelopes_ClosedChannelRecovers(t *testing.T) {
+	sm := NewStreamManager()
+	ch := sm.CreateStream("msg-1", "sess-1")
+	defer sm.CloseStream("msg-1")
+
+	// Simulate the producer half of the race: the channel is closed but
+	// CloseStream has not yet run, so sm.streams still holds the reference.
+	close(ch)
+
+	env := sdkplugin.EnvelopeOut{Type: "oembed-card", Data: map[string]interface{}{}}
+	ok := sm.DeliverSessionEnvelopes("sess-1", "oembed", []sdkplugin.EnvelopeOut{env})
+	if ok {
+		t.Fatal("want false when channel closed; got true")
+	}
+	if sm.PluginEnvelopeDropCount() != 1 {
+		t.Errorf("drop count: want 1, got %d", sm.PluginEnvelopeDropCount())
+	}
+}
+
 // TestStreamManager_DeliverSessionEnvelopes_SlowConsumerDrops exercises the
 // "chat stream full" branch. We fill the buffered channel, then attempt to
 // deliver — the event cannot land, so it is counted as a drop. The active

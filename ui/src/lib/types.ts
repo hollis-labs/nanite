@@ -358,6 +358,18 @@ export interface UserSettings {
     theme_preference?: 'system' | 'light' | 'dark';
     user_context?: string;
   };
+  // Memory embedding (S2a). Server validates provider against a 5-item enum.
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_mode: 'disabled' | 'explicit';
+  // Computed server-side; not persisted. Reflects live credential / reachability.
+  embedding_status?: 'active' | 'disabled' | 'missing_credentials' | 'unreachable';
+}
+
+export interface EmbeddingProviderInfo {
+  id: string;
+  name: string;
+  default_models: string[];
 }
 
 export interface ProviderConfig {

@@ -502,6 +502,13 @@ export const api = {
     return res.json();
   },
 
+  listEmbeddingProviders: async (): Promise<import("./types").EmbeddingProviderInfo[]> => {
+    const res = await fetch(`${API_BASE}/settings/embedding/providers`);
+    if (!res.ok) throw new Error(`Failed to list embedding providers: ${res.status}`);
+    const body = await res.json();
+    return body.providers ?? [];
+  },
+
   // Session Agents
   listSessionAgents: async (sessionId: string): Promise<SessionAgent[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/agents`);

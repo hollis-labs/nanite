@@ -396,10 +396,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Commands:        commands,
 		PluginHost:      pluginSink,
 		ProcessTracker:  processTracker,
-		UtilityProvider: cfg.UtilityProvider,
-		UtilityModel:    cfg.UtilityModel,
-		Permissions:     permissions,
-		Tasks:           tasks,
+		UtilityProvider:   cfg.UtilityProvider,
+		UtilityModel:      cfg.UtilityModel,
+		Permissions:       permissions,
+		Tasks:             tasks,
+		EmbeddingStatus:   embeddingStatus,
+		EmbeddingProvider: embeddingProviderID,
 	})
 
 	// Worker manager — requires ChatService for delegation.

@@ -78,6 +78,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		return
 	}
 
+	// Advisory: warn once per session when the memory embedder isn't active.
+	// Fires regardless of whether memory sources get queried on this turn —
+	// users see the state without having to trigger a recall.
+	s.maybeEmitEmbeddingWarning(sessionID, ch)
+
 	// --- Resolve agent ---
 	agent, mode, err := s.agents.ResolveForSession(ctx, sessionID)
 	if err != nil {

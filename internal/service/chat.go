@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -86,6 +88,12 @@ type ChatServiceConfig struct {
 
 	// Task tracking service — nil-safe (task tracking disabled).
 	Tasks task.Service
+
+	// EmbeddingStatus drives the first-turn memory warning envelope:
+	// when non-empty and not "active", a dismissible warning is emitted the
+	// first time a given session generates a response.
+	EmbeddingStatus   string
+	EmbeddingProvider string
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -111,6 +119,12 @@ type chatServiceImpl struct {
 	utilityProvider string
 	utilityModel    string
 	permissions    *permission.Engine
+
+	embeddingStatus   string
+	embeddingProvider string
+	// embeddingWarnedSessions tracks which session IDs have already received
+	// the first-turn memory warning. Process-local; resets on restart.
+	embeddingWarnedSessions sync.Map
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -146,8 +160,41 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		utilityProvider: up,
 		utilityModel:    um,
 		permissions:    cfg.Permissions,
+		embeddingStatus:   cfg.EmbeddingStatus,
+		embeddingProvider: cfg.EmbeddingProvider,
 		lifecycle:      lifecycle.NewManager("service.chat"),
 	}
+}
+
+// maybeEmitEmbeddingWarning pushes a one-time dismissible warning onto the
+// stream when the embedder is not "active". Silently no-ops for active /
+// unknown states and for sessions that have already been warned in this
+// process lifetime.
+func (s *chatServiceImpl) maybeEmitEmbeddingWarning(sessionID string, ch chan chat.StreamEvent) {
+	if s.embeddingStatus == "" || s.embeddingStatus == EmbeddingStatusActive {
+		return
+	}
+	if _, warned := s.embeddingWarnedSessions.LoadOrStore(sessionID, true); warned {
+		return
+	}
+	var msg string
+	switch s.embeddingStatus {
+	case EmbeddingStatusDisabled:
+		msg = "Memory similarity recall is off. Enable an embedding provider in Settings \u2192 Memory."
+	case EmbeddingStatusMissingCredentials:
+		msg = fmt.Sprintf("Memory similarity recall is disabled: %s credentials not found. Add the key in Settings \u2192 Providers.", s.embeddingProvider)
+	case EmbeddingStatusUnreachable:
+		msg = fmt.Sprintf("Memory similarity recall is disabled: %s is not reachable. Start it or switch providers in Settings \u2192 Memory.", s.embeddingProvider)
+	default:
+		msg = "Memory similarity recall is disabled."
+	}
+	payload := chat.ToolWarningPayload{
+		ToolName: "memory",
+		Error:    msg,
+		Level:    "warning",
+	}
+	data, _ := json.Marshal(payload)
+	ch <- chat.StreamEvent{Type: "tool_warning", Data: string(data)}
 }
 
 // HandleMessage implements ChatService.

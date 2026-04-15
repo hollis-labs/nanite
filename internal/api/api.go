@@ -288,6 +288,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/memories/{key}", a.handleDeleteMemory)
 	mux.HandleFunc("PUT /api/memories/{key}/status", a.handleUpdateMemoryStatus)
 
+	// Envelope typed responses (Phase 3 S5).
+	mux.HandleFunc("POST /api/envelopes/{id}/respond", a.handleEnvelopeRespond)
+
 	// Debug
 	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 

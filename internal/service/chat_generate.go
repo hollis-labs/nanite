@@ -604,20 +604,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ch <- chat.StreamEvent{Type: "delta", Content: envelopeBlock}
 	}
 
-	// Inject ticket confirmation envelope.
-	if tStart := strings.Index(userContent, "<!--TICKET_DATA:"); tStart >= 0 {
-		tail := userContent[tStart+len("<!--TICKET_DATA:"):]
-		if tEnd := strings.Index(tail, ":TICKET_DATA-->"); tEnd >= 0 {
-			ticketJSON := tail[:tEnd]
-			env := chat.BuildTicketConfirmationEnvelope(ticketJSON)
-			if env != "" {
-				envelopeBlock := "\n\n```nanite-envelope\n" + env + "\n```"
-				responseContent += envelopeBlock
-				ch <- chat.StreamEvent{Type: "delta", Content: envelopeBlock}
-			}
-		}
-	}
-
 	// Parse envelopes.
 	envelopes, cleanContent, envErrors := chat.ParseEnvelopes(responseContent)
 	for _, envErr := range envErrors {

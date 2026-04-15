@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS envelope_instances (
     id              TEXT PRIMARY KEY,
-    session_id      TEXT NOT NULL,
+    session_id      TEXT NOT NULL REFERENCES sessions(id),
     envelope_type   TEXT NOT NULL,
     envelope_json   TEXT NOT NULL,
     emitted_at      TEXT NOT NULL,
@@ -13,5 +13,5 @@ CREATE TABLE IF NOT EXISTS envelope_instances (
     response_json   TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_envelope_instances_session
-    ON envelope_instances(session_id);
+CREATE INDEX IF NOT EXISTS idx_envelope_instances_session_time
+    ON envelope_instances(session_id, emitted_at);

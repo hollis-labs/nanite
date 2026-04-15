@@ -10,9 +10,9 @@
 -- in store.go hands it to a single db.Exec call. That preserves connection
 -- affinity so PRAGMA foreign_keys=OFF applies to the DROP/RENAME that follows.
 --
--- Idempotent: CREATE ... IF NOT EXISTS on messages_new and INSERT OR IGNORE
--- both no-op on second run. The messages table always ends with the expanded
--- CHECK regardless of starting state.
+-- Idempotent: CREATE ... IF NOT EXISTS on messages_new and the rename-over
+-- pattern leave the messages table in the same end state regardless of
+-- starting state.
 
 BEGIN;
 
@@ -31,7 +31,10 @@ CREATE TABLE IF NOT EXISTS messages_new (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT OR IGNORE INTO messages_new
+-- Plain INSERT INTO so any row that can't be copied fails loudly rather than
+-- being silently dropped. On second run messages_new is empty (renamed away)
+-- so the INSERT never conflicts.
+INSERT INTO messages_new
     SELECT id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at
       FROM messages;
 
@@ -39,8 +42,10 @@ DROP TABLE messages;
 
 ALTER TABLE messages_new RENAME TO messages;
 
+-- idx_messages_content from 001_schema.sql duplicated idx_messages_session
+-- (same (session_id, created_at) key). The rebuild drops the duplicate and
+-- we do not recreate it here.
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_messages_content ON messages(session_id, created_at);
 
 PRAGMA foreign_keys = ON;
 

@@ -8,14 +8,15 @@ import (
 // ResponseV1 is the typed envelope-response schema submitted by the frontend
 // when a user acts on a rendered envelope. See plans/phase-3-s5-envelope-typed-responses.md §D1.
 //
-// Default shape: Data is a free-form map. Envelope types may register an override
-// schema via RegisterResponseSchema; in that case the response endpoint validates
-// Data against it before dispatching to the ResponseHandler.
+// Data is a free-form map; the endpoint runs Validate() (version + required
+// fields + status enum) and then dispatches to the registered ResponseHandler
+// for the envelope type. Per-type override schemas are a planned extension;
+// S5 ships without one.
 //
-// Convenience fields Answers/Decisions are populated when the envelope type is one
-// of the Fast-Triage cores (collect_feedback, triage_items) — the response endpoint
-// promotes well-known keys out of Data for ergonomics and back-compat with the
-// Fast-Triage schema. Callers may populate either form.
+// Answers and Decisions are convenience fields for the Fast-Triage cores
+// (collect_feedback, triage_items). Callers may populate either the typed
+// slice or the equivalent key inside Data — the default handler promotes
+// whichever is set into the transcript payload.
 type ResponseV1 struct {
 	V         int            `json:"v"`
 	Kind      string         `json:"kind"`

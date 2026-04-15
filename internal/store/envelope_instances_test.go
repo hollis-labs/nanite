@@ -6,8 +6,27 @@ import (
 	"testing"
 )
 
+// seedEnvelopeTestSession inserts the workspace + session rows the
+// envelope_instances.session_id foreign key requires.
+func seedEnvelopeTestSession(t *testing.T, s *Store, sessionID string) {
+	t.Helper()
+	if _, err := s.DB.Exec(
+		`INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+		"ws-env-"+sessionID, "env",
+	); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := s.DB.Exec(
+		`INSERT INTO sessions (id, workspace_id, title, short_code, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		sessionID, "ws-env-"+sessionID, "t", "sc-"+sessionID,
+	); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+}
+
 func TestEnvelopeInstance_CreateAndGet(t *testing.T) {
 	s := newTestStore(t)
+	seedEnvelopeTestSession(t, s, "sess-1")
 
 	inst := &EnvelopeInstance{
 		SessionID:    "sess-1",
@@ -38,6 +57,7 @@ func TestEnvelopeInstance_CreateAndGet(t *testing.T) {
 
 func TestEnvelopeInstance_RecordResponse(t *testing.T) {
 	s := newTestStore(t)
+	seedEnvelopeTestSession(t, s, "sess-1")
 
 	inst := &EnvelopeInstance{
 		SessionID:    "sess-1",
@@ -70,6 +90,7 @@ func TestEnvelopeInstance_RecordResponse(t *testing.T) {
 
 func TestEnvelopeInstance_DuplicateResponseRejected(t *testing.T) {
 	s := newTestStore(t)
+	seedEnvelopeTestSession(t, s, "s")
 
 	inst := &EnvelopeInstance{SessionID: "s", EnvelopeType: "t", EnvelopeJSON: "{}"}
 	if err := s.CreateEnvelopeInstance(inst); err != nil {

@@ -204,3 +204,37 @@ func TestEnvelopeRespond_HandlerError(t *testing.T) {
 type assertHandlerError struct{}
 
 func (assertHandlerError) Error() string { return "synthetic handler failure" }
+
+func TestEnvelopeRespond_KindMismatchRejected(t *testing.T) {
+	a, mux := newTestAPI(t)
+	sessID := seedSessionForEnvelope(t, a)
+	inst := seedEnvelopeInstance(t, a, sessID, "collect_feedback")
+
+	// Response kind disagrees with stored envelope type.
+	body, _ := json.Marshal(chat.ResponseV1{
+		V: 1, Kind: "something-else", ID: inst.ID, Status: chat.StatusSubmitted,
+	})
+	w := doPost(mux, "/api/envelopes/"+inst.ID+"/respond", body)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestEnvelopeRespond_SessionIDNonStringRejected(t *testing.T) {
+	a, mux := newTestAPI(t)
+	sessID := seedSessionForEnvelope(t, a)
+	inst := seedEnvelopeInstance(t, a, sessID, "x")
+
+	// session_id as a number (present-but-non-string) must be treated as
+	// mismatch — a forged body can't bypass the check by using the wrong
+	// JSON type.
+	payload := map[string]any{
+		"v": 1, "kind": "x", "id": inst.ID, "status": "submitted",
+		"session_id": 42,
+	}
+	body, _ := json.Marshal(payload)
+	w := doPost(mux, "/api/envelopes/"+inst.ID+"/respond", body)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d; body: %s", w.Code, w.Body.String())
+	}
+}

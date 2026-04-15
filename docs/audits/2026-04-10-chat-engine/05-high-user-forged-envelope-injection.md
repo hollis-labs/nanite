@@ -3,7 +3,7 @@
 **Scope:** chat-engine
 **Topic:** Security / Trust boundary
 **Date:** 2026-04-10
-**Status:** **RESOLVED 2026-04-15 (Phase 3 S5).** The TICKET_DATA marker scan at `internal/service/chat_generate.go:597-609` and the `BuildTicketConfirmationEnvelope` helper were removed. Tickets are now entirely plugin responsibility; envelope responses flow through the typed `POST /api/envelopes/:id/respond` path (S5 T4) with schema validation and per-type response handlers. See `docs/envelopes.md` and the `phase-3 s5:` commit series on `phase-3-s5-envelope`.
+**Status:** **RESOLVED 2026-04-15 (Phase 3 S5).** The `<!--TICKET_DATA:...-->` marker scan in `generateResponse` (`internal/service/chat_generate.go`) and the `BuildTicketConfirmationEnvelope` helper (`internal/chat/envelope.go`) were both removed. Tickets are now entirely plugin responsibility; envelope responses flow through the typed `POST /api/envelopes/:id/respond` path (S5 T4) with schema validation and per-type response handlers. See `docs/envelopes.md` and the `phase-3 s5:` commit series on `phase-3-s5-envelope`.
 
 ## Problem
 

@@ -105,7 +105,7 @@ func (t *StdioTransport) call(ctx context.Context, method string, params any) (*
 	// Write request + newline
 	payload = append(payload, '\n')
 	if _, err := t.stdin.Write(payload); err != nil {
-		t.started = false
+		t.killAndReapLocked()
 		return nil, fmt.Errorf("write to stdin: %w", err)
 	}
 
@@ -129,15 +129,15 @@ func (t *StdioTransport) call(ctx context.Context, method string, params any) (*
 	select {
 	case res := <-readCh:
 		if res.err != nil {
-			t.started = false
+			t.killAndReapLocked()
 			return nil, fmt.Errorf("read from stdout: %w", res.err)
 		}
 		line = res.line
 	case <-time.After(timeout):
-		t.started = false
+		t.killAndReapLocked()
 		return nil, fmt.Errorf("timeout waiting for response from %s after %s", t.command, timeout)
 	case <-ctx.Done():
-		t.started = false
+		t.killAndReapLocked()
 		return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
 
@@ -204,7 +204,6 @@ func readLineBounded(r *bufio.Reader, max int) ([]byte, error) {
 		chunk, err := r.ReadSlice('\n')
 		switch err {
 		case nil:
-			// chunk includes the terminating '\n'; drop it.
 			chunk = chunk[:len(chunk)-1]
 			if len(buf)+len(chunk) > max {
 				return nil, fmt.Errorf("mcp response exceeded %d bytes", max)
@@ -222,6 +221,30 @@ func readLineBounded(r *bufio.Reader, max int) ([]byte, error) {
 	}
 }
 
+// killAndReapLocked kills the current subprocess, closes its pipes, waits
+// for exit, and marks the transport as not started. Caller must hold t.mu.
+// Idempotent.
+//
+// Closes audit 2026-04-10-mcp-client-transport finding 01. Before this
+// helper, timeout / ctx.Done / read-error / write-error branches only set
+// t.started = false and leaked the subprocess, its reader goroutine, and a
+// stdin/stdout FD pair. The next start() then overwrote t.cmd in place,
+// making the previous process unreachable. This reaps it properly; Wait()
+// closes the stdout pipe so the orphaned reader goroutine unblocks via EOF.
+func (t *StdioTransport) killAndReapLocked() {
+	if !t.started {
+		return
+	}
+	if t.stdin != nil {
+		_ = t.stdin.Close()
+	}
+	if t.cmd != nil && t.cmd.Process != nil {
+		_ = t.cmd.Process.Kill()
+		_ = t.cmd.Wait()
+	}
+	t.started = false
+}
+
 // Close stops the subprocess.
 func (t *StdioTransport) Close() error {
 	t.mu.Lock()
@@ -231,10 +254,7 @@ func (t *StdioTransport) Close() error {
 		return nil
 	}
 
-	t.stdin.Close()
-	err := t.cmd.Process.Kill()
-	t.cmd.Wait()
-	t.started = false
+	t.killAndReapLocked()
 	slog.Info("mcp: stopped stdio transport", "command", t.command)
-	return err
+	return nil
 }

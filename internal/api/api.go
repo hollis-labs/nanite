@@ -201,6 +201,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// User Settings
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
+	mux.HandleFunc("GET /api/settings/embedding/providers", a.handleEmbeddingProviders)
 
 	// Plugin Config (prefixed to avoid collision with plugin CRUD routes)
 	mux.HandleFunc("GET /api/plugin-config/{id}", a.handleGetPluginConfig)

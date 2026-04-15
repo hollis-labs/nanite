@@ -123,7 +123,11 @@ export function EnvelopeRenderer({
         <Suspense
           fallback={<div className="animate-pulse p-4 text-sm text-fg-secondary">Loading...</div>}
         >
-          <PluginComponent data={envelope.data} {...(onSendMessage ? { onSendMessage } : {})} />
+          <PluginComponent
+            data={envelope.data}
+            {...(onSendMessage ? { onSendMessage } : {})}
+            {...(envelope.id ? { onRespond } : {})}
+          />
         </Suspense>
       </EnvelopeErrorBoundary>
     );

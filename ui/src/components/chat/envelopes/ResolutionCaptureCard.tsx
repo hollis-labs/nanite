@@ -82,13 +82,17 @@ export function ResolutionCaptureCard({
     }
   };
 
-  const handleSkip = () => {
-    setCardState("skipped");
+  const handleSkip = async () => {
     setSubmitError(null);
-    if (!onRespond) return;
-    void onRespond({ status: ResponseStatus.Cancelled, data: {} }).catch((err) => {
-      setSubmitError(err instanceof Error ? err.message : "Failed to record skip");
-    });
+    if (onRespond) {
+      try {
+        await onRespond({ status: ResponseStatus.Cancelled, data: {} });
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Failed to record skip");
+        return;
+      }
+    }
+    setCardState("skipped");
   };
 
   if (cardState === "submitted") {
@@ -237,7 +241,7 @@ export function ResolutionCaptureCard({
             size="sm"
             variant="ghost"
             className="text-xs text-fg-secondary hover:text-fg-secondary px-4 py-1 h-8"
-            onClick={handleSkip}
+            onClick={() => void handleSkip()}
           >
             Skip
           </Button>

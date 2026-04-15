@@ -458,6 +458,7 @@ export interface Envelope {
   kind: string;
   version: number;
   type: string;
+  id?: string;
   proposals?: Proposal[];
   questions?: Question[];
   approval?: EnvelopeApprovalRequest;

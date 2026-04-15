@@ -23,7 +23,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/service/a2a"
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
@@ -62,6 +61,12 @@ type Container struct {
 	// Memory system (embedded Conduit).
 	Conduit *conduit.Conduit
 	Memory  *memory.Service
+	// EmbeddingStatus is the resolved state of the embedder at container build
+	// time: "active" | "disabled" | "missing_credentials" | "unreachable".
+	// Surfaced by the settings API and consumed by the first-turn warning.
+	EmbeddingStatus   string
+	EmbeddingProvider string
+	EmbeddingModel    string
 
 	// Multi-agent orchestration.
 	Coord     coordination.CoordStore
@@ -245,37 +250,36 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Embedded Conduit instance for memory storage.
 	var conduitInstance *conduit.Conduit
 	var memorySvc *memory.Service
+	var embeddingStatus string
+	var embeddingProviderID, embeddingModel string
 	{
 		homeDir, _ := os.UserHomeDir()
 		conduitRoot := filepath.Join(homeDir, ".conduit")
 
-		// Embedder selection: OS keychain → env var → Ollama → nil (disables similarity).
+		// Embedder selection: resolve from user settings via selectEmbedder.
+		// No configured embedder = no-op (similarity recall unavailable).
 		var embedder provider.Embedder
-		var embeddingModel string
-
-		openaiKey := secrets.Get(secrets.ProviderKeyName("openai-001"))
-		if openaiKey == "" {
-			openaiKey = os.Getenv("OPENAI_API_KEY")
-		}
-
-		if openaiKey != "" {
-			oai := provider.NewOpenAI()
-			oai.SetAPIKey(openaiKey)
-			embedder = oai
-			embeddingModel = "text-embedding-3-large"
-			slog.Info("service container: OpenAI embedder enabled", "model", "text-embedding-3-large")
+		us, usErr := cfg.Store.GetUserSettings()
+		if usErr != nil {
+			slog.Warn("service container: user_settings read failed; embedder disabled", "err", usErr)
+			embeddingStatus = EmbeddingStatusDisabled
 		} else {
-			ollamaProvider := provider.NewOllama()
-			probeCtx, probeCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer probeCancel()
-			if _, testErr := ollamaProvider.Embed(probeCtx, "test", "nomic-embed-text"); testErr == nil {
-				embedder = ollamaProvider
-				embeddingModel = "nomic-embed-text"
-				slog.Info("service container: Ollama embedder enabled", "model", "nomic-embed-text")
-			} else {
-				slog.Warn("service container: no embedder available, similarity ranking disabled")
-			}
+			embedder, embeddingModel, embeddingStatus = SelectEmbedder(
+				context.Background(),
+				EmbedderSettings{
+					Mode:     us.EmbeddingMode,
+					Provider: us.EmbeddingProvider,
+					Model:    us.EmbeddingModel,
+				},
+				DefaultEmbedderSelectDeps(),
+			)
+			embeddingProviderID = us.EmbeddingProvider
 		}
+		slog.Info("service container: embedder status",
+			"status", embeddingStatus,
+			"provider", embeddingProviderID,
+			"model", embeddingModel,
+		)
 
 		var conduitOpts []conduit.Option
 		if embedder != nil {
@@ -491,6 +495,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Todos:               todos,
 		Conduit:             conduitInstance,
 		Memory:              memorySvc,
+		EmbeddingStatus:     embeddingStatus,
+		EmbeddingProvider:   embeddingProviderID,
+		EmbeddingModel:      embeddingModel,
 		Coord:               cfg.CoordStore,
 		Tasks:               tasks,
 		Workers:             workers,

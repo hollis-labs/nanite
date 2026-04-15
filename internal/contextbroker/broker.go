@@ -65,6 +65,11 @@ type Intent struct {
 	// Keywords are extracted from the user query for relevance matching.
 	Keywords []string
 
+	// QueryText is the raw user-turn text used for similarity-based recall
+	// (e.g. embedding-backed memory search). When empty, callers that need
+	// similarity recall will degrade to non-similarity ordering.
+	QueryText string
+
 	// Scope limits context to a project, namespace, or other boundary.
 	Scope string
 

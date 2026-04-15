@@ -308,6 +308,7 @@ func (cb *ContextClient) enrichWithContextBroker(ctx context.Context, systemProm
 	// Derive intent from the session's most recent user message.
 	intentType := contextbroker.IntentCustom
 	var keywords []string
+	var queryText string
 	messages, err := cb.Store.ListMessages(session.ID, 5)
 	if err == nil && len(messages) > 0 {
 		// Find last user message.
@@ -315,6 +316,7 @@ func (cb *ContextClient) enrichWithContextBroker(ctx context.Context, systemProm
 			if messages[i].Role == "user" {
 				_, keywords = ExtractIntent(messages[i].Content)
 				intentType = classifyContextIntent(messages[i].Content)
+				queryText = messages[i].Content
 				break
 			}
 		}
@@ -323,6 +325,7 @@ func (cb *ContextClient) enrichWithContextBroker(ctx context.Context, systemProm
 	intent := contextbroker.Intent{
 		Type:      intentType,
 		Keywords:  keywords,
+		QueryText: queryText,
 		Scope:     session.ProjectID,
 		SessionID: session.ID,
 		AgentID:   agent.ID,

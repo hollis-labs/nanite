@@ -65,6 +65,7 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 	opts := memory.RecallOpts{
 		Namespaces:    namespaces,
 		Ranking:       "similarity",
+		Query:         intent.QueryText,
 		Limit:         30,
 		MinConfidence: 0.4,
 	}

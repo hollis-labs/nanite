@@ -192,23 +192,33 @@ func (t *StdioTransport) CallTool(ctx context.Context, name string, arguments ma
 
 // readLineBounded reads bytes until a newline or until max bytes have been
 // buffered (excluding the newline). Exceeding max returns an error without
-// consuming the rest of the line — the transport will then be marked not
-// started by the caller, so the oversized payload stream is abandoned with
-// the subprocess.
+// consuming the rest of the line — the caller must tear the transport down,
+// otherwise the next call will read mid-line garbage.
+//
+// Uses ReadSlice chunked through bufio's internal buffer rather than byte-
+// at-a-time ReadByte to avoid a per-byte method-call loop on legitimately
+// large (near-cap) responses.
 func readLineBounded(r *bufio.Reader, max int) ([]byte, error) {
-	buf := make([]byte, 0, 4096)
+	var buf []byte
 	for {
-		b, err := r.ReadByte()
-		if err != nil {
+		chunk, err := r.ReadSlice('\n')
+		switch err {
+		case nil:
+			// chunk includes the terminating '\n'; drop it.
+			chunk = chunk[:len(chunk)-1]
+			if len(buf)+len(chunk) > max {
+				return nil, fmt.Errorf("mcp response exceeded %d bytes", max)
+			}
+			return append(buf, chunk...), nil
+		case bufio.ErrBufferFull:
+			if len(buf)+len(chunk) > max {
+				return nil, fmt.Errorf("mcp response exceeded %d bytes", max)
+			}
+			buf = append(buf, chunk...)
+			continue
+		default:
 			return nil, err
 		}
-		if b == '\n' {
-			return buf, nil
-		}
-		if len(buf) >= max {
-			return nil, fmt.Errorf("mcp response exceeded %d bytes", max)
-		}
-		buf = append(buf, b)
 	}
 }
 

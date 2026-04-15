@@ -77,7 +77,7 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	chatMessages := make([]provider.ChatMessage, len(messages))
 	for i, m := range messages {
 		role := m.Role
-		if role == "system" || role == "tool" {
+		if role == "system" || role == "tool" || role == RoleEnvelopeResponse {
 			role = "user" // Anthropic API only accepts user/assistant
 		}
 		chatMessages[i] = provider.ChatMessage{Role: role, Content: m.Content}

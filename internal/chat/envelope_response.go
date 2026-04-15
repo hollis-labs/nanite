@@ -35,7 +35,24 @@ const (
 	StatusSubmitted ResponseStatus = "submitted"
 	StatusCancelled ResponseStatus = "cancelled"
 	StatusPartial   ResponseStatus = "partial"
+
+	// RoleEnvelopeResponse is the message role used for transcript entries
+	// produced by envelope-response submissions (T4/T5). Stored alongside
+	// user/assistant/system/tool; context assembly maps it to "user" for
+	// providers that only accept user/assistant roles.
+	RoleEnvelopeResponse = "envelope_response"
 )
+
+// FormatEnvelopeResponseContent produces the self-describing string stored as
+// message.content for envelope_response rows. The prefix `[envelope:{type}
+// status:{status}]` lets the LLM and downstream tooling distinguish the
+// payload from ordinary user text without metadata lookups.
+func FormatEnvelopeResponseContent(envelopeType string, status ResponseStatus, payload string) string {
+	if payload == "" {
+		payload = "{}"
+	}
+	return "[envelope:" + envelopeType + " status:" + string(status) + "] " + payload
+}
 
 // Answer is the per-question response payload used by collect_feedback.
 type Answer struct {

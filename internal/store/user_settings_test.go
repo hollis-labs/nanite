@@ -69,6 +69,51 @@ func TestUpdateUserSettings(t *testing.T) {
 	}
 }
 
+func TestUserSettings_EmbeddingDefaults(t *testing.T) {
+	s := newSeededStore(t)
+
+	us, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if us.EmbeddingMode != "disabled" {
+		t.Errorf("expected embedding_mode 'disabled', got %q", us.EmbeddingMode)
+	}
+	if us.EmbeddingProvider != "" {
+		t.Errorf("expected empty embedding_provider, got %q", us.EmbeddingProvider)
+	}
+	if us.EmbeddingModel != "" {
+		t.Errorf("expected empty embedding_model, got %q", us.EmbeddingModel)
+	}
+}
+
+func TestUserSettings_EmbeddingRoundTrip(t *testing.T) {
+	s := newSeededStore(t)
+
+	us := &UserSettings{
+		EmbeddingProvider: "ollama",
+		EmbeddingModel:    "nomic-embed-text",
+		EmbeddingMode:     "explicit",
+	}
+	if err := s.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	got, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if got.EmbeddingProvider != "ollama" {
+		t.Errorf("provider: got %q, want %q", got.EmbeddingProvider, "ollama")
+	}
+	if got.EmbeddingModel != "nomic-embed-text" {
+		t.Errorf("model: got %q, want %q", got.EmbeddingModel, "nomic-embed-text")
+	}
+	if got.EmbeddingMode != "explicit" {
+		t.Errorf("mode: got %q, want %q", got.EmbeddingMode, "explicit")
+	}
+}
+
 func TestUpdateUserSettings_EmptyChain(t *testing.T) {
 	s := newSeededStore(t)
 

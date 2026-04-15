@@ -30,6 +30,7 @@ type Memory struct {
 type RecallOpts struct {
 	Namespaces    []string // Conduit-format namespaces (e.g. "user/x/memory")
 	Ranking       string   // "activation" (default), "chronological", "similarity"
+	Query         string   // raw query text — required when Ranking == "similarity"
 	Limit         int      // max results (default 20)
 	MinConfidence float64  // minimum confidence threshold
 	Origins       []string // filter by origin
@@ -130,9 +131,15 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 		conduitMemory.StatusCanonical,
 	}
 
+	if ranking == conduitMemory.RankingSimilarity && opts.Query == "" {
+		slog.Warn("memory: similarity recall without query text — results will be degenerate",
+			"namespaces", opts.Namespaces)
+	}
+
 	in := conduitMemory.RecallInput{
 		Namespaces: opts.Namespaces,
 		Ranking:    ranking,
+		Query:      opts.Query,
 		Limit:      limit,
 		Filters:    filters,
 	}

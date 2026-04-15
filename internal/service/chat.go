@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -86,6 +88,12 @@ type ChatServiceConfig struct {
 
 	// Task tracking service — nil-safe (task tracking disabled).
 	Tasks task.Service
+
+	// EmbeddingStatus drives the first-turn memory warning envelope:
+	// when non-empty and not "active", a dismissible warning is emitted the
+	// first time a given session generates a response.
+	EmbeddingStatus   string
+	EmbeddingProvider string
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -111,6 +119,16 @@ type chatServiceImpl struct {
 	utilityProvider string
 	utilityModel    string
 	permissions    *permission.Engine
+
+	embeddingStatus   string
+	embeddingProvider string
+	// embeddingWarnedSessions tracks which session IDs have already received
+	// the first-turn memory warning. Process-local; resets on restart.
+	// Bounded FIFO eviction prevents unbounded growth on long-lived hosts with
+	// many sessions.
+	embeddingWarnedMu       sync.Mutex
+	embeddingWarnedSessions map[string]struct{}
+	embeddingWarnedOrder    []string
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -146,8 +164,57 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		utilityProvider: up,
 		utilityModel:    um,
 		permissions:    cfg.Permissions,
-		lifecycle:      lifecycle.NewManager("service.chat"),
+		embeddingStatus:         cfg.EmbeddingStatus,
+		embeddingProvider:       cfg.EmbeddingProvider,
+		embeddingWarnedSessions: make(map[string]struct{}),
+		lifecycle:               lifecycle.NewManager("service.chat"),
 	}
+}
+
+// maybeEmitEmbeddingWarning pushes a one-time dismissible warning onto the
+// stream when the embedder is not "active". Silently no-ops for active /
+// unknown states and for sessions that have already been warned in this
+// process lifetime.
+// maxEmbeddingWarnedSessions bounds the per-session dedupe map so long-lived
+// hosts don't leak memory. When the cap is hit, the oldest entry is dropped —
+// a worst-case duplicate warning is far cheaper than unbounded growth.
+const maxEmbeddingWarnedSessions = 4096
+
+func (s *chatServiceImpl) maybeEmitEmbeddingWarning(sessionID string, ch chan chat.StreamEvent) {
+	if s.embeddingStatus == "" || s.embeddingStatus == EmbeddingStatusActive {
+		return
+	}
+	s.embeddingWarnedMu.Lock()
+	if _, seen := s.embeddingWarnedSessions[sessionID]; seen {
+		s.embeddingWarnedMu.Unlock()
+		return
+	}
+	s.embeddingWarnedSessions[sessionID] = struct{}{}
+	s.embeddingWarnedOrder = append(s.embeddingWarnedOrder, sessionID)
+	if len(s.embeddingWarnedOrder) > maxEmbeddingWarnedSessions {
+		drop := s.embeddingWarnedOrder[0]
+		s.embeddingWarnedOrder = s.embeddingWarnedOrder[1:]
+		delete(s.embeddingWarnedSessions, drop)
+	}
+	s.embeddingWarnedMu.Unlock()
+	var msg string
+	switch s.embeddingStatus {
+	case EmbeddingStatusDisabled:
+		msg = "Memory similarity recall is off. Enable an embedding provider in Settings \u2192 Memory."
+	case EmbeddingStatusMissingCredentials:
+		msg = fmt.Sprintf("Memory similarity recall is disabled: %s credentials not found. Add the key in Settings \u2192 Providers.", s.embeddingProvider)
+	case EmbeddingStatusUnreachable:
+		msg = fmt.Sprintf("Memory similarity recall is disabled: %s is not reachable. Start it or switch providers in Settings \u2192 Memory.", s.embeddingProvider)
+	default:
+		msg = "Memory similarity recall is disabled."
+	}
+	payload := chat.ToolWarningPayload{
+		ToolName: "memory",
+		Error:    msg,
+		Level:    "warning",
+	}
+	data, _ := json.Marshal(payload)
+	ch <- chat.StreamEvent{Type: "tool_warning", Data: string(data)}
 }
 
 // HandleMessage implements ChatService.

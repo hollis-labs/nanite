@@ -1,6 +1,7 @@
 import {
   Activity,
   Bot,
+  Brain,
   Building2,
   Cpu,
   FileText,
@@ -29,6 +30,7 @@ import { getSlotComponent } from "@/lib/plugin-slot-lookup";
 import { useNavigationStore } from "@/stores/useNavigationStore";
 import { ActionsPanel } from "./ActionsPanel";
 import { AgentProfileManager } from "./AgentProfileManager";
+import { MemoryPanel } from "./MemoryPanel";
 
 const AppearancePanel = lazy(() =>
   import("./appearance/AppearancePanel").then((m) => ({ default: m.AppearancePanel })),
@@ -59,6 +61,7 @@ const CORE_SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "tools", label: "Tools", icon: Wrench },
   { id: "plugins", label: "Plugins", icon: Puzzle },
   { id: "widgets", label: "Widgets", icon: LayoutGrid },
+  { id: "memory", label: "Memory", icon: Brain },
   { id: "observability", label: "Observability", icon: Activity },
 ];
 
@@ -128,6 +131,8 @@ export default function SettingsPage() {
         return <WidgetManager />;
       case "workspaces":
         return <WorkspaceProjectManager />;
+      case "memory":
+        return <MemoryPanel />;
       case "observability":
         return <ObservabilityDashboard />;
       default: {

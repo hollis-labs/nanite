@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -13,7 +15,52 @@ func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load settings")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, settings)
+	// Marshal into a generic map so we can append the computed embedding_status
+	// without duplicating every persisted field in a wrapper struct.
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, "failed to encode settings")
+		return
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, "failed to decode settings")
+		return
+	}
+	out["embedding_status"] = a.computeEmbeddingStatus(r.Context(), settings.EmbeddingMode, settings.EmbeddingProvider, settings.EmbeddingModel)
+	a.jsonResp(w, http.StatusOK, out)
+}
+
+// computeEmbeddingStatus re-runs the selection helper at response time so the
+// returned status reflects the current secret/reachability state, not a value
+// frozen at container build time. Uses the injected embedderSelectDeps, which
+// in production has a short (500ms) Ollama probe timeout to keep the settings
+// endpoint responsive.
+func (a *API) computeEmbeddingStatus(ctx context.Context, mode, provider, model string) string {
+	_, _, status := service.SelectEmbedder(ctx, service.EmbedderSettings{
+		Mode:     mode,
+		Provider: provider,
+		Model:    model,
+	}, a.embedderSelectDeps)
+	return status
+}
+
+// handleEmbeddingProviders returns the ordered list of providers that the
+// Settings UI dropdown should surface.
+func (a *API) handleEmbeddingProviders(w http.ResponseWriter, r *http.Request) {
+	type providerInfo struct {
+		ID            string   `json:"id"`
+		Name          string   `json:"name"`
+		DefaultModels []string `json:"default_models"`
+	}
+	catalog := []providerInfo{
+		{"openai", "OpenAI", []string{"text-embedding-3-large", "text-embedding-3-small"}},
+		{"azure_openai", "Azure OpenAI", []string{"text-embedding-3-large", "text-embedding-3-small"}},
+		{"ollama", "Ollama (local)", []string{"nomic-embed-text", "mxbai-embed-large"}},
+		{"gemini", "Google Gemini", []string{"text-embedding-004"}},
+		{"mistral", "Mistral", []string{"mistral-embed"}},
+	}
+	a.jsonResp(w, http.StatusOK, map[string]any{"providers": catalog})
 }
 
 func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +159,35 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if v, ok := raw["embedding_provider"]; ok {
+		if err := json.Unmarshal(v, &existing.EmbeddingProvider); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'embedding_provider'")
+			return
+		}
+		if existing.EmbeddingProvider != "" && !service.IsSupportedEmbeddingProvider(existing.EmbeddingProvider) {
+			a.errorResp(w, http.StatusBadRequest, "embedding_provider must be one of: openai, azure_openai, ollama, gemini, mistral")
+			return
+		}
+	}
+	if v, ok := raw["embedding_model"]; ok {
+		if err := json.Unmarshal(v, &existing.EmbeddingModel); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'embedding_model'")
+			return
+		}
+	}
+	if v, ok := raw["embedding_mode"]; ok {
+		if err := json.Unmarshal(v, &existing.EmbeddingMode); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'embedding_mode'")
+			return
+		}
+		switch existing.EmbeddingMode {
+		case "", "disabled", "explicit":
+			// valid
+		default:
+			a.errorResp(w, http.StatusBadRequest, "embedding_mode must be 'disabled' or 'explicit'")
+			return
+		}
+	}
 	if v, ok := raw["allow_unsigned_plugins"]; ok {
 		// J.2: raw field pass-through. The setting is honoured only in
 		// devmode builds of the host (compile-time gate in
@@ -156,5 +232,18 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	a.jsonResp(w, http.StatusOK, existing)
+	// Return the updated settings with the computed embedding_status attached,
+	// mirroring the GET shape so the UI can refresh from the PUT response.
+	raw2, err := json.Marshal(existing)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, "failed to encode settings")
+		return
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(raw2, &out); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, "failed to decode settings")
+		return
+	}
+	out["embedding_status"] = a.computeEmbeddingStatus(r.Context(), existing.EmbeddingMode, existing.EmbeddingProvider, existing.EmbeddingModel)
+	a.jsonResp(w, http.StatusOK, out)
 }

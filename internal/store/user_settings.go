@@ -28,6 +28,12 @@ type UserSettings struct {
 	// In production binaries this field is intentionally inert: a
 	// compromised row cannot disable signature verification.
 	AllowUnsignedPlugins bool `json:"allow_unsigned_plugins"`
+	// Embedding provider configuration. EmbeddingMode is one of
+	// "disabled" (default) or "explicit". When disabled or when provider is
+	// empty, no embedder is wired and similarity recall is unavailable.
+	EmbeddingProvider string `json:"embedding_provider"`
+	EmbeddingModel    string `json:"embedding_model"`
+	EmbeddingMode     string `json:"embedding_mode"`
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -40,16 +46,19 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var toolLoadPrefsJSON string
 	var taskBackend string
 	var allowUnsigned bool
+	var embeddingProvider, embeddingModel, embeddingMode string
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
 		        developer_mode, recover_mode, tool_stream_behavior, tool_drawer_retention,
-		        tool_load_preferences, task_backend, allow_unsigned_plugins
+		        tool_load_preferences, task_backend, allow_unsigned_plugins,
+		        embedding_provider, embedding_model, embedding_mode
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
 		&devMode, &recoverMode, &toolStreamBehavior, &toolDrawerRetention,
-		&toolLoadPrefsJSON, &taskBackend, &allowUnsigned)
+		&toolLoadPrefsJSON, &taskBackend, &allowUnsigned,
+		&embeddingProvider, &embeddingModel, &embeddingMode)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -67,6 +76,9 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		RecoverMode:          recoverMode,
 		TaskBackend:          taskBackend,
 		AllowUnsignedPlugins: allowUnsigned,
+		EmbeddingProvider:    embeddingProvider,
+		EmbeddingModel:       embeddingModel,
+		EmbeddingMode:        embeddingMode,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -117,6 +129,10 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	if taskBackend == "" {
 		taskBackend = "local"
 	}
+	embeddingMode := us.EmbeddingMode
+	if embeddingMode == "" {
+		embeddingMode = "disabled"
+	}
 	_, err = s.DB.Exec(
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
@@ -134,13 +150,17 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			tool_load_preferences = ?,
 			task_backend = ?,
 			allow_unsigned_plugins = ?,
+			embedding_provider = ?,
+			embedding_model = ?,
+			embedding_mode = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
 		us.DefaultAgent, us.UtilityProvider, us.UtilityModel, us.ToolCallDisplayMode,
 		string(extJSON), us.DeveloperMode, us.RecoverMode,
 		us.ToolStreamBehavior, us.ToolDrawerRetention, string(toolPrefsJSON),
-		taskBackend, us.AllowUnsignedPlugins, now,
+		taskBackend, us.AllowUnsignedPlugins,
+		us.EmbeddingProvider, us.EmbeddingModel, embeddingMode, now,
 	)
 	if err != nil {
 		return fmt.Errorf("update user settings: %w", err)

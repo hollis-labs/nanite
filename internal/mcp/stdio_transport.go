@@ -15,6 +15,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/safego"
 )
 
+// maxStdioResponseBytes caps the size of a single JSON-RPC response line read
+// from an MCP subprocess. Without this cap, bufio.Reader.ReadBytes would grow
+// unbounded and a malicious or misbehaving server could OOM the host with one
+// reply (audit 2026-04-10-mcp-client-transport finding 02). Per-server
+// overrides are deferred to S4b; 10 MiB matches the audit recommendation.
+const maxStdioResponseBytes = 10 * 1024 * 1024
+
 // StdioTransport implements MCP over a subprocess stdin/stdout.
 type StdioTransport struct {
 	command string
@@ -109,7 +116,7 @@ func (t *StdioTransport) call(ctx context.Context, method string, params any) (*
 	}
 	readCh := make(chan readResult, 1)
 	safego.Go(ctx, "mcp.stdio.transport.read", func() {
-		line, err := t.stdout.ReadBytes('\n')
+		line, err := readLineBounded(t.stdout, maxStdioResponseBytes)
 		readCh <- readResult{line, err}
 	})
 
@@ -181,6 +188,38 @@ func (t *StdioTransport) CallTool(ctx context.Context, name string, arguments ma
 	}
 
 	return &result, nil
+}
+
+// readLineBounded reads bytes until a newline or until max bytes have been
+// buffered (excluding the newline). Exceeding max returns an error without
+// consuming the rest of the line — the caller must tear the transport down,
+// otherwise the next call will read mid-line garbage.
+//
+// Uses ReadSlice chunked through bufio's internal buffer rather than byte-
+// at-a-time ReadByte to avoid a per-byte method-call loop on legitimately
+// large (near-cap) responses.
+func readLineBounded(r *bufio.Reader, max int) ([]byte, error) {
+	var buf []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		switch err {
+		case nil:
+			// chunk includes the terminating '\n'; drop it.
+			chunk = chunk[:len(chunk)-1]
+			if len(buf)+len(chunk) > max {
+				return nil, fmt.Errorf("mcp response exceeded %d bytes", max)
+			}
+			return append(buf, chunk...), nil
+		case bufio.ErrBufferFull:
+			if len(buf)+len(chunk) > max {
+				return nil, fmt.Errorf("mcp response exceeded %d bytes", max)
+			}
+			buf = append(buf, chunk...)
+			continue
+		default:
+			return nil, err
+		}
+	}
 }
 
 // Close stops the subprocess.

@@ -53,6 +53,16 @@ type ToolContent struct {
 	Text string `json:"text,omitempty"`
 }
 
+// maxHTTPResponseBytes caps an HTTP MCP response body so a remote server
+// cannot OOM the host with an unbounded JSON-RPC reply (audit
+// 2026-04-10-mcp-client-transport finding 02). Per-server overrides are
+// deferred to S4b.
+const maxHTTPResponseBytes = 10 * 1024 * 1024
+
+// maxHTTPErrorBodyBytes caps the non-OK error body read so a server returning
+// a large error payload cannot OOM the host either.
+const maxHTTPErrorBodyBytes = 64 * 1024
+
 // HTTPTransport implements an HTTP-based MCP transport.
 // It sends JSON-RPC requests to a remote MCP server URL.
 type HTTPTransport struct {
@@ -100,12 +110,13 @@ func (t *HTTPTransport) call(ctx context.Context, method string, params any) (*J
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxHTTPErrorBodyBytes))
 		return nil, fmt.Errorf("MCP server error %d: %s", resp.StatusCode, string(errBody))
 	}
 
+	body := http.MaxBytesReader(nil, resp.Body, maxHTTPResponseBytes)
 	var rpcResp JSONRPCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+	if err := json.NewDecoder(body).Decode(&rpcResp); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 

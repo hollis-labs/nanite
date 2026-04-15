@@ -24,7 +24,7 @@ func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to encode settings")
+		a.errorResp(w, http.StatusInternalServerError, "failed to decode settings")
 		return
 	}
 	out["embedding_status"] = a.computeEmbeddingStatus(r.Context(), settings.EmbeddingMode, settings.EmbeddingProvider, settings.EmbeddingModel)
@@ -33,13 +33,15 @@ func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 // computeEmbeddingStatus re-runs the selection helper at response time so the
 // returned status reflects the current secret/reachability state, not a value
-// frozen at container build time.
+// frozen at container build time. Uses the injected embedderSelectDeps, which
+// in production has a short (500ms) Ollama probe timeout to keep the settings
+// endpoint responsive.
 func (a *API) computeEmbeddingStatus(ctx context.Context, mode, provider, model string) string {
 	_, _, status := service.SelectEmbedder(ctx, service.EmbedderSettings{
 		Mode:     mode,
 		Provider: provider,
 		Model:    model,
-	}, service.DefaultEmbedderSelectDeps())
+	}, a.embedderSelectDeps)
 	return status
 }
 
@@ -239,7 +241,7 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{}
 	if err := json.Unmarshal(raw2, &out); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to encode settings")
+		a.errorResp(w, http.StatusInternalServerError, "failed to decode settings")
 		return
 	}
 	out["embedding_status"] = a.computeEmbeddingStatus(r.Context(), existing.EmbeddingMode, existing.EmbeddingProvider, existing.EmbeddingModel)

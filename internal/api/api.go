@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/service"
 )
@@ -10,11 +11,25 @@ import (
 // API holds dependencies for HTTP handlers.
 type API struct {
 	Services *service.Container
+	// embedderSelectDeps is injected for embedding_status computation. Defaults
+	// to service.DefaultEmbedderSelectDeps with a short probe timeout so the
+	// settings endpoint can't block a request for seconds on a cold Ollama probe.
+	// Tests override via SetEmbedderSelectDeps.
+	embedderSelectDeps service.EmbedderSelectDeps
 }
 
 // New creates a new API instance from a service container.
 func New(svc *service.Container) *API {
-	return &API{Services: svc}
+	deps := service.DefaultEmbedderSelectDeps()
+	deps.ProbeTimeout = 500 * time.Millisecond
+	return &API{Services: svc, embedderSelectDeps: deps}
+}
+
+// SetEmbedderSelectDeps overrides the injected embedder-selection deps.
+// Intended for tests that need deterministic embedding_status without hitting
+// the live Ollama probe.
+func (a *API) SetEmbedderSelectDeps(deps service.EmbedderSelectDeps) {
+	a.embedderSelectDeps = deps
 }
 
 // RegisterRoutes wires all API routes onto the given ServeMux.

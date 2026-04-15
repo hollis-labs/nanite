@@ -2,21 +2,31 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
-// newSettingsTestAPI wraps newTestAPI and ensures the singleton user_settings
-// row exists — the container itself handles a missing row, but the settings
-// handlers expect it to be present.
+// newSettingsTestAPI wraps newTestAPI, seeds the singleton user_settings row,
+// and injects an embedder-select deps that never hits the network. That keeps
+// settings-endpoint tests deterministic and fast regardless of local Ollama state.
 func newSettingsTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	a, mux := newTestAPI(t)
 	if _, err := a.Services.Store.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
 		t.Fatalf("seed user_settings: %v", err)
 	}
+	a.SetEmbedderSelectDeps(service.EmbedderSelectDeps{
+		LookupSecret: func(string) string { return "" },
+		Getenv:       func(string) string { return "" },
+		// Pretend Ollama is always reachable so provider=ollama paths can
+		// deterministically hit active.
+		ProbeOllama: func(context.Context, string) error { return nil },
+	})
 	return a, mux
 }
 
@@ -91,10 +101,9 @@ func TestSettings_PutRoundTripsEmbeddingFields(t *testing.T) {
 	if got["embedding_mode"] != "explicit" {
 		t.Errorf("embedding_mode: got %v", got["embedding_mode"])
 	}
-	// Status should be one of: active, unreachable (Ollama probe outcome).
-	status, _ := got["embedding_status"].(string)
-	if status != "active" && status != "unreachable" {
-		t.Errorf("embedding_status: got %q, want active or unreachable", status)
+	// Fake probe always reports reachable, so we expect active.
+	if got["embedding_status"] != "active" {
+		t.Errorf("embedding_status: got %v, want active", got["embedding_status"])
 	}
 }
 

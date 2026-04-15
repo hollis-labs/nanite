@@ -46,7 +46,6 @@ func TestSelectEmbedder_CredentialProviders(t *testing.T) {
 	}
 	cases := []caseT{
 		{"openai", "openai-001", "OPENAI_API_KEY", "text-embedding-3-large"},
-		{"azure_openai", "azure_openai-001", "AZURE_OPENAI_API_KEY", "text-embedding-3-large"},
 		{"gemini", "gemini-001", "GEMINI_API_KEY", "text-embedding-004"},
 		{"mistral", "mistral-001", "MISTRAL_API_KEY", "mistral-embed"},
 	}
@@ -120,6 +119,63 @@ func TestSelectEmbedder_Ollama(t *testing.T) {
 			t.Errorf("status: got %q, want unreachable", status)
 		}
 	})
+}
+
+func TestSelectEmbedder_AzureRequiresFullConfig(t *testing.T) {
+	full := map[string]string{
+		"AZURE_OPENAI_API_KEY":     "sk-test",
+		"AZURE_OPENAI_ENDPOINT":    "https://example.openai.azure.com",
+		"AZURE_OPENAI_DEPLOYMENT":  "embed-deploy",
+		"AZURE_OPENAI_API_VERSION": "2024-02-15-preview",
+	}
+	settings := EmbedderSettings{Mode: "explicit", Provider: "azure_openai", Model: "text-embedding-3-large"}
+
+	// Fully configured → active.
+	e, _, status := SelectEmbedder(context.Background(), settings, testDeps(nil, full, nil))
+	if e == nil || status != EmbeddingStatusActive {
+		t.Errorf("full azure config should activate, got status=%q embedder=%v", status, e != nil)
+	}
+
+	// Each required env missing → missing_credentials.
+	for _, missing := range []string{"AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT", "AZURE_OPENAI_API_VERSION"} {
+		env := map[string]string{}
+		for k, v := range full {
+			if k != missing {
+				env[k] = v
+			}
+		}
+		e, _, status := SelectEmbedder(context.Background(), settings, testDeps(nil, env, nil))
+		if e != nil || status != EmbeddingStatusMissingCredentials {
+			t.Errorf("missing %s: expected missing_credentials, got status=%q embedder=%v", missing, status, e != nil)
+		}
+	}
+}
+
+func TestSelectEmbedder_DefaultsModelWhenBlank(t *testing.T) {
+	cases := map[string]string{
+		"openai":       "text-embedding-3-large",
+		"gemini":       "text-embedding-004",
+		"mistral":      "mistral-embed",
+		"ollama":       "nomic-embed-text",
+	}
+	for prov, want := range cases {
+		t.Run(prov, func(t *testing.T) {
+			env := map[string]string{
+				"OPENAI_API_KEY":  "x",
+				"GEMINI_API_KEY":  "x",
+				"MISTRAL_API_KEY": "x",
+			}
+			_, model, status := SelectEmbedder(context.Background(),
+				EmbedderSettings{Mode: "explicit", Provider: prov}, // empty Model
+				testDeps(nil, env, nil))
+			if status != EmbeddingStatusActive {
+				t.Fatalf("status: got %q, want active", status)
+			}
+			if model != want {
+				t.Errorf("model default: got %q, want %q", model, want)
+			}
+		})
+	}
 }
 
 func TestIsSupportedEmbeddingProvider(t *testing.T) {

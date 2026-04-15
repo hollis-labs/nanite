@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -22,8 +23,9 @@ func drainWarning(t *testing.T, ch chan chat.StreamEvent) (count int, last chat.
 
 func TestMaybeEmitEmbeddingWarning_EmitsOncePerSession(t *testing.T) {
 	s := &chatServiceImpl{
-		embeddingStatus:   EmbeddingStatusDisabled,
-		embeddingProvider: "",
+		embeddingStatus:         EmbeddingStatusDisabled,
+		embeddingProvider:       "",
+		embeddingWarnedSessions: make(map[string]struct{}),
 	}
 	ch := make(chan chat.StreamEvent, 4)
 
@@ -50,7 +52,7 @@ func TestMaybeEmitEmbeddingWarning_EmitsOncePerSession(t *testing.T) {
 }
 
 func TestMaybeEmitEmbeddingWarning_SkipsWhenActive(t *testing.T) {
-	s := &chatServiceImpl{embeddingStatus: EmbeddingStatusActive}
+	s := &chatServiceImpl{embeddingStatus: EmbeddingStatusActive, embeddingWarnedSessions: make(map[string]struct{})}
 	ch := make(chan chat.StreamEvent, 2)
 	s.maybeEmitEmbeddingWarning("session-x", ch)
 	count, _ := drainWarning(t, ch)
@@ -59,8 +61,29 @@ func TestMaybeEmitEmbeddingWarning_SkipsWhenActive(t *testing.T) {
 	}
 }
 
+func TestMaybeEmitEmbeddingWarning_BoundedGrowth(t *testing.T) {
+	s := &chatServiceImpl{
+		embeddingStatus:         EmbeddingStatusDisabled,
+		embeddingWarnedSessions: make(map[string]struct{}),
+	}
+	// Push 10 past the cap; verify the map is bounded and oldest entries evict.
+	total := maxEmbeddingWarnedSessions + 10
+	ch := make(chan chat.StreamEvent, total)
+	for i := 0; i < total; i++ {
+		s.maybeEmitEmbeddingWarning(testSessionID(i), ch)
+	}
+	s.embeddingWarnedMu.Lock()
+	size := len(s.embeddingWarnedSessions)
+	s.embeddingWarnedMu.Unlock()
+	if size > maxEmbeddingWarnedSessions {
+		t.Errorf("dedupe map grew past cap: got %d, want <=%d", size, maxEmbeddingWarnedSessions)
+	}
+}
+
+func testSessionID(i int) string { return "sess-" + strconv.Itoa(i) }
+
 func TestMaybeEmitEmbeddingWarning_DistinctSessions(t *testing.T) {
-	s := &chatServiceImpl{embeddingStatus: EmbeddingStatusUnreachable, embeddingProvider: "ollama"}
+	s := &chatServiceImpl{embeddingStatus: EmbeddingStatusUnreachable, embeddingProvider: "ollama", embeddingWarnedSessions: make(map[string]struct{})}
 	ch := make(chan chat.StreamEvent, 4)
 
 	s.maybeEmitEmbeddingWarning("a", ch)

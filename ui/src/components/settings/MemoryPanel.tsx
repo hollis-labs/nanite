@@ -48,7 +48,13 @@ export function MemoryPanel() {
   if (!settings) return null;
 
   const currentProvider = providers.find((p) => p.id === settings.embedding_provider);
-  const modelOptions = currentProvider?.default_models ?? [];
+  const defaults = currentProvider?.default_models ?? [];
+  // If the user has a custom model that isn't in the provider's default list,
+  // include it so the <select> can render and preserve their choice.
+  const modelOptions =
+    settings.embedding_model && !defaults.includes(settings.embedding_model)
+      ? [settings.embedding_model, ...defaults]
+      : defaults;
 
   const handleProviderChange = (value: string) => {
     const next: Partial<UserSettings> = { embedding_provider: value };

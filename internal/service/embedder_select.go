@@ -37,6 +37,17 @@ var SupportedEmbeddingProviders = []string{
 	"mistral",
 }
 
+// defaultEmbeddingModels maps each supported provider to the model used when
+// the user hasn't specified one explicitly. Keeps container wiring coherent
+// (a provider with an empty model would otherwise call Embed with "" and fail).
+var defaultEmbeddingModels = map[string]string{
+	"openai":       "text-embedding-3-large",
+	"azure_openai": "text-embedding-3-large",
+	"ollama":       "nomic-embed-text",
+	"gemini":       "text-embedding-004",
+	"mistral":      "mistral-embed",
+}
+
 // IsSupportedEmbeddingProvider reports whether id is one of the embedding-
 // capable providers surfaced in the Settings UI.
 func IsSupportedEmbeddingProvider(id string) bool {
@@ -103,6 +114,9 @@ func SelectEmbedder(ctx context.Context, s EmbedderSettings, deps EmbedderSelect
 	}
 
 	model := s.Model
+	if model == "" {
+		model = defaultEmbeddingModels[s.Provider]
+	}
 
 	switch s.Provider {
 	case "openai":
@@ -122,12 +136,15 @@ func SelectEmbedder(ctx context.Context, s EmbedderSettings, deps EmbedderSelect
 		if key == "" {
 			key = deps.Getenv("AZURE_OPENAI_API_KEY")
 		}
-		if key == "" {
+		// NewAzureOpenAI reads endpoint/deployment/api-version from env and
+		// will error at first use if any is missing — validate up-front so
+		// embedding_status reflects reality instead of deferring the failure.
+		endpoint := deps.Getenv("AZURE_OPENAI_ENDPOINT")
+		deployment := deps.Getenv("AZURE_OPENAI_DEPLOYMENT")
+		apiVersion := deps.Getenv("AZURE_OPENAI_API_VERSION")
+		if key == "" || endpoint == "" || deployment == "" || apiVersion == "" {
 			return nil, model, EmbeddingStatusMissingCredentials
 		}
-		// NewAzureOpenAI reads endpoint/deployment/api-version from env; if
-		// the endpoint is missing the provider will error at first use. We
-		// treat only the API key as the hard-gate credential check here.
 		p := provider.NewAzureOpenAI()
 		p.SetAPIKey(key)
 		return p, model, EmbeddingStatusActive
@@ -164,11 +181,7 @@ func SelectEmbedder(ctx context.Context, s EmbedderSettings, deps EmbedderSelect
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		probeModel := model
-		if probeModel == "" {
-			probeModel = "nomic-embed-text"
-		}
-		if err := deps.ProbeOllama(probeCtx, probeModel); err != nil {
+		if err := deps.ProbeOllama(probeCtx, model); err != nil {
 			return nil, model, EmbeddingStatusUnreachable
 		}
 		return provider.NewOllama(), model, EmbeddingStatusActive

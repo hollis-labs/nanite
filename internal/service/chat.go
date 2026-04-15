@@ -124,7 +124,11 @@ type chatServiceImpl struct {
 	embeddingProvider string
 	// embeddingWarnedSessions tracks which session IDs have already received
 	// the first-turn memory warning. Process-local; resets on restart.
-	embeddingWarnedSessions sync.Map
+	// Bounded FIFO eviction prevents unbounded growth on long-lived hosts with
+	// many sessions.
+	embeddingWarnedMu       sync.Mutex
+	embeddingWarnedSessions map[string]struct{}
+	embeddingWarnedOrder    []string
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -160,9 +164,10 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		utilityProvider: up,
 		utilityModel:    um,
 		permissions:    cfg.Permissions,
-		embeddingStatus:   cfg.EmbeddingStatus,
-		embeddingProvider: cfg.EmbeddingProvider,
-		lifecycle:      lifecycle.NewManager("service.chat"),
+		embeddingStatus:         cfg.EmbeddingStatus,
+		embeddingProvider:       cfg.EmbeddingProvider,
+		embeddingWarnedSessions: make(map[string]struct{}),
+		lifecycle:               lifecycle.NewManager("service.chat"),
 	}
 }
 
@@ -170,13 +175,28 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 // stream when the embedder is not "active". Silently no-ops for active /
 // unknown states and for sessions that have already been warned in this
 // process lifetime.
+// maxEmbeddingWarnedSessions bounds the per-session dedupe map so long-lived
+// hosts don't leak memory. When the cap is hit, the oldest entry is dropped —
+// a worst-case duplicate warning is far cheaper than unbounded growth.
+const maxEmbeddingWarnedSessions = 4096
+
 func (s *chatServiceImpl) maybeEmitEmbeddingWarning(sessionID string, ch chan chat.StreamEvent) {
 	if s.embeddingStatus == "" || s.embeddingStatus == EmbeddingStatusActive {
 		return
 	}
-	if _, warned := s.embeddingWarnedSessions.LoadOrStore(sessionID, true); warned {
+	s.embeddingWarnedMu.Lock()
+	if _, seen := s.embeddingWarnedSessions[sessionID]; seen {
+		s.embeddingWarnedMu.Unlock()
 		return
 	}
+	s.embeddingWarnedSessions[sessionID] = struct{}{}
+	s.embeddingWarnedOrder = append(s.embeddingWarnedOrder, sessionID)
+	if len(s.embeddingWarnedOrder) > maxEmbeddingWarnedSessions {
+		drop := s.embeddingWarnedOrder[0]
+		s.embeddingWarnedOrder = s.embeddingWarnedOrder[1:]
+		delete(s.embeddingWarnedSessions, drop)
+	}
+	s.embeddingWarnedMu.Unlock()
 	var msg string
 	switch s.embeddingStatus {
 	case EmbeddingStatusDisabled:

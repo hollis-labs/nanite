@@ -41,7 +41,24 @@ type Slot struct {
 	CacheKey   string // SHA-256 hex of Content
 	Priority   int    // compaction priority: lower = keep longer
 	MaxTokens  int    // budget ceiling (0 = dynamic)
+	Compactable bool  // false = pipeline never modifies this slot (system, agent, rules)
 	Flags      SlotFlags
+}
+
+// DefaultCompactable returns the default compactability per slot. System,
+// Agent, and Rules survive compaction so the model never loses identity,
+// instructions, or policy mid-conversation.
+func DefaultCompactable() map[string]bool {
+	return map[string]bool{
+		SlotSystem:       false,
+		SlotMemory:       true,
+		SlotAgent:        false,
+		SlotRules:        false,
+		SlotTools:        true,
+		SlotSession:      true,
+		SlotContext:      true,
+		SlotConversation: true,
+	}
 }
 
 // SlotFlags carry per-slot signals consumed by the compaction and

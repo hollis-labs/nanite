@@ -42,12 +42,14 @@ func NewContextWindow(providerWindowSize int, estimator TokenEstimator) *Context
 	budget := int(float64(providerWindowSize) * BudgetFraction)
 
 	budgets := DefaultBudgets()
+	compactable := DefaultCompactable()
 	slots := make(map[string]*Slot, len(SlotOrder))
 	for i, name := range SlotOrder {
 		slots[name] = &Slot{
-			Name:      name,
-			Priority:  i, // lower index = lower priority number = keep longer
-			MaxTokens: budgets[name],
+			Name:        name,
+			Priority:    i, // lower index = lower priority number = keep longer
+			MaxTokens:   budgets[name],
+			Compactable: compactable[name],
 		}
 	}
 

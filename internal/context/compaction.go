@@ -108,7 +108,7 @@ func (p *CompactionPipeline) refreshConversationSlot() {
 
 func stageDropEnrichment(ctx context.Context, p *CompactionPipeline) (bool, error) {
 	slot := p.Window.Slot(SlotContext)
-	if slot == nil || slot.Content == "" {
+	if slot == nil || slot.Content == "" || !slot.Compactable {
 		return false, nil
 	}
 	savedTokens := slot.TokenCount
@@ -123,6 +123,9 @@ func stageDropEnrichment(ctx context.Context, p *CompactionPipeline) (bool, erro
 func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, error) {
 	if p.Summarizer == nil {
 		slog.Warn("compaction: no summarizer configured, skipping summary stage")
+		return false, nil
+	}
+	if conv := p.Window.Slot(SlotConversation); conv != nil && !conv.Compactable {
 		return false, nil
 	}
 	msgs := p.ConversationMessages

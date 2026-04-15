@@ -346,10 +346,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			slog.Debug("chat-service: tool-use iteration",
 				"iter", ls.iteration, "tools", len(tools), "messages", len(chatMessages),
 				"tokens", breakdown.Total, "ceiling", breakdown.Ceiling)
-			provCh, err = prov.StreamChatWithTools(provCtx, systemPrompt, chatMessages, model, tools)
-		} else {
-			provCh, err = prov.StreamChat(provCtx, systemPrompt, chatMessages, model)
 		}
+		provCh, err = prov.StreamChat(provCtx, provider.ChatRequest{
+			SystemPrompt: systemPrompt,
+			Messages:     chatMessages,
+			Model:        model,
+			Tools:        tools,
+		})
 		if err != nil {
 			provSpan.RecordError(err)
 			provSpan.SetStatus(codes.Error, err.Error())
@@ -691,10 +694,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		return
 	}
 
-	// Prune old tool messages.
-	if err := s.context.PruneAfterTurn(ctx, sessionID); err != nil {
-		slog.Warn("chat-service: prune after turn failed", "err", err)
-	}
+	// PruneAfterTurn retired in Phase 3 S3a — slot compaction supersedes.
+	// The ContextService interface method remains for one release so out-of-tree
+	// callers don't break; removal is a follow-up.
 
 	// Record token usage.
 	if finalUsage != nil && (finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0) {
@@ -1024,7 +1026,7 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 	}
 
 	correctionMsgs := []provider.ChatMessage{{Role: "user", Content: correction}}
-	retryCh, err := prov.StreamChat(retryCtx, "", correctionMsgs, model)
+	retryCh, err := prov.StreamChat(retryCtx, provider.ChatRequest{Messages: correctionMsgs, Model: model})
 	if err != nil {
 		slog.Warn("chat-service: envelope retry stream error", "err", err)
 		return nil
@@ -1065,7 +1067,7 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 	}
 
 	start := time.Now()
-	title, err := prov.Complete(context.Background(), prompt, msgs, s.utilityModel)
+	title, err := prov.Complete(context.Background(), provider.ChatRequest{SystemPrompt: prompt, Messages: msgs, Model: s.utilityModel})
 	duration := time.Since(start)
 	s.recordUtilityMetrics(sessionID, "autoTitle", duration, err)
 
@@ -1113,7 +1115,7 @@ func (s *chatServiceImpl) autoTags(sessionID string) {
 	tagMsgs := []provider.ChatMessage{{Role: "user", Content: sb.String()}}
 
 	start := time.Now()
-	raw, err := prov.Complete(context.Background(), prompt, tagMsgs, s.utilityModel)
+	raw, err := prov.Complete(context.Background(), provider.ChatRequest{SystemPrompt: prompt, Messages: tagMsgs, Model: s.utilityModel})
 	duration := time.Since(start)
 	s.recordUtilityMetrics(sessionID, "autoTags", duration, err)
 

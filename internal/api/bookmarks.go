@@ -176,7 +176,7 @@ func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	title, err := prov.Complete(ctx, prompt, msgs, a.Services.UtilityModel)
+	title, err := prov.Complete(ctx, provider.ChatRequest{SystemPrompt: prompt, Messages: msgs, Model: a.Services.UtilityModel})
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "autotitle failed: "+err.Error())
 		return

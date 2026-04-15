@@ -125,41 +125,15 @@ func EstimateTokens(text string) int {
 	return n
 }
 
-// PruneAfterTurn compacts old tool results in the message history.
-// Tool-role messages older than 2 turns from the end with content longer
-// than 500 chars are replaced with a structured compaction marker.
+// PruneAfterTurn is retired in Phase 3 S3a. The destructive per-turn DB
+// rewrite has been superseded by the in-memory slot compaction pipeline at
+// internal/context/CompactionPipeline. Callers should no longer rely on
+// database-level compaction; message.content rows are the append-only
+// source of truth going forward. This method is preserved as a no-op with
+// a deprecation log for one release cycle and will be deleted next.
 func (cb *ContextClient) PruneAfterTurn(sessionID string) error {
-	messages, err := cb.Store.ListMessages(sessionID, 1000)
-	if err != nil {
-		return err
-	}
-
-	if len(messages) <= 3 {
-		return nil
-	}
-
-	// Keep last 2 turns (4 messages: 2 user + 2 assistant).
-	cutoff := len(messages) - 4
-	if cutoff < 0 {
-		cutoff = 0
-	}
-
-	compacted := 0
-	for i := 0; i < cutoff; i++ {
-		m := messages[i]
-		if m.Role == "tool" && !m.IsCompacted && len(m.Content) > 500 {
-			marker := fmt.Sprintf("[compacted: tool output, %d chars]", len(m.Content))
-			if err := cb.Store.UpdateMessageContent(m.ID, marker, true); err != nil {
-				slog.Warn("broker: failed to compact message", "id", m.ID, "err", err)
-				continue
-			}
-			compacted++
-		}
-	}
-
-	if compacted > 0 {
-		slog.Info("broker: compacted tool messages", "count", compacted, "session_id", sessionID)
-	}
+	slog.Warn("broker: PruneAfterTurn is deprecated (slot compaction supersedes); no-op",
+		"session_id", sessionID)
 	return nil
 }
 

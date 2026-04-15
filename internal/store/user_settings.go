@@ -83,14 +83,14 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	}
 
 	us := &UserSettings{
-		DefaultProvider:     provider,
-		DefaultModel:        model,
-		DefaultAgent:        agent,
-		UtilityProvider:     utilProvider,
-		UtilityModel:        utilModel,
-		ToolCallDisplayMode: toolMode,
-		ToolStreamBehavior:  toolStreamBehavior,
-		ToolDrawerRetention: toolDrawerRetention,
+		DefaultProvider:      provider,
+		DefaultModel:         model,
+		DefaultAgent:         agent,
+		UtilityProvider:      utilProvider,
+		UtilityModel:         utilModel,
+		ToolCallDisplayMode:  toolMode,
+		ToolStreamBehavior:   toolStreamBehavior,
+		ToolDrawerRetention:  toolDrawerRetention,
 		DeveloperMode:        devMode,
 		RecoverMode:          recoverMode,
 		TaskBackend:          taskBackend,
@@ -164,6 +164,9 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	contextBudgetPct := us.ContextBudgetPct
 	if contextBudgetPct <= 0 {
 		contextBudgetPct = 0.80
+	}
+	if contextBudgetPct > 1.0 {
+		contextBudgetPct = 1.0
 	}
 	compactionStrategy := us.CompactionStrategy
 	if compactionStrategy == "" {

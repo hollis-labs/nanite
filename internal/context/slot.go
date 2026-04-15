@@ -35,14 +35,14 @@ var SlotOrder = []string{
 // region of the context window. Slots are the unit of caching,
 // compaction, and budget accounting.
 type Slot struct {
-	Name       string
-	Content    string
-	TokenCount int
-	CacheKey   string // SHA-256 hex of Content
-	Priority   int    // compaction priority: lower = keep longer
-	MaxTokens  int    // budget ceiling (0 = dynamic)
-	Compactable bool  // false = pipeline never modifies this slot (system, agent, rules)
-	Flags      SlotFlags
+	Name        string
+	Content     string
+	TokenCount  int
+	CacheKey    string // SHA-256 hex of Content
+	Priority    int    // compaction priority: lower = keep longer
+	MaxTokens   int    // budget ceiling (0 = dynamic)
+	Compactable bool   // false = pipeline never modifies this slot (system, agent, rules)
+	Flags       SlotFlags
 }
 
 // DefaultCompactable returns the default compactability per slot. System,

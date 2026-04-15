@@ -145,25 +145,6 @@ func BuildKBEnvelope(searchResult string) string {
 	return string(data)
 }
 
-// BuildTicketConfirmationEnvelope wraps ticket JSON as a ticket-confirmation envelope.
-func BuildTicketConfirmationEnvelope(ticketJSON string) string {
-	var ticket map[string]any
-	if err := json.Unmarshal([]byte(ticketJSON), &ticket); err != nil {
-		return ""
-	}
-	env := map[string]any{
-		"kind":    "envelope",
-		"version": 1,
-		"type":    "ticket-confirmation",
-		"data":    map[string]any{"ticket": ticket},
-	}
-	data, err := json.Marshal(env)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
 // envelopePattern matches fenced code blocks with volon-envelope or nanite-envelope language tags.
 var envelopePattern = regexp.MustCompile("(?s)```(?:volon-envelope|nanite-envelope)\\s*\n(.*?)```")
 

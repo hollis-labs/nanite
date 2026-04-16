@@ -2,9 +2,11 @@
 // first-class agent-to-agent and agent-to-user message primitive.
 //
 // This package replaces the former `internal/store/a2a.go` +
-// `internal/service/a2a/*` split. The public Go types use "Message"
-// vocabulary; the on-disk tables remain named `a2a_messages` and
-// `session_handoffs` (table rename is deferred as a BLG chore).
+// `internal/service/a2a/*` split. The public Go types, the on-disk
+// `agent_messages` table (renamed from `a2a_messages` by migration
+// 018; the `agent_` prefix distinguishes from the session-chat
+// `messages` table), and the `session_handoffs` table all use a
+// consistent "message" vocabulary.
 //
 // The Store interface is shaped after the Nexus messaging reference
 // impl (~/Projects-apps/nexus/messaging) with one adaptation: nanite

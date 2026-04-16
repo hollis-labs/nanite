@@ -28,9 +28,12 @@ type Memory struct {
 
 // RecallOpts configures memory recall.
 type RecallOpts struct {
-	Namespaces    []string // Conduit-format namespaces (e.g. "user/x/memory")
-	Ranking       string   // "activation" (default), "chronological", "similarity"
-	Query         string   // raw query text — required when Ranking == "similarity"
+	Namespaces []string // Conduit-format namespaces (e.g. "user/x/memory")
+	// Ranking selects the recall mode. Accepts: "activation", "chronological",
+	// "similarity", "relevance", or "" (empty). Empty triggers Conduit's smart
+	// default: "relevance" when Query is non-empty, else "activation".
+	Ranking       string
+	Query         string   // raw query text — required for "similarity" / "relevance"
 	Limit         int      // max results (default 20)
 	MinConfidence float64  // minimum confidence threshold
 	Origins       []string // filter by origin
@@ -96,14 +99,28 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 		return nil, fmt.Errorf("memory service: no memory store configured")
 	}
 
-	ranking := conduitMemory.RankingActivation
+	// Map caller string → Conduit Ranking. Empty passes through empty so
+	// Conduit's smart default (relevance-when-query, else activation) fires.
+	var ranking conduitMemory.Ranking
 	switch opts.Ranking {
+	case "activation":
+		ranking = conduitMemory.RankingActivation
 	case "chronological":
 		ranking = conduitMemory.RankingChronological
 	case "similarity":
 		ranking = conduitMemory.RankingSimilarity
-	case "activation", "":
-		ranking = conduitMemory.RankingActivation
+	case "relevance":
+		// Vanta v0.4.0 ships RankingRelevance in internal/memory but forgot
+		// to re-export the constant in the public memory package. The string
+		// literal is the stable wire value and Conduit's internal switch
+		// compares by string. Replace with conduitMemory.RankingRelevance
+		// once Vanta publishes the export (BLG-worthy patch release).
+		ranking = conduitMemory.Ranking("relevance")
+	case "":
+		// leave as "" — Conduit resolves to relevance (when Query != "") or activation.
+	default:
+		slog.Warn("memory: unknown ranking; falling through to Conduit smart default",
+			"requested", opts.Ranking)
 	}
 
 	limit := opts.Limit
@@ -131,8 +148,9 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 		conduitMemory.StatusCanonical,
 	}
 
-	if ranking == conduitMemory.RankingSimilarity && opts.Query == "" {
-		slog.Warn("memory: similarity recall without query text — results will be degenerate",
+	if (ranking == conduitMemory.RankingSimilarity || ranking == conduitMemory.Ranking("relevance")) && opts.Query == "" {
+		slog.Warn("memory: query-required ranking without query text — results will be degenerate",
+			"ranking", string(ranking),
 			"namespaces", opts.Namespaces)
 	}
 

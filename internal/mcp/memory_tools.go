@@ -212,6 +212,11 @@ func (mt *MemoryToolsTransport) callMemoryRecall(ctx context.Context, args map[s
 		return errorResult("memory service not configured"), nil
 	}
 
+	query, _ := args["query"].(string)
+	if query == "" {
+		return errorResult("query is required"), nil
+	}
+
 	scope, _ := args["scope"].(string)
 	if scope == "" {
 		scope = "all"
@@ -261,9 +266,12 @@ func (mt *MemoryToolsTransport) callMemoryRecall(ctx context.Context, args map[s
 
 	opts := memory.RecallOpts{
 		Namespaces: namespaces,
-		Ranking:    "activation",
-		Limit:      limit,
-		Tags:       tags,
+		// Empty Ranking triggers Conduit's smart default: relevance (hybrid
+		// BM25+cosine) when Query is set, else activation. The MCP tool
+		// always takes a query, so in practice this resolves to relevance.
+		Query: query,
+		Limit: limit,
+		Tags:  tags,
 	}
 
 	memories, err := mt.Memory.Recall(ctx, opts)

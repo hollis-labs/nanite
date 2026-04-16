@@ -115,6 +115,19 @@ func (s *Store) migrate() error {
 				if isDDLIdempotent && strings.Contains(err.Error(), "no such column") {
 					continue
 				}
+				// ALTER TABLE ... RENAME TO is idempotent if the rename already
+				// happened. Two error shapes indicate this:
+				//   - "no such table: <src>" — source already renamed away.
+				//   - "already another table ... <dst>" — destination exists.
+				// Swallow both so migrations can re-run on every boot cleanly
+				// (no schema_migrations table in this codebase).
+				if strings.Contains(upper, "ALTER TABLE") && strings.Contains(upper, "RENAME TO") {
+					msg := err.Error()
+					if strings.Contains(msg, "no such table") ||
+						strings.Contains(msg, "already another table") {
+						continue
+					}
+				}
 				return fmt.Errorf("exec migration statement: %w\nSQL: %s", err, stmt)
 			}
 		}

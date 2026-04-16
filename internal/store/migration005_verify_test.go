@@ -19,18 +19,21 @@ func TestMigration005_MessagingSessionScoping(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Verify old columns are gone.
-	a2aCols := tableColumns(t, db, "a2a_messages")
+	// Verify old columns are gone. Table was renamed from a2a_messages to
+	// agent_messages by migration 018, so columns are inspected on the new
+	// name here — the session-scoping changes from migration 005 persist
+	// through the rename.
+	agentMsgCols := tableColumns(t, db, "agent_messages")
 	for _, col := range []string{"from_agent", "to_agent"} {
-		if a2aCols[col] {
-			t.Errorf("column %q should have been dropped from a2a_messages", col)
+		if agentMsgCols[col] {
+			t.Errorf("column %q should have been dropped from agent_messages", col)
 		}
 	}
 
 	// Verify new session-scoped columns exist.
 	for _, col := range []string{"from_session_id", "from_agent_id", "to_session_id", "to_agent_id"} {
-		if !a2aCols[col] {
-			t.Errorf("expected column %q in a2a_messages, not found", col)
+		if !agentMsgCols[col] {
+			t.Errorf("expected column %q in agent_messages, not found", col)
 		}
 	}
 
@@ -42,7 +45,7 @@ func TestMigration005_MessagingSessionScoping(t *testing.T) {
 		}
 	}
 
-	t.Logf("a2a_messages columns: %v", keys(a2aCols))
+	t.Logf("agent_messages columns: %v", keys(agentMsgCols))
 	t.Logf("session_handoffs columns: %v", keys(handoffCols))
 }
 

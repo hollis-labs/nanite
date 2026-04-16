@@ -1,6 +1,6 @@
 # Messaging subsystem
 
-Nanite's first-class agent-to-agent and agent-to-user message primitive. Introduced in Phase 3 Session 7 as a rebuild of the former `a2a` subsystem — same underlying tables (`a2a_messages`, `session_handoffs`), new Go surface, new HTTP / MCP / CLI names.
+Nanite's first-class agent-to-agent and agent-to-user message primitive. Introduced in Phase 3 Session 7 as a rebuild of the former `a2a` subsystem — new Go surface + HTTP / MCP / CLI names, and (migration 018) the `a2a_messages` table was renamed to `agent_messages`. The `session_handoffs` table name was already neutral and is unchanged.
 
 Package: `internal/messaging/` (+ `internal/subagent/` for the inline subagent spawn flow).
 
@@ -10,8 +10,8 @@ Three orthogonal axes describe any message. The naming distinction is deliberate
 
 | Axis | Values | Purpose | Column |
 |---|---|---|---|
-| **Channel** | `chat`, `inbox`, `alert` | Transport bucket. Controls delivery semantics — `chat` is synchronous in-session traffic, `inbox` is async polled work, `alert` is an agent-triggered one-off ("report ready") delivered as toast + inbox entry. | `a2a_messages.channel` |
-| **Kind** | `request`, `reply`, `notification`, `handoff` | Wire type. Signals what shape of payload rides on the message and how receivers should react. `notification` is the default when the caller does not specify. | `a2a_messages.kind` |
+| **Channel** | `chat`, `inbox`, `alert` | Transport bucket. Controls delivery semantics — `chat` is synchronous in-session traffic, `inbox` is async polled work, `alert` is an agent-triggered one-off ("report ready") delivered as toast + inbox entry. | `agent_messages.channel` |
+| **Kind** | `request`, `reply`, `notification`, `handoff` | Wire type. Signals what shape of payload rides on the message and how receivers should react. `notification` is the default when the caller does not specify. | `agent_messages.kind` |
 | **EnvelopeType** (S5) | `message-request`, `message-reply`, `message-notification`, `message-handoff`, and many non-messaging shapes like `proposal-card`, `collect-data`, etc. | UI content shape. Lives in `config/envelopes.yaml`. A message whose `kind=request` typically rides an `envelope_type=message-request` shape but this isn't a hard coupling — content shapes are owned by the S5 envelope registry, not the messaging layer. |
 
 Channel is POLICY not code in MVP — the CHECK constraint bounds the set of acceptable values, but what to send on which channel is a convention (not enforced by the application layer). See §Channel-usage-policy below.
@@ -33,7 +33,7 @@ type Store interface {
 }
 ```
 
-The `SQLiteStore` is the only implementation; backed by the `a2a_messages` table (kept under its legacy name as a BLG chore — see docs/messaging-upgrade-path.md).
+The `SQLiteStore` is the only implementation; backed by the `agent_messages` table (renamed from the legacy `a2a_messages` by migration 018; the `agent_` prefix avoids collision with the separate session-chat `messages` table).
 
 ## Service layer
 

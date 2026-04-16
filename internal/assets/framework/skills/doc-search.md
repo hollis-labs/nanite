@@ -32,14 +32,14 @@ Parse the user's input for query text and optional filters.
 
 ### If query text is provided → Semantic Search
 
-Use `mcp__cortex__context_rag_query` with:
+Use `mcp__vanta__context_rag_query` with:
 - query: the search text
 - namespace: `{project}/docs` if --project given, otherwise `*/docs`
 - limit: from --limit or default 5
 
 ### If only filters, no query text → Structured Query
 
-Use `mcp__cortex__context_typed_view` with:
+Use `mcp__vanta__context_typed_view` with:
 - namespaces: `{project}/docs` if --project given, otherwise `*/docs`
 - types: mapped from --type to Conduit type (same mapping as doc-note)
 - status: from --status if given

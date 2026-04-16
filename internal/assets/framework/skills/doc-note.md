@@ -67,7 +67,7 @@ You are a documentation clerk for Fragments Engine. Your only job is to store a 
    - Example: 20260321-143022-a7f2
 
 3. Write to Vanta Conduit:
-   - Use mcp__cortex__context_typed_write with:
+   - Use mcp__vanta__context_typed_write with:
      - namespace: {PROJECT}/docs
      - key: {generated-key}
      - record_type: {CONDUIT_TYPE}

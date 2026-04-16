@@ -7,8 +7,8 @@ Parse $ARGUMENTS for:
 - --status: filter by lifecycle (draft, reviewed, canonical, deprecated). Default: all non-deprecated
 - --limit: max results. Default: 5
 
-If query text is provided, use mcp__cortex__context_rag_query for semantic search.
-If only filters (no query), use mcp__cortex__context_typed_view for structured query.
+If query text is provided, use mcp__vanta__context_rag_query for semantic search.
+If only filters (no query), use mcp__vanta__context_typed_view for structured query.
 
 Namespace pattern: {project}/docs (or */docs if no --project)
 

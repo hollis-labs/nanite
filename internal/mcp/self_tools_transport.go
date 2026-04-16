@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 // TodoStoreInterface is the subset of store.Store needed by todo/plan MCP tools.
@@ -45,6 +46,8 @@ type SelfToolsTransport struct {
 	TodoStore       TodoStoreInterface // nil-safe; set after construction
 	// Messaging is set post-construction from the container; nil-safe.
 	Messaging *messaging.Service
+	// Subagent is set post-construction from the container; nil-safe.
+	Subagent *subagent.Service
 }
 
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
@@ -137,6 +140,12 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callHandoffApprove(ctx, args)
 	case "nanite_handoff_reject":
 		return st.callHandoffReject(ctx, args)
+	case "nanite_spawn_subagent":
+		return st.callSpawnSubagent(ctx, args)
+	case "nanite_subagent_status":
+		return st.callSubagentStatus(ctx, args)
+	case "nanite_subagent_cancel":
+		return st.callSubagentCancel(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -1051,6 +1060,64 @@ func (st *SelfToolsTransport) callHandoffReject(ctx context.Context, args map[st
 		return errorResult(fmt.Sprintf("handoff reject: %v", err)), nil
 	}
 	return textResult("rejected"), nil
+}
+
+// --- subagent handlers (T9) ---
+
+// callSpawnSubagent handles nanite_spawn_subagent. Happy-path: all
+// three modes auto-approve for MVP; interactive approval is a
+// follow-up (T9.2). The spawn returns a runID the caller can poll
+// via nanite_subagent_status or observe via the reply message
+// posted back to the parent session on completion.
+func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Subagent == nil {
+		return errorResult("subagent service not configured"), nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
+	defer cancel()
+	req := subagent.SpawnRequest{
+		ParentSessionID: strArg(args, "parent_session_id", ""),
+		ParentAgentID:   strArg(args, "parent_agent_id", ""),
+		Role:            strArg(args, "role", ""),
+		Prompt:          strArg(args, "prompt", ""),
+		Mode:            strArg(args, "mode", "sync"),
+		InputsJSON:      strArg(args, "inputs_json", ""),
+		TimeoutSeconds:  intArg(args, "timeout_seconds", 0),
+	}
+	id, err := st.Subagent.Spawn(ctx, req)
+	if err != nil {
+		return errorResult(fmt.Sprintf("spawn subagent: %v", err)), nil
+	}
+	return textResult(fmt.Sprintf("spawned: %s", id)), nil
+}
+
+func (st *SelfToolsTransport) callSubagentStatus(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Subagent == nil {
+		return errorResult("subagent service not configured"), nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
+	defer cancel()
+	run, err := st.Subagent.Status(ctx, strArg(args, "run_id", ""))
+	if err != nil {
+		return errorResult(fmt.Sprintf("subagent status: %v", err)), nil
+	}
+	data, err := json.Marshal(run)
+	if err != nil {
+		return errorResult(fmt.Sprintf("subagent status marshal: %v", err)), nil
+	}
+	return textResult(string(data)), nil
+}
+
+func (st *SelfToolsTransport) callSubagentCancel(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Subagent == nil {
+		return errorResult("subagent service not configured"), nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
+	defer cancel()
+	if err := st.Subagent.Cancel(ctx, strArg(args, "run_id", "")); err != nil {
+		return errorResult(fmt.Sprintf("subagent cancel: %v", err)), nil
+	}
+	return textResult("cancelled"), nil
 }
 
 // --- helpers ---

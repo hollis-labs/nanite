@@ -23,6 +23,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
@@ -56,6 +57,10 @@ type Container struct {
 	// Messaging service — validates, persists, and fans out
 	// agent-to-agent messages plus handoff state transitions.
 	Messaging *messaging.Service
+
+	// Subagent service — inline spawn / status / cancel for
+	// primary-agent-dispatched child agents (T9).
+	Subagent *subagent.Service
 
 	// Internal todo/plan system.
 	Todos TodoService
@@ -333,6 +338,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// drops silently, which is the intended MVP behavior.
 	messagingSvc.SetNotificationSink(&messagingStreamSink{streams: streams})
 
+	// T9: subagent spawn service. Uses the EchoRunner stub for MVP
+	// — the real chat-engine-backed runner is a follow-up. The
+	// messaging service is passed as the reply poster so subagent
+	// completions deliver a reply message to the parent session.
+	subagentSvc := subagent.NewService(cfg.Store.DB, subagent.EchoRunner{}, messagingSvc)
+	slog.Info("service container: subagent service enabled (stub runner)")
+
 	contextClient := chat.NewContextClient(cfg.Store)
 
 	// --- ContextBroker: universal context retrieval ---
@@ -534,6 +546,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Plugins:             cfg.Plugins,
 		MCP:                 cfg.MCP,
 		Messaging:           messagingSvc,
+		Subagent:            subagentSvc,
 		Todos:               todos,
 		Conduit:             conduitInstance,
 		Memory:              memorySvc,

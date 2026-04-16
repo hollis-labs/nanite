@@ -281,6 +281,7 @@ func cmdServe(args []string) {
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
 	selfTools.Messaging = container.Messaging
+	selfTools.Subagent = container.Subagent
 
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {

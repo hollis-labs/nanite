@@ -472,5 +472,45 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"handoff_id"},
 			},
 		},
+		// --- Subagent spawn (S7 T9) ---
+		{
+			Name:        "nanite_spawn_subagent",
+			Description: "Spawn an inline subagent to handle a subtask. Sync mode blocks until the subagent returns; async/api modes return immediately and the subagent's reply lands in the parent session (inbox channel for async, chat channel for api). On completion a message of kind=reply is delivered back to parent_agent_id.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"parent_session_id": map[string]any{"type": "string", "description": "Session the spawning agent is in; the reply lands here."},
+					"parent_agent_id":   map[string]any{"type": "string", "description": "Agent ID of the spawning (primary) agent."},
+					"role":              map[string]any{"type": "string", "description": "Role slug (e.g. 'file-backend') the subagent is booted with."},
+					"prompt":            map[string]any{"type": "string", "description": "Initial prompt for the subagent."},
+					"mode":              map[string]any{"type": "string", "enum": []string{"sync", "async", "api"}, "description": "sync blocks; async returns immediately and replies via inbox; api returns immediately and replies via chat."},
+					"inputs_json":       map[string]any{"type": "string", "description": "JSON blob of caller-specified inputs passed to the subagent."},
+					"timeout_seconds":   map[string]any{"type": "integer", "description": "Wall-time cap for the subagent runner. 0 uses default (300)."},
+				},
+				"required": []string{"parent_session_id", "parent_agent_id", "role", "prompt"},
+			},
+		},
+		{
+			Name:        "nanite_subagent_status",
+			Description: "Return the current lifecycle state of a spawned subagent run.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"run_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"run_id"},
+			},
+		},
+		{
+			Name:        "nanite_subagent_cancel",
+			Description: "Cancel an in-flight subagent run. Idempotent; already-terminal runs are no-ops.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"run_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"run_id"},
+			},
+		},
 	}
 }

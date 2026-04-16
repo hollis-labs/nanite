@@ -113,9 +113,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Assemble context ---
-	systemPrompt, chatMessages, err := s.context.AssembleContext(ctx, session, agent, mode, workspace)
+	systemPrompt, chatMessages, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, ch)
 	if err != nil {
-		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context", map[string]interface{}{"raw": err.Error()})
 		return
 	}
 	// --- Resolve model ---
@@ -233,6 +232,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			s.pluginHost.EmitAgentLoaded(sessionID, agent.ID, agent.Name, fmt.Sprintf("%d", agent.Version))
 		})
 	}
+
+	// --- Pre-loop budget / compaction gate (pt3 T4 hook) ---
+	chatMessages, tools = s.enforceBudgetOrCompact(ctx, sessionID, systemPrompt, chatMessages, tools, ch)
 
 	// --- Loop state ---
 	toolNames := make([]string, len(tools))
@@ -776,6 +778,51 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // ---------------------------------------------------------------------------
 // Private helper methods
 // ---------------------------------------------------------------------------
+
+// assembleTurnContext resolves the system prompt and message history for the
+// current turn. Today it delegates to the legacy flat-prompt path; S3a-pt3
+// swaps the body to slot-based assembly (context.ContextWindow + SlotBlocks)
+// and emits slot_changed envelopes on enrichment transitions. On error it
+// writes an error event to the stream and returns; callers should just
+// `return` on non-nil err without emitting again.
+//
+// Landing zone for Phase 3 S3a-pt3 T3.
+func (s *chatServiceImpl) assembleTurnContext(
+	ctx context.Context,
+	session *store.Session,
+	agent *store.AgentProfile,
+	mode *store.AgentMode,
+	workspace *store.Workspace,
+	ch chan chat.StreamEvent,
+) (string, []provider.ChatMessage, error) {
+	systemPrompt, chatMessages, err := s.context.AssembleContext(ctx, session, agent, mode, workspace)
+	if err != nil {
+		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
+			map[string]interface{}{"raw": err.Error()})
+		return "", nil, err
+	}
+	return systemPrompt, chatMessages, nil
+}
+
+// enforceBudgetOrCompact is the pre-loop token gate. Today it's a
+// pass-through — the per-iteration EnforceTokenBudget call inside the tool
+// loop handles the hard ceiling. S3a-pt3 T4 wires context.CompactionPipeline
+// here so slot-based assembly can summarize the conversation before the
+// destructive ceiling cascade runs, and emit slot_changed envelopes when
+// stages fire.
+//
+// Landing zone for Phase 3 S3a-pt3 T4.
+func (s *chatServiceImpl) enforceBudgetOrCompact(
+	ctx context.Context,
+	sessionID string,
+	systemPrompt string,
+	chatMessages []provider.ChatMessage,
+	tools []provider.ToolDefinition,
+	ch chan chat.StreamEvent,
+) ([]provider.ChatMessage, []provider.ToolDefinition) {
+	// No-op today. CompactionPipeline lands here in S3a-pt3.
+	return chatMessages, tools
+}
 
 // handleRequestTools processes a request_tools meta-tool call within the tool loop.
 func (s *chatServiceImpl) handleRequestTools(

@@ -218,6 +218,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	chatMessages := slotResult.Messages
 	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
 
+	// S3b — emit a tools-variant slot_changed envelope when the classifier
+	// transitioned this turn's Tools slot between pointer / full / partial.
+	emitToolSlotChangedIfNeeded(ch, slotResult.ToolCache)
+
 	// Emit context.assembled event after tool selection and filters are applied.
 	if s.pluginHost != nil {
 		safego.Go(ctx, "service.chat.emit.context-assembled", func() {
@@ -798,6 +802,45 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // ---------------------------------------------------------------------------
 // Private helper methods
 // ---------------------------------------------------------------------------
+
+// emitToolSlotChangedIfNeeded translates a ToolCacheOutcome into a
+// slot_changed envelope when the Tools slot's hydration state flipped. The
+// zero-transition case (e.g., pointer → pointer across two ambient chat
+// turns) produces no event so the user sees a card only when something
+// actually changed.
+func emitToolSlotChangedIfNeeded(ch chan chat.StreamEvent, outcome *ToolCacheOutcome) {
+	if outcome == nil || ch == nil {
+		return
+	}
+	if outcome.Prev == outcome.Next {
+		return
+	}
+	payload := chat.SlotChangedV1{
+		Slot:         ctxpkg.SlotTools,
+		Change:       toolSlotChangeKindFor(outcome.Next),
+		Reasoning:    outcome.Reasoning,
+		TokensBefore: outcome.TokensBefore,
+		TokensAfter:  outcome.TokensAfter,
+		Categories:   append([]string(nil), outcome.Categories...),
+		HelpLink:     chat.SlotChangedHelpLinkTools,
+	}
+	if err := chat.EmitSlotChangedEvent(ch, payload); err != nil {
+		slog.Warn("chat-service: tool slot_changed emit failed", "err", err)
+	}
+}
+
+// toolSlotChangeKindFor maps a HydrationState to the matching envelope
+// change kind.
+func toolSlotChangeKindFor(s HydrationState) string {
+	switch s {
+	case StateFull:
+		return chat.SlotChangeHydrated
+	case StatePartial:
+		return chat.SlotChangePartialHydrated
+	default:
+		return chat.SlotChangeDehydrated
+	}
+}
 
 // assembleTurnContext drives slot-based context assembly for the current turn.
 // It builds a *SlotAssemblyResult that carries the slot blocks (for

@@ -4,6 +4,20 @@ Nanite stores long-term memory via an embedded Vanta Conduit instance. Memory
 revisions are persisted regardless of configuration; the embedder only affects
 whether **similarity-based recall** is available during context assembly.
 
+## Ranking modes
+
+`memory.RecallOpts.Ranking` accepts:
+
+| Value | Conduit behavior |
+|---|---|
+| `"activation"` | Recency × access-count weighted score. Good for "what's been hot lately." No query needed. |
+| `"chronological"` | Newest-first by `written_at`. No query needed. |
+| `"similarity"` | Cosine against the query embedding. Requires `Query` and a configured embedder. Degenerate without both. |
+| `"relevance"` | **Hybrid** (Vanta v0.4.0+): BM25 (FTS5) ∪ cosine fused via Reciprocal Rank Fusion, multiplied by status / origin / confidence / recency / activation modifiers. Works with just BM25 if no embedder is configured — fresh memories surface immediately instead of waiting on the async embedder. Requires `Query`. |
+| `""` (empty) | Smart default — Conduit resolves to `relevance` when `Query` is non-empty, else `activation`. |
+
+The **context-broker memory source** (`internal/contextbroker/source_memory.go`) uses `relevance` — the primary beneficiary of hybrid recall during auto-assembled context. The **MCP `nanite_memory_recall` tool** passes empty Ranking with the agent-supplied query; Conduit's smart default picks `relevance`. HTTP `/api/memories?tags=...` and `nanite_memory_list`-style queries still use `activation` since they're browses, not queries.
+
 ## Configuration (Settings → Memory)
 
 | Field | Values |

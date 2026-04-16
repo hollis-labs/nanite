@@ -133,6 +133,99 @@ func TestMemoryRecall_DefaultValues(t *testing.T) {
 	}
 }
 
+// TestMemoryRecall_RankingRelevance verifies the hybrid-relevance ranking
+// (Vanta v0.4.0+) is accepted via its string name and passes through to
+// Conduit without error. Doesn't assert ranking quality — that's covered
+// by Vanta's own regression gate.
+func TestMemoryRecall_RankingRelevance(t *testing.T) {
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
+
+	if err := svc.Store(context.Background(), Memory{
+		Namespace: "user/chrispian/memory",
+		MemoryKey: "user_prefers_go",
+		Summary:   "User prefers Go for backend work",
+		Origin:    "user",
+		Trigger:   "explicit",
+		SessionID: "test-relevance",
+	}); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Sanity: activation ranking sees the memory.
+	baseline, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{"user/chrispian/memory"},
+		Ranking:    "activation",
+		Limit:      5,
+	})
+	if err != nil {
+		t.Fatalf("activation baseline: %v", err)
+	}
+	if len(baseline) != 1 {
+		t.Fatalf("activation baseline: expected 1, got %d", len(baseline))
+	}
+
+	// Relevance ranking with a query that overlaps the stored summary.
+	results, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{"user/chrispian/memory"},
+		Ranking:    "relevance",
+		Query:      "prefers backend",
+		Limit:      5,
+	})
+	if err != nil {
+		t.Fatalf("relevance recall: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 memory, got %d — relevance arm may need closer term overlap", len(results))
+	}
+}
+
+// TestMemoryRecall_EmptyRankingSmartDefault verifies that empty Ranking is
+// passed through to Conduit (not normalized to activation), so Conduit's
+// smart default can pick relevance-when-query / activation-when-no-query.
+func TestMemoryRecall_EmptyRankingSmartDefault(t *testing.T) {
+	c, cleanup := newTestConduit(t)
+	defer cleanup()
+	svc := NewService(c.MemoryStore())
+
+	if err := svc.Store(context.Background(), Memory{
+		Namespace: "user/chrispian/memory",
+		MemoryKey: "deploy_on_friday",
+		Summary:   "Never deploy on Friday",
+		Origin:    "feedback",
+		Trigger:   "explicit",
+		SessionID: "test-smart-default",
+	}); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Empty ranking + query — Conduit resolves to relevance.
+	withQuery, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{"user/chrispian/memory"},
+		Query:      "deploy Friday",
+		Limit:      5,
+	})
+	if err != nil {
+		t.Fatalf("smart-default recall with query: %v", err)
+	}
+	if len(withQuery) != 1 {
+		t.Fatalf("expected 1 memory with query, got %d", len(withQuery))
+	}
+
+	// Empty ranking + no query — Conduit resolves to activation.
+	noQuery, err := svc.Recall(context.Background(), RecallOpts{
+		Namespaces: []string{"user/chrispian/memory"},
+		Limit:      5,
+	})
+	if err != nil {
+		t.Fatalf("smart-default recall no query: %v", err)
+	}
+	if len(noQuery) != 1 {
+		t.Fatalf("expected 1 memory with no query, got %d", len(noQuery))
+	}
+}
+
 func TestMemoryGet(t *testing.T) {
 	c, cleanup := newTestConduit(t)
 	defer cleanup()

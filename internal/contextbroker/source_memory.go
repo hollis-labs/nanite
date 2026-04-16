@@ -64,7 +64,7 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 
 	opts := memory.RecallOpts{
 		Namespaces:    namespaces,
-		Ranking:       "similarity",
+		Ranking:       "relevance", // hybrid BM25 + cosine via RRF (Vanta v0.4.0+)
 		Query:         intent.QueryText,
 		Limit:         30,
 		MinConfidence: 0.4,

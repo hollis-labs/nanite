@@ -1,5 +1,5 @@
 import { AlertTriangle, Key, MessageSquare, Puzzle, RefreshCw, Settings, X } from "lucide-react";
-import { TaskThreadPanel } from "@/components/a2a/TaskThreadPanel";
+import { TaskThreadPanel } from "@/components/messaging/TaskThreadPanel";
 import { useChat } from "@/hooks/useChat";
 import { useTaskContext } from "@/hooks/useTaskContext";
 import { useAppStore } from "@/stores/useAppStore";

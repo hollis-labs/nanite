@@ -1,5 +1,5 @@
 import type {
-  A2AMessage,
+  AgentMessage,
   AgentModeProfile,
   AgentProfile,
   ApprovalDecision,
@@ -1279,7 +1279,7 @@ export const api = {
   // Distinct from session-chat `sendMessage` above — that's for user
   // chat turns; these target the agent-to-agent messaging primitive.
 
-  getMessagingInbox: async (agentId: string, status?: string): Promise<A2AMessage[]> => {
+  getMessagingInbox: async (agentId: string, status?: string): Promise<AgentMessage[]> => {
     const params = new URLSearchParams({ agent_id: agentId });
     if (status) params.set("status", status);
     const res = await fetch(`${API_BASE}/messaging/inbox?${params}`);
@@ -1287,7 +1287,7 @@ export const api = {
     return res.json();
   },
 
-  getMessagingThread: async (threadId: string): Promise<A2AMessage[]> => {
+  getMessagingThread: async (threadId: string): Promise<AgentMessage[]> => {
     const res = await fetch(`${API_BASE}/messaging/threads/${encodeURIComponent(threadId)}`);
     if (!res.ok) throw new Error(`Failed to get thread: ${res.status}`);
     return res.json();
@@ -1302,7 +1302,7 @@ export const api = {
     thread_id?: string;
     reply_to?: string;
     priority?: number;
-  }): Promise<A2AMessage> => {
+  }): Promise<AgentMessage> => {
     const res = await fetch(`${API_BASE}/messaging/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

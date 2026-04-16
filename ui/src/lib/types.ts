@@ -505,23 +505,23 @@ export interface EnvelopeApprovalRequest {
   details?: string;
 }
 
-// --- A2A Messages ---
+// --- Agent messages ---
 
-export type A2AMessageType = "message" | "help_request" | "directive" | "status_update" | "handoff";
-export type A2AMessageStatus = "unread" | "read" | "acknowledged" | "resolved";
+export type AgentMessageType = "message" | "help_request" | "directive" | "status_update" | "handoff";
+export type AgentMessageStatus = "unread" | "read" | "acknowledged" | "resolved";
 
-export interface A2AMessage {
+export interface AgentMessage {
   id: string;
   from_agent: string;
   to_agent: string;
   thread_id: string | null;
   reply_to: string | null;
-  type: A2AMessageType;
+  type: AgentMessageType;
   subject: string | null;
   body: string;
   metadata: string;
   priority: number;
-  status: A2AMessageStatus;
+  status: AgentMessageStatus;
   created_at: string;
   read_at: string | null;
   resolved_at: string | null;

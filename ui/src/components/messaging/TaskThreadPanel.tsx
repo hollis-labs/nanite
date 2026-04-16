@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MessageSquare, Send, X, ChevronRight } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { A2AMessage } from '@/lib/types'
+import type { AgentMessage } from '@/lib/types'
 
 interface TaskThreadPanelProps {
   taskId: string
@@ -11,7 +11,7 @@ interface TaskThreadPanelProps {
 }
 
 /**
- * TaskThreadPanel renders an A2A message thread for a given Engine task.
+ * TaskThreadPanel renders an agent message thread for a given Engine task.
  * It appears as a narrow side panel beside the chat when the session is
  * task-scoped (context_type === 'task').
  */
@@ -23,7 +23,7 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
   const queryClient = useQueryClient()
 
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['a2a-thread', taskId],
+    queryKey: ['messaging-thread', taskId],
     queryFn: () => api.getMessagingThread(taskId),
     refetchInterval: 10_000,
     enabled: open,
@@ -51,9 +51,9 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
       })
       setBody('')
       // Refetch thread immediately after send
-      await queryClient.invalidateQueries({ queryKey: ['a2a-thread', taskId] })
+      await queryClient.invalidateQueries({ queryKey: ['messaging-thread', taskId] })
     } catch (err) {
-      console.error('Failed to send A2A message:', err)
+      console.error('Failed to send agent message:', err)
     } finally {
       setSending(false)
     }
@@ -150,7 +150,7 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
 
 // --- Individual message bubble ---
 
-function ThreadMessage({ message }: { message: A2AMessage }) {
+function ThreadMessage({ message }: { message: AgentMessage }) {
   const ts = formatTimestamp(message.created_at)
 
   return (

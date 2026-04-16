@@ -24,7 +24,7 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
 
   const { data: messages = [], isLoading } = useQuery({
     queryKey: ['a2a-thread', taskId],
-    queryFn: () => api.getA2AThread(taskId),
+    queryFn: () => api.getMessagingThread(taskId),
     refetchInterval: 10_000,
     enabled: open,
   })
@@ -42,7 +42,7 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
 
     setSending(true)
     try {
-      await api.sendA2AMessage({
+      await api.sendAgentMessage({
         from_agent: 'user',
         to_agent: 'thread',
         thread_id: taskId,

@@ -103,10 +103,10 @@ func (s *Store) GetAgent(id string) (*AgentProfile, error) {
 // CreateAgent inserts a new agent profile.
 func (s *Store) CreateAgent(a *AgentProfile) error {
 	if a.Slug == "user" {
-		return fmt.Errorf("agent slug %q is reserved (A2A user sentinel)", a.Slug)
+		return fmt.Errorf("agent slug %q is reserved (messaging user sentinel)", a.Slug)
 	}
 	if a.ID == "user" {
-		return fmt.Errorf("agent id %q is reserved (A2A user sentinel)", a.ID)
+		return fmt.Errorf("agent id %q is reserved (messaging user sentinel)", a.ID)
 	}
 	if a.ID == "" {
 		a.ID = uuid.New().String()

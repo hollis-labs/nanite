@@ -1275,23 +1275,25 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to set source key: ${res.status}`);
   },
 
-  // --- A2A Messaging ---
+  // --- Messaging subsystem (agent-to-agent + agent-to-user) ---
+  // Distinct from session-chat `sendMessage` above — that's for user
+  // chat turns; these target the agent-to-agent messaging primitive.
 
-  getA2AInbox: async (agentId: string, status?: string): Promise<A2AMessage[]> => {
+  getMessagingInbox: async (agentId: string, status?: string): Promise<A2AMessage[]> => {
     const params = new URLSearchParams({ agent_id: agentId });
     if (status) params.set("status", status);
-    const res = await fetch(`${API_BASE}/a2a/inbox?${params}`);
-    if (!res.ok) throw new Error(`Failed to get A2A inbox: ${res.status}`);
+    const res = await fetch(`${API_BASE}/messaging/inbox?${params}`);
+    if (!res.ok) throw new Error(`Failed to get messaging inbox: ${res.status}`);
     return res.json();
   },
 
-  getA2AThread: async (threadId: string): Promise<A2AMessage[]> => {
-    const res = await fetch(`${API_BASE}/a2a/threads/${encodeURIComponent(threadId)}`);
-    if (!res.ok) throw new Error(`Failed to get A2A thread: ${res.status}`);
+  getMessagingThread: async (threadId: string): Promise<A2AMessage[]> => {
+    const res = await fetch(`${API_BASE}/messaging/threads/${encodeURIComponent(threadId)}`);
+    if (!res.ok) throw new Error(`Failed to get thread: ${res.status}`);
     return res.json();
   },
 
-  sendA2AMessage: async (data: {
+  sendAgentMessage: async (data: {
     from_agent: string;
     to_agent: string;
     subject?: string;
@@ -1301,32 +1303,32 @@ export const api = {
     reply_to?: string;
     priority?: number;
   }): Promise<A2AMessage> => {
-    const res = await fetch(`${API_BASE}/a2a/messages`, {
+    const res = await fetch(`${API_BASE}/messaging/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to send A2A message: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to send agent message: ${res.status}`);
     return res.json();
   },
 
-  ackA2AMessage: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/a2a/messages/${encodeURIComponent(id)}/ack`, {
+  ackAgentMessage: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/ack`, {
       method: "PUT",
     });
-    if (!res.ok) throw new Error(`Failed to acknowledge A2A message: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to acknowledge agent message: ${res.status}`);
   },
 
-  resolveA2AMessage: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/a2a/messages/${encodeURIComponent(id)}/resolve`, {
+  resolveAgentMessage: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/resolve`, {
       method: "PUT",
     });
-    if (!res.ok) throw new Error(`Failed to resolve A2A message: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to resolve agent message: ${res.status}`);
   },
 
-  getA2AUnreadCount: async (agentId: string): Promise<{ count: number }> => {
-    const res = await fetch(`${API_BASE}/a2a/unread?agent_id=${encodeURIComponent(agentId)}`);
-    if (!res.ok) throw new Error(`Failed to get A2A unread count: ${res.status}`);
+  getAgentMessageUnreadCount: async (agentId: string): Promise<{ count: number }> => {
+    const res = await fetch(`${API_BASE}/messaging/unread?agent_id=${encodeURIComponent(agentId)}`);
+    if (!res.ok) throw new Error(`Failed to get unread count: ${res.status}`);
     return res.json();
   },
 

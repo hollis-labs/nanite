@@ -13,7 +13,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/crossapp"
-	a2a "github.com/hollis-labs/nanite/internal/service/a2a"
+	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -43,8 +43,8 @@ type SelfToolsTransport struct {
 	BuilderRegistry *builders.Registry
 	BuilderSessions *builders.SessionManager
 	TodoStore       TodoStoreInterface // nil-safe; set after construction
-	// A2A is set post-construction from the container's A2A service; nil-safe.
-	A2A *a2a.Service
+	// Messaging is set post-construction from the container; nil-safe.
+	Messaging *messaging.Service
 }
 
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
@@ -61,14 +61,14 @@ func (st *SelfToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	return selfToolDefinitions(), nil
 }
 
-// a2aCallTimeout bounds every unary a2a tool call so a wedged store or
+// messageCallTimeout bounds every unary messaging tool call so a wedged store or
 // slow subscriber can't hang the MCP handler forever. Subscription
 // handlers use the parent ctx directly (lifetime-scoped) instead of this
-// timeout — see callA2ASubscribe when it lands.
-const a2aCallTimeout = 30 * time.Second
+// timeout — see callMessageSubscribe when it lands.
+const messageCallTimeout = 30 * time.Second
 
 // CallTool dispatches to the appropriate handler based on tool name.
-// The request ctx is threaded to every handler; a2a handlers further
+// The request ctx is threaded to every handler; messaging handlers further
 // wrap it with a 30s timeout so a wedged service call cannot block the
 // MCP stream indefinitely (F06).
 func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args map[string]any) (*ToolResult, error) {
@@ -119,24 +119,24 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callInstallRollback(args)
 	case "nanite_install_diff":
 		return st.callInstallDiff(args)
-	case "nanite_a2a_send":
-		return st.callA2ASend(ctx, args)
-	case "nanite_a2a_inbox":
-		return st.callA2AInbox(ctx, args)
-	case "nanite_a2a_thread":
-		return st.callA2AThread(ctx, args)
-	case "nanite_a2a_ack":
-		return st.callA2AAck(ctx, args)
-	case "nanite_a2a_resolve":
-		return st.callA2AResolve(ctx, args)
-	case "nanite_a2a_catch_up":
-		return st.callA2ACatchUp(ctx, args)
-	case "nanite_a2a_handoff_request":
-		return st.callA2AHandoffRequest(ctx, args)
-	case "nanite_a2a_handoff_approve":
-		return st.callA2AHandoffApprove(ctx, args)
-	case "nanite_a2a_handoff_reject":
-		return st.callA2AHandoffReject(ctx, args)
+	case "nanite_message_send":
+		return st.callMessageSend(ctx, args)
+	case "nanite_message_inbox":
+		return st.callMessageInbox(ctx, args)
+	case "nanite_message_thread":
+		return st.callMessageThread(ctx, args)
+	case "nanite_message_ack":
+		return st.callMessageAck(ctx, args)
+	case "nanite_message_resolve":
+		return st.callMessageResolve(ctx, args)
+	case "nanite_message_catch_up":
+		return st.callMessageCatchUp(ctx, args)
+	case "nanite_handoff_request":
+		return st.callHandoffRequest(ctx, args)
+	case "nanite_handoff_approve":
+		return st.callHandoffApprove(ctx, args)
+	case "nanite_handoff_reject":
+		return st.callHandoffReject(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -849,19 +849,19 @@ func (st *SelfToolsTransport) callInstallDiff(args map[string]any) (*ToolResult,
 	return textResult("install diff not yet implemented"), nil
 }
 
-// --- A2A messaging handlers ---
+// --- Messaging handlers ---
 //
-// The nanite_a2a_subscribe tool is intentionally not registered here: it
+// The nanite_message_subscribe tool is intentionally not registered here: it
 // requires streaming support in mcp-go or a custom server-side handler,
 // which is deferred to a follow-up task. See Task 10 notes.
 
-func (st *SelfToolsTransport) callA2ASend(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callMessageSend(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
-	msg := &store.A2AMessage{
+	msg := messaging.SendInput{
 		FromSessionID: strArg(args, "from_session_id", ""),
 		FromAgentID:   strArg(args, "from_agent_id", ""),
 		ToSessionID:   strArg(args, "to_session_id", ""),
@@ -871,18 +871,18 @@ func (st *SelfToolsTransport) callA2ASend(ctx context.Context, args map[string]a
 		Type:          strArg(args, "type", ""),
 		ReplyTo:       strArg(args, "reply_to", ""),
 	}
-	out, err := st.A2A.SendMessage(ctx, msg)
+	out, err := st.Messaging.SendMessage(ctx, msg)
 	if err != nil {
-		return errorResult(fmt.Sprintf("a2a send: %v", err)), nil
+		return errorResult(fmt.Sprintf("message send: %v", err)), nil
 	}
 	return textResult(fmt.Sprintf("sent: %s", out.ID)), nil
 }
 
-func (st *SelfToolsTransport) callA2AInbox(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callMessageInbox(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
 	// MVP caller identity: the MCP boundary has no out-of-band caller
 	// channel yet, so the same (session_id, agent_id) args serve as both
@@ -891,7 +891,7 @@ func (st *SelfToolsTransport) callA2AInbox(ctx context.Context, args map[string]
 	// misconfigured caller that passes different values.
 	sessionID := strArg(args, "session_id", "")
 	agentID := strArg(args, "agent_id", "")
-	inbox, err := st.A2A.Inbox(
+	inbox, err := st.Messaging.Inbox(
 		ctx,
 		sessionID,
 		agentID,
@@ -900,111 +900,111 @@ func (st *SelfToolsTransport) callA2AInbox(ctx context.Context, args map[string]
 		agentID,
 	)
 	if err != nil {
-		return errorResult(fmt.Sprintf("a2a inbox: %v", err)), nil
+		return errorResult(fmt.Sprintf("message inbox: %v", err)), nil
 	}
 	if inbox == nil {
-		inbox = []store.A2AMessage{}
+		inbox = []messaging.Message{}
 	}
 	data, err := json.Marshal(inbox)
 	if err != nil {
-		return errorResult(fmt.Sprintf("a2a inbox marshal: %v", err)), nil
+		return errorResult(fmt.Sprintf("messaging inbox marshal: %v", err)), nil
 	}
 	return textResult(string(data)), nil
 }
 
-func (st *SelfToolsTransport) callA2AThread(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callMessageThread(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
-	messages, err := st.A2A.Thread(
+	messages, err := st.Messaging.Thread(
 		ctx,
 		strArg(args, "thread_id", ""),
 		strArg(args, "session_id", ""),
 		strArg(args, "agent_id", ""),
 	)
 	if err != nil {
-		return errorResult(fmt.Sprintf("a2a thread: %v", err)), nil
+		return errorResult(fmt.Sprintf("message thread: %v", err)), nil
 	}
 	if messages == nil {
-		messages = []store.A2AMessage{}
+		messages = []messaging.Message{}
 	}
 	data, err := json.Marshal(messages)
 	if err != nil {
-		return errorResult(fmt.Sprintf("a2a thread marshal: %v", err)), nil
+		return errorResult(fmt.Sprintf("messaging thread marshal: %v", err)), nil
 	}
 	return textResult(string(data)), nil
 }
 
-func (st *SelfToolsTransport) callA2AAck(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callMessageAck(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
-	if err := st.A2A.Ack(
+	if err := st.Messaging.Ack(
 		ctx,
 		strArg(args, "session_id", ""),
 		strArg(args, "agent_id", ""),
 		strArg(args, "message_id", ""),
 	); err != nil {
-		return errorResult(fmt.Sprintf("a2a ack: %v", err)), nil
+		return errorResult(fmt.Sprintf("message ack: %v", err)), nil
 	}
 	return textResult("acked"), nil
 }
 
-func (st *SelfToolsTransport) callA2AResolve(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callMessageResolve(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
-	if err := st.A2A.Resolve(
+	if err := st.Messaging.Resolve(
 		ctx,
 		strArg(args, "session_id", ""),
 		strArg(args, "agent_id", ""),
 		strArg(args, "message_id", ""),
 	); err != nil {
-		return errorResult(fmt.Sprintf("a2a resolve: %v", err)), nil
+		return errorResult(fmt.Sprintf("message resolve: %v", err)), nil
 	}
 	return textResult("resolved"), nil
 }
 
-func (st *SelfToolsTransport) callA2ACatchUp(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callMessageCatchUp(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
 	// intArg does not clamp; non-positive values are passed through to
 	// the service/store layers, which apply default-20 + store cap.
 	limit := intArg(args, "limit", 20)
-	messages, err := st.A2A.RecentForSession(
+	messages, err := st.Messaging.RecentForSession(
 		ctx,
 		strArg(args, "session_id", ""),
 		limit,
 	)
 	if err != nil {
-		return errorResult(fmt.Sprintf("a2a catch_up: %v", err)), nil
+		return errorResult(fmt.Sprintf("message catch_up: %v", err)), nil
 	}
 	if messages == nil {
-		messages = []store.A2AMessage{}
+		messages = []messaging.Message{}
 	}
 	data, err := json.Marshal(messages)
 	if err != nil {
-		return errorResult(fmt.Sprintf("a2a catch_up marshal: %v", err)), nil
+		return errorResult(fmt.Sprintf("messaging catch_up marshal: %v", err)), nil
 	}
 	return textResult(string(data)), nil
 }
 
-func (st *SelfToolsTransport) callA2AHandoffRequest(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callHandoffRequest(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
-	id, err := st.A2A.RequestHandoff(
+	id, err := st.Messaging.RequestHandoff(
 		ctx,
 		strArg(args, "session_id", ""),
 		strArg(args, "from_agent_id", ""),
@@ -1012,35 +1012,35 @@ func (st *SelfToolsTransport) callA2AHandoffRequest(ctx context.Context, args ma
 		strArg(args, "requested_by", ""),
 	)
 	if err != nil {
-		return errorResult(fmt.Sprintf("a2a handoff request: %v", err)), nil
+		return errorResult(fmt.Sprintf("handoff request: %v", err)), nil
 	}
 	return textResult("handoff requested: " + id), nil
 }
 
-func (st *SelfToolsTransport) callA2AHandoffApprove(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callHandoffApprove(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
-	if err := st.A2A.ApproveHandoff(ctx, strArg(args, "handoff_id", "")); err != nil {
-		return errorResult(fmt.Sprintf("a2a handoff approve: %v", err)), nil
+	if err := st.Messaging.ApproveHandoff(ctx, strArg(args, "handoff_id", "")); err != nil {
+		return errorResult(fmt.Sprintf("handoff approve: %v", err)), nil
 	}
 	return textResult("approved"), nil
 }
 
-func (st *SelfToolsTransport) callA2AHandoffReject(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	if st.A2A == nil {
-		return errorResult("a2a service not configured"), nil
+func (st *SelfToolsTransport) callHandoffReject(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Messaging == nil {
+		return errorResult("messaging service not configured"), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, a2aCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
-	if err := st.A2A.RejectHandoff(
+	if err := st.Messaging.RejectHandoff(
 		ctx,
 		strArg(args, "handoff_id", ""),
 		strArg(args, "reason", ""),
 	); err != nil {
-		return errorResult(fmt.Sprintf("a2a handoff reject: %v", err)), nil
+		return errorResult(fmt.Sprintf("handoff reject: %v", err)), nil
 	}
 	return textResult("rejected"), nil
 }

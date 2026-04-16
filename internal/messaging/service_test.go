@@ -1,4 +1,4 @@
-package a2a
+package messaging
 
 import (
 	"context"
@@ -10,10 +10,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// newTestA2AStore spins up a fresh file-backed SQLite store in a temp dir
-// and runs all embedded migrations. A file-backed DB (rather than :memory:)
-// avoids any surprise around shared-cache semantics on modernc.org/sqlite.
-func newTestA2AStore(t *testing.T) *store.Store {
+// newTestMessagingStore spins up a fresh file-backed SQLite store in a
+// temp dir, runs all embedded migrations, and returns a SQLiteStore
+// wrapping its DB plus the parent *store.Store for tests that need to
+// seed rows directly. A file-backed DB (rather than :memory:) avoids
+// any surprise around shared-cache semantics on modernc.org/sqlite.
+func newTestMessagingStore(t *testing.T) (*SQLiteStore, *store.Store) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := store.New(dbPath)
@@ -21,23 +23,25 @@ func newTestA2AStore(t *testing.T) *store.Store {
 		t.Fatalf("store.New: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	return s
+	return NewSQLiteStore(s.DB), s
 }
 
-// newTestService wires up a Service backed by a fresh store and a fakeResolver
-// that knows the supplied agent IDs. Returns both so tests can seed rows
-// directly through the store when they want to bypass validation.
-func newTestService(t *testing.T, knownAgents ...string) (*Service, *store.Store) {
+// newTestService wires up a Service backed by a fresh messaging store
+// and a fakeResolver that knows the supplied agent IDs. Returns the
+// Service plus the SQLiteStore (for message seeding) plus the parent
+// *store.Store (for session / session-agent seeding needed by handoff
+// tests).
+func newTestService(t *testing.T, knownAgents ...string) (*Service, *SQLiteStore, *store.Store) {
 	t.Helper()
-	s := newTestA2AStore(t)
+	ms, parent := newTestMessagingStore(t)
 	r := newFakeResolver(knownAgents...)
-	return NewService(s, r), s
+	return NewService(ms, parent.DB, r), ms, parent
 }
 
-// baseMessage builds a minimal valid A2AMessage for tests that only care
+// baseInput builds a minimal valid SendInput for tests that only care
 // about the validation or routing behavior.
-func baseMessage(from, to string) *store.A2AMessage {
-	return &store.A2AMessage{
+func baseInput(from, to string) SendInput {
+	return SendInput{
 		FromSessionID: "sess-1",
 		FromAgentID:   from,
 		ToSessionID:   "sess-1",
@@ -47,8 +51,8 @@ func baseMessage(from, to string) *store.A2AMessage {
 }
 
 func TestService_SendMessage_RejectsUnknownTo(t *testing.T) {
-	svc, _ := newTestService(t, "file-backend")
-	msg := baseMessage("file-backend", "file-nonexistent")
+	svc, _, _ := newTestService(t, "file-backend")
+	msg := baseInput("file-backend", "file-nonexistent")
 
 	_, err := svc.SendMessage(context.Background(), msg)
 	if err == nil {
@@ -60,8 +64,8 @@ func TestService_SendMessage_RejectsUnknownTo(t *testing.T) {
 }
 
 func TestService_SendMessage_RejectsUnknownFrom(t *testing.T) {
-	svc, _ := newTestService(t, "file-backend")
-	msg := baseMessage("file-nonexistent", "file-backend")
+	svc, _, _ := newTestService(t, "file-backend")
+	msg := baseInput("file-nonexistent", "file-backend")
 
 	_, err := svc.SendMessage(context.Background(), msg)
 	if err == nil {
@@ -75,10 +79,10 @@ func TestService_SendMessage_RejectsUnknownFrom(t *testing.T) {
 func TestService_SendMessage_AcceptsUserSentinel(t *testing.T) {
 	// Resolver knows file-backend. The user sentinel short-circuits validation,
 	// so it must work on either side of the send.
-	svc, _ := newTestService(t, "file-backend")
+	svc, _, _ := newTestService(t, "file-backend")
 
 	// user -> file-backend
-	msg1 := baseMessage(UserSentinel, "file-backend")
+	msg1 := baseInput(UserSentinel, "file-backend")
 	out, err := svc.SendMessage(context.Background(), msg1)
 	if err != nil {
 		t.Fatalf("user -> file-backend: unexpected error: %v", err)
@@ -91,7 +95,7 @@ func TestService_SendMessage_AcceptsUserSentinel(t *testing.T) {
 	}
 
 	// file-backend -> user
-	msg2 := baseMessage("file-backend", UserSentinel)
+	msg2 := baseInput("file-backend", UserSentinel)
 	out2, err := svc.SendMessage(context.Background(), msg2)
 	if err != nil {
 		t.Fatalf("file-backend -> user: unexpected error: %v", err)
@@ -102,29 +106,27 @@ func TestService_SendMessage_AcceptsUserSentinel(t *testing.T) {
 }
 
 func TestService_SendMessage_RequiresFields(t *testing.T) {
-	svc, _ := newTestService(t, "file-backend")
+	svc, _, _ := newTestService(t, "file-backend")
 
-	// nil message
-	if _, err := svc.SendMessage(context.Background(), nil); err == nil {
-		t.Error("expected error for nil message")
-	}
+	// SendInput is a value type — no nil case; an empty input trips
+	// the field validation below instead.
 
 	// missing FromSessionID
-	m := baseMessage("file-backend", UserSentinel)
+	m := baseInput("file-backend", UserSentinel)
 	m.FromSessionID = ""
 	if _, err := svc.SendMessage(context.Background(), m); err == nil || !strings.Contains(err.Error(), "from_session_id") {
 		t.Errorf("expected from_session_id error, got: %v", err)
 	}
 
 	// missing ToSessionID
-	m = baseMessage("file-backend", UserSentinel)
+	m = baseInput("file-backend", UserSentinel)
 	m.ToSessionID = ""
 	if _, err := svc.SendMessage(context.Background(), m); err == nil || !strings.Contains(err.Error(), "to_session_id") {
 		t.Errorf("expected to_session_id error, got: %v", err)
 	}
 
 	// missing Body
-	m = baseMessage("file-backend", UserSentinel)
+	m = baseInput("file-backend", UserSentinel)
 	m.Body = ""
 	if _, err := svc.SendMessage(context.Background(), m); err == nil || !strings.Contains(err.Error(), "body") {
 		t.Errorf("expected body error, got: %v", err)
@@ -132,12 +134,12 @@ func TestService_SendMessage_RequiresFields(t *testing.T) {
 }
 
 func TestService_Inbox(t *testing.T) {
-	svc, s := newTestService(t, "file-backend")
+	svc, s, _ := newTestService(t, "file-backend")
 
 	// Seed 2 messages directly via store (bypassing validation) so we can
 	// test the read path in isolation.
 	for i := 0; i < 2; i++ {
-		if _, err := s.SendA2AMessage(&store.A2AMessage{
+		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-other",
 			FromAgentID:   UserSentinel,
 			ToSessionID:   "sess-1",
@@ -158,13 +160,13 @@ func TestService_Inbox(t *testing.T) {
 }
 
 func TestService_Thread(t *testing.T) {
-	svc, s := newTestService(t, "file-backend")
+	svc, s, _ := newTestService(t, "file-backend")
 
-	// Seed 3 messages sharing a thread_id. The store's GetA2AThread query
+	// Seed 3 messages sharing a thread_id. The store's Thread query
 	// tiebreaks on rowid ASC so same-tick inserts remain deterministic.
 	threadID := "thread-xyz"
 	for i := 0; i < 3; i++ {
-		if _, err := s.SendA2AMessage(&store.A2AMessage{
+		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1",
 			FromAgentID:   UserSentinel,
 			ToSessionID:   "sess-1",
@@ -192,8 +194,8 @@ func TestService_Thread(t *testing.T) {
 }
 
 func TestService_Ack(t *testing.T) {
-	svc, s := newTestService(t, "file-backend")
-	seeded, err := s.SendA2AMessage(&store.A2AMessage{
+	svc, s, _ := newTestService(t, "file-backend")
+	seeded, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
 		FromAgentID:   UserSentinel,
 		ToSessionID:   "sess-1",
@@ -208,9 +210,9 @@ func TestService_Ack(t *testing.T) {
 		t.Fatalf("Ack: %v", err)
 	}
 
-	got, err := s.GetA2AMessage(seeded.ID)
+	got, err := s.Get(context.Background(), seeded.ID)
 	if err != nil {
-		t.Fatalf("GetA2AMessage: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
 	if got.Status != "read" {
 		t.Errorf("expected status=read, got %q", got.Status)
@@ -218,8 +220,8 @@ func TestService_Ack(t *testing.T) {
 }
 
 func TestService_Ack_RejectsUnknownAgent(t *testing.T) {
-	svc, s := newTestService(t, "file-backend")
-	seeded, err := s.SendA2AMessage(&store.A2AMessage{
+	svc, s, _ := newTestService(t, "file-backend")
+	seeded, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
 		FromAgentID:   UserSentinel,
 		ToSessionID:   "sess-1",
@@ -235,8 +237,8 @@ func TestService_Ack_RejectsUnknownAgent(t *testing.T) {
 }
 
 func TestService_Resolve(t *testing.T) {
-	svc, s := newTestService(t, "file-backend")
-	seeded, err := s.SendA2AMessage(&store.A2AMessage{
+	svc, s, _ := newTestService(t, "file-backend")
+	seeded, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
 		FromAgentID:   UserSentinel,
 		ToSessionID:   "sess-1",
@@ -251,9 +253,9 @@ func TestService_Resolve(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	got, err := s.GetA2AMessage(seeded.ID)
+	got, err := s.Get(context.Background(), seeded.ID)
 	if err != nil {
-		t.Fatalf("GetA2AMessage: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
 	if got.Status != "resolved" {
 		t.Errorf("expected status=resolved, got %q", got.Status)
@@ -261,12 +263,12 @@ func TestService_Resolve(t *testing.T) {
 }
 
 func TestService_RecentForSession(t *testing.T) {
-	svc, s := newTestService(t, "file-backend")
+	svc, s, _ := newTestService(t, "file-backend")
 
 	// Seed 4 messages in sess-1. Use the user sentinel on both sides so we
 	// don't rely on store agent rows existing.
 	for i := 0; i < 4; i++ {
-		if _, err := s.SendA2AMessage(&store.A2AMessage{
+		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1",
 			FromAgentID:   UserSentinel,
 			ToSessionID:   "sess-1",
@@ -302,8 +304,8 @@ func TestService_RecentForSession(t *testing.T) {
 func TestService_Ack_ForbidsNonRecipient(t *testing.T) {
 	// Resolver knows both agents so validation passes; ownership check
 	// is what must reject.
-	svc, s := newTestService(t, "file-backend", "file-frontend")
-	seeded, err := s.SendA2AMessage(&store.A2AMessage{
+	svc, s, _ := newTestService(t, "file-backend", "file-frontend")
+	seeded, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-1",
 		FromAgentID:   UserSentinel,
 		ToSessionID:   "sess-1",
@@ -328,7 +330,7 @@ func TestService_Ack_ForbidsNonRecipient(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Re-seed so we get a fresh unread msg each subtest.
-			fresh, err := s.SendA2AMessage(&store.A2AMessage{
+			fresh, err := s.Send(context.Background(), SendInput{
 				FromSessionID: "sess-1",
 				FromAgentID:   UserSentinel,
 				ToSessionID:   "sess-1",
@@ -353,7 +355,7 @@ func TestService_Ack_ForbidsNonRecipient(t *testing.T) {
 // TestService_Resolve_ForbidsNonRecipient covers F01 on Resolve — same
 // shape as Ack.
 func TestService_Resolve_ForbidsNonRecipient(t *testing.T) {
-	svc, s := newTestService(t, "file-backend", "file-frontend")
+	svc, s, _ := newTestService(t, "file-backend", "file-frontend")
 
 	cases := []struct {
 		name      string
@@ -367,7 +369,7 @@ func TestService_Resolve_ForbidsNonRecipient(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fresh, err := s.SendA2AMessage(&store.A2AMessage{
+			fresh, err := s.Send(context.Background(), SendInput{
 				FromSessionID: "sess-1",
 				FromAgentID:   UserSentinel,
 				ToSessionID:   "sess-1",
@@ -395,7 +397,7 @@ func TestService_Resolve_ForbidsNonRecipient(t *testing.T) {
 // only messages they are a participant of, and an unrelated agent sees
 // an empty slice (no existence leak).
 func TestService_Thread_FiltersByParticipant(t *testing.T) {
-	svc, s := newTestService(t, "file-backend", "file-frontend", "file-stranger")
+	svc, s, _ := newTestService(t, "file-backend", "file-frontend", "file-stranger")
 
 	threadID := "thread-participants"
 	// Two messages: backend→frontend, frontend→backend.
@@ -403,7 +405,7 @@ func TestService_Thread_FiltersByParticipant(t *testing.T) {
 		{"file-backend", "file-frontend"},
 		{"file-frontend", "file-backend"},
 	} {
-		if _, err := s.SendA2AMessage(&store.A2AMessage{
+		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1", FromAgentID: p.from,
 			ToSessionID: "sess-1", ToAgentID: p.to,
 			ThreadID: threadID, Body: "msg",
@@ -415,7 +417,7 @@ func TestService_Thread_FiltersByParticipant(t *testing.T) {
 	// A third message completely unrelated to backend/frontend — stranger
 	// as both sender and recipient in a different session — sharing the
 	// threadID. Neither backend nor frontend should see it.
-	if _, err := s.SendA2AMessage(&store.A2AMessage{
+	if _, err := s.Send(context.Background(), SendInput{
 		FromSessionID: "sess-2", FromAgentID: "file-stranger",
 		ToSessionID: "sess-2", ToAgentID: "file-stranger",
 		ThreadID: threadID, Body: "stranger-only",
@@ -454,7 +456,7 @@ func TestService_Thread_FiltersByParticipant(t *testing.T) {
 // (sessionID, agentID) target and (callerSessionID, callerAgentID)
 // returns ErrForbidden without touching the store.
 func TestService_Inbox_RequiresCallerMatch(t *testing.T) {
-	svc, _ := newTestService(t, "file-backend")
+	svc, _, _ := newTestService(t, "file-backend")
 
 	cases := []struct {
 		name          string
@@ -488,15 +490,15 @@ func TestService_Inbox_RequiresCallerMatch(t *testing.T) {
 // --- F05 Medium: RecentForSession limit cap + aligned defaults ---
 
 // TestService_RecentForSession_LimitCap covers F05. A caller asking for
-// 100000 rows gets clamped to MaxA2ARecentLimit; a caller asking for a
+// 100000 rows gets clamped to MaxRecentLimit; a caller asking for a
 // non-positive limit gets the default 20 (service and store agree).
 func TestService_RecentForSession_LimitCap(t *testing.T) {
-	svc, s := newTestService(t, "file-backend")
+	svc, s, _ := newTestService(t, "file-backend")
 
 	// Seed 150 messages so both cap (100) and default (20) paths can
 	// actually fill.
 	for i := 0; i < 150; i++ {
-		if _, err := s.SendA2AMessage(&store.A2AMessage{
+		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1",
 			FromAgentID:   UserSentinel,
 			ToSessionID:   "sess-1",
@@ -512,8 +514,8 @@ func TestService_RecentForSession_LimitCap(t *testing.T) {
 		limit     int
 		wantCount int
 	}{
-		{"huge limit clamped to MaxA2ARecentLimit", 100000, store.MaxA2ARecentLimit},
-		{"exactly at cap", store.MaxA2ARecentLimit, store.MaxA2ARecentLimit},
+		{"huge limit clamped to MaxRecentLimit", 100000, MaxRecentLimit},
+		{"exactly at cap", MaxRecentLimit, MaxRecentLimit},
 		{"under cap", 50, 50},
 		{"negative uses default 20", -1, 20},
 		{"zero uses default 20", 0, 20},
@@ -536,10 +538,10 @@ func TestService_RecentForSession_DefaultLimit(t *testing.T) {
 	// verify by seeding more than 20 messages and confirming exactly 20
 	// come back — proving the Service default (20), not the store's
 	// default (50), took effect.
-	svc, s := newTestService(t, "file-backend")
+	svc, s, _ := newTestService(t, "file-backend")
 
 	for i := 0; i < 25; i++ {
-		if _, err := s.SendA2AMessage(&store.A2AMessage{
+		if _, err := s.Send(context.Background(), SendInput{
 			FromSessionID: "sess-1",
 			FromAgentID:   UserSentinel,
 			ToSessionID:   "sess-1",

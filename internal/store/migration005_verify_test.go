@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestMigration005_A2ASessionScoping(t *testing.T) {
+func TestMigration005_MessagingSessionScoping(t *testing.T) {
 	dbPath := t.TempDir() + "/migration005test.db"
 	s, err := New(dbPath)
 	if err != nil {

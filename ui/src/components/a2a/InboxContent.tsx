@@ -85,19 +85,19 @@ export function InboxContent({ agentId }: InboxContentProps) {
 
   const { data: messages = [], isLoading } = useQuery({
     queryKey: ['a2a-inbox', effectiveAgentId, filter],
-    queryFn: () => api.getA2AInbox(effectiveAgentId, filter || undefined),
+    queryFn: () => api.getMessagingInbox(effectiveAgentId, filter || undefined),
     enabled: !!effectiveAgentId,
     refetchInterval: 30000,
   })
 
   const { data: threadMessages = [] } = useQuery({
     queryKey: ['a2a-thread', threadView],
-    queryFn: () => api.getA2AThread(threadView!),
+    queryFn: () => api.getMessagingThread(threadView!),
     enabled: !!threadView,
   })
 
   const ackMutation = useMutation({
-    mutationFn: api.ackA2AMessage,
+    mutationFn: api.ackAgentMessage,
     onSuccess: () => {
       addToast('Marked as read')
       void queryClient.invalidateQueries({ queryKey: ['a2a-inbox'] })
@@ -106,7 +106,7 @@ export function InboxContent({ agentId }: InboxContentProps) {
   })
 
   const resolveMutation = useMutation({
-    mutationFn: api.resolveA2AMessage,
+    mutationFn: api.resolveAgentMessage,
     onSuccess: () => {
       addToast('Message resolved')
       void queryClient.invalidateQueries({ queryKey: ['a2a-inbox'] })
@@ -115,7 +115,7 @@ export function InboxContent({ agentId }: InboxContentProps) {
   })
 
   const sendMutation = useMutation({
-    mutationFn: api.sendA2AMessage,
+    mutationFn: api.sendAgentMessage,
     onSuccess: () => {
       setReplyBody('')
       setReplyTo(null)

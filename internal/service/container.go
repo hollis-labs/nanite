@@ -21,9 +21,9 @@ import (
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
+	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/service/a2a"
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -53,9 +53,9 @@ type Container struct {
 	Plugins   *plugin.Host
 	MCP       *mcp.Manager
 
-	// A2A messaging service — validates, persists, and fans out
+	// Messaging service — validates, persists, and fans out
 	// agent-to-agent messages plus handoff state transitions.
-	A2A *a2a.Service
+	Messaging *messaging.Service
 
 	// Internal todo/plan system.
 	Todos TodoService
@@ -197,10 +197,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Overrides:  cfg.Store,
 	})
 
-	// A2A messaging service. Uses the AgentService as its resolver so both
-	// DB-backed and file-based agents validate uniformly.
-	a2aSvc := a2a.NewService(cfg.Store, agents)
-	slog.Info("service container: A2A service enabled")
+	// Messaging service. Uses the AgentService as its resolver so both
+	// DB-backed and file-based agents validate uniformly. Takes the
+	// SQLite-backed messaging Store plus the underlying *sql.DB so
+	// handoff transactions (which span session_handoffs +
+	// session_agents) can run as a single txn.
+	msgStore := messaging.NewSQLiteStore(cfg.Store.DB)
+	messagingSvc := messaging.NewService(msgStore, cfg.Store.DB, agents)
+	slog.Info("service container: messaging service enabled")
 
 	// Discover file-based skill definitions from all 5 priority locations.
 	skillDefs, err := skill.Discover(skill.DiscoverOptions{
@@ -520,7 +524,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Commands:            commands,
 		Plugins:             cfg.Plugins,
 		MCP:                 cfg.MCP,
-		A2A:                 a2aSvc,
+		Messaging:           messagingSvc,
 		Todos:               todos,
 		Conduit:             conduitInstance,
 		Memory:              memorySvc,
@@ -614,10 +618,10 @@ func (c *Container) Shutdown() {
 	if c.MCP != nil {
 		run("mcp", func() { c.MCP.Close() })
 	}
-	if c.A2A != nil {
-		run("a2a", func() {
-			if err := c.A2A.Close(); err != nil {
-				slog.Warn("shutdown: a2a close", "err", err)
+	if c.Messaging != nil {
+		run("messaging", func() {
+			if err := c.Messaging.Close(); err != nil {
+				slog.Warn("shutdown: messaging close", "err", err)
 			}
 		})
 	}

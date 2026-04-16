@@ -1,25 +1,23 @@
-// Package a2a — subscribe_test.go
+// Package messaging — subscribe_test.go
 //
 // Tests for the in-process pubsub that backs MCP streaming subscribers.
 // The pubsub has no replay buffer: only messages published AFTER a
 // subscription takes effect are delivered to that subscriber, and slow
 // subscribers are dropped on a full channel (buffer = 16).
-package a2a
+package messaging
 
 import (
 	"context"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // TestSubscribe_ReceivesNewMessage verifies that SubscribeSessionAgent
 // returns a channel which receives a matching message published after the
 // subscription is established.
 func TestSubscribe_ReceivesNewMessage(t *testing.T) {
-	svc, _ := newTestService(t, "file-a")
+	svc, _, _ := newTestService(t, "file-a")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -29,7 +27,7 @@ func TestSubscribe_ReceivesNewMessage(t *testing.T) {
 		t.Fatalf("SubscribeSessionAgent: %v", err)
 	}
 
-	msg := &store.A2AMessage{
+	msg := SendInput{
 		FromSessionID: "sess-1",
 		FromAgentID:   UserSentinel,
 		ToSessionID:   "sess-1",
@@ -67,7 +65,7 @@ func TestSubscribe_ReceivesNewMessage(t *testing.T) {
 // (sessionID, agentID) does not receive messages addressed to a different
 // (sessionID, agentID) pair.
 func TestSubscribe_IgnoresNonMatching(t *testing.T) {
-	svc, _ := newTestService(t, "file-a", "file-b")
+	svc, _, _ := newTestService(t, "file-a", "file-b")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -77,7 +75,7 @@ func TestSubscribe_IgnoresNonMatching(t *testing.T) {
 		t.Fatalf("SubscribeSessionAgent: %v", err)
 	}
 
-	if _, err := svc.SendMessage(context.Background(), &store.A2AMessage{
+	if _, err := svc.SendMessage(context.Background(), SendInput{
 		FromSessionID: "sess-1",
 		FromAgentID:   UserSentinel,
 		ToSessionID:   "sess-1",
@@ -99,11 +97,11 @@ func TestSubscribe_IgnoresNonMatching(t *testing.T) {
 // a message published before any subscription exists is dropped, and a
 // subsequent subscriber does not receive it.
 func TestSubscribe_NoReplayOnResubscribe(t *testing.T) {
-	svc, _ := newTestService(t, "file-a")
+	svc, _, _ := newTestService(t, "file-a")
 
 	// Publish BEFORE subscribing. There are zero subscribers, so this must
 	// be dropped by the pubsub.
-	if _, err := svc.SendMessage(context.Background(), &store.A2AMessage{
+	if _, err := svc.SendMessage(context.Background(), SendInput{
 		FromSessionID: "sess-1",
 		FromAgentID:   UserSentinel,
 		ToSessionID:   "sess-1",
@@ -137,7 +135,7 @@ func TestSubscribe_NoReplayOnResubscribe(t *testing.T) {
 // does not strand goroutines blocked on reads of a channel that will
 // never deliver again.
 func TestService_Close_DrainsSubscribers(t *testing.T) {
-	svc, _ := newTestService(t, "file-a", "file-b", "file-c")
+	svc, _, _ := newTestService(t, "file-a", "file-b", "file-c")
 
 	// Three independent subscriptions across two keys. Use separate
 	// ctxs so nothing is canceled when Close fires — only Close should
@@ -167,7 +165,7 @@ func TestService_Close_DrainsSubscribers(t *testing.T) {
 	// timeout to prove we don't block.
 	for _, tc := range []struct {
 		name string
-		ch   <-chan *store.A2AMessage
+		ch   <-chan *Message
 	}{{"a", chA}, {"b", chB}, {"c", chC}} {
 		t.Run(tc.name, func(t *testing.T) {
 			select {
@@ -200,7 +198,7 @@ func TestService_Close_DrainsSubscribers(t *testing.T) {
 // map and close its channel, so a handler that loses its MCP stream
 // doesn't strand a zombie entry.
 func TestSubscribe_CtxCancelReleasesSlot(t *testing.T) {
-	svc, _ := newTestService(t, "file-a")
+	svc, _, _ := newTestService(t, "file-a")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ch, err := svc.SubscribeSessionAgent(ctx, "sess-1", "file-a")
@@ -242,7 +240,7 @@ func TestSubscribe_CtxCancelReleasesSlot(t *testing.T) {
 // Before the fix this reliably panicked with "send on closed channel" under -race
 // within a few iterations.
 func TestSubscribe_PublishUnsubscribeRace(t *testing.T) {
-	svc, _ := newTestService(t, "file-a")
+	svc, _, _ := newTestService(t, "file-a")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 200; i++ {
@@ -255,7 +253,7 @@ func TestSubscribe_PublishUnsubscribeRace(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = svc.SendMessage(context.Background(), &store.A2AMessage{
+			_, _ = svc.SendMessage(context.Background(), SendInput{
 				FromSessionID: "sess-1",
 				FromAgentID:   UserSentinel,
 				ToSessionID:   "sess-1",

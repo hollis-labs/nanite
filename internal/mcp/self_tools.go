@@ -345,13 +345,13 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"project_dir"},
 			},
 		},
-		// --- A2A messaging tools ---
-		// nanite_a2a_subscribe is intentionally NOT registered here: it
+		// --- messaging tools ---
+		// nanite_message_subscribe is intentionally NOT registered here: it
 		// requires streaming support in mcp-go or a custom server-side
 		// handler, which is deferred to a follow-up task.
 		{
-			Name:        "nanite_a2a_send",
-			Description: "Send an A2A message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session. Set reply_to to the parent message ID to continue an existing thread.",
+			Name:        "nanite_message_send",
+			Description: "Send a message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session. Set reply_to to the parent message ID to continue an existing thread.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -368,8 +368,8 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_inbox",
-			Description: "Read the A2A inbox for (session_id, agent_id). Optional status filter.",
+			Name:        "nanite_message_inbox",
+			Description: "Read the messaging inbox for (session_id, agent_id). Optional status filter.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -381,7 +381,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_thread",
+			Name:        "nanite_message_thread",
 			Description: "Get all messages in a thread by thread_id.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -392,8 +392,8 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_ack",
-			Description: "Mark an A2A message as read.",
+			Name:        "nanite_message_ack",
+			Description: "Mark a message as read.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -405,8 +405,8 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_resolve",
-			Description: "Mark an A2A message as resolved.",
+			Name:        "nanite_message_resolve",
+			Description: "Mark a message as resolved.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -418,7 +418,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_catch_up",
+			Name:        "nanite_message_catch_up",
 			Description: "Get the last N messages for a session across both sides of the conversation. Used for handoff catch-up.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -430,7 +430,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_handoff_request",
+			Name:        "nanite_handoff_request",
 			Description: "Request a session handoff from one agent to another. Creates a pending row; user must approve.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -444,7 +444,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_handoff_approve",
+			Name:        "nanite_handoff_approve",
 			Description: "Approve a pending handoff. Atomically rebinds the session's primary agent and marks the handoff complete.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -455,7 +455,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_handoff_reject",
+			Name:        "nanite_handoff_reject",
 			Description: "Reject a pending handoff with a reason.",
 			InputSchema: map[string]any{
 				"type": "object",

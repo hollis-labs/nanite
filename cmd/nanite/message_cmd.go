@@ -13,18 +13,18 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/service"
-	a2asvc "github.com/hollis-labs/nanite/internal/service/a2a"
+	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// cmdA2A is the entry point for the `nanite a2a ...` command group. It
+// cmdMessage is the entry point for the `nanite message ...` command group. It
 // parses a single optional top-level flag (--db) that must appear before
-// the subcommand, opens the store, constructs a minimal A2A service, and
+// the subcommand, opens the store, constructs a minimal messaging service, and
 // dispatches to the matching sub-handler.
-func cmdA2A(args []string) {
+func cmdMessage(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s a2a [--db path] <send|inbox|thread|ack|resolve|catch-up|handoff>\n", brand.BinaryName)
+		fmt.Fprintf(os.Stderr, "usage: %s message [--db path] <send|inbox|thread|ack|resolve|catch-up|handoff>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 
@@ -38,7 +38,7 @@ func cmdA2A(args []string) {
 		remaining = args[2:]
 	}
 	if len(remaining) < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s a2a [--db path] <send|inbox|thread|ack|resolve|catch-up|handoff>\n", brand.BinaryName)
+		fmt.Fprintf(os.Stderr, "usage: %s message [--db path] <send|inbox|thread|ack|resolve|catch-up|handoff>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 
@@ -47,38 +47,38 @@ func cmdA2A(args []string) {
 
 	s, err := store.New(dbPath)
 	if err != nil {
-		slogx.Fatal("a2a: open db", "path", dbPath, "err", err)
+		slogx.Fatal("message: open db", "path", dbPath, "err", err)
 	}
 	defer s.Close()
 
-	svc, err := newA2AServiceForCLI(s)
+	svc, err := newMessagingServiceForCLI(s)
 	if err != nil {
-		slogx.Fatal("a2a: init service", "err", err)
+		slogx.Fatal("message: init service", "err", err)
 	}
 
 	switch sub {
 	case "send":
-		a2aSend(svc, rest)
+		messageSend(svc, rest)
 	case "inbox":
-		a2aInbox(svc, rest)
+		messageInbox(svc, rest)
 	case "thread":
-		a2aThread(svc, rest)
+		messageThread(svc, rest)
 	case "ack":
-		a2aAck(svc, rest)
+		messageAck(svc, rest)
 	case "resolve":
-		a2aResolve(svc, rest)
+		messageResolve(svc, rest)
 	case "catch-up":
-		a2aCatchUp(svc, rest)
+		messageCatchUp(svc, rest)
 	case "handoff":
-		a2aHandoff(svc, rest)
+		messageHandoff(svc, rest)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown a2a subcommand: %s\n", sub)
+		fmt.Fprintf(os.Stderr, "unknown message subcommand: %s\n", sub)
 		os.Exit(1)
 	}
 }
 
-func a2aSend(svc *a2asvc.Service, args []string) {
-	fs := flag.NewFlagSet("a2a send", flag.ExitOnError)
+func messageSend(svc *messaging.Service, args []string) {
+	fs := flag.NewFlagSet("message send", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	to := fs.String("to", "", "to agent id (or 'user')")
 	from := fs.String("from", "user", "from agent id")
@@ -98,10 +98,10 @@ func a2aSend(svc *a2asvc.Service, args []string) {
 		missing = append(missing, "--body")
 	}
 	if len(missing) > 0 {
-		fmt.Fprintf(os.Stderr, "a2a send: missing required flag(s): %s\n", strings.Join(missing, ", "))
+		fmt.Fprintf(os.Stderr, "message send: missing required flag(s): %s\n", strings.Join(missing, ", "))
 		os.Exit(1)
 	}
-	msg := &store.A2AMessage{
+	msg := messaging.SendInput{
 		FromSessionID: *session,
 		FromAgentID:   *from,
 		ToSessionID:   *session,
@@ -112,27 +112,27 @@ func a2aSend(svc *a2asvc.Service, args []string) {
 	}
 	out, err := svc.SendMessage(context.Background(), msg)
 	if err != nil {
-		slogx.Fatal("a2a send", "err", err)
+		slogx.Fatal("message send", "err", err)
 	}
 	fmt.Printf("sent: %s\n", out.ID)
 }
 
-func a2aInbox(svc *a2asvc.Service, args []string) {
-	fs := flag.NewFlagSet("a2a inbox", flag.ExitOnError)
+func messageInbox(svc *messaging.Service, args []string) {
+	fs := flag.NewFlagSet("message inbox", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	agentID := fs.String("agent", "", "agent id")
 	status := fs.String("status", "", "filter: unread|read|acknowledged|resolved")
 	fs.Parse(args)
 
 	if *session == "" || *agentID == "" {
-		fmt.Fprintln(os.Stderr, "a2a inbox: --session and --agent are required")
+		fmt.Fprintln(os.Stderr, "message inbox: --session and --agent are required")
 		os.Exit(1)
 	}
 	if *status != "" {
 		switch *status {
 		case "unread", "read", "acknowledged", "resolved":
 		default:
-			fmt.Fprintf(os.Stderr, "a2a inbox: invalid --status %q (want: unread|read|acknowledged|resolved)\n", *status)
+			fmt.Fprintf(os.Stderr, "message inbox: invalid --status %q (want: unread|read|acknowledged|resolved)\n", *status)
 			os.Exit(1)
 		}
 	}
@@ -142,108 +142,108 @@ func a2aInbox(svc *a2asvc.Service, args []string) {
 	// own inbox. The service still requires the match.
 	inbox, err := svc.Inbox(context.Background(), *session, *agentID, *status, *session, *agentID)
 	if err != nil {
-		slogx.Fatal("a2a inbox", "err", err)
+		slogx.Fatal("message inbox", "err", err)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(inbox); err != nil {
-		slogx.Fatal("a2a inbox: encode", "err", err)
+		slogx.Fatal("message inbox: encode", "err", err)
 	}
 }
 
-func a2aThread(svc *a2asvc.Service, args []string) {
-	fs := flag.NewFlagSet("a2a thread", flag.ExitOnError)
+func messageThread(svc *messaging.Service, args []string) {
+	fs := flag.NewFlagSet("message thread", flag.ExitOnError)
 	session := fs.String("session", "", "caller session id")
 	agentID := fs.String("agent", "", "caller agent id")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s a2a thread --session X --agent Y <threadID>\n", brand.BinaryName)
+		fmt.Fprintf(os.Stderr, "usage: %s message thread --session X --agent Y <threadID>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 	if *session == "" || *agentID == "" {
-		fmt.Fprintln(os.Stderr, "a2a thread: --session and --agent are required (caller identity for participant filtering)")
+		fmt.Fprintln(os.Stderr, "message thread: --session and --agent are required (caller identity for participant filtering)")
 		os.Exit(1)
 	}
 	// Thread is participant-filtered: only messages where the caller is
 	// sender or recipient are returned. Non-participants see empty.
 	messages, err := svc.Thread(context.Background(), fs.Arg(0), *session, *agentID)
 	if err != nil {
-		slogx.Fatal("a2a thread", "err", err)
+		slogx.Fatal("message thread", "err", err)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(messages); err != nil {
-		slogx.Fatal("a2a thread: encode", "err", err)
+		slogx.Fatal("message thread: encode", "err", err)
 	}
 }
 
-func a2aAck(svc *a2asvc.Service, args []string) {
-	fs := flag.NewFlagSet("a2a ack", flag.ExitOnError)
+func messageAck(svc *messaging.Service, args []string) {
+	fs := flag.NewFlagSet("message ack", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	agentID := fs.String("agent", "", "agent id")
 	fs.Parse(args)
 	if *session == "" || *agentID == "" {
-		fmt.Fprintln(os.Stderr, "a2a ack: --session and --agent are required")
+		fmt.Fprintln(os.Stderr, "message ack: --session and --agent are required")
 		os.Exit(1)
 	}
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s a2a ack --session X --agent Y <msgID>\n", brand.BinaryName)
+		fmt.Fprintf(os.Stderr, "usage: %s message ack --session X --agent Y <msgID>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 	if err := svc.Ack(context.Background(), *session, *agentID, fs.Arg(0)); err != nil {
-		slogx.Fatal("a2a ack", "err", err)
+		slogx.Fatal("message ack", "err", err)
 	}
 	fmt.Printf("acked: %s\n", fs.Arg(0))
 }
 
-func a2aResolve(svc *a2asvc.Service, args []string) {
-	fs := flag.NewFlagSet("a2a resolve", flag.ExitOnError)
+func messageResolve(svc *messaging.Service, args []string) {
+	fs := flag.NewFlagSet("message resolve", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	agentID := fs.String("agent", "", "agent id")
 	fs.Parse(args)
 	if *session == "" || *agentID == "" {
-		fmt.Fprintln(os.Stderr, "a2a resolve: --session and --agent are required")
+		fmt.Fprintln(os.Stderr, "message resolve: --session and --agent are required")
 		os.Exit(1)
 	}
 	if fs.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s a2a resolve --session X --agent Y <msgID>\n", brand.BinaryName)
+		fmt.Fprintf(os.Stderr, "usage: %s message resolve --session X --agent Y <msgID>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 	if err := svc.Resolve(context.Background(), *session, *agentID, fs.Arg(0)); err != nil {
-		slogx.Fatal("a2a resolve", "err", err)
+		slogx.Fatal("message resolve", "err", err)
 	}
 	fmt.Printf("resolved: %s\n", fs.Arg(0))
 }
 
-func a2aCatchUp(svc *a2asvc.Service, args []string) {
-	fs := flag.NewFlagSet("a2a catch-up", flag.ExitOnError)
+func messageCatchUp(svc *messaging.Service, args []string) {
+	fs := flag.NewFlagSet("message catch-up", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	last := fs.Int("last", 20, "number of recent messages")
 	fs.Parse(args)
 
 	if *session == "" {
-		fmt.Fprintln(os.Stderr, "a2a catch-up: --session is required")
+		fmt.Fprintln(os.Stderr, "message catch-up: --session is required")
 		os.Exit(1)
 	}
 	if *last <= 0 {
-		fmt.Fprintln(os.Stderr, "a2a catch-up: --last must be positive")
+		fmt.Fprintln(os.Stderr, "message catch-up: --last must be positive")
 		os.Exit(1)
 	}
 
 	messages, err := svc.RecentForSession(context.Background(), *session, *last)
 	if err != nil {
-		slogx.Fatal("a2a catch-up", "err", err)
+		slogx.Fatal("message catch-up", "err", err)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(messages); err != nil {
-		slogx.Fatal("a2a catch-up: encode", "err", err)
+		slogx.Fatal("message catch-up: encode", "err", err)
 	}
 }
 
-func a2aHandoff(svc *a2asvc.Service, args []string) {
+func messageHandoff(svc *messaging.Service, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s a2a handoff <request|approve|reject>\n", brand.BinaryName)
+		fmt.Fprintf(os.Stderr, "usage: %s message handoff <request|approve|reject>\n", brand.BinaryName)
 		os.Exit(1)
 	}
 	sub := args[0]
@@ -258,28 +258,28 @@ func a2aHandoff(svc *a2asvc.Service, args []string) {
 		fs.Parse(rest)
 
 		if *session == "" || *to == "" {
-			fmt.Fprintln(os.Stderr, "a2a handoff request: --session and --to are required")
+			fmt.Fprintln(os.Stderr, "message handoff request: --session and --to are required")
 			os.Exit(1)
 		}
 		switch *reqBy {
 		case "departing", "incoming", "user":
 		default:
-			fmt.Fprintf(os.Stderr, "a2a handoff request: invalid --requested-by %q (want: departing|incoming|user)\n", *reqBy)
+			fmt.Fprintf(os.Stderr, "message handoff request: invalid --requested-by %q (want: departing|incoming|user)\n", *reqBy)
 			os.Exit(1)
 		}
 
 		id, err := svc.RequestHandoff(context.Background(), *session, *from, *to, *reqBy)
 		if err != nil {
-			slogx.Fatal("a2a handoff request", "err", err)
+			slogx.Fatal("message handoff request", "err", err)
 		}
 		fmt.Printf("handoff requested: %s\n", id)
 	case "approve":
 		if len(rest) < 1 {
-			fmt.Fprintf(os.Stderr, "usage: %s a2a handoff approve <handoffID>\n", brand.BinaryName)
+			fmt.Fprintf(os.Stderr, "usage: %s message handoff approve <handoffID>\n", brand.BinaryName)
 			os.Exit(1)
 		}
 		if err := svc.ApproveHandoff(context.Background(), rest[0]); err != nil {
-			slogx.Fatal("a2a handoff approve", "err", err)
+			slogx.Fatal("message handoff approve", "err", err)
 		}
 		fmt.Printf("approved: %s\n", rest[0])
 	case "reject":
@@ -287,11 +287,11 @@ func a2aHandoff(svc *a2asvc.Service, args []string) {
 		reason := fs.String("reason", "", "rejection reason")
 		fs.Parse(rest)
 		if fs.NArg() < 1 {
-			fmt.Fprintf(os.Stderr, "usage: %s a2a handoff reject --reason X <handoffID>\n", brand.BinaryName)
+			fmt.Fprintf(os.Stderr, "usage: %s message handoff reject --reason X <handoffID>\n", brand.BinaryName)
 			os.Exit(1)
 		}
 		if err := svc.RejectHandoff(context.Background(), fs.Arg(0), *reason); err != nil {
-			slogx.Fatal("a2a handoff reject", "err", err)
+			slogx.Fatal("message handoff reject", "err", err)
 		}
 		fmt.Printf("rejected: %s\n", fs.Arg(0))
 	default:
@@ -300,13 +300,13 @@ func a2aHandoff(svc *a2asvc.Service, args []string) {
 	}
 }
 
-// newA2AServiceForCLI wires a minimal AgentService as the a2a.Service
+// newMessagingServiceForCLI wires a minimal AgentService as the messaging.Service
 // resolver for CLI use. It discovers file-based agents from the working
 // directory and plugins dir (same as the server) and appends the built-in
 // default agent so "file-default" resolves. Events is nil: the CLI doesn't
-// emit activity, and AgentService.Get — the only method a2a.Service calls
+// emit activity, and AgentService.Get — the only method messaging.Service calls
 // via AgentResolver — never dereferences the Events field.
-func newA2AServiceForCLI(s *store.Store) (*a2asvc.Service, error) {
+func newMessagingServiceForCLI(s *store.Store) (*messaging.Service, error) {
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
 		WorkingDir: ".",
 		PluginsDir: "plugins",
@@ -315,7 +315,7 @@ func newA2AServiceForCLI(s *store.Store) (*a2asvc.Service, error) {
 	if err != nil {
 		// Non-fatal: CLI can still address the "user" sentinel and DB
 		// agents even if file discovery hits a parse error on one tier.
-		slog.Warn("a2a: agent discovery", "err", err)
+		slog.Warn("message: agent discovery", "err", err)
 	}
 	if defaultDef, defErr := builtin.DefaultAgent(); defErr == nil {
 		agentDefs = append(agentDefs, defaultDef)
@@ -329,5 +329,5 @@ func newA2AServiceForCLI(s *store.Store) (*a2asvc.Service, error) {
 		FileAgents: agentDefs,
 		Overrides:  s,
 	})
-	return a2asvc.NewService(s, agents), nil
+	return messaging.NewService(messaging.NewSQLiteStore(s.DB), s.DB, agents), nil
 }

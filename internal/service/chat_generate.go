@@ -259,6 +259,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	debugMode := isAgentDebugEnabled(agent.Settings) || s.isGlobalDebugMode()
 	ls := newLoopState(constraints, toolNames, debugMode)
 
+	// Load per-tool cap from UserSettings.
+	if us, err := s.store.GetUserSettings(); err == nil && us.ToolPerTurnCap > 0 {
+		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
+	}
+
 	// --- Tool-use loop ---
 	var fullContent strings.Builder
 	var finalUsage *chat.Usage
@@ -545,7 +550,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 
 		// Pre-check regular tools: permission, blocked, concurrency safety.
-		plans := s.preCheckTools(ctx, sessionID, regularTools, ls, ch, selection, tools)
+		plans := s.preCheckTools(ctx, sessionID, agentID, regularTools, ls, ch, selection, tools)
 
 		// Execute tools: concurrent-safe in parallel, serial one at a time.
 		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID)

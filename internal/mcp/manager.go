@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -30,14 +31,22 @@ type ToolLoadChecker interface {
 	IsToolEnabled(toolName string) bool
 }
 
+// DiscoveryWarning records a tool that was rejected during MCP discovery.
+type DiscoveryWarning struct {
+	ServerName string `json:"server_name"`
+	ToolName   string `json:"tool_name"`
+	Reason     string `json:"reason"`
+}
+
 // Manager holds multiple MCP server connections and provides unified tool access.
 type Manager struct {
-	servers       map[string]MCPTransport // name -> transport
-	pluginServers map[string][]string     // pluginID -> server names (reverse map for hot-unload)
-	tools         []toolEntry             // all discovered tools with server association
-	Broker        *broker.LocalBroker     // intent-aware tool broker
-	LoadChecker   ToolLoadChecker         // optional loadType filter
-	mu            sync.RWMutex
+	servers            map[string]MCPTransport // name -> transport
+	pluginServers      map[string][]string     // pluginID -> server names (reverse map for hot-unload)
+	tools              []toolEntry             // all discovered tools with server association
+	discoveryWarnings  []DiscoveryWarning      // tools rejected during discovery
+	Broker             *broker.LocalBroker     // intent-aware tool broker
+	LoadChecker        ToolLoadChecker         // optional loadType filter
+	mu                 sync.RWMutex
 }
 
 // toolEntry associates a tool with its originating server.
@@ -199,6 +208,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	defer m.mu.Unlock()
 
 	m.tools = nil
+	m.discoveryWarnings = nil
 	var totalTools int
 
 	for name, transport := range m.servers {
@@ -208,6 +218,16 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 			continue
 		}
 		for _, t := range tools {
+			if reason := validateToolName(t.Name); reason != "" {
+				slog.Warn("mcp: invalid tool name — skipping",
+					"server", name, "tool", t.Name, "reason", reason)
+				m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
+					ServerName: name,
+					ToolName:   t.Name,
+					Reason:     reason,
+				})
+				continue
+			}
 			m.tools = append(m.tools, toolEntry{
 				serverName: name,
 				tool:       t,
@@ -400,9 +420,10 @@ func (m *Manager) HasTools() bool {
 
 // ServerInfo describes an MCP server's status and tool count.
 type ServerInfo struct {
-	Name      string `json:"name"`
-	ToolCount int    `json:"tool_count"`
-	Connected bool   `json:"connected"`
+	Name              string             `json:"name"`
+	ToolCount         int                `json:"tool_count"`
+	Connected         bool               `json:"connected"`
+	DiscoveryWarnings []DiscoveryWarning `json:"discovery_warnings,omitempty"`
 }
 
 // ListServers returns information about all registered MCP servers.
@@ -416,12 +437,19 @@ func (m *Manager) ListServers() []ServerInfo {
 		toolCounts[entry.serverName]++
 	}
 
+	// Collect per-server discovery warnings.
+	serverWarnings := make(map[string][]DiscoveryWarning)
+	for _, w := range m.discoveryWarnings {
+		serverWarnings[w.ServerName] = append(serverWarnings[w.ServerName], w)
+	}
+
 	infos := make([]ServerInfo, 0, len(m.servers))
 	for name := range m.servers {
 		infos = append(infos, ServerInfo{
-			Name:      name,
-			ToolCount: toolCounts[name],
-			Connected: true, // registered means connected
+			Name:              name,
+			ToolCount:         toolCounts[name],
+			Connected:         true, // registered means connected
+			DiscoveryWarnings: serverWarnings[name],
 		})
 	}
 	return infos
@@ -568,4 +596,34 @@ func parsePrefixedToolName(name string) (server, tool string, err error) {
 		return "", "", fmt.Errorf("tool name %q has empty server or tool", name)
 	}
 	return server, tool, nil
+}
+
+// maxToolNameLen is the maximum allowed length for an MCP tool name.
+const maxToolNameLen = 128
+
+// reValidToolName matches the allowed tool name charset.
+var reValidToolName = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
+
+// validateToolName returns a non-empty reason string if the tool name is invalid.
+func validateToolName(name string) string {
+	if name == "" {
+		return "empty tool name"
+	}
+	if len(name) > maxToolNameLen {
+		return fmt.Sprintf("tool name exceeds %d characters (%d)", maxToolNameLen, len(name))
+	}
+	if !reValidToolName.MatchString(name) {
+		return "tool name contains invalid characters (allowed: a-zA-Z0-9_-)"
+	}
+	return ""
+}
+
+// GetDiscoveryWarnings returns warnings from the last discovery run.
+// Safe to call concurrently.
+func (m *Manager) GetDiscoveryWarnings() []DiscoveryWarning {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]DiscoveryWarning, len(m.discoveryWarnings))
+	copy(out, m.discoveryWarnings)
+	return out
 }

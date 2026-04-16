@@ -28,6 +28,7 @@ import (
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
+	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/worker"
 	"github.com/hollis-labs/nanite/internal/workflow"
@@ -402,6 +403,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Tasks:             tasks,
 		EmbeddingStatus:   embeddingStatus,
 		EmbeddingProvider: embeddingProviderID,
+		ResultCache:       buildResultCache(cfg.Store),
 	})
 
 	// Worker manager — requires ChatService for delegation.
@@ -599,4 +601,15 @@ func (c *Container) Shutdown() {
 	case <-time.After(containerShutdownMaxWait):
 		slog.Warn("shutdown: timeout — some subsystems may still be running", "timeout", containerShutdownMaxWait.String())
 	}
+}
+
+// buildResultCache creates a ResultCache from UserSettings or defaults.
+func buildResultCache(s *store.Store) *tool.ResultCache {
+	cfg := tool.ResultCacheConfig{}
+	if us, err := s.GetUserSettings(); err == nil {
+		cfg.SoftTruncBytes = us.ToolResultSoftTruncBytes
+		cfg.HardCapBytes = us.ToolResultHardCapBytes
+		cfg.CacheTTLSeconds = us.ToolResultCacheTTLSeconds
+	}
+	return tool.NewResultCache(s.DB, cfg)
 }

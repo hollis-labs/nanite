@@ -59,6 +59,7 @@ type iterationLimits struct {
 	consecutiveFailCap  int
 	idleTimeout         time.Duration
 	perToolMax          map[string]int // tool name → max iterations (0 = no limit)
+	defaultPerToolCap   int            // global per-tool cap from UserSettings (0 = no cap)
 }
 
 // loopState consolidates all mutable state for the generateResponse loop.
@@ -222,13 +223,21 @@ func (ls *loopState) recordToolCall(toolName string, success bool) bool {
 		}
 	}
 
-	// Check per-tool max.
+	// Meta-tools (fetch_tool_result, search_tool_result, request_tools) are
+	// exempt from per-tool caps so the LLM can always recall cached results.
+	if isMetaTool(toolName) {
+		return false
+	}
+
+	// Check per-tool max (explicit override takes priority over global default).
+	cap := ls.limits.defaultPerToolCap
 	if max, ok := ls.limits.perToolMax[toolName]; ok && max > 0 {
-		if ls.toolCallCounts[toolName] >= max {
-			ls.blockedTools[toolName] = true
-			slog.Warn("chat-loop: tool exhausted", "tool", toolName, "calls", ls.toolCallCounts[toolName], "max", max)
-			return true
-		}
+		cap = max
+	}
+	if cap > 0 && ls.toolCallCounts[toolName] >= cap {
+		ls.blockedTools[toolName] = true
+		slog.Warn("chat-loop: tool exhausted", "tool", toolName, "calls", ls.toolCallCounts[toolName], "cap", cap)
+		return true
 	}
 
 	return false
@@ -241,12 +250,28 @@ func (ls *loopState) recordPermissionDenial() {
 }
 
 // isToolExhausted returns true if the tool has hit its per-tool iteration limit.
+// Meta-tools are always exempt.
 func (ls *loopState) isToolExhausted(toolName string) bool {
-	max, ok := ls.limits.perToolMax[toolName]
-	if !ok || max <= 0 {
+	if isMetaTool(toolName) {
 		return false
 	}
-	return ls.toolCallCounts[toolName] >= max
+	cap := ls.limits.defaultPerToolCap
+	if max, ok := ls.limits.perToolMax[toolName]; ok && max > 0 {
+		cap = max
+	}
+	if cap <= 0 {
+		return false
+	}
+	return ls.toolCallCounts[toolName] >= cap
+}
+
+// isMetaTool returns true for meta-tools that are exempt from per-tool caps.
+func isMetaTool(name string) bool {
+	switch name {
+	case "request_tools", "fetch_tool_result", "search_tool_result":
+		return true
+	}
+	return false
 }
 
 // touchActivity updates the last activity timestamp.

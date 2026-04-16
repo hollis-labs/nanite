@@ -52,6 +52,10 @@ type ToolService interface {
 	// GetToolMeta returns safety metadata for a tool. Returns false if the
 	// tool is not found in the registry. Used by the permission engine.
 	GetToolMeta(toolName string) (ToolMetaInfo, bool)
+
+	// GetToolSchema returns the InputSchema for a named tool, or nil if the
+	// tool has no schema or is not found. Used by arg validation at execute time.
+	GetToolSchema(toolName string) map[string]any
 }
 
 // ToolMetaInfo carries safety metadata for a tool, used by the permission
@@ -404,6 +408,18 @@ var intentStopWords = map[string]bool{
 	"please": true, "want": true, "need": true, "like": true,
 	"know": true, "think": true, "make": true, "use": true,
 	"using": true, "help": true, "show": true, "tell": true,
+}
+
+// GetToolSchema implements ToolService.
+func (s *toolServiceImpl) GetToolSchema(toolName string) map[string]any {
+	if s.toolClient != nil {
+		for _, t := range s.toolClient.ListTools() {
+			if t.Name == toolName {
+				return t.InputSchema
+			}
+		}
+	}
+	return nil
 }
 
 // parseJSONStrings is a tiny helper to unmarshal a JSON string array.

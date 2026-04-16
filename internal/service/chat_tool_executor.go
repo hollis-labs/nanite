@@ -68,6 +68,7 @@ type toolExecContext struct {
 func (s *chatServiceImpl) preCheckTools(
 	ctx context.Context,
 	sessionID string,
+	agentID string,
 	toolUseBlocks []provider.ToolUseBlock,
 	ls *loopState,
 	ch chan chat.StreamEvent,
@@ -232,6 +233,44 @@ func (s *chatServiceImpl) preCheckTools(
 			}
 		}
 
+		// Execution-time rules: re-check agent toolset + permissions.
+		if allowed, reason := s.enforceExecutionRulesForTool(ctx, agentID, tu.Name); !allowed {
+			ls.recordToolCall(tu.Name, false)
+			denyMsg := fmt.Sprintf("EXECUTION_RULES_DENIED: %s — %s", tu.Name, reason)
+			slog.Warn("chat-service: tool denied by execution rules", "tool", tu.Name, "reason", reason)
+			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
+			block := provider.ContentBlock{
+				Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg, IsError: true,
+			}
+			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+			plan.status = toolPlanDenied
+			plan.denyReason = reason
+			plan.resultBlock = &block
+			plan.ref = &ref
+			plans = append(plans, plan)
+			continue
+		}
+
+		// Arg validation: check tool_use Input against the tool's InputSchema.
+		if schema := s.tools.GetToolSchema(tu.Name); len(schema) > 0 {
+			if errMsg := s.argValidator.validate(tu.Name, schema, tu.Input); errMsg != "" {
+				ls.recordToolCall(tu.Name, false)
+				slog.Warn("chat-service: tool arg validation failed", "tool", tu.Name, "err", errMsg)
+				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: errMsg}
+				block := provider.ContentBlock{
+					Type: "tool_result", ToolUseID: tu.ID, Content: errMsg, IsError: true,
+				}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "error"}
+				plan.status = toolPlanBlocked
+				plan.resultBlock = &block
+				plan.ref = &ref
+				plans = append(plans, plan)
+				continue
+			}
+		}
+
 		// Tool passed pre-check — determine concurrency safety.
 		plan.status = toolPlanReady
 		if toolInfo, ok := s.tools.GetToolMeta(tu.Name); ok {
@@ -311,6 +350,11 @@ func (s *chatServiceImpl) executeSingleTool(
 ) toolExecResult {
 	start := time.Now()
 
+	// Handle result-cache meta-tools locally (no MCP routing).
+	if tu.Name == "fetch_tool_result" || tu.Name == "search_tool_result" {
+		return s.handleResultCacheMetaTool(tu, sessionID, ch, mu, start)
+	}
+
 	// Broadcast tool pending.
 	if mu != nil {
 		mu.Lock()
@@ -345,6 +389,7 @@ func (s *chatServiceImpl) executeSingleTool(
 	}
 
 	if toolIsError {
+		resultText = chat.SanitizeToolError(resultText)
 		toolSpan.RecordError(fmt.Errorf("%s", resultText))
 		toolSpan.SetStatus(codes.Error, resultText)
 		slog.Warn("chat-service: tool failed", "tool", tu.Name, "content", resultText)
@@ -460,9 +505,31 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// Detect stuck loops (modifies result text).
 		resultText := s.detectStuckLoop(tu.Name, r.rawOutput, ls.lastToolResults, ls.toolRepeatCount, ls.blockedTools)
 
-		// Truncate for LLM context.
-		canDelegate := s.orchestrator != nil && s.orchestrator.HasDecomposer()
-		tr := truncate.Output(resultText, tu.Name, truncate.WithDelegationHint(canDelegate))
+		// Cache-and-pointer: route through ResultCache before truncation.
+		// If the result exceeds the soft threshold, the cache returns a
+		// truncated view with a pointer footer. Skip truncate.Output in
+		// that case — the cache already sized the LLM-visible view and
+		// truncate.Output's 4K cap would drop the pointer footer.
+		wasCached := false
+		if s.resultCache != nil && !r.isError {
+			visible, cached, err := s.resultCache.StoreResult(sessionID, tu.ID, tu.Name, resultText)
+			if err != nil {
+				slog.Warn("chat-service: result cache store error", "tool", tu.Name, "err", err)
+			} else if cached {
+				resultText = visible
+				wasCached = true
+			}
+		}
+
+		// Truncate for LLM context (handles results not caught by the cache).
+		// Skip when the cache already produced the LLM-visible view.
+		var tr truncate.Result
+		if wasCached {
+			tr = truncate.Result{Content: resultText}
+		} else {
+			canDelegate := s.orchestrator != nil && s.orchestrator.HasDecomposer()
+			tr = truncate.Output(resultText, tu.Name, truncate.WithDelegationHint(canDelegate))
+		}
 
 		// Emit tool_result to client.
 		summary := resultText
@@ -556,4 +623,102 @@ func toolCallDetail(toolName string, input map[string]any) string {
 		detail = detail[:117] + "…"
 	}
 	return detail
+}
+
+// handleResultCacheMetaTool handles fetch_tool_result and search_tool_result
+// meta-tool calls locally without MCP routing.
+func (s *chatServiceImpl) handleResultCacheMetaTool(
+	tu provider.ToolUseBlock,
+	sessionID string,
+	ch chan chat.StreamEvent,
+	mu *sync.Mutex,
+	start time.Time,
+) toolExecResult {
+	// Broadcast tool pending.
+	if mu != nil {
+		mu.Lock()
+	}
+	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+	if mu != nil {
+		mu.Unlock()
+	}
+
+	var resultText string
+	var isError bool
+
+	if s.resultCache == nil {
+		resultText = "Error: result cache not available"
+		isError = true
+	} else if tu.Name == "fetch_tool_result" {
+		resultText, isError = s.handleFetchToolResult(sessionID, tu.Input)
+	} else {
+		resultText, isError = s.handleSearchToolResult(sessionID, tu.Input)
+	}
+
+	duration := time.Since(start)
+	summary := resultText
+	if len(summary) > 500 {
+		summary = summary[:500] + "... (truncated)"
+	}
+	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary}
+
+	return toolExecResult{
+		resultBlock: provider.ContentBlock{
+			Type: "tool_result", ToolUseID: tu.ID, Content: resultText, IsError: isError,
+		},
+		ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name},
+		isError:   isError,
+		rawOutput: resultText,
+		duration:  duration,
+	}
+}
+
+func (s *chatServiceImpl) handleFetchToolResult(sessionID string, input map[string]any) (string, bool) {
+	id, _ := input["id"].(string)
+	if id == "" {
+		return "Error: 'id' is required", true
+	}
+	offset := 0
+	if v, ok := input["offset"].(float64); ok {
+		offset = int(v)
+	}
+	length := 65536
+	if v, ok := input["length"].(float64); ok && v > 0 {
+		length = int(v)
+	}
+
+	slice, totalSize, err := s.resultCache.Fetch(sessionID, id, offset, length)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err), true
+	}
+	header := fmt.Sprintf("[Cached result %s — showing bytes %d-%d of %d total]\n\n",
+		id, offset, offset+len(slice), totalSize)
+	return header + slice, false
+}
+
+func (s *chatServiceImpl) handleSearchToolResult(sessionID string, input map[string]any) (string, bool) {
+	id, _ := input["id"].(string)
+	pattern, _ := input["pattern"].(string)
+	if id == "" || pattern == "" {
+		return "Error: 'id' and 'pattern' are required", true
+	}
+	maxMatches := 20
+	if v, ok := input["max_matches"].(float64); ok && v > 0 {
+		maxMatches = int(v)
+	}
+
+	matches, err := s.resultCache.Search(sessionID, id, pattern, maxMatches)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err), true
+	}
+	if len(matches) == 0 {
+		return fmt.Sprintf("No matches found for pattern %q in cached result %s", pattern, id), false
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d match(es) for %q in cached result %s:\n\n", len(matches), pattern, id))
+	for i, m := range matches {
+		sb.WriteString(fmt.Sprintf("--- Match %d (line %d) ---\n%s\n\n", i+1, m.LineStart, m.Context))
+	}
+	return sb.String(), false
 }

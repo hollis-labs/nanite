@@ -492,6 +492,13 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	slog.Info("registered self-service built-in tools", "count", len(selfToolDefs))
 
+	// Register result-cache meta-tools (S4a). These let the LLM recall
+	// truncated tool results via fetch_tool_result / search_tool_result.
+	tb.Builtins.RegisterBuiltins("result-cache", []provider.ToolDefinition{
+		toolclient.FetchToolResultMetaTool(),
+		toolclient.SearchToolResultMetaTool(),
+	})
+
 	return mcpManager, tb, selfTools
 }
 

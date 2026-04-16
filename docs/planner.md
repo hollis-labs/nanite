@@ -15,8 +15,8 @@ internal/
     plans_test.go
   api/
     api.go            — 13 HTTP handlers registered in Mux
-    handlers_todos.go
-    handlers_plans.go
+    todos.go          — todo HTTP handlers
+    plans.go          — plan HTTP handlers
   mcp/
     self_tools.go     — 5 MCP tools registered (nanite_todo_{create,update,list}, nanite_plan_{create,update})
     self_tools_transport.go — tool handlers dispatch into Store methods
@@ -76,8 +76,8 @@ Five tools registered as core builtins in `internal/mcp/self_tools.go`:
 
 - `nanite_todo_create` — scope + title required; priority defaults to `medium`
 - `nanite_todo_update` — id required; any subset of title/description/status/priority/labels
-- `nanite_todo_list` — optional filters; emits `todo-list` envelope when used as UI surface
-- `nanite_plan_create` — scope + title required; status defaults to `proposed`; emits `plan-review` envelope
+- `nanite_todo_list` — optional filters; tool description prompts the agent to wrap results in a `todo-list` envelope when presenting to the user (the handler itself returns plain text)
+- `nanite_plan_create` — scope + title required; status defaults to `proposed`; tool description prompts the agent to wrap the returned plan in a `plan-review` envelope
 - `nanite_plan_update` — id required; if `step_id` supplied, updates just that step; otherwise plan-level
 
 All five handlers live in `internal/mcp/self_tools_transport.go`.
@@ -97,12 +97,12 @@ Tables live in the baseline migrations. No separate migration for the planner su
 
 - Unit tests: `internal/store/{todos,plans}_test.go` — cover CRUD, filters, status transitions, JSON round-trips
 - MCP handler coverage: `internal/mcp/self_tools_transport_test.go`
-- API coverage: `internal/api/handlers_todos_test.go` / `handlers_plans_test.go` (where present)
+- API coverage: none currently dedicated to todo/plan endpoints. Add endpoint-level tests in `internal/api/` if/when coverage is needed — the general `internal/api/api_test.go` exercises the mux, not the individual handlers.
 
 Run with:
 
 ```bash
-go test ./internal/store/... ./internal/api/... ./internal/mcp/...
+go test ./internal/store/... ./internal/mcp/...
 ```
 
 ## Out of scope for this subsystem

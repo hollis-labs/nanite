@@ -12,8 +12,8 @@ Five MCP tools are exposed to the LLM (always-on, no plugin required):
 |---|---|
 | `nanite_todo_create` | Create a todo item (workspace/project/session scope, optional parent, priority, labels) |
 | `nanite_todo_update` | Transition status, change priority, edit title/description/labels |
-| `nanite_todo_list` | List/filter todos (by scope, status, priority) — emits a `todo-list` envelope for UI |
-| `nanite_plan_create` | Create a plan with ordered steps — emits a `plan-review` envelope for user approve/reject |
+| `nanite_todo_list` | List/filter todos (by scope, status, priority). The tool description prompts the agent to wrap results in a `todo-list` envelope when presenting to the user. |
+| `nanite_plan_create` | Create a plan with ordered steps. The tool description prompts the agent to wrap the returned plan in a `plan-review` envelope when status is `proposed`. |
 | `nanite_plan_update` | Update plan fields, or transition a single step (`step_id=...`) |
 
 Full HTTP is also available under `/api/todos/*` and `/api/plans/*` (13 routes total) for non-LLM callers (UI, CLI, sub-agent runners). See `docs/planner.md`.
@@ -92,12 +92,12 @@ Plan steps and todos can be coupled: a step carries an optional `todo_id` linkin
 
 ## Envelope integration
 
-Two S5 envelope types pair with these tools:
+Two S5 envelope types pair with these tools. Note: the tool handlers themselves return plain text; the *agent* wraps the results in a `nanite-envelope` block. The tool descriptions prompt the agent to do this when presenting to the user.
 
-- **`todo-list`** — `nanite_todo_list` emits this. The UI renders an interactive card; users can toggle status directly.
-- **`plan-review`** — `nanite_plan_create` with status `proposed` emits this. The UI renders approve/reject affordances; user interaction transitions the plan to `approved` or `abandoned`.
+- **`todo-list`** — paired with `nanite_todo_list`. The UI renders an interactive card; users can toggle status directly.
+- **`plan-review`** — paired with `nanite_plan_create` when status is `proposed`. The UI renders approve/reject affordances; user interaction transitions the plan to `approved` or `abandoned`.
 
-Emit these envelopes when you want the user to see or act on the result in the chat UI. Skip the envelope for pure agent-internal reads.
+Wrap results in these envelopes when you want the user to see or act on them in the chat UI. Skip the envelope for pure agent-internal reads.
 
 ## Sub-agent handoff pattern
 
@@ -105,17 +105,17 @@ Plans are the default substrate for parent → sub-agent handoff.
 
 **Parent agent:**
 
-1. `nanite_plan_create scope=session scope_id=<sid> title=... steps=[...]` — status defaults to `proposed`, emits `plan-review` envelope.
+1. `nanite_plan_create scope=session scope_id=<sid> title=... steps=[...]` — status defaults to `proposed`; wrap the returned plan in a `plan-review` envelope.
 2. User approves → plan transitions to `approved`.
-3. Parent spawns sub-agent via the inline subagent runner (Phase 3 S7 groundwork) or external mechanism.
+3. Parent spawns sub-agent via the inline subagent runner (Phase 3 S7 groundwork) or external mechanism, **passing the `plan_id` and the target `step_id`** as part of the spawn context.
 
 **Sub-agent:**
 
-1. On boot, read the plan: `nanite_plan_list scope=session scope_id=<sid>` → fetch by id.
-2. Claim the first `pending` step: `nanite_plan_update id=<plan> step_id=<step> status=in_progress`.
+1. On boot, receive `plan_id` and `step_id` from the parent's spawn context. If the sub-agent needs the plan body, fetch via HTTP: `GET /api/plans/{plan_id}` (MCP tools don't currently include a plan reader — it's a parent-passes-id handoff).
+2. Claim the step: `nanite_plan_update id=<plan_id> step_id=<step_id> status=in_progress`.
 3. Do the work.
-4. Mark done: `nanite_plan_update id=<plan> step_id=<step> status=done notes="..."`.
-5. Repeat for next `pending` step or return control.
+4. Mark done: `nanite_plan_update id=<plan_id> step_id=<step_id> status=done notes="..."`.
+5. Return control. The parent decides whether to spawn a new sub-agent for the next step.
 
 **Invariants:**
 

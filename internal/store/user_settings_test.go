@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -196,8 +197,12 @@ func TestUpdateUserSettings_InvalidCompactionStrategy(t *testing.T) {
 	s := newSeededStore(t)
 
 	us := &UserSettings{CompactionStrategy: "unknown-strategy"}
-	if err := s.UpdateUserSettings(us); err == nil {
-		t.Error("expected error for unknown compaction_strategy, got nil")
+	err := s.UpdateUserSettings(us)
+	if err == nil {
+		t.Fatal("expected error for unknown compaction_strategy, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown-strategy") {
+		t.Errorf("error should mention the invalid value; got: %v", err)
 	}
 }
 
@@ -215,5 +220,18 @@ func TestUpdateUserSettings_BudgetPctClamp(t *testing.T) {
 	}
 	if got.ContextBudgetPct != 1.0 {
 		t.Errorf("expected budget_pct clamped to 1.0, got %f", got.ContextBudgetPct)
+	}
+
+	// Below 0 should default to 0.80.
+	us = &UserSettings{ContextBudgetPct: -0.5}
+	if err := s.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings negative: %v", err)
+	}
+	got, err = s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings after negative: %v", err)
+	}
+	if got.ContextBudgetPct != 0.80 {
+		t.Errorf("expected budget_pct defaulted to 0.80 for negative input, got %f", got.ContextBudgetPct)
 	}
 }

@@ -386,6 +386,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Command registry.
 	commands := chat.NewCommandRegistry()
 	commands.RegisterServerCommands(cfg.Store, cfg.Providers)
+	RegisterToolCacheCommand(commands, overrideStore)
 
 	// Register file-based skills as slash commands.
 	RegisterSkillCommands(commands, skills)

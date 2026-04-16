@@ -29,6 +29,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool/stash"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/worker"
 	"github.com/hollis-labs/nanite/internal/workflow"
@@ -361,11 +362,31 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Info("service container: context broker enabled", "sources", len(sources))
 	}
 
-	ctxService := NewContextService(ContextServiceConfig{Client: contextClient})
+	// S3b tool-slot cache pipeline: stash manager + intent classifier. The
+	// classifier's LLM fallback layer reuses the summarizer provider/model
+	// unless UserSettings pins a different one.
+	stashManager := stash.NewManager(stash.BuiltinCategorizer())
+	overrideStore := newToolCacheOverrideStore()
+	classifier := buildToolIntentClassifier(cfg.Providers, cfg.Store)
+
+	ctxService := NewContextService(ContextServiceConfig{
+		Client:       contextClient,
+		StashManager: stashManager,
+		Classifier:   classifier,
+		Overrides:    overrideStore,
+		SettingsFunc: func() *store.UserSettings {
+			us, err := cfg.Store.GetUserSettings()
+			if err != nil {
+				return nil
+			}
+			return us
+		},
+	})
 
 	// Command registry.
 	commands := chat.NewCommandRegistry()
 	commands.RegisterServerCommands(cfg.Store, cfg.Providers)
+	RegisterToolCacheCommand(commands, overrideStore)
 
 	// Register file-based skills as slash commands.
 	RegisterSkillCommands(commands, skills)

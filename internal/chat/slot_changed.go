@@ -14,25 +14,33 @@ const SlotChangedKind = "slot_changed"
 // SlotChangeKind enumerates the kinds of slot transitions the pipeline can
 // emit. Each value corresponds to a frontend modal explanation.
 const (
-	SlotChangeSummarized  = "summarized"
-	SlotChangeDropped     = "dropped"
-	SlotChangeHydrated    = "hydrated"
-	SlotChangeTruncated   = "truncated"
-	SlotChangeRepopulated = "repopulated"
+	SlotChangeSummarized      = "summarized"
+	SlotChangeDropped         = "dropped"
+	SlotChangeHydrated        = "hydrated"
+	SlotChangeDehydrated      = "dehydrated"       // S3b: Tools slot flipped to pointer-only
+	SlotChangePartialHydrated = "partial_hydrated" // S3b: subset of tool categories hydrated
+	SlotChangeTruncated       = "truncated"
+	SlotChangeRepopulated     = "repopulated"
 )
 
 // SlotChangedV1 is the payload schema for slot_changed envelopes. It captures
 // what the slot pipeline did during a turn so the frontend can render an
 // inline notification card with a "What is this?" link to the hot-swap
 // explainer modal.
+//
+// Categories is populated only for the S3b tools-slot variants
+// (hydrated / dehydrated / partial_hydrated). It lists the categories that
+// moved between pointer and full-def state this turn so the frontend can
+// render "search tools loaded" chips instead of an opaque counter.
 type SlotChangedV1 struct {
-	V            int    `json:"v"`
-	Slot         string `json:"slot"`
-	Change       string `json:"change"`
-	Reasoning    string `json:"reasoning"`
-	TokensBefore int    `json:"tokens_before"`
-	TokensAfter  int    `json:"tokens_after"`
-	HelpLink     string `json:"help_link,omitempty"`
+	V            int      `json:"v"`
+	Slot         string   `json:"slot"`
+	Change       string   `json:"change"`
+	Reasoning    string   `json:"reasoning"`
+	TokensBefore int      `json:"tokens_before"`
+	TokensAfter  int      `json:"tokens_after"`
+	Categories   []string `json:"categories,omitempty"`
+	HelpLink     string   `json:"help_link,omitempty"`
 }
 
 // SlotChangedV1Version is the schema version emitted on the wire.
@@ -40,6 +48,10 @@ const SlotChangedV1Version = 1
 
 // SlotChangedDefaultHelpLink points to the hot-swap explainer modal.
 const SlotChangedDefaultHelpLink = "/help/hot-swap"
+
+// SlotChangedHelpLinkTools is the anchor the frontend modal scrolls to when
+// the user clicks "What is this?" on a tools-variant card.
+const SlotChangedHelpLinkTools = SlotChangedDefaultHelpLink + "#tools"
 
 // EmitSlotChangedEvent constructs and sends a slot_changed StreamEvent to the
 // chat stream. Callers fill the payload; this helper marshals the envelope

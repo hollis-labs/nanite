@@ -206,6 +206,96 @@ func TestUpdateUserSettings_InvalidCompactionStrategy(t *testing.T) {
 	}
 }
 
+func TestUserSettings_ToolCacheDefaults(t *testing.T) {
+	s := newSeededStore(t)
+
+	us, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if !us.ToolCacheEnabled {
+		t.Errorf("expected tool_cache_enabled default true, got %v", us.ToolCacheEnabled)
+	}
+	if us.ToolClassifierMode != "broker" {
+		t.Errorf("expected tool_classifier_mode default %q, got %q", "broker", us.ToolClassifierMode)
+	}
+	if us.ToolClassifierTimeoutMS != 500 {
+		t.Errorf("expected tool_classifier_timeout_ms default 500, got %d", us.ToolClassifierTimeoutMS)
+	}
+	if !us.ContextOverflowRecovery {
+		t.Errorf("expected context_overflow_recovery default true, got %v", us.ContextOverflowRecovery)
+	}
+}
+
+func TestUserSettings_ToolCacheRoundTrip(t *testing.T) {
+	s := newSeededStore(t)
+
+	us := &UserSettings{
+		ToolCacheEnabled:        false,
+		ToolClassifierMode:      "rules",
+		ToolClassifierProvider:  "anthropic",
+		ToolClassifierModel:     "claude-haiku-4-5",
+		ToolClassifierTimeoutMS: 750,
+		ContextOverflowRecovery: false,
+	}
+	if err := s.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	got, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if got.ToolCacheEnabled {
+		t.Errorf("ToolCacheEnabled: got true, want false")
+	}
+	if got.ToolClassifierMode != "rules" {
+		t.Errorf("ToolClassifierMode: got %q, want %q", got.ToolClassifierMode, "rules")
+	}
+	if got.ToolClassifierProvider != "anthropic" {
+		t.Errorf("ToolClassifierProvider: got %q, want %q", got.ToolClassifierProvider, "anthropic")
+	}
+	if got.ToolClassifierModel != "claude-haiku-4-5" {
+		t.Errorf("ToolClassifierModel: got %q, want %q", got.ToolClassifierModel, "claude-haiku-4-5")
+	}
+	if got.ToolClassifierTimeoutMS != 750 {
+		t.Errorf("ToolClassifierTimeoutMS: got %d, want 750", got.ToolClassifierTimeoutMS)
+	}
+	if got.ContextOverflowRecovery {
+		t.Errorf("ContextOverflowRecovery: got true, want false")
+	}
+}
+
+func TestUpdateUserSettings_InvalidToolClassifierMode(t *testing.T) {
+	s := newSeededStore(t)
+
+	us := &UserSettings{ToolClassifierMode: "bogus"}
+	err := s.UpdateUserSettings(us)
+	if err == nil {
+		t.Fatal("expected error for unknown tool_classifier_mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("error should mention the invalid value; got: %v", err)
+	}
+}
+
+func TestUpdateUserSettings_ToolClassifierTimeoutDefault(t *testing.T) {
+	s := newSeededStore(t)
+
+	// Zero / negative should default to 500.
+	us := &UserSettings{ToolClassifierMode: "broker", ToolClassifierTimeoutMS: 0}
+	if err := s.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	got, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if got.ToolClassifierTimeoutMS != 500 {
+		t.Errorf("expected timeout defaulted to 500, got %d", got.ToolClassifierTimeoutMS)
+	}
+}
+
 func TestUpdateUserSettings_BudgetPctClamp(t *testing.T) {
 	s := newSeededStore(t)
 

@@ -218,6 +218,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	chatMessages := slotResult.Messages
 	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
 
+	// S3b — emit a tools-variant slot_changed envelope when the classifier
+	// transitioned this turn's Tools slot between pointer / full / partial.
+	emitToolSlotChangedIfNeeded(ch, slotResult.ToolCache)
+
 	// Emit context.assembled event after tool selection and filters are applied.
 	if s.pluginHost != nil {
 		safego.Go(ctx, "service.chat.emit.context-assembled", func() {
@@ -376,6 +380,23 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			Tools:        tools,
 		})
 		if err != nil {
+			// T9 — provider context-overflow recovery: detect the sentinel /
+			// matching error text, run the compaction pipeline synchronously,
+			// and retry once. Second failure surfaces as a user-facing error.
+			if ctxpkg.IsContextOverflow(err) && !ls.contextOverflowRetried {
+				provSpan.End()
+				ls.contextOverflowRetried = true
+				ls.continueWith(ContinueRecovery, "context_overflow at stream start")
+				if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error()); ok {
+					chatMessages = newMsgs
+					tools = newTools
+					systemPrompt = slotResult.SystemPrompt
+					ls.iteration-- // the retry isn't a fresh turn
+					continue
+				}
+				// Recovery refused (flag off / no summarizer / no stages) —
+				// fall through to the normal error path.
+			}
 			provSpan.RecordError(err)
 			provSpan.SetStatus(codes.Error, err.Error())
 			provSpan.End()
@@ -400,10 +421,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			if ls.retryBudget > 0 {
 				ls.retryBudget--
 			}
-			// TODO(phase4): When provider error recovery is added (e.g., prompt_too_long
-			// triggers compaction + retry), use:
-			//   ls.continueWith(ContinueRecovery, fmt.Sprintf("recovered from %s", errCode))
-			//   continue
+			if ctxpkg.IsContextOverflow(err) && ls.contextOverflowRetried {
+				// Already retried once — emit the plan's user-facing message.
+				slog.Warn("chat-service: context_overflow after compaction retry",
+					"session_id", sessionID, "iter", ls.iteration)
+				msg := "Context is still too large after compaction. Use `/clear` or split the request."
+				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
+				return
+			}
 			errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(tools)}
 			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
 			ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
@@ -415,7 +441,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		var toolUseBlocks []provider.ToolUseBlock
 		var stopReason string
 		var lastPTYToolPending string
+		// T9 — set by the mid-stream overflow handler when the outer loop
+		// should retry with a compacted request instead of terminating.
+		contextOverflowRecovered := false
 
+	streamLoop:
 		for evt := range provCh {
 			switch evt.Type {
 			case "delta":
@@ -473,7 +503,33 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 
 			case "error":
+				// T9 — mid-stream overflow recovery: same pattern as the
+				// stream-start case above. Streaming surgery isn't attempted
+				// (plan non-goal) — we abort the in-flight stream, recover,
+				// and the outer loop retries with a rebuilt request.
+				if ctxpkg.IsContextOverflowMessage(evt.Error) && !ls.contextOverflowRetried {
+					ls.contextOverflowRetried = true
+					ls.continueWith(ContinueRecovery, "context_overflow mid-stream")
+					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error); ok {
+						chatMessages = newMsgs
+						tools = newTools
+						systemPrompt = slotResult.SystemPrompt
+						ls.iteration-- // the retry isn't a fresh turn
+						contextOverflowRecovered = true
+						// Labeled break — without the label, `break` would exit
+						// the switch only, and the stream loop would keep
+						// draining events. Copilot review #3095050032.
+						break streamLoop
+					}
+				}
 				errDetails := map[string]interface{}{"raw": evt.Error, "model": model}
+				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.contextOverflowRetried {
+					msg := "Context is still too large after compaction. Use `/clear` or split the request."
+					errDetails["recovery"] = "failed_after_retry"
+					ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, errDetails)
+					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, errDetails)
+					return
+				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
 				ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
 				return
@@ -486,6 +542,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			case "done":
 				// handled below
 			}
+		}
+
+		// T9 — the mid-stream overflow handler broke out of the stream loop so
+		// the outer loop can retry with a compacted request. Skip the
+		// post-stream processing (no content produced this attempt) and
+		// continue.
+		if contextOverflowRecovered {
+			provSpan.End()
+			continue
 		}
 
 		// Resolve remaining PTY tool presence.
@@ -798,6 +863,131 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // ---------------------------------------------------------------------------
 // Private helper methods
 // ---------------------------------------------------------------------------
+
+// recoverFromContextOverflow runs the CompactionPipeline synchronously —
+// ignoring the NeedsCompaction gate, because the provider has already told
+// us the current request is over budget. Returns the rebuilt chat messages
+// and tools plus true on success; false when the feature flag is off, the
+// summarizer isn't available, or the pipeline produced no new stages.
+//
+// Caller is expected to have already classified the incoming error via
+// ctxpkg.IsContextOverflow / IsContextOverflowMessage and to set
+// ls.contextOverflowRetried = true before calling.
+//
+// Folded from BLG-20260410-003 — plan §T9.
+func (s *chatServiceImpl) recoverFromContextOverflow(
+	ctx context.Context,
+	sessionID string,
+	result *SlotAssemblyResult,
+	agent *store.AgentProfile,
+	chatMessages []provider.ChatMessage,
+	tools []provider.ToolDefinition,
+	ch chan chat.StreamEvent,
+	triggerMsg string,
+) ([]provider.ChatMessage, []provider.ToolDefinition, bool) {
+	if result == nil || result.Window == nil {
+		return chatMessages, tools, false
+	}
+	settings, _ := s.store.GetUserSettings()
+	if settings == nil || !settings.ContextOverflowRecovery {
+		slog.Info("chat-service: context_overflow recovery disabled by user setting",
+			"session_id", sessionID, "trigger", triggerMsg)
+		return chatMessages, tools, false
+	}
+	summarizer := s.buildSummarizer(settings)
+	if summarizer == nil {
+		slog.Warn("chat-service: context_overflow recovery skipped; no summarizer available",
+			"session_id", sessionID)
+		return chatMessages, tools, false
+	}
+
+	pipeline := &ctxpkg.CompactionPipeline{
+		Window:               result.Window,
+		Estimator:            ctxpkg.DefaultEstimator{},
+		Summarizer:           summarizer,
+		Mode:                 classifyModeFromAgentTags(agent),
+		ConversationMessages: chatMessages,
+	}
+
+	tokensBefore := result.Window.UsedTokens()
+	cr, err := pipeline.Run(ctx)
+	if err != nil {
+		slog.Warn("chat-service: context_overflow recovery pipeline failed",
+			"err", err, "session_id", sessionID)
+		return chatMessages, tools, false
+	}
+	if cr == nil || len(cr.StagesApplied) == 0 {
+		slog.Warn("chat-service: context_overflow recovery produced no stages",
+			"session_id", sessionID, "trigger", triggerMsg)
+		return chatMessages, tools, false
+	}
+
+	tokensAfter := result.Window.UsedTokens()
+	chatMessages = pipeline.ConversationMessages
+	result.Messages = chatMessages
+	result.Blocks = result.Window.Assemble()
+	result.NeedsCompaction = result.Window.NeedsCompaction()
+	result.SystemPrompt = rebuildLegacySystemPrompt(result.Window)
+
+	if emitErr := chat.EmitSlotChangedEvent(ch, chat.SlotChangedV1{
+		Slot:         ctxpkg.SlotConversation,
+		Change:       chat.SlotChangeSummarized,
+		Reasoning:    fmt.Sprintf("Provider returned context-overflow; synchronously compacted %d stage(s).", len(cr.StagesApplied)),
+		TokensBefore: tokensBefore,
+		TokensAfter:  tokensAfter,
+	}); emitErr != nil {
+		slog.Warn("chat-service: slot_changed emit failed during overflow recovery", "err", emitErr)
+	}
+
+	slog.Info("chat-service: context_overflow recovery ran",
+		"session_id", sessionID,
+		"tokens_before", tokensBefore,
+		"tokens_after", tokensAfter,
+		"stages", cr.StagesApplied,
+		"trigger", triggerMsg,
+	)
+
+	return chatMessages, tools, true
+}
+
+// emitToolSlotChangedIfNeeded translates a ToolCacheOutcome into a
+// slot_changed envelope when the Tools slot's hydration state flipped. The
+// zero-transition case (e.g., pointer → pointer across two ambient chat
+// turns) produces no event so the user sees a card only when something
+// actually changed.
+func emitToolSlotChangedIfNeeded(ch chan chat.StreamEvent, outcome *ToolCacheOutcome) {
+	if outcome == nil || ch == nil {
+		return
+	}
+	if outcome.Prev == outcome.Next {
+		return
+	}
+	payload := chat.SlotChangedV1{
+		Slot:         ctxpkg.SlotTools,
+		Change:       toolSlotChangeKindFor(outcome.Next),
+		Reasoning:    outcome.Reasoning,
+		TokensBefore: outcome.TokensBefore,
+		TokensAfter:  outcome.TokensAfter,
+		Categories:   append([]string(nil), outcome.Categories...),
+		HelpLink:     chat.SlotChangedHelpLinkTools,
+	}
+	if err := chat.EmitSlotChangedEvent(ch, payload); err != nil {
+		slog.Warn("chat-service: tool slot_changed emit failed", "err", err)
+	}
+}
+
+// toolSlotChangeKindFor maps a HydrationState to the matching envelope
+// change kind.
+func toolSlotChangeKindFor(s HydrationState) string {
+	switch s {
+	case StateFull:
+		return chat.SlotChangeHydrated
+	case StatePartial:
+		return chat.SlotChangePartialHydrated
+	default:
+		return chat.SlotChangeDehydrated
+	}
+}
 
 // assembleTurnContext drives slot-based context assembly for the current turn.
 // It builds a *SlotAssemblyResult that carries the slot blocks (for

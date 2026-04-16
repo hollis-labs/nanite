@@ -52,6 +52,24 @@ type UserSettings struct {
 	ToolResultCacheTTLSeconds int `json:"tool_result_cache_ttl_seconds"`
 	ToolResultSoftTruncBytes  int `json:"tool_result_soft_truncate_bytes"`
 	ToolResultHardCapBytes    int `json:"tool_result_hard_cap_bytes"`
+	// Tool-slot cache-and-pointer settings (Phase 3 S3b).
+	// ToolCacheEnabled flips the Tools slot between pointer-by-default
+	// (enabled) and always-hydrate (disabled, S3a behavior).
+	// ToolClassifierMode is one of "rules", "llm", or "broker" (composes
+	// rules + LLM fallback + explicit signals, see plan §D3). Empty
+	// ToolClassifierProvider / ToolClassifierModel fall back to the
+	// summarizer provider/model (see S3a D1).
+	// ToolClassifierTimeoutMS bounds the LLM-layer call; exceeding triggers
+	// D9 fail-open (hydrate all for this turn).
+	// ContextOverflowRecovery (folded from BLG-20260410-003, T9) enables
+	// synchronous compaction+retry when a provider returns a
+	// context-overflow error mid-generation.
+	ToolCacheEnabled        bool   `json:"tool_cache_enabled"`
+	ToolClassifierMode      string `json:"tool_classifier_mode"`
+	ToolClassifierProvider  string `json:"tool_classifier_provider"`
+	ToolClassifierModel     string `json:"tool_classifier_model"`
+	ToolClassifierTimeoutMS int    `json:"tool_classifier_timeout_ms"`
+	ContextOverflowRecovery bool   `json:"context_overflow_recovery"`
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -69,6 +87,10 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var contextBudgetPct float64
 	var summarizerProvider, summarizerModel, compactionStrategy string
 	var toolPerTurnCap, toolResultCacheTTL, toolResultSoftTrunc, toolResultHardCap int
+	var toolCacheEnabled bool
+	var toolClassifierMode, toolClassifierProvider, toolClassifierModel string
+	var toolClassifierTimeoutMS int
+	var contextOverflowRecovery bool
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
@@ -78,7 +100,10 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		        context_window_tokens, context_budget_pct,
 		        summarizer_provider, summarizer_model, compaction_strategy,
 		        tool_per_turn_cap, tool_result_cache_ttl_seconds,
-		        tool_result_soft_truncate_bytes, tool_result_hard_cap_bytes
+		        tool_result_soft_truncate_bytes, tool_result_hard_cap_bytes,
+		        tool_cache_enabled, tool_classifier_mode,
+		        tool_classifier_provider, tool_classifier_model,
+		        tool_classifier_timeout_ms, context_overflow_recovery
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
@@ -87,7 +112,10 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		&embeddingProvider, &embeddingModel, &embeddingMode,
 		&contextWindowTokens, &contextBudgetPct,
 		&summarizerProvider, &summarizerModel, &compactionStrategy,
-		&toolPerTurnCap, &toolResultCacheTTL, &toolResultSoftTrunc, &toolResultHardCap)
+		&toolPerTurnCap, &toolResultCacheTTL, &toolResultSoftTrunc, &toolResultHardCap,
+		&toolCacheEnabled, &toolClassifierMode,
+		&toolClassifierProvider, &toolClassifierModel,
+		&toolClassifierTimeoutMS, &contextOverflowRecovery)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -117,6 +145,12 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		ToolResultCacheTTLSeconds:    toolResultCacheTTL,
 		ToolResultSoftTruncBytes:     toolResultSoftTrunc,
 		ToolResultHardCapBytes:       toolResultHardCap,
+		ToolCacheEnabled:             toolCacheEnabled,
+		ToolClassifierMode:           toolClassifierMode,
+		ToolClassifierProvider:       toolClassifierProvider,
+		ToolClassifierModel:          toolClassifierModel,
+		ToolClassifierTimeoutMS:      toolClassifierTimeoutMS,
+		ContextOverflowRecovery:      contextOverflowRecovery,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -209,6 +243,20 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	if toolResultHardCap <= 0 {
 		toolResultHardCap = 1048576
 	}
+	toolClassifierMode := us.ToolClassifierMode
+	if toolClassifierMode == "" {
+		toolClassifierMode = "broker"
+	}
+	switch toolClassifierMode {
+	case "rules", "llm", "broker":
+		// valid
+	default:
+		return fmt.Errorf("update user settings: unknown tool_classifier_mode %q (must be \"rules\", \"llm\", or \"broker\")", toolClassifierMode)
+	}
+	toolClassifierTimeoutMS := us.ToolClassifierTimeoutMS
+	if toolClassifierTimeoutMS <= 0 {
+		toolClassifierTimeoutMS = 500
+	}
 	_, err = s.DB.Exec(
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
@@ -238,6 +286,12 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			tool_result_cache_ttl_seconds = ?,
 			tool_result_soft_truncate_bytes = ?,
 			tool_result_hard_cap_bytes = ?,
+			tool_cache_enabled = ?,
+			tool_classifier_mode = ?,
+			tool_classifier_provider = ?,
+			tool_classifier_model = ?,
+			tool_classifier_timeout_ms = ?,
+			context_overflow_recovery = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
@@ -249,6 +303,9 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		contextWindowTokens, contextBudgetPct,
 		us.SummarizerProvider, us.SummarizerModel, compactionStrategy,
 		toolPerTurnCap, toolResultCacheTTL, toolResultSoftTrunc, toolResultHardCap,
+		us.ToolCacheEnabled, toolClassifierMode,
+		us.ToolClassifierProvider, us.ToolClassifierModel,
+		toolClassifierTimeoutMS, us.ContextOverflowRecovery,
 		now,
 	)
 	if err != nil {

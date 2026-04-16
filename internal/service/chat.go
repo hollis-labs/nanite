@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
+	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/worker"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
@@ -94,6 +95,9 @@ type ChatServiceConfig struct {
 	// first time a given session generates a response.
 	EmbeddingStatus   string
 	EmbeddingProvider string
+
+	// ResultCache for the cache-and-pointer pattern (S4a) — nil-safe.
+	ResultCache *tool.ResultCache
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -129,6 +133,11 @@ type chatServiceImpl struct {
 	embeddingWarnedMu       sync.Mutex
 	embeddingWarnedSessions map[string]struct{}
 	embeddingWarnedOrder    []string
+
+	// argValidator caches compiled JSON Schemas for tool InputSchema validation.
+	argValidator *argValidator
+	// resultCache stores large tool results for the cache-and-pointer pattern.
+	resultCache *tool.ResultCache
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -167,6 +176,8 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		embeddingStatus:         cfg.EmbeddingStatus,
 		embeddingProvider:       cfg.EmbeddingProvider,
 		embeddingWarnedSessions: make(map[string]struct{}),
+		argValidator:            newArgValidator(),
+		resultCache:             cfg.ResultCache,
 		lifecycle:               lifecycle.NewManager("service.chat"),
 	}
 }

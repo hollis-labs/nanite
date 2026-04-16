@@ -46,6 +46,12 @@ type UserSettings struct {
 	SummarizerProvider  string  `json:"summarizer_provider"`
 	SummarizerModel     string  `json:"summarizer_model"`
 	CompactionStrategy  string  `json:"compaction_strategy"`
+	// Tool broker execution-path settings (Phase 3 S4a).
+	// ToolPerTurnCap is the max calls to any single tool per turn (default 10; 0 = no cap).
+	ToolPerTurnCap            int `json:"tool_per_turn_cap"`
+	ToolResultCacheTTLSeconds int `json:"tool_result_cache_ttl_seconds"`
+	ToolResultSoftTruncBytes  int `json:"tool_result_soft_truncate_bytes"`
+	ToolResultHardCapBytes    int `json:"tool_result_hard_cap_bytes"`
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -62,6 +68,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var contextWindowTokens int
 	var contextBudgetPct float64
 	var summarizerProvider, summarizerModel, compactionStrategy string
+	var toolPerTurnCap, toolResultCacheTTL, toolResultSoftTrunc, toolResultHardCap int
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
@@ -69,7 +76,9 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		        tool_load_preferences, task_backend, allow_unsigned_plugins,
 		        embedding_provider, embedding_model, embedding_mode,
 		        context_window_tokens, context_budget_pct,
-		        summarizer_provider, summarizer_model, compaction_strategy
+		        summarizer_provider, summarizer_model, compaction_strategy,
+		        tool_per_turn_cap, tool_result_cache_ttl_seconds,
+		        tool_result_soft_truncate_bytes, tool_result_hard_cap_bytes
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
@@ -77,7 +86,8 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		&toolLoadPrefsJSON, &taskBackend, &allowUnsigned,
 		&embeddingProvider, &embeddingModel, &embeddingMode,
 		&contextWindowTokens, &contextBudgetPct,
-		&summarizerProvider, &summarizerModel, &compactionStrategy)
+		&summarizerProvider, &summarizerModel, &compactionStrategy,
+		&toolPerTurnCap, &toolResultCacheTTL, &toolResultSoftTrunc, &toolResultHardCap)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -102,7 +112,11 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		ContextBudgetPct:     contextBudgetPct,
 		SummarizerProvider:   summarizerProvider,
 		SummarizerModel:      summarizerModel,
-		CompactionStrategy:   compactionStrategy,
+		CompactionStrategy:           compactionStrategy,
+		ToolPerTurnCap:               toolPerTurnCap,
+		ToolResultCacheTTLSeconds:    toolResultCacheTTL,
+		ToolResultSoftTruncBytes:     toolResultSoftTrunc,
+		ToolResultHardCapBytes:       toolResultHardCap,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -178,6 +192,22 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	default:
 		return fmt.Errorf("update user settings: unknown compaction_strategy %q (must be \"default\" or \"broker\")", compactionStrategy)
 	}
+	toolPerTurnCap := us.ToolPerTurnCap
+	if toolPerTurnCap <= 0 {
+		toolPerTurnCap = 10
+	}
+	toolResultCacheTTL := us.ToolResultCacheTTLSeconds
+	if toolResultCacheTTL <= 0 {
+		toolResultCacheTTL = 3600
+	}
+	toolResultSoftTrunc := us.ToolResultSoftTruncBytes
+	if toolResultSoftTrunc <= 0 {
+		toolResultSoftTrunc = 65536
+	}
+	toolResultHardCap := us.ToolResultHardCapBytes
+	if toolResultHardCap <= 0 {
+		toolResultHardCap = 1048576
+	}
 	_, err = s.DB.Exec(
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
@@ -203,6 +233,10 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			summarizer_provider = ?,
 			summarizer_model = ?,
 			compaction_strategy = ?,
+			tool_per_turn_cap = ?,
+			tool_result_cache_ttl_seconds = ?,
+			tool_result_soft_truncate_bytes = ?,
+			tool_result_hard_cap_bytes = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
@@ -213,6 +247,7 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		us.EmbeddingProvider, us.EmbeddingModel, embeddingMode,
 		contextWindowTokens, contextBudgetPct,
 		us.SummarizerProvider, us.SummarizerModel, compactionStrategy,
+		toolPerTurnCap, toolResultCacheTTL, toolResultSoftTrunc, toolResultHardCap,
 		now,
 	)
 	if err != nil {

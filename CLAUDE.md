@@ -85,4 +85,13 @@ Agent configuration for this project lives in `.nanite/config.yaml`. Roles load 
 
 **Session state** (if present) lives in `.nanite/boot-prompt.md` — read it first when starting a new session.
 
+## Tool result cache (Phase 3 S4a)
+
+When a tool result exceeds 64 KiB, the full body is cached and the LLM sees a truncated view with a `tool_result://<id>` pointer. Two meta-tools are always available:
+
+- `fetch_tool_result({id, offset?, length?})` — retrieve a byte slice.
+- `search_tool_result({id, pattern, max_matches?})` — regex search with context.
+
+These meta-tools are exempt from the per-tool call cap.
+
 <!-- nanite:end -->

@@ -102,6 +102,27 @@ Introduce a validator layer at the boundary. Minimum viable shape:
 
 The validator layer is 200-300 lines and goes in a new file `internal/mcp/validate.go`. It's a natural home for the size caps referenced by finding 02 and the schema checks referenced here.
 
+## Resolution status
+
+**Execution-side pieces resolved in Phase 3 S4a (2026-04-15):**
+
+- Tool-name charset validation on MCP discovery (`^[a-zA-Z0-9_-]+$`, max 128 chars) — warn+skip invalid names.
+- Tool-argument validation against `InputSchema` (jsonschema v6) before dispatch.
+- Selection-broker rules re-applied at execution time (agent toolset + permissions).
+- Per-tool call cap (default 10 per turn, configurable).
+- Error sanitization (home-dir, secret env vars, stack traces).
+- Result cache-and-pointer pattern (64 KiB soft / 1 MiB hard cap, TTL 1h).
+
+See `docs/tool-broker.md` for full details.
+
+**Remaining for S4b (trust-boundary hardening):**
+
+- `MCPServerConfig.TrustTier` + per-tier validation (discovery + transport side).
+- InputSchema size/depth caps on discovery.
+- Tool-result size caps per trust tier.
+- ANSI stripping, prompt-injection heuristics, env allowlist.
+- Tool-name collision resolution across servers.
+
 ## References
 
 - `internal/mcp/manager.go:L116-L164` — unchecked tool ingestion

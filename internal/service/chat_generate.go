@@ -445,6 +445,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// should retry with a compacted request instead of terminating.
 		contextOverflowRecovered := false
 
+	streamLoop:
 		for evt := range provCh {
 			switch evt.Type {
 			case "delta":
@@ -515,7 +516,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 						systemPrompt = slotResult.SystemPrompt
 						ls.iteration-- // the retry isn't a fresh turn
 						contextOverflowRecovered = true
-						break // exit the stream loop; outer loop continues
+						// Labeled break — without the label, `break` would exit
+						// the switch only, and the stream loop would keep
+						// draining events. Copilot review #3095050032.
+						break streamLoop
 					}
 				}
 				errDetails := map[string]interface{}{"raw": evt.Error, "model": model}

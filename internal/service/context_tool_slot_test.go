@@ -282,6 +282,59 @@ func TestAssembleSlots_S3b_StateTransitionTracking(t *testing.T) {
 	}
 }
 
+// TestAssembleSlots_S3b_TokensBeforeReflectsPriorSlot locks in the fix for
+// Copilot review #3095049986. Prior implementation reported the pointer-
+// summary size as TokensBefore even on full→pointer transitions, producing
+// misleading "tokens saved" deltas. The test stores per-session slot sizes
+// and asserts every transition reports the actual prior slot's tokens.
+func TestAssembleSlots_S3b_TokensBeforeReflectsPriorSlot(t *testing.T) {
+	cls := &scriptedClassifier{
+		result: intent.Result{Hydrate: true, Categories: nil, Source: intent.SourceRules, Reasoning: "hydrate all"},
+	}
+	svc, s := newStubbedContextService(t, cls, nil, true)
+	sess, agent := seedSession(t, s, "run tests")
+
+	// Turn 1: full hydration. Records the full-slot size as prior-state.
+	first, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000)
+	if err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+	if first.ToolCache.Next != StateFull {
+		t.Fatalf("turn 1 expected StateFull, got %v", first.ToolCache.Next)
+	}
+	fullTokens := first.ToolCache.TokensAfter
+
+	// Turn 2: classifier flips to no-hydrate. TokensBefore must be the full
+	// slot's size (what we previously emitted), not the pointer summary's —
+	// that's the exact bug the fix addresses.
+	cls.result = intent.Result{Hydrate: false, Source: intent.SourceRules, Reasoning: "ambient"}
+	second, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000)
+	if err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	if second.ToolCache.Prev != StateFull || second.ToolCache.Next != StatePointer {
+		t.Fatalf("turn 2 expected full→pointer; got %v→%v", second.ToolCache.Prev, second.ToolCache.Next)
+	}
+	if second.ToolCache.TokensBefore != fullTokens {
+		t.Fatalf("TokensBefore on full→pointer should equal prior slot tokens (%d); got %d", fullTokens, second.ToolCache.TokensBefore)
+	}
+
+	// Turn 3: back to full. TokensBefore should now equal the pointer size
+	// from turn 2.
+	pointerTokens := second.ToolCache.TokensAfter
+	cls.result = intent.Result{Hydrate: true, Categories: nil, Source: intent.SourceRules, Reasoning: "hydrate all"}
+	third, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000)
+	if err != nil {
+		t.Fatalf("turn 3: %v", err)
+	}
+	if third.ToolCache.Prev != StatePointer || third.ToolCache.Next != StateFull {
+		t.Fatalf("turn 3 expected pointer→full; got %v→%v", third.ToolCache.Prev, third.ToolCache.Next)
+	}
+	if third.ToolCache.TokensBefore != pointerTokens {
+		t.Fatalf("TokensBefore on pointer→full should equal prior pointer tokens (%d); got %d", pointerTokens, third.ToolCache.TokensBefore)
+	}
+}
+
 func TestAssembleSlots_S3b_ClassifierErrorStillRenders(t *testing.T) {
 	// When the classifier returns an error, contextServiceImpl currently still
 	// honours the returned Result (BrokerClassifier's fail-open pattern applies

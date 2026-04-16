@@ -96,6 +96,13 @@ type ToolCacheOverrideStore interface {
 	Get(sessionID string) intent.Override
 }
 
+// toolCacheSessionState is the per-session memo the ContextService keeps so
+// the next turn can report accurate prev→next transitions and token deltas.
+type toolCacheSessionState struct {
+	State      HydrationState
+	SlotTokens int
+}
+
 // contextServiceImpl delegates to the existing chat.ContextClient for content
 // retrieval, and wraps results in the slot-based ContextWindow for budgeting,
 // caching, and compaction.
@@ -109,9 +116,11 @@ type contextServiceImpl struct {
 	classifier   intent.Classifier
 	overrides    ToolCacheOverrideStore
 	settingsFunc func() *store.UserSettings
-	// lastState tracks the last-emitted hydration state per session so
-	// AssembleSlots can report transitions for the T5 envelope.
-	lastState sync.Map // map[sessionID]HydrationState
+	// lastToolCache tracks the last-emitted hydration state and the token
+	// count of the previous Tools slot per session. Used for T5 transition
+	// detection and to report accurate before/after deltas across all
+	// transitions — not just pointer→x — Copilot review #3095049986.
+	lastToolCache sync.Map // map[sessionID]toolCacheSessionState
 }
 
 // ContextServiceConfig holds dependencies for constructing a ContextService.
@@ -268,11 +277,19 @@ func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.
 
 	content, next, cats := renderToolsSlot(st, result)
 
-	prev := s.loadLastState(sessionID)
-	s.storeLastState(sessionID, next)
-
-	before := s.estimator.Estimate(st.SummaryText) // baseline if we were to leave the pointer
+	prevMemo := s.loadLastToolCache(sessionID)
 	after := s.estimator.Estimate(content)
+	s.storeLastToolCache(sessionID, toolCacheSessionState{State: next, SlotTokens: after})
+
+	// TokensBefore is the actual prior Tools-slot size when we have a memo
+	// for this session, so full→pointer and partial→pointer transitions
+	// report a real reduction. Fresh sessions with no memo default to the
+	// pointer-summary size — that matches the "what we would have used"
+	// baseline from S3a→S3b plus a first-turn inherits-pointer convention.
+	before := prevMemo.SlotTokens
+	if before == 0 {
+		before = s.estimator.Estimate(st.SummaryText)
+	}
 
 	// Approximate tokens saved vs. S3a: the per-turn delta between "if we had
 	// shipped the full defs" and what we actually shipped. When hydrated, this
@@ -294,7 +311,7 @@ func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.
 		"session_id", sessionID,
 		"source", result.Source,
 		"hydration", next.String(),
-		"prev_hydration", prev.String(),
+		"prev_hydration", prevMemo.State.String(),
 		"categories", cats,
 		"confidence", result.Confidence,
 		"latency_ms", latency,
@@ -306,7 +323,7 @@ func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.
 	)
 
 	return content, &ToolCacheOutcome{
-		Prev:            prev,
+		Prev:            prevMemo.State,
 		Next:            next,
 		Categories:      cats,
 		Source:          result.Source,
@@ -436,21 +453,21 @@ func diffCategories(all, picked []string) []string {
 	return out
 }
 
-func (s *contextServiceImpl) loadLastState(sessionID string) HydrationState {
+func (s *contextServiceImpl) loadLastToolCache(sessionID string) toolCacheSessionState {
 	if sessionID == "" {
-		return StatePointer
+		return toolCacheSessionState{}
 	}
-	if v, ok := s.lastState.Load(sessionID); ok {
-		return v.(HydrationState)
+	if v, ok := s.lastToolCache.Load(sessionID); ok {
+		return v.(toolCacheSessionState)
 	}
-	return StatePointer
+	return toolCacheSessionState{}
 }
 
-func (s *contextServiceImpl) storeLastState(sessionID string, st HydrationState) {
+func (s *contextServiceImpl) storeLastToolCache(sessionID string, st toolCacheSessionState) {
 	if sessionID == "" {
 		return
 	}
-	s.lastState.Store(sessionID, st)
+	s.lastToolCache.Store(sessionID, st)
 }
 
 // lastUserTurn returns the content of the most recent user-role message, or

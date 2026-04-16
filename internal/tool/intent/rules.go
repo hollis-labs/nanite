@@ -104,9 +104,13 @@ func describeRuleMatch(cats []string, matches map[string][]string) string {
 		ms := matches[c]
 		sort.Strings(ms)
 		// Regex strings may look noisy; strip the common boundary anchors.
+		// strings.Trim would munch stray '\' / 'b' chars, not the literal \b
+		// substring — Copilot review #3095049844.
 		pretty := make([]string, 0, len(ms))
 		for _, m := range ms {
-			pretty = append(pretty, strings.Trim(m, `\b`))
+			clean := strings.TrimPrefix(m, `\b`)
+			clean = strings.TrimSuffix(clean, `\b`)
+			pretty = append(pretty, clean)
 		}
 		parts = append(parts, c+": "+strings.Join(pretty, ", "))
 	}
@@ -147,7 +151,9 @@ func defaultRules() []rule {
 		mustRule(`\bfetch\b`, "http", 0.7),
 		mustRule(`\bcurl\b`, "http", 0.8),
 		mustRule(`\bhttp(s)?\b`, "http", 0.6),
-		mustRule(`\bGET\b|\bPOST\b|\bPUT\b|\bDELETE\b`, "http", 0.7),
+		// Text is lowercased before matching (see Classify), so these must be
+		// lowercase too — Copilot review #3095049742.
+		mustRule(`\bget\b|\bpost\b|\bput\b|\bdelete\b`, "http", 0.7),
 		mustRule(`\burl\b`, "http", 0.3),
 
 		// agent

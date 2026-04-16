@@ -84,6 +84,42 @@ func TestRulesClassifier_MultipleCategories(t *testing.T) {
 	}
 }
 
+// TestRulesClassifier_HTTPMethodCaseInsensitive locks in the fix for Copilot
+// review #3095049742 — the HTTP method pattern must be lowercase so that
+// uppercase inputs still match after the classifier lowercases the text.
+func TestRulesClassifier_HTTPMethodCaseInsensitive(t *testing.T) {
+	c := NewRulesClassifier()
+	cases := []string{
+		"GET /api/users",
+		"POST the data",
+		"PUT /resource",
+		"DELETE /thing",
+		"get the page",
+		"do a post request",
+	}
+	for _, input := range cases {
+		t.Run(input, func(t *testing.T) {
+			r, err := c.Classify(context.Background(), Input{UserTurn: input, AvailableCategories: allCats})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !r.Hydrate {
+				t.Fatalf("HTTP method in %q should hydrate; got %+v", input, r)
+			}
+			found := false
+			for _, cat := range r.Categories {
+				if cat == "http" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("HTTP category should be picked for %q; got %v", input, r.Categories)
+			}
+		})
+	}
+}
+
 func TestRulesClassifier_ConfidenceReflectsBestScore(t *testing.T) {
 	c := NewRulesClassifier()
 	// "find" alone is 0.5 — under threshold but reported as confidence.

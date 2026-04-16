@@ -274,6 +274,37 @@ func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.
 	before := s.estimator.Estimate(st.SummaryText) // baseline if we were to leave the pointer
 	after := s.estimator.Estimate(content)
 
+	// Approximate tokens saved vs. S3a: the per-turn delta between "if we had
+	// shipped the full defs" and what we actually shipped. When hydrated, this
+	// is zero or near-zero; when pointer, this captures the win.
+	fullTokens := s.estimator.Estimate(serializeToolsForSlot(defsFromStash(st)))
+	tokensSaved := fullTokens - after
+	if tokensSaved < 0 {
+		tokensSaved = 0
+	}
+
+	// T8 — single structured INFO line per turn. Tail-readable; no metrics
+	// SDK dependency. Fields mirror the telemetry counters/histogram the
+	// plan describes (nanite.tool_cache.classify.source, .hydration, etc.).
+	llmErrs := 0
+	if result.Source == intent.SourceFallback {
+		llmErrs = 1
+	}
+	slog.Info("context-service: tool_cache classify",
+		"session_id", sessionID,
+		"source", result.Source,
+		"hydration", next.String(),
+		"prev_hydration", prev.String(),
+		"categories", cats,
+		"confidence", result.Confidence,
+		"latency_ms", latency,
+		"tokens_before", before,
+		"tokens_after", after,
+		"tokens_saved", tokensSaved,
+		"llm_errors", llmErrs,
+		"selection_hash", st.SelectionHash,
+	)
+
 	return content, &ToolCacheOutcome{
 		Prev:            prev,
 		Next:            next,
@@ -285,6 +316,24 @@ func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.
 		SelectionHash:   st.SelectionHash,
 		ClassifierLatMS: latency,
 	}
+}
+
+// defsFromStash returns every def in the stash, sorted by category then name —
+// matches the shape renderToolsSlot produces when fully hydrating.
+func defsFromStash(st *stash.Stash) []provider.ToolDefinition {
+	if st == nil {
+		return nil
+	}
+	cats := st.CategoriesList()
+	out := make([]provider.ToolDefinition, 0, len(st.FullDefs))
+	for _, c := range cats {
+		for _, name := range st.Categories[c] {
+			if d, ok := st.FullDefs[name]; ok {
+				out = append(out, d)
+			}
+		}
+	}
+	return out
 }
 
 // renderToolsSlot produces the serialized content for the Tools slot plus the

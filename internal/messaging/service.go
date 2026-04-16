@@ -119,6 +119,9 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 		// can't deliver (e.g. no active SSE for that session yet).
 		svc.sink.NotifyReceived(ctx, out)
 	}
+	// T8: record send in the session event-log so context broker +
+	// replay tooling can reconstruct session history.
+	svc.writeSendEvents(ctx, out)
 	return out, nil
 }
 
@@ -172,7 +175,11 @@ func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) e
 	if msg.ToSessionID != sessionID || msg.ToAgentID != agentID {
 		return fmt.Errorf("%w: caller is not message recipient", ErrForbidden)
 	}
-	return svc.store.Ack(ctx, msgID)
+	if err := svc.store.Ack(ctx, msgID); err != nil {
+		return err
+	}
+	svc.writeMessageEvent(ctx, sessionID, EventMessageAcked, msg)
+	return nil
 }
 
 // Resolve marks a message as resolved. Same recipient-ownership check
@@ -188,7 +195,11 @@ func (svc *Service) Resolve(ctx context.Context, sessionID, agentID, msgID strin
 	if msg.ToSessionID != sessionID || msg.ToAgentID != agentID {
 		return fmt.Errorf("%w: caller is not message recipient", ErrForbidden)
 	}
-	return svc.store.Resolve(ctx, msgID)
+	if err := svc.store.Resolve(ctx, msgID); err != nil {
+		return err
+	}
+	svc.writeMessageEvent(ctx, sessionID, EventMessageResolved, msg)
+	return nil
 }
 
 // RecentForSession returns the last N messages touching a session

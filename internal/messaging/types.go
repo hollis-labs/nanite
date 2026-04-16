@@ -1,5 +1,16 @@
 package messaging
 
+// Kind constants name the wire type of a message — what shape of
+// payload rides on it and how receivers should react. Distinct from
+// the message Type constants (semantic role) and from S5 envelope
+// content types (UI shape). See docs/messaging.md §Vocabulary.
+const (
+	KindRequest      = "request"
+	KindReply        = "reply"
+	KindNotification = "notification"
+	KindHandoff      = "handoff"
+)
+
 // Channel constants name the transport bucket a message travels on.
 // Distinct from MessageKind (wire type, T4) and S5 EnvelopeType (UI
 // content shape). Channel usage policy lives in docs/messaging.md:
@@ -12,14 +23,13 @@ const (
 	ChannelAlert = "alert"
 )
 
-// InboxFilter bundles optional inbox filters. An empty-string value on
-// any field means "no constraint on that dimension". Callers construct
-// a filter with whichever fields they want to narrow by. Struct shape
-// (rather than positional args) lets T4's kind filter land without
-// breaking every caller.
+// InboxFilter bundles optional inbox filters. An empty-string value
+// on any field means "no constraint on that dimension". Callers
+// construct a filter with whichever fields they want to narrow by.
 type InboxFilter struct {
 	Status  string
 	Channel string
+	Kind    string
 }
 
 // Message is a single agent-to-agent (or agent-to-user) message row.
@@ -47,6 +57,8 @@ type Message struct {
 	Priority      int     `json:"priority"`
 	Status        string  `json:"status"`
 	Channel       string  `json:"channel"`
+	Kind          string  `json:"kind"`
+	PayloadJSON   string  `json:"payload_json"`
 	CreatedAt     string  `json:"created_at"`
 	ReadAt        *string `json:"read_at"`
 	ResolvedAt    *string `json:"resolved_at"`
@@ -63,14 +75,20 @@ type SendInput struct {
 	// Channel is required; empty defaults to ChannelChat. The Store
 	// validates against the CHECK constraint so unknown values reject
 	// at insert time rather than silently rewriting themselves.
-	Channel  string
-	Type     string
-	Subject  string
-	Body     string
-	ThreadID string
-	ReplyTo  string
-	Metadata string
-	Priority int
+	Channel string
+	// Kind is optional; empty defaults to KindNotification. Same CHECK
+	// semantics as Channel — invalid values reject at insert.
+	Kind string
+	// PayloadJSON carries kind-specific structured payload per S5's
+	// ResponseV1 shape. Empty defaults to "{}".
+	PayloadJSON string
+	Type        string
+	Subject     string
+	Body        string
+	ThreadID    string
+	ReplyTo     string
+	Metadata    string
+	Priority    int
 }
 
 // Message type constants (wire-level "type" column on each row). These

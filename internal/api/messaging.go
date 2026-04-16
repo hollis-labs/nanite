@@ -40,6 +40,7 @@ func (a *API) handleMessageInbox(w http.ResponseWriter, r *http.Request) {
 	filter := messaging.InboxFilter{
 		Status:  r.URL.Query().Get("status"),
 		Channel: r.URL.Query().Get("channel"),
+		Kind:    r.URL.Query().Get("kind"),
 	}
 
 	msgs, err := a.Services.Messaging.Inbox(r.Context(), sessionID, agentID, filter, sessionID, agentID)

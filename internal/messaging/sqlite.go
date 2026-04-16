@@ -30,7 +30,7 @@ func NewSQLiteStore(db *sql.DB) *SQLiteStore {
 // rows. All read queries use this so scanRows can consume them.
 const selectColumns = `id, from_session_id, from_agent_id, to_session_id, to_agent_id,
 	COALESCE(thread_id,''), COALESCE(reply_to,''),
-	type, COALESCE(subject,''), body, metadata, priority, status, channel,
+	type, COALESCE(subject,''), body, metadata, priority, status, channel, kind, payload_json,
 	created_at, read_at, resolved_at`
 
 // Send inserts a new message row, populating defaults, and re-fetches
@@ -55,6 +55,14 @@ func (s *SQLiteStore) Send(ctx context.Context, input SendInput) (*Message, erro
 	if channel == "" {
 		channel = ChannelChat
 	}
+	kind := input.Kind
+	if kind == "" {
+		kind = KindNotification
+	}
+	payload := input.PayloadJSON
+	if payload == "" {
+		payload = "{}"
+	}
 	threadID := input.ThreadID
 	if threadID == "" {
 		// Self-thread for top-level messages — a reply adds itself to
@@ -67,14 +75,14 @@ func (s *SQLiteStore) Send(ctx context.Context, input SendInput) (*Message, erro
 		`INSERT INTO a2a_messages (id, from_session_id, from_agent_id,
 		                           to_session_id, to_agent_id,
 		                           thread_id, reply_to, type,
-		                           subject, body, metadata, priority, status, channel, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                           subject, body, metadata, priority, status, channel, kind, payload_json, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id,
 		input.FromSessionID, input.FromAgentID,
 		input.ToSessionID, input.ToAgentID,
 		nullIfEmpty(threadID), nullIfEmpty(input.ReplyTo),
 		msgType, nullIfEmpty(input.Subject), input.Body,
-		metadata, priority, status, channel, now,
+		metadata, priority, status, channel, kind, payload, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("send message: %w", err)
@@ -93,7 +101,7 @@ func (s *SQLiteStore) Get(ctx context.Context, msgID string) (*Message, error) {
 		&m.ID,
 		&m.FromSessionID, &m.FromAgentID, &m.ToSessionID, &m.ToAgentID,
 		&m.ThreadID, &m.ReplyTo,
-		&m.Type, &m.Subject, &m.Body, &m.Metadata, &m.Priority, &m.Status, &m.Channel,
+		&m.Type, &m.Subject, &m.Body, &m.Metadata, &m.Priority, &m.Status, &m.Channel, &m.Kind, &m.PayloadJSON,
 		&m.CreatedAt, &m.ReadAt, &m.ResolvedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -118,6 +126,10 @@ func (s *SQLiteStore) Inbox(ctx context.Context, sessionID, agentID string, filt
 	if filter.Channel != "" {
 		where = append(where, "channel = ?")
 		args = append(args, filter.Channel)
+	}
+	if filter.Kind != "" {
+		where = append(where, "kind = ?")
+		args = append(args, filter.Kind)
 	}
 
 	query := `SELECT ` + selectColumns + ` FROM a2a_messages WHERE ` +
@@ -261,7 +273,7 @@ func scanRows(rows *sql.Rows) ([]Message, error) {
 			&m.ID,
 			&m.FromSessionID, &m.FromAgentID, &m.ToSessionID, &m.ToAgentID,
 			&m.ThreadID, &m.ReplyTo,
-			&m.Type, &m.Subject, &m.Body, &m.Metadata, &m.Priority, &m.Status, &m.Channel,
+			&m.Type, &m.Subject, &m.Body, &m.Metadata, &m.Priority, &m.Status, &m.Channel, &m.Kind, &m.PayloadJSON,
 			&m.CreatedAt, &m.ReadAt, &m.ResolvedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)

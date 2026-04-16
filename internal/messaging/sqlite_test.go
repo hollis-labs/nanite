@@ -286,6 +286,125 @@ func TestSQLiteStore_Send_InvalidChannelRejected(t *testing.T) {
 	}
 }
 
+// --- T4: MessageKind typed payloads ---
+
+// TestSQLiteStore_Send_DefaultsKindAndPayload covers T4: Send
+// populates Kind to KindNotification and PayloadJSON to "{}" when the
+// input leaves them empty.
+func TestSQLiteStore_Send_DefaultsKindAndPayload(t *testing.T) {
+	s, _ := newTestMessagingStore(t)
+	out, err := s.Send(context.Background(), SendInput{
+		FromSessionID: "sess-1", FromAgentID: "file-a",
+		ToSessionID: "sess-1", ToAgentID: "file-b",
+		Body: "hi",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if out.Kind != KindNotification {
+		t.Errorf("Kind = %q, want %q", out.Kind, KindNotification)
+	}
+	if out.PayloadJSON != "{}" {
+		t.Errorf("PayloadJSON = %q, want %q", out.PayloadJSON, "{}")
+	}
+}
+
+// TestSQLiteStore_Send_KindRoundTrip covers T4: each of the four
+// wire kinds persists with its payload and comes back intact via Get.
+func TestSQLiteStore_Send_KindRoundTrip(t *testing.T) {
+	s, _ := newTestMessagingStore(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		kind    string
+		payload string
+	}{
+		{KindRequest, `{"question":"what time is it?"}`},
+		{KindReply, `{"answer":"noon","in_reply_to":"abc-123"}`},
+		{KindNotification, `{"summary":"build green"}`},
+		{KindHandoff, `{"target_agent":"file-frontend"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			out, err := s.Send(ctx, SendInput{
+				FromSessionID: "sess-1", FromAgentID: "file-a",
+				ToSessionID: "sess-1", ToAgentID: "file-b",
+				Kind: tc.kind, PayloadJSON: tc.payload,
+				Body: "msg",
+			})
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			got, err := s.Get(ctx, out.ID)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if got.Kind != tc.kind {
+				t.Errorf("Kind = %q, want %q", got.Kind, tc.kind)
+			}
+			if got.PayloadJSON != tc.payload {
+				t.Errorf("PayloadJSON = %q, want %q", got.PayloadJSON, tc.payload)
+			}
+		})
+	}
+}
+
+// TestSQLiteStore_Send_InvalidKindRejected covers the CHECK constraint
+// — a kind outside (request|reply|notification|handoff) fails at
+// insert.
+func TestSQLiteStore_Send_InvalidKindRejected(t *testing.T) {
+	s, _ := newTestMessagingStore(t)
+	_, err := s.Send(context.Background(), SendInput{
+		FromSessionID: "sess-1", FromAgentID: "file-a",
+		ToSessionID: "sess-1", ToAgentID: "file-b",
+		Kind: "telepathic-blast",
+		Body: "hi",
+	})
+	if err == nil {
+		t.Fatal("expected CHECK constraint rejection for unknown kind, got nil")
+	}
+}
+
+// TestSQLiteStore_Inbox_FiltersByKind covers T4: the kind filter
+// narrows inbox results to matching-kind rows only.
+func TestSQLiteStore_Inbox_FiltersByKind(t *testing.T) {
+	s, _ := newTestMessagingStore(t)
+	ctx := context.Background()
+
+	kinds := []string{KindRequest, KindReply, KindNotification, KindNotification}
+	for _, k := range kinds {
+		if _, err := s.Send(ctx, SendInput{
+			FromSessionID: "sess-1", FromAgentID: "file-b",
+			ToSessionID: "sess-1", ToAgentID: "file-a",
+			Kind: k, Body: "msg",
+		}); err != nil {
+			t.Fatalf("seed %s: %v", k, err)
+		}
+	}
+
+	cases := []struct {
+		kind string
+		want int
+	}{
+		{"", 4},
+		{KindRequest, 1},
+		{KindReply, 1},
+		{KindNotification, 2},
+		{KindHandoff, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			msgs, err := s.Inbox(ctx, "sess-1", "file-a", InboxFilter{Kind: tc.kind})
+			if err != nil {
+				t.Fatalf("Inbox: %v", err)
+			}
+			if len(msgs) != tc.want {
+				t.Errorf("kind=%q: got %d, want %d", tc.kind, len(msgs), tc.want)
+			}
+		})
+	}
+}
+
 // TestSQLiteStore_Inbox_FiltersByChannel covers T3: the channel filter
 // narrows inbox results to matching-channel rows only.
 func TestSQLiteStore_Inbox_FiltersByChannel(t *testing.T) {

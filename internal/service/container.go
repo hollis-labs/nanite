@@ -439,7 +439,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		if prov, ok := cfg.Providers.Get(utilityProvider); ok {
 			utilityCall = func(ctx context.Context, prompt string) (string, error) {
 				msgs := []provider.ChatMessage{{Role: "user", Content: prompt}}
-				return prov.Complete(ctx, "You are a memory extraction assistant. Follow instructions precisely.", msgs, utilityModel)
+				return prov.Complete(ctx, provider.ChatRequest{
+					SystemPrompt: "You are a memory extraction assistant. Follow instructions precisely.",
+					Messages:     msgs,
+					Model:        utilityModel,
+				})
 			}
 		}
 

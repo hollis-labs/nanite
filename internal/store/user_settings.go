@@ -34,6 +34,18 @@ type UserSettings struct {
 	EmbeddingProvider string `json:"embedding_provider"`
 	EmbeddingModel    string `json:"embedding_model"`
 	EmbeddingMode     string `json:"embedding_mode"`
+	// Context window + compaction settings (Phase 3 S3a).
+	// ContextWindowTokens is the assumed provider context window (default
+	// 200_000). ContextBudgetPct is the fraction used as the slot budget
+	// (default 0.80). SummarizerProvider/Model select the model that runs
+	// compaction Stage 2; empty means use the active chat provider/model.
+	// CompactionStrategy is a forward hook ("default" or "broker"); only
+	// "default" has an implementation today.
+	ContextWindowTokens int     `json:"context_window_tokens"`
+	ContextBudgetPct    float64 `json:"context_budget_pct"`
+	SummarizerProvider  string  `json:"summarizer_provider"`
+	SummarizerModel     string  `json:"summarizer_model"`
+	CompactionStrategy  string  `json:"compaction_strategy"`
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -47,31 +59,38 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var taskBackend string
 	var allowUnsigned bool
 	var embeddingProvider, embeddingModel, embeddingMode string
+	var contextWindowTokens int
+	var contextBudgetPct float64
+	var summarizerProvider, summarizerModel, compactionStrategy string
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
 		        developer_mode, recover_mode, tool_stream_behavior, tool_drawer_retention,
 		        tool_load_preferences, task_backend, allow_unsigned_plugins,
-		        embedding_provider, embedding_model, embedding_mode
+		        embedding_provider, embedding_model, embedding_mode,
+		        context_window_tokens, context_budget_pct,
+		        summarizer_provider, summarizer_model, compaction_strategy
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
 		&devMode, &recoverMode, &toolStreamBehavior, &toolDrawerRetention,
 		&toolLoadPrefsJSON, &taskBackend, &allowUnsigned,
-		&embeddingProvider, &embeddingModel, &embeddingMode)
+		&embeddingProvider, &embeddingModel, &embeddingMode,
+		&contextWindowTokens, &contextBudgetPct,
+		&summarizerProvider, &summarizerModel, &compactionStrategy)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
 
 	us := &UserSettings{
-		DefaultProvider:     provider,
-		DefaultModel:        model,
-		DefaultAgent:        agent,
-		UtilityProvider:     utilProvider,
-		UtilityModel:        utilModel,
-		ToolCallDisplayMode: toolMode,
-		ToolStreamBehavior:  toolStreamBehavior,
-		ToolDrawerRetention: toolDrawerRetention,
+		DefaultProvider:      provider,
+		DefaultModel:         model,
+		DefaultAgent:         agent,
+		UtilityProvider:      utilProvider,
+		UtilityModel:         utilModel,
+		ToolCallDisplayMode:  toolMode,
+		ToolStreamBehavior:   toolStreamBehavior,
+		ToolDrawerRetention:  toolDrawerRetention,
 		DeveloperMode:        devMode,
 		RecoverMode:          recoverMode,
 		TaskBackend:          taskBackend,
@@ -79,6 +98,11 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		EmbeddingProvider:    embeddingProvider,
 		EmbeddingModel:       embeddingModel,
 		EmbeddingMode:        embeddingMode,
+		ContextWindowTokens:  contextWindowTokens,
+		ContextBudgetPct:     contextBudgetPct,
+		SummarizerProvider:   summarizerProvider,
+		SummarizerModel:      summarizerModel,
+		CompactionStrategy:   compactionStrategy,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -133,6 +157,27 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	if embeddingMode == "" {
 		embeddingMode = "disabled"
 	}
+	contextWindowTokens := us.ContextWindowTokens
+	if contextWindowTokens <= 0 {
+		contextWindowTokens = 200000
+	}
+	contextBudgetPct := us.ContextBudgetPct
+	if contextBudgetPct <= 0 {
+		contextBudgetPct = 0.80
+	}
+	if contextBudgetPct > 1.0 {
+		contextBudgetPct = 1.0
+	}
+	compactionStrategy := us.CompactionStrategy
+	if compactionStrategy == "" {
+		compactionStrategy = "default"
+	}
+	switch compactionStrategy {
+	case "default", "broker":
+		// valid
+	default:
+		return fmt.Errorf("update user settings: unknown compaction_strategy %q (must be \"default\" or \"broker\")", compactionStrategy)
+	}
 	_, err = s.DB.Exec(
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
@@ -153,6 +198,11 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			embedding_provider = ?,
 			embedding_model = ?,
 			embedding_mode = ?,
+			context_window_tokens = ?,
+			context_budget_pct = ?,
+			summarizer_provider = ?,
+			summarizer_model = ?,
+			compaction_strategy = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
@@ -160,7 +210,10 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		string(extJSON), us.DeveloperMode, us.RecoverMode,
 		us.ToolStreamBehavior, us.ToolDrawerRetention, string(toolPrefsJSON),
 		taskBackend, us.AllowUnsignedPlugins,
-		us.EmbeddingProvider, us.EmbeddingModel, embeddingMode, now,
+		us.EmbeddingProvider, us.EmbeddingModel, embeddingMode,
+		contextWindowTokens, contextBudgetPct,
+		us.SummarizerProvider, us.SummarizerModel, compactionStrategy,
+		now,
 	)
 	if err != nil {
 		return fmt.Errorf("update user settings: %w", err)

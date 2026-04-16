@@ -77,7 +77,7 @@ func (d *Decomposer) DecomposeTask(ctx context.Context, userMessage string, agen
 		{Role: "user", Content: userMessage},
 	}
 
-	raw, err := prov.Complete(ctx, prompt, messages, model)
+	raw, err := prov.Complete(ctx, provider.ChatRequest{SystemPrompt: prompt, Messages: messages, Model: model})
 	if err != nil {
 		return nil, fmt.Errorf("decomposition LLM call: %w", err)
 	}

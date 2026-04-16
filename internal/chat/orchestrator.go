@@ -133,7 +133,7 @@ func (o *Orchestrator) Aggregate(ctx context.Context, plan *OrchestrationPlan, r
 		{Role: "user", Content: sb.String()},
 	}
 
-	finalOutput, err := prov.Complete(ctx, aggregatePrompt, messages, model)
+	finalOutput, err := prov.Complete(ctx, provider.ChatRequest{SystemPrompt: aggregatePrompt, Messages: messages, Model: model})
 	if err != nil {
 		slog.Warn("orchestrator: aggregation LLM call failed — using raw concatenation", "err", err)
 		orchResult.FinalOutput = sb.String()

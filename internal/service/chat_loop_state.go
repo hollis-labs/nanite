@@ -95,6 +95,12 @@ type loopState struct {
 	// Continuation tracking.
 	lastSite   ContinueSite
 	lastReason string
+
+	// S3b T9 — true once we've run the synchronous compaction+retry after a
+	// provider returned a context-overflow error. A second overflow in the
+	// same generateResponse surfaces as a user-visible error rather than
+	// looping indefinitely.
+	contextOverflowRetried bool
 }
 
 // newLoopState creates a loopState with resolved limits from agent constraints.

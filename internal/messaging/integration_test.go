@@ -1,10 +1,8 @@
-package a2a
+package messaging
 
 import (
 	"context"
 	"testing"
-
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // TestIntegration_HandoffFullFlow exercises the full handoff round-trip
@@ -13,23 +11,23 @@ import (
 // approval, primary rebinding, a post-handoff user message, and finally a
 // catch-up read that must return every message in chronological order.
 //
-// This is the one end-to-end test for the A2A session-scoping work — the
+// This is the one end-to-end test for the messaging session-scoping work — the
 // per-method unit tests in service_test.go and handoff_test.go already cover
 // edge cases, so this test focuses on the happy path stitched together.
 func TestIntegration_HandoffFullFlow(t *testing.T) {
-	svc, s := newTestService(t, "file-backend", "file-frontend")
+	svc, _, parent := newTestService(t, "file-backend", "file-frontend")
 	ctx := context.Background()
 
-	sess := newHandoffTestSession(t, s)
-	if err := s.EnsureSessionAgent(sess.ID, "file-backend", "default", true); err != nil {
+	sess := newHandoffTestSession(t, parent)
+	if err := parent.EnsureSessionAgent(sess.ID, "file-backend", "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent backend: %v", err)
 	}
-	if err := s.EnsureSessionAgent(sess.ID, "file-frontend", "default", false); err != nil {
+	if err := parent.EnsureSessionAgent(sess.ID, "file-frontend", "default", false); err != nil {
 		t.Fatalf("EnsureSessionAgent frontend: %v", err)
 	}
 
 	// 1. User -> backend.
-	if _, err := svc.SendMessage(ctx, &store.A2AMessage{
+	if _, err := svc.SendMessage(ctx, SendInput{
 		FromSessionID: sess.ID,
 		FromAgentID:   UserSentinel,
 		ToSessionID:   sess.ID,
@@ -40,7 +38,7 @@ func TestIntegration_HandoffFullFlow(t *testing.T) {
 	}
 
 	// 2. Backend -> user.
-	if _, err := svc.SendMessage(ctx, &store.A2AMessage{
+	if _, err := svc.SendMessage(ctx, SendInput{
 		FromSessionID: sess.ID,
 		FromAgentID:   "file-backend",
 		ToSessionID:   sess.ID,
@@ -65,7 +63,7 @@ func TestIntegration_HandoffFullFlow(t *testing.T) {
 	}
 
 	// 5. Verify frontend is now primary.
-	primary, err := s.GetSessionPrimaryAgent(sess.ID)
+	primary, err := parent.GetSessionPrimaryAgent(sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionPrimaryAgent: %v", err)
 	}
@@ -74,7 +72,7 @@ func TestIntegration_HandoffFullFlow(t *testing.T) {
 	}
 
 	// 6. User -> frontend (post-handoff).
-	if _, err := svc.SendMessage(ctx, &store.A2AMessage{
+	if _, err := svc.SendMessage(ctx, SendInput{
 		FromSessionID: sess.ID,
 		FromAgentID:   UserSentinel,
 		ToSessionID:   sess.ID,
@@ -87,7 +85,7 @@ func TestIntegration_HandoffFullFlow(t *testing.T) {
 	// 7. Frontend inbox should have exactly one message — the post-handoff
 	// user prompt. The earlier messages were addressed to backend or user, so
 	// none of them should land in the frontend's inbox.
-	inbox, err := svc.Inbox(ctx, sess.ID, "file-frontend", "")
+	inbox, err := svc.Inbox(ctx, sess.ID, "file-frontend", InboxFilter{}, sess.ID, "file-frontend")
 	if err != nil {
 		t.Fatalf("Inbox: %v", err)
 	}
@@ -99,7 +97,7 @@ func TestIntegration_HandoffFullFlow(t *testing.T) {
 	}
 
 	// 8. Catch-up returns all 3 messages in chronological order. The store's
-	// GetA2ARecent query has a rowid ASC tiebreak for same-tick inserts, so
+	// Recent query has a rowid ASC tiebreak for same-tick inserts, so
 	// ordering is deterministic even when CURRENT_TIMESTAMP values collide.
 	recent, err := svc.RecentForSession(ctx, sess.ID, 10)
 	if err != nil {

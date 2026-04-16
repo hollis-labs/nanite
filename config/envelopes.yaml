@@ -82,3 +82,12 @@ core:
 
   # Backend-only (registered for validation, no frontend component yet)
   - type: session-task
+
+  # Messaging subsystem — S7 T4. Four wire kinds get envelope
+  # content types so request/reply/notification/handoff payloads
+  # can be validated and rendered uniformly. No FE component yet;
+  # registered for validation only. Component work is T10.
+  - type: message-request
+  - type: message-reply
+  - type: message-notification
+  - type: message-handoff

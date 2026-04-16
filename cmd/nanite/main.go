@@ -47,7 +47,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, a2a, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, message, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
@@ -60,8 +60,8 @@ func main() {
 		cmdMCP(os.Args[2:])
 	case "install":
 		cmdInstall(os.Args[2:])
-	case "a2a":
-		cmdA2A(os.Args[2:])
+	case "message":
+		cmdMessage(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:
@@ -280,7 +280,8 @@ func cmdServe(args []string) {
 
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
-	selfTools.A2A = container.A2A
+	selfTools.Messaging = container.Messaging
+	selfTools.Subagent = container.Subagent
 
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {

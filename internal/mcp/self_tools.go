@@ -345,13 +345,13 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"project_dir"},
 			},
 		},
-		// --- A2A messaging tools ---
-		// nanite_a2a_subscribe is intentionally NOT registered here: it
+		// --- messaging tools ---
+		// nanite_message_subscribe is intentionally NOT registered here: it
 		// requires streaming support in mcp-go or a custom server-side
 		// handler, which is deferred to a follow-up task.
 		{
-			Name:        "nanite_a2a_send",
-			Description: "Send an A2A message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session. Set reply_to to the parent message ID to continue an existing thread.",
+			Name:        "nanite_message_send",
+			Description: "Send a message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session. Set reply_to to the parent message ID to continue an existing thread. Channel policy: 'chat' for in-session conversation, 'inbox' for async polled work, 'alert' for agent-triggered one-off notifications.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -359,54 +359,49 @@ func selfToolDefinitions() []Tool {
 					"from_agent_id":   map[string]any{"type": "string"},
 					"to_session_id":   map[string]any{"type": "string"},
 					"to_agent_id":     map[string]any{"type": "string"},
+					"channel":         map[string]any{"type": "string", "enum": []string{"chat", "inbox", "alert"}, "description": "Transport bucket. Defaults to 'chat' when omitted."},
+					"kind":            map[string]any{"type": "string", "enum": []string{"request", "reply", "notification", "handoff"}, "description": "Wire type. Defaults to 'notification' when omitted."},
+					"payload_json":    map[string]any{"type": "string", "description": "Kind-specific JSON payload (S5 ResponseV1 shape). Defaults to '{}'."},
 					"subject":         map[string]any{"type": "string"},
 					"body":            map[string]any{"type": "string"},
 					"type":            map[string]any{"type": "string", "enum": []string{"message", "help_request", "directive", "status_update", "handoff"}},
 					"reply_to":        map[string]any{"type": "string", "description": "Parent message ID to continue an existing thread."},
+					"register_as":     map[string]any{"type": "string", "enum": []string{"", "external", "cli"}, "description": "Auto-register the from_agent_id on first send with this provenance kind. Ignored if the agent already exists."},
 				},
 				"required": []string{"from_session_id", "from_agent_id", "to_session_id", "to_agent_id", "body"},
 			},
 		},
 		{
-			Name:        "nanite_a2a_inbox",
-			Description: "Read the A2A inbox for (session_id, agent_id). Optional status filter.",
+			Name:        "nanite_message_inbox",
+			Description: "Read the messaging inbox for (session_id, agent_id). Optional status and channel filters.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_id": map[string]any{"type": "string"},
 					"agent_id":   map[string]any{"type": "string"},
 					"status":     map[string]any{"type": "string", "enum": []string{"", "unread", "read", "acknowledged", "resolved"}},
+					"channel":    map[string]any{"type": "string", "enum": []string{"", "chat", "inbox", "alert"}, "description": "Filter by channel; empty returns all channels."},
+					"kind":       map[string]any{"type": "string", "enum": []string{"", "request", "reply", "notification", "handoff"}, "description": "Filter by wire kind; empty returns all kinds."},
 				},
 				"required": []string{"session_id", "agent_id"},
 			},
 		},
 		{
-			Name:        "nanite_a2a_thread",
-			Description: "Get all messages in a thread by thread_id.",
+			Name:        "nanite_message_thread",
+			Description: "Get all messages in a thread by thread_id. Thread is participant-filtered by (session_id, agent_id) — only messages where the caller is sender or recipient come back. Non-participants see an empty slice (no existence leak).",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"thread_id": map[string]any{"type": "string"},
+					"thread_id":  map[string]any{"type": "string"},
+					"session_id": map[string]any{"type": "string", "description": "Caller's session id — used for participant filtering."},
+					"agent_id":   map[string]any{"type": "string", "description": "Caller's agent id — used for participant filtering."},
 				},
-				"required": []string{"thread_id"},
+				"required": []string{"thread_id", "session_id", "agent_id"},
 			},
 		},
 		{
-			Name:        "nanite_a2a_ack",
-			Description: "Mark an A2A message as read.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_id": map[string]any{"type": "string"},
-					"agent_id":   map[string]any{"type": "string"},
-					"message_id": map[string]any{"type": "string"},
-				},
-				"required": []string{"session_id", "agent_id", "message_id"},
-			},
-		},
-		{
-			Name:        "nanite_a2a_resolve",
-			Description: "Mark an A2A message as resolved.",
+			Name:        "nanite_message_ack",
+			Description: "Mark a message as read.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -418,7 +413,20 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_catch_up",
+			Name:        "nanite_message_resolve",
+			Description: "Mark a message as resolved.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{"type": "string"},
+					"agent_id":   map[string]any{"type": "string"},
+					"message_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"session_id", "agent_id", "message_id"},
+			},
+		},
+		{
+			Name:        "nanite_message_catch_up",
 			Description: "Get the last N messages for a session across both sides of the conversation. Used for handoff catch-up.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -430,7 +438,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_handoff_request",
+			Name:        "nanite_handoff_request",
 			Description: "Request a session handoff from one agent to another. Creates a pending row; user must approve.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -444,7 +452,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_handoff_approve",
+			Name:        "nanite_handoff_approve",
 			Description: "Approve a pending handoff. Atomically rebinds the session's primary agent and marks the handoff complete.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -455,7 +463,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_a2a_handoff_reject",
+			Name:        "nanite_handoff_reject",
 			Description: "Reject a pending handoff with a reason.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -464,6 +472,46 @@ func selfToolDefinitions() []Tool {
 					"reason":     map[string]any{"type": "string"},
 				},
 				"required": []string{"handoff_id"},
+			},
+		},
+		// --- Subagent spawn (S7 T9) ---
+		{
+			Name:        "nanite_spawn_subagent",
+			Description: "Spawn an inline subagent to handle a subtask. Sync mode blocks until the subagent returns; async/api modes return immediately and the subagent's reply lands in the parent session (inbox channel for async, chat channel for api). On completion a message of kind=reply is delivered back to parent_agent_id.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"parent_session_id": map[string]any{"type": "string", "description": "Session the spawning agent is in; the reply lands here."},
+					"parent_agent_id":   map[string]any{"type": "string", "description": "Agent ID of the spawning (primary) agent."},
+					"role":              map[string]any{"type": "string", "description": "Role slug (e.g. 'file-backend') the subagent is booted with."},
+					"prompt":            map[string]any{"type": "string", "description": "Initial prompt for the subagent."},
+					"mode":              map[string]any{"type": "string", "enum": []string{"sync", "async", "api"}, "description": "sync blocks; async returns immediately and replies via inbox; api returns immediately and replies via chat."},
+					"inputs_json":       map[string]any{"type": "string", "description": "JSON blob of caller-specified inputs passed to the subagent."},
+					"timeout_seconds":   map[string]any{"type": "integer", "description": "Wall-time cap for the subagent runner. 0 uses default (300)."},
+				},
+				"required": []string{"parent_session_id", "parent_agent_id", "role", "prompt"},
+			},
+		},
+		{
+			Name:        "nanite_subagent_status",
+			Description: "Return the current lifecycle state of a spawned subagent run.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"run_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"run_id"},
+			},
+		},
+		{
+			Name:        "nanite_subagent_cancel",
+			Description: "Cancel an in-flight subagent run. Idempotent; already-terminal runs are no-ops.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"run_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"run_id"},
 			},
 		},
 	}

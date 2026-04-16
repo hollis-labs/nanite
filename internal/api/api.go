@@ -186,21 +186,21 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mcp-servers/import", a.handleImportMCPServers)
 	mux.HandleFunc("GET /api/mcp-servers/export", a.handleExportMCPServers)
 
-	// A2A Messaging
-	mux.HandleFunc("GET /api/a2a/inbox", a.handleA2AInbox)
-	mux.HandleFunc("GET /api/a2a/threads/{threadId}", a.handleA2AThread)
-	mux.HandleFunc("POST /api/a2a/messages", a.handleA2ASendMessage)
-	mux.HandleFunc("PUT /api/a2a/messages/{id}/ack", a.handleA2AAck)
-	mux.HandleFunc("PUT /api/a2a/messages/{id}/resolve", a.handleA2AResolve)
-	mux.HandleFunc("GET /api/a2a/unread", a.handleA2AUnreadCount)
+	// Messaging subsystem (agent-to-agent and agent-to-user). Distinct
+	// path prefix from /api/messages which is for session-chat message
+	// CRUD. Session messages and agent messages are different primitives.
+	mux.HandleFunc("GET /api/messaging/inbox", a.handleMessageInbox)
+	mux.HandleFunc("GET /api/messaging/threads/{threadId}", a.handleMessageThread)
+	mux.HandleFunc("POST /api/messaging/send", a.handleMessageSend)
+	mux.HandleFunc("PUT /api/messaging/{id}/ack", a.handleMessageAck)
+	mux.HandleFunc("PUT /api/messaging/{id}/resolve", a.handleMessageResolve)
+	mux.HandleFunc("GET /api/messaging/unread", a.handleMessageUnreadCount)
+	mux.HandleFunc("GET /api/messaging/recent", a.handleMessageRecent)
 
-	// A2A handoff
-	mux.HandleFunc("POST /api/a2a/handoffs", a.handleA2AHandoffRequest)
-	mux.HandleFunc("POST /api/a2a/handoffs/{id}/approve", a.handleA2AHandoffApprove)
-	mux.HandleFunc("POST /api/a2a/handoffs/{id}/reject", a.handleA2AHandoffReject)
-
-	// A2A recent messages (for handoff catch-up / debugging)
-	mux.HandleFunc("GET /api/a2a/recent", a.handleA2ARecent)
+	// Handoff (related to messaging — primary-agent flip for a session).
+	mux.HandleFunc("POST /api/handoffs", a.handleHandoffRequest)
+	mux.HandleFunc("POST /api/handoffs/{id}/approve", a.handleHandoffApprove)
+	mux.HandleFunc("POST /api/handoffs/{id}/reject", a.handleHandoffReject)
 
 	// Output Templates
 	mux.HandleFunc("GET /api/templates", a.handleListTemplates)

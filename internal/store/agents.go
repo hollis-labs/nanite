@@ -36,6 +36,16 @@ type AgentProfile struct {
 	Source      string `json:"source"`
 	SourceRef   string `json:"source_ref"`
 	Icon        string `json:"icon"`
+	// S7 T5 — registry extension. Kind names the provenance of the
+	// agent row (internal = DB/file-based agent, external = auto-
+	// registered on first messaging call, cli = CLI caller with a
+	// deterministic ID). CapabilitiesJSON / LimitsJSON / ModelStrategy
+	// are reserved for the future capability broker; they are
+	// read-only placeholders for MVP.
+	Kind             string `json:"kind"`
+	CapabilitiesJSON string `json:"capabilities_json"`
+	LimitsJSON       string `json:"limits_json"`
+	ModelStrategy    string `json:"model_strategy"`
 }
 
 // agentColumns is the canonical SELECT column list for agent_profiles.
@@ -43,7 +53,8 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         modes, default_mode, COALESCE(default_model,''), COALESCE(default_provider,''),
         mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at,
         agent_hash, version, tools, directories, constraints, tags, status, source, source_ref,
-        COALESCE(icon,'')`
+        COALESCE(icon,''),
+        kind, capabilities_json, limits_json, model_strategy`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -53,6 +64,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
 		&a.AgentHash, &a.Version, &a.Tools, &a.Directories, &a.Constraints, &a.Tags,
 		&a.Status, &a.Source, &a.SourceRef, &a.Icon,
+		&a.Kind, &a.CapabilitiesJSON, &a.LimitsJSON, &a.ModelStrategy,
 	)
 }
 
@@ -103,10 +115,10 @@ func (s *Store) GetAgent(id string) (*AgentProfile, error) {
 // CreateAgent inserts a new agent profile.
 func (s *Store) CreateAgent(a *AgentProfile) error {
 	if a.Slug == "user" {
-		return fmt.Errorf("agent slug %q is reserved (A2A user sentinel)", a.Slug)
+		return fmt.Errorf("agent slug %q is reserved (messaging user sentinel)", a.Slug)
 	}
 	if a.ID == "user" {
-		return fmt.Errorf("agent id %q is reserved (A2A user sentinel)", a.ID)
+		return fmt.Errorf("agent id %q is reserved (messaging user sentinel)", a.ID)
 	}
 	if a.ID == "" {
 		a.ID = uuid.New().String()
@@ -152,6 +164,18 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 	if a.AgentHash == "" {
 		a.AgentHash = ComputeAgentHash(a.SystemPrompt, a.Tools, a.ToolPermissions)
 	}
+	// S7 T5 registry defaults — match the CHECK/NOT NULL column
+	// defaults so DB insert sees non-empty values for these new
+	// columns without forcing every caller to populate them.
+	if a.Kind == "" {
+		a.Kind = "internal"
+	}
+	if a.CapabilitiesJSON == "" {
+		a.CapabilitiesJSON = "[]"
+	}
+	if a.LimitsJSON == "" {
+		a.LimitsJSON = "{}"
+	}
 
 	_, err := s.DB.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
@@ -159,14 +183,16 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              mcp_servers, tool_permissions, can_execute, settings,
 		                              created_at, updated_at,
 		                              agent_hash, version, tools, directories, constraints,
-		                              tags, status, source, source_ref, icon)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              tags, status, source, source_ref, icon,
+		                              kind, capabilities_json, limits_json, model_strategy)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now, now,
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
 		a.Tags, a.Status, a.Source, a.SourceRef, nullIfEmpty(a.Icon),
+		a.Kind, a.CapabilitiesJSON, a.LimitsJSON, a.ModelStrategy,
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)

@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MessageSquare, Send, X, ChevronRight } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { A2AMessage } from '@/lib/types'
+import { useAppStore } from '@/stores/useAppStore'
+import type { AgentMessage } from '@/lib/types'
 
 interface TaskThreadPanelProps {
   taskId: string
@@ -11,7 +12,7 @@ interface TaskThreadPanelProps {
 }
 
 /**
- * TaskThreadPanel renders an A2A message thread for a given Engine task.
+ * TaskThreadPanel renders an agent message thread for a given Engine task.
  * It appears as a narrow side panel beside the chat when the session is
  * task-scoped (context_type === 'task').
  */
@@ -21,12 +22,17 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
+  // Task-thread messages are posted as user-to-user within the
+  // active session — the `taskId` acts as the thread_id grouping.
+  // The previous code used `to_agent: 'thread'` which fails
+  // agent validation (only the `user` sentinel short-circuits).
+  const activeSessionId = useAppStore((s) => s.activeSessionId) ?? ''
 
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['a2a-thread', taskId],
-    queryFn: () => api.getA2AThread(taskId),
+    queryKey: ['messaging-thread', taskId, activeSessionId],
+    queryFn: () => api.getMessagingThread(taskId, activeSessionId, 'user'),
     refetchInterval: 10_000,
-    enabled: open,
+    enabled: open && !!activeSessionId,
   })
 
   // Scroll to bottom when messages change
@@ -42,18 +48,20 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
 
     setSending(true)
     try {
-      await api.sendA2AMessage({
-        from_agent: 'user',
-        to_agent: 'thread',
+      await api.sendAgentMessage({
+        from_session_id: activeSessionId,
+        from_agent_id: 'user',
+        to_session_id: activeSessionId,
+        to_agent_id: 'user',
         thread_id: taskId,
         type: 'message',
         body: trimmed,
       })
       setBody('')
       // Refetch thread immediately after send
-      await queryClient.invalidateQueries({ queryKey: ['a2a-thread', taskId] })
+      await queryClient.invalidateQueries({ queryKey: ['messaging-thread', taskId] })
     } catch (err) {
-      console.error('Failed to send A2A message:', err)
+      console.error('Failed to send agent message:', err)
     } finally {
       setSending(false)
     }
@@ -150,14 +158,14 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
 
 // --- Individual message bubble ---
 
-function ThreadMessage({ message }: { message: A2AMessage }) {
+function ThreadMessage({ message }: { message: AgentMessage }) {
   const ts = formatTimestamp(message.created_at)
 
   return (
     <div className="group">
       <div className="flex items-baseline gap-2 mb-0.5">
         <span className="text-xs font-medium text-info truncate">
-          {message.from_agent || 'unknown'}
+          {message.from_agent_id || 'unknown'}
         </span>
         <span className="text-[10px] text-fg-faint flex-shrink-0">{ts}</span>
       </div>

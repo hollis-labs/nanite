@@ -12,7 +12,7 @@ interface TaskContext {
  * useTaskContext inspects the active session to determine if it is a
  * task-scoped session (context_type === 'task' with a valid context_id).
  * Returns { isTaskSession, taskId } so panels can conditionally render
- * A2A thread content for the linked Engine task.
+ * messaging thread content for the linked Engine task.
  */
 export function useTaskContext(): TaskContext {
   const activeSessionId = useAppStore((s) => s.activeSessionId)

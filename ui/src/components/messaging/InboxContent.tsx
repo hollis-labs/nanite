@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { api } from '@/lib/api'
-import type { A2AMessage, A2AMessageType } from '@/lib/types'
+import { useAppStore } from '@/stores/useAppStore'
+import type { AgentMessage, AgentMessageType } from '@/lib/types'
 
-const TYPE_LABELS: Record<A2AMessageType, string> = {
+const TYPE_LABELS: Record<AgentMessageType, string> = {
   message: 'Message',
   help_request: 'Help Request',
   directive: 'Directive',
@@ -15,7 +16,7 @@ const TYPE_LABELS: Record<A2AMessageType, string> = {
   handoff: 'Handoff',
 }
 
-const TYPE_COLORS: Record<A2AMessageType, string> = {
+const TYPE_COLORS: Record<AgentMessageType, string> = {
   message: 'bg-surface text-fg-secondary',
   help_request: 'bg-warning/30 text-warning',
   directive: 'bg-primary/10 text-primary-hover',
@@ -61,6 +62,7 @@ export function InboxContent({ agentId }: InboxContentProps) {
     }, 3000)
   }, [])
 
+  const activeSessionId = useAppStore((s) => s.activeSessionId) ?? ''
   const effectiveAgentId = activeTab === 'user' ? 'user' : agentId
 
   const { data: agents = [] } = useQuery({
@@ -84,44 +86,45 @@ export function InboxContent({ agentId }: InboxContentProps) {
   )
 
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['a2a-inbox', effectiveAgentId, filter],
-    queryFn: () => api.getA2AInbox(effectiveAgentId, filter || undefined),
-    enabled: !!effectiveAgentId,
+    queryKey: ['messaging-inbox', activeSessionId, effectiveAgentId, filter],
+    queryFn: () =>
+      api.getMessagingInbox(activeSessionId, effectiveAgentId, filter ? { status: filter } : undefined),
+    enabled: !!activeSessionId && !!effectiveAgentId,
     refetchInterval: 30000,
   })
 
   const { data: threadMessages = [] } = useQuery({
-    queryKey: ['a2a-thread', threadView],
-    queryFn: () => api.getA2AThread(threadView!),
-    enabled: !!threadView,
+    queryKey: ['messaging-thread', threadView, activeSessionId, effectiveAgentId],
+    queryFn: () => api.getMessagingThread(threadView!, activeSessionId, effectiveAgentId),
+    enabled: !!threadView && !!activeSessionId && !!effectiveAgentId,
   })
 
   const ackMutation = useMutation({
-    mutationFn: api.ackA2AMessage,
+    mutationFn: (id: string) => api.ackAgentMessage(id, activeSessionId, effectiveAgentId),
     onSuccess: () => {
       addToast('Marked as read')
-      void queryClient.invalidateQueries({ queryKey: ['a2a-inbox'] })
-      void queryClient.invalidateQueries({ queryKey: ['a2a-unread'] })
+      void queryClient.invalidateQueries({ queryKey: ['messaging-inbox'] })
+      void queryClient.invalidateQueries({ queryKey: ['messaging-unread'] })
     },
   })
 
   const resolveMutation = useMutation({
-    mutationFn: api.resolveA2AMessage,
+    mutationFn: (id: string) => api.resolveAgentMessage(id, activeSessionId, effectiveAgentId),
     onSuccess: () => {
       addToast('Message resolved')
-      void queryClient.invalidateQueries({ queryKey: ['a2a-inbox'] })
-      void queryClient.invalidateQueries({ queryKey: ['a2a-unread'] })
+      void queryClient.invalidateQueries({ queryKey: ['messaging-inbox'] })
+      void queryClient.invalidateQueries({ queryKey: ['messaging-unread'] })
     },
   })
 
   const sendMutation = useMutation({
-    mutationFn: api.sendA2AMessage,
+    mutationFn: api.sendAgentMessage,
     onSuccess: () => {
       setReplyBody('')
       setReplyTo(null)
       addToast('Message sent')
-      void queryClient.invalidateQueries({ queryKey: ['a2a-inbox'] })
-      void queryClient.invalidateQueries({ queryKey: ['a2a-thread'] })
+      void queryClient.invalidateQueries({ queryKey: ['messaging-inbox'] })
+      void queryClient.invalidateQueries({ queryKey: ['messaging-thread'] })
     },
   })
 
@@ -133,17 +136,21 @@ export function InboxContent({ agentId }: InboxContentProps) {
     setReplyTo(null)
   }
 
-  const handleReply = (msg: A2AMessage) => {
+  const handleReply = (msg: AgentMessage) => {
     setReplyTo(msg.id)
     setReplyBody('')
   }
 
-  const submitReply = (msg: A2AMessage) => {
+  const submitReply = (msg: AgentMessage) => {
     if (!replyBody.trim()) return
     const fromAgent = activeTab === 'user' ? 'user' : agentId
+    // Reply stays in the same session; the recipient is the
+    // original sender's (session, agent) tuple.
     sendMutation.mutate({
-      from_agent: fromAgent,
-      to_agent: msg.from_agent,
+      from_session_id: activeSessionId,
+      from_agent_id: fromAgent,
+      to_session_id: msg.from_session_id || activeSessionId,
+      to_agent_id: msg.from_agent_id,
       body: replyBody.trim(),
       subject: msg.subject ? `Re: ${msg.subject}` : undefined,
       thread_id: msg.thread_id || msg.id,
@@ -279,19 +286,19 @@ export function InboxContent({ agentId }: InboxContentProps) {
                           }`}
                         />
                         <span className="text-sm font-medium text-fg truncate">
-                          {getAgentName(msg.from_agent)}
+                          {getAgentName(msg.from_agent_id)}
                         </span>
                         <ArrowRight className="w-3 h-3 text-fg-faint shrink-0" />
                         <span className="text-sm text-fg-secondary truncate">
-                          {getAgentName(msg.to_agent)}
+                          {getAgentName(msg.to_agent_id)}
                         </span>
                       </div>
                       <span
                         className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-                          TYPE_COLORS[msg.type as A2AMessageType] || TYPE_COLORS.message
+                          TYPE_COLORS[msg.type as AgentMessageType] || TYPE_COLORS.message
                         }`}
                       >
-                        {TYPE_LABELS[msg.type as A2AMessageType] || msg.type}
+                        {TYPE_LABELS[msg.type as AgentMessageType] || msg.type}
                       </span>
                     </div>
 

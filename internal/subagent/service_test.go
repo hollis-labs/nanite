@@ -18,7 +18,7 @@ import (
 
 // newTestDB opens a fresh file-backed SQLite DB with all nanite
 // migrations applied. subagent uses only the subagent_runs table but
-// the messaging reply path touches session_events + a2a_messages, so
+// the messaging reply path touches session_events + agent_messages, so
 // we run the full migration set by going through the existing
 // *store.Store constructor.
 func newTestDB(t *testing.T) (*sql.DB, *store.Store) {

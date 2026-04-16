@@ -10,7 +10,7 @@ Nanite's messaging subsystem today addresses messages with two tuples:
 (from_session_id, from_agent_id)  →  (to_session_id, to_agent_id)
 ```
 
-Each row in `a2a_messages` carries both tuples plus a `thread_id` that groups messages into a conversation.
+Each row in `agent_messages` carries both tuples plus a `thread_id` that groups messages into a conversation.
 
 Engine's `docs/unified-messaging-architecture.md` points at a different shape for the long term: a **stream-scoped** model where a `stream_id` plus a `participants[]` array replaces the denormalized from/to tuples. A stream is like a group chat: any number of agents can participate, each addressed by their id within the stream.
 
@@ -32,12 +32,12 @@ When the stream-scoped migration lands, roughly:
 
 ```sql
 -- Add the stream-scoped columns.
-ALTER TABLE a2a_messages ADD COLUMN stream_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE a2a_messages ADD COLUMN participants_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE agent_messages ADD COLUMN stream_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN participants_json TEXT NOT NULL DEFAULT '[]';
 
 -- Back-fill from existing tuples. Every existing row's thread_id becomes
 -- its stream_id; participants are the two ends of the tuple.
-UPDATE a2a_messages
+UPDATE agent_messages
    SET stream_id = COALESCE(thread_id, id),
        participants_json = json_array(
          json_object('session_id', from_session_id, 'agent_id', from_agent_id),
@@ -46,16 +46,16 @@ UPDATE a2a_messages
  WHERE stream_id = '';
 
 -- New index for stream lookups.
-CREATE INDEX idx_a2a_messages_stream ON a2a_messages(stream_id, created_at);
+CREATE INDEX idx_agent_messages_stream ON agent_messages(stream_id, created_at);
 ```
 
 Later (separate cleanup migration once no reader depends on the tuples):
 
 ```sql
-ALTER TABLE a2a_messages DROP COLUMN from_session_id;
-ALTER TABLE a2a_messages DROP COLUMN from_agent_id;
-ALTER TABLE a2a_messages DROP COLUMN to_session_id;
-ALTER TABLE a2a_messages DROP COLUMN to_agent_id;
+ALTER TABLE agent_messages DROP COLUMN from_session_id;
+ALTER TABLE agent_messages DROP COLUMN from_agent_id;
+ALTER TABLE agent_messages DROP COLUMN to_session_id;
+ALTER TABLE agent_messages DROP COLUMN to_agent_id;
 -- thread_id stays as the human-readable alias for stream_id, or gets
 -- dropped too if participants_json makes it redundant. Decide at
 -- migration time based on query patterns.

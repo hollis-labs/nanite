@@ -116,7 +116,7 @@ Every send / ack / resolve also writes rows to `session_events` for replay and c
 
 ## Storage
 
-- `a2a_messages` — every message, with `(from_session_id, from_agent_id, to_session_id, to_agent_id)` addressing columns, plus `channel`, `kind`, `payload_json`. The table name is kept under its legacy `a2a_` prefix as a BLG chore (rename tracked separately).
+- `agent_messages` — every message, with `(from_session_id, from_agent_id, to_session_id, to_agent_id)` addressing columns, plus `channel`, `kind`, `payload_json`. Renamed from the legacy `a2a_messages` name by migration 018 (the `agent_` prefix avoids collision with the separate session-chat `messages` table).
 - `session_handoffs` — audit trail for handoff requests (`pending | approved | rejected | completed`).
 - `session_agents` — session-to-agent binding. The `is_primary` column is the authoritative primary-agent flag; handoff approval updates it in the same transaction that marks the handoff row completed.
 - `agent_profiles` — extended in S7 with `kind`, `capabilities_json`, `limits_json`, `model_strategy` for registry needs.

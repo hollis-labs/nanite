@@ -12,9 +12,11 @@ import (
 )
 
 // SQLiteStore is the SQLite-backed implementation of Store. It targets
-// the existing on-disk schema: the `a2a_messages` table — renamed in a
-// future BLG chore, not here. Methods preserve the query shapes of the
-// former store/a2a.go so the SQL plan is unchanged.
+// the `agent_messages` table (renamed from the legacy `a2a_messages`
+// name by migration 018; target name is `agent_messages` rather than
+// `messages` to avoid collision with the existing session-chat
+// `messages` table). Methods preserve the query shapes of the former
+// store/a2a.go so the SQL plan is unchanged.
 type SQLiteStore struct {
 	db *sql.DB
 }
@@ -72,7 +74,7 @@ func (s *SQLiteStore) Send(ctx context.Context, input SendInput) (*Message, erro
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO a2a_messages (id, from_session_id, from_agent_id,
+		`INSERT INTO agent_messages (id, from_session_id, from_agent_id,
 		                           to_session_id, to_agent_id,
 		                           thread_id, reply_to, type,
 		                           subject, body, metadata, priority, status, channel, kind, payload_json, created_at)
@@ -94,7 +96,7 @@ func (s *SQLiteStore) Send(ctx context.Context, input SendInput) (*Message, erro
 func (s *SQLiteStore) Get(ctx context.Context, msgID string) (*Message, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+selectColumns+`
-		 FROM a2a_messages WHERE id = ?`, msgID,
+		 FROM agent_messages WHERE id = ?`, msgID,
 	)
 	var m Message
 	if err := row.Scan(
@@ -132,7 +134,7 @@ func (s *SQLiteStore) Inbox(ctx context.Context, sessionID, agentID string, filt
 		args = append(args, filter.Kind)
 	}
 
-	query := `SELECT ` + selectColumns + ` FROM a2a_messages WHERE ` +
+	query := `SELECT ` + selectColumns + ` FROM agent_messages WHERE ` +
 		strings.Join(where, " AND ") + ` ORDER BY priority DESC, created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -149,7 +151,7 @@ func (s *SQLiteStore) Inbox(ctx context.Context, sessionID, agentID string, filt
 func (s *SQLiteStore) Thread(ctx context.Context, threadID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectColumns+`
-		 FROM a2a_messages WHERE thread_id = ?
+		 FROM agent_messages WHERE thread_id = ?
 		 ORDER BY created_at ASC, rowid ASC`, threadID,
 	)
 	if err != nil {
@@ -175,7 +177,7 @@ func (s *SQLiteStore) Recent(ctx context.Context, sessionID string, limit int) (
 	// multiple inserts in the same RFC3339 second share created_at.
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectColumns+`
-		 FROM a2a_messages
+		 FROM agent_messages
 		 WHERE from_session_id = ? OR to_session_id = ?
 		 ORDER BY created_at DESC, rowid DESC
 		 LIMIT ?`, sessionID, sessionID, limit,
@@ -200,7 +202,7 @@ func (s *SQLiteStore) Recent(ctx context.Context, sessionID string, limit int) (
 func (s *SQLiteStore) Ack(ctx context.Context, msgID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE a2a_messages SET status = 'read', read_at = ? WHERE id = ?`,
+		`UPDATE agent_messages SET status = 'read', read_at = ? WHERE id = ?`,
 		now, msgID,
 	)
 	if err != nil {
@@ -217,7 +219,7 @@ func (s *SQLiteStore) Ack(ctx context.Context, msgID string) error {
 func (s *SQLiteStore) Resolve(ctx context.Context, msgID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE a2a_messages SET status = 'resolved', resolved_at = ? WHERE id = ?`,
+		`UPDATE agent_messages SET status = 'resolved', resolved_at = ? WHERE id = ?`,
 		now, msgID,
 	)
 	if err != nil {
@@ -235,7 +237,7 @@ func (s *SQLiteStore) Resolve(ctx context.Context, msgID string) error {
 func (s *SQLiteStore) UnreadCount(ctx context.Context, sessionID, agentID string) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM a2a_messages
+		`SELECT COUNT(*) FROM agent_messages
 		 WHERE to_session_id = ? AND to_agent_id = ? AND status = 'unread'`,
 		sessionID, agentID,
 	).Scan(&count)

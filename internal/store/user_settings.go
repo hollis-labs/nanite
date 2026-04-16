@@ -193,9 +193,10 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		return fmt.Errorf("update user settings: unknown compaction_strategy %q (must be \"default\" or \"broker\")", compactionStrategy)
 	}
 	toolPerTurnCap := us.ToolPerTurnCap
-	if toolPerTurnCap <= 0 {
+	if toolPerTurnCap < 0 {
 		toolPerTurnCap = 10
 	}
+	// 0 = no cap (disabled), positive = cap value.
 	toolResultCacheTTL := us.ToolResultCacheTTLSeconds
 	if toolResultCacheTTL <= 0 {
 		toolResultCacheTTL = 3600

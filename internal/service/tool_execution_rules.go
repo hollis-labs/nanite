@@ -19,7 +19,7 @@ import (
 //
 // Returns (allowed bool, reason string). If allowed is false, reason describes
 // the denial for the LLM.
-func (s *chatServiceImpl) enforceExecutionRules(agentID, toolName string) (bool, string) {
+func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, toolName string) (bool, string) {
 	if s.tools == nil {
 		return true, ""
 	}
@@ -29,7 +29,7 @@ func (s *chatServiceImpl) enforceExecutionRules(agentID, toolName string) (bool,
 		return true, ""
 	}
 
-	agent, err := s.agents.Get(context.Background(), agentID)
+	agent, err := s.agents.Get(ctx, agentID)
 	if err != nil {
 		slog.Warn("tool-execution-rules: agent lookup failed — allowing",
 			"agent", agentID, "err", err)
@@ -55,9 +55,6 @@ func (s *chatServiceImpl) enforceExecutionRules(agentID, toolName string) (bool,
 
 	// Check permission deny/allow via ToolClient.
 	if s.permissions != nil {
-		// Permission engine already ran in preCheckTools, but we re-check here
-		// for defence-in-depth against mid-turn agent config changes.
-		// We only check the simple allow/deny (no approval UX at execute time).
 		perms := toolclient.ParsePermissions(agent.ToolPermissions)
 		if !perms.CheckPermission(toolName) {
 			return false, "tool denied by agent permission policy"
@@ -67,10 +64,10 @@ func (s *chatServiceImpl) enforceExecutionRules(agentID, toolName string) (bool,
 	return true, ""
 }
 
-// enforceExecutionRulesForTools applies enforceExecutionRules to a tool name,
+// enforceExecutionRulesForTool applies enforceExecutionRules to a tool name,
 // including the unprefixed fallback check for mcp__ prefixed tools.
-func (s *chatServiceImpl) enforceExecutionRulesForTool(agentID, toolName string) (bool, string) {
-	allowed, reason := s.enforceExecutionRules(agentID, toolName)
+func (s *chatServiceImpl) enforceExecutionRulesForTool(ctx context.Context, agentID, toolName string) (bool, string) {
+	allowed, reason := s.enforceExecutionRules(ctx, agentID, toolName)
 	if !allowed {
 		return false, reason
 	}
@@ -79,7 +76,7 @@ func (s *chatServiceImpl) enforceExecutionRulesForTool(agentID, toolName string)
 	if strings.HasPrefix(toolName, "mcp__") {
 		parts := strings.SplitN(toolName, "__", 3)
 		if len(parts) == 3 {
-			bareAllowed, bareReason := s.enforceExecutionRules(agentID, parts[2])
+			bareAllowed, bareReason := s.enforceExecutionRules(ctx, agentID, parts[2])
 			if !bareAllowed {
 				return false, bareReason
 			}

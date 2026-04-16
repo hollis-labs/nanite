@@ -79,7 +79,7 @@ func TestResultCache_LargeResult_StoreAndFetch(t *testing.T) {
 	id := visible[idStart : idStart+idEnd]
 
 	// Fetch full body.
-	slice, totalSize, err := cache.Fetch(id, 0, 0)
+	slice, totalSize, err := cache.Fetch("sess-1", id, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestResultCache_LargeResult_StoreAndFetch(t *testing.T) {
 	}
 
 	// Fetch with offset and length.
-	slice2, _, err := cache.Fetch(id, 10, 20)
+	slice2, _, err := cache.Fetch("sess-1", id, 10, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestResultCache_HardCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err = cache.Fetch(id, 0, 0)
+	_, _, err = cache.Fetch("sess-1", id, 0, 0)
 	if err == nil {
 		t.Error("expected error for hard-cap entry")
 	}
@@ -152,7 +152,7 @@ func TestResultCache_Search(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matches, err := cache.Search(id, "hello", 10)
+	matches, err := cache.Search("sess-1", id, "hello", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestResultCache_FetchNotFound(t *testing.T) {
 	cache, db := setupTestCache(t)
 	defer db.Close()
 
-	_, _, err := cache.Fetch("nonexistent", 0, 0)
+	_, _, err := cache.Fetch("sess-1", "nonexistent", 0, 0)
 	if err == nil {
 		t.Error("expected error for nonexistent ID")
 	}

@@ -54,6 +54,10 @@ func NewResultCache(db *sql.DB, cfg ResultCacheConfig) *ResultCache {
 	if ttl <= 0 {
 		ttl = DefaultCacheTTLSeconds
 	}
+	// Clamp: soft must not exceed hard.
+	if soft > hard {
+		soft = hard
+	}
 	return &ResultCache{
 		db:              db,
 		softTruncBytes:  soft,
@@ -99,11 +103,20 @@ func (c *ResultCache) StoreResult(sessionID, toolCallID, toolName, body string) 
 
 	// Build truncated view + pointer.
 	truncated := body[:c.softTruncBytes]
-	footer := fmt.Sprintf(
-		"\n\n[TRUNCATED — full result cached as tool_result://%s (total_size=%d bytes, expires_at=%s). "+
-			"Use fetch_tool_result({\"id\": \"%s\"}) or search_tool_result({\"id\": \"%s\", \"pattern\": \"...\"}) to retrieve more.]",
-		id, bodyLen, expiresAt.Format(time.RFC3339), id, id,
-	)
+	var footer string
+	if storeBody.Valid {
+		footer = fmt.Sprintf(
+			"\n\n[TRUNCATED — full result cached as tool_result://%s (total_size=%d bytes, expires_at=%s). "+
+				"Use fetch_tool_result({\"id\": \"%s\"}) or search_tool_result({\"id\": \"%s\", \"pattern\": \"...\"}) to retrieve more.]",
+			id, bodyLen, expiresAt.Format(time.RFC3339), id, id,
+		)
+	} else {
+		footer = fmt.Sprintf(
+			"\n\n[TRUNCATED — result too large (%d bytes, exceeds hard cap %d). "+
+				"Only metadata was cached (tool_result://%s). The full body is not available for retrieval.]",
+			bodyLen, c.hardCapBytes, id,
+		)
+	}
 	visible = truncated + footer
 
 	slog.Info("tool-cache: result stored",
@@ -112,14 +125,15 @@ func (c *ResultCache) StoreResult(sessionID, toolCallID, toolName, body string) 
 	return visible, true, nil
 }
 
-// Fetch retrieves a slice of the cached body.
-func (c *ResultCache) Fetch(id string, offset, length int) (slice string, totalSize int, err error) {
+// Fetch retrieves a slice of the cached body. sessionID scopes the lookup
+// to prevent cross-session reads.
+func (c *ResultCache) Fetch(sessionID, id string, offset, length int) (slice string, totalSize int, err error) {
 	var body sql.NullString
 	var byteSize int
 	var expiresAt string
 
 	err = c.db.QueryRow(
-		`SELECT body, byte_size, expires_at FROM tool_result_cache WHERE id = ?`, id,
+		`SELECT body, byte_size, expires_at FROM tool_result_cache WHERE id = ? AND session_id = ?`, id, sessionID,
 	).Scan(&body, &byteSize, &expiresAt)
 	if err == sql.ErrNoRows {
 		return "", 0, fmt.Errorf("cached result %q not found or expired", id)
@@ -129,7 +143,10 @@ func (c *ResultCache) Fetch(id string, offset, length int) (slice string, totalS
 	}
 
 	// Check expiry.
-	expires, _ := time.Parse(time.RFC3339, expiresAt)
+	expires, parseErr := time.Parse(time.RFC3339, expiresAt)
+	if parseErr != nil {
+		return "", 0, fmt.Errorf("cache fetch: malformed expires_at for %q: %w", id, parseErr)
+	}
 	if time.Now().UTC().After(expires) {
 		return "", 0, fmt.Errorf("cached result %q has expired", id)
 	}
@@ -161,7 +178,8 @@ type Match struct {
 }
 
 // Search performs a regex match over the cached body and returns matches with context.
-func (c *ResultCache) Search(id, pattern string, maxMatches int) ([]Match, error) {
+// sessionID scopes the lookup to prevent cross-session reads.
+func (c *ResultCache) Search(sessionID, id, pattern string, maxMatches int) ([]Match, error) {
 	if maxMatches <= 0 {
 		maxMatches = 20
 	}
@@ -169,7 +187,7 @@ func (c *ResultCache) Search(id, pattern string, maxMatches int) ([]Match, error
 	var body sql.NullString
 	var expiresAt string
 	err := c.db.QueryRow(
-		`SELECT body, expires_at FROM tool_result_cache WHERE id = ?`, id,
+		`SELECT body, expires_at FROM tool_result_cache WHERE id = ? AND session_id = ?`, id, sessionID,
 	).Scan(&body, &expiresAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("cached result %q not found", id)
@@ -178,7 +196,10 @@ func (c *ResultCache) Search(id, pattern string, maxMatches int) ([]Match, error
 		return nil, fmt.Errorf("cache search: %w", err)
 	}
 
-	expires, _ := time.Parse(time.RFC3339, expiresAt)
+	expires, parseErr := time.Parse(time.RFC3339, expiresAt)
+	if parseErr != nil {
+		return nil, fmt.Errorf("cache search: malformed expires_at for %q: %w", id, parseErr)
+	}
 	if time.Now().UTC().After(expires) {
 		return nil, fmt.Errorf("cached result %q has expired", id)
 	}

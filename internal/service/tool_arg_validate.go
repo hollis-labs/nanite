@@ -12,7 +12,8 @@ import (
 )
 
 // argValidator caches compiled JSON Schemas per tool to avoid re-compilation
-// on every call within a turn.
+// on every call. Process-scoped; schemas are invalidated on tool rediscovery
+// by clearing the cache (see invalidate).
 type argValidator struct {
 	mu      sync.RWMutex
 	schemas map[string]*jsonschema.Schema // toolName → compiled schema
@@ -20,6 +21,20 @@ type argValidator struct {
 
 func newArgValidator() *argValidator {
 	return &argValidator{schemas: make(map[string]*jsonschema.Schema)}
+}
+
+// invalidate clears cached schemas for the given tool names (e.g., after tool
+// rediscovery). Pass nil to clear all cached schemas.
+func (v *argValidator) invalidate(toolNames []string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if toolNames == nil {
+		v.schemas = make(map[string]*jsonschema.Schema)
+		return
+	}
+	for _, name := range toolNames {
+		delete(v.schemas, name)
+	}
 }
 
 // validate checks args against the tool's InputSchema. Returns a human-readable

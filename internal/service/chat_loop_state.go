@@ -250,7 +250,11 @@ func (ls *loopState) recordPermissionDenial() {
 }
 
 // isToolExhausted returns true if the tool has hit its per-tool iteration limit.
+// Meta-tools are always exempt.
 func (ls *loopState) isToolExhausted(toolName string) bool {
+	if isMetaTool(toolName) {
+		return false
+	}
 	cap := ls.limits.defaultPerToolCap
 	if max, ok := ls.limits.perToolMax[toolName]; ok && max > 0 {
 		cap = max

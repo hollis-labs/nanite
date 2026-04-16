@@ -37,7 +37,7 @@ var reGoStack = regexp.MustCompile(`(?m)^goroutine \d+ \[`)
 
 // SanitizeToolError redacts sensitive information from tool error output.
 // Rules applied (in order):
-//  1. Replace literal $HOME prefix with ~.
+//  1. Replace the resolved home directory path with ~ everywhere in the string.
 //  2. Replace /Users/<name>/… or /home/<name>/… paths with ~/….
 //  3. Strip lines that look like secret env var assignments.
 //  4. Truncate Go stack traces to the first frame.

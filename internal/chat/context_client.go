@@ -132,8 +132,8 @@ type SlotSources struct {
 
 // AssembleSlotSources builds the raw per-slot content for slot-based assembly.
 // Memory and Context are split from the ContextBroker fetch by item.Source.
-// The Tools slot is intentionally not populated here — tool selection happens
-// after context assembly today, so callers fill Tools separately.
+// The Tools slot is intentionally not populated here — the service layer
+// fills it from the selected tool definitions after calling this method.
 func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (*SlotSources, error) {
 	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleSlotSources")
 	defer span.End()

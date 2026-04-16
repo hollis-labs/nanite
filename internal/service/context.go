@@ -24,8 +24,11 @@ type ContextService interface {
 	// stringified into the Tools slot (S3b will replace with a cache pointer).
 	// extraSystemPrefix captures dynamic per-turn additions (no-tools warning,
 	// progressive discovery catalog, native tool guide) that vary with the
-	// tool selection result; it is exposed via SlotAssemblyResult.SystemPrompt
-	// so the caller can hand it to ChatRequest.SystemPrompt verbatim.
+	// tool selection result. The returned SystemPrompt is the LEGACY
+	// concatenation of all slots plus the prefix — used for budget enforcement
+	// and telemetry. It is NOT the value callers should pass as
+	// ChatRequest.SystemPrompt; callers should pass extraSystemPrefix there
+	// directly so that static content flows exclusively through SlotBlocks.
 	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int) (*SlotAssemblyResult, error)
 
 	PruneAfterTurn(ctx context.Context, sessionID string) error
@@ -86,7 +89,8 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	cw.SetContent(ctxpkg.SlotMemory, sources.Memory)
 	cw.SetContent(ctxpkg.SlotAgent, sources.Agent)
 	cw.SetContent(ctxpkg.SlotRules, sources.Rules)
-	cw.SetContent(ctxpkg.SlotTools, serializeToolsForSlot(tools))
+	toolsContent := serializeToolsForSlot(tools)
+	cw.SetContent(ctxpkg.SlotTools, toolsContent)
 	cw.SetContent(ctxpkg.SlotSession, sources.Session)
 	cw.SetContent(ctxpkg.SlotContext, sources.Context)
 	cw.SetContent(ctxpkg.SlotConversation, serializeMessagesForSlot(sources.Messages))
@@ -100,10 +104,11 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 
 	blocks := cw.Assemble()
 
-	// Legacy SystemPrompt: concatenation of every static slot in order, plus
-	// the caller-provided dynamic prefix. This is the form callers that have
-	// not migrated to SlotBlocks expect.
-	systemPrompt := composeLegacySystemPrompt(sources, extraSystemPrefix)
+	// Legacy SystemPrompt: concatenation of every slot in order (including
+	// Tools) plus the caller-provided dynamic prefix. Used by
+	// EnforceTokenBudget, plugin filters, and telemetry — NOT by
+	// ChatRequest.SystemPrompt (which carries only the per-turn prefix).
+	systemPrompt := composeLegacySystemPrompt(sources, toolsContent, extraSystemPrefix)
 
 	slog.Debug("context-service: slot assembly",
 		"blocks", len(blocks), "used_tokens", cw.UsedTokens(),
@@ -148,15 +153,17 @@ func hasToolBlocks(msgs []provider.ChatMessage) bool {
 }
 
 // composeLegacySystemPrompt rebuilds the flat system prompt for callers that
-// haven't migrated to SlotBlocks (e.g., plugin filters, debug logging, the
-// EmitContextAssembled event). The prefix appears first so dynamic per-turn
-// additions (no-tools warning, progressive catalog, native tool guide) lead.
-func composeLegacySystemPrompt(sources *chat.SlotSources, prefix string) string {
+// haven't migrated to SlotBlocks (e.g., EnforceTokenBudget, plugin filters,
+// debug logging, the EmitContextAssembled event). It must account for all
+// slot content that the Anthropic adapter will send in the system payload —
+// including the Tools slot — so budget enforcement doesn't undercount. The
+// prefix appears first so dynamic per-turn additions lead.
+func composeLegacySystemPrompt(sources *chat.SlotSources, toolsContent, prefix string) string {
 	parts := make([]string, 0, 8)
 	if prefix != "" {
 		parts = append(parts, prefix)
 	}
-	for _, p := range []string{sources.System, sources.Agent, sources.Rules, sources.Session, sources.Memory, sources.Context} {
+	for _, p := range []string{sources.System, sources.Agent, sources.Rules, toolsContent, sources.Session, sources.Memory, sources.Context} {
 		if p != "" {
 			parts = append(parts, p)
 		}

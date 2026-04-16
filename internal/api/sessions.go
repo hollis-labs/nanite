@@ -1,6 +1,8 @@
 package api
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -279,7 +281,11 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 
 	session, err := a.Services.Sessions.Get(ctx, sessionID)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		if errors.Is(err, sql.ErrNoRows) {
+			a.errorResp(w, http.StatusNotFound, "session not found")
+		} else {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
@@ -351,7 +357,6 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if a.Services.Streams != nil {
-		evt := chat.StreamEvent{Type: chat.SlotChangedKind}
 		payload := chat.SlotChangedV1{
 			Slot:         ctxpkg.SlotConversation,
 			Change:       chat.SlotChangeSummarized,
@@ -366,7 +371,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		if emitErr := chat.EmitSlotChangedEvent(envCh, payload); emitErr != nil {
 			slog.Warn("api: slot_changed marshal failed", "session_id", sessionID, "err", emitErr)
 		} else {
-			evt = <-envCh
+			evt := <-envCh
 			a.Services.Streams.BroadcastSessionStreamEvent(sessionID, evt)
 		}
 	}

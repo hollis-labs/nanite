@@ -821,6 +821,23 @@ func (s *chatServiceImpl) assembleTurnContext(
 	return result, nil
 }
 
+// rebuildLegacySystemPrompt recomputes the flat system prompt from the
+// ContextWindow's current slot contents. Called after compaction stages
+// may have modified slot content (e.g., dropping enrichment) so that
+// downstream consumers (EnforceTokenBudget, telemetry) see accurate sizes.
+func rebuildLegacySystemPrompt(cw *ctxpkg.ContextWindow) string {
+	parts := make([]string, 0, len(ctxpkg.SlotOrder))
+	for _, name := range ctxpkg.SlotOrder {
+		if name == ctxpkg.SlotConversation {
+			continue
+		}
+		if s := cw.Slot(name); s != nil && s.Content != "" {
+			parts = append(parts, s.Content)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 // slotBlocksFor projects the context package's SlotBlock onto the provider
 // package's mirror type. The two are kept separate so the provider module has
 // no dependency on the host's context package.
@@ -900,6 +917,7 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	result.Messages = chatMessages
 	result.Blocks = result.Window.Assemble()
 	result.NeedsCompaction = result.Window.NeedsCompaction()
+	result.SystemPrompt = rebuildLegacySystemPrompt(result.Window)
 
 	if emitErr := chat.EmitSlotChangedEvent(ch, chat.SlotChangedV1{
 		Slot:         ctxpkg.SlotConversation,

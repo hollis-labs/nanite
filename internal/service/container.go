@@ -326,6 +326,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		streams.CLIActiveThrottleInterval = time.Duration(cfg.AppConfig.Presence.CLIActiveThrottleSeconds) * time.Second
 	}
 
+	// T7: wire the messaging → SSE notification bridge. Now that
+	// streams exists, every SendMessage broadcasts a
+	// message_received StreamEvent into the target session's active
+	// SSE stream. Nil-safe — when no stream is attached the broadcast
+	// drops silently, which is the intended MVP behavior.
+	messagingSvc.SetNotificationSink(&messagingStreamSink{streams: streams})
+
 	contextClient := chat.NewContextClient(cfg.Store)
 
 	// --- ContextBroker: universal context retrieval ---

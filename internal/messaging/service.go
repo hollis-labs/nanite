@@ -28,11 +28,21 @@ import (
 //
 // Service is safe for concurrent use since Store, the *sql.DB, and
 // the pubsub are each safe for concurrent use.
+// NotificationSink receives a message-received hook on every
+// successful SendMessage. Implementations bridge messaging events
+// into the session SSE stream so subscribed UI clients see an
+// incoming message chip / notification. Nil-safe — Service skips the
+// sink call when this is unset (e.g. in tests).
+type NotificationSink interface {
+	NotifyReceived(ctx context.Context, msg *Message)
+}
+
 type Service struct {
 	store     Store
 	db        *sql.DB
 	resolver  AgentResolver
-	registrar AgentRegistrar // nil = auto-register disabled
+	registrar AgentRegistrar  // nil = auto-register disabled
+	sink      NotificationSink // nil = no SSE push
 	pub       *pubsub
 }
 
@@ -50,6 +60,14 @@ func NewService(s Store, db *sql.DB, r AgentResolver, reg AgentRegistrar) *Servi
 		registrar: reg,
 		pub:       newPubsub(),
 	}
+}
+
+// SetNotificationSink wires (or unwires) the T7 message-received
+// hook. Separate from NewService so the container can wire the sink
+// after StreamManager construction without threading it through
+// every caller that doesn't care.
+func (svc *Service) SetNotificationSink(s NotificationSink) {
+	svc.sink = s
 }
 
 // SendMessage validates both ends of the address tuple, persists the
@@ -95,6 +113,11 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	}
 	if svc.pub != nil {
 		svc.pub.publish(out)
+	}
+	if svc.sink != nil {
+		// Best-effort notification; don't fail the send if the sink
+		// can't deliver (e.g. no active SSE for that session yet).
+		svc.sink.NotifyReceived(ctx, out)
 	}
 	return out, nil
 }

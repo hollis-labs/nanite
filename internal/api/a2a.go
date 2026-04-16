@@ -11,10 +11,14 @@ import (
 )
 
 // a2aStatus returns the HTTP status code for an a2a.Service error:
-// 400 for validation errors, 404 for not-found, 500 for everything else.
+// 400 for validation errors, 403 for forbidden, 404 for not-found, 500
+// for everything else.
 func a2aStatus(err error) int {
 	if errors.Is(err, a2a.ErrValidation) {
 		return http.StatusBadRequest
+	}
+	if errors.Is(err, a2a.ErrForbidden) {
+		return http.StatusForbidden
 	}
 	if errors.Is(err, a2a.ErrNotFound) {
 		return http.StatusNotFound
@@ -33,7 +37,11 @@ func (a *API) handleA2AInbox(w http.ResponseWriter, r *http.Request) {
 	}
 	status := r.URL.Query().Get("status")
 
-	msgs, err := a.Services.A2A.Inbox(r.Context(), sessionID, agentID, status)
+	// MVP caller identity: the HTTP boundary has no session-cookie-based
+	// auth yet, so the query's session_id/agent_id serve as both target
+	// and caller. The service still enforces the match, which catches
+	// misconfigured callers passing different values.
+	msgs, err := a.Services.A2A.Inbox(r.Context(), sessionID, agentID, status, sessionID, agentID)
 	if err != nil {
 		a.errorResp(w, a2aStatus(err), err.Error())
 		return
@@ -41,15 +49,24 @@ func (a *API) handleA2AInbox(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, msgs)
 }
 
-// handleA2AThread returns all messages in a thread.
+// handleA2AThread returns all messages in a thread that the caller is a
+// participant of (from_* or to_*). Non-participants see an empty slice.
+// The caller's identity is taken from the query's session_id+agent_id
+// parameters (same MVP shape as Inbox).
 func (a *API) handleA2AThread(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("threadId")
 	if threadID == "" {
 		a.errorResp(w, http.StatusBadRequest, "threadId is required")
 		return
 	}
+	callerSessionID := r.URL.Query().Get("session_id")
+	callerAgentID := r.URL.Query().Get("agent_id")
+	if callerSessionID == "" || callerAgentID == "" {
+		a.errorResp(w, http.StatusBadRequest, "session_id and agent_id are required")
+		return
+	}
 
-	msgs, err := a.Services.A2A.Thread(r.Context(), threadID)
+	msgs, err := a.Services.A2A.Thread(r.Context(), threadID, callerSessionID, callerAgentID)
 	if err != nil {
 		a.errorResp(w, a2aStatus(err), err.Error())
 		return

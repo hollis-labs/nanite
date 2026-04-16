@@ -65,19 +65,43 @@ func (p *pubsub) subscribe(ctx context.Context, sessionID, agentID string) <-cha
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		list := p.subs[key]
+		found := false
 		for i, c := range list {
 			if c == ch {
 				p.subs[key] = append(list[:i], list[i+1:]...)
+				found = true
 				break
 			}
 		}
 		if len(p.subs[key]) == 0 {
 			delete(p.subs, key)
 		}
-		close(ch)
+		// Only close if we removed it from the map; otherwise closeAll
+		// (service shutdown) already closed the channel and doing so
+		// again would panic.
+		if found {
+			close(ch)
+		}
 	})
 
 	return ch
+}
+
+// closeAll drains every subscriber channel and empties the subscriber
+// map. Called from Service.Close on graceful shutdown so receivers
+// blocked on <-ch unblock with a closed-channel signal. After closeAll,
+// publish is a no-op (map is empty) and any later per-subscriber
+// unsubscribe-on-ctx-done goroutine skips its close(ch) call because
+// its channel is no longer in the map (see subscribe's found guard).
+func (p *pubsub) closeAll() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, list := range p.subs {
+		for _, ch := range list {
+			close(ch)
+		}
+	}
+	p.subs = make(map[string][]chan *store.A2AMessage)
 }
 
 // publish fans the message out to every subscriber whose key matches the

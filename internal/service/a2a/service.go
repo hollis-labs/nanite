@@ -68,35 +68,73 @@ func (svc *Service) SendMessage(ctx context.Context, msg *store.A2AMessage) (*st
 	return out, nil
 }
 
-// Inbox returns messages addressed to the (sessionID, agentID) pair. If
-// status is non-empty, only messages in that status are returned. Messages
-// are ordered by priority DESC, then created_at ASC (see store docs).
-func (svc *Service) Inbox(ctx context.Context, sessionID, agentID, status string) ([]store.A2AMessage, error) {
+// Inbox returns messages addressed to the (sessionID, agentID) pair. The
+// caller's (callerSessionID, callerAgentID) is required and must match the
+// inbox owner — a caller may only read its own inbox. Returns ErrForbidden
+// on mismatch. If status is non-empty, only messages in that status are
+// returned. Messages are ordered by priority DESC, then created_at ASC
+// (see store docs).
+//
+// MVP defensive-authz note: the tool-broker (S4a) is the real ACL; this
+// check exists so misaddressed MCP/HTTP calls fail loudly rather than
+// silently returning someone else's inbox. Real caller-identity-from-ctx
+// is a post-MVP upgrade.
+func (svc *Service) Inbox(ctx context.Context, sessionID, agentID, status, callerSessionID, callerAgentID string) ([]store.A2AMessage, error) {
+	if callerSessionID != sessionID || callerAgentID != agentID {
+		return nil, fmt.Errorf("%w: caller does not match inbox owner", ErrForbidden)
+	}
 	return svc.store.GetA2AInbox(sessionID, agentID, status)
 }
 
-// Thread returns all messages in a thread, chronologically (oldest first).
-func (svc *Service) Thread(ctx context.Context, threadID string) ([]store.A2AMessage, error) {
-	return svc.store.GetA2AThread(threadID)
+// Thread returns all messages in a thread, chronologically (oldest first),
+// filtered to only those where the caller is either the sender or the
+// recipient. Non-participants see an empty slice — the service does not
+// leak "thread exists but you cannot see it" signal.
+func (svc *Service) Thread(ctx context.Context, threadID, callerSessionID, callerAgentID string) ([]store.A2AMessage, error) {
+	rows, err := svc.store.GetA2AThread(threadID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.A2AMessage, 0, len(rows))
+	for _, m := range rows {
+		if (m.FromSessionID == callerSessionID && m.FromAgentID == callerAgentID) ||
+			(m.ToSessionID == callerSessionID && m.ToAgentID == callerAgentID) {
+			out = append(out, m)
+		}
+	}
+	return out, nil
 }
 
-// Ack marks a message as read. The caller's (sessionID, agentID) is accepted
-// for future impersonation checks and logging — MVP is permissive and does
-// not require that the caller is the recipient. The agent ID is still
+// Ack marks a message as read. The caller must be the message's intended
+// recipient: (sessionID, agentID) is checked against (msg.ToSessionID,
+// msg.ToAgentID) and mismatches return ErrForbidden. The agent ID is also
 // validated so typos and garbage don't silently succeed.
 func (svc *Service) Ack(ctx context.Context, sessionID, agentID, msgID string) error {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
 		return fmt.Errorf("%w: agent_id: %v", ErrValidation, err)
 	}
+	msg, err := svc.store.GetA2AMessage(msgID)
+	if err != nil {
+		return err
+	}
+	if msg.ToSessionID != sessionID || msg.ToAgentID != agentID {
+		return fmt.Errorf("%w: caller is not message recipient", ErrForbidden)
+	}
 	return svc.store.AckA2AMessage(msgID)
 }
 
-// Resolve marks a message as resolved. Same permissive semantics as Ack:
-// validates the caller's agent ID but does not enforce ownership of the
-// message.
+// Resolve marks a message as resolved. Same recipient-ownership check as
+// Ack — mismatches return ErrForbidden.
 func (svc *Service) Resolve(ctx context.Context, sessionID, agentID, msgID string) error {
 	if err := ValidateAgentID(ctx, svc.resolver, agentID); err != nil {
 		return fmt.Errorf("%w: agent_id: %v", ErrValidation, err)
+	}
+	msg, err := svc.store.GetA2AMessage(msgID)
+	if err != nil {
+		return err
+	}
+	if msg.ToSessionID != sessionID || msg.ToAgentID != agentID {
+		return fmt.Errorf("%w: caller is not message recipient", ErrForbidden)
 	}
 	return svc.store.ResolveA2AMessage(msgID)
 }
@@ -105,10 +143,26 @@ func (svc *Service) Resolve(ctx context.Context, sessionID, agentID, msgID strin
 // sender or receiver), regardless of agent. This powers handoff catch-up
 // in Task 6, where a newly spawned agent needs a summary of what happened
 // in the session before it took over. The default limit is 20 when the
-// caller passes 0 or a negative value.
+// caller passes 0 or a negative value; the absolute cap is enforced at
+// the store layer (store.MaxRecentLimit).
 func (svc *Service) RecentForSession(ctx context.Context, sessionID string, limit int) ([]store.A2AMessage, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	return svc.store.GetA2ARecent(sessionID, limit)
+}
+
+// Close drains all pubsub subscriber channels and clears the subscriber
+// map. After Close, publish becomes a no-op (no subscribers); existing
+// subscribers see their receive channels close, unblocking any pending
+// receive. Safe to call multiple times.
+//
+// Wired into Container.Shutdown so graceful shutdown of the nanite-agent
+// process unblocks any agent still reading from a subscription. Pair with
+// F06 ctx propagation: together they close the subscriber-lifecycle gap.
+func (svc *Service) Close() error {
+	if svc.pub != nil {
+		svc.pub.closeAll()
+	}
+	return nil
 }

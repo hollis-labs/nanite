@@ -153,11 +153,24 @@ func (s *Store) GetA2AThread(threadID string) ([]A2AMessage, error) {
 	return scanA2AMessages(rows)
 }
 
+// MaxA2ARecentLimit is the absolute upper bound for GetA2ARecent. A
+// caller that passes a larger limit (or a wrapping service default) is
+// clamped here — protects against memory DoS from an LLM-controlled
+// catch_up call. Aligns with the broader Phase 3 pattern of bounding
+// LLM-reachable resource knobs (see S4a tool result cache; S4b trust-
+// tier result size caps).
+const MaxA2ARecentLimit = 100
+
 // GetA2ARecent returns up to limit recent messages involving sessionID (as
-// sender or receiver), ordered chronologically (oldest first).
+// sender or receiver), ordered chronologically (oldest first). A non-
+// positive limit defaults to 20 (aligned with the service layer default);
+// limits above MaxA2ARecentLimit are clamped down.
 func (s *Store) GetA2ARecent(sessionID string, limit int) ([]A2AMessage, error) {
 	if limit <= 0 {
-		limit = 50
+		limit = 20
+	}
+	if limit > MaxA2ARecentLimit {
+		limit = MaxA2ARecentLimit
 	}
 	// Tiebreak on rowid so sub-second bursts remain deterministic — multiple
 	// inserts in the same RFC3339 second share created_at.

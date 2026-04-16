@@ -2,6 +2,7 @@ package a2a
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -147,7 +148,7 @@ func TestService_Inbox(t *testing.T) {
 		}
 	}
 
-	msgs, err := svc.Inbox(context.Background(), "sess-1", "file-backend", "")
+	msgs, err := svc.Inbox(context.Background(), "sess-1", "file-backend", "", "sess-1", "file-backend")
 	if err != nil {
 		t.Fatalf("Inbox: %v", err)
 	}
@@ -175,7 +176,7 @@ func TestService_Thread(t *testing.T) {
 		}
 	}
 
-	msgs, err := svc.Thread(context.Background(), threadID)
+	msgs, err := svc.Thread(context.Background(), threadID, "sess-1", "file-backend")
 	if err != nil {
 		t.Fatalf("Thread: %v", err)
 	}
@@ -290,6 +291,243 @@ func TestService_RecentForSession(t *testing.T) {
 		if msgs[i].CreatedAt < msgs[i-1].CreatedAt {
 			t.Errorf("recent not chronological: %q before %q", msgs[i-1].CreatedAt, msgs[i].CreatedAt)
 		}
+	}
+}
+
+// --- F01 Critical: Ack/Resolve ownership check ---
+
+// TestService_Ack_ForbidsNonRecipient covers F01: only the addressed
+// recipient can ack a message. A caller with a valid agent ID but
+// mismatched (session, agent) vs. msg.To* must get ErrForbidden.
+func TestService_Ack_ForbidsNonRecipient(t *testing.T) {
+	// Resolver knows both agents so validation passes; ownership check
+	// is what must reject.
+	svc, s := newTestService(t, "file-backend", "file-frontend")
+	seeded, err := s.SendA2AMessage(&store.A2AMessage{
+		FromSessionID: "sess-1",
+		FromAgentID:   UserSentinel,
+		ToSessionID:   "sess-1",
+		ToAgentID:     "file-backend",
+		Body:          "hi",
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		session   string
+		agent     string
+		wantErrIs error
+	}{
+		{"recipient matches", "sess-1", "file-backend", nil},
+		{"different agent same session", "sess-1", "file-frontend", ErrForbidden},
+		{"different session same agent", "sess-other", "file-backend", ErrForbidden},
+		{"different session and agent", "sess-other", "file-frontend", ErrForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Re-seed so we get a fresh unread msg each subtest.
+			fresh, err := s.SendA2AMessage(&store.A2AMessage{
+				FromSessionID: "sess-1",
+				FromAgentID:   UserSentinel,
+				ToSessionID:   "sess-1",
+				ToAgentID:     "file-backend",
+				Body:          "hi",
+			})
+			if err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			err = svc.Ack(context.Background(), tc.session, tc.agent, fresh.ID)
+			if tc.wantErrIs == nil && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Fatalf("got err=%v, want errors.Is(_, %v)", err, tc.wantErrIs)
+			}
+		})
+	}
+	_ = seeded
+}
+
+// TestService_Resolve_ForbidsNonRecipient covers F01 on Resolve — same
+// shape as Ack.
+func TestService_Resolve_ForbidsNonRecipient(t *testing.T) {
+	svc, s := newTestService(t, "file-backend", "file-frontend")
+
+	cases := []struct {
+		name      string
+		session   string
+		agent     string
+		wantErrIs error
+	}{
+		{"recipient matches", "sess-1", "file-backend", nil},
+		{"wrong agent", "sess-1", "file-frontend", ErrForbidden},
+		{"wrong session", "sess-other", "file-backend", ErrForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fresh, err := s.SendA2AMessage(&store.A2AMessage{
+				FromSessionID: "sess-1",
+				FromAgentID:   UserSentinel,
+				ToSessionID:   "sess-1",
+				ToAgentID:     "file-backend",
+				Body:          "hi",
+			})
+			if err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			err = svc.Resolve(context.Background(), tc.session, tc.agent, fresh.ID)
+			if tc.wantErrIs == nil && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Fatalf("got err=%v, want errors.Is(_, %v)", err, tc.wantErrIs)
+			}
+		})
+	}
+}
+
+// --- F02 High: Thread access filtered by participant ---
+
+// TestService_Thread_FiltersByParticipant covers F02. Seed a thread with
+// messages between backend and frontend; assert that each agent sees
+// only messages they are a participant of, and an unrelated agent sees
+// an empty slice (no existence leak).
+func TestService_Thread_FiltersByParticipant(t *testing.T) {
+	svc, s := newTestService(t, "file-backend", "file-frontend", "file-stranger")
+
+	threadID := "thread-participants"
+	// Two messages: backend→frontend, frontend→backend.
+	for _, p := range []struct{ from, to string }{
+		{"file-backend", "file-frontend"},
+		{"file-frontend", "file-backend"},
+	} {
+		if _, err := s.SendA2AMessage(&store.A2AMessage{
+			FromSessionID: "sess-1", FromAgentID: p.from,
+			ToSessionID: "sess-1", ToAgentID: p.to,
+			ThreadID: threadID, Body: "msg",
+		}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	// A third message completely unrelated to backend/frontend — stranger
+	// as both sender and recipient in a different session — sharing the
+	// threadID. Neither backend nor frontend should see it.
+	if _, err := s.SendA2AMessage(&store.A2AMessage{
+		FromSessionID: "sess-2", FromAgentID: "file-stranger",
+		ToSessionID: "sess-2", ToAgentID: "file-stranger",
+		ThreadID: threadID, Body: "stranger-only",
+	}); err != nil {
+		t.Fatalf("seed stranger: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		session string
+		agent   string
+		wantLen int
+	}{
+		{"backend sees 2 messages", "sess-1", "file-backend", 2},
+		{"frontend sees 2 messages", "sess-1", "file-frontend", 2},
+		{"stranger sees only their own message", "sess-2", "file-stranger", 1},
+		{"non-participant sees empty", "sess-1", "file-unknown", 0},
+		{"participant in wrong session sees empty", "sess-999", "file-backend", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs, err := svc.Thread(context.Background(), threadID, tc.session, tc.agent)
+			if err != nil {
+				t.Fatalf("Thread: %v", err)
+			}
+			if len(msgs) != tc.wantLen {
+				t.Errorf("len=%d, want %d", len(msgs), tc.wantLen)
+			}
+		})
+	}
+}
+
+// --- F03 High: Inbox caller-match ---
+
+// TestService_Inbox_RequiresCallerMatch covers F03. Any mismatch between
+// (sessionID, agentID) target and (callerSessionID, callerAgentID)
+// returns ErrForbidden without touching the store.
+func TestService_Inbox_RequiresCallerMatch(t *testing.T) {
+	svc, _ := newTestService(t, "file-backend")
+
+	cases := []struct {
+		name          string
+		target        [2]string
+		caller        [2]string
+		wantForbidden bool
+	}{
+		{"caller matches target", [2]string{"sess-1", "file-backend"}, [2]string{"sess-1", "file-backend"}, false},
+		{"different agent", [2]string{"sess-1", "file-backend"}, [2]string{"sess-1", "file-other"}, true},
+		{"different session", [2]string{"sess-1", "file-backend"}, [2]string{"sess-2", "file-backend"}, true},
+		{"empty caller", [2]string{"sess-1", "file-backend"}, [2]string{"", ""}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.Inbox(
+				context.Background(),
+				tc.target[0], tc.target[1], "",
+				tc.caller[0], tc.caller[1],
+			)
+			if tc.wantForbidden {
+				if !errors.Is(err, ErrForbidden) {
+					t.Errorf("got err=%v, want errors.Is(_, ErrForbidden)", err)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// --- F05 Medium: RecentForSession limit cap + aligned defaults ---
+
+// TestService_RecentForSession_LimitCap covers F05. A caller asking for
+// 100000 rows gets clamped to MaxA2ARecentLimit; a caller asking for a
+// non-positive limit gets the default 20 (service and store agree).
+func TestService_RecentForSession_LimitCap(t *testing.T) {
+	svc, s := newTestService(t, "file-backend")
+
+	// Seed 150 messages so both cap (100) and default (20) paths can
+	// actually fill.
+	for i := 0; i < 150; i++ {
+		if _, err := s.SendA2AMessage(&store.A2AMessage{
+			FromSessionID: "sess-1",
+			FromAgentID:   UserSentinel,
+			ToSessionID:   "sess-1",
+			ToAgentID:     "file-backend",
+			Body:          "msg",
+		}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	cases := []struct {
+		name      string
+		limit     int
+		wantCount int
+	}{
+		{"huge limit clamped to MaxA2ARecentLimit", 100000, store.MaxA2ARecentLimit},
+		{"exactly at cap", store.MaxA2ARecentLimit, store.MaxA2ARecentLimit},
+		{"under cap", 50, 50},
+		{"negative uses default 20", -1, 20},
+		{"zero uses default 20", 0, 20},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs, err := svc.RecentForSession(context.Background(), "sess-1", tc.limit)
+			if err != nil {
+				t.Fatalf("RecentForSession: %v", err)
+			}
+			if len(msgs) != tc.wantCount {
+				t.Errorf("len=%d, want %d", len(msgs), tc.wantCount)
+			}
+		})
 	}
 }
 

@@ -137,7 +137,10 @@ func a2aInbox(svc *a2asvc.Service, args []string) {
 		}
 	}
 
-	inbox, err := svc.Inbox(context.Background(), *session, *agentID, *status)
+	// CLI caller identity is the same (session, agent) pair by
+	// construction — the user authenticates via flags and reads their
+	// own inbox. The service still requires the match.
+	inbox, err := svc.Inbox(context.Background(), *session, *agentID, *status, *session, *agentID)
 	if err != nil {
 		slogx.Fatal("a2a inbox", "err", err)
 	}
@@ -149,11 +152,21 @@ func a2aInbox(svc *a2asvc.Service, args []string) {
 }
 
 func a2aThread(svc *a2asvc.Service, args []string) {
-	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s a2a thread <threadID>\n", brand.BinaryName)
+	fs := flag.NewFlagSet("a2a thread", flag.ExitOnError)
+	session := fs.String("session", "", "caller session id")
+	agentID := fs.String("agent", "", "caller agent id")
+	fs.Parse(args)
+	if fs.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "usage: %s a2a thread --session X --agent Y <threadID>\n", brand.BinaryName)
 		os.Exit(1)
 	}
-	messages, err := svc.Thread(context.Background(), args[0])
+	if *session == "" || *agentID == "" {
+		fmt.Fprintln(os.Stderr, "a2a thread: --session and --agent are required (caller identity for participant filtering)")
+		os.Exit(1)
+	}
+	// Thread is participant-filtered: only messages where the caller is
+	// sender or recipient are returned. Non-participants see empty.
+	messages, err := svc.Thread(context.Background(), fs.Arg(0), *session, *agentID)
 	if err != nil {
 		slogx.Fatal("a2a thread", "err", err)
 	}

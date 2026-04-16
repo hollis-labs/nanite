@@ -614,6 +614,13 @@ func (c *Container) Shutdown() {
 	if c.MCP != nil {
 		run("mcp", func() { c.MCP.Close() })
 	}
+	if c.A2A != nil {
+		run("a2a", func() {
+			if err := c.A2A.Close(); err != nil {
+				slog.Warn("shutdown: a2a close", "err", err)
+			}
+		})
+	}
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()

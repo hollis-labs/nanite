@@ -175,24 +175,24 @@ func (stubTransport) CallTool(_ context.Context, _ string, _ map[string]any) (*T
 func TestManager_AddServer_Validation(t *testing.T) {
 	t.Run("rejects empty name", func(t *testing.T) {
 		mgr := NewManager()
-		if err := mgr.AddServer("", stubTransport{}); err == nil {
+		if err := mgr.AddServer("", stubTransport{}, TierBuiltin); err == nil {
 			t.Fatal("expected empty name to fail")
 		}
 	})
 
 	t.Run("rejects nil transport", func(t *testing.T) {
 		mgr := NewManager()
-		if err := mgr.AddServer("srv", nil); err == nil {
+		if err := mgr.AddServer("srv", nil, TierBuiltin); err == nil {
 			t.Fatal("expected nil transport to fail")
 		}
 	})
 
 	t.Run("rejects duplicate registration", func(t *testing.T) {
 		mgr := NewManager()
-		if err := mgr.AddServer("srv", stubTransport{}); err != nil {
+		if err := mgr.AddServer("srv", stubTransport{}, TierBuiltin); err != nil {
 			t.Fatalf("first AddServer: %v", err)
 		}
-		if err := mgr.AddServer("srv", stubTransport{}); err == nil {
+		if err := mgr.AddServer("srv", stubTransport{}, TierBuiltin); err == nil {
 			t.Fatal("expected duplicate registration to fail")
 		}
 	})

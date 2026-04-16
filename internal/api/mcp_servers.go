@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpconfig"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -201,11 +202,19 @@ func (a *API) registerMCPTransport(cfg *store.MCPServerConfig) {
 		if cfg.Env != "" && cfg.Env != "[]" {
 			json.Unmarshal([]byte(cfg.Env), &env)
 		}
-		if err := a.Services.MCP.AddStdioServer(cfg.Name, cfg.Command, args, env); err != nil {
+		var envAllowlist []string
+		if cfg.EnvAllowlist != "" && cfg.EnvAllowlist != "[]" {
+			if err := json.Unmarshal([]byte(cfg.EnvAllowlist), &envAllowlist); err != nil {
+				slog.Warn("api: malformed env_allowlist json — ignoring",
+					"name", cfg.Name, "err", err)
+				envAllowlist = nil
+			}
+		}
+		if err := a.Services.MCP.AddStdioServer(cfg.Name, cfg.Command, args, env, envAllowlist, mcp.TrustTier(cfg.TrustTier)); err != nil {
 			slog.Warn("api: failed to register stdio MCP server", "name", cfg.Name, "err", err)
 		}
 	case "sse":
-		if err := a.Services.MCP.AddHTTPServer(cfg.Name, cfg.URL); err != nil {
+		if err := a.Services.MCP.AddHTTPServer(cfg.Name, cfg.URL, mcp.TrustTier(cfg.TrustTier)); err != nil {
 			slog.Warn("api: failed to register http MCP server", "name", cfg.Name, "err", err)
 		}
 	}

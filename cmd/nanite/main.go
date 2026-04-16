@@ -458,17 +458,17 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	if err := mcpManager.AddServer("dev", mcp.NewDevToolsTransport([]string{
 		filepath.Join(homeDir, "Projects-apps"),
 		filepath.Join(homeDir, "Projects"),
-	})); err != nil {
+	}), mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "dev", "err", err)
 	}
-	if err := mcpManager.AddServer("general", mcp.NewGeneralToolsTransport()); err != nil {
+	if err := mcpManager.AddServer("general", mcp.NewGeneralToolsTransport(), mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "general", "err", err)
 	}
-	if err := mcpManager.AddServer("code", mcp.NewCodeExecTransport("")); err != nil {
+	if err := mcpManager.AddServer("code", mcp.NewCodeExecTransport(""), mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "code", "err", err)
 	}
 	selfTools := mcp.NewSelfToolsTransport(s)
-	if err := mcpManager.AddServer("self", selfTools); err != nil {
+	if err := mcpManager.AddServer("self", selfTools, mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
 	}
 
@@ -660,11 +660,19 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 			if cfg.Env != "" && cfg.Env != "[]" {
 				json.Unmarshal([]byte(cfg.Env), &envVars)
 			}
-			if err := m.AddStdioServer(cfg.Name, cfg.Command, args, envVars); err != nil {
+			var envAllowlist []string
+			if cfg.EnvAllowlist != "" && cfg.EnvAllowlist != "[]" {
+				if err := json.Unmarshal([]byte(cfg.EnvAllowlist), &envAllowlist); err != nil {
+					slog.Warn("mcp: malformed env_allowlist json — ignoring",
+						"name", cfg.Name, "err", err)
+					envAllowlist = nil
+				}
+			}
+			if err := m.AddStdioServer(cfg.Name, cfg.Command, args, envVars, envAllowlist, mcp.TrustTier(cfg.TrustTier)); err != nil {
 				slog.Warn("mcp: failed to register persisted stdio server", "name", cfg.Name, "err", err)
 			}
 		case "sse":
-			if err := m.AddHTTPServer(cfg.Name, cfg.URL); err != nil {
+			if err := m.AddHTTPServer(cfg.Name, cfg.URL, mcp.TrustTier(cfg.TrustTier)); err != nil {
 				slog.Warn("mcp: failed to register persisted http server", "name", cfg.Name, "err", err)
 			}
 		default:

@@ -66,9 +66,10 @@ const maxHTTPErrorBodyBytes = 64 * 1024
 // HTTPTransport implements an HTTP-based MCP transport.
 // It sends JSON-RPC requests to a remote MCP server URL.
 type HTTPTransport struct {
-	serverURL string
-	client    *http.Client
-	nextID    atomic.Int64
+	serverURL        string
+	client           *http.Client
+	nextID           atomic.Int64
+	maxResponseBytes int64 // 0 means use the package-default maxHTTPResponseBytes
 }
 
 // NewHTTPTransport creates a new HTTP-based MCP transport pointing to the given server URL.
@@ -79,6 +80,25 @@ func NewHTTPTransport(serverURL string) *HTTPTransport {
 			Timeout: 60 * time.Second, // longer than stdio's 30s to account for network latency
 		},
 	}
+}
+
+// SetMaxResponseBytes overrides the default 10 MiB response cap with a
+// tier-derived ceiling. Values ≤ 0 are ignored so accidental zeroing can't
+// disable the cap. Manager calls this after AddServer based on the registered
+// server's TrustTier (S4b D2).
+func (t *HTTPTransport) SetMaxResponseBytes(n int) {
+	if n > 0 {
+		t.maxResponseBytes = int64(n)
+	}
+}
+
+// effectiveMaxResponseBytes returns the active cap — the tier override when
+// set, the package default otherwise.
+func (t *HTTPTransport) effectiveMaxResponseBytes() int64 {
+	if t.maxResponseBytes > 0 {
+		return t.maxResponseBytes
+	}
+	return int64(maxHTTPResponseBytes)
 }
 
 // call sends a JSON-RPC request and parses the response.
@@ -114,7 +134,7 @@ func (t *HTTPTransport) call(ctx context.Context, method string, params any) (*J
 		return nil, fmt.Errorf("MCP server error %d: %s", resp.StatusCode, string(errBody))
 	}
 
-	body := http.MaxBytesReader(nil, resp.Body, maxHTTPResponseBytes)
+	body := http.MaxBytesReader(nil, resp.Body, t.effectiveMaxResponseBytes())
 	var rpcResp JSONRPCResponse
 	if err := json.NewDecoder(body).Decode(&rpcResp); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)

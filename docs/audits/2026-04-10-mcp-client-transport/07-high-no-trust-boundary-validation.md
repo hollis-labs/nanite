@@ -3,6 +3,10 @@
 **Scope:** MCP client transport — trust model at the boundary
 **Topic:** Security / Protocol correctness
 **Date:** 2026-04-10
+**Status:** Resolved in S4b (2026-04-16). Validator layer landed at
+`internal/mcp/validate.go`; four-tier trust classification on
+`store.MCPServerConfig.TrustTier` (migration 012); Manager wires per-tier
+limits at discovery + execute. See `docs/mcp-trust-model.md`.
 
 ## Problem
 

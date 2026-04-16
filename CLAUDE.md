@@ -94,4 +94,8 @@ When a tool result exceeds 64 KiB, the full body is cached and the LLM sees a tr
 
 These meta-tools are exempt from the per-tool call cap.
 
+## MCP trust tiers (Phase 3 S4b)
+
+Every MCP server is classified into a trust tier (`builtin`, `plugin_stdio`, `plugin_http`, `third_party_http`) and each tier carries its own per-result size ceiling — 2 MiB, 512 KiB, 256 KiB, 128 KiB respectively. Results over the ceiling are rejected at the boundary; they never reach the LLM. The S4a cache-and-pointer pattern still applies: it caches whatever made it through the tier ceiling. Expect third-party results to truncate earlier than built-in results. Text blocks are ANSI-stripped unconditionally, so terminal escape sequences won't appear in tool output. See `docs/mcp-trust-model.md` for the full tier table and validator architecture.
+
 <!-- nanite:end -->

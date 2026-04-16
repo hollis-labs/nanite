@@ -71,16 +71,22 @@ func (p *CompactionPipeline) Run(ctx context.Context) (*CompactionResult, error)
 	if !p.Window.NeedsCompaction() {
 		return nil, nil
 	}
+	return p.runStages(ctx, true)
+}
 
-	result := &CompactionResult{
-		Mode: p.Mode,
-	}
+// RunForce executes every compaction stage unconditionally and returns the
+// result. Used by the manual /compact endpoint where the user asked for a
+// compaction even though the budget hasn't been exceeded yet.
+func (p *CompactionPipeline) RunForce(ctx context.Context) (*CompactionResult, error) {
+	return p.runStages(ctx, false)
+}
 
-	stages := DefaultStages()
-	for _, stage := range stages {
-		// Recheck — an earlier stage may have freed enough.
+func (p *CompactionPipeline) runStages(ctx context.Context, recheckBetweenStages bool) (*CompactionResult, error) {
+	result := &CompactionResult{Mode: p.Mode}
+
+	for _, stage := range DefaultStages() {
 		p.refreshConversationSlot()
-		if !p.Window.NeedsCompaction() {
+		if recheckBetweenStages && !p.Window.NeedsCompaction() {
 			break
 		}
 

@@ -116,6 +116,226 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	return systemPrompt, chatMessages, nil
 }
 
+// SlotSources carries the raw, per-slot strings sourced for slot-based
+// context assembly. The service layer composes these into a ContextWindow.
+// Tools content is filled by the service layer after tool selection.
+type SlotSources struct {
+	System           string                 // think-tool block + workspace identity (no agent-specific text)
+	Memory           string                 // formatted ContextBroker items where Source == "memory"
+	Agent            string                 // agent.SystemPrompt + mode.PromptAddendum + skill list
+	Rules            string                 // agent tags + tool allowlist (S4a expands)
+	Session          string                 // session name, mode label, workspace name
+	Context          string                 // formatted ContextBroker items where Source != "memory"
+	Messages         []provider.ChatMessage // conversation slot messages
+	EnrichmentActive bool                   // true when Context slot was populated by the broker
+}
+
+// AssembleSlotSources builds the raw per-slot content for slot-based assembly.
+// Memory and Context are split from the ContextBroker fetch by item.Source.
+// The Tools slot is intentionally not populated here — tool selection happens
+// after context assembly today, so callers fill Tools separately.
+func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (*SlotSources, error) {
+	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleSlotSources")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("nanite.session.id", session.ID),
+		attribute.String("nanite.agent.id", agent.ID),
+	)
+
+	// System slot — think-tool block + workspace identity. Agent-specific
+	// content moves to the Agent slot.
+	var sysB strings.Builder
+	sysB.WriteString(strings.TrimLeft(thinkToolBlock, "\n"))
+	if workspace != nil && workspace.Name != "" {
+		sysB.WriteString("\n\nWorkspace: ")
+		sysB.WriteString(workspace.Name)
+		if workspace.Description != "" {
+			sysB.WriteString(" - ")
+			sysB.WriteString(workspace.Description)
+		}
+	}
+
+	// Agent slot — composed via prompt templates with skills, falling back to
+	// raw agent + mode strings when no template is assigned.
+	skillList := buildSkillList(cb.Store, agent.ID)
+	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList)
+
+	// Rules slot — agent tags + tool allowlist. S4a expands this.
+	rules := buildRulesSlotContent(agent)
+
+	// Session slot — small, stable identifiers.
+	sessionContent := buildSessionSlotContent(session, mode, workspace)
+
+	// Memory + Context — both sourced from ContextBroker; split by item.Source.
+	var memoryContent, contextContent string
+	enrichmentActive := false
+	if cb.ContextBroker != nil {
+		intent := cb.deriveIntent(session, agent)
+		packet, err := cb.ContextBroker.Fetch(ctx, intent)
+		if err != nil {
+			slog.Warn("broker: slot enrichment failed", "err", err)
+		} else if packet != nil && len(packet.Items) > 0 {
+			memoryContent = formatPacketItemsBySource(packet, true)
+			contextContent = formatPacketItemsBySource(packet, false)
+			if contextContent != "" {
+				enrichmentActive = true
+			}
+		}
+	}
+
+	// Conversation messages.
+	messages, err := cb.Store.ListMessages(session.ID, 200)
+	if err != nil {
+		return nil, err
+	}
+	chatMessages := make([]provider.ChatMessage, len(messages))
+	for i, m := range messages {
+		role := m.Role
+		if role == "system" || role == "tool" || role == RoleEnvelopeResponse {
+			role = "user"
+		}
+		chatMessages[i] = provider.ChatMessage{Role: role, Content: m.Content}
+	}
+
+	return &SlotSources{
+		System:           sysB.String(),
+		Memory:           memoryContent,
+		Agent:            agentPrompt,
+		Rules:            rules,
+		Session:          sessionContent,
+		Context:          contextContent,
+		Messages:         chatMessages,
+		EnrichmentActive: enrichmentActive,
+	}, nil
+}
+
+// deriveIntent extracts the broker intent from the session's recent user turn.
+// Mirrors the logic from enrichWithContextBroker so slot- and legacy-paths
+// produce identical broker queries.
+func (cb *ContextClient) deriveIntent(session *store.Session, agent *store.AgentProfile) contextbroker.Intent {
+	intentType := contextbroker.IntentCustom
+	var keywords []string
+	var queryText string
+	messages, err := cb.Store.ListMessages(session.ID, 5)
+	if err == nil && len(messages) > 0 {
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == "user" {
+				_, keywords = ExtractIntent(messages[i].Content)
+				intentType = classifyContextIntent(messages[i].Content)
+				queryText = messages[i].Content
+				break
+			}
+		}
+	}
+	return contextbroker.Intent{
+		Type:      intentType,
+		Keywords:  keywords,
+		QueryText: queryText,
+		Scope:     session.ProjectID,
+		SessionID: session.ID,
+		AgentID:   agent.ID,
+	}
+}
+
+// formatPacketItemsBySource filters the packet to items where Source == "memory"
+// (when memoryOnly is true) or Source != "memory" (when false), then formats
+// the filtered subset using the same renderer as the legacy path.
+func formatPacketItemsBySource(packet *contextbroker.ContextPacket, memoryOnly bool) string {
+	if packet == nil {
+		return ""
+	}
+	filtered := make([]contextbroker.ContextItem, 0, len(packet.Items))
+	for _, it := range packet.Items {
+		isMemory := it.Source == "memory"
+		if memoryOnly == isMemory {
+			filtered = append(filtered, it)
+		}
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	sub := &contextbroker.ContextPacket{
+		Items:    filtered,
+		Manifest: packet.Manifest,
+	}
+	return contextbroker.FormatPacket(sub)
+}
+
+// assembleAgentSlotContent composes the agent-specific portion of the prompt
+// (agent.SystemPrompt, mode addendum, skill list) without the workspace or
+// think-tool sections that live in the System slot.
+func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *store.AgentMode, skillList string) string {
+	vars := map[string]string{
+		"agent_name":        agent.Name,
+		"agent_description": agent.Description,
+	}
+	if mode != nil {
+		vars["mode_addendum"] = mode.PromptAddendum
+	}
+	if skillList != "" {
+		vars["skill_list"] = skillList
+	}
+	if agent.Tools != "" && agent.Tools != "[]" {
+		vars["tools_allowlist"] = agent.Tools
+	}
+	if agent.Tags != "" && agent.Tags != "[]" {
+		vars["agent_tags"] = agent.Tags
+	}
+
+	composed, err := s.ComposePromptForAgent(agent.ID, vars)
+	if err != nil {
+		slog.Warn("chat: agent slot ComposePromptForAgent failed — falling back", "err", err)
+		composed = ""
+	}
+	if composed == "" {
+		// Legacy fallback: agent prompt + mode addendum only (workspace lives in System slot).
+		var b strings.Builder
+		b.WriteString(agent.SystemPrompt)
+		if mode != nil && mode.PromptAddendum != "" {
+			b.WriteString("\n\n")
+			b.WriteString(mode.PromptAddendum)
+		}
+		composed = b.String()
+	}
+	if skillList != "" {
+		composed += "\n\nAvailable skills:\n" + skillList
+	}
+	return composed
+}
+
+// buildRulesSlotContent renders the Rules slot from the agent profile. S4a
+// expands this with policy-layer rules; for now it surfaces tags + allowlist.
+func buildRulesSlotContent(agent *store.AgentProfile) string {
+	var b strings.Builder
+	if agent.Tags != "" && agent.Tags != "[]" {
+		b.WriteString("Agent tags: ")
+		b.WriteString(agent.Tags)
+		b.WriteByte('\n')
+	}
+	if agent.Tools != "" && agent.Tools != "[]" {
+		b.WriteString("Tool allowlist: ")
+		b.WriteString(agent.Tools)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// buildSessionSlotContent renders the Session slot — small, stable identifiers
+// the model uses to anchor itself to the active session.
+func buildSessionSlotContent(session *store.Session, mode *store.AgentMode, workspace *store.Workspace) string {
+	var b strings.Builder
+	if session.Title != "" {
+		fmt.Fprintf(&b, "Session: %s\n", session.Title)
+	}
+	if mode != nil && mode.Slug != "" {
+		fmt.Fprintf(&b, "Mode: %s\n", mode.Slug)
+	}
+	if workspace != nil && workspace.Name != "" {
+		fmt.Fprintf(&b, "Workspace: %s\n", workspace.Name)
+	}
+	return b.String()
+}
+
 // EstimateTokens does a rough chars/4 estimation.
 func EstimateTokens(text string) int {
 	n := len(text) / 4

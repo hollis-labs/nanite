@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -112,11 +113,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		workspace, _ = s.store.GetWorkspace(session.WorkspaceID)
 	}
 
-	// --- Assemble context ---
-	systemPrompt, chatMessages, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, ch)
-	if err != nil {
-		return
-	}
 	// --- Resolve model ---
 	model := session.Model
 	if model == "" && agent.DefaultModel != "" {
@@ -153,13 +149,20 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		cacheable.SetCacheHints(provider.DefaultCacheStrategy())
 	}
 
-	// --- Tool selection via ToolService ---
+	// --- Tool selection via ToolService (must precede slot assembly so the
+	// Tools slot and the dynamic system prefix can be derived from the result). ---
 	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID)
 	if err != nil {
 		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}
 	}
 	tools := selection.Tools
+
+	// Build the dynamic per-turn system prefix from tool selection. This text
+	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks
+	// in the provider payload) and varies per turn; static agent / rules /
+	// session content lives in the slot blocks.
+	var prefixB strings.Builder
 
 	// Warn if no MCP tools and not progressive discovery.
 	if !selection.Progressive {
@@ -171,27 +174,30 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			}
 			warningJSON, _ := json.Marshal(warningPayload)
 			ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
-
-			systemPrompt += "\n\nIMPORTANT: You have no tools available in this session. Do NOT attempt to call any tools — all tool calls will fail. Respond with text only. If the user's request requires tools (data lookup, task management, code execution, etc.), clearly explain that this agent is not configured with the necessary tools and suggest they switch to an agent that has tools configured."
+			prefixB.WriteString("IMPORTANT: You have no tools available in this session. Do NOT attempt to call any tools — all tool calls will fail. Respond with text only. If the user's request requires tools (data lookup, task management, code execution, etc.), clearly explain that this agent is not configured with the necessary tools and suggest they switch to an agent that has tools configured.\n\n")
 		}
 	}
 
 	// Inject progressive discovery catalog.
 	if selection.Progressive && selection.Catalog != "" {
-		systemPrompt = systemPrompt + "\n\n" + selection.Catalog
+		prefixB.WriteString(selection.Catalog)
+		prefixB.WriteString("\n\n")
 	}
 
-	systemPrompt += nativeToolGuide
+	prefixB.WriteString(strings.TrimLeft(nativeToolGuide, "\n"))
+	extraSystemPrefix := prefixB.String()
 
-	// --- Plugin filters ---
+	// --- Plugin filter: system_prompt ---
+	// In the slot model the filter operates on the dynamic per-turn prefix
+	// (the only string-shaped portion of the system payload); slot content is
+	// not exposed to the filter. Plugins that need to mutate static system
+	// content should target the upcoming slot-aware filter (S4 backlog).
 	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
-
-	// Filter: system_prompt — plugins can inject persona rules, disclaimers, etc.
 	if s.pluginHost != nil {
-		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterSystemPrompt, systemPrompt, fctx); err != nil {
+		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterSystemPrompt, extraSystemPrefix, fctx); err != nil {
 			slog.Warn("chat-service: system_prompt filter error", "err", err)
 		} else if fs, ok := filtered.(string); ok {
-			systemPrompt = fs
+			extraSystemPrefix = fs
 		}
 	}
 
@@ -203,6 +209,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			userContent = fs
 		}
 	}
+
+	// --- Assemble context (slot-based) ---
+	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, ch)
+	if err != nil {
+		return
+	}
+	chatMessages := slotResult.Messages
+	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
 
 	// Emit context.assembled event after tool selection and filters are applied.
 	if s.pluginHost != nil {
@@ -233,8 +247,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		})
 	}
 
-	// --- Pre-loop budget / compaction gate (pt3 T4 hook) ---
-	chatMessages, tools = s.enforceBudgetOrCompact(ctx, sessionID, systemPrompt, chatMessages, tools, ch)
+	// --- Pre-loop budget / compaction gate (pt3 T4) ---
+	chatMessages, tools = s.enforceBudgetOrCompact(ctx, sessionID, slotResult, agent, chatMessages, tools, ch)
 
 	// --- Loop state ---
 	toolNames := make([]string, len(tools))
@@ -350,7 +364,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"tokens", breakdown.Total, "ceiling", breakdown.Ceiling)
 		}
 		provCh, err = prov.StreamChat(provCtx, provider.ChatRequest{
-			SystemPrompt: systemPrompt,
+			SystemPrompt: extraSystemPrefix,
+			SlotBlocks:   slotBlocksFor(slotResult),
 			Messages:     chatMessages,
 			Model:        model,
 			Tools:        tools,
@@ -779,49 +794,191 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // Private helper methods
 // ---------------------------------------------------------------------------
 
-// assembleTurnContext resolves the system prompt and message history for the
-// current turn. Today it delegates to the legacy flat-prompt path; S3a-pt3
-// swaps the body to slot-based assembly (context.ContextWindow + SlotBlocks)
-// and emits slot_changed envelopes on enrichment transitions. On error it
-// writes an error event to the stream and returns; callers should just
-// `return` on non-nil err without emitting again.
-//
-// Landing zone for Phase 3 S3a-pt3 T3.
+// assembleTurnContext drives slot-based context assembly for the current turn.
+// It builds a *SlotAssemblyResult that carries the slot blocks (for
+// SlotBlocks-aware providers), the legacy concatenated SystemPrompt (for
+// telemetry / budget enforcement), the conversation messages, and the
+// ContextWindow for the compaction pipeline. On error it writes an error
+// event to the stream and returns; callers should just `return` on non-nil
+// err without emitting again.
 func (s *chatServiceImpl) assembleTurnContext(
 	ctx context.Context,
 	session *store.Session,
 	agent *store.AgentProfile,
 	mode *store.AgentMode,
 	workspace *store.Workspace,
+	tools []provider.ToolDefinition,
+	extraSystemPrefix string,
 	ch chan chat.StreamEvent,
-) (string, []provider.ChatMessage, error) {
-	systemPrompt, chatMessages, err := s.context.AssembleContext(ctx, session, agent, mode, workspace)
+) (*SlotAssemblyResult, error) {
+	windowSize := s.contextWindowSize()
+	result, err := s.context.AssembleSlots(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, windowSize)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
 			map[string]interface{}{"raw": err.Error()})
-		return "", nil, err
+		return nil, err
 	}
-	return systemPrompt, chatMessages, nil
+	return result, nil
 }
 
-// enforceBudgetOrCompact is the pre-loop token gate. Today it's a
-// pass-through — the per-iteration EnforceTokenBudget call inside the tool
-// loop handles the hard ceiling. S3a-pt3 T4 wires context.CompactionPipeline
-// here so slot-based assembly can summarize the conversation before the
-// destructive ceiling cascade runs, and emit slot_changed envelopes when
-// stages fire.
-//
-// Landing zone for Phase 3 S3a-pt3 T4.
+// slotBlocksFor projects the context package's SlotBlock onto the provider
+// package's mirror type. The two are kept separate so the provider module has
+// no dependency on the host's context package.
+func slotBlocksFor(result *SlotAssemblyResult) []provider.SlotBlock {
+	if result == nil || len(result.Blocks) == 0 {
+		return nil
+	}
+	out := make([]provider.SlotBlock, 0, len(result.Blocks))
+	for _, b := range result.Blocks {
+		if b.Content == "" {
+			continue
+		}
+		out = append(out, provider.SlotBlock{
+			Name:     b.SlotName,
+			Content:  b.Content,
+			CacheKey: b.CacheKey,
+			Changed:  b.Changed,
+		})
+	}
+	return out
+}
+
+// contextWindowSize returns the user-configured slot budget source — the
+// provider context window in tokens. Falls back to the slot package default
+// when unset or unavailable.
+func (s *chatServiceImpl) contextWindowSize() int {
+	if s.store == nil {
+		return 0
+	}
+	settings, err := s.store.GetUserSettings()
+	if err != nil || settings == nil || settings.ContextWindowTokens <= 0 {
+		return 0
+	}
+	return settings.ContextWindowTokens
+}
+
+// enforceBudgetOrCompact is the pre-loop budget gate. When the conversation
+// slot exceeds its budget it runs the compaction pipeline (drop enrichment →
+// summarize oldest → strip tool blocks) and emits a slot_changed envelope so
+// the frontend can surface the rewrite. The per-iteration EnforceTokenBudget
+// call inside the tool loop remains as the hard-ceiling safety net.
 func (s *chatServiceImpl) enforceBudgetOrCompact(
 	ctx context.Context,
 	sessionID string,
-	systemPrompt string,
+	result *SlotAssemblyResult,
+	agent *store.AgentProfile,
 	chatMessages []provider.ChatMessage,
 	tools []provider.ToolDefinition,
 	ch chan chat.StreamEvent,
 ) ([]provider.ChatMessage, []provider.ToolDefinition) {
-	// No-op today. CompactionPipeline lands here in S3a-pt3.
+	if result == nil || result.Window == nil || !result.NeedsCompaction {
+		return chatMessages, tools
+	}
+
+	settings, _ := s.store.GetUserSettings()
+	summarizer := s.buildSummarizer(settings)
+	pipeline := &ctxpkg.CompactionPipeline{
+		Window:               result.Window,
+		Estimator:            ctxpkg.DefaultEstimator{},
+		Summarizer:           summarizer,
+		Mode:                 classifyModeFromAgentTags(agent),
+		ConversationMessages: chatMessages,
+	}
+
+	tokensBefore := result.Window.UsedTokens()
+	cr, err := pipeline.Run(ctx)
+	if err != nil {
+		slog.Warn("chat-service: compaction pipeline failed; ceiling enforcer will catch", "err", err, "session_id", sessionID)
+		return chatMessages, tools
+	}
+	if cr == nil || len(cr.StagesApplied) == 0 {
+		return chatMessages, tools
+	}
+
+	tokensAfter := result.Window.UsedTokens()
+	chatMessages = pipeline.ConversationMessages
+	result.Messages = chatMessages
+	result.Blocks = result.Window.Assemble()
+	result.NeedsCompaction = result.Window.NeedsCompaction()
+
+	if emitErr := chat.EmitSlotChangedEvent(ch, chat.SlotChangedV1{
+		Slot:         ctxpkg.SlotConversation,
+		Change:       chat.SlotChangeSummarized,
+		Reasoning:    fmt.Sprintf("Conversation slot exceeded budget; %d compaction stage(s) applied.", len(cr.StagesApplied)),
+		TokensBefore: tokensBefore,
+		TokensAfter:  tokensAfter,
+	}); emitErr != nil {
+		slog.Warn("chat-service: slot_changed emit failed", "err", emitErr)
+	}
+	if s.pluginHost != nil {
+		stages := append([]string(nil), cr.StagesApplied...)
+		safego.Go(ctx, "service.chat.emit.context-compacted", func() {
+			s.pluginHost.EmitContextCompacted(sessionID, tokensBefore-tokensAfter, stages)
+		})
+	}
+
 	return chatMessages, tools
+}
+
+// buildSummarizer is the chat-service-bound form of BuildSummarizer.
+func (s *chatServiceImpl) buildSummarizer(settings *store.UserSettings) ctxpkg.Summarizer {
+	return BuildSummarizer(s.providers, settings)
+}
+
+// BuildSummarizer resolves the provider+model used to summarize compacted
+// conversation spans. UserSettings can override; an empty/missing override
+// falls back to the configured default chat provider so summarization always
+// uses a known reachable model. Returns nil when the chosen provider is not
+// registered — Stage 2 of the compaction pipeline is nil-safe and skips.
+func BuildSummarizer(registry *provider.Registry, settings *store.UserSettings) ctxpkg.Summarizer {
+	provName := ""
+	model := ""
+	if settings != nil {
+		provName = settings.SummarizerProvider
+		model = settings.SummarizerModel
+	}
+	if provName == "" {
+		provName = models.DefaultProvider()
+	}
+	if model == "" {
+		model = models.DefaultChatModel()
+	}
+	if registry == nil {
+		return nil
+	}
+	prov, ok := registry.Get(provName)
+	if !ok || prov == nil {
+		slog.Warn("summarizer provider not registered; compaction Stage 2 will skip", "provider", provName)
+		return nil
+	}
+	return ctxpkg.NewProviderSummarizer(prov, model)
+}
+
+// ClassifyCompactionMode maps an agent profile to a CompactionPipeline mode by
+// inspecting the agent's tags. Default is "general" when no recognised tag is
+// present. Exported so out-of-package callers (e.g. /compact handler) reuse the
+// same classification heuristic as the chat hot path.
+func ClassifyCompactionMode(agent *store.AgentProfile) string {
+	return classifyModeFromAgentTags(agent)
+}
+
+// classifyModeFromAgentTags maps agent tags to a CompactionPipeline mode.
+// Default is "general" when no recognised tag is present.
+func classifyModeFromAgentTags(agent *store.AgentProfile) string {
+	if agent == nil || agent.Tags == "" || agent.Tags == "[]" {
+		return ctxpkg.CompactionModeGeneral
+	}
+	tags := strings.ToLower(agent.Tags)
+	switch {
+	case strings.Contains(tags, "code") || strings.Contains(tags, "engineer"):
+		return ctxpkg.CompactionModeCode
+	case strings.Contains(tags, "plan") || strings.Contains(tags, "planner"):
+		return ctxpkg.CompactionModePlan
+	case strings.Contains(tags, "research"):
+		return ctxpkg.CompactionModeResearch
+	default:
+		return ctxpkg.CompactionModeGeneral
+	}
 }
 
 // handleRequestTools processes a request_tools meta-tool call within the tool loop.

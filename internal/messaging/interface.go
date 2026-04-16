@@ -44,11 +44,11 @@ type Store interface {
 	Get(ctx context.Context, msgID string) (*Message, error)
 
 	// Inbox returns messages addressed to (sessionID, agentID),
-	// optionally filtered by status. When status is the empty string,
-	// all statuses are returned. Ordered by priority DESC, created_at
-	// ASC so high-priority messages surface first while FIFO holds
-	// within a priority tier.
-	Inbox(ctx context.Context, sessionID, agentID, status string) ([]Message, error)
+	// optionally filtered by the fields of InboxFilter (empty string
+	// on any filter field = "no constraint on that dimension").
+	// Ordered by priority DESC, created_at ASC so high-priority
+	// messages surface first while FIFO holds within a priority tier.
+	Inbox(ctx context.Context, sessionID, agentID string, filter InboxFilter) ([]Message, error)
 
 	// Thread returns all messages belonging to a thread, ordered
 	// chronologically (oldest first). Same-tick inserts are tiebroken

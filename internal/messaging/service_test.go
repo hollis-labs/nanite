@@ -150,7 +150,7 @@ func TestService_Inbox(t *testing.T) {
 		}
 	}
 
-	msgs, err := svc.Inbox(context.Background(), "sess-1", "file-backend", "", "sess-1", "file-backend")
+	msgs, err := svc.Inbox(context.Background(), "sess-1", "file-backend", InboxFilter{}, "sess-1", "file-backend")
 	if err != nil {
 		t.Fatalf("Inbox: %v", err)
 	}
@@ -473,7 +473,8 @@ func TestService_Inbox_RequiresCallerMatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := svc.Inbox(
 				context.Background(),
-				tc.target[0], tc.target[1], "",
+				tc.target[0], tc.target[1],
+				InboxFilter{},
 				tc.caller[0], tc.caller[1],
 			)
 			if tc.wantForbidden {

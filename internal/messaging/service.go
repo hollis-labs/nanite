@@ -84,11 +84,11 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 // this check exists so misaddressed MCP/HTTP calls fail loudly rather
 // than silently returning someone else's inbox. Real caller-identity-
 // from-ctx is a post-MVP upgrade.
-func (svc *Service) Inbox(ctx context.Context, sessionID, agentID, status, callerSessionID, callerAgentID string) ([]Message, error) {
+func (svc *Service) Inbox(ctx context.Context, sessionID, agentID string, filter InboxFilter, callerSessionID, callerAgentID string) ([]Message, error) {
 	if callerSessionID != sessionID || callerAgentID != agentID {
 		return nil, fmt.Errorf("%w: caller does not match inbox owner", ErrForbidden)
 	}
-	return svc.store.Inbox(ctx, sessionID, agentID, status)
+	return svc.store.Inbox(ctx, sessionID, agentID, filter)
 }
 
 // Thread returns all messages in a thread, chronologically, filtered

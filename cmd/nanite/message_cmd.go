@@ -140,7 +140,12 @@ func messageInbox(svc *messaging.Service, args []string) {
 	// CLI caller identity is the same (session, agent) pair by
 	// construction — the user authenticates via flags and reads their
 	// own inbox. The service still requires the match.
-	inbox, err := svc.Inbox(context.Background(), *session, *agentID, *status, *session, *agentID)
+	inbox, err := svc.Inbox(
+		context.Background(),
+		*session, *agentID,
+		messaging.InboxFilter{Status: *status},
+		*session, *agentID,
+	)
 	if err != nil {
 		slogx.Fatal("message inbox", "err", err)
 	}

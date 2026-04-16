@@ -85,7 +85,7 @@ func TestIntegration_HandoffFullFlow(t *testing.T) {
 	// 7. Frontend inbox should have exactly one message — the post-handoff
 	// user prompt. The earlier messages were addressed to backend or user, so
 	// none of them should land in the frontend's inbox.
-	inbox, err := svc.Inbox(ctx, sess.ID, "file-frontend", "", sess.ID, "file-frontend")
+	inbox, err := svc.Inbox(ctx, sess.ID, "file-frontend", InboxFilter{}, sess.ID, "file-frontend")
 	if err != nil {
 		t.Fatalf("Inbox: %v", err)
 	}

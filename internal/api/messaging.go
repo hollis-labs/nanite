@@ -37,9 +37,12 @@ func (a *API) handleMessageInbox(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "session_id and agent_id are required")
 		return
 	}
-	status := r.URL.Query().Get("status")
+	filter := messaging.InboxFilter{
+		Status:  r.URL.Query().Get("status"),
+		Channel: r.URL.Query().Get("channel"),
+	}
 
-	msgs, err := a.Services.Messaging.Inbox(r.Context(), sessionID, agentID, status, sessionID, agentID)
+	msgs, err := a.Services.Messaging.Inbox(r.Context(), sessionID, agentID, filter, sessionID, agentID)
 	if err != nil {
 		a.errorResp(w, messagingStatus(err), err.Error())
 		return

@@ -351,7 +351,7 @@ func selfToolDefinitions() []Tool {
 		// handler, which is deferred to a follow-up task.
 		{
 			Name:        "nanite_message_send",
-			Description: "Send a message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session. Set reply_to to the parent message ID to continue an existing thread.",
+			Description: "Send a message addressed to (to_session_id, to_agent_id). Use 'user' for to_agent_id to reach the human in a session. Set reply_to to the parent message ID to continue an existing thread. Channel policy: 'chat' for in-session conversation, 'inbox' for async polled work, 'alert' for agent-triggered one-off notifications.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -359,6 +359,7 @@ func selfToolDefinitions() []Tool {
 					"from_agent_id":   map[string]any{"type": "string"},
 					"to_session_id":   map[string]any{"type": "string"},
 					"to_agent_id":     map[string]any{"type": "string"},
+					"channel":         map[string]any{"type": "string", "enum": []string{"chat", "inbox", "alert"}, "description": "Transport bucket. Defaults to 'chat' when omitted."},
 					"subject":         map[string]any{"type": "string"},
 					"body":            map[string]any{"type": "string"},
 					"type":            map[string]any{"type": "string", "enum": []string{"message", "help_request", "directive", "status_update", "handoff"}},
@@ -369,13 +370,14 @@ func selfToolDefinitions() []Tool {
 		},
 		{
 			Name:        "nanite_message_inbox",
-			Description: "Read the messaging inbox for (session_id, agent_id). Optional status filter.",
+			Description: "Read the messaging inbox for (session_id, agent_id). Optional status and channel filters.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_id": map[string]any{"type": "string"},
 					"agent_id":   map[string]any{"type": "string"},
 					"status":     map[string]any{"type": "string", "enum": []string{"", "unread", "read", "acknowledged", "resolved"}},
+					"channel":    map[string]any{"type": "string", "enum": []string{"", "chat", "inbox", "alert"}, "description": "Filter by channel; empty returns all channels."},
 				},
 				"required": []string{"session_id", "agent_id"},
 			},

@@ -71,7 +71,7 @@ func TestSQLiteStore_Inbox_FiltersBySessionAndAgent(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	msgs, err := s.Inbox(ctx, "sess-1", "file-a", "")
+	msgs, err := s.Inbox(ctx, "sess-1", "file-a", InboxFilter{})
 	if err != nil {
 		t.Fatalf("Inbox: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestSQLiteStore_Inbox_FiltersByStatus(t *testing.T) {
 		t.Fatalf("Ack: %v", err)
 	}
 
-	unread, err := s.Inbox(ctx, "sess-1", "file-a", StatusUnread)
+	unread, err := s.Inbox(ctx, "sess-1", "file-a", InboxFilter{Status: StatusUnread})
 	if err != nil {
 		t.Fatalf("Inbox unread: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestSQLiteStore_Inbox_FiltersByStatus(t *testing.T) {
 		t.Errorf("unread count = %d, want 1", len(unread))
 	}
 
-	read, err := s.Inbox(ctx, "sess-1", "file-a", StatusRead)
+	read, err := s.Inbox(ctx, "sess-1", "file-a", InboxFilter{Status: StatusRead})
 	if err != nil {
 		t.Fatalf("Inbox read: %v", err)
 	}
@@ -248,5 +248,80 @@ func TestSQLiteStore_Get_NotFound(t *testing.T) {
 	_, err := s.Get(context.Background(), "no-such-id")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("got err=%v, want errors.Is(_, ErrNotFound)", err)
+	}
+}
+
+// --- T3: Channels ---
+
+// TestSQLiteStore_Send_DefaultsChannel covers T3: Send populates
+// Channel to ChannelChat when SendInput.Channel is empty.
+func TestSQLiteStore_Send_DefaultsChannel(t *testing.T) {
+	s, _ := newTestMessagingStore(t)
+	out, err := s.Send(context.Background(), SendInput{
+		FromSessionID: "sess-1", FromAgentID: "file-a",
+		ToSessionID: "sess-1", ToAgentID: "file-b",
+		Body: "hi",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if out.Channel != ChannelChat {
+		t.Errorf("Channel = %q, want %q", out.Channel, ChannelChat)
+	}
+}
+
+// TestSQLiteStore_Send_InvalidChannelRejected covers the CHECK
+// constraint: a channel outside (chat|inbox|alert) is rejected at
+// insert.
+func TestSQLiteStore_Send_InvalidChannelRejected(t *testing.T) {
+	s, _ := newTestMessagingStore(t)
+	_, err := s.Send(context.Background(), SendInput{
+		FromSessionID: "sess-1", FromAgentID: "file-a",
+		ToSessionID: "sess-1", ToAgentID: "file-b",
+		Channel: "telepathy",
+		Body:    "hi",
+	})
+	if err == nil {
+		t.Fatal("expected CHECK constraint rejection for unknown channel, got nil")
+	}
+}
+
+// TestSQLiteStore_Inbox_FiltersByChannel covers T3: the channel filter
+// narrows inbox results to matching-channel rows only.
+func TestSQLiteStore_Inbox_FiltersByChannel(t *testing.T) {
+	s, _ := newTestMessagingStore(t)
+	ctx := context.Background()
+
+	// Seed: 2 chat, 1 inbox, 1 alert — all to (sess-1, file-a).
+	channels := []string{ChannelChat, ChannelChat, ChannelInbox, ChannelAlert}
+	for _, ch := range channels {
+		if _, err := s.Send(ctx, SendInput{
+			FromSessionID: "sess-1", FromAgentID: "file-b",
+			ToSessionID: "sess-1", ToAgentID: "file-a",
+			Channel: ch, Body: "msg",
+		}); err != nil {
+			t.Fatalf("seed %s: %v", ch, err)
+		}
+	}
+
+	cases := []struct {
+		channel string
+		want    int
+	}{
+		{"", 4},
+		{ChannelChat, 2},
+		{ChannelInbox, 1},
+		{ChannelAlert, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.channel, func(t *testing.T) {
+			msgs, err := s.Inbox(ctx, "sess-1", "file-a", InboxFilter{Channel: tc.channel})
+			if err != nil {
+				t.Fatalf("Inbox: %v", err)
+			}
+			if len(msgs) != tc.want {
+				t.Errorf("channel=%q: got %d, want %d", tc.channel, len(msgs), tc.want)
+			}
+		})
 	}
 }

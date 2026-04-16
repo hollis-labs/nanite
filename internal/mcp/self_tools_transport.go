@@ -866,6 +866,7 @@ func (st *SelfToolsTransport) callMessageSend(ctx context.Context, args map[stri
 		FromAgentID:   strArg(args, "from_agent_id", ""),
 		ToSessionID:   strArg(args, "to_session_id", ""),
 		ToAgentID:     strArg(args, "to_agent_id", ""),
+		Channel:       strArg(args, "channel", ""),
 		Subject:       strArg(args, "subject", ""),
 		Body:          strArg(args, "body", ""),
 		Type:          strArg(args, "type", ""),
@@ -895,7 +896,10 @@ func (st *SelfToolsTransport) callMessageInbox(ctx context.Context, args map[str
 		ctx,
 		sessionID,
 		agentID,
-		strArg(args, "status", ""),
+		messaging.InboxFilter{
+			Status:  strArg(args, "status", ""),
+			Channel: strArg(args, "channel", ""),
+		},
 		sessionID,
 		agentID,
 	)

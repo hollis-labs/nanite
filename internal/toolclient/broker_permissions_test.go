@@ -93,7 +93,7 @@ func TestCallTool_FallbackPath_StructuredErrorShape(t *testing.T) {
 	mgr := mcp.NewManager()
 	if err := mgr.AddServer("test", &mockTransport{tools: []mcp.Tool{
 		{Name: "hello", Description: "Hello tool"},
-	}}); err != nil {
+	}}, mcp.TierBuiltin); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}
 	_ = mgr.DiscoverTools(context.Background())
@@ -249,7 +249,7 @@ func TestCallToolWithPolicyCheck_RejectsTraversal(t *testing.T) {
 	mgr := mcp.NewManager()
 	if err := mgr.AddServer("test", &mockTransport{tools: []mcp.Tool{
 		{Name: "dev_read", Description: "Read files"},
-	}}); err != nil {
+	}}, mcp.TierBuiltin); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}
 	_ = mgr.DiscoverTools(context.Background())

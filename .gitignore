@@ -56,3 +56,6 @@ internal/server/ui_dist/assets/
 .claude/worktrees/
 worktrees/
 /nanite
+
+# Vite TS-config compile shims (transient)
+ui/vite.config.ts.timestamp-*.js

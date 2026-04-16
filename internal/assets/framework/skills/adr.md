@@ -60,7 +60,7 @@ You are an ADR writer. Write a formal Architecture Decision Record.
    {Related ADRs, design docs, backlog items, or external resources.}
 
 4. Register in Vanta Conduit (if available):
-   - Use mcp__cortex__context_typed_write with type=adr if the tool is available
+   - Use mcp__vanta__context_typed_write with type=adr if the tool is available
    - If not available, skip — the file is the primary artifact
 
 5. Return ONLY this format:

@@ -469,7 +469,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Register memory tools as a built-in MCP transport.
 	if memorySvc != nil && cfg.MCP != nil {
 		memoryTransport := mcp.NewMemoryToolsTransport(memorySvc)
-		if err := cfg.MCP.AddServer("nanite-memory", memoryTransport); err != nil {
+		if err := cfg.MCP.AddServer("nanite-memory", memoryTransport, mcp.TierBuiltin); err != nil {
 			slog.Warn("service container: failed to register memory MCP server", "err", err)
 		} else {
 			slog.Info("service container: memory agent tools registered")

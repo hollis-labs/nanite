@@ -448,7 +448,7 @@ mcp_servers:
 
 tool_permissions:
   allow:
-    - "mcp__cortex__*"
+    - "mcp__vanta__*"
     - "mcp__my-custom-server__*"
 
 system_prompt: |
@@ -505,7 +505,7 @@ func seedAgent(host plugin.Host) error {
         DefaultMode:     "default",
         CanExecute:      false,
         MCPServers:      `["cortex","my-custom-server"]`,
-        ToolPermissions: `{"allow":["mcp__cortex__*","mcp__my-custom-server__*"]}`,
+        ToolPermissions: `{"allow":["mcp__vanta__*","mcp__my-custom-server__*"]}`,
         Modes:           `[]`,
         Settings:        `{}`,
         SystemPrompt:    myAgentSystemPrompt,

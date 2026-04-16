@@ -11,16 +11,16 @@ func TestManager_RemoveServersByPlugin(t *testing.T) {
 	mgr := NewManager()
 
 	// A regular non-plugin server — RemoveServersByPlugin must not touch it.
-	if err := mgr.AddServer("core", stubTransport{}); err != nil {
+	if err := mgr.AddServer("core", stubTransport{}, TierBuiltin); err != nil {
 		t.Fatalf("AddServer(core): %v", err)
 	}
 
 	// Two servers owned by plugin-a (no real subprocess — use AddServer
 	// directly, then poke the reverse map).
-	if err := mgr.AddServer("a1", stubTransport{}); err != nil {
+	if err := mgr.AddServer("a1", stubTransport{}, TierBuiltin); err != nil {
 		t.Fatalf("AddServer(a1): %v", err)
 	}
-	if err := mgr.AddServer("a2", stubTransport{}); err != nil {
+	if err := mgr.AddServer("a2", stubTransport{}, TierBuiltin); err != nil {
 		t.Fatalf("AddServer(a2): %v", err)
 	}
 	mgr.mu.Lock()
@@ -28,7 +28,7 @@ func TestManager_RemoveServersByPlugin(t *testing.T) {
 	mgr.mu.Unlock()
 
 	// One server owned by plugin-b.
-	if err := mgr.AddServer("b1", stubTransport{}); err != nil {
+	if err := mgr.AddServer("b1", stubTransport{}, TierBuiltin); err != nil {
 		t.Fatalf("AddServer(b1): %v", err)
 	}
 	mgr.mu.Lock()

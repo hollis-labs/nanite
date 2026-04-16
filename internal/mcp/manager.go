@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -40,13 +39,14 @@ type DiscoveryWarning struct {
 
 // Manager holds multiple MCP server connections and provides unified tool access.
 type Manager struct {
-	servers            map[string]MCPTransport // name -> transport
-	pluginServers      map[string][]string     // pluginID -> server names (reverse map for hot-unload)
-	tools              []toolEntry             // all discovered tools with server association
-	discoveryWarnings  []DiscoveryWarning      // tools rejected during discovery
-	Broker             *broker.LocalBroker     // intent-aware tool broker
-	LoadChecker        ToolLoadChecker         // optional loadType filter
-	mu                 sync.RWMutex
+	servers           map[string]MCPTransport // name -> transport
+	serverTiers       map[string]TrustTier    // name -> trust tier
+	pluginServers     map[string][]string     // pluginID -> server names (reverse map for hot-unload)
+	tools             []toolEntry             // all discovered tools with server association
+	discoveryWarnings []DiscoveryWarning      // tools rejected during discovery
+	Broker            *broker.LocalBroker     // intent-aware tool broker
+	LoadChecker       ToolLoadChecker         // optional loadType filter
+	mu                sync.RWMutex
 }
 
 // toolEntry associates a tool with its originating server.
@@ -59,18 +59,25 @@ type toolEntry struct {
 func NewManager() *Manager {
 	return &Manager{
 		servers:       make(map[string]MCPTransport),
+		serverTiers:   make(map[string]TrustTier),
 		pluginServers: make(map[string][]string),
 	}
 }
 
-// AddServer registers an MCP server with the given transport.
+// AddServer registers an MCP server with the given transport and trust tier.
 // Call DiscoverTools() after adding all servers.
+//
+// The tier classifies the server's blast radius (S4b D1) and selects per-tier
+// validator limits used at discovery and execution time. If the transport
+// implements an int "SetMaxResponseBytes" setter, the tier-derived
+// MaxResultBytes is wired into the transport so the per-line / per-body
+// reader cap tightens from the default 10 MiB safety net to the tier ceiling.
 //
 // Returns an error if name is empty, transport is nil, or a server with the
 // same name is already registered. Silent overwrite is rejected because
 // shadowing an existing MCP server is a footgun regardless of transport type
 // (HTTP, stdio, plugin, or builtin).
-func (m *Manager) AddServer(name string, transport MCPTransport) error {
+func (m *Manager) AddServer(name string, transport MCPTransport, tier TrustTier) error {
 	if name == "" {
 		return fmt.Errorf("mcp: AddServer: name is required")
 	}
@@ -84,7 +91,16 @@ func (m *Manager) AddServer(name string, transport MCPTransport) error {
 		return fmt.Errorf("mcp: AddServer %q: server already registered", name)
 	}
 	m.servers[name] = transport
-	slog.Info("mcp: added server", "name", name)
+	m.serverTiers[name] = tier
+
+	// Tighten the transport's response cap to the tier ceiling when the
+	// transport opts in via the SetMaxResponseBytes interface (HTTPTransport
+	// and StdioTransport do; in-process built-ins don't need to).
+	if setter, ok := transport.(interface{ SetMaxResponseBytes(int) }); ok {
+		setter.SetMaxResponseBytes(LimitsFor(tier).MaxResultBytes)
+	}
+
+	slog.Info("mcp: added server", "name", name, "tier", string(tier))
 	return nil
 }
 
@@ -115,6 +131,7 @@ func (m *Manager) RemoveServer(name string) {
 	}
 
 	delete(m.servers, name)
+	delete(m.serverTiers, name)
 
 	// Remove tools that belonged to this server.
 	filtered := m.tools[:0]
@@ -128,23 +145,35 @@ func (m *Manager) RemoveServer(name string) {
 	slog.Info("mcp: removed server", "name", name)
 }
 
-// AddHTTPServer registers an HTTP-based MCP server. Propagates any error from
-// AddServer (empty name, nil transport, duplicate registration).
-func (m *Manager) AddHTTPServer(name, url string) error {
-	if err := m.AddServer(name, NewHTTPTransport(url)); err != nil {
+// AddHTTPServer registers an HTTP-based MCP server with the given trust tier.
+// Propagates any error from AddServer (empty name, nil transport, duplicate
+// registration).
+func (m *Manager) AddHTTPServer(name, url string, tier TrustTier) error {
+	if err := m.AddServer(name, NewHTTPTransport(url), tier); err != nil {
 		return err
 	}
-	slog.Info("mcp: server using HTTP transport", "name", name, "url", url)
+	slog.Info("mcp: server using HTTP transport", "name", name, "url", url, "tier", string(tier))
 	return nil
 }
 
-// AddStdioServer registers a stdio-based MCP server (subprocess). Propagates
-// any error from AddServer (empty name, nil transport, duplicate registration).
-func (m *Manager) AddStdioServer(name, command string, args []string, env []string) error {
-	if err := m.AddServer(name, NewStdioTransport(command, args, env)); err != nil {
+// AddStdioServer registers a stdio-based MCP server (subprocess) with the
+// given trust tier and host-env allowlist. envAllowlist is the list of
+// environment variable names the subprocess is permitted to inherit from
+// nanite's own environment (S4b D6 / finding 10). Pass nil/empty for
+// no inheritance. PATH must always be in the allowlist — the transport
+// fails at start-time otherwise. Propagates any error from AddServer
+// (empty name, nil transport, duplicate registration).
+func (m *Manager) AddStdioServer(name, command string, args []string, env []string, envAllowlist []string, tier TrustTier) error {
+	if err := m.AddServer(name, NewStdioTransport(command, args, env, envAllowlist), tier); err != nil {
 		return err
 	}
-	slog.Info("mcp: server using stdio transport", "name", name, "command", command, "args", strings.Join(args, " "))
+	slog.Info("mcp: server using stdio transport",
+		"name", name,
+		"command", command,
+		"args", strings.Join(args, " "),
+		"tier", string(tier),
+		"env_allowlist", envAllowlist,
+	)
 	return nil
 }
 
@@ -152,6 +181,11 @@ func (m *Manager) AddStdioServer(name, command string, args []string, env []stri
 // existing JSON-RPC transport. The plugin is expected to answer the
 // mcp/list_tools and mcp/call_tool methods defined in plugin-sdk and to
 // dispatch by the server name passed in params.
+//
+// Plugin servers are always subprocess-backed, so the trust tier is fixed
+// at TierPluginStdio (S4b D1). Keeping this implicit avoids leaking the
+// mcp.TrustTier type into internal/plugin, which would close an import
+// cycle (mcp → plugin/subprocess and plugin → mcp).
 //
 // Returns an error if name is empty, transport is nil, or the name is already
 // registered. The explicit nil-transport guard here gives a clearer error
@@ -169,7 +203,7 @@ func (m *Manager) AddPluginServer(pluginID, name string, transport *subprocess.T
 	if transport == nil {
 		return fmt.Errorf("mcp: AddPluginServer %q: transport is nil", name)
 	}
-	if err := m.AddServer(name, NewPluginMCPTransport(transport, name)); err != nil {
+	if err := m.AddServer(name, NewPluginMCPTransport(transport, name), TierPluginStdio); err != nil {
 		return err
 	}
 	if pluginID != "" {
@@ -177,7 +211,7 @@ func (m *Manager) AddPluginServer(pluginID, name string, transport *subprocess.T
 		m.pluginServers[pluginID] = append(m.pluginServers[pluginID], name)
 		m.mu.Unlock()
 	}
-	slog.Info("mcp: server using plugin transport", "name", name, "plugin", pluginID)
+	slog.Info("mcp: server using plugin transport", "name", name, "plugin", pluginID, "tier", string(TierPluginStdio))
 	return nil
 }
 
@@ -199,7 +233,21 @@ func (m *Manager) RemoveServersByPlugin(pluginID string) int {
 	return len(names)
 }
 
-// DiscoverTools queries all registered servers for their tools.
+// tierFor returns the registered tier for a server, defaulting to
+// TierThirdPartyHTTP (D4 fail-closed) when unknown. Caller must hold mu.
+func (m *Manager) tierForLocked(name string) TrustTier {
+	if t, ok := m.serverTiers[name]; ok && t != "" {
+		return t
+	}
+	return TierThirdPartyHTTP
+}
+
+// DiscoverTools queries all registered servers for their tools and runs the
+// per-tier validator pipeline (S4b T2). Tools failing per-tool validation
+// (ValidateToolMeta) are skipped with a DiscoveryWarning. Cross-tool checks
+// (ValidateToolSet — count cap, duplicate names) emit the same warnings;
+// when the count cap fires, only the first MaxToolsPerServer tools are
+// retained.
 func (m *Manager) DiscoverTools(ctx context.Context) error {
 	ctx, span := feotel.StartSpan(ctx, "nanite.mcp.discoverTools")
 	defer span.End()
@@ -212,29 +260,67 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	var totalTools int
 
 	for name, transport := range m.servers {
+		tier := m.tierForLocked(name)
+		limits := LimitsFor(tier)
+
 		tools, err := transport.ListTools(ctx)
 		if err != nil {
 			slog.Warn("mcp: failed to discover tools", "server", name, "err", err)
 			continue
 		}
+
+		// Cross-tool checks first so the count cap can be applied before we
+		// iterate. Each ValidationError → one DiscoveryWarning.
+		for _, ve := range ValidateToolSet(tier, tools) {
+			slog.Warn("mcp: discovery cross-tool check",
+				"server", name, "field", ve.Field, "reason", ve.Reason)
+			m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
+				ServerName: name,
+				ToolName:   ve.Value, // empty for count-cap; tool name for dup
+				Reason:     ve.Field,
+			})
+		}
+		if len(tools) > limits.MaxToolsPerServer {
+			tools = tools[:limits.MaxToolsPerServer]
+		}
+
+		advertised := len(tools)
+		accepted := 0
+		seen := make(map[string]struct{}, len(tools))
 		for _, t := range tools {
-			if reason := validateToolName(t.Name); reason != "" {
-				slog.Warn("mcp: invalid tool name — skipping",
-					"server", name, "tool", t.Name, "reason", reason)
-				m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
-					ServerName: name,
-					ToolName:   t.Name,
-					Reason:     reason,
-				})
+			// Skip duplicates here too so the in-scope tool list mirrors the
+			// validator outcome (ValidateToolSet flagged them already).
+			if _, dup := seen[t.Name]; dup {
+				continue
+			}
+			seen[t.Name] = struct{}{}
+
+			if errs := ValidateToolMeta(tier, t); len(errs) > 0 {
+				for _, ve := range errs {
+					slog.Warn("mcp: tool rejected at discovery",
+						"server", name, "tool", t.Name, "field", ve.Field, "reason", ve.Reason)
+					m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
+						ServerName: name,
+						ToolName:   t.Name,
+						Reason:     ve.Field,
+					})
+				}
 				continue
 			}
 			m.tools = append(m.tools, toolEntry{
 				serverName: name,
 				tool:       t,
 			})
+			accepted++
+			totalTools++
 		}
-		totalTools += len(tools)
-		slog.Info("mcp: discovered tools", "count", len(tools), "server", name)
+
+		slog.Info("mcp: discovered tools",
+			"server", name,
+			"tier", string(tier),
+			"advertised", advertised,
+			"accepted", accepted,
+		)
 	}
 
 	// Register tools with the broker if available.
@@ -341,6 +427,15 @@ func (m *Manager) GetAllToolsUnfiltered() []provider.ToolDefinition {
 
 // ExecuteTool routes a tool call to the correct server and returns the result as text.
 // Tool names are expected in the format "mcp__<server>__<tool_name>".
+//
+// Result handling (S4b T3 + T5 + D5):
+//  1. ValidateBlockType drops blocks whose Type is not in the allowlist.
+//  2. StripANSI strips CSI/OSC sequences from text blocks (UI spoofing).
+//  3. ScanInjection emits WARN logs + structured metric records on hits;
+//     S4b is observability-only (D3), so hits do not block the call.
+//  4. ValidateResultSize enforces the per-tier MaxResultBytes ceiling on
+//     the assembled string as defense-in-depth on top of the transport's
+//     own LimitReader cap (S4b T3 transport-level wiring + PR #42 floor).
 func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string]any) (string, error) {
 	ctx, span := feotel.ToolCallSpan(ctx, name)
 	defer span.End()
@@ -359,6 +454,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 
 	m.mu.RLock()
 	transport, ok := m.servers[serverName]
+	tier := m.tierForLocked(serverName)
 	m.mu.RUnlock()
 
 	if !ok {
@@ -376,15 +472,39 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		return "", err
 	}
 
-	// Concatenate text content blocks.
+	// Concatenate text content blocks, stripping ANSI and scanning for
+	// injection patterns on the way through.
 	var sb strings.Builder
 	for _, c := range result.Content {
-		if c.Type == "text" && c.Text != "" {
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
-			}
-			sb.WriteString(c.Text)
+		if err := ValidateBlockType(c); err != nil {
+			slog.Warn("mcp: dropping invalid content block",
+				"server", serverName, "tool", toolName, "block_type", c.Type)
+			continue
 		}
+		if c.Type != "text" || c.Text == "" {
+			continue
+		}
+		text := StripANSI(c.Text)
+		for _, hit := range ScanInjection(text) {
+			// T5 observability: log + structured metric record. D3 says
+			// observe-only in S4b — do not short-circuit the result.
+			slog.Warn("mcp: injection pattern detected",
+				"server", serverName,
+				"tool", toolName,
+				"rule", hit.Rule,
+				"snippet", hit.Snippet,
+			)
+			slog.Info("metric mcp_injection_hits_total",
+				"server", serverName,
+				"tool", toolName,
+				"rule", hit.Rule,
+				"count", 1,
+			)
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(text)
 	}
 
 	if result.IsError {
@@ -392,6 +512,12 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return "", err
+	}
+
+	if err := ValidateResultSize(tier, sb.Len()); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", fmt.Errorf("call tool %s on %s: %w", toolName, serverName, err)
 	}
 
 	span.SetAttributes(attribute.Int("nanite.mcp.result_len", sb.Len()))
@@ -423,6 +549,7 @@ type ServerInfo struct {
 	Name              string             `json:"name"`
 	ToolCount         int                `json:"tool_count"`
 	Connected         bool               `json:"connected"`
+	TrustTier         string             `json:"trust_tier,omitempty"`
 	DiscoveryWarnings []DiscoveryWarning `json:"discovery_warnings,omitempty"`
 }
 
@@ -449,6 +576,7 @@ func (m *Manager) ListServers() []ServerInfo {
 			Name:              name,
 			ToolCount:         toolCounts[name],
 			Connected:         true, // registered means connected
+			TrustTier:         string(m.tierForLocked(name)),
 			DiscoveryWarnings: serverWarnings[name],
 		})
 	}
@@ -596,26 +724,6 @@ func parsePrefixedToolName(name string) (server, tool string, err error) {
 		return "", "", fmt.Errorf("tool name %q has empty server or tool", name)
 	}
 	return server, tool, nil
-}
-
-// maxToolNameLen is the maximum allowed length for an MCP tool name.
-const maxToolNameLen = 128
-
-// reValidToolName matches the allowed tool name charset.
-var reValidToolName = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
-
-// validateToolName returns a non-empty reason string if the tool name is invalid.
-func validateToolName(name string) string {
-	if name == "" {
-		return "empty tool name"
-	}
-	if len(name) > maxToolNameLen {
-		return fmt.Sprintf("tool name exceeds %d characters (%d)", maxToolNameLen, len(name))
-	}
-	if !reValidToolName.MatchString(name) {
-		return "tool name contains invalid characters (allowed: a-zA-Z0-9_-)"
-	}
-	return ""
 }
 
 // GetDiscoveryWarnings returns warnings from the last discovery run.

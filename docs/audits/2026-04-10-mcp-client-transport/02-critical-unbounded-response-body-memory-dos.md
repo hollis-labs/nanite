@@ -3,6 +3,12 @@
 **Scope:** MCP client transport — stdio and HTTP response handling
 **Topic:** Security / Memory & Resources
 **Date:** 2026-04-10
+**Status:** Resolved. Hotfix PR #42 (`9384714`, 2026-04-14) installed a
+10 MiB per-response floor on both transports (`http.MaxBytesReader` and
+bounded `readLineBounded`). S4b (2026-04-16) tightens that ceiling
+per-trust-tier via `SetMaxResponseBytes` and adds a defense-in-depth
+`ValidateResultSize` check on the assembled body in `Manager.ExecuteTool`.
+See `docs/mcp-trust-model.md`.
 
 ## Problem
 

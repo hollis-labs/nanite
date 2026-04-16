@@ -20,8 +20,8 @@ Nanite's `internal/contextbroker/` package provides a multi-source context assem
 | **HadronBlueprintGate** | `gate_hadron_blueprints.go` | Session-start blueprint cache |
 
 **CortexSource uses a two-stage fallback** (`source_cortex.go:54-98`):
-1. **Primary:** `mcp__cortex__context_broker_fetch` — structured intent-based retrieval
-2. **Fallback:** `mcp__cortex__context_search` — keyword search (currently broken: no embedding provider)
+1. **Primary:** `mcp__vanta__context_broker_fetch` — structured intent-based retrieval
+2. **Fallback:** `mcp__vanta__context_search` — keyword search (currently broken: no embedding provider)
 
 **Integration point:** `internal/chat/context_client.go:303-348` — `enrichWithContextBroker()` is called during system prompt assembly before every chat turn.
 

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,26 +26,57 @@ const maxStdioResponseBytes = 10 * 1024 * 1024
 
 // StdioTransport implements MCP over a subprocess stdin/stdout.
 type StdioTransport struct {
-	command string
-	args    []string
-	env     []string // "KEY=VALUE" pairs
+	command      string
+	args         []string
+	env          []string // "KEY=VALUE" pairs declared on MCPServerConfig.Env
+	envAllowlist []string // host env var names the subprocess may inherit
 
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
 
-	nextID  atomic.Int64
-	mu      sync.Mutex // serializes requests
-	started bool
+	nextID           atomic.Int64
+	mu               sync.Mutex // serializes requests
+	started          bool
+	maxResponseBytes int // 0 means use the package-default maxStdioResponseBytes
 }
 
 // NewStdioTransport creates a new stdio-based MCP transport.
-func NewStdioTransport(command string, args []string, env []string) *StdioTransport {
+//
+// env is the per-server user-declared "KEY=VALUE" list from
+// MCPServerConfig.Env — trusted and appended as-is to the subprocess env.
+// envAllowlist is the list of host env var names (e.g. "PATH", "HOME") the
+// subprocess is permitted to inherit from the nanite process (S4b D6).
+// Default nil/empty allowlist means the subprocess starts with only the
+// explicit env entries, nothing inherited — closes finding 10.
+func NewStdioTransport(command string, args []string, env []string, envAllowlist []string) *StdioTransport {
 	return &StdioTransport{
-		command: command,
-		args:    args,
-		env:     env,
+		command:      command,
+		args:         args,
+		env:          env,
+		envAllowlist: envAllowlist,
 	}
+}
+
+// SetMaxResponseBytes overrides the default 10 MiB per-line cap with a
+// tier-derived ceiling. Values ≤ 0 are ignored so accidental zeroing can't
+// disable the cap. Manager calls this after AddServer based on the registered
+// server's TrustTier (S4b D2).
+func (t *StdioTransport) SetMaxResponseBytes(n int) {
+	if n > 0 {
+		t.mu.Lock()
+		t.maxResponseBytes = n
+		t.mu.Unlock()
+	}
+}
+
+// effectiveMaxResponseBytes returns the active cap — the tier override when
+// set, the package default otherwise. Caller must hold t.mu.
+func (t *StdioTransport) effectiveMaxResponseBytesLocked() int {
+	if t.maxResponseBytes > 0 {
+		return t.maxResponseBytes
+	}
+	return maxStdioResponseBytes
 }
 
 // start launches the subprocess if not already running.
@@ -53,11 +86,19 @@ func (t *StdioTransport) start() error {
 	}
 
 	t.cmd = exec.Command(t.command, t.args...)
-	if len(t.env) > 0 {
-		t.cmd.Env = append(t.cmd.Environ(), t.env...)
-	}
 
-	var err error
+	// S4b D6 / finding 10: the subprocess env is built deterministically
+	// from the allowlist + the per-server Env declared on MCPServerConfig,
+	// NOT inherited from nanite's environment by default. Host vars only
+	// enter when their name is explicitly allowlisted. This closes the
+	// credential-leak vector (AWS_*, GITHUB_TOKEN, etc.) identified by the
+	// audit.
+	childEnv, err := t.buildSubprocessEnv()
+	if err != nil {
+		return err
+	}
+	t.cmd.Env = childEnv
+
 	t.stdin, err = t.cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
@@ -78,6 +119,58 @@ func (t *StdioTransport) start() error {
 
 	t.started = true
 	return nil
+}
+
+// buildSubprocessEnv computes the env slice to hand to exec.Cmd based on
+// the configured allowlist + user-declared Env. A bare command like
+// "my-mcp-server" needs PATH to resolve via LookPath, so require that PATH
+// be satisfied by at least one of:
+//
+//   - the allowlist (host PATH inherited),
+//   - an explicit "PATH=..." entry in the per-server Env, or
+//   - the command itself being path-qualified (contains a '/'),
+//
+// whichever is true. When none are, fail loudly at start-time rather than
+// surface as an opaque "exec: file not found" later. Audit finding 10.
+func (t *StdioTransport) buildSubprocessEnv() ([]string, error) {
+	if !t.pathSatisfied() {
+		return nil, fmt.Errorf(
+			"mcp stdio: %q is a bare command but no PATH source (allowlist=%v, env has PATH=? no)",
+			t.command, t.envAllowlist,
+		)
+	}
+
+	env := make([]string, 0, len(t.envAllowlist)+len(t.env))
+	for _, key := range t.envAllowlist {
+		if v, ok := os.LookupEnv(key); ok {
+			env = append(env, key+"="+v)
+		}
+	}
+	// User-declared per-server env is already trusted; append last so it
+	// overrides any inherited value of the same key.
+	env = append(env, t.env...)
+	return env, nil
+}
+
+// pathSatisfied reports whether the subprocess will have a PATH to resolve
+// t.command against — either via the allowlist, an explicit "PATH=..." in
+// t.env, or because t.command itself is path-qualified (so exec skips
+// LookPath entirely).
+func (t *StdioTransport) pathSatisfied() bool {
+	if strings.ContainsRune(t.command, '/') {
+		return true
+	}
+	for _, k := range t.envAllowlist {
+		if k == "PATH" {
+			return true
+		}
+	}
+	for _, kv := range t.env {
+		if strings.HasPrefix(kv, "PATH=") {
+			return true
+		}
+	}
+	return false
 }
 
 // call sends a JSON-RPC request and reads the response.
@@ -115,8 +208,9 @@ func (t *StdioTransport) call(ctx context.Context, method string, params any) (*
 		err  error
 	}
 	readCh := make(chan readResult, 1)
+	maxBytes := t.effectiveMaxResponseBytesLocked()
 	safego.Go(ctx, "mcp.stdio.transport.read", func() {
-		line, err := readLineBounded(t.stdout, maxStdioResponseBytes)
+		line, err := readLineBounded(t.stdout, maxBytes)
 		readCh <- readResult{line, err}
 	})
 

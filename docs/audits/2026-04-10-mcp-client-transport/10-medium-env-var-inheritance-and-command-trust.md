@@ -3,6 +3,13 @@
 **Scope:** MCP client transport — subprocess environment
 **Topic:** Security
 **Date:** 2026-04-10
+**Status:** Resolved in S4b (2026-04-16). Added
+`store.MCPServerConfig.EnvAllowlist` (migration 012) and
+`StdioTransport.envAllowlist` — subprocess env is now built deterministically
+from the allowlist + user-declared `Env`, with no implicit host inheritance.
+`buildSubprocessEnv` fails loudly at start-time if `PATH` is not allowlisted.
+Default for new third-party rows is `[]` (nothing inherited). See
+`docs/mcp-trust-model.md`.
 
 ## Problem
 

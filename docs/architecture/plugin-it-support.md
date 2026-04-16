@@ -328,7 +328,7 @@ The search defaults to 3 results (`kb.go` line 134) -- enough for relevance, sma
 | Mode | `default` |
 | CanExecute | `false` |
 | MCP Servers | `["cortex","support-kb"]` |
-| Tool Permissions | `{"allow":["mcp__cortex__*","mcp__support-kb__*"]}` |
+| Tool Permissions | `{"allow":["mcp__vanta__*","mcp__support-kb__*"]}` |
 
 ### System Prompt Design
 

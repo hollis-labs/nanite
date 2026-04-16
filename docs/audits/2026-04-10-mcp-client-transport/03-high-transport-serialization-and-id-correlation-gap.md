@@ -62,7 +62,7 @@ internal/mcp/http_transport.go:26:    ID      int64           `json:"id"`
 
 ## Impact
 
-**Serialization.** The chat engine routes every tool call through `Manager.ExecuteTool` → `StdioTransport.CallTool` → `StdioTransport.call`, one transport per configured server. A single chat session that wants to call `mcp__engine__engine_tasks_list` and `mcp__cortex__context_search` on the same server in parallel (or a sub-agent doing delegation) will serialize them. The chat engine's delegation / orchestrator features spawn child sessions that share the Manager — their RPCs also queue.
+**Serialization.** The chat engine routes every tool call through `Manager.ExecuteTool` → `StdioTransport.CallTool` → `StdioTransport.call`, one transport per configured server. A single chat session that wants to call `mcp__engine__engine_tasks_list` and `mcp__vanta__context_search` on the same server in parallel (or a sub-agent doing delegation) will serialize them. The chat engine's delegation / orchestrator features spawn child sessions that share the Manager — their RPCs also queue.
 
 This is not hypothetical for Nanite. `internal/chat/orchestrator.go:L152-L190` calls `ExecuteTool` multiple times against `mcp__engine__engine_sprint_create` and `mcp__engine__engine_task_create` in sequence; a worker pool that did any of this concurrently would slow to one-at-a-time per server. With the context-broker's five-source parallel query model, any future feature that issues parallel tool calls will hit this wall.
 

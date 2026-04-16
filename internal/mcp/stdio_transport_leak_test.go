@@ -21,7 +21,8 @@ func startSleepTransport(t *testing.T) *StdioTransport {
 	}
 	// `sleep 300` consumes no stdin and never writes stdout — exactly the
 	// shape of an MCP server that hangs.
-	return NewStdioTransport("sleep", []string{"300"}, nil)
+	// Allowlist PATH so buildSubprocessEnv doesn't refuse to start.
+	return NewStdioTransport("sleep", []string{"300"}, nil, []string{"PATH"})
 }
 
 func TestStdioTransport_ReapsOnTimeout(t *testing.T) {

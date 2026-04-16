@@ -147,8 +147,8 @@ The core chat loop lives in `internal/chat/engine.go` (1760 lines). The main ent
 
 **Sources** (`contextbroker/broker.go`):
 - **CortexSource**: queries Cortex via MCP tools (`source_cortex.go:54-98`)
-  - Primary: `mcp__cortex__context_broker_fetch` (intent-based retrieval)
-  - Fallback: `mcp__cortex__context_search` (keyword search; currently broken without embedding provider)
+  - Primary: `mcp__vanta__context_broker_fetch` (intent-based retrieval)
+  - Fallback: `mcp__vanta__context_search` (keyword search; currently broken without embedding provider)
   - Intent classification: user message → 7 intent types (write_code, debug_issue, plan_feature, recall_decision, etc.) → mapped to Cortex's 4 native types
   - Budget: 30-40% of context window (default 15-20k tokens)
 - **PCCSource**: reads local `.agentrc/pcc/` files
@@ -410,8 +410,8 @@ No per-turn retrieval beyond message history + context broker sources. The conte
 
 - Nanite queries Cortex via MCP tools (`context_broker/source_cortex.go`)
 - Two-stage fallback:
-  1. Primary: `mcp__cortex__context_broker_fetch` (intent-based retrieval)
-  2. Fallback: `mcp__cortex__context_search` (keyword; currently broken without embedding provider)
+  1. Primary: `mcp__vanta__context_broker_fetch` (intent-based retrieval)
+  2. Fallback: `mcp__vanta__context_search` (keyword; currently broken without embedding provider)
 - Intent mapping: 7 Nanite intents (write_code, debug_issue, etc.) → 4 Cortex types (lossy)
 - Token budget: Cortex gets 30-40% of 50k budget (15-20k tokens)
 - No explicit config; relies on MCP auto-discovery

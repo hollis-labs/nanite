@@ -368,7 +368,7 @@ The transport must implement the `mcp.MCPTransport` interface with `ListTools()`
 Agent profiles store tool permissions as JSON:
 
 ```json
-{"allow": ["mcp__cortex__*", "mcp__support-kb__*"]}
+{"allow": ["mcp__vanta__*", "mcp__support-kb__*"]}
 ```
 
 The Tool Broker checks these permissions. The direct MCP discovery fallback (`engine.go` lines 977-1000) bypasses the broker -- it runs when the broker returned zero MCP tools, ensuring plugin-registered servers are always available to agents that declare them.
@@ -384,7 +384,7 @@ agent := &store.AgentProfile{
     Name:            "IT Support",
     DefaultModel:    "claude-sonnet-4-20250514",
     MCPServers:      `["cortex","support-kb"]`,
-    ToolPermissions: `{"allow":["mcp__cortex__*","mcp__support-kb__*"]}`,
+    ToolPermissions: `{"allow":["mcp__vanta__*","mcp__support-kb__*"]}`,
     SystemPrompt:    itSupportSystemPrompt,
 }
 db.CreateAgent(agent)

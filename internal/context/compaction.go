@@ -52,16 +52,22 @@ type CompactionPipeline struct {
 // Stage is a single compaction action. Returns true if it made progress.
 type Stage func(ctx context.Context, p *CompactionPipeline) (bool, error)
 
+// namedStage bundles a Stage function with a stable identifier for logging
+// and the stages_applied response on /compact.
+type namedStage struct {
+	Name string
+	Fn   Stage
+}
+
 // DefaultStages returns the escalation stages in order:
 // 1. Drop Context slot enrichment
 // 2. Summarize oldest conversation messages
 // 3. Strip tool blocks from non-tool-use spans
-// 4. Reduce Tools slot (signal to broker — not directly modifying tools here)
-func DefaultStages() []Stage {
-	return []Stage{
-		stageDropEnrichment,
-		stageSummarizeOldest,
-		stageStripToolBlocks,
+func DefaultStages() []namedStage {
+	return []namedStage{
+		{"drop_enrichment", stageDropEnrichment},
+		{"summarize_oldest", stageSummarizeOldest},
+		{"strip_tool_blocks", stageStripToolBlocks},
 	}
 }
 
@@ -71,25 +77,31 @@ func (p *CompactionPipeline) Run(ctx context.Context) (*CompactionResult, error)
 	if !p.Window.NeedsCompaction() {
 		return nil, nil
 	}
+	return p.runStages(ctx, true)
+}
 
-	result := &CompactionResult{
-		Mode: p.Mode,
-	}
+// RunForce executes every compaction stage unconditionally and returns the
+// result. Used by the manual /compact endpoint where the user asked for a
+// compaction even though the budget hasn't been exceeded yet.
+func (p *CompactionPipeline) RunForce(ctx context.Context) (*CompactionResult, error) {
+	return p.runStages(ctx, false)
+}
 
-	stages := DefaultStages()
-	for _, stage := range stages {
-		// Recheck — an earlier stage may have freed enough.
+func (p *CompactionPipeline) runStages(ctx context.Context, recheckBetweenStages bool) (*CompactionResult, error) {
+	result := &CompactionResult{Mode: p.Mode}
+
+	for _, ns := range DefaultStages() {
 		p.refreshConversationSlot()
-		if !p.Window.NeedsCompaction() {
+		if recheckBetweenStages && !p.Window.NeedsCompaction() {
 			break
 		}
 
-		progress, err := stage(ctx, p)
+		progress, err := ns.Fn(ctx, p)
 		if err != nil {
-			return result, fmt.Errorf("compaction stage failed: %w", err)
+			return result, fmt.Errorf("compaction stage %s failed: %w", ns.Name, err)
 		}
 		if progress {
-			result.StagesApplied = append(result.StagesApplied, stageName(stage))
+			result.StagesApplied = append(result.StagesApplied, ns.Name)
 		}
 	}
 
@@ -264,9 +276,3 @@ func serializeMessages(msgs []provider.ChatMessage, est TokenEstimator) string {
 	return b.String()
 }
 
-// stageName returns a human-readable name for a stage function (for logging).
-func stageName(s Stage) string {
-	// We can't get the function name at runtime without reflect tricks.
-	// Use the stage index from DefaultStages instead — the caller knows the order.
-	return "stage"
-}

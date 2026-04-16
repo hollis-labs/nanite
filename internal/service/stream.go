@@ -260,6 +260,41 @@ func (sm *StreamManager) ThrottledCLIPresence(sessionID string) {
 	})
 }
 
+// BroadcastSessionStreamEvent fans a single chat.StreamEvent out to every
+// active message stream for sessionID. Non-blocking — drops on full buffers
+// and on the closed-channel race window the same way DeliverSessionEnvelopes
+// does. Returns the count of streams that accepted the event so callers can
+// detect "no active stream" and choose to surface a different signal.
+func (sm *StreamManager) BroadcastSessionStreamEvent(sessionID string, evt chat.StreamEvent) int {
+	if sessionID == "" {
+		return 0
+	}
+	val, ok := sm.sessionToMsgs.Load(sessionID)
+	if !ok {
+		return 0
+	}
+	ss := val.(*sessionStreams)
+	ss.mu.Lock()
+	targets := make([]string, 0, len(ss.ids))
+	for id := range ss.ids {
+		targets = append(targets, id)
+	}
+	ss.mu.Unlock()
+
+	delivered := 0
+	for _, msgID := range targets {
+		chVal, ok := sm.streams.Load(msgID)
+		if !ok {
+			continue
+		}
+		ch := chVal.(chan chat.StreamEvent)
+		if trySendEnvelope(ch, evt) == sendDelivered {
+			delivered++
+		}
+	}
+	return delivered
+}
+
 // --- Plugin envelope delivery (BLG-20260413-012) ---
 
 // sendOutcome classifies the result of a non-blocking envelope send so

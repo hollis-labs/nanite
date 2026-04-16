@@ -27,6 +27,19 @@ type AgentResolver interface {
 	Get(ctx context.Context, id string) (*store.AgentProfile, error)
 }
 
+// AgentRegistrar optionally auto-registers an unknown sender on first
+// messaging call (T6). Implementations insert a minimal
+// agent_profiles row with the specified kind (`external` or `cli`)
+// and sensible defaults for everything else. A nil registrar on the
+// Service disables auto-register — SendMessage then rejects unknown
+// from_agent_ids through ValidateAgentID as before.
+//
+// *store.Store satisfies this structurally via its existing
+// CreateAgent method.
+type AgentRegistrar interface {
+	CreateAgent(a *store.AgentProfile) error
+}
+
 // ValidateAgentID checks that an agent_id is one of:
 //   - the UserSentinel (always valid, resolver not consulted)
 //   - "file-<slug>" where <slug> references a known file agent

@@ -109,6 +109,10 @@ func messageSend(svc *messaging.Service, args []string) {
 		Subject:       *subject,
 		Body:          *body,
 		Type:          *msgType,
+		// CLI callers flag themselves so auto-register stamps the
+		// right provenance on an unknown from id. Safe no-op when
+		// the id already resolves.
+		RegisterAs: "cli",
 	}
 	out, err := svc.SendMessage(context.Background(), msg)
 	if err != nil {
@@ -334,5 +338,5 @@ func newMessagingServiceForCLI(s *store.Store) (*messaging.Service, error) {
 		FileAgents: agentDefs,
 		Overrides:  s,
 	})
-	return messaging.NewService(messaging.NewSQLiteStore(s.DB), s.DB, agents), nil
+	return messaging.NewService(messaging.NewSQLiteStore(s.DB), s.DB, agents, s), nil
 }

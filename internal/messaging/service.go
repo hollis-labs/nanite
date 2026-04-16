@@ -10,6 +10,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // Service coordinates messaging validation, persistence, subscriber
@@ -25,32 +29,52 @@ import (
 // Service is safe for concurrent use since Store, the *sql.DB, and
 // the pubsub are each safe for concurrent use.
 type Service struct {
-	store    Store
-	db       *sql.DB
-	resolver AgentResolver
-	pub      *pubsub
+	store     Store
+	db        *sql.DB
+	resolver  AgentResolver
+	registrar AgentRegistrar // nil = auto-register disabled
+	pub       *pubsub
 }
 
 // NewService constructs a Service. The Store is used for message CRUD
 // and should wrap the same underlying DB as the *sql.DB so that
 // handoff transactions and message reads see consistent state. The
 // resolver is used by ValidateAgentID when send/subscribe arrives
-// with an unknown agent id.
-func NewService(s Store, db *sql.DB, r AgentResolver) *Service {
+// with an unknown agent id. The registrar (optional) enables T6
+// auto-register-on-first-send — pass nil to disable.
+func NewService(s Store, db *sql.DB, r AgentResolver, reg AgentRegistrar) *Service {
 	return &Service{
-		store:    s,
-		db:       db,
-		resolver: r,
-		pub:      newPubsub(),
+		store:     s,
+		db:        db,
+		resolver:  r,
+		registrar: reg,
+		pub:       newPubsub(),
 	}
 }
 
 // SendMessage validates both ends of the address tuple, persists the
 // message via the Store, and fans the row out to any live subscribers
 // on the recipient's (session, agent) key.
+//
+// T6 auto-register: if the caller's FromAgentID is not the user
+// sentinel and doesn't resolve AND the Service has a registrar wired
+// in, a minimal agent_profiles row is inserted with kind='external'
+// (default) or 'cli' (when input.RegisterAs == "cli"). The send then
+// proceeds with the freshly-registered ID. Without a registrar the
+// unknown id still rejects through ValidateAgentID below.
 func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message, error) {
-	if err := ValidateAgentID(ctx, svc.resolver, input.FromAgentID); err != nil {
+	registered, err := svc.maybeAutoRegister(ctx, input.FromAgentID, input.RegisterAs)
+	if err != nil {
 		return nil, fmt.Errorf("%w: from_agent_id: %v", ErrValidation, err)
+	}
+	// Skip the from-side ValidateAgentID call when we just auto-
+	// registered the id: the resolver may cache negative lookups or
+	// (as in tests) be a fixed known-set that doesn't see DB writes.
+	// We know the row exists because we just wrote it.
+	if !registered {
+		if err := ValidateAgentID(ctx, svc.resolver, input.FromAgentID); err != nil {
+			return nil, fmt.Errorf("%w: from_agent_id: %v", ErrValidation, err)
+		}
 	}
 	if err := ValidateAgentID(ctx, svc.resolver, input.ToAgentID); err != nil {
 		return nil, fmt.Errorf("%w: to_agent_id: %v", ErrValidation, err)
@@ -160,6 +184,74 @@ func (svc *Service) RecentForSession(ctx context.Context, sessionID string, limi
 // identity plumbed yet. Revisit when caller-identity-from-ctx lands.
 func (svc *Service) UnreadCount(ctx context.Context, sessionID, agentID string) (int, error) {
 	return svc.store.UnreadCount(ctx, sessionID, agentID)
+}
+
+// maybeAutoRegister inserts a minimal agent_profiles row for an
+// unknown fromAgentID when the Service has a registrar wired.
+// Returns (registered=true, nil) when a fresh row was inserted,
+// (registered=false, nil) when the id already resolves or auto-
+// register is disabled, and (_, err) when the insert fails for a
+// reason other than a lost race.
+func (svc *Service) maybeAutoRegister(ctx context.Context, fromAgentID, registerAs string) (bool, error) {
+	if svc.registrar == nil || fromAgentID == "" || fromAgentID == UserSentinel {
+		return false, nil
+	}
+	if svc.resolver != nil {
+		if _, err := svc.resolver.Get(ctx, fromAgentID); err == nil {
+			return false, nil // already registered
+		}
+	}
+	kind := "external"
+	if registerAs == "cli" {
+		kind = "cli"
+	}
+	profile := &store.AgentProfile{
+		ID:     fromAgentID,
+		Slug:   slugifyAgentID(fromAgentID),
+		Name:   fromAgentID,
+		Source: "auto",
+		Kind:   kind,
+	}
+	if err := svc.registrar.CreateAgent(profile); err != nil {
+		// Race: another request may have registered the same id
+		// concurrently (SQLite UNIQUE constraint). Treat as
+		// success if the resolver now sees the row.
+		if svc.resolver != nil {
+			if _, gerr := svc.resolver.Get(ctx, fromAgentID); gerr == nil {
+				slog.Info("messaging: auto-register lost race, proceeding",
+					"agent_id", fromAgentID, "kind", kind, "err", err)
+				return true, nil
+			}
+		}
+		return false, fmt.Errorf("auto-register: %w", err)
+	}
+	slog.Info("messaging: auto-registered agent on first message_send",
+		"agent_id", fromAgentID, "kind", kind)
+	return true, nil
+}
+
+// slugifyAgentID turns an opaque from_agent_id into a slug suitable
+// for the agent_profiles.slug unique index. Conservative: lowercase,
+// trim, replace any non-[a-z0-9-] with '-', strip leading/trailing
+// dashes. If the cleaned slug is empty, fall back to the raw id —
+// CreateAgent will surface the constraint violation clearly if that
+// also fails.
+func slugifyAgentID(id string) string {
+	lower := strings.ToLower(id)
+	var b strings.Builder
+	for _, r := range lower {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		case r == '_' || r == ' ' || r == '.' || r == '/':
+			b.WriteRune('-')
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		return id
+	}
+	return slug
 }
 
 // Close drains all pubsub subscriber channels and clears the

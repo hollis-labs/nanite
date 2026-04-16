@@ -873,6 +873,7 @@ func (st *SelfToolsTransport) callMessageSend(ctx context.Context, args map[stri
 		Body:          strArg(args, "body", ""),
 		Type:          strArg(args, "type", ""),
 		ReplyTo:       strArg(args, "reply_to", ""),
+		RegisterAs:    strArg(args, "register_as", ""),
 	}
 	out, err := st.Messaging.SendMessage(ctx, msg)
 	if err != nil {

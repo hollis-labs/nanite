@@ -86,6 +86,14 @@ func (a *API) handleMessageSend(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// T6: HTTP callers can also flag CLI provenance via header. The
+	// JSON body's RegisterAs wins if both are set — callers that
+	// care go through the body.
+	if in.RegisterAs == "" {
+		if h := r.Header.Get("X-Nanite-Agent-Kind"); h != "" {
+			in.RegisterAs = h
+		}
+	}
 
 	saved, err := a.Services.Messaging.SendMessage(r.Context(), in)
 	if err != nil {

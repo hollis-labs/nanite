@@ -366,6 +366,7 @@ func selfToolDefinitions() []Tool {
 					"body":            map[string]any{"type": "string"},
 					"type":            map[string]any{"type": "string", "enum": []string{"message", "help_request", "directive", "status_update", "handoff"}},
 					"reply_to":        map[string]any{"type": "string", "description": "Parent message ID to continue an existing thread."},
+					"register_as":     map[string]any{"type": "string", "enum": []string{"", "external", "cli"}, "description": "Auto-register the from_agent_id on first send with this provenance kind. Ignored if the agent already exists."},
 				},
 				"required": []string{"from_session_id", "from_agent_id", "to_session_id", "to_agent_id", "body"},
 			},

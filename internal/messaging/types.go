@@ -82,13 +82,19 @@ type SendInput struct {
 	// PayloadJSON carries kind-specific structured payload per S5's
 	// ResponseV1 shape. Empty defaults to "{}".
 	PayloadJSON string
-	Type        string
-	Subject     string
-	Body        string
-	ThreadID    string
-	ReplyTo     string
-	Metadata    string
-	Priority    int
+	Type     string
+	Subject  string
+	Body     string
+	ThreadID string
+	ReplyTo  string
+	Metadata string
+	Priority int
+	// RegisterAs controls T6 auto-register behavior when
+	// FromAgentID is not yet in agent_profiles. Empty (default)
+	// registers the caller as kind='external'; set to 'cli' to
+	// register as a CLI caller. Ignored if the from_agent_id
+	// already resolves or if Service has no registrar.
+	RegisterAs string
 }
 
 // Message type constants (wire-level "type" column on each row). These

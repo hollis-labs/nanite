@@ -203,7 +203,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// handoff transactions (which span session_handoffs +
 	// session_agents) can run as a single txn.
 	msgStore := messaging.NewSQLiteStore(cfg.Store.DB)
-	messagingSvc := messaging.NewService(msgStore, cfg.Store.DB, agents)
+	// cfg.Store satisfies messaging.AgentRegistrar via its CreateAgent
+	// method — enables T6 auto-register-on-first-send.
+	messagingSvc := messaging.NewService(msgStore, cfg.Store.DB, agents, cfg.Store)
 	slog.Info("service container: messaging service enabled")
 
 	// Discover file-based skill definitions from all 5 priority locations.

@@ -31,11 +31,16 @@ func newTestMessagingStore(t *testing.T) (*SQLiteStore, *store.Store) {
 // Service plus the SQLiteStore (for message seeding) plus the parent
 // *store.Store (for session / session-agent seeding needed by handoff
 // tests).
+//
+// T6: passes nil as the registrar so existing tests that expect
+// unknown from_agent_id to reject through ValidateAgentID keep that
+// behavior. T6-specific tests construct their own Service with a
+// non-nil registrar.
 func newTestService(t *testing.T, knownAgents ...string) (*Service, *SQLiteStore, *store.Store) {
 	t.Helper()
 	ms, parent := newTestMessagingStore(t)
 	r := newFakeResolver(knownAgents...)
-	return NewService(ms, parent.DB, r), ms, parent
+	return NewService(ms, parent.DB, r, nil), ms, parent
 }
 
 // baseInput builds a minimal valid SendInput for tests that only care
@@ -47,6 +52,114 @@ func baseInput(from, to string) SendInput {
 		ToSessionID:   "sess-1",
 		ToAgentID:     to,
 		Body:          "hello",
+	}
+}
+
+// --- T6: Auto-register on first message_send ---
+
+// TestService_SendMessage_AutoRegistersUnknownFrom covers T6 happy
+// path: an unknown from_agent_id with a wired registrar gets inserted
+// as kind='external' and the send proceeds.
+func TestService_SendMessage_AutoRegistersUnknownFrom(t *testing.T) {
+	ms, parent := newTestMessagingStore(t)
+	r := newFakeResolver("file-backend")
+	svc := NewService(ms, parent.DB, r, parent)
+
+	in := SendInput{
+		FromSessionID: "sess-1",
+		FromAgentID:   "new-agent",
+		ToSessionID:   "sess-1",
+		ToAgentID:     "file-backend",
+		Body:          "hello",
+	}
+	out, err := svc.SendMessage(context.Background(), in)
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if out.FromAgentID != "new-agent" {
+		t.Errorf("FromAgentID = %q, want %q", out.FromAgentID, "new-agent")
+	}
+	got, err := parent.GetAgent("new-agent")
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	if got.Kind != "external" {
+		t.Errorf("Kind = %q, want %q", got.Kind, "external")
+	}
+	if got.Source != "auto" {
+		t.Errorf("Source = %q, want %q", got.Source, "auto")
+	}
+}
+
+// TestService_SendMessage_AutoRegisterAsCLI covers T6 when the caller
+// flags register_as=cli: the inserted profile's kind is 'cli'.
+func TestService_SendMessage_AutoRegisterAsCLI(t *testing.T) {
+	ms, parent := newTestMessagingStore(t)
+	r := newFakeResolver("file-backend")
+	svc := NewService(ms, parent.DB, r, parent)
+
+	in := SendInput{
+		FromSessionID: "sess-1",
+		FromAgentID:   "cli-host-12345",
+		ToSessionID:   "sess-1",
+		ToAgentID:     "file-backend",
+		Body:          "hello",
+		RegisterAs:    "cli",
+	}
+	if _, err := svc.SendMessage(context.Background(), in); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	got, err := parent.GetAgent("cli-host-12345")
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	if got.Kind != "cli" {
+		t.Errorf("Kind = %q, want %q", got.Kind, "cli")
+	}
+}
+
+// TestService_SendMessage_NoRegistrarStillRejects covers the disabled
+// path: if Service has no registrar, unknown from_agent_id still
+// errors through ValidateAgentID.
+func TestService_SendMessage_NoRegistrarStillRejects(t *testing.T) {
+	ms, parent := newTestMessagingStore(t)
+	r := newFakeResolver("file-backend")
+	svc := NewService(ms, parent.DB, r, nil)
+
+	_, err := svc.SendMessage(context.Background(), SendInput{
+		FromSessionID: "sess-1",
+		FromAgentID:   "ghost-agent",
+		ToSessionID:   "sess-1",
+		ToAgentID:     "file-backend",
+		Body:          "hi",
+	})
+	if err == nil {
+		t.Fatal("expected rejection for unknown from_agent_id without registrar, got nil")
+	}
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("got err=%v, want errors.Is(_, ErrValidation)", err)
+	}
+}
+
+// TestService_SendMessage_AutoRegisterSkipsUserSentinel covers the
+// carve-out: the user sentinel never produces a profile row even with
+// a registrar wired in.
+func TestService_SendMessage_AutoRegisterSkipsUserSentinel(t *testing.T) {
+	ms, parent := newTestMessagingStore(t)
+	r := newFakeResolver("file-backend")
+	svc := NewService(ms, parent.DB, r, parent)
+
+	if _, err := svc.SendMessage(context.Background(), SendInput{
+		FromSessionID: "sess-1",
+		FromAgentID:   UserSentinel,
+		ToSessionID:   "sess-1",
+		ToAgentID:     "file-backend",
+		Body:          "hi",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if _, err := parent.GetAgent(UserSentinel); err == nil {
+		t.Error("user sentinel should not produce an agent_profiles row")
 	}
 }
 

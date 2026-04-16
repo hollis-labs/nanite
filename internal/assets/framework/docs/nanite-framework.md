@@ -295,6 +295,12 @@ agents:
 
 All skills and commands reference `mcp__engine__*` tools. The legacy `mcp__volon__*` namespace is no longer used. The service was previously labeled "Volon"; it is now "Engine" throughout.
 
+## Internal Planner (todos + plans)
+
+Nanite also exposes its own planner subsystem with five always-on MCP tools — `nanite_todo_{create,update,list}` and `nanite_plan_{create,update}` — for in-session and per-project work tracking. This is distinct from Engine (portfolio-wide tracking) and Claude Code's built-in `TodoWrite` (turn-scoped agent bookkeeping).
+
+See `docs/nanite-planner.md` for conventions: scope selection, TodoWrite-vs-nanite-todo decision rule, todo-vs-plan decision rule, status lifecycles, and the sub-agent handoff pattern using plan steps.
+
 ## Version History
 
 - **v2.2.0** — Agent composition model. Roles split into domain/stack/meta. Named agents in project config. projects.yaml absorbed into config.yaml. Context files moved to agents/ dir. 18 skills, 18 commands. Monorepo modules registered as individual projects. Legacy archive convention (`.agentrc-legacy/`). `mcp__engine__*` replaces `mcp__volon__*`. `backend` and `frontend` roles gain `## What NOT to do` sections. `/health-check` aliased to `/qhealth`. All 14 portfolio projects on v2.2.0.

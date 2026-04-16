@@ -160,7 +160,7 @@ import (
     "time"
 
     hostplugin "github.com/hollis-labs/conduit/internal/plugin"
-    "github.com/hollis-labs/fragments-engine/plugin"
+    "github.com/hollis-labs/plugin-sdk"
 )
 
 func init() {
@@ -473,7 +473,7 @@ import (
     "fmt"
 
     "github.com/hollis-labs/conduit/internal/store"
-    "github.com/hollis-labs/fragments-engine/plugin"
+    "github.com/hollis-labs/plugin-sdk"
 )
 
 func seedAgent(host plugin.Host) error {

@@ -284,6 +284,8 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 			tools = tools[:limits.MaxToolsPerServer]
 		}
 
+		advertised := len(tools)
+		accepted := 0
 		seen := make(map[string]struct{}, len(tools))
 		for _, t := range tools {
 			// Skip duplicates here too so the in-scope tool list mirrors the
@@ -309,10 +311,16 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 				serverName: name,
 				tool:       t,
 			})
+			accepted++
 			totalTools++
 		}
 
-		slog.Info("mcp: discovered tools", "count", len(tools), "server", name, "tier", string(tier))
+		slog.Info("mcp: discovered tools",
+			"server", name,
+			"tier", string(tier),
+			"advertised", advertised,
+			"accepted", accepted,
+		)
 	}
 
 	// Register tools with the broker if available.

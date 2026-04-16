@@ -91,6 +91,44 @@ func TestStdioTransport_EnvAllowlist_EmptyDefaultOverridable(t *testing.T) {
 	}
 }
 
+// TestStdioTransport_EnvAllowlist_PathQualifiedCommand covers the Copilot
+// review finding: an absolute- or relative-path command does not need PATH
+// from either the allowlist or the user-declared env, because exec.LookPath
+// is bypassed when the command contains a path separator.
+func TestStdioTransport_EnvAllowlist_PathQualifiedCommand(t *testing.T) {
+	for _, cmd := range []string{"/bin/echo", "./local-mcp", "../parent-mcp"} {
+		tr := NewStdioTransport(cmd, nil, nil, nil)
+		env, err := tr.buildSubprocessEnv()
+		if err != nil {
+			t.Errorf("path-qualified %q: unexpected error: %v", cmd, err)
+			continue
+		}
+		if len(env) != 0 {
+			t.Errorf("path-qualified %q: env should be empty, got %v", cmd, env)
+		}
+	}
+}
+
+// TestStdioTransport_EnvAllowlist_ExplicitPathInEnv covers the Copilot
+// finding's other branch: an operator who wants to pin a custom PATH for a
+// specific server can do so via MCPServerConfig.Env, and buildSubprocessEnv
+// must accept that without also requiring PATH in the allowlist.
+func TestStdioTransport_EnvAllowlist_ExplicitPathInEnv(t *testing.T) {
+	tr := NewStdioTransport(
+		"bare-server",
+		nil,
+		[]string{"PATH=/usr/local/sbin:/usr/local/bin"},
+		nil, // no allowlist at all
+	)
+	env, err := tr.buildSubprocessEnv()
+	if err != nil {
+		t.Fatalf("buildSubprocessEnv: %v", err)
+	}
+	if !hasKeyValue(env, "PATH", "/usr/local/sbin:/usr/local/bin") {
+		t.Errorf("explicit PATH missing from env: %v", env)
+	}
+}
+
 func hasKey(env []string, key string) bool {
 	prefix := key + "="
 	for _, e := range env {

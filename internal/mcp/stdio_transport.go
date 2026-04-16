@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -121,20 +122,20 @@ func (t *StdioTransport) start() error {
 }
 
 // buildSubprocessEnv computes the env slice to hand to exec.Cmd based on
-// the configured allowlist + user-declared Env. Fails loudly if the
-// allowlist omits PATH, because every non-trivial subprocess needs it and
-// silent failure would surface as an opaque "no such file" from exec.
+// the configured allowlist + user-declared Env. A bare command like
+// "my-mcp-server" needs PATH to resolve via LookPath, so require that PATH
+// be satisfied by at least one of:
+//
+//   - the allowlist (host PATH inherited),
+//   - an explicit "PATH=..." entry in the per-server Env, or
+//   - the command itself being path-qualified (contains a '/'),
+//
+// whichever is true. When none are, fail loudly at start-time rather than
+// surface as an opaque "exec: file not found" later. Audit finding 10.
 func (t *StdioTransport) buildSubprocessEnv() ([]string, error) {
-	hasPath := false
-	for _, k := range t.envAllowlist {
-		if k == "PATH" {
-			hasPath = true
-			break
-		}
-	}
-	if !hasPath {
+	if !t.pathSatisfied() {
 		return nil, fmt.Errorf(
-			"mcp stdio: env_allowlist must include PATH for %q (current allowlist: %v)",
+			"mcp stdio: %q is a bare command but no PATH source (allowlist=%v, env has PATH=? no)",
 			t.command, t.envAllowlist,
 		)
 	}
@@ -149,6 +150,27 @@ func (t *StdioTransport) buildSubprocessEnv() ([]string, error) {
 	// overrides any inherited value of the same key.
 	env = append(env, t.env...)
 	return env, nil
+}
+
+// pathSatisfied reports whether the subprocess will have a PATH to resolve
+// t.command against — either via the allowlist, an explicit "PATH=..." in
+// t.env, or because t.command itself is path-qualified (so exec skips
+// LookPath entirely).
+func (t *StdioTransport) pathSatisfied() bool {
+	if strings.ContainsRune(t.command, '/') {
+		return true
+	}
+	for _, k := range t.envAllowlist {
+		if k == "PATH" {
+			return true
+		}
+	}
+	for _, kv := range t.env {
+		if strings.HasPrefix(kv, "PATH=") {
+			return true
+		}
+	}
+	return false
 }
 
 // call sends a JSON-RPC request and reads the response.

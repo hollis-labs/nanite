@@ -66,10 +66,14 @@ const maxHTTPErrorBodyBytes = 64 * 1024
 // HTTPTransport implements an HTTP-based MCP transport.
 // It sends JSON-RPC requests to a remote MCP server URL.
 type HTTPTransport struct {
-	serverURL        string
-	client           *http.Client
-	nextID           atomic.Int64
-	maxResponseBytes int64 // 0 means use the package-default maxHTTPResponseBytes
+	serverURL string
+	client    *http.Client
+	nextID    atomic.Int64
+	// maxResponseBytes is 0 when the package default applies; otherwise
+	// it's the tier-derived ceiling. Atomic because SetMaxResponseBytes is
+	// a public method reachable concurrently with call() through the
+	// SetMaxResponseBytes interface assertion Manager uses.
+	maxResponseBytes atomic.Int64
 }
 
 // NewHTTPTransport creates a new HTTP-based MCP transport pointing to the given server URL.
@@ -88,15 +92,15 @@ func NewHTTPTransport(serverURL string) *HTTPTransport {
 // server's TrustTier (S4b D2).
 func (t *HTTPTransport) SetMaxResponseBytes(n int) {
 	if n > 0 {
-		t.maxResponseBytes = int64(n)
+		t.maxResponseBytes.Store(int64(n))
 	}
 }
 
 // effectiveMaxResponseBytes returns the active cap — the tier override when
 // set, the package default otherwise.
 func (t *HTTPTransport) effectiveMaxResponseBytes() int64 {
-	if t.maxResponseBytes > 0 {
-		return t.maxResponseBytes
+	if v := t.maxResponseBytes.Load(); v > 0 {
+		return v
 	}
 	return int64(maxHTTPResponseBytes)
 }

@@ -17,6 +17,6 @@ Read `agent-workspaces/boot/nanite/boot-prompt.md` — it has the complete sessi
 
 - Build: `go build ./cmd/nanite/` · `go test ./...`
 - Deploy: always use Cerberus (`cerberus_rebuild nanite-api`)
-- Migrations: DDL only, `internal/store/migrations/`. Latest: 011.
+- Migrations: DDL only, `internal/store/migrations/`. Latest: 012.
 - Phase 3 plans: `agent-workspaces/planning/nanite-release-prep/plans/phase-3-*.md`
 - Audits: `docs/audits/`

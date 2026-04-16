@@ -1,6 +1,6 @@
 # Messaging subsystem
 
-Nanite's first-class agent-to-agent and agent-to-user message primitive. Introduced in Phase 3 Session 7 as a rebuild of the former `a2a` subsystem — new Go surface + HTTP / MCP / CLI names, and (migration 018) the `agent_messages` table was renamed to `agent_messages`. The `session_handoffs` table name was already neutral and is unchanged.
+Nanite's first-class agent-to-agent and agent-to-user message primitive. Introduced in Phase 3 Session 7 as a rebuild of the former `a2a` subsystem — new Go surface + HTTP / MCP / CLI names, and (migration 018) the `a2a_messages` table was renamed to `agent_messages`. The `session_handoffs` table name was already neutral and is unchanged.
 
 Package: `internal/messaging/` (+ `internal/subagent/` for the inline subagent spawn flow).
 

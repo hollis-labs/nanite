@@ -2,14 +2,18 @@ package messaging
 
 import (
 	"context"
-	"errors"
+	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// fakeResolver is a test double for AgentResolver. It returns a synthetic
-// profile for known IDs and an error for anything else.
+// fakeResolver is a test double for AgentResolver. It returns a
+// synthetic profile for known IDs and sql.ErrNoRows for anything
+// else — mirroring the real AgentService.Get behavior, which wraps
+// sql.ErrNoRows on missing. The errors.Is-based not-found
+// distinction in maybeAutoRegister depends on this shape.
 type fakeResolver struct {
 	known map[string]bool
 }
@@ -18,7 +22,7 @@ func (f *fakeResolver) Get(_ context.Context, id string) (*store.AgentProfile, e
 	if f.known[id] {
 		return &store.AgentProfile{ID: id}, nil
 	}
-	return nil, errors.New("not found")
+	return nil, fmt.Errorf("agent %s: %w", id, sql.ErrNoRows)
 }
 
 func newFakeResolver(ids ...string) *fakeResolver {

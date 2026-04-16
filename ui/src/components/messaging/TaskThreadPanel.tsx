@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { MessageSquare, Send, X, ChevronRight } from 'lucide-react'
 import { api } from '@/lib/api'
+import { useAppStore } from '@/stores/useAppStore'
 import type { AgentMessage } from '@/lib/types'
 
 interface TaskThreadPanelProps {
@@ -21,12 +22,17 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
+  // Task-thread messages are posted as user-to-user within the
+  // active session — the `taskId` acts as the thread_id grouping.
+  // The previous code used `to_agent: 'thread'` which fails
+  // agent validation (only the `user` sentinel short-circuits).
+  const activeSessionId = useAppStore((s) => s.activeSessionId) ?? ''
 
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['messaging-thread', taskId],
-    queryFn: () => api.getMessagingThread(taskId),
+    queryKey: ['messaging-thread', taskId, activeSessionId],
+    queryFn: () => api.getMessagingThread(taskId, activeSessionId, 'user'),
     refetchInterval: 10_000,
-    enabled: open,
+    enabled: open && !!activeSessionId,
   })
 
   // Scroll to bottom when messages change
@@ -43,8 +49,10 @@ export function TaskThreadPanel({ taskId, open, onToggle }: TaskThreadPanelProps
     setSending(true)
     try {
       await api.sendAgentMessage({
-        from_agent: 'user',
-        to_agent: 'thread',
+        from_session_id: activeSessionId,
+        from_agent_id: 'user',
+        to_session_id: activeSessionId,
+        to_agent_id: 'user',
         thread_id: taskId,
         type: 'message',
         body: trimmed,
@@ -157,7 +165,7 @@ function ThreadMessage({ message }: { message: AgentMessage }) {
     <div className="group">
       <div className="flex items-baseline gap-2 mb-0.5">
         <span className="text-xs font-medium text-info truncate">
-          {message.from_agent || 'unknown'}
+          {message.from_agent_id || 'unknown'}
         </span>
         <span className="text-[10px] text-fg-faint flex-shrink-0">{ts}</span>
       </div>

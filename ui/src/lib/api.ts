@@ -1,5 +1,7 @@
 import type {
   AgentMessage,
+  AgentMessageChannel,
+  AgentMessageKind,
   AgentModeProfile,
   AgentProfile,
   ApprovalDecision,
@@ -1278,30 +1280,53 @@ export const api = {
   // --- Messaging subsystem (agent-to-agent + agent-to-user) ---
   // Distinct from session-chat `sendMessage` above — that's for user
   // chat turns; these target the agent-to-agent messaging primitive.
+  //
+  // Backend (S7) requires BOTH session_id and agent_id on every
+  // read/ack/resolve — caller identity is enforced at the service
+  // layer. Helpers accept session + agent as required args.
 
-  getMessagingInbox: async (agentId: string, status?: string): Promise<AgentMessage[]> => {
-    const params = new URLSearchParams({ agent_id: agentId });
-    if (status) params.set("status", status);
+  getMessagingInbox: async (
+    sessionId: string,
+    agentId: string,
+    filter?: { status?: string; channel?: string; kind?: string },
+  ): Promise<AgentMessage[]> => {
+    const params = new URLSearchParams({ session_id: sessionId, agent_id: agentId });
+    if (filter?.status) params.set("status", filter.status);
+    if (filter?.channel) params.set("channel", filter.channel);
+    if (filter?.kind) params.set("kind", filter.kind);
     const res = await fetch(`${API_BASE}/messaging/inbox?${params}`);
     if (!res.ok) throw new Error(`Failed to get messaging inbox: ${res.status}`);
     return res.json();
   },
 
-  getMessagingThread: async (threadId: string): Promise<AgentMessage[]> => {
-    const res = await fetch(`${API_BASE}/messaging/threads/${encodeURIComponent(threadId)}`);
+  getMessagingThread: async (
+    threadId: string,
+    sessionId: string,
+    agentId: string,
+  ): Promise<AgentMessage[]> => {
+    const params = new URLSearchParams({ session_id: sessionId, agent_id: agentId });
+    const res = await fetch(
+      `${API_BASE}/messaging/threads/${encodeURIComponent(threadId)}?${params}`,
+    );
     if (!res.ok) throw new Error(`Failed to get thread: ${res.status}`);
     return res.json();
   },
 
   sendAgentMessage: async (data: {
-    from_agent: string;
-    to_agent: string;
+    from_session_id: string;
+    from_agent_id: string;
+    to_session_id: string;
+    to_agent_id: string;
+    channel?: AgentMessageChannel;
+    kind?: AgentMessageKind;
+    payload_json?: string;
     subject?: string;
     body: string;
     type?: string;
     thread_id?: string;
     reply_to?: string;
     priority?: number;
+    register_as?: "external" | "cli";
   }): Promise<AgentMessage> => {
     const res = await fetch(`${API_BASE}/messaging/send`, {
       method: "POST",
@@ -1312,22 +1337,38 @@ export const api = {
     return res.json();
   },
 
-  ackAgentMessage: async (id: string): Promise<void> => {
+  ackAgentMessage: async (
+    id: string,
+    sessionId: string,
+    agentId: string,
+  ): Promise<void> => {
     const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/ack`, {
       method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
     });
     if (!res.ok) throw new Error(`Failed to acknowledge agent message: ${res.status}`);
   },
 
-  resolveAgentMessage: async (id: string): Promise<void> => {
+  resolveAgentMessage: async (
+    id: string,
+    sessionId: string,
+    agentId: string,
+  ): Promise<void> => {
     const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/resolve`, {
       method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
     });
     if (!res.ok) throw new Error(`Failed to resolve agent message: ${res.status}`);
   },
 
-  getAgentMessageUnreadCount: async (agentId: string): Promise<{ count: number }> => {
-    const res = await fetch(`${API_BASE}/messaging/unread?agent_id=${encodeURIComponent(agentId)}`);
+  getAgentMessageUnreadCount: async (
+    sessionId: string,
+    agentId: string,
+  ): Promise<{ count: number }> => {
+    const params = new URLSearchParams({ session_id: sessionId, agent_id: agentId });
+    const res = await fetch(`${API_BASE}/messaging/unread?${params}`);
     if (!res.ok) throw new Error(`Failed to get unread count: ${res.status}`);
     return res.json();
   },

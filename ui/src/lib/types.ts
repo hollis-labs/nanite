@@ -505,23 +505,35 @@ export interface EnvelopeApprovalRequest {
   details?: string;
 }
 
-// --- Agent messages ---
+// --- Agent messages (messaging subsystem) ---
+//
+// Shape matches the backend messaging.Message struct introduced in
+// S7. Addressing is session-scoped — every message has both a
+// session_id and agent_id on each end of the tuple. Channel +
+// kind + payload_json came in S7 T3/T4.
 
 export type AgentMessageType = "message" | "help_request" | "directive" | "status_update" | "handoff";
 export type AgentMessageStatus = "unread" | "read" | "acknowledged" | "resolved";
+export type AgentMessageChannel = "chat" | "inbox" | "alert";
+export type AgentMessageKind = "request" | "reply" | "notification" | "handoff";
 
 export interface AgentMessage {
   id: string;
-  from_agent: string;
-  to_agent: string;
-  thread_id: string | null;
-  reply_to: string | null;
+  from_session_id: string;
+  from_agent_id: string;
+  to_session_id: string;
+  to_agent_id: string;
+  thread_id: string;
+  reply_to: string;
   type: AgentMessageType;
-  subject: string | null;
+  subject: string;
   body: string;
   metadata: string;
   priority: number;
   status: AgentMessageStatus;
+  channel: AgentMessageChannel;
+  kind: AgentMessageKind;
+  payload_json: string;
   created_at: string;
   read_at: string | null;
   resolved_at: string | null;

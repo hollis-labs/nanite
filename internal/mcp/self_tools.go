@@ -388,13 +388,15 @@ func selfToolDefinitions() []Tool {
 		},
 		{
 			Name:        "nanite_message_thread",
-			Description: "Get all messages in a thread by thread_id.",
+			Description: "Get all messages in a thread by thread_id. Thread is participant-filtered by (session_id, agent_id) — only messages where the caller is sender or recipient come back. Non-participants see an empty slice (no existence leak).",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"thread_id": map[string]any{"type": "string"},
+					"thread_id":  map[string]any{"type": "string"},
+					"session_id": map[string]any{"type": "string", "description": "Caller's session id — used for participant filtering."},
+					"agent_id":   map[string]any{"type": "string", "description": "Caller's agent id — used for participant filtering."},
 				},
-				"required": []string{"thread_id"},
+				"required": []string{"thread_id", "session_id", "agent_id"},
 			},
 		},
 		{

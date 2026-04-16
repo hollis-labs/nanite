@@ -9,6 +9,7 @@ package messaging
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -231,8 +232,18 @@ func (svc *Service) maybeAutoRegister(ctx context.Context, fromAgentID, register
 		return false, nil
 	}
 	if svc.resolver != nil {
-		if _, err := svc.resolver.Get(ctx, fromAgentID); err == nil {
+		switch _, err := svc.resolver.Get(ctx, fromAgentID); {
+		case err == nil:
 			return false, nil // already registered
+		case errors.Is(err, sql.ErrNoRows):
+			// Genuinely not found; fall through to register.
+		default:
+			// Transient or structural resolver error (DB down,
+			// permission denied, etc.) — do NOT auto-register over
+			// a real error. Surface it so the caller sees a clear
+			// validation failure rather than a silent agent
+			// creation.
+			return false, fmt.Errorf("resolver: %w", err)
 		}
 	}
 	kind := "external"

@@ -157,6 +157,15 @@ func (svc *Service) Cancel(ctx context.Context, runID string) error {
 // and (if a poster is configured) delivers a reply message to the
 // parent session. Separate from Spawn so async callers can launch
 // it as a goroutine.
+//
+// Ctx discipline: the runner itself receives `runCtx` (parent + the
+// run's wall-time cap) so cancellation propagates properly. But the
+// finalize+reply bookkeeping uses a FRESH context derived from
+// context.Background — if the caller's request is canceled
+// mid-execute in sync mode, we still want to persist the terminal
+// state and post the reply. Dropping those because the caller gave
+// up would leave the run stuck in 'running' and silently drop the
+// subagent's work.
 func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string) {
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
 	defer cancel()
@@ -178,7 +187,14 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	}
 	run.CompletedAt = now
 
-	if err := svc.finalizeRun(ctx, run); err != nil {
+	// Finalize + reply under their own bounded background ctx so a
+	// canceled parent request (sync mode) still gets the
+	// bookkeeping written. 30s is ample for a single UPDATE +
+	// messaging.Send against local SQLite.
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer finalCancel()
+
+	if err := svc.finalizeRun(finalCtx, run); err != nil {
 		slog.Warn("subagent: finalize run", "err", err, "run_id", run.ID)
 	}
 
@@ -203,7 +219,7 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	if resultPayload == "" {
 		resultPayload = "{}"
 	}
-	if _, err := svc.poster.SendMessage(ctx, messaging.SendInput{
+	if _, err := svc.poster.SendMessage(finalCtx, messaging.SendInput{
 		FromSessionID: run.ParentSessionID,
 		FromAgentID:   run.Role, // the subagent is the sender
 		ToSessionID:   run.ParentSessionID,
@@ -238,14 +254,31 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 }
 
 // finalizeRun updates the terminal fields of a run (status, result,
-// error, completed_at). Only these fields change after insert.
+// error, completed_at). Guarded so a concurrent Cancel that flipped
+// the row to 'cancelled' wins the race — without this, a runner
+// that was cancelled mid-flight would have its cancellation
+// overwritten by the completed/failed terminal state this function
+// wants to write.
 func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
-	_, err := svc.db.ExecContext(ctx,
-		`UPDATE subagent_runs SET status = ?, result_json = ?, error = ?, completed_at = ?
-		 WHERE id = ?`,
-		r.Status, r.ResultJSON, r.Error, r.CompletedAt, r.ID,
+	res, err := svc.db.ExecContext(ctx,
+		`UPDATE subagent_runs
+		   SET status = ?, result_json = ?, error = ?, completed_at = ?
+		 WHERE id = ? AND status IN (?, ?, ?)`,
+		r.Status, r.ResultJSON, r.Error, r.CompletedAt,
+		r.ID, StatusRunning, StatusRequested, StatusApproved,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// Zero rows updated means a concurrent Cancel (or another
+	// terminal transition) already wrote a terminal state. That's
+	// fine — the run is settled. Log for observability and let the
+	// caller proceed.
+	if n, _ := res.RowsAffected(); n == 0 {
+		slog.Info("subagent: finalize skipped; run already terminal",
+			"run_id", r.ID, "intended_status", r.Status)
+	}
+	return nil
 }
 
 // selectSQL is the canonical SELECT clause for subagent_runs rows.

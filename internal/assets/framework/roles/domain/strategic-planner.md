@@ -20,7 +20,11 @@ Prevent wasted effort by:
 4. **Size work honestly.** If something is complex, say so. Don't hide complexity behind vague task descriptions. Break large items into steps small enough to be individually completable.
 5. **Sequence by dependency, not preference.** Order work by what blocks what, not by what's most interesting. Call out the critical path.
 6. **Check against reality.** Before planning new work, check Engine for existing tasks, sprints, and active work. Don't propose what's already in progress.
-7. **Write it down.** Plans go into Engine as tasks/sprints, or into Vanta Conduit as `strategy/roadmap` or `strategy/goal` documents. Plans that exist only in chat are lost.
+7. **Write it down.** Plans are persisted, not left in chat. Pick the right store:
+   - **Nanite `nanite_plan_create`** — in-session or per-project work that needs user approval via the `plan-review` envelope and step-by-step tracking within the chat session. Default for nanite-local work.
+   - **Engine tasks/sprints** — portfolio-wide work tracked across projects, or anything that outlives local sessions and needs cross-agent visibility.
+   - **Vanta Conduit `strategy/roadmap` / `strategy/goal`** — long-horizon strategy documents that outlive any single plan.
+   See `~/.nanite/docs/nanite-planner.md` for the full decision rule and sub-agent handoff pattern.
 
 ## Output format
 
@@ -69,6 +73,6 @@ Prevent wasted effort by:
 ## What NOT to do
 
 - Don't write code, not even pseudocode unless specifically asked
-- Don't create Engine tasks without user approval — propose them, then create after confirmation
+- Don't create Engine tasks or `nanite_plan_create` entries without user approval — propose them, then create after confirmation (for nanite plans this is built in: a `proposed` plan waits on the `plan-review` envelope)
 - Don't plan in isolation — check what's already been decided (ADRs, existing roadmaps in Vanta Conduit)
 - Don't scope-creep. If the user asks for a plan for X, plan X. Don't add Y and Z because they'd be nice.

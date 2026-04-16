@@ -67,16 +67,12 @@ func EmitSlotChangedEvent(stream chan<- StreamEvent, payload SlotChangedV1) erro
 
 // slotChangedResponseHandler is registered in init so the response endpoint
 // has a handler if the frontend ever POSTs back (e.g., a user-acknowledged
-// dismissal). Today the card is informational only — the default behaviour
-// is identical to defaultResponseHandler.
+// dismissal). The card is informational only — responses are silent and
+// produce no transcript entry.
 type slotChangedResponseHandler struct{}
 
-func (slotChangedResponseHandler) HandleResponse(_ context.Context, _ store.EnvelopeInstance, resp ResponseV1) (HandlerResult, error) {
-	data := make(map[string]any, len(resp.Data))
-	for k, v := range resp.Data {
-		data[k] = v
-	}
-	return HandlerResult{TranscriptData: data, Silent: true}, nil
+func (slotChangedResponseHandler) HandleResponse(_ context.Context, _ store.EnvelopeInstance, _ ResponseV1) (HandlerResult, error) {
+	return HandlerResult{Silent: true}, nil
 }
 
 func init() {

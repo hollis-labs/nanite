@@ -172,6 +172,12 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	if compactionStrategy == "" {
 		compactionStrategy = "default"
 	}
+	switch compactionStrategy {
+	case "default", "broker":
+		// valid
+	default:
+		return fmt.Errorf("update user settings: unknown compaction_strategy %q (must be \"default\" or \"broker\")", compactionStrategy)
+	}
 	_, err = s.DB.Exec(
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,

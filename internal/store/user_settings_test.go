@@ -138,3 +138,82 @@ func TestUpdateUserSettings_EmptyChain(t *testing.T) {
 		t.Errorf("expected empty chain after clear, got %v", got.ProviderFallbackChain)
 	}
 }
+
+func TestUserSettings_ContextWindowRoundTrip(t *testing.T) {
+	s := newSeededStore(t)
+
+	us := &UserSettings{
+		ContextWindowTokens: 128000,
+		ContextBudgetPct:    0.75,
+		SummarizerProvider:  "anthropic",
+		SummarizerModel:     "claude-haiku",
+		CompactionStrategy:  "default",
+	}
+	if err := s.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	got, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if got.ContextWindowTokens != 128000 {
+		t.Errorf("ContextWindowTokens: got %d, want 128000", got.ContextWindowTokens)
+	}
+	if got.ContextBudgetPct != 0.75 {
+		t.Errorf("ContextBudgetPct: got %f, want 0.75", got.ContextBudgetPct)
+	}
+	if got.SummarizerProvider != "anthropic" {
+		t.Errorf("SummarizerProvider: got %q, want %q", got.SummarizerProvider, "anthropic")
+	}
+	if got.SummarizerModel != "claude-haiku" {
+		t.Errorf("SummarizerModel: got %q, want %q", got.SummarizerModel, "claude-haiku")
+	}
+	if got.CompactionStrategy != "default" {
+		t.Errorf("CompactionStrategy: got %q, want %q", got.CompactionStrategy, "default")
+	}
+}
+
+func TestUserSettings_ContextWindowDefaults(t *testing.T) {
+	s := newSeededStore(t)
+
+	us, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if us.ContextWindowTokens != 200000 {
+		t.Errorf("expected default context_window_tokens 200000, got %d", us.ContextWindowTokens)
+	}
+	if us.ContextBudgetPct != 0.80 {
+		t.Errorf("expected default context_budget_pct 0.80, got %f", us.ContextBudgetPct)
+	}
+	if us.CompactionStrategy != "default" {
+		t.Errorf("expected default compaction_strategy 'default', got %q", us.CompactionStrategy)
+	}
+}
+
+func TestUpdateUserSettings_InvalidCompactionStrategy(t *testing.T) {
+	s := newSeededStore(t)
+
+	us := &UserSettings{CompactionStrategy: "unknown-strategy"}
+	if err := s.UpdateUserSettings(us); err == nil {
+		t.Error("expected error for unknown compaction_strategy, got nil")
+	}
+}
+
+func TestUpdateUserSettings_BudgetPctClamp(t *testing.T) {
+	s := newSeededStore(t)
+
+	// Over 1.0 should be clamped to 1.0.
+	us := &UserSettings{ContextBudgetPct: 1.5}
+	if err := s.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	got, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if got.ContextBudgetPct != 1.0 {
+		t.Errorf("expected budget_pct clamped to 1.0, got %f", got.ContextBudgetPct)
+	}
+}

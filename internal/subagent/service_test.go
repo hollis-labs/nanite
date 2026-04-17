@@ -58,7 +58,7 @@ func (p *stubPoster) captured() *messaging.SendInput {
 func TestSpawn_SyncEchoRunner_RoundTrip(t *testing.T) {
 	db, _ := newTestDB(t)
 	poster := &stubPoster{}
-	svc := NewService(db, EchoRunner{}, poster)
+	svc := NewService(db, EchoRunner{}, poster, nil)
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -115,7 +115,7 @@ func TestSpawn_SyncEchoRunner_RoundTrip(t *testing.T) {
 func TestSpawn_AsyncMode_RepliesViaInbox(t *testing.T) {
 	db, _ := newTestDB(t)
 	poster := &stubPoster{}
-	svc := NewService(db, EchoRunner{}, poster)
+	svc := NewService(db, EchoRunner{}, poster, nil)
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -156,7 +156,7 @@ func TestSpawn_AsyncMode_RepliesViaInbox(t *testing.T) {
 
 func TestSpawn_RejectsMissingFields(t *testing.T) {
 	db, _ := newTestDB(t)
-	svc := NewService(db, EchoRunner{}, nil)
+	svc := NewService(db, EchoRunner{}, nil, nil)
 
 	cases := []struct {
 		name string
@@ -178,7 +178,7 @@ func TestSpawn_RejectsMissingFields(t *testing.T) {
 
 func TestSpawn_NoRunnerConfigured(t *testing.T) {
 	db, _ := newTestDB(t)
-	svc := NewService(db, nil, nil)
+	svc := NewService(db, nil, nil, nil)
 
 	_, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "s", Role: "r", Prompt: "p",
@@ -199,7 +199,7 @@ func (failRunner) Run(_ context.Context, _ *Run) (*Result, error) {
 func TestSpawn_FailedRunner_SetsStatusFailed(t *testing.T) {
 	db, _ := newTestDB(t)
 	poster := &stubPoster{}
-	svc := NewService(db, failRunner{}, poster)
+	svc := NewService(db, failRunner{}, poster, nil)
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -225,7 +225,7 @@ func TestSpawn_FailedRunner_SetsStatusFailed(t *testing.T) {
 
 func TestCancel_TerminalIsNoop(t *testing.T) {
 	db, _ := newTestDB(t)
-	svc := NewService(db, EchoRunner{}, &stubPoster{})
+	svc := NewService(db, EchoRunner{}, &stubPoster{}, nil)
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -269,7 +269,7 @@ func TestCancel_PerRunContextCancellation(t *testing.T) {
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	svc := NewService(db, runner, &stubPoster{})
+	svc := NewService(db, runner, &stubPoster{}, nil)
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -354,7 +354,7 @@ func TestSpawn_EmitsRunningEventBeforeRunner(t *testing.T) {
 	gate := make(chan struct{})
 	runner := gateRunner{release: gate}
 
-	svc := NewService(db, runner, &stubPoster{})
+	svc := NewService(db, runner, &stubPoster{}, nil)
 	svc.SetStreamSink(sink)
 
 	doneCh := make(chan string, 1)
@@ -405,7 +405,7 @@ func TestSpawn_EmitsRunningEventBeforeRunner(t *testing.T) {
 func TestSpawn_EmitsTerminalEventOnComplete(t *testing.T) {
 	db, _ := newTestDB(t)
 	sink := &recordingSink{}
-	svc := NewService(db, EchoRunner{}, &stubPoster{})
+	svc := NewService(db, EchoRunner{}, &stubPoster{}, nil)
 	svc.SetStreamSink(sink)
 
 	_, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -436,7 +436,7 @@ func TestSpawn_EmitsTerminalEventOnComplete(t *testing.T) {
 func TestSpawn_EmitsTerminalEventOnFailure(t *testing.T) {
 	db, _ := newTestDB(t)
 	sink := &recordingSink{}
-	svc := NewService(db, failRunner{}, &stubPoster{})
+	svc := NewService(db, failRunner{}, &stubPoster{}, nil)
 	svc.SetStreamSink(sink)
 
 	_, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -475,7 +475,7 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	svc := NewService(db, runner, &stubPoster{})
+	svc := NewService(db, runner, &stubPoster{}, nil)
 	svc.SetStreamSink(sink)
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -528,7 +528,7 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 
 func TestSpawn_PersistsParentAgentID(t *testing.T) {
 	db, _ := newTestDB(t)
-	svc := NewService(db, EchoRunner{}, &stubPoster{})
+	svc := NewService(db, EchoRunner{}, &stubPoster{}, nil)
 
 	runID, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -561,7 +561,7 @@ func TestCancel_UnblocksRunnerEvenWhenDBUpdateFails(t *testing.T) {
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	svc := NewService(db, runner, &stubPoster{})
+	svc := NewService(db, runner, &stubPoster{}, nil)
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",

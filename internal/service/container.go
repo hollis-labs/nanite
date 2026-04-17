@@ -456,7 +456,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		return nil, fmt.Errorf("service container: chatSvc is %T, expected *chatServiceImpl for ChatRunner", chatSvc)
 	}
 	subagentRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB)
-	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc)
+	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, nil) // T10 will replace nil with real ApprovalEmitterImpl
 	subagentSvc.SetStreamSink(&subagentStreamSink{streams: streams})
 	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink)")
 

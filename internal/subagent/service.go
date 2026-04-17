@@ -41,12 +41,21 @@ type MessagePoster interface {
 	SendMessage(ctx context.Context, input messaging.SendInput) (*messaging.Message, error)
 }
 
+// ApprovalEmitter persists an envelope instance and pushes the envelope onto
+// the parent session's live stream. Container-injected so the subagent package
+// stays independent of the envelope + stream subsystems. Returns the generated
+// envelope instance ID so Spawn can denormalize it onto the run row.
+type ApprovalEmitter interface {
+	Emit(ctx context.Context, sessionID, envelopeType string, payload []byte) (envelopeID string, err error)
+}
+
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
 	db         *sql.DB
 	runner     Runner
 	poster     MessagePoster
+	approver   ApprovalEmitter
 	streamSink SubagentStreamSink
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
@@ -61,12 +70,15 @@ type Service struct {
 // CRUD. The runner is the injected LLM-execution dependency (nil =
 // no spawn permitted — Spawn returns an error). The poster delivers
 // the reply message on completion (nil = reply skipped, run result
-// is still visible via Status).
-func NewService(db *sql.DB, runner Runner, poster MessagePoster) *Service {
+// is still visible via Status). The approver emits approval envelopes
+// onto the parent session's stream (nil = approval emission disabled;
+// T10 will wire the real impl).
+func NewService(db *sql.DB, runner Runner, poster MessagePoster, approver ApprovalEmitter) *Service {
 	return &Service{
 		db:        db,
 		runner:    runner,
 		poster:    poster,
+		approver:  approver,
 		cancelers: make(map[string]context.CancelFunc),
 	}
 }

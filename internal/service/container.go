@@ -338,12 +338,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// drops silently, which is the intended MVP behavior.
 	messagingSvc.SetNotificationSink(&messagingStreamSink{streams: streams})
 
-	// T9: subagent spawn service. Uses the EchoRunner stub for MVP
-	// — the real chat-engine-backed runner is a follow-up. The
-	// messaging service is passed as the reply poster so subagent
-	// completions deliver a reply message to the parent session.
-	subagentSvc := subagent.NewService(cfg.Store.DB, subagent.EchoRunner{}, messagingSvc)
-	slog.Info("service container: subagent service enabled (stub runner)")
 
 	contextClient := chat.NewContextClient(cfg.Store)
 
@@ -451,6 +445,20 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		EmbeddingProvider: embeddingProviderID,
 		ResultCache:       buildResultCache(cfg.Store),
 	})
+
+	// G-3 + G-5: subagent service with the real chat-engine-backed
+	// runner. ChatRunner spawns a persisted child session per run and
+	// drives one assistant turn through chatServiceImpl.generateResponse.
+	// subagentStreamSink emits subagent_run_status_changed events on
+	// the parent session's SSE stream for each transition.
+	chatSvcImpl, ok := chatSvc.(*chatServiceImpl)
+	if !ok {
+		return nil, fmt.Errorf("service container: chatSvc is %T, expected *chatServiceImpl for ChatRunner", chatSvc)
+	}
+	subagentRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB)
+	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc)
+	subagentSvc.SetStreamSink(&subagentStreamSink{streams: streams})
+	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink)")
 
 	// Worker manager — requires ChatService for delegation.
 	// Uses SetWorkers to break the circular dependency (ChatService <-> WorkerManager).

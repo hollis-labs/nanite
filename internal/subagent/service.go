@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,9 +44,17 @@ type MessagePoster interface {
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
-	db     *sql.DB
-	runner Runner
-	poster MessagePoster
+	db         *sql.DB
+	runner     Runner
+	poster     MessagePoster
+	streamSink SubagentStreamSink
+
+	// cancelers holds a per-run context.CancelFunc keyed by runID so
+	// Cancel(runID) can propagate cancellation into the in-flight
+	// runner — not just flip the DB row. Spawn registers; execute's
+	// defer clears; Cancel invokes-and-deletes. Mutex-guarded.
+	cancelMu  sync.Mutex
+	cancelers map[string]context.CancelFunc
 }
 
 // NewService constructs a Service. The db is used for subagent_runs
@@ -54,7 +63,40 @@ type Service struct {
 // the reply message on completion (nil = reply skipped, run result
 // is still visible via Status).
 func NewService(db *sql.DB, runner Runner, poster MessagePoster) *Service {
-	return &Service{db: db, runner: runner, poster: poster}
+	return &Service{
+		db:        db,
+		runner:    runner,
+		poster:    poster,
+		cancelers: make(map[string]context.CancelFunc),
+	}
+}
+
+// SetStreamSink wires (or unwires) the G-5 status-event sink. Pass nil
+// to disable emission. Safe to call before any Spawn.
+func (svc *Service) SetStreamSink(s SubagentStreamSink) { svc.streamSink = s }
+
+// emitStatus marshals the run's current state into a JSON payload and
+// hands it to the configured sink. summaryPreview is passed in because
+// result.Summary is not persisted on the Run row — for the running
+// transition pass "", for terminal transitions pass result.Summary
+// (or "" on failure).
+func (svc *Service) emitStatus(run *Run, summaryPreview string) {
+	if svc.streamSink == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"run_id":           run.ID,
+		"role":             run.Role,
+		"status":           run.Status,
+		"child_session_id": run.ChildSessionID,
+		"error":            run.Error,
+		"summary_preview":  truncate(summaryPreview, 80),
+	})
+	if err != nil {
+		slog.Warn("subagent: marshal status payload", "err", err, "run_id", run.ID)
+		return
+	}
+	svc.streamSink.SubagentStatusChanged(run.ParentSessionID, payload)
 }
 
 // Spawn inserts a subagent_runs row and (for sync/api/async MVP
@@ -115,16 +157,35 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		return "", fmt.Errorf("insert run: %w", err)
 	}
 
+	// G-5: emit running event so the parent UI can render "subagent
+	// spawned" before the runner does any work.
+	svc.emitStatus(run, "")
+
 	switch mode {
 	case ModeSync:
 		// Blocking: caller holds until the runner returns. The
-		// parent's next turn can then reason over the reply.
-		svc.execute(ctx, run, req.ParentAgentID)
+		// parent's next turn can then reason over the reply. We
+		// derive the runner ctx from the caller's ctx (so caller
+		// cancellation propagates) but ALSO register the derived
+		// CancelFunc so a Cancel(runID) from another goroutine
+		// unblocks the in-flight runner.
+		execCtx, execCancel := context.WithCancel(ctx)
+		svc.cancelMu.Lock()
+		svc.cancelers[run.ID] = execCancel
+		svc.cancelMu.Unlock()
+		svc.execute(execCtx, run, req.ParentAgentID)
 	case ModeAsync, ModeAPI:
 		// Non-blocking: fire-and-forget goroutine. The reply lands
 		// in the parent session's inbox (async) or chat (api).
+		// Background-derived ctx because the caller's request ctx
+		// will likely be done by the time the runner finishes;
+		// Cancel(runID) is the only intended cancellation path.
+		runCtx, runCancel := context.WithCancel(context.Background())
+		svc.cancelMu.Lock()
+		svc.cancelers[run.ID] = runCancel
+		svc.cancelMu.Unlock()
 		safego.Go(context.Background(), "subagent.run", func() {
-			svc.execute(context.Background(), run, req.ParentAgentID)
+			svc.execute(runCtx, run, req.ParentAgentID)
 		})
 	}
 
@@ -138,11 +199,21 @@ func (svc *Service) Status(ctx context.Context, runID string) (*Run, error) {
 	return scanRun(row)
 }
 
-// Cancel marks a run as cancelled. The in-flight runner receives
-// the signal via the ctx it was started with (future hook — MVP
-// runner doesn't wire a per-run cancel-context yet; the flag is
-// strictly advisory). Idempotent.
+// Cancel marks a run as cancelled and unblocks its runner. Ordering
+// is load-bearing: we invoke the registered per-run CancelFunc FIRST
+// so the runner's ctx fires and its terminal state attempt races
+// into the existing finalizeRun guard clause (WHERE status IN
+// (running, requested, approved)) — letting the cancelled UPDATE
+// below win. Idempotent: a second Cancel finds no entry and the DB
+// UPDATE no-ops because the row is already terminal.
 func (svc *Service) Cancel(ctx context.Context, runID string) error {
+	svc.cancelMu.Lock()
+	if c, ok := svc.cancelers[runID]; ok {
+		c()
+		delete(svc.cancelers, runID)
+	}
+	svc.cancelMu.Unlock()
+
 	_, err := svc.db.ExecContext(ctx,
 		`UPDATE subagent_runs SET status = ? WHERE id = ? AND status IN (?,?,?)`,
 		StatusCancelled, runID, StatusRequested, StatusApproved, StatusRunning,
@@ -169,6 +240,15 @@ func (svc *Service) Cancel(ctx context.Context, runID string) error {
 func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string) {
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
 	defer cancel()
+
+	// Clear the per-run cancel registration on exit so a late Cancel
+	// call after terminal state is a cheap no-op (no stale func held,
+	// no double-invocation).
+	defer func() {
+		svc.cancelMu.Lock()
+		delete(svc.cancelers, run.ID)
+		svc.cancelMu.Unlock()
+	}()
 
 	result, runErr := svc.runner.Run(runCtx, run)
 
@@ -197,6 +277,15 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	if err := svc.finalizeRun(finalCtx, run); err != nil {
 		slog.Warn("subagent: finalize run", "err", err, "run_id", run.ID)
 	}
+
+	// G-5: emit terminal event after finalizeRun commits, before the
+	// reply post. Parent UI sees "subagent done, posting reply..." if
+	// reply delivery is slow.
+	terminalPreview := ""
+	if result != nil {
+		terminalPreview = result.Summary
+	}
+	svc.emitStatus(run, terminalPreview)
 
 	if svc.poster == nil || parentAgentID == "" {
 		return
@@ -272,11 +361,24 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
 	}
 	// Zero rows updated means a concurrent Cancel (or another
 	// terminal transition) already wrote a terminal state. That's
-	// fine — the run is settled. Log for observability and let the
-	// caller proceed.
+	// fine — the run is settled. Re-read the authoritative status so
+	// the in-memory struct reflects DB truth (otherwise the G-5
+	// terminal event would report "failed" on a cancel-path run).
 	if n, _ := res.RowsAffected(); n == 0 {
 		slog.Info("subagent: finalize skipped; run already terminal",
 			"run_id", r.ID, "intended_status", r.Status)
+		var actual string
+		if err := svc.db.QueryRowContext(ctx,
+			`SELECT status FROM subagent_runs WHERE id = ?`, r.ID,
+		).Scan(&actual); err == nil {
+			r.Status = actual
+			if actual == StatusCancelled {
+				// The runner returned ctx.Err() after Cancel fired;
+				// the "context canceled" Error is an artifact of the
+				// cancellation, not a real failure.
+				r.Error = ""
+			}
+		}
 	}
 	return nil
 }

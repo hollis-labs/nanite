@@ -102,3 +102,10 @@ type Result struct {
 	Summary    string
 	ResultJSON string
 }
+
+// SubagentStreamSink receives subagent status transitions for delivery
+// to the parent session's SSE stream. Wired by the container; nil is
+// permitted (emission is a no-op when no sink is set).
+type SubagentStreamSink interface {
+	SubagentStatusChanged(parentSessionID string, payloadJSON []byte)
+}

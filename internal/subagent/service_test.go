@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -243,5 +244,284 @@ func TestCancel_TerminalIsNoop(t *testing.T) {
 	run, _ := svc.Status(context.Background(), id)
 	if run.Status != StatusCompleted {
 		t.Errorf("Status = %q, want %q (cancel must not demote terminal state)", run.Status, StatusCompleted)
+	}
+}
+
+// slowRunner blocks on its ctx until cancelled, then returns ctx.Err().
+// Lets us verify per-run Cancel actually cancels the in-flight runner:
+// done closes after <-ctx.Done() returns, so the test can assert the
+// runner goroutine actually exits (not just that the DB row flipped).
+type slowRunner struct {
+	started chan struct{} // closed when Run begins
+	done    chan struct{} // closed when Run returns
+}
+
+func (r *slowRunner) Run(ctx context.Context, _ *Run) (*Result, error) {
+	close(r.started)
+	<-ctx.Done()
+	close(r.done)
+	return nil, ctx.Err()
+}
+
+func TestCancel_PerRunContextCancellation(t *testing.T) {
+	db, _ := newTestDB(t)
+	runner := &slowRunner{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	svc := NewService(db, runner, &stubPoster{})
+
+	id, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "slow task",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Wait for runner to actually be running before cancelling.
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not start within 1s")
+	}
+
+	if err := svc.Cancel(context.Background(), id); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	// The core assertion: Cancel must propagate into the runner's ctx so
+	// the goroutine actually exits. Without per-run cancel plumbing this
+	// would time out (runner stays blocked until execute's 300s WithTimeout).
+	select {
+	case <-runner.done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("runner did not exit within 500ms of Cancel")
+	}
+
+	// Secondary: the DB row reflects the cancellation.
+	run, _ := svc.Status(context.Background(), id)
+	if run == nil || run.Status != StatusCancelled {
+		t.Fatalf("Status = %+v, want StatusCancelled", run)
+	}
+}
+
+// recordingSink captures every SubagentStatusChanged invocation in
+// arrival order. Lets G-5 tests assert event count + payload shape.
+type recordingSink struct {
+	mu     sync.Mutex
+	events []recordedSinkEvent
+}
+
+type recordedSinkEvent struct {
+	ParentSessionID string
+	Payload         map[string]any
+}
+
+func (s *recordingSink) SubagentStatusChanged(parentSessionID string, payload []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var decoded map[string]any
+	_ = json.Unmarshal(payload, &decoded)
+	s.events = append(s.events, recordedSinkEvent{ParentSessionID: parentSessionID, Payload: decoded})
+}
+
+func (s *recordingSink) snapshot() []recordedSinkEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]recordedSinkEvent, len(s.events))
+	copy(out, s.events)
+	return out
+}
+
+// gateRunner blocks Run until release is closed, then returns success.
+// Used to inspect the sink mid-flight so we can isolate the Spawn-time
+// emission from the terminal-time emission.
+type gateRunner struct{ release chan struct{} }
+
+func (r gateRunner) Run(_ context.Context, run *Run) (*Result, error) {
+	<-r.release
+	return &Result{Summary: "ok-" + run.ID, ResultJSON: `{"ok":true}`}, nil
+}
+
+func TestSpawn_EmitsRunningEventBeforeRunner(t *testing.T) {
+	db, _ := newTestDB(t)
+	sink := &recordingSink{}
+
+	gate := make(chan struct{})
+	runner := gateRunner{release: gate}
+
+	svc := NewService(db, runner, &stubPoster{})
+	svc.SetStreamSink(sink)
+
+	doneCh := make(chan string, 1)
+	go func() {
+		id, err := svc.Spawn(context.Background(), SpawnRequest{
+			ParentSessionID: "sess-1",
+			ParentAgentID:   "file-backend",
+			Role:            "file-summarizer",
+			Prompt:          "p",
+			Mode:            ModeAsync,
+		})
+		if err != nil {
+			t.Errorf("Spawn: %v", err)
+		}
+		doneCh <- id
+	}()
+
+	// Async Spawn returns immediately. Wait briefly for the running event.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(sink.snapshot()) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(gate) // let the runner finish
+
+	events := sink.snapshot()
+	if len(events) == 0 {
+		t.Fatal("no running event emitted")
+	}
+	first := events[0]
+	if first.ParentSessionID != "sess-1" {
+		t.Errorf("ParentSessionID = %q, want sess-1", first.ParentSessionID)
+	}
+	if got := first.Payload["status"]; got != "running" {
+		t.Errorf("status = %v, want running", got)
+	}
+	if got := first.Payload["role"]; got != "file-summarizer" {
+		t.Errorf("role = %v, want file-summarizer", got)
+	}
+	if first.Payload["run_id"] == nil || first.Payload["run_id"] == "" {
+		t.Error("run_id missing from payload")
+	}
+	<-doneCh
+}
+
+func TestSpawn_EmitsTerminalEventOnComplete(t *testing.T) {
+	db, _ := newTestDB(t)
+	sink := &recordingSink{}
+	svc := NewService(db, EchoRunner{}, &stubPoster{})
+	svc.SetStreamSink(sink)
+
+	_, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "ok",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	events := sink.snapshot()
+	if len(events) < 2 {
+		t.Fatalf("expected >= 2 events (running + terminal), got %d", len(events))
+	}
+	terminal := events[len(events)-1]
+	if got := terminal.Payload["status"]; got != "completed" {
+		t.Errorf("terminal status = %v, want completed", got)
+	}
+	preview, _ := terminal.Payload["summary_preview"].(string)
+	if preview == "" {
+		t.Error("summary_preview empty for completed run")
+	}
+}
+
+func TestSpawn_EmitsTerminalEventOnFailure(t *testing.T) {
+	db, _ := newTestDB(t)
+	sink := &recordingSink{}
+	svc := NewService(db, failRunner{}, &stubPoster{})
+	svc.SetStreamSink(sink)
+
+	_, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "will fail",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	events := sink.snapshot()
+	if len(events) < 2 {
+		t.Fatalf("expected >= 2 events, got %d", len(events))
+	}
+	terminal := events[len(events)-1]
+	if got := terminal.Payload["status"]; got != "failed" {
+		t.Errorf("terminal status = %v, want failed", got)
+	}
+	if errStr, _ := terminal.Payload["error"].(string); errStr == "" {
+		t.Error("error field empty for failed run")
+	}
+}
+
+// TestSpawn_EmitsTerminalEventOnCancelled verifies the terminal event
+// payload reports the DB-authoritative "cancelled" status, not the
+// in-memory "failed" that execute sets after the runner returns
+// ctx.Err(). finalizeRun's 0-rows-affected branch re-reads the row and
+// patches run.Status before the emit.
+func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
+	db, _ := newTestDB(t)
+	sink := &recordingSink{}
+	runner := &slowRunner{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	svc := NewService(db, runner, &stubPoster{})
+	svc.SetStreamSink(sink)
+
+	id, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "cancel me",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not start within 1s")
+	}
+	if err := svc.Cancel(context.Background(), id); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	select {
+	case <-runner.done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("runner did not exit within 500ms of Cancel")
+	}
+
+	// Wait for the terminal emit to land (it fires from the runner
+	// goroutine after finalizeRun, which re-reads the cancelled row).
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(sink.snapshot()) >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	events := sink.snapshot()
+	if len(events) < 2 {
+		t.Fatalf("expected >= 2 events (running + terminal), got %d", len(events))
+	}
+	terminal := events[len(events)-1]
+	if got := terminal.Payload["status"]; got != "cancelled" {
+		t.Errorf("terminal status = %v, want cancelled", got)
+	}
+	if errStr, _ := terminal.Payload["error"].(string); errStr != "" {
+		t.Errorf("error = %q, want empty on cancel path", errStr)
 	}
 }

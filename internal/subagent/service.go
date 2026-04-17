@@ -44,9 +44,10 @@ type MessagePoster interface {
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
-	db     *sql.DB
-	runner Runner
-	poster MessagePoster
+	db         *sql.DB
+	runner     Runner
+	poster     MessagePoster
+	streamSink SubagentStreamSink
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
 	// Cancel(runID) can propagate cancellation into the in-flight
@@ -68,6 +69,34 @@ func NewService(db *sql.DB, runner Runner, poster MessagePoster) *Service {
 		poster:    poster,
 		cancelers: make(map[string]context.CancelFunc),
 	}
+}
+
+// SetStreamSink wires (or unwires) the G-5 status-event sink. Pass nil
+// to disable emission. Safe to call before any Spawn.
+func (svc *Service) SetStreamSink(s SubagentStreamSink) { svc.streamSink = s }
+
+// emitStatus marshals the run's current state into a JSON payload and
+// hands it to the configured sink. summaryPreview is passed in because
+// result.Summary is not persisted on the Run row — for the running
+// transition pass "", for terminal transitions pass result.Summary
+// (or "" on failure).
+func (svc *Service) emitStatus(run *Run, summaryPreview string) {
+	if svc.streamSink == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"run_id":           run.ID,
+		"role":             run.Role,
+		"status":           run.Status,
+		"child_session_id": run.ChildSessionID,
+		"error":            run.Error,
+		"summary_preview":  truncate(summaryPreview, 80),
+	})
+	if err != nil {
+		slog.Warn("subagent: marshal status payload", "err", err, "run_id", run.ID)
+		return
+	}
+	svc.streamSink.SubagentStatusChanged(run.ParentSessionID, payload)
 }
 
 // Spawn inserts a subagent_runs row and (for sync/api/async MVP

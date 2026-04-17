@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"testing"
 
@@ -120,7 +119,6 @@ func TestSubagentApprovalHandler_MissingRunID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, err) { /* just confirm err is non-nil and readable */ }
 }
 
 func TestSubagentApprovalHandler_UnsupportedStatus(t *testing.T) {

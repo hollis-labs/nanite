@@ -198,14 +198,12 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	}
 
 	if gate {
-		// Gated path: insert a requested row, emit the approval envelope,
-		// persist the envelope_instance_id, and return early WITHOUT launching
-		// the runner. Approve/Reject (T7/T8) will resume execution.
-		run.Status = StatusRequested
-		if err := svc.insertRun(ctx, run); err != nil {
-			return "", fmt.Errorf("insert run: %w", err)
-		}
-
+		// Gated path: validate prerequisites + marshal payload BEFORE any DB
+		// write so a misconfiguration (nil emitter) or marshal error doesn't
+		// leave a row orphaned in 'requested'. Post-insert failures (Emit,
+		// envelope-id persist) compensate by transitioning the run to
+		// 'failed' with an error reason — we preserve the audit trail
+		// rather than deleting.
 		if svc.approver == nil {
 			return "", fmt.Errorf("gated spawn requires approver but none configured")
 		}
@@ -222,14 +220,22 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		if err != nil {
 			return "", fmt.Errorf("marshal approval payload: %w", err)
 		}
+
+		run.Status = StatusRequested
+		if err := svc.insertRun(ctx, run); err != nil {
+			return "", fmt.Errorf("insert run: %w", err)
+		}
+
 		envelopeID, err := svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)
 		if err != nil {
+			svc.markGatedSpawnFailed(run.ID, "approval envelope emission failed: "+err.Error())
 			return "", fmt.Errorf("emit approval envelope: %w", err)
 		}
 
-		if _, err := svc.db.ExecContext(ctx,
-			`UPDATE subagent_runs SET envelope_instance_id=? WHERE id=?`, envelopeID, run.ID); err != nil {
-			return "", fmt.Errorf("persist envelope id: %w", err)
+		if _, uerr := svc.db.ExecContext(ctx,
+			`UPDATE subagent_runs SET envelope_instance_id=? WHERE id=?`, envelopeID, run.ID); uerr != nil {
+			svc.markGatedSpawnFailed(run.ID, "envelope id persist failed: "+uerr.Error())
+			return "", fmt.Errorf("persist envelope id: %w", uerr)
 		}
 		run.EnvelopeInstanceID = envelopeID
 
@@ -277,6 +283,22 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	}
 
 	return run.ID, nil
+}
+
+// markGatedSpawnFailed transitions a just-inserted 'requested' run to
+// 'failed' with an error reason when a post-insert step in gated Spawn
+// (envelope Emit, envelope_instance_id persist) fails. Compensating
+// update — uses Background ctx so it survives a cancelled caller, and
+// matches on status=requested to avoid clobbering a concurrent
+// Approve/Reject. Errors are swallowed: the caller is already returning
+// an error to its own caller; double-reporting helps no one.
+func (svc *Service) markGatedSpawnFailed(runID, reason string) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, _ = svc.db.ExecContext(context.Background(),
+		`UPDATE subagent_runs
+		   SET status=?, error=?, completed_at=?
+		 WHERE id=? AND status=?`,
+		StatusFailed, reason, now, runID, StatusRequested)
 }
 
 // Status returns the current Run row for runID, or ErrNotFound
@@ -409,9 +431,18 @@ func (svc *Service) expireIfStale(ctx context.Context, runID string) (bool, erro
 	return true, nil
 }
 
-// Approve transitions a requested run to approved and launches its runner.
-// Returns ErrNotPending if the run is in a terminal or non-requested state,
-// ErrApprovalExpired if the run has exceeded the stale timeout.
+// Approve transitions a requested run directly to running (recording the
+// approval audit fields) and launches its runner. Returns ErrNotPending if
+// the run is in a terminal or non-requested state, ErrApprovalExpired if
+// the run has exceeded the stale timeout.
+//
+// The schema reserves a distinct 'approved' state, but the MVP collapses
+// requested→approved→running into a single UPDATE so UI/ops consumers
+// keying off status=running observe the run as soon as it is dispatched.
+// approved_at/approved_by remain the audit witnesses. approved_by is left
+// empty here — there is no authenticated caller identity plumbed to this
+// method yet; a future change will populate it from the response-endpoint
+// auth context rather than hard-coding a sentinel.
 func (svc *Service) Approve(ctx context.Context, runID string) error {
 	if expired, err := svc.expireIfStale(ctx, runID); err != nil {
 		return err
@@ -424,7 +455,7 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 		`UPDATE subagent_runs
 		   SET status=?, approved_at=?, approved_by=?, started_at=?
 		 WHERE id=? AND status=?`,
-		StatusApproved, now, "user", now, runID, StatusRequested)
+		StatusRunning, now, "", now, runID, StatusRequested)
 	if err != nil {
 		return fmt.Errorf("approve run: %w", err)
 	}

@@ -96,6 +96,19 @@ func (s *Store) migrate() error {
 	}
 	defer conn.Close()
 
+	// The pool-level PRAGMAs set in New() ran on an arbitrary pool conn,
+	// not this one. Re-apply the required defaults here so migrations run
+	// with the same invariants the app expects (and leave this conn in a
+	// known state before it returns to the pool).
+	for _, pragma := range []string{
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",
+	} {
+		if _, err := conn.ExecContext(ctx, pragma); err != nil {
+			return fmt.Errorf("exec %s on migration conn: %w", pragma, err)
+		}
+	}
+
 	for _, f := range files {
 		data, err := migrationsFS.ReadFile(f)
 		if err != nil {

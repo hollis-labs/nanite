@@ -61,21 +61,29 @@ func TestMigration008_SurvivesOrphanMessage(t *testing.T) {
 
 	// Orphan the message by deleting the session with FKs disabled on a
 	// dedicated connection (PRAGMA + DELETE must be on the same conn).
+	// All cleanup is deferred so a failed Exec can't leak a conn with
+	// foreign_keys=OFF back into the pool and flake other tests.
 	ctx := context.Background()
 	conn, err := s.DB.Conn(ctx)
 	if err != nil {
 		t.Fatalf("get conn: %v", err)
 	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close conn: %v", err)
+		}
+	}()
 	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
 		t.Fatalf("disable fk: %v", err)
 	}
+	defer func() {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+			t.Errorf("re-enable fk: %v", err)
+		}
+	}()
 	if _, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE id='s1'`); err != nil {
 		t.Fatalf("orphan the message: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
-		t.Fatalf("re-enable fk: %v", err)
-	}
-	conn.Close()
 
 	// Confirm we actually produced an orphan.
 	var orphans int

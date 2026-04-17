@@ -14,6 +14,8 @@ The `"user"` value is reserved: you cannot create an agent with slug `"user"`, a
 
 Unknown `from_agent_id`s are **auto-registered** on first send with `kind='external'` (or `'cli'` when invoked via CLI). Callers don't have to pre-register.
 
+For non-user CLI senders (scripts, cron, automation), pass `--cli` on `nanite message send` so the CLI substitutes a deterministic `cli-<hostname>-<pid>-<start-unix>` id when `--from` is omitted. All sends within the same process share this id so replies accumulate in a single inbox; a new process (new PID + start-unix) gets a fresh id. Humans piping into `nanite message send` without `--cli` keep the default `user` sentinel.
+
 ## Channel / Kind / EnvelopeType
 
 Every message carries three orthogonal axes (introduced in S7):
@@ -29,11 +31,14 @@ Channel selection is policy, not enforced by code. Default to `chat` for in-sess
 ## CLI
 
 ```bash
-# Send a message to an agent.
+# Send a message to an agent (from the user — default behavior).
 nanite message send --session <sid> --to file-backend --subject "question" --body "what file handles auth?"
 
 # Send a message to the user.
 nanite message send --session <sid> --to user --body "I finished the refactor."
+
+# Send from a non-user CLI caller (deterministic from_agent_id auto-computed).
+nanite message send --cli --session <sid> --to file-backend --body "build-status: ok"
 
 # Read an agent's inbox.
 nanite message inbox --session <sid> --agent file-backend

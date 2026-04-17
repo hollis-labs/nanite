@@ -456,9 +456,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		return nil, fmt.Errorf("service container: chatSvc is %T, expected *chatServiceImpl for ChatRunner", chatSvc)
 	}
 	subagentRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB)
-	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, nil, cfg.Store) // T10 will replace nil with real ApprovalEmitterImpl
+	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
+	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, approvalEmitter, cfg.Store)
 	subagentSvc.SetStreamSink(&subagentStreamSink{streams: streams})
-	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink)")
+
+	// G-4: register the subagent-spawn-approval typed response handler so
+	// POST /api/envelopes/:id/respond dispatches to Approve/Reject.
+	chat.RegisterResponseHandler("subagent-spawn-approval", chat.NewSubagentApprovalHandler(subagentSvc))
+
+	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink + approval handler)")
 
 	// Worker manager — requires ChatService for delegation.
 	// Uses SetWorkers to break the circular dependency (ChatService <-> WorkerManager).

@@ -296,6 +296,37 @@ func TestUpdateUserSettings_ToolClassifierTimeoutDefault(t *testing.T) {
 	}
 }
 
+func TestUserSettings_G4_DefaultsApplied(t *testing.T) {
+	s := newSeededStore(t)
+	us, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !us.SubagentApprovalRequired {
+		t.Errorf("SubagentApprovalRequired default = false, want true")
+	}
+	if us.SubagentApprovalTimeoutSeconds != 86400 {
+		t.Errorf("SubagentApprovalTimeoutSeconds default = %d, want 86400", us.SubagentApprovalTimeoutSeconds)
+	}
+}
+
+func TestUserSettings_G4_UpdateRoundTrips(t *testing.T) {
+	s := newSeededStore(t)
+	us, _ := s.GetUserSettings()
+	us.SubagentApprovalRequired = false
+	us.SubagentApprovalTimeoutSeconds = 600
+	if err := s.UpdateUserSettings(us); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, _ := s.GetUserSettings()
+	if got.SubagentApprovalRequired {
+		t.Errorf("SubagentApprovalRequired not persisted")
+	}
+	if got.SubagentApprovalTimeoutSeconds != 600 {
+		t.Errorf("timeout not persisted: %d", got.SubagentApprovalTimeoutSeconds)
+	}
+}
+
 func TestUpdateUserSettings_BudgetPctClamp(t *testing.T) {
 	s := newSeededStore(t)
 

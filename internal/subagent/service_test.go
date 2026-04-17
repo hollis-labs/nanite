@@ -716,3 +716,152 @@ func TestSpawn_Ungated_UnchangedBehavior(t *testing.T) {
 		t.Errorf("emit should not fire for ungated path: %d calls", emitter.Count())
 	}
 }
+
+// recordingPoster captures all SendMessage calls in order. Extends the
+// stubPoster pattern with Count() + Last() helpers for multi-call assertions.
+type recordingPoster struct {
+	mu    sync.Mutex
+	calls []messaging.SendInput
+}
+
+func (p *recordingPoster) SendMessage(_ context.Context, in messaging.SendInput) (*messaging.Message, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, in)
+	return &messaging.Message{ID: "m-" + strconv.Itoa(len(p.calls))}, nil
+}
+
+func (p *recordingPoster) Count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.calls)
+}
+
+func (p *recordingPoster) Last() messaging.SendInput {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls[len(p.calls)-1]
+}
+
+func TestApprove_TransitionsAndRunsRunner(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true, SubagentApprovalTimeoutSeconds: 3600}}
+	poster := &recordingPoster{}
+	svc := NewService(db, EchoRunner{}, poster, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	if err := svc.Approve(context.Background(), runID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	// Poll until EchoRunner completes the run in the background.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run, _ := svc.Status(context.Background(), runID)
+		if run.Status == StatusCompleted {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	t.Fatalf("run did not reach completed within 2s; status=%q", run.Status)
+}
+
+func TestApprove_NotPending_WhenAlreadyTerminal(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true}}
+	svc := NewService(db, EchoRunner{}, nil, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	_, _ = db.Exec(`UPDATE subagent_runs SET status='completed' WHERE id=?`, runID)
+
+	if err := svc.Approve(context.Background(), runID); !errors.Is(err, ErrNotPending) {
+		t.Errorf("err = %v, want ErrNotPending", err)
+	}
+}
+
+func TestApprove_StaleReturnsExpiredError(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true, SubagentApprovalTimeoutSeconds: 1}}
+	poster := &recordingPoster{}
+	svc := NewService(db, EchoRunner{}, poster, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	backdated := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano)
+	_, _ = db.Exec(`UPDATE subagent_runs SET created_at=? WHERE id=?`, backdated, runID)
+
+	if err := svc.Approve(context.Background(), runID); !errors.Is(err, ErrApprovalExpired) {
+		t.Errorf("err = %v, want ErrApprovalExpired", err)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	if run.Status != StatusRejected {
+		t.Errorf("status = %q, want rejected", run.Status)
+	}
+	if run.RejectionReason != "approval timed out" {
+		t.Errorf("reason = %q", run.RejectionReason)
+	}
+}
+
+func TestReject_TransitionsAndPostsReply(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true}}
+	poster := &recordingPoster{}
+	svc := NewService(db, EchoRunner{}, poster, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1", ParentAgentID: "primary",
+		Role: "file-backend", Prompt: "hi", Mode: ModeSync,
+	})
+
+	if err := svc.Reject(context.Background(), runID, "too risky"); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	if run.Status != StatusRejected {
+		t.Errorf("status = %q", run.Status)
+	}
+	if run.RejectionReason != "too risky" {
+		t.Errorf("reason = %q", run.RejectionReason)
+	}
+
+	if poster.Count() != 1 {
+		t.Fatalf("poster calls = %d", poster.Count())
+	}
+	got := poster.Last()
+	if got.ToAgentID != "primary" {
+		t.Errorf("to = %q", got.ToAgentID)
+	}
+	if got.Body != "Subagent spawn rejected: too risky" {
+		t.Errorf("body = %q", got.Body)
+	}
+}
+
+func TestReject_NotPending(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true}}
+	svc := NewService(db, EchoRunner{}, nil, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	_, _ = db.Exec(`UPDATE subagent_runs SET status='cancelled' WHERE id=?`, runID)
+
+	if err := svc.Reject(context.Background(), runID, ""); !errors.Is(err, ErrNotPending) {
+		t.Errorf("err = %v, want ErrNotPending", err)
+	}
+}

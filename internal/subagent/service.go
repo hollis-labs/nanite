@@ -21,6 +21,13 @@ import (
 // a timeout. 5 minutes matches the plan's §T9 spawn-request default.
 const DefaultTimeoutSeconds = 300
 
+// Typed errors returned by Approve and Reject so callers can
+// distinguish rejection causes without string matching.
+var (
+	ErrNotPending      = errors.New("subagent: run is not in requested state")
+	ErrApprovalExpired = errors.New("subagent: approval has expired")
+)
+
 // Runner executes the subagent's work and returns a structured
 // Result. Implementations own the actual chat-engine invocation,
 // agent role loading, and any MCP tool calls. The subagent package
@@ -315,6 +322,131 @@ func (svc *Service) Cancel(ctx context.Context, runID string) error {
 	if err != nil {
 		return fmt.Errorf("cancel run: %w", err)
 	}
+	return nil
+}
+
+// Reject transitions a requested run to rejected, posts a reply message to
+// the parent agent summarizing the decision, and returns. Returns
+// ErrNotPending if the run is not in requested state. reason may be empty.
+func (svc *Service) Reject(ctx context.Context, runID, reason string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := svc.db.ExecContext(ctx,
+		`UPDATE subagent_runs
+		   SET status=?, rejected_at=?, rejection_reason=?
+		 WHERE id=? AND status=?`,
+		StatusRejected, now, reason, runID, StatusRequested)
+	if err != nil {
+		return fmt.Errorf("reject run: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotPending
+	}
+
+	run, err := svc.Status(ctx, runID)
+	if err != nil {
+		return err
+	}
+	svc.emitStatus(run, "")
+
+	if svc.poster != nil && run.ParentAgentID != "" {
+		body := "Subagent spawn rejected"
+		if reason != "" {
+			body = body + ": " + reason
+		}
+		_, _ = svc.poster.SendMessage(ctx, messaging.SendInput{
+			FromSessionID: run.ParentSessionID,
+			FromAgentID:   run.Role,
+			ToSessionID:   run.ParentSessionID,
+			ToAgentID:     run.ParentAgentID,
+			Channel:       messaging.ChannelChat,
+			Kind:          messaging.KindReply,
+			Body:          body,
+			Type:          messaging.TypeMessage,
+			RegisterAs:    "external",
+		})
+	}
+	return nil
+}
+
+// expireIfStale checks whether runID is in 'requested' and older than
+// UserSettings.SubagentApprovalTimeoutSeconds. If so, transitions to
+// 'rejected' with the sentinel reason and returns (true, nil). Otherwise
+// returns (false, nil). Any DB error surfaces as (false, err).
+func (svc *Service) expireIfStale(ctx context.Context, runID string) (bool, error) {
+	if svc.settings == nil {
+		return false, nil // no settings = gating off = nothing to expire
+	}
+	us, err := svc.settings.GetUserSettings()
+	if err != nil {
+		return false, fmt.Errorf("load settings: %w", err)
+	}
+	timeout := us.SubagentApprovalTimeoutSeconds
+	if timeout <= 0 {
+		timeout = 86400
+	}
+
+	var status, createdAt string
+	err = svc.db.QueryRowContext(ctx,
+		`SELECT status, created_at FROM subagent_runs WHERE id=?`, runID).Scan(&status, &createdAt)
+	if err != nil {
+		return false, err
+	}
+	if status != StatusRequested {
+		return false, nil
+	}
+
+	t, perr := time.Parse(time.RFC3339Nano, createdAt)
+	if perr != nil {
+		return false, nil
+	}
+	if time.Since(t) <= time.Duration(timeout)*time.Second {
+		return false, nil
+	}
+
+	if err := svc.Reject(ctx, runID, "approval timed out"); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Approve transitions a requested run to approved and launches its runner.
+// Returns ErrNotPending if the run is in a terminal or non-requested state,
+// ErrApprovalExpired if the run has exceeded the stale timeout.
+func (svc *Service) Approve(ctx context.Context, runID string) error {
+	if expired, err := svc.expireIfStale(ctx, runID); err != nil {
+		return err
+	} else if expired {
+		return ErrApprovalExpired
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := svc.db.ExecContext(ctx,
+		`UPDATE subagent_runs
+		   SET status=?, approved_at=?, approved_by=?, started_at=?
+		 WHERE id=? AND status=?`,
+		StatusApproved, now, "user", now, runID, StatusRequested)
+	if err != nil {
+		return fmt.Errorf("approve run: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotPending
+	}
+
+	run, err := svc.Status(ctx, runID)
+	if err != nil {
+		return err
+	}
+	svc.emitStatus(run, "")
+
+	// Launch runner with independent ctx + registered cancel, matching the
+	// async branch pattern in Spawn.
+	runCtx, runCancel := context.WithCancel(context.Background())
+	svc.cancelMu.Lock()
+	svc.cancelers[run.ID] = runCancel
+	svc.cancelMu.Unlock()
+	safego.Go(context.Background(), "subagent.run", func() {
+		svc.execute(runCtx, run, run.ParentAgentID)
+	})
 	return nil
 }
 

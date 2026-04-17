@@ -29,7 +29,9 @@ var errStreamFailure = errors.New("subagent: child chat loop emitted error event
 //     Envelope field (last-wins)
 //   - "error" / "structured_error" events: terminate drain, return
 //     errStreamFailure wrapped with the error message
-//   - "stream_end": terminate drain successfully
+//   - "stream_end": capture evt.Envelope if non-empty (production
+//     generateResponse attaches the terminal aggregated envelope JSON
+//     there — chat_generate.go:837), then terminate drain successfully
 //   - everything else (stream_start, status, tool_call, tool_result,
 //     presence, etc.): ignored for capture purposes
 //
@@ -55,6 +57,15 @@ func drainCapture(ch <-chan chat.StreamEvent) (summary string, envelope string, 
 			}
 			return sb.String(), envelope, errors.Join(errStreamFailure, errors.New(msg))
 		case "stream_end":
+			// Production generateResponse attaches the final aggregated
+			// envelope JSON to stream_end.Envelope. Mid-stream
+			// plugin_envelope delivery additionally depends on
+			// StreamManager routing that isn't guaranteed here — prefer
+			// the terminal payload when present so ResultJSON reflects
+			// the actual turn output rather than falling back to "{}".
+			if evt.Envelope != "" {
+				envelope = evt.Envelope
+			}
 			return sb.String(), envelope, nil
 		}
 	}
@@ -80,6 +91,7 @@ type sessionStoreForRunner interface {
 	CreateSession(*store.Session) error
 	GetSession(id string) (*store.Session, error)
 	EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error
+	CreateMessage(*store.Message) error
 }
 
 // chatInvoker is the narrow surface the runner needs from
@@ -198,6 +210,23 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 		return nil, err
 	}
 	run.ChildSessionID = childID
+
+	// Persist the prompt as a user message on the child session.
+	// generateResponse's context assembly loads the provider message
+	// list via ListMessages (assembleTurnContext → chat_generate.go);
+	// the userContent parameter is only used for tool selection,
+	// filters, and auto-title. Without this row the provider sees an
+	// empty conversation and ignores run.Prompt. Mirrors the pattern
+	// in chat.go:234 (HandleMessage) and delegation.go:109.
+	userMsg := &store.Message{
+		ID:        uuid.New().String(),
+		SessionID: childID,
+		Role:      "user",
+		Content:   run.Prompt,
+	}
+	if err := r.store.CreateMessage(userMsg); err != nil {
+		return nil, fmt.Errorf("create user message: %w", err)
+	}
 
 	// Drive one assistant turn. invokeChat closes the channel via its
 	// defer (or the fake's equivalent), so drainCapture exits naturally.

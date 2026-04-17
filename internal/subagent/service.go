@@ -200,19 +200,33 @@ func (svc *Service) Status(ctx context.Context, runID string) (*Run, error) {
 }
 
 // Cancel marks a run as cancelled and unblocks its runner. Ordering
-// is load-bearing: we invoke the registered per-run CancelFunc FIRST
-// so the runner's ctx fires and its terminal state attempt races
-// into the existing finalizeRun guard clause (WHERE status IN
-// (running, requested, approved)) — letting the cancelled UPDATE
-// below win. Idempotent: a second Cancel finds no entry and the DB
-// UPDATE no-ops because the row is already terminal.
+// is load-bearing: on the success path we UPDATE the DB row to
+// cancelled FIRST, then invoke the registered CancelFunc. This makes
+// cancellation deterministic — a concurrent finalizeRun from the
+// unblocked runner sees status = cancelled (not in the (running,
+// requested, approved) guard set) and no-ops. finalizeRun's re-read
+// branch then patches the in-memory Run so the G-5 terminal emit
+// reports "cancelled" (not the "failed" that execute writes after
+// ctx.Err()).
+//
+// CancelFunc invocation is deferred so the runner still unblocks even
+// if the DB UPDATE errors (e.g., caller ctx times out). We'd rather
+// return the error to the caller AND stop the runner than leak the
+// goroutine while surfacing the DB failure. On that error path the
+// row ends up "failed" via the runner's own finalizeRun (which finds
+// status = running and writes cleanly), but the runner does not leak.
+//
+// Idempotent: a second Cancel finds the row already terminal and the
+// map entry already cleared.
 func (svc *Service) Cancel(ctx context.Context, runID string) error {
-	svc.cancelMu.Lock()
-	if c, ok := svc.cancelers[runID]; ok {
-		c()
-		delete(svc.cancelers, runID)
-	}
-	svc.cancelMu.Unlock()
+	defer func() {
+		svc.cancelMu.Lock()
+		if c, ok := svc.cancelers[runID]; ok {
+			c()
+			delete(svc.cancelers, runID)
+		}
+		svc.cancelMu.Unlock()
+	}()
 
 	_, err := svc.db.ExecContext(ctx,
 		`UPDATE subagent_runs SET status = ? WHERE id = ? AND status IN (?,?,?)`,

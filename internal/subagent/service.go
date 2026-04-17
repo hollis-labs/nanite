@@ -14,11 +14,19 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // DefaultTimeoutSeconds bounds a runner when the caller doesn't set
 // a timeout. 5 minutes matches the plan's §T9 spawn-request default.
 const DefaultTimeoutSeconds = 300
+
+// Typed errors returned by Approve and Reject so callers can
+// distinguish rejection causes without string matching.
+var (
+	ErrNotPending      = errors.New("subagent: run is not in requested state")
+	ErrApprovalExpired = errors.New("subagent: approval has expired")
+)
 
 // Runner executes the subagent's work and returns a structured
 // Result. Implementations own the actual chat-engine invocation,
@@ -41,12 +49,28 @@ type MessagePoster interface {
 	SendMessage(ctx context.Context, input messaging.SendInput) (*messaging.Message, error)
 }
 
+// ApprovalEmitter persists an envelope instance and pushes the envelope onto
+// the parent session's live stream. Container-injected so the subagent package
+// stays independent of the envelope + stream subsystems. Returns the generated
+// envelope instance ID so Spawn can denormalize it onto the run row.
+type ApprovalEmitter interface {
+	Emit(ctx context.Context, sessionID, envelopeType string, payload []byte) (envelopeID string, err error)
+}
+
+// SettingsReader returns the per-user settings. Container-injected so the
+// subagent package doesn't take a hard dep on the full Store.
+type SettingsReader interface {
+	GetUserSettings() (*store.UserSettings, error)
+}
+
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
 	db         *sql.DB
 	runner     Runner
 	poster     MessagePoster
+	approver   ApprovalEmitter
+	settings   SettingsReader
 	streamSink SubagentStreamSink
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
@@ -61,12 +85,18 @@ type Service struct {
 // CRUD. The runner is the injected LLM-execution dependency (nil =
 // no spawn permitted — Spawn returns an error). The poster delivers
 // the reply message on completion (nil = reply skipped, run result
-// is still visible via Status).
-func NewService(db *sql.DB, runner Runner, poster MessagePoster) *Service {
+// is still visible via Status). The approver emits approval envelopes
+// onto the parent session's stream (nil = approval emission disabled;
+// T10 will wire the real impl). The settings reader provides per-user
+// settings for gating decisions (nil = only ModeInteractive triggers
+// gating; T6 wires cfg.Store).
+func NewService(db *sql.DB, runner Runner, poster MessagePoster, approver ApprovalEmitter, settings SettingsReader) *Service {
 	return &Service{
 		db:        db,
 		runner:    runner,
 		poster:    poster,
+		approver:  approver,
+		settings:  settings,
 		cancelers: make(map[string]context.CancelFunc),
 	}
 }
@@ -128,7 +158,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		mode = ModeSync
 	}
 	switch mode {
-	case ModeSync, ModeAsync, ModeAPI:
+	case ModeSync, ModeAsync, ModeAPI, ModeInteractive:
 	default:
 		return "", fmt.Errorf("subagent: invalid mode %q", mode)
 	}
@@ -144,14 +174,77 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	run := &Run{
 		ID:              uuid.New().String(),
 		ParentSessionID: req.ParentSessionID,
+		ParentAgentID:   req.ParentAgentID,
 		Role:            req.Role,
 		Prompt:          req.Prompt,
 		Mode:            mode,
-		Status:          StatusRunning, // MVP: skip requested/approved
 		InputsJSON:      inputs,
 		TimeoutSeconds:  timeout,
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 	}
+
+	// Gate predicate: consult user settings + mode.
+	gate := false
+	if svc.settings != nil {
+		us, err := svc.settings.GetUserSettings()
+		if err != nil {
+			return "", fmt.Errorf("load settings: %w", err)
+		}
+		gate = us.SubagentApprovalRequired || mode == ModeInteractive
+	} else {
+		// Nil settings = tests that don't care about gating; fall through to
+		// ungated unless mode explicitly requests interactive approval.
+		gate = mode == ModeInteractive
+	}
+
+	if gate {
+		// Gated path: validate prerequisites + marshal payload BEFORE any DB
+		// write so a misconfiguration (nil emitter) or marshal error doesn't
+		// leave a row orphaned in 'requested'. Post-insert failures (Emit,
+		// envelope-id persist) compensate by transitioning the run to
+		// 'failed' with an error reason — we preserve the audit trail
+		// rather than deleting.
+		if svc.approver == nil {
+			return "", fmt.Errorf("gated spawn requires approver but none configured")
+		}
+		payload, err := json.Marshal(map[string]any{
+			"run_id":          run.ID,
+			"role":            run.Role,
+			"prompt":          run.Prompt,
+			"mode":            run.Mode,
+			"parent_agent_id": run.ParentAgentID,
+			"timeout_seconds": run.TimeoutSeconds,
+			"inputs_json":     run.InputsJSON,
+			"risk_level":      "medium",
+		})
+		if err != nil {
+			return "", fmt.Errorf("marshal approval payload: %w", err)
+		}
+
+		run.Status = StatusRequested
+		if err := svc.insertRun(ctx, run); err != nil {
+			return "", fmt.Errorf("insert run: %w", err)
+		}
+
+		envelopeID, err := svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)
+		if err != nil {
+			svc.markGatedSpawnFailed(run.ID, "approval envelope emission failed: "+err.Error())
+			return "", fmt.Errorf("emit approval envelope: %w", err)
+		}
+
+		if _, uerr := svc.db.ExecContext(ctx,
+			`UPDATE subagent_runs SET envelope_instance_id=? WHERE id=?`, envelopeID, run.ID); uerr != nil {
+			svc.markGatedSpawnFailed(run.ID, "envelope id persist failed: "+uerr.Error())
+			return "", fmt.Errorf("persist envelope id: %w", uerr)
+		}
+		run.EnvelopeInstanceID = envelopeID
+
+		svc.emitStatus(run, "")
+		return run.ID, nil
+	}
+
+	// Ungated path — existing behavior preserved exactly.
+	run.Status = StatusRunning // MVP: skip requested/approved
 	run.StartedAt = run.CreatedAt
 	if err := svc.insertRun(ctx, run); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)
@@ -190,6 +283,22 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	}
 
 	return run.ID, nil
+}
+
+// markGatedSpawnFailed transitions a just-inserted 'requested' run to
+// 'failed' with an error reason when a post-insert step in gated Spawn
+// (envelope Emit, envelope_instance_id persist) fails. Compensating
+// update — uses Background ctx so it survives a cancelled caller, and
+// matches on status=requested to avoid clobbering a concurrent
+// Approve/Reject. Errors are swallowed: the caller is already returning
+// an error to its own caller; double-reporting helps no one.
+func (svc *Service) markGatedSpawnFailed(runID, reason string) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, _ = svc.db.ExecContext(context.Background(),
+		`UPDATE subagent_runs
+		   SET status=?, error=?, completed_at=?
+		 WHERE id=? AND status=?`,
+		StatusFailed, reason, now, runID, StatusRequested)
 }
 
 // Status returns the current Run row for runID, or ErrNotFound
@@ -235,6 +344,140 @@ func (svc *Service) Cancel(ctx context.Context, runID string) error {
 	if err != nil {
 		return fmt.Errorf("cancel run: %w", err)
 	}
+	return nil
+}
+
+// Reject transitions a requested run to rejected, posts a reply message to
+// the parent agent summarizing the decision, and returns. Returns
+// ErrNotPending if the run is not in requested state. reason may be empty.
+func (svc *Service) Reject(ctx context.Context, runID, reason string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := svc.db.ExecContext(ctx,
+		`UPDATE subagent_runs
+		   SET status=?, rejected_at=?, rejection_reason=?
+		 WHERE id=? AND status=?`,
+		StatusRejected, now, reason, runID, StatusRequested)
+	if err != nil {
+		return fmt.Errorf("reject run: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotPending
+	}
+
+	run, err := svc.Status(ctx, runID)
+	if err != nil {
+		return err
+	}
+	svc.emitStatus(run, "")
+
+	if svc.poster != nil && run.ParentAgentID != "" {
+		body := "Subagent spawn rejected"
+		if reason != "" {
+			body = body + ": " + reason
+		}
+		_, _ = svc.poster.SendMessage(ctx, messaging.SendInput{
+			FromSessionID: run.ParentSessionID,
+			FromAgentID:   run.Role,
+			ToSessionID:   run.ParentSessionID,
+			ToAgentID:     run.ParentAgentID,
+			Channel:       messaging.ChannelChat,
+			Kind:          messaging.KindReply,
+			Body:          body,
+			Type:          messaging.TypeMessage,
+			RegisterAs:    "external",
+		})
+	}
+	return nil
+}
+
+// expireIfStale checks whether runID is in 'requested' and older than
+// UserSettings.SubagentApprovalTimeoutSeconds. If so, transitions to
+// 'rejected' with the sentinel reason and returns (true, nil). Otherwise
+// returns (false, nil). Any DB error surfaces as (false, err).
+func (svc *Service) expireIfStale(ctx context.Context, runID string) (bool, error) {
+	if svc.settings == nil {
+		return false, nil // no settings = gating off = nothing to expire
+	}
+	us, err := svc.settings.GetUserSettings()
+	if err != nil {
+		return false, fmt.Errorf("load settings: %w", err)
+	}
+	timeout := us.SubagentApprovalTimeoutSeconds
+	if timeout <= 0 {
+		timeout = 86400
+	}
+
+	var status, createdAt string
+	err = svc.db.QueryRowContext(ctx,
+		`SELECT status, created_at FROM subagent_runs WHERE id=?`, runID).Scan(&status, &createdAt)
+	if err != nil {
+		return false, err
+	}
+	if status != StatusRequested {
+		return false, nil
+	}
+
+	t, perr := time.Parse(time.RFC3339Nano, createdAt)
+	if perr != nil {
+		return false, nil
+	}
+	if time.Since(t) <= time.Duration(timeout)*time.Second {
+		return false, nil
+	}
+
+	if err := svc.Reject(ctx, runID, "approval timed out"); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Approve transitions a requested run directly to running (recording the
+// approval audit fields) and launches its runner. Returns ErrNotPending if
+// the run is in a terminal or non-requested state, ErrApprovalExpired if
+// the run has exceeded the stale timeout.
+//
+// The schema reserves a distinct 'approved' state, but the MVP collapses
+// requested→approved→running into a single UPDATE so UI/ops consumers
+// keying off status=running observe the run as soon as it is dispatched.
+// approved_at/approved_by remain the audit witnesses. approved_by is left
+// empty here — there is no authenticated caller identity plumbed to this
+// method yet; a future change will populate it from the response-endpoint
+// auth context rather than hard-coding a sentinel.
+func (svc *Service) Approve(ctx context.Context, runID string) error {
+	if expired, err := svc.expireIfStale(ctx, runID); err != nil {
+		return err
+	} else if expired {
+		return ErrApprovalExpired
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := svc.db.ExecContext(ctx,
+		`UPDATE subagent_runs
+		   SET status=?, approved_at=?, approved_by=?, started_at=?
+		 WHERE id=? AND status=?`,
+		StatusRunning, now, "", now, runID, StatusRequested)
+	if err != nil {
+		return fmt.Errorf("approve run: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotPending
+	}
+
+	run, err := svc.Status(ctx, runID)
+	if err != nil {
+		return err
+	}
+	svc.emitStatus(run, "")
+
+	// Launch runner with independent ctx + registered cancel, matching the
+	// async branch pattern in Spawn.
+	runCtx, runCancel := context.WithCancel(context.Background())
+	svc.cancelMu.Lock()
+	svc.cancelers[run.ID] = runCancel
+	svc.cancelMu.Unlock()
+	safego.Go(context.Background(), "subagent.run", func() {
+		svc.execute(runCtx, run, run.ParentAgentID)
+	})
 	return nil
 }
 
@@ -347,11 +590,17 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 	_, err := svc.db.ExecContext(ctx,
 		`INSERT INTO subagent_runs (id, parent_session_id, child_session_id, role, prompt,
 		                            mode, status, inputs_json, result_json, error,
-		                            timeout_seconds, created_at, started_at, completed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                            timeout_seconds, created_at, started_at, completed_at,
+		                            parent_agent_id, envelope_instance_id,
+		                            approved_at, approved_by,
+		                            rejected_at, rejection_reason)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.ParentSessionID, r.ChildSessionID, r.Role, r.Prompt,
 		r.Mode, r.Status, r.InputsJSON, r.ResultJSON, r.Error,
 		r.TimeoutSeconds, r.CreatedAt, r.StartedAt, r.CompletedAt,
+		r.ParentAgentID, r.EnvelopeInstanceID,
+		r.ApprovedAt, r.ApprovedBy,
+		r.RejectedAt, r.RejectionReason,
 	)
 	return err
 }
@@ -400,7 +649,9 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
 // selectSQL is the canonical SELECT clause for subagent_runs rows.
 const selectSQL = `SELECT id, parent_session_id, child_session_id, role, prompt,
 	mode, status, inputs_json, result_json, error,
-	timeout_seconds, created_at, started_at, completed_at
+	timeout_seconds, created_at, started_at, completed_at,
+	parent_agent_id, envelope_instance_id, approved_at, approved_by,
+	rejected_at, rejection_reason
 	FROM subagent_runs`
 
 func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
@@ -409,6 +660,9 @@ func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 		&r.ID, &r.ParentSessionID, &r.ChildSessionID, &r.Role, &r.Prompt,
 		&r.Mode, &r.Status, &r.InputsJSON, &r.ResultJSON, &r.Error,
 		&r.TimeoutSeconds, &r.CreatedAt, &r.StartedAt, &r.CompletedAt,
+		&r.ParentAgentID, &r.EnvelopeInstanceID,
+		&r.ApprovedAt, &r.ApprovedBy,
+		&r.RejectedAt, &r.RejectionReason,
 	); err != nil {
 		return nil, err
 	}

@@ -18,6 +18,8 @@ var schemaFS embed.FS
 var knownTypes = []string{
 	// Core primitives
 	"session-task",
+	// G-4 — subagent spawn approval.
+	"subagent-spawn-approval",
 	"document-viewer",
 	"report-card",
 	"error-report",
@@ -207,6 +209,13 @@ var examplePayloads = map[string]string{
 		"issue_summary": "VPN drops repeatedly during video calls",
 		"categories": ["networking", "hardware", "software", "access"]
 	}`,
+	"subagent-spawn-approval": `{"run_id":"r-1","role":"file-backend","prompt":"summarize messaging","mode":"interactive"}`,
+}
+
+// invalidPayloads provides a payload expected to fail validation for each envelope type.
+var invalidPayloads = map[string]string{
+	// G-4 — subagent spawn approval: missing required fields role/prompt/mode.
+	"subagent-spawn-approval": `{"run_id":"r-1"}`,
 }
 
 // loadSchemaFiles returns all schema files from the embedded FS.
@@ -315,6 +324,37 @@ func TestEnvelopeSchemas_ExamplePayloads(t *testing.T) {
 
 			if err := schema.Validate(payload); err != nil {
 				t.Errorf("example payload does not validate:\n%v", err)
+			}
+		})
+	}
+}
+
+func TestEnvelopeSchemas_InvalidPayloads(t *testing.T) {
+	schemas := loadSchemaFiles(t)
+
+	for typeName, badJSON := range invalidPayloads {
+		t.Run(typeName, func(t *testing.T) {
+			schemaData, ok := schemas[typeName]
+			if !ok {
+				t.Fatalf("no schema file for %q", typeName)
+			}
+
+			compiler := jsonschema.NewCompiler()
+			if err := compiler.AddResource(typeName+".schema.json", unmarshalAny(t, schemaData)); err != nil {
+				t.Fatalf("add resource: %v", err)
+			}
+			schema, err := compiler.Compile(typeName + ".schema.json")
+			if err != nil {
+				t.Fatalf("compile schema: %v", err)
+			}
+
+			var payload any
+			if err := json.Unmarshal([]byte(badJSON), &payload); err != nil {
+				t.Fatalf("invalid payload is not valid JSON: %v", err)
+			}
+
+			if err := schema.Validate(payload); err == nil {
+				t.Errorf("expected validation error for invalid payload, got none")
 			}
 		})
 	}

@@ -70,6 +70,13 @@ type UserSettings struct {
 	ToolClassifierModel     string `json:"tool_classifier_model"`
 	ToolClassifierTimeoutMS int    `json:"tool_classifier_timeout_ms"`
 	ContextOverflowRecovery bool   `json:"context_overflow_recovery"`
+	// Subagent approval gate (G-4).
+	// SubagentApprovalRequired gates every Spawn() behind a user approval envelope.
+	// Default true — dogfood-safe.
+	SubagentApprovalRequired bool `json:"subagent_approval_required"`
+	// SubagentApprovalTimeoutSeconds is the wall-time after which a pending
+	// approval is lazily auto-rejected on the next admin read. Default 86400 (24h).
+	SubagentApprovalTimeoutSeconds int `json:"subagent_approval_timeout_seconds"`
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -91,6 +98,8 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var toolClassifierMode, toolClassifierProvider, toolClassifierModel string
 	var toolClassifierTimeoutMS int
 	var contextOverflowRecovery bool
+	var subagentApprovalRequired bool
+	var subagentApprovalTimeoutSeconds int
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
@@ -103,7 +112,8 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		        tool_result_soft_truncate_bytes, tool_result_hard_cap_bytes,
 		        tool_cache_enabled, tool_classifier_mode,
 		        tool_classifier_provider, tool_classifier_model,
-		        tool_classifier_timeout_ms, context_overflow_recovery
+		        tool_classifier_timeout_ms, context_overflow_recovery,
+		        subagent_approval_required, subagent_approval_timeout_seconds
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
@@ -115,7 +125,8 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		&toolPerTurnCap, &toolResultCacheTTL, &toolResultSoftTrunc, &toolResultHardCap,
 		&toolCacheEnabled, &toolClassifierMode,
 		&toolClassifierProvider, &toolClassifierModel,
-		&toolClassifierTimeoutMS, &contextOverflowRecovery)
+		&toolClassifierTimeoutMS, &contextOverflowRecovery,
+		&subagentApprovalRequired, &subagentApprovalTimeoutSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -145,12 +156,14 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		ToolResultCacheTTLSeconds:    toolResultCacheTTL,
 		ToolResultSoftTruncBytes:     toolResultSoftTrunc,
 		ToolResultHardCapBytes:       toolResultHardCap,
-		ToolCacheEnabled:             toolCacheEnabled,
-		ToolClassifierMode:           toolClassifierMode,
-		ToolClassifierProvider:       toolClassifierProvider,
-		ToolClassifierModel:          toolClassifierModel,
-		ToolClassifierTimeoutMS:      toolClassifierTimeoutMS,
-		ContextOverflowRecovery:      contextOverflowRecovery,
+		ToolCacheEnabled:               toolCacheEnabled,
+		ToolClassifierMode:             toolClassifierMode,
+		ToolClassifierProvider:         toolClassifierProvider,
+		ToolClassifierModel:            toolClassifierModel,
+		ToolClassifierTimeoutMS:        toolClassifierTimeoutMS,
+		ContextOverflowRecovery:        contextOverflowRecovery,
+		SubagentApprovalRequired:       subagentApprovalRequired,
+		SubagentApprovalTimeoutSeconds: subagentApprovalTimeoutSeconds,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -292,6 +305,8 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			tool_classifier_model = ?,
 			tool_classifier_timeout_ms = ?,
 			context_overflow_recovery = ?,
+			subagent_approval_required = ?,
+			subagent_approval_timeout_seconds = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
@@ -306,6 +321,7 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		us.ToolCacheEnabled, toolClassifierMode,
 		us.ToolClassifierProvider, us.ToolClassifierModel,
 		toolClassifierTimeoutMS, us.ContextOverflowRecovery,
+		us.SubagentApprovalRequired, us.SubagentApprovalTimeoutSeconds,
 		now,
 	)
 	if err != nil {

@@ -29,14 +29,16 @@ package subagent
 
 // Mode names the execution style for a spawn request.
 const (
-	ModeSync  = "sync"
-	ModeAsync = "async"
-	ModeAPI   = "api"
+	ModeSync        = "sync"
+	ModeAsync       = "async"
+	ModeAPI         = "api"
+	ModeInteractive = "interactive"
 )
 
 // Run status constants. Lifecycle:
 //
 //	requested → approved → running → completed | failed | cancelled
+//	requested → rejected
 //
 // `requested` is the initial state only when interactive approval
 // is pending (T9.2 scope). MVP paths skip straight to `running`
@@ -48,6 +50,7 @@ const (
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"
 	StatusCancelled = "cancelled"
+	StatusRejected  = "rejected"
 )
 
 // SpawnRequest is the caller-supplied input for a spawn.
@@ -93,6 +96,14 @@ type Run struct {
 	CreatedAt       string `json:"created_at"`
 	StartedAt       string `json:"started_at"`
 	CompletedAt     string `json:"completed_at"`
+
+	// G-4 additions.
+	ParentAgentID      string `json:"parent_agent_id"`
+	EnvelopeInstanceID string `json:"envelope_instance_id"`
+	ApprovedAt         string `json:"approved_at"`
+	ApprovedBy         string `json:"approved_by"`
+	RejectedAt         string `json:"rejected_at"`
+	RejectionReason    string `json:"rejection_reason"`
 }
 
 // Result is the output a Runner returns on successful completion.

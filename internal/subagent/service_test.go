@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -55,10 +56,51 @@ func (p *stubPoster) captured() *messaging.SendInput {
 	return p.last
 }
 
+// stubEmitter records emit calls for assertions.
+type stubEmitter struct {
+	mu    sync.Mutex
+	calls []emitCall
+}
+type emitCall struct {
+	sessionID string
+	typ       string
+	payload   []byte
+}
+
+func (e *stubEmitter) Emit(_ context.Context, s, t string, p []byte) (string, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.calls = append(e.calls, emitCall{s, t, append([]byte(nil), p...)})
+	return "env-" + strconv.Itoa(len(e.calls)), nil
+}
+func (e *stubEmitter) Count() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.calls)
+}
+func (e *stubEmitter) Last() emitCall {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.calls[len(e.calls)-1]
+}
+
+// stubSettings returns fixed UserSettings.
+type stubSettings struct{ us store.UserSettings }
+
+func (s stubSettings) GetUserSettings() (*store.UserSettings, error) { return &s.us, nil }
+
+// notCalledRunner fails the test if Run is invoked.
+type notCalledRunner struct{ t *testing.T }
+
+func (r *notCalledRunner) Run(_ context.Context, _ *Run) (*Result, error) {
+	r.t.Fatal("runner should not be invoked during gated Spawn")
+	return nil, nil
+}
+
 func TestSpawn_SyncEchoRunner_RoundTrip(t *testing.T) {
 	db, _ := newTestDB(t)
 	poster := &stubPoster{}
-	svc := NewService(db, EchoRunner{}, poster)
+	svc := NewService(db, EchoRunner{}, poster, nil, stubSettings{})
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -115,7 +157,7 @@ func TestSpawn_SyncEchoRunner_RoundTrip(t *testing.T) {
 func TestSpawn_AsyncMode_RepliesViaInbox(t *testing.T) {
 	db, _ := newTestDB(t)
 	poster := &stubPoster{}
-	svc := NewService(db, EchoRunner{}, poster)
+	svc := NewService(db, EchoRunner{}, poster, nil, stubSettings{})
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -156,7 +198,7 @@ func TestSpawn_AsyncMode_RepliesViaInbox(t *testing.T) {
 
 func TestSpawn_RejectsMissingFields(t *testing.T) {
 	db, _ := newTestDB(t)
-	svc := NewService(db, EchoRunner{}, nil)
+	svc := NewService(db, EchoRunner{}, nil, nil, stubSettings{})
 
 	cases := []struct {
 		name string
@@ -178,7 +220,7 @@ func TestSpawn_RejectsMissingFields(t *testing.T) {
 
 func TestSpawn_NoRunnerConfigured(t *testing.T) {
 	db, _ := newTestDB(t)
-	svc := NewService(db, nil, nil)
+	svc := NewService(db, nil, nil, nil, stubSettings{})
 
 	_, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "s", Role: "r", Prompt: "p",
@@ -199,7 +241,7 @@ func (failRunner) Run(_ context.Context, _ *Run) (*Result, error) {
 func TestSpawn_FailedRunner_SetsStatusFailed(t *testing.T) {
 	db, _ := newTestDB(t)
 	poster := &stubPoster{}
-	svc := NewService(db, failRunner{}, poster)
+	svc := NewService(db, failRunner{}, poster, nil, stubSettings{})
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -225,7 +267,7 @@ func TestSpawn_FailedRunner_SetsStatusFailed(t *testing.T) {
 
 func TestCancel_TerminalIsNoop(t *testing.T) {
 	db, _ := newTestDB(t)
-	svc := NewService(db, EchoRunner{}, &stubPoster{})
+	svc := NewService(db, EchoRunner{}, &stubPoster{}, nil, stubSettings{})
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -269,7 +311,7 @@ func TestCancel_PerRunContextCancellation(t *testing.T) {
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	svc := NewService(db, runner, &stubPoster{})
+	svc := NewService(db, runner, &stubPoster{}, nil, stubSettings{})
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -354,7 +396,7 @@ func TestSpawn_EmitsRunningEventBeforeRunner(t *testing.T) {
 	gate := make(chan struct{})
 	runner := gateRunner{release: gate}
 
-	svc := NewService(db, runner, &stubPoster{})
+	svc := NewService(db, runner, &stubPoster{}, nil, stubSettings{})
 	svc.SetStreamSink(sink)
 
 	doneCh := make(chan string, 1)
@@ -405,7 +447,7 @@ func TestSpawn_EmitsRunningEventBeforeRunner(t *testing.T) {
 func TestSpawn_EmitsTerminalEventOnComplete(t *testing.T) {
 	db, _ := newTestDB(t)
 	sink := &recordingSink{}
-	svc := NewService(db, EchoRunner{}, &stubPoster{})
+	svc := NewService(db, EchoRunner{}, &stubPoster{}, nil, stubSettings{})
 	svc.SetStreamSink(sink)
 
 	_, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -436,7 +478,7 @@ func TestSpawn_EmitsTerminalEventOnComplete(t *testing.T) {
 func TestSpawn_EmitsTerminalEventOnFailure(t *testing.T) {
 	db, _ := newTestDB(t)
 	sink := &recordingSink{}
-	svc := NewService(db, failRunner{}, &stubPoster{})
+	svc := NewService(db, failRunner{}, &stubPoster{}, nil, stubSettings{})
 	svc.SetStreamSink(sink)
 
 	_, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -475,7 +517,7 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	svc := NewService(db, runner, &stubPoster{})
+	svc := NewService(db, runner, &stubPoster{}, nil, stubSettings{})
 	svc.SetStreamSink(sink)
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -526,6 +568,29 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 	}
 }
 
+func TestSpawn_PersistsParentAgentID(t *testing.T) {
+	db, _ := newTestDB(t)
+	svc := NewService(db, EchoRunner{}, &stubPoster{}, nil, stubSettings{})
+
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "primary-agent",
+		Role:            "file-backend",
+		Prompt:          "x",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	run, err := svc.Status(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if got, want := run.ParentAgentID, "primary-agent"; got != want {
+		t.Errorf("parent_agent_id = %q, want %q", got, want)
+	}
+}
+
 // TestCancel_UnblocksRunnerEvenWhenDBUpdateFails verifies that Cancel
 // still invokes the registered CancelFunc when the DB UPDATE errors —
 // otherwise the runner goroutine would leak even though the caller
@@ -538,7 +603,7 @@ func TestCancel_UnblocksRunnerEvenWhenDBUpdateFails(t *testing.T) {
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	svc := NewService(db, runner, &stubPoster{})
+	svc := NewService(db, runner, &stubPoster{}, nil, stubSettings{})
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-1",
@@ -571,5 +636,232 @@ func TestCancel_UnblocksRunnerEvenWhenDBUpdateFails(t *testing.T) {
 	case <-runner.done:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("runner did not exit within 500ms — CancelFunc was skipped after DB error")
+	}
+}
+
+func TestSpawn_Gated_InsertsRequestedAndEmitsEnvelope(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true}}
+	runner := &notCalledRunner{t: t}
+	svc := NewService(db, runner, nil, emitter, settings)
+
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "primary",
+		Role:            "file-backend",
+		Prompt:          "hello",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	run, _ := svc.Status(context.Background(), runID)
+	if run.Status != StatusRequested {
+		t.Errorf("status = %q, want requested", run.Status)
+	}
+	if run.EnvelopeInstanceID == "" {
+		t.Error("envelope_instance_id not persisted")
+	}
+	if emitter.Count() != 1 {
+		t.Errorf("emit count = %d", emitter.Count())
+	}
+	if emitter.Last().typ != "subagent-spawn-approval" {
+		t.Errorf("emit type = %q", emitter.Last().typ)
+	}
+}
+
+func TestSpawn_InteractiveMode_GatesEvenWhenFlagOff(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: false}}
+	runner := &notCalledRunner{t: t}
+	svc := NewService(db, runner, nil, emitter, settings)
+
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1", ParentAgentID: "primary",
+		Role: "file-backend", Prompt: "hi", Mode: ModeInteractive,
+	})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	if run.Status != StatusRequested {
+		t.Errorf("status = %q, want requested", run.Status)
+	}
+	if emitter.Count() != 1 {
+		t.Errorf("emit count = %d", emitter.Count())
+	}
+}
+
+func TestSpawn_Ungated_UnchangedBehavior(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: false}}
+	svc := NewService(db, EchoRunner{}, nil, emitter, settings)
+
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1", ParentAgentID: "primary",
+		Role: "file-backend", Prompt: "hi", Mode: ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	if run.Status != StatusCompleted {
+		t.Errorf("status = %q, want completed", run.Status)
+	}
+	if emitter.Count() != 0 {
+		t.Errorf("emit should not fire for ungated path: %d calls", emitter.Count())
+	}
+}
+
+// recordingPoster captures all SendMessage calls in order. Extends the
+// stubPoster pattern with Count() + Last() helpers for multi-call assertions.
+type recordingPoster struct {
+	mu    sync.Mutex
+	calls []messaging.SendInput
+}
+
+func (p *recordingPoster) SendMessage(_ context.Context, in messaging.SendInput) (*messaging.Message, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, in)
+	return &messaging.Message{ID: "m-" + strconv.Itoa(len(p.calls))}, nil
+}
+
+func (p *recordingPoster) Count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.calls)
+}
+
+func (p *recordingPoster) Last() messaging.SendInput {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls[len(p.calls)-1]
+}
+
+func TestApprove_TransitionsAndRunsRunner(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true, SubagentApprovalTimeoutSeconds: 3600}}
+	poster := &recordingPoster{}
+	svc := NewService(db, EchoRunner{}, poster, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	if err := svc.Approve(context.Background(), runID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	// Poll until EchoRunner completes the run in the background.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run, _ := svc.Status(context.Background(), runID)
+		if run.Status == StatusCompleted {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	t.Fatalf("run did not reach completed within 2s; status=%q", run.Status)
+}
+
+func TestApprove_NotPending_WhenAlreadyTerminal(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true}}
+	svc := NewService(db, EchoRunner{}, nil, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	_, _ = db.Exec(`UPDATE subagent_runs SET status='completed' WHERE id=?`, runID)
+
+	if err := svc.Approve(context.Background(), runID); !errors.Is(err, ErrNotPending) {
+		t.Errorf("err = %v, want ErrNotPending", err)
+	}
+}
+
+func TestApprove_StaleReturnsExpiredError(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true, SubagentApprovalTimeoutSeconds: 1}}
+	poster := &recordingPoster{}
+	svc := NewService(db, EchoRunner{}, poster, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	backdated := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano)
+	_, _ = db.Exec(`UPDATE subagent_runs SET created_at=? WHERE id=?`, backdated, runID)
+
+	if err := svc.Approve(context.Background(), runID); !errors.Is(err, ErrApprovalExpired) {
+		t.Errorf("err = %v, want ErrApprovalExpired", err)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	if run.Status != StatusRejected {
+		t.Errorf("status = %q, want rejected", run.Status)
+	}
+	if run.RejectionReason != "approval timed out" {
+		t.Errorf("reason = %q", run.RejectionReason)
+	}
+}
+
+func TestReject_TransitionsAndPostsReply(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true}}
+	poster := &recordingPoster{}
+	svc := NewService(db, EchoRunner{}, poster, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1", ParentAgentID: "primary",
+		Role: "file-backend", Prompt: "hi", Mode: ModeSync,
+	})
+
+	if err := svc.Reject(context.Background(), runID, "too risky"); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	run, _ := svc.Status(context.Background(), runID)
+	if run.Status != StatusRejected {
+		t.Errorf("status = %q", run.Status)
+	}
+	if run.RejectionReason != "too risky" {
+		t.Errorf("reason = %q", run.RejectionReason)
+	}
+
+	if poster.Count() != 1 {
+		t.Fatalf("poster calls = %d", poster.Count())
+	}
+	got := poster.Last()
+	if got.ToAgentID != "primary" {
+		t.Errorf("to = %q", got.ToAgentID)
+	}
+	if got.Body != "Subagent spawn rejected: too risky" {
+		t.Errorf("body = %q", got.Body)
+	}
+}
+
+func TestReject_NotPending(t *testing.T) {
+	db, _ := newTestDB(t)
+	emitter := &stubEmitter{}
+	settings := stubSettings{us: store.UserSettings{SubagentApprovalRequired: true}}
+	svc := NewService(db, EchoRunner{}, nil, emitter, settings)
+
+	runID, _ := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "s", ParentAgentID: "p",
+		Role: "r", Prompt: "hi", Mode: ModeSync,
+	})
+	_, _ = db.Exec(`UPDATE subagent_runs SET status='cancelled' WHERE id=?`, runID)
+
+	if err := svc.Reject(context.Background(), runID, ""); !errors.Is(err, ErrNotPending) {
+		t.Errorf("err = %v, want ErrNotPending", err)
 	}
 }

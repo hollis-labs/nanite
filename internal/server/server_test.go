@@ -57,7 +57,9 @@ func (s *Server) testChain() http.Handler {
 		s.loggingMiddleware(
 			s.corsMiddleware(
 				basicAuthMiddleware(
-					s.bodyLimitMiddleware(s.mux),
+					callerIdentityMiddleware(
+						s.bodyLimitMiddleware(s.mux),
+					),
 				),
 			),
 		),
@@ -199,6 +201,21 @@ func TestCORSPreflightNoAuth(t *testing.T) {
 	}
 	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "true" {
 		t.Fatalf("expected ACAC=true, got %q", got)
+	}
+	// Browser preflight must admit the custom caller-identity + agent-kind
+	// headers — otherwise the FE cannot actually send them on the real request
+	// and the callerIdentityMiddleware plumbing is unreachable over CORS.
+	allowHeaders := resp.Header.Get("Access-Control-Allow-Headers")
+	for _, want := range []string{
+		"Content-Type",
+		"Authorization",
+		"X-Nanite-Caller-Session",
+		"X-Nanite-Caller-Agent",
+		"X-Nanite-Agent-Kind",
+	} {
+		if !strings.Contains(allowHeaders, want) {
+			t.Fatalf("Access-Control-Allow-Headers missing %q: got %q", want, allowHeaders)
+		}
 	}
 }
 

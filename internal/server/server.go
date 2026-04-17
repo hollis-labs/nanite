@@ -137,19 +137,24 @@ func (s *Server) SetPluginsDir(dir string) {
 // ListenAndServe starts the HTTP server.
 //
 // Middleware chain (outer -> inner):
-//   recover -> logging -> CORS -> basicAuth -> bodyLimit -> mux
+//   recover -> logging -> CORS -> basicAuth -> callerIdentity -> bodyLimit -> mux
 //
 // CORS is outside basicAuth so that preflight (OPTIONS) requests succeed for
 // allowed origins even when the caller has not yet sent credentials — auth
 // UAs cannot attach credentials to a preflight. The body-limit middleware
 // sits inside auth because unauthenticated traffic is already rejected by
-// auth; caps only matter for requests that reach a handler.
+// auth; caps only matter for requests that reach a handler. callerIdentity
+// sits between auth and bodyLimit so that only authenticated requests get
+// a caller-identity stamped on the context; see caller_identity.go for the
+// G-6.3 header contract.
 func (s *Server) ListenAndServe() error {
 	handler := s.recoverMiddleware(
 		s.loggingMiddleware(
 			s.corsMiddleware(
 				basicAuthMiddleware(
-					s.bodyLimitMiddleware(s.mux),
+					callerIdentityMiddleware(
+						s.bodyLimitMiddleware(s.mux),
+					),
 				),
 			),
 		),
@@ -175,7 +180,9 @@ func (s *Server) newHTTPServer(addr string) *http.Server {
 		s.loggingMiddleware(
 			s.corsMiddleware(
 				basicAuthMiddleware(
-					s.bodyLimitMiddleware(s.mux),
+					callerIdentityMiddleware(
+						s.bodyLimitMiddleware(s.mux),
+					),
 				),
 			),
 		),
@@ -251,7 +258,12 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			// Custom headers must appear here or browser preflight rejects them:
+			//   - X-Nanite-Caller-Session / X-Nanite-Caller-Agent: caller identity
+			//     plumbed by callerIdentityMiddleware (see caller_identity.go).
+			//   - X-Nanite-Agent-Kind: CLI-provenance flag consumed by the send
+			//     handler (see internal/api/messaging.go).
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Nanite-Caller-Session, X-Nanite-Caller-Agent, X-Nanite-Agent-Kind")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

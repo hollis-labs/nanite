@@ -213,11 +213,20 @@ func (svc *Service) RecentForSession(ctx context.Context, sessionID string, limi
 }
 
 // UnreadCount returns the count of unread messages for (sessionID,
-// agentID). Thin pass-through — adding a caller-match defensive check
-// here would pair with Inbox, but the unread count does not leak
-// content, and the existing HTTP handler does not have caller
-// identity plumbed yet. Revisit when caller-identity-from-ctx lands.
+// agentID). When a CallerIdentity is carried on ctx (set by the HTTP
+// caller-identity middleware — see internal/messaging/caller.go and
+// internal/server/caller_identity.go), the caller tuple must match
+// the inbox owner; mismatches return ErrForbidden to pair with the
+// Inbox / Thread / Ack / Resolve caller-match pattern. When no
+// identity is plumbed, the check falls open — matches the pre-G-6.3
+// MVP trust-the-query behavior for MCP and CLI callers that have not
+// yet been wired through ctx.
 func (svc *Service) UnreadCount(ctx context.Context, sessionID, agentID string) (int, error) {
+	if caller, ok := CallerFromCtx(ctx); ok {
+		if caller.SessionID != sessionID || caller.AgentID != agentID {
+			return 0, fmt.Errorf("%w: caller does not match inbox owner", ErrForbidden)
+		}
+	}
 	return svc.store.UnreadCount(ctx, sessionID, agentID)
 }
 

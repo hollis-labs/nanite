@@ -14,6 +14,8 @@ The `"user"` value is reserved: you cannot create an agent with slug `"user"`, a
 
 Unknown `from_agent_id`s are **auto-registered** on first send with `kind='external'` (or `'cli'` when invoked via CLI). Callers don't have to pre-register.
 
+For non-user CLI senders (scripts, cron, automation), pass `--cli` on `nanite message send` so the CLI substitutes a deterministic `cli-<hostname>-<pid>-<start-unix>` id when `--from` is omitted. All sends within the same process share this id so replies accumulate in a single inbox; a new process (new PID + start-unix) gets a fresh id. Humans piping into `nanite message send` without `--cli` keep the default `user` sentinel.
+
 ## Channel / Kind / EnvelopeType
 
 Every message carries three orthogonal axes (introduced in S7):
@@ -29,11 +31,14 @@ Channel selection is policy, not enforced by code. Default to `chat` for in-sess
 ## CLI
 
 ```bash
-# Send a message to an agent.
+# Send a message to an agent (from the user — default behavior).
 nanite message send --session <sid> --to file-backend --subject "question" --body "what file handles auth?"
 
 # Send a message to the user.
 nanite message send --session <sid> --to user --body "I finished the refactor."
+
+# Send from a non-user CLI caller (deterministic from_agent_id auto-computed).
+nanite message send --cli --session <sid> --to file-backend --body "build-status: ok"
 
 # Read an agent's inbox.
 nanite message inbox --session <sid> --agent file-backend
@@ -111,6 +116,23 @@ Handoff is not exposed at the MCP layer — it's user-approval gated and runs th
 ## Push notifications
 
 Every successful send fires a `message_received` SSE event on the recipient's session stream (via the `NotificationSink` bridge into `StreamManager`). Agents subscribed to their session's SSE stream receive messages without polling.
+
+### SSE stream route
+
+```
+GET /api/stream/{messageID}
+```
+
+The `{messageID}` path segment is the **in-flight chat message ID** — the id of the current turn's generation stream on the recipient's session, not a messaging-envelope id. Subscribing to a session's SSE stream today means opening this endpoint on whatever `messageID` is currently streaming for that session. While the connection is open, every `message_received` event targeted at the session is fanned out to it (along with chat deltas, `subagent_run_status_changed`, `plugin_envelope`, and other session-scoped events) as `event: message_received` frames with a JSON payload containing `{ message_id, channel, kind, from_session_id, from_agent_id, to_session_id, to_agent_id, thread_id, subject?, summary }`.
+
+Example subscribe + filter (curl):
+
+```bash
+curl -N http://127.0.0.1:8090/api/stream/<messageID> \
+  | grep -A1 '^event: message_received'
+```
+
+When no generation is currently in flight for a session, there is no active per-message stream — new messages still persist to `agent_messages` and write `message_received` rows to `session_events`, so recipients pick them up on their next inbox poll. The SSE push is a best-effort "UI already open" hint, not a durable delivery channel.
 
 Every send / ack / resolve also writes rows to `session_events` for replay and context-broker consumption.
 

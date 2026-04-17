@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
@@ -17,6 +18,47 @@ import (
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// cliProcessStartUnix captures the unix time at the CLI process's
+// entry so that every send within the same process produces the same
+// deterministic from_agent_id (G-1 convention). Package-level so
+// multiple subcommand invocations from a single process agree; tests
+// override cliProcessStartUnix directly.
+var cliProcessStartUnix = time.Now().Unix()
+
+// cliHostnameFn is indirected for tests.
+var cliHostnameFn = os.Hostname
+
+// cliDeterministicFromAgentID computes the deterministic G-1 default
+// for a non-user CLI sender: cli-<hostname>-<pid>-<start-unix>.
+// Hostname errors fall back to the literal "unknown". Returned id is
+// safe to pass as SendInput.FromAgentID with RegisterAs="cli" — the
+// auto-register hook stamps kind='cli' on first use.
+func cliDeterministicFromAgentID() string {
+	host, err := cliHostnameFn()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	// Sanitize hostname: agent_id is treated as an opaque identifier,
+	// but keeping it shell/URL-friendly simplifies logs and tests.
+	// Lower-case, strip anything outside [a-z0-9-].
+	host = strings.ToLower(host)
+	var b strings.Builder
+	b.Grow(len(host))
+	for _, r := range host {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		case r == '.' || r == '_':
+			b.WriteRune('-')
+		}
+	}
+	sanitized := strings.Trim(b.String(), "-")
+	if sanitized == "" {
+		sanitized = "unknown"
+	}
+	return fmt.Sprintf("cli-%s-%d-%d", sanitized, os.Getpid(), cliProcessStartUnix)
+}
 
 // cmdMessage is the entry point for the `nanite message ...` command group. It
 // parses a single optional top-level flag (--db) that must appear before
@@ -81,7 +123,8 @@ func messageSend(svc *messaging.Service, args []string) {
 	fs := flag.NewFlagSet("message send", flag.ExitOnError)
 	session := fs.String("session", "", "session id")
 	to := fs.String("to", "", "to agent id (or 'user')")
-	from := fs.String("from", "user", "from agent id")
+	from := fs.String("from", "user", "from agent id (default 'user' sentinel; pass --cli or an explicit id for non-user sends)")
+	cliMode := fs.Bool("cli", false, "treat sender as a non-user CLI caller: when --from is omitted (or left at the 'user' default), a deterministic id cli-<hostname>-<pid>-<start-unix> is substituted and auto-registered with kind='cli'")
 	subject := fs.String("subject", "", "subject line")
 	body := fs.String("body", "", "message body")
 	msgType := fs.String("type", "message", "message type")
@@ -101,9 +144,21 @@ func messageSend(svc *messaging.Service, args []string) {
 		fmt.Fprintf(os.Stderr, "message send: missing required flag(s): %s\n", strings.Join(missing, ", "))
 		os.Exit(1)
 	}
+
+	// G-1: When the caller explicitly flags non-user CLI mode AND leaves
+	// --from at the user-sentinel default (or empty), substitute the
+	// deterministic id so auto-register stamps a stable provenance row
+	// instead of short-circuiting on the user sentinel. Explicit
+	// --from=<id> always wins; explicit --from=user with --cli is
+	// treated as "I want a deterministic CLI id, not literal user".
+	fromID := *from
+	if *cliMode && (fromID == "" || fromID == messaging.UserSentinel) {
+		fromID = cliDeterministicFromAgentID()
+	}
+
 	msg := messaging.SendInput{
 		FromSessionID: *session,
-		FromAgentID:   *from,
+		FromAgentID:   fromID,
 		ToSessionID:   *session,
 		ToAgentID:     *to,
 		Subject:       *subject,
@@ -111,7 +166,9 @@ func messageSend(svc *messaging.Service, args []string) {
 		Type:          *msgType,
 		// CLI callers flag themselves so auto-register stamps the
 		// right provenance on an unknown from id. Safe no-op when
-		// the id already resolves.
+		// the id already resolves. For the literal 'user' sentinel
+		// the service skips auto-register entirely (see
+		// maybeAutoRegister).
 		RegisterAs: "cli",
 	}
 	out, err := svc.SendMessage(context.Background(), msg)

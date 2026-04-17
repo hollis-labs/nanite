@@ -90,10 +90,10 @@ func TestDrainCapture_CapturesStreamEndEnvelope(t *testing.T) {
 	}
 }
 
-// TestDrainCapture_StreamEndEnvelopePrefersPluginEnvelope verifies
-// precedence: a mid-stream plugin_envelope is kept when stream_end
-// has no Envelope (it was already captured by last-wins). If both
-// are present, stream_end wins (it's the terminal, aggregated truth).
+// TestDrainCapture_StreamEndEnvelopeWinsOverMidStream verifies that
+// when both a mid-stream plugin_envelope and a terminal stream_end
+// carry an Envelope, stream_end wins — it's the aggregated truth that
+// production generateResponse emits last (chat_generate.go:837).
 func TestDrainCapture_StreamEndEnvelopeWinsOverMidStream(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 4)
 	ch <- chat.StreamEvent{Type: "plugin_envelope", Envelope: `{"mid":1}`}

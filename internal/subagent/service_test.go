@@ -525,3 +525,51 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 		t.Errorf("error = %q, want empty on cancel path", errStr)
 	}
 }
+
+// TestCancel_UnblocksRunnerEvenWhenDBUpdateFails verifies that Cancel
+// still invokes the registered CancelFunc when the DB UPDATE errors —
+// otherwise the runner goroutine would leak even though the caller
+// asked us to stop it. Simulated by closing the underlying DB before
+// calling Cancel; ExecContext returns an error but the deferred
+// CancelFunc path must still fire.
+func TestCancel_UnblocksRunnerEvenWhenDBUpdateFails(t *testing.T) {
+	db, _ := newTestDB(t)
+	runner := &slowRunner{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	svc := NewService(db, runner, &stubPoster{})
+
+	id, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "slow task",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not start within 1s")
+	}
+
+	// Force the Cancel UPDATE to error.
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close: %v", err)
+	}
+
+	cancelErr := svc.Cancel(context.Background(), id)
+	if cancelErr == nil {
+		t.Fatal("expected Cancel to return an error after db close")
+	}
+
+	// The CancelFunc must still have fired so the runner exits.
+	select {
+	case <-runner.done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("runner did not exit within 500ms — CancelFunc was skipped after DB error")
+	}
+}

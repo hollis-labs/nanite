@@ -278,6 +278,15 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 		slog.Warn("subagent: finalize run", "err", err, "run_id", run.ID)
 	}
 
+	// G-5: emit terminal event after finalizeRun commits, before the
+	// reply post. Parent UI sees "subagent done, posting reply..." if
+	// reply delivery is slow.
+	terminalPreview := ""
+	if result != nil {
+		terminalPreview = result.Summary
+	}
+	svc.emitStatus(run, terminalPreview)
+
 	if svc.poster == nil || parentAgentID == "" {
 		return
 	}

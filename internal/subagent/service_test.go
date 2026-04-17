@@ -401,3 +401,64 @@ func TestSpawn_EmitsRunningEventBeforeRunner(t *testing.T) {
 	}
 	<-doneCh
 }
+
+func TestSpawn_EmitsTerminalEventOnComplete(t *testing.T) {
+	db, _ := newTestDB(t)
+	sink := &recordingSink{}
+	svc := NewService(db, EchoRunner{}, &stubPoster{})
+	svc.SetStreamSink(sink)
+
+	_, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "ok",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	events := sink.snapshot()
+	if len(events) < 2 {
+		t.Fatalf("expected >= 2 events (running + terminal), got %d", len(events))
+	}
+	terminal := events[len(events)-1]
+	if got := terminal.Payload["status"]; got != "completed" {
+		t.Errorf("terminal status = %v, want completed", got)
+	}
+	preview, _ := terminal.Payload["summary_preview"].(string)
+	if preview == "" {
+		t.Error("summary_preview empty for completed run")
+	}
+}
+
+func TestSpawn_EmitsTerminalEventOnFailure(t *testing.T) {
+	db, _ := newTestDB(t)
+	sink := &recordingSink{}
+	svc := NewService(db, failRunner{}, &stubPoster{})
+	svc.SetStreamSink(sink)
+
+	_, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "will fail",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	events := sink.snapshot()
+	if len(events) < 2 {
+		t.Fatalf("expected >= 2 events, got %d", len(events))
+	}
+	terminal := events[len(events)-1]
+	if got := terminal.Payload["status"]; got != "failed" {
+		t.Errorf("terminal status = %v, want failed", got)
+	}
+	if errStr, _ := terminal.Payload["error"].(string); errStr == "" {
+		t.Error("error field empty for failed run")
+	}
+}

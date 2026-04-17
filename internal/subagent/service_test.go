@@ -526,6 +526,29 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 	}
 }
 
+func TestSpawn_PersistsParentAgentID(t *testing.T) {
+	db, _ := newTestDB(t)
+	svc := NewService(db, EchoRunner{}, &stubPoster{})
+
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "primary-agent",
+		Role:            "file-backend",
+		Prompt:          "x",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	run, err := svc.Status(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if got, want := run.ParentAgentID, "primary-agent"; got != want {
+		t.Errorf("parent_agent_id = %q, want %q", got, want)
+	}
+}
+
 // TestCancel_UnblocksRunnerEvenWhenDBUpdateFails verifies that Cancel
 // still invokes the registered CancelFunc when the DB UPDATE errors —
 // otherwise the runner goroutine would leak even though the caller

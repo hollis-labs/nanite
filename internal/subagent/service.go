@@ -144,6 +144,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	run := &Run{
 		ID:              uuid.New().String(),
 		ParentSessionID: req.ParentSessionID,
+		ParentAgentID:   req.ParentAgentID,
 		Role:            req.Role,
 		Prompt:          req.Prompt,
 		Mode:            mode,
@@ -347,11 +348,17 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 	_, err := svc.db.ExecContext(ctx,
 		`INSERT INTO subagent_runs (id, parent_session_id, child_session_id, role, prompt,
 		                            mode, status, inputs_json, result_json, error,
-		                            timeout_seconds, created_at, started_at, completed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                            timeout_seconds, created_at, started_at, completed_at,
+		                            parent_agent_id, envelope_instance_id,
+		                            approved_at, approved_by,
+		                            rejected_at, rejection_reason)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.ParentSessionID, r.ChildSessionID, r.Role, r.Prompt,
 		r.Mode, r.Status, r.InputsJSON, r.ResultJSON, r.Error,
 		r.TimeoutSeconds, r.CreatedAt, r.StartedAt, r.CompletedAt,
+		r.ParentAgentID, r.EnvelopeInstanceID,
+		r.ApprovedAt, r.ApprovedBy,
+		r.RejectedAt, r.RejectionReason,
 	)
 	return err
 }
@@ -400,7 +407,9 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
 // selectSQL is the canonical SELECT clause for subagent_runs rows.
 const selectSQL = `SELECT id, parent_session_id, child_session_id, role, prompt,
 	mode, status, inputs_json, result_json, error,
-	timeout_seconds, created_at, started_at, completed_at
+	timeout_seconds, created_at, started_at, completed_at,
+	parent_agent_id, envelope_instance_id, approved_at, approved_by,
+	rejected_at, rejection_reason
 	FROM subagent_runs`
 
 func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
@@ -409,6 +418,9 @@ func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 		&r.ID, &r.ParentSessionID, &r.ChildSessionID, &r.Role, &r.Prompt,
 		&r.Mode, &r.Status, &r.InputsJSON, &r.ResultJSON, &r.Error,
 		&r.TimeoutSeconds, &r.CreatedAt, &r.StartedAt, &r.CompletedAt,
+		&r.ParentAgentID, &r.EnvelopeInstanceID,
+		&r.ApprovedAt, &r.ApprovedBy,
+		&r.RejectedAt, &r.RejectionReason,
 	); err != nil {
 		return nil, err
 	}

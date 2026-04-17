@@ -258,7 +258,12 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			// Custom headers must appear here or browser preflight rejects them:
+			//   - X-Nanite-Caller-Session / X-Nanite-Caller-Agent: caller identity
+			//     plumbed by callerIdentityMiddleware (see caller_identity.go).
+			//   - X-Nanite-Agent-Kind: CLI-provenance flag consumed by the send
+			//     handler (see internal/api/messaging.go).
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Nanite-Caller-Session, X-Nanite-Caller-Agent, X-Nanite-Agent-Kind")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

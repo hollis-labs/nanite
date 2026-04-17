@@ -47,6 +47,53 @@ func TestWithCaller_ZeroIsNoOp(t *testing.T) {
 	}
 }
 
+// TestCallerIdentity_IsComplete pins down the all-or-nothing predicate
+// used by WithCaller: both fields must be populated for the identity to
+// be considered trustworthy enough to stamp on ctx.
+func TestCallerIdentity_IsComplete(t *testing.T) {
+	tests := []struct {
+		name string
+		id   CallerIdentity
+		want bool
+	}{
+		{"both empty", CallerIdentity{}, false},
+		{"session only", CallerIdentity{SessionID: "s"}, false},
+		{"agent only", CallerIdentity{AgentID: "a"}, false},
+		{"both set", CallerIdentity{SessionID: "s", AgentID: "a"}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.id.IsComplete(); got != tc.want {
+				t.Fatalf("IsComplete=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWithCaller_PartialIsNoOp guards the all-or-nothing contract: a
+// CallerIdentity with only one of (SessionID, AgentID) populated must
+// NOT be stamped on ctx. Stamping a partial identity would flip
+// service-layer authz checks from fall-open to enforce (or trigger 400s
+// in resolveCaller) without an actual authenticated caller behind it —
+// see WithCaller doc comment.
+func TestWithCaller_PartialIsNoOp(t *testing.T) {
+	tests := []struct {
+		name string
+		id   CallerIdentity
+	}{
+		{"session only", CallerIdentity{SessionID: "s"}},
+		{"agent only", CallerIdentity{AgentID: "a"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := WithCaller(context.Background(), tc.id)
+			if _, ok := CallerFromCtx(ctx); ok {
+				t.Fatalf("partial CallerIdentity %+v must NOT be stamped on ctx", tc.id)
+			}
+		})
+	}
+}
+
 func TestCallerFromCtx_NilCtx(t *testing.T) {
 	if _, ok := CallerFromCtx(nil); ok {
 		t.Fatal("nil ctx must report caller-absent")

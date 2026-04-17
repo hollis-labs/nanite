@@ -35,11 +35,22 @@ type CallerIdentity struct {
 }
 
 // IsZero reports whether the identity is unset (both fields empty).
-// Handlers use this to decide whether the ctx-carried identity should
-// override body/query-derived caller args or whether to fall back to
-// the legacy shape.
+// Distinct from partial identity (only one field set), which IsComplete
+// rejects. Preserved as "both empty" for any caller that cares about the
+// strict all-empty state.
 func (c CallerIdentity) IsZero() bool {
 	return c.SessionID == "" && c.AgentID == ""
+}
+
+// IsComplete reports whether BOTH fields are populated. The HTTP header
+// contract (X-Nanite-Caller-Session + X-Nanite-Caller-Agent) is
+// all-or-nothing, and service-layer authz checks compare on (session,
+// agent) pairs — a partial identity would flip authz semantics
+// (fall-open vs enforce) or trigger 400s in resolveCaller. Handlers and
+// WithCaller use this predicate to decide whether an identity is
+// trustworthy enough to stamp on ctx.
+func (c CallerIdentity) IsComplete() bool {
+	return c.SessionID != "" && c.AgentID != ""
 }
 
 // callerCtxKey is the private context key used to carry
@@ -49,11 +60,15 @@ func (c CallerIdentity) IsZero() bool {
 type callerCtxKey struct{}
 
 // WithCaller returns a new context carrying the given CallerIdentity.
-// If id.IsZero(), the original ctx is returned unchanged — zero
-// identity is equivalent to "no caller plumbed" and should fall
-// through to any parent ctx's identity.
+// Only a COMPLETE identity (both SessionID and AgentID populated) is
+// stamped; zero or partial identities return the original ctx unchanged
+// and fall through to any parent ctx's identity. This matches the
+// HTTP X-Nanite-Caller-Session/Agent header contract, which is
+// all-or-nothing — a partial identity would otherwise flip service-layer
+// authz checks from fall-open to enforce (or cause resolveCaller to 400)
+// without a legitimate caller behind it.
 func WithCaller(ctx context.Context, id CallerIdentity) context.Context {
-	if id.IsZero() {
+	if !id.IsComplete() {
 		return ctx
 	}
 	return context.WithValue(ctx, callerCtxKey{}, id)
@@ -61,9 +76,9 @@ func WithCaller(ctx context.Context, id CallerIdentity) context.Context {
 
 // CallerFromCtx extracts the CallerIdentity carried on ctx. The
 // second return is false when no identity was plumbed — callers can
-// distinguish "identity known and empty" (never happens because
-// WithCaller rejects zero values) from "identity not set, fall back
-// to legacy behavior."
+// distinguish "identity known and incomplete" (never happens because
+// WithCaller rejects zero/partial values) from "identity not set, fall
+// back to legacy behavior."
 func CallerFromCtx(ctx context.Context) (CallerIdentity, bool) {
 	if ctx == nil {
 		return CallerIdentity{}, false

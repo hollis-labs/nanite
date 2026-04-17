@@ -23,7 +23,7 @@ import (
 // entry so that every send within the same process produces the same
 // deterministic from_agent_id (G-1 convention). Package-level so
 // multiple subcommand invocations from a single process agree; tests
-// override via cliStartUnixForTest.
+// override cliProcessStartUnix directly.
 var cliProcessStartUnix = time.Now().Unix()
 
 // cliHostnameFn is indirected for tests.

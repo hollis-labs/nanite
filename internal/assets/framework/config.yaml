@@ -42,12 +42,23 @@ roles:
     file: stack/react.md
     type: stack
     description: React/Next.js/shadcn/Tailwind conventions
+  vercel:
+    file: stack/vercel.md
+    type: stack
+    description: Vercel-flavored React ecosystem (Vite/Next.js/TS/Tailwind/shadcn) + design sensibility
 
   # Meta roles — roles/meta/
   nanite-agent-manager:
     file: meta/nanite-agent-manager.md
     type: meta
     description: Develop and maintain the Nanite agent framework
+
+# ─── Defaults ────────────────────────────────────────────
+# Skills and tools loaded for every agent, on top of agent-specific lists.
+# Agent-specific skills/tools are additive — they never replace defaults.
+
+default_skills: [fast-triage, end-of-session, escalate]
+default_tools:  [engine, cortex, hadron, cerberus]
 
 # ─── Docs ────────────────────────────────────────────────
 # Framework reference doc. nanite-agent-manager role keeps this current.
@@ -117,6 +128,9 @@ projects:
   sigil:     { root: ~/Projects-apps/sigil, lang: go, description: UI generation engine }
   lnklst:    { root: ~/Projects-apps/lnklst, lang: go, description: Link list app }
   suds-v2:   { root: ~/Projects-apps/suds-v2, lang: typescript, description: MUD game (Next.js) }
+
+  # Tools (standalone apps used by CLI agent sessions)
+  fast-triage: { root: ~/Projects-apps/fast-triage, lang: typescript, description: "Fast Triage — standalone Vite/React app for structured feedback collection + item triage (CLI agent tool)" }
 
   # Sites
   fragmentsengine.com: { root: ~/Projects-apps/fragmentsengine.com, type: static-site, description: Marketing site }

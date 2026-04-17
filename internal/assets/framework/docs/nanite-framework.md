@@ -52,6 +52,55 @@ The agent config schema maps directly to Nexus `AgentConfig`:
 
 A Nanite agent config can be serialized into a Nexus `RegisterInput` for DB-backed agent infrastructure.
 
+## Playbook Model
+
+A playbook is a parameterized session template — a reusable pattern for exploration, research, and cross-project work. Unlike agents (fixed persona for a project), playbooks take variable inputs and produce session contexts.
+
+```yaml
+# ~/.nanite/playbooks/explore.md frontmatter
+name: Cross-Project Explorer
+description: Ideation, research, and planning across multiple codebases
+inputs:
+  goal: { required: true, description: "What are we exploring and why" }
+  projects: { required: true, description: "Project slugs or paths (comma-separated)" }
+  output_dir: { required: false, default: "exploration/", description: "Where artifacts land" }
+roles: [strategic-planner]
+skills: [doc-search, adr, blg, vault-search]
+read_only: true
+```
+
+### How playbooks differ from agents
+
+| | Agent | Playbook |
+|---|---|---|
+| Identity | Named persona with fixed role composition | Session pattern with variable inputs |
+| Reuse | Same config every time | Same template, different inputs per session |
+| Scope | Single project | Often cross-project |
+| Lifecycle | Persistent definition | Instantiated per session |
+| Output | Code/artifacts in the target project | Plans, docs, analysis in the workspace |
+
+### Activation
+
+- `Boot <playbook-name>` — with inputs inline or prompted
+- `/playbook <name> <args>` — via the playbook command/skill
+- `/playbook` — list available playbooks
+
+Resolution order: agents → playbooks → roles (first match wins).
+
+### Design rules
+
+1. **Playbooks don't build.** They explore, research, plan, and produce documents. Build work uses agents.
+2. **Inputs are declared, not implied.** Every variable the playbook needs is in the `inputs:` frontmatter.
+3. **`read_only: true` is enforced.** Sessions must not modify target project directories.
+4. **Output goes to the workspace.** Playbook artifacts land in the output directory, not in target projects.
+5. **Playbooks are templates, not scripts.** The LLM interprets the rendered playbook as session context. There is no execution engine — the structure guides the session.
+
+### Current playbooks
+
+| Playbook | Purpose |
+|----------|---------|
+| explore | Cross-project capability mapping, overlap analysis, gap identification |
+
 ## Role Architecture
 
 Roles are organized by type in `~/.nanite/roles/`:
@@ -89,11 +138,12 @@ Agents compose domain + stack: `[backend, go]`, `[frontend, react]`, `[auditor, 
 
 ```
 ~/.nanite/
-├── config.yaml        # Global config: version, roles, agent schema, projects
+├── config.yaml        # Global config: version, roles, default_skills, default_tools, agent schema, projects
 ├── agent-boot.md      # Session boot rules (loaded at session start)
 ├── roles/             # Role definitions (domain/, stack/, meta/)
 ├── skills/            # Skill definitions (procedures)
 ├── commands/          # Command stubs (slash command entry points)
+├── playbooks/         # Playbook templates (parameterized session patterns)
 ├── templates/         # Context doc templates, CLAUDE.md template
 ├── docs/              # Framework documentation (this file)
 └── hooks/             # Hook scripts (enforcement)
@@ -129,6 +179,21 @@ Directories archived: `boot/`, `pcc/`, `tasks/`, `logs/`, `state/`, `backlog/`, 
 
 Any `*.md` context docs found in `.nanite/` root (not in `agents/`) are moved to `.nanite/agents/` with a warning if no agent definition references the migrated doc.
 
+## Default Skills and Tools
+
+The global config (`~/.nanite/config.yaml`) defines `default_skills` and `default_tools` — loaded for every agent session on top of agent-specific lists.
+
+```yaml
+default_skills: [fast-triage, end-of-session, escalate]
+default_tools:  [engine, cortex, hadron, cerberus]
+```
+
+**default_skills** — Skills every agent gets regardless of its `skills:` array. Agent-specific skills are additive; they never replace defaults. A skill belongs here when every agent benefits from having it (e.g., structured user input, session handoff, blocker escalation).
+
+**default_tools** — MCP tools expected in every session. Informational — nanite doesn't start MCP servers, but agents should expect these tools to be available and flag if they're missing.
+
+When booting an agent, the effective skill set is: `default_skills ∪ agent.skills` (deduplicated).
+
 ## Skill Design Rules
 
 ### Output contracts matter
@@ -145,7 +210,7 @@ Everything an agent outputs consumes context window tokens. Design skills to pro
 
 ### Current skills
 
-18 shared skills (in `~/.nanite/skills/`) + 1 vendor skill (in `~/.nanite/vendor/`).
+20 shared skills (in `~/.nanite/skills/`) + 1 vendor skill (in `~/.nanite/vendor/`).
 
 | Skill | Purpose | Mode |
 |-------|---------|------|
@@ -166,6 +231,8 @@ Everything an agent outputs consumes context window tokens. Design skills to pro
 | go-test | Run Go tests | inline |
 | nanite-agent-manage | Create roles, context, skills, agent definitions | sub-agent |
 | shadcn-install | Add shadcn MCP + skill to a project | inline |
+| fast-triage | Structured feedback + item triage via browser UI | inline |
+| playbook | List, inspect, or boot session playbooks | inline |
 | nanite/ | Nanite knowledge vault skills | inline |
 
 ### Vendor skills
@@ -182,7 +249,7 @@ Vendor skills are third-party skill packages stored in `~/.nanite/vendor/` (not 
 
 ### Current commands
 
-18 command stubs in `~/.nanite/commands/`. Each is a slash-command entry point that delegates to its matching skill.
+20 command stubs in `~/.nanite/commands/`. Each is a slash-command entry point that delegates to its matching skill.
 
 | Command | Delegates to | Notes |
 |---------|-------------|-------|
@@ -203,6 +270,8 @@ Vendor skills are third-party skill packages stored in `~/.nanite/vendor/` (not 
 | /go-test | go-test | |
 | /nanite-agent-manage | nanite-agent-manage | |
 | /shadcn-install | shadcn-install | Add shadcn to a frontend project |
+| /fast-triage | fast-triage | Structured feedback + item triage via browser UI |
+| /playbook | playbook | List/inspect/boot playbooks |
 | /boot-prompt | boot-prompt | |
 
 ## Hook Design Rules
@@ -232,12 +301,12 @@ Auto-generated timestamps (YYYYMMDD-HHMMSS-4random). Meaning from namespace, typ
 ### Lifecycle
 All agent writes start as `draft`. Promotion to `canonical` requires explicit action.
 
-## Config Schema (v2.2.0)
+## Config Schema (v2.3.0)
 
 Single config file at `~/.nanite/config.yaml`:
 
 ```yaml
-version: 2.2.0
+version: 2.3.0
 
 roles:
   <name>:
@@ -251,6 +320,8 @@ projects:
     lang: <language>
     description: <one-liner>
 ```
+
+Playbooks are file-based (not config-based). They live in `~/.nanite/playbooks/` and are discovered by directory listing. No config entry needed.
 
 ### Project registry
 
@@ -297,6 +368,7 @@ All skills and commands reference `mcp__engine__*` tools. The legacy `mcp__volon
 
 ## Version History
 
+- **v2.3.0** — Playbooks: parameterized session templates. New primitive type in `~/.nanite/playbooks/`. `/playbook` command and skill. Boot loader updated: agents → playbooks → roles resolution order. First playbook: `explore` (cross-project capability mapping). 20 skills, 20 commands.
 - **v2.2.0** — Agent composition model. Roles split into domain/stack/meta. Named agents in project config. projects.yaml absorbed into config.yaml. Context files moved to agents/ dir. 18 skills, 18 commands. Monorepo modules registered as individual projects. Legacy archive convention (`.agentrc-legacy/`). `mcp__engine__*` replaces `mcp__volon__*`. `backend` and `frontend` roles gain `## What NOT to do` sections. `/health-check` aliased to `/qhealth`. All 14 portfolio projects on v2.2.0.
 - **v2.1.0** — Install/uninstall system. Directory symlinks. Three-tier install model.
 - **v2.0.0** — Initial framework. Roles, skills, commands, hooks.

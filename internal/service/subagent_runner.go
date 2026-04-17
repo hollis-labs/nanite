@@ -79,6 +79,14 @@ type agentSlugResolver interface {
 type sessionStoreForRunner interface {
 	CreateSession(*store.Session) error
 	GetSession(id string) (*store.Session, error)
+	EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error
+}
+
+// chatInvoker is the narrow surface the runner needs from
+// chatServiceImpl. Lets tests swap in a fake without exporting
+// generateResponse. Satisfied structurally by *chatServiceImpl.
+type chatInvoker interface {
+	generateResponse(ctx context.Context, sessionID, msgID, prompt string, ch chan chat.StreamEvent)
 }
 
 // ChatRunner implements subagent.Runner by driving a single assistant
@@ -90,12 +98,34 @@ type ChatRunner struct {
 	agents agentSlugResolver
 	store  sessionStoreForRunner
 	db     *sql.DB
+
+	// Test-only override hooks. Production wiring leaves these nil; the
+	// runner falls back to r.chat.generateResponse and the real DB UPDATE.
+	invoker   chatInvoker
+	persistFn func(ctx context.Context, runID, childID string) error
 }
 
 // NewChatRunner constructs a runner. All deps are required in production;
 // tests can leave fields unset when they don't exercise that code path.
 func NewChatRunner(c *chatServiceImpl, agents agentSlugResolver, st sessionStoreForRunner, db *sql.DB) *ChatRunner {
 	return &ChatRunner{chat: c, agents: agents, store: st, db: db}
+}
+
+// invokeChat delegates to the test override or the real generateResponse.
+func (r *ChatRunner) invokeChat(ctx context.Context, sessionID, msgID, prompt string, ch chan chat.StreamEvent) {
+	if r.invoker != nil {
+		r.invoker.generateResponse(ctx, sessionID, msgID, prompt, ch)
+		return
+	}
+	r.chat.generateResponse(ctx, sessionID, msgID, prompt, ch)
+}
+
+// persistChild delegates to the test override or the real persistChildSessionID.
+func (r *ChatRunner) persistChild(ctx context.Context, runID, childID string) error {
+	if r.persistFn != nil {
+		return r.persistFn(ctx, runID, childID)
+	}
+	return r.persistChildSessionID(ctx, runID, childID)
 }
 
 // resolveRole looks up the role slug in the agent registry. Wraps the
@@ -111,8 +141,9 @@ func (r *ChatRunner) resolveRole(slug string) (*store.AgentProfile, error) {
 
 // createChildSession builds a persisted child session row bound to the
 // resolved agent's provider/model defaults. Workspace inherits from
-// the parent session. Agent-session binding (session_agents row) is
-// deferred to Task 8 when generateResponse is wired.
+// the parent session. The child session is bound to the agent via
+// EnsureSessionAgent so generateResponse's ResolveForSession lookup
+// (chat_generate.go:88) finds the row.
 func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, agent *store.AgentProfile) (string, error) {
 	parent, err := r.store.GetSession(run.ParentSessionID)
 	if err != nil {
@@ -127,6 +158,12 @@ func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 		Title:       fmt.Sprintf("subagent: %s — %s", run.Role, truncatePrompt(run.Prompt, 60)),
 	}); err != nil {
 		return "", fmt.Errorf("create child session: %w", err)
+	}
+	// Bind the child session to the resolved agent so generateResponse's
+	// ResolveForSession lookup finds it. Without this, chat_generate.go:88
+	// returns "Failed to resolve agent".
+	if err := r.store.EnsureSessionAgent(childID, agent.ID, "default", true); err != nil {
+		return "", fmt.Errorf("bind child session to agent: %w", err)
 	}
 	return childID, nil
 }
@@ -144,11 +181,10 @@ func (r *ChatRunner) persistChildSessionID(ctx context.Context, runID, childID s
 	return nil
 }
 
-// Run is the skeleton for the runner interface. Task 8 finishes this
-// function by launching generateResponse, draining via drainCapture,
-// and assembling the Result. Role resolution is live so
-// TestChatRunner_ResolveRoleFails passes; the chat invocation returns
-// a sentinel error.
+// Run executes one assistant turn for the subagent run. It resolves the
+// role to an agent profile, creates a child session (bound to the agent),
+// persists the child session ID, then drives generateResponse in a
+// goroutine and drains the resulting stream into a Result.
 func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Result, error) {
 	agent, err := r.resolveRole(run.Role)
 	if err != nil {
@@ -158,11 +194,25 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	if err != nil {
 		return nil, err
 	}
-	if err := r.persistChildSessionID(ctx, run.ID, childID); err != nil {
+	if err := r.persistChild(ctx, run.ID, childID); err != nil {
 		return nil, err
 	}
 	run.ChildSessionID = childID
-	return nil, errors.New("subagent runner: chat invocation not yet wired (Task 8)")
+
+	// Drive one assistant turn. invokeChat closes the channel via its
+	// defer (or the fake's equivalent), so drainCapture exits naturally.
+	assistantMsgID := uuid.New().String()
+	captureCh := make(chan chat.StreamEvent, 64)
+	go r.invokeChat(ctx, childID, assistantMsgID, run.Prompt, captureCh)
+
+	summary, envelope, runErr := drainCapture(captureCh)
+	if runErr != nil {
+		return nil, runErr
+	}
+	if summary == "" {
+		summary = fmt.Sprintf("subagent %s completed without text response", run.Role)
+	}
+	return &subagent.Result{Summary: summary, ResultJSON: envelope}, nil
 }
 
 // truncatePrompt shortens s to at most n bytes, appending an ellipsis

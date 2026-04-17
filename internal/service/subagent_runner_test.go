@@ -149,3 +149,88 @@ func TestChatRunner_ResolveRoleFails(t *testing.T) {
 		t.Errorf("error = %v, want wrapped role-not-found", err)
 	}
 }
+
+// recordingSessionStore implements sessionStoreForRunner in memory.
+type recordingSessionStore struct {
+	created  []*store.Session
+	parents  map[string]*store.Session
+	bindings []sessionAgentBinding
+}
+
+type sessionAgentBinding struct {
+	sessionID, agentID, mode string
+	isPrimary                bool
+}
+
+func (r *recordingSessionStore) CreateSession(s *store.Session) error {
+	r.created = append(r.created, s)
+	return nil
+}
+
+func (r *recordingSessionStore) GetSession(id string) (*store.Session, error) {
+	if s, ok := r.parents[id]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("session not found: %s", id)
+}
+
+func (r *recordingSessionStore) EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error {
+	r.bindings = append(r.bindings, sessionAgentBinding{sessionID, agentID, mode, isPrimary})
+	return nil
+}
+
+// fakeChatService is a chatInvoker that emits canned events.
+type fakeChatService struct {
+	events []chat.StreamEvent
+	called int
+}
+
+func (f *fakeChatService) generateResponse(_ context.Context, _, _, _ string, ch chan chat.StreamEvent) {
+	defer close(ch)
+	f.called++
+	for _, e := range f.events {
+		ch <- e
+	}
+}
+
+func TestChatRunner_DrainsSummaryAndEnvelope(t *testing.T) {
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "delta", Content: "Project X has "},
+		{Type: "delta", Content: "3 open tasks."},
+		{Type: "plugin_envelope", Envelope: `{"open_tasks":3}`},
+		{Type: "stream_end"},
+	}}
+
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"role-1": {ID: "ag-1", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store: &recordingSessionStore{
+			parents: map[string]*store.Session{
+				"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			},
+		},
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-1", Role: "role-1", ParentSessionID: "sess-parent", Prompt: "summarize",
+	}
+	result, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Summary != "Project X has 3 open tasks." {
+		t.Errorf("Summary = %q", result.Summary)
+	}
+	if result.ResultJSON != `{"open_tasks":3}` {
+		t.Errorf("ResultJSON = %q", result.ResultJSON)
+	}
+	if fake.called != 1 {
+		t.Errorf("generateResponse called %d times, want 1", fake.called)
+	}
+	if run.ChildSessionID == "" {
+		t.Error("ChildSessionID not set on run")
+	}
+}

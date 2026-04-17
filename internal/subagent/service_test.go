@@ -245,3 +245,55 @@ func TestCancel_TerminalIsNoop(t *testing.T) {
 		t.Errorf("Status = %q, want %q (cancel must not demote terminal state)", run.Status, StatusCompleted)
 	}
 }
+
+// slowRunner blocks on its ctx until cancelled, then returns ctx.Err().
+// Lets us verify per-run Cancel actually cancels the in-flight runner.
+type slowRunner struct {
+	started chan struct{} // closed when Run begins
+}
+
+func (r *slowRunner) Run(ctx context.Context, _ *Run) (*Result, error) {
+	close(r.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestCancel_PerRunContextCancellation(t *testing.T) {
+	db, _ := newTestDB(t)
+	runner := &slowRunner{started: make(chan struct{})}
+	svc := NewService(db, runner, &stubPoster{})
+
+	id, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "slow task",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Wait for runner to actually be running before cancelling.
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not start within 1s")
+	}
+
+	// Cancel must cause the runner's ctx to fire and the run to land in failed
+	// (because slowRunner returns ctx.Err()) within 100ms.
+	if err := svc.Cancel(context.Background(), id); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		run, _ := svc.Status(context.Background(), id)
+		if run != nil && run.Status == StatusCancelled {
+			return // success
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("run did not reach cancelled status within 500ms")
+}

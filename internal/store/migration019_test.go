@@ -130,6 +130,42 @@ func TestMigration019_AcceptsNewEnumValues(t *testing.T) {
 	}
 }
 
+// TestMigration019_RerunPreservesBothUserSettingsColumns verifies the tail
+// ALTER TABLE statements survive an idempotent re-run. splitSQL emits each
+// ALTER as its own Exec (guaranteed by migration 019 ending its transaction
+// with `END;` — not `COMMIT;`, which the splitter would not treat as a
+// BEGIN-block closer, causing the two ALTERs to collapse into one multi-
+// statement Exec where a "duplicate column" error on the first can mask the
+// second under some driver semantics).
+//
+// Regression for Copilot review on PR #60, finding 3.
+func TestMigration019_RerunPreservesBothUserSettingsColumns(t *testing.T) {
+	s := newTestStore(t)
+
+	// Re-run migrate(), which will re-hit the ALTER TABLE ADD COLUMN lines
+	// and exercise the idempotent "duplicate column" path for each.
+	if err := s.migrate(); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+
+	// Both columns must still exist and be queryable.
+	if _, err := s.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
+		t.Fatalf("seed user_settings: %v", err)
+	}
+	var approvalRequired, approvalTimeoutSeconds int
+	if err := s.DB.QueryRow(
+		`SELECT subagent_approval_required, subagent_approval_timeout_seconds FROM user_settings WHERE id = 1`,
+	).Scan(&approvalRequired, &approvalTimeoutSeconds); err != nil {
+		t.Fatalf("scan user_settings post re-migrate: %v", err)
+	}
+	if approvalRequired != 1 {
+		t.Errorf("subagent_approval_required: got %d, want 1", approvalRequired)
+	}
+	if approvalTimeoutSeconds != 86400 {
+		t.Errorf("subagent_approval_timeout_seconds: got %d, want 86400", approvalTimeoutSeconds)
+	}
+}
+
 // TestMigration019_UserSettingsColumns verifies that the two new columns were
 // added to user_settings with the correct defaults.
 func TestMigration019_UserSettingsColumns(t *testing.T) {

@@ -5,14 +5,23 @@
 -- constraints, so subagent_runs is recreated. The partial
 -- idx_subagent_runs_pending index supports the lazy stale-scan.
 --
--- The BEGIN/END wrapper keeps the whole block as one statement so splitSQL
--- in store.go hands it to a single db.Exec call. PRAGMA foreign_keys=OFF
--- covers the DROP/RENAME. CREATE TABLE IF NOT EXISTS and IF NOT EXISTS indexes
--- make the block idempotent on re-run.
-
-BEGIN;
+-- PRAGMA foreign_keys must sit OUTSIDE the BEGIN/END block: SQLite makes
+-- the pragma a no-op inside an open transaction
+-- (https://sqlite.org/pragma.html#pragma_foreign_keys). The migration runner
+-- pins every statement to a single *sql.Conn so the PRAGMA set here carries
+-- into the transaction that follows. We use END (SQLite's alias for COMMIT)
+-- instead of COMMIT so splitSQL's BEGIN/END depth counter correctly closes
+-- the transaction block and emits the trailing ALTER TABLE statements as
+-- their own Execs — important for the idempotent "duplicate column" path.
+-- No table currently FK-references subagent_runs, but fixing now preempts
+-- the class of bug caught in CW-20260417-0477 on migration 008.
+--
+-- CREATE TABLE IF NOT EXISTS and IF NOT EXISTS indexes make the block
+-- idempotent on re-run.
 
 PRAGMA foreign_keys = OFF;
+
+BEGIN;
 
 CREATE TABLE IF NOT EXISTS subagent_runs_new (
     id TEXT PRIMARY KEY,
@@ -60,9 +69,9 @@ CREATE INDEX IF NOT EXISTS idx_subagent_runs_status  ON subagent_runs(status, cr
 CREATE INDEX IF NOT EXISTS idx_subagent_runs_pending ON subagent_runs(status, created_at)
     WHERE status = 'requested';
 
-PRAGMA foreign_keys = ON;
-
 END;
+
+PRAGMA foreign_keys = ON;
 
 -- UserSettings additions (idempotent: runner skips duplicate column errors).
 ALTER TABLE user_settings ADD COLUMN subagent_approval_required INTEGER NOT NULL DEFAULT 1;

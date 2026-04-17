@@ -6,17 +6,24 @@
 -- sqlite_master don't take effect on an open connection. Full table
 -- recreation is the only reliable path.
 --
--- The BEGIN/END wrapper keeps the whole block as one statement so splitSQL
--- in store.go hands it to a single db.Exec call. That preserves connection
--- affinity so PRAGMA foreign_keys=OFF applies to the DROP/RENAME that follows.
+-- PRAGMA foreign_keys must sit OUTSIDE the BEGIN/END block: SQLite makes
+-- the pragma a no-op inside an open transaction
+-- (https://sqlite.org/pragma.html#pragma_foreign_keys). The migration runner
+-- pins every statement to a single *sql.Conn so the PRAGMA set here carries
+-- into the transaction that follows. We use END (SQLite's alias for COMMIT)
+-- instead of COMMIT so splitSQL's BEGIN/END depth counter correctly closes
+-- the transaction block and emits it as a single Exec. Needed for
+-- CW-20260417-0477 — any orphan FK row (bookmarks → messages, artifacts →
+-- messages, or a message with a stale session_id) tripped FK enforcement
+-- on DROP/INSERT before this fix.
 --
 -- Idempotent: CREATE ... IF NOT EXISTS on messages_new and the rename-over
 -- pattern leave the messages table in the same end state regardless of
 -- starting state.
 
-BEGIN;
-
 PRAGMA foreign_keys = OFF;
+
+BEGIN;
 
 CREATE TABLE IF NOT EXISTS messages_new (
     id TEXT PRIMARY KEY,
@@ -47,6 +54,6 @@ ALTER TABLE messages_new RENAME TO messages;
 -- we do not recreate it here.
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 
-PRAGMA foreign_keys = ON;
-
 END;
+
+PRAGMA foreign_keys = ON;

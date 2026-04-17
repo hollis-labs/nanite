@@ -25,11 +25,34 @@ func messagingStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
+// resolveCaller picks the authoritative caller (session_id, agent_id)
+// for a messaging handler. G-6.3 precedence:
+//   1. ctx-carried CallerIdentity (stamped by the HTTP caller-identity
+//      middleware from X-Nanite-Caller-Session + X-Nanite-Caller-Agent
+//      headers) wins when present.
+//   2. The body/query-supplied fallback is used when no headers were
+//      set — preserves pre-G-6.3 MVP trust-the-body behavior for
+//      clients that have not adopted the header contract.
+//
+// Returning the header-stamped identity as caller and the body/query
+// values as target lets the service's existing caller-match checks
+// reject requests where the authenticated caller does not own the
+// target inbox.
+func resolveCaller(r *http.Request, fallbackSession, fallbackAgent string) (session, agent string) {
+	if id, ok := messaging.CallerFromCtx(r.Context()); ok {
+		return id.SessionID, id.AgentID
+	}
+	return fallbackSession, fallbackAgent
+}
+
 // handleMessageInbox returns messages for a (session_id, agent_id)
-// inbox. MVP caller identity: the HTTP boundary has no session-cookie-
-// based auth yet, so the query's session_id/agent_id serve as both
-// target and caller. The service still enforces the match, which
-// catches misconfigured callers passing different values.
+// inbox. G-6.3 caller identity: when the request carries the
+// X-Nanite-Caller-Session / X-Nanite-Caller-Agent headers (stamped on
+// ctx by server.callerIdentityMiddleware), that identity wins and
+// mismatches against the target tuple return 403. Without those
+// headers the query's session_id/agent_id serve as both target and
+// caller — preserves pre-G-6.3 behavior for FE/CLI clients that have
+// not yet adopted the header contract.
 func (a *API) handleMessageInbox(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session_id")
 	agentID := r.URL.Query().Get("agent_id")
@@ -42,8 +65,9 @@ func (a *API) handleMessageInbox(w http.ResponseWriter, r *http.Request) {
 		Channel: r.URL.Query().Get("channel"),
 		Kind:    r.URL.Query().Get("kind"),
 	}
+	callerSession, callerAgent := resolveCaller(r, sessionID, agentID)
 
-	msgs, err := a.Services.Messaging.Inbox(r.Context(), sessionID, agentID, filter, sessionID, agentID)
+	msgs, err := a.Services.Messaging.Inbox(r.Context(), sessionID, agentID, filter, callerSession, callerAgent)
 	if err != nil {
 		a.errorResp(w, messagingStatus(err), err.Error())
 		return
@@ -53,16 +77,20 @@ func (a *API) handleMessageInbox(w http.ResponseWriter, r *http.Request) {
 
 // handleMessageThread returns all messages in a thread that the caller
 // is a participant of (from_* or to_*). Non-participants see an empty
-// slice. Caller identity is taken from the query's session_id+agent_id
-// parameters (same MVP shape as Inbox).
+// slice. G-6.3 caller identity: ctx-carried CallerIdentity (from the
+// X-Nanite-Caller-* headers) wins over the query's session_id/agent_id
+// when present; the query is still read to preserve backwards
+// compatibility with clients that have not adopted the header
+// contract.
 func (a *API) handleMessageThread(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("threadId")
 	if threadID == "" {
 		a.errorResp(w, http.StatusBadRequest, "threadId is required")
 		return
 	}
-	callerSessionID := r.URL.Query().Get("session_id")
-	callerAgentID := r.URL.Query().Get("agent_id")
+	querySession := r.URL.Query().Get("session_id")
+	queryAgent := r.URL.Query().Get("agent_id")
+	callerSessionID, callerAgentID := resolveCaller(r, querySession, queryAgent)
 	if callerSessionID == "" || callerAgentID == "" {
 		a.errorResp(w, http.StatusBadRequest, "session_id and agent_id are required")
 		return
@@ -105,7 +133,10 @@ func (a *API) handleMessageSend(w http.ResponseWriter, r *http.Request) {
 
 // handleMessageAck marks a message as read. The caller's (session_id,
 // agent_id) comes from the JSON body and must match the persisted
-// recipient (enforced by the service).
+// recipient (enforced by the service). G-6.3: when the ctx carries a
+// CallerIdentity (from X-Nanite-Caller-* headers), it overrides the
+// body — prevents a caller from body-spoofing the identity when the
+// middleware has stamped an authoritative one.
 func (a *API) handleMessageAck(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -123,12 +154,13 @@ func (a *API) handleMessageAck(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.SessionID == "" || req.AgentID == "" {
+	sessionID, agentID := resolveCaller(r, req.SessionID, req.AgentID)
+	if sessionID == "" || agentID == "" {
 		a.errorResp(w, http.StatusBadRequest, "session_id and agent_id are required")
 		return
 	}
 
-	if err := a.Services.Messaging.Ack(r.Context(), req.SessionID, req.AgentID, id); err != nil {
+	if err := a.Services.Messaging.Ack(r.Context(), sessionID, agentID, id); err != nil {
 		a.errorResp(w, messagingStatus(err), err.Error())
 		return
 	}
@@ -136,7 +168,7 @@ func (a *API) handleMessageAck(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMessageResolve marks a message as resolved. Same recipient
-// check as Ack.
+// check as Ack. Same G-6.3 ctx-caller-identity override behavior.
 func (a *API) handleMessageResolve(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -151,12 +183,13 @@ func (a *API) handleMessageResolve(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.SessionID == "" || req.AgentID == "" {
+	sessionID, agentID := resolveCaller(r, req.SessionID, req.AgentID)
+	if sessionID == "" || agentID == "" {
 		a.errorResp(w, http.StatusBadRequest, "session_id and agent_id are required")
 		return
 	}
 
-	if err := a.Services.Messaging.Resolve(r.Context(), req.SessionID, req.AgentID, id); err != nil {
+	if err := a.Services.Messaging.Resolve(r.Context(), sessionID, agentID, id); err != nil {
 		a.errorResp(w, messagingStatus(err), err.Error())
 		return
 	}
@@ -164,7 +197,14 @@ func (a *API) handleMessageResolve(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMessageUnreadCount returns the unread message count for a
-// (session_id, agent_id) inbox.
+// (session_id, agent_id) inbox. G-6.3: when the request carries the
+// X-Nanite-Caller-* headers, the stamped CallerIdentity flows into
+// messaging.Service.UnreadCount via ctx and the service returns 403
+// if the caller does not match the target inbox owner. No override is
+// done at the handler because the target here IS the same (session,
+// agent) tuple as the caller — the service's caller-match is the
+// effective authz check. Without headers, the service falls open
+// (legacy trust-the-query behavior).
 func (a *API) handleMessageUnreadCount(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session_id")
 	agentID := r.URL.Query().Get("agent_id")

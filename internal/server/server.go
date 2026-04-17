@@ -137,19 +137,24 @@ func (s *Server) SetPluginsDir(dir string) {
 // ListenAndServe starts the HTTP server.
 //
 // Middleware chain (outer -> inner):
-//   recover -> logging -> CORS -> basicAuth -> bodyLimit -> mux
+//   recover -> logging -> CORS -> basicAuth -> callerIdentity -> bodyLimit -> mux
 //
 // CORS is outside basicAuth so that preflight (OPTIONS) requests succeed for
 // allowed origins even when the caller has not yet sent credentials — auth
 // UAs cannot attach credentials to a preflight. The body-limit middleware
 // sits inside auth because unauthenticated traffic is already rejected by
-// auth; caps only matter for requests that reach a handler.
+// auth; caps only matter for requests that reach a handler. callerIdentity
+// sits between auth and bodyLimit so that only authenticated requests get
+// a caller-identity stamped on the context; see caller_identity.go for the
+// G-6.3 header contract.
 func (s *Server) ListenAndServe() error {
 	handler := s.recoverMiddleware(
 		s.loggingMiddleware(
 			s.corsMiddleware(
 				basicAuthMiddleware(
-					s.bodyLimitMiddleware(s.mux),
+					callerIdentityMiddleware(
+						s.bodyLimitMiddleware(s.mux),
+					),
 				),
 			),
 		),
@@ -175,7 +180,9 @@ func (s *Server) newHTTPServer(addr string) *http.Server {
 		s.loggingMiddleware(
 			s.corsMiddleware(
 				basicAuthMiddleware(
-					s.bodyLimitMiddleware(s.mux),
+					callerIdentityMiddleware(
+						s.bodyLimitMiddleware(s.mux),
+					),
 				),
 			),
 		),

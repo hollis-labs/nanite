@@ -57,7 +57,9 @@ func (s *Server) testChain() http.Handler {
 		s.loggingMiddleware(
 			s.corsMiddleware(
 				basicAuthMiddleware(
-					s.bodyLimitMiddleware(s.mux),
+					callerIdentityMiddleware(
+						s.bodyLimitMiddleware(s.mux),
+					),
 				),
 			),
 		),

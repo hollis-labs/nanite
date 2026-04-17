@@ -674,3 +674,79 @@ func TestService_RecentForSession_DefaultLimit(t *testing.T) {
 		t.Errorf("expected default limit of 20 messages, got %d", len(msgs))
 	}
 }
+
+// TestService_UnreadCount_NoCallerFallsOpen confirms the G-6.3 fall-
+// open behavior: when no CallerIdentity is stamped on ctx, UnreadCount
+// is a thin pass-through and returns the count without authz checks,
+// matching the pre-G-6.3 MVP trust-the-query behavior that MCP and
+// CLI callers still rely on.
+func TestService_UnreadCount_NoCallerFallsOpen(t *testing.T) {
+	svc, s, _ := newTestService(t, "file-backend")
+
+	for i := 0; i < 3; i++ {
+		if _, err := s.Send(context.Background(), SendInput{
+			FromSessionID: "sess-other",
+			FromAgentID:   UserSentinel,
+			ToSessionID:   "sess-1",
+			ToAgentID:     "file-backend",
+			Body:          "msg",
+		}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	count, err := svc.UnreadCount(context.Background(), "sess-1", "file-backend")
+	if err != nil {
+		t.Fatalf("UnreadCount: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected unread count 3, got %d", count)
+	}
+}
+
+// TestService_UnreadCount_CallerMatch confirms G-6.3 happy path: when
+// ctx carries a CallerIdentity matching the target tuple, the service
+// returns the count normally.
+func TestService_UnreadCount_CallerMatch(t *testing.T) {
+	svc, s, _ := newTestService(t, "file-backend")
+
+	if _, err := s.Send(context.Background(), SendInput{
+		FromSessionID: "sess-other",
+		FromAgentID:   UserSentinel,
+		ToSessionID:   "sess-1",
+		ToAgentID:     "file-backend",
+		Body:          "msg",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	ctx := WithCaller(context.Background(), CallerIdentity{
+		SessionID: "sess-1",
+		AgentID:   "file-backend",
+	})
+	count, err := svc.UnreadCount(ctx, "sess-1", "file-backend")
+	if err != nil {
+		t.Fatalf("UnreadCount with matching caller: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected unread count 1, got %d", count)
+	}
+}
+
+// TestService_UnreadCount_CallerMismatchForbidden confirms G-6.3
+// enforcement: a ctx-plumbed caller that does NOT match the target
+// inbox owner returns ErrForbidden. This is the HTTP-boundary authz
+// check that was missing pre-G-6.3 — the previous comment on
+// UnreadCount called it out explicitly.
+func TestService_UnreadCount_CallerMismatchForbidden(t *testing.T) {
+	svc, _, _ := newTestService(t, "file-backend", "file-frontend")
+
+	ctx := WithCaller(context.Background(), CallerIdentity{
+		SessionID: "sess-1",
+		AgentID:   "file-frontend", // not the target inbox owner
+	})
+	_, err := svc.UnreadCount(ctx, "sess-1", "file-backend")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}

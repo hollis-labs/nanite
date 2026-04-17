@@ -118,6 +118,24 @@ POST   /api/handoffs/{id}/reject        — reject with reason
 
 `/api/messaging/*` is distinct from `/api/messages/*` (the latter is for session-chat messages — a different primitive).
 
+### SSE stream for `message_received`
+
+```
+GET /api/stream/{messageID}
+```
+
+The per-message SSE stream fans `message_received` events into any currently-open connection on the recipient's session. `{messageID}` is the in-flight chat generation id for that session (registered by `ChatService.Generate`), not a messaging-envelope id. When no generation is in flight, there is no active stream; messages still persist to `agent_messages` + write `session_events` rows, so recipients catch up on next inbox poll. The SSE push is a "UI already open" hint, not a durable channel.
+
+Payload (JSON, wrapped in a `chat.StreamEvent` envelope — `envelope` is a stringified JSON blob):
+
+```json
+{ "message_id": "...", "channel": "chat|inbox|alert", "kind": "request|reply|notification|handoff",
+  "from_session_id": "...", "from_agent_id": "...", "to_session_id": "...", "to_agent_id": "...",
+  "thread_id": "...", "subject": "...", "summary": "..." }
+```
+
+Producer: `service/messaging_sink.go` (`messagingStreamSink.NotifyReceived` → `StreamManager.BroadcastSessionStreamEvent`). Consumer: `internal/api/messages.go:handleStream`.
+
 ## Resource bounds
 
 - `Recent` limit: default 20, cap 100 (`messaging.MaxRecentLimit`). Prevents LLM-controlled memory DoS.

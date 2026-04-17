@@ -117,6 +117,23 @@ Handoff is not exposed at the MCP layer — it's user-approval gated and runs th
 
 Every successful send fires a `message_received` SSE event on the recipient's session stream (via the `NotificationSink` bridge into `StreamManager`). Agents subscribed to their session's SSE stream receive messages without polling.
 
+### SSE stream route
+
+```
+GET /api/stream/{messageID}
+```
+
+The `{messageID}` path segment is the **in-flight chat message ID** — the id of the current turn's generation stream on the recipient's session, not a messaging-envelope id. Subscribing to a session's SSE stream today means opening this endpoint on whatever `messageID` is currently streaming for that session. While the connection is open, every `message_received` event targeted at the session is fanned out to it (along with chat deltas, `subagent_run_status_changed`, `plugin_envelope`, and other session-scoped events) as `event: message_received` frames with a JSON payload containing `{ message_id, channel, kind, from_session_id, from_agent_id, to_session_id, to_agent_id, thread_id, subject?, summary }`.
+
+Example subscribe + filter (curl):
+
+```bash
+curl -N http://127.0.0.1:8090/api/stream/<messageID> \
+  | grep -A1 '^event: message_received'
+```
+
+When no generation is currently in flight for a session, there is no active per-message stream — new messages still persist to `agent_messages` and write `message_received` rows to `session_events`, so recipients pick them up on their next inbox poll. The SSE push is a best-effort "UI already open" hint, not a durable delivery channel.
+
 Every send / ack / resolve also writes rows to `session_events` for replay and context-broker consumption.
 
 ## Storage

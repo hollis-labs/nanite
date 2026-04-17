@@ -247,20 +247,27 @@ func TestCancel_TerminalIsNoop(t *testing.T) {
 }
 
 // slowRunner blocks on its ctx until cancelled, then returns ctx.Err().
-// Lets us verify per-run Cancel actually cancels the in-flight runner.
+// Lets us verify per-run Cancel actually cancels the in-flight runner:
+// done closes after <-ctx.Done() returns, so the test can assert the
+// runner goroutine actually exits (not just that the DB row flipped).
 type slowRunner struct {
 	started chan struct{} // closed when Run begins
+	done    chan struct{} // closed when Run returns
 }
 
 func (r *slowRunner) Run(ctx context.Context, _ *Run) (*Result, error) {
 	close(r.started)
 	<-ctx.Done()
+	close(r.done)
 	return nil, ctx.Err()
 }
 
 func TestCancel_PerRunContextCancellation(t *testing.T) {
 	db, _ := newTestDB(t)
-	runner := &slowRunner{started: make(chan struct{})}
+	runner := &slowRunner{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
 	svc := NewService(db, runner, &stubPoster{})
 
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -281,19 +288,22 @@ func TestCancel_PerRunContextCancellation(t *testing.T) {
 		t.Fatal("runner did not start within 1s")
 	}
 
-	// Cancel must cause the runner's ctx to fire and the run to land in failed
-	// (because slowRunner returns ctx.Err()) within 100ms.
 	if err := svc.Cancel(context.Background(), id); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		run, _ := svc.Status(context.Background(), id)
-		if run != nil && run.Status == StatusCancelled {
-			return // success
-		}
-		time.Sleep(10 * time.Millisecond)
+	// The core assertion: Cancel must propagate into the runner's ctx so
+	// the goroutine actually exits. Without per-run cancel plumbing this
+	// would time out (runner stays blocked until execute's 300s WithTimeout).
+	select {
+	case <-runner.done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("runner did not exit within 500ms of Cancel")
 	}
-	t.Fatal("run did not reach cancelled status within 500ms")
+
+	// Secondary: the DB row reflects the cancellation.
+	run, _ := svc.Status(context.Background(), id)
+	if run == nil || run.Status != StatusCancelled {
+		t.Fatalf("Status = %+v, want StatusCancelled", run)
+	}
 }

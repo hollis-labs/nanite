@@ -462,3 +462,66 @@ func TestSpawn_EmitsTerminalEventOnFailure(t *testing.T) {
 		t.Error("error field empty for failed run")
 	}
 }
+
+// TestSpawn_EmitsTerminalEventOnCancelled verifies the terminal event
+// payload reports the DB-authoritative "cancelled" status, not the
+// in-memory "failed" that execute sets after the runner returns
+// ctx.Err(). finalizeRun's 0-rows-affected branch re-reads the row and
+// patches run.Status before the emit.
+func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
+	db, _ := newTestDB(t)
+	sink := &recordingSink{}
+	runner := &slowRunner{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	svc := NewService(db, runner, &stubPoster{})
+	svc.SetStreamSink(sink)
+
+	id, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "cancel me",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not start within 1s")
+	}
+	if err := svc.Cancel(context.Background(), id); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	select {
+	case <-runner.done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("runner did not exit within 500ms of Cancel")
+	}
+
+	// Wait for the terminal emit to land (it fires from the runner
+	// goroutine after finalizeRun, which re-reads the cancelled row).
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(sink.snapshot()) >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	events := sink.snapshot()
+	if len(events) < 2 {
+		t.Fatalf("expected >= 2 events (running + terminal), got %d", len(events))
+	}
+	terminal := events[len(events)-1]
+	if got := terminal.Payload["status"]; got != "cancelled" {
+		t.Errorf("terminal status = %v, want cancelled", got)
+	}
+	if errStr, _ := terminal.Payload["error"].(string); errStr != "" {
+		t.Errorf("error = %q, want empty on cancel path", errStr)
+	}
+}

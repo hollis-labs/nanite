@@ -361,11 +361,24 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
 	}
 	// Zero rows updated means a concurrent Cancel (or another
 	// terminal transition) already wrote a terminal state. That's
-	// fine — the run is settled. Log for observability and let the
-	// caller proceed.
+	// fine — the run is settled. Re-read the authoritative status so
+	// the in-memory struct reflects DB truth (otherwise the G-5
+	// terminal event would report "failed" on a cancel-path run).
 	if n, _ := res.RowsAffected(); n == 0 {
 		slog.Info("subagent: finalize skipped; run already terminal",
 			"run_id", r.ID, "intended_status", r.Status)
+		var actual string
+		if err := svc.db.QueryRowContext(ctx,
+			`SELECT status FROM subagent_runs WHERE id = ?`, r.ID,
+		).Scan(&actual); err == nil {
+			r.Status = actual
+			if actual == StatusCancelled {
+				// The runner returned ctx.Err() after Cancel fired;
+				// the "context canceled" Error is an artifact of the
+				// cancellation, not a real failure.
+				r.Error = ""
+			}
+		}
 	}
 	return nil
 }

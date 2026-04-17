@@ -231,7 +231,7 @@ ui/                          # React SPA (see frontend.md)
 
 ## Beta Known Issues (canonical list)
 
-**Primary tracking:** [`docs/beta-known-issues.md`](../../docs/beta-known-issues.md). Check this document before starting backend work — it contains the P0 ship blockers currently being fixed (worker field sync, trigger dispatch race) and any P1 issues promoted from investigation.
+**Primary tracking:** [`docs/beta-known-issues.md`](../../docs/beta-known-issues.md). Check this document before starting backend work — it contains the P0 issues currently being fixed (worker field sync, trigger dispatch race) and any P1 issues promoted from investigation.
 
 **Post-beta items filed to Engine backlog:** query `engine_backlog_list --project-id nanite` for deferred items. As of 2026-04-10:
 - BLG-20260410-001 — PTY tool-level presence (P3, deferred)
@@ -248,11 +248,11 @@ Source: [`.nanite/agents/plugin-dev.md`](plugin-dev.md) §Known Limitations. The
 1. Frontend component loading — historically hardcoded. **Likely resolved** by `ui/src/generated/plugin-widgets.ts` + `plugin-envelopes.ts` lazy registries (Task 5, 2026-03-28). Verify before referencing.
 2. `plugin.yaml` was documentation-only. **Likely resolved** per `plugin-dev-tasks.md:14` ("plugin.yaml parsing" now resolved). Verify.
 3. Plugin auto-discovery was manual via `main.go`. **Likely resolved** per `plugin-dev-tasks.md:14` ("auto-discovery" now resolved). Verify.
-4. **No plugin isolation** — plugins run in the same process as the host. This is a design choice, not a bug. Relevant for sandboxing/security posture but not a beta blocker.
+4. **No plugin isolation** — plugins run in the same process as the host. This is a design choice, not a bug. Relevant for sandboxing/security posture.
 5. No widget/slot system — **RESOLVED** by `WidgetRenderer.tsx` + `plugin-widgets.ts` registry + Widget Admin panel (Task 5, 2026-03-28). Can be struck from the source list.
 6. **No quick-action framework** — `action` is a listed `UIComponent` type but no action framework exists. Low priority; no current plugins request it.
-7. **CRUD error mapping uses fragile string matching** — in the auto-wired CRUD handler layer. Still true. Candidate for a typed error taxonomy. Not a beta blocker.
-8. **`http.ServeMux` doesn't support route removal on unload** — stdlib constraint. Affects hot-unload of plugins with routes; plugins currently remain mounted until a process restart. Not a beta blocker (unload is rare at runtime), but worth a design note if we care about dynamic plugin lifecycle.
+7. **CRUD error mapping uses fragile string matching** — in the auto-wired CRUD handler layer. Still true. Candidate for a typed error taxonomy.
+8. **`http.ServeMux` doesn't support route removal on unload** — stdlib constraint. Affects hot-unload of plugins with routes; plugins currently remain mounted until a process restart. Unload is rare at runtime, but worth a design note if we care about dynamic plugin lifecycle.
 
 **Action for backend agent:** when next working in `internal/plugin/`, reconcile `plugin-dev.md` §Known Limitations against current state — strike the resolved ones and keep only the real constraints.
 

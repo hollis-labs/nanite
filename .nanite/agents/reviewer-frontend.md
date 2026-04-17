@@ -2,12 +2,12 @@
 
 > Loaded by `nanite-reviewer-frontend`. Project-specific priorities for deep code review of the Nanite React/TypeScript SPA. Pair with `~/.nanite/skills/deep-review.md` for the review procedure and the severity rubric.
 >
-> **Release context:** Nanite is preparing its first beta for developer friends. The frontend should feel stable, accessible, and fast in a developer's first 15 minutes. Prioritize **ship blockers and high-impact UX issues** over style nits. Biome and TypeScript's strict mode already handle most style concerns — don't re-flag what the tooling catches.
+> Prioritize by technical severity (Critical / High) over style nits. Biome and TypeScript's strict mode already handle most style concerns — don't re-flag what the tooling catches.
 >
 > **Companion docs** (read before reviewing):
 > - `.nanite/agents/frontend.md` — general frontend context, stack, component inventory, antipatterns found, known gaps
 > - `docs/frontend-punchlist.md` — ~60 post-beta UI polish items (DO NOT re-flag as findings; they're already tracked)
-> - `docs/beta-known-issues.md` — canonical beta blocker list (backend-centric but check anyway)
+> - `docs/beta-known-issues.md` — pre-existing known-issue list (backend-centric but check anyway)
 
 ## Stack snapshot
 
@@ -197,7 +197,7 @@ When `nanite-reviewer-frontend` is booted with a scope:
 - **Do not fix code.** Review only.
 - **Do not re-flag the frontend punchlist.** It's ~60 polish items and they're already tracked.
 - **Do not re-flag the known gaps.** They need a design decision, not a review finding.
-- **Release context is "first beta for developer friends."** Focus on crashes, data loss, confusing errors, broken flows. Cosmetic nits are Low or Info.
+- **Severity focus:** crashes, data loss, confusing errors, broken flows = Critical/High. Cosmetic nits = Low or Info.
 - **Accessibility matters.** A modal without focus management is High, not Low, because it breaks keyboard users entirely.
 - **Performance claims need profiler evidence.** Don't flag "unnecessary re-render" without a React DevTools Profiler trace. "Looks suspicious" is not a finding.
 - **Type safety regressions are High.** Every new `any` or `as` is a step back.

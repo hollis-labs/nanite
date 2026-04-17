@@ -1,4 +1,4 @@
-# Agent Boot — v2.2
+# Agent Boot — v2.3
 
 Core rules for all agent sessions. Loaded from `~/.nanite/agent-boot.md`.
 
@@ -28,13 +28,30 @@ Agents are named configurations that compose roles, skills, and project context.
 
 ### Activation
 
-The user says "Boot <agent>" to activate a named agent. The loading sequence:
+The user says "Boot <name>" to activate a named agent or playbook. The loading sequence:
 
-1. Look up the agent slug in `./.nanite/config.yaml` under `agents:`.
-2. For each role listed, resolve the file path from `~/.nanite/config.yaml` role definitions and read from `~/.nanite/roles/`.
-3. Load each listed skill from `~/.nanite/skills/`.
-4. If a `context:` file is specified, read it from `./.nanite/` (relative to the project).
-5. If no agent matches the slug, fall back to loading a single role by name from `~/.nanite/roles/` (check domain/, stack/, meta/ subdirectories).
+1. Look up the slug in `./.nanite/config.yaml` under `agents:`.
+2. If found — **agent boot:**
+   a. For each role listed, resolve the file path from `~/.nanite/config.yaml` role definitions and read from `~/.nanite/roles/`.
+   b. Load `default_skills` from `~/.nanite/config.yaml`, then the agent's own `skills:` list. Defaults + agent-specific are additive (no duplicates).
+   c. Note `default_tools` from `~/.nanite/config.yaml` — these MCP tools are expected to be available in every session.
+   d. If a `context:` file is specified, read it from `./.nanite/` (relative to the project).
+3. If no agent matches — check `~/.nanite/playbooks/<slug>.md`. If found — **playbook boot:**
+   a. Read the playbook file and parse frontmatter for `inputs`, `roles`, `skills`, `read_only`.
+   b. Load each role listed in the playbook's `roles:`.
+   c. Note the listed skills as available for the session.
+   d. Resolve required inputs from the boot command or prompt the user for missing ones.
+   e. Replace `{{input_name}}` placeholders in the playbook body with resolved values.
+   f. The rendered playbook becomes the active session context.
+4. If neither agent nor playbook matches, fall back to loading a single role by name from `~/.nanite/roles/` (check domain/, stack/, meta/ subdirectories).
+
+## Playbooks
+
+Playbooks are parameterized session templates stored in `~/.nanite/playbooks/`. Unlike agents (fixed persona for a project), playbooks are reusable patterns with variable inputs — typically for cross-project exploration, research, and planning.
+
+Use `/playbook` to list, inspect, or boot playbooks. Or `Boot <playbook-name>` with inputs.
+
+Playbooks declare `inputs:` in frontmatter. Required inputs must be provided at boot time or the session will prompt for them. Playbooks with `read_only: true` enforce no writes to target project directories.
 
 ### Compaction recovery
 
@@ -42,4 +59,4 @@ Role and context files are small (~500-800 tokens). After context compaction, re
 
 ### Default behavior
 
-Without a "Boot <agent>" instruction, the session runs as general-purpose with universal skills only. Projects can define agents but none activate automatically.
+Without a "Boot <agent>" instruction, the session runs as general-purpose with `default_skills` and `default_tools` from `~/.nanite/config.yaml`. All skills in `~/.nanite/skills/` remain available on demand. Projects can define agents but none activate automatically.

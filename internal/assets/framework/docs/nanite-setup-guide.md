@@ -157,7 +157,7 @@ This triggers the loading chain:
 
 If no agent matches, falls back to loading a single role by name (checks domain/, stack/, meta/).
 
-Without "Boot <agent>", the session runs general-purpose with universal skills only.
+Without "Boot <agent>", the session runs general-purpose with `default_skills` and `default_tools` from `~/.nanite/config.yaml`.
 
 After context compaction, role and context files are re-read automatically (~500-800 tokens each).
 
@@ -196,18 +196,19 @@ git commit -m "Add agent project context"
 
 ## Skill Tiers
 
-### Universal skills
+### Default skills
 
-Location: `~/.nanite/skills/`
+Defined in `~/.nanite/config.yaml` under `default_skills:`. Loaded for every agent automatically, on top of agent-specific skills.
 
-Available everywhere. General-purpose operations not tied to any technology or codebase.
-Examples: `adr`, `doc-note`, `boot-prompt`, `qstatus`.
+Current defaults: `fast-triage`, `end-of-session`, `escalate`.
+
+All other skills in `~/.nanite/skills/` remain available on demand but are only loaded when listed in an agent's `skills:` array.
 
 ### Project skills
 
 Location: `<project>/.nanite/skills/` (via symlink, inherits universal skills automatically)
 
-For operations unique to a specific project. Use sparingly — if a skill could apply across projects, it belongs at the universal level.
+For operations unique to a specific project. Use sparingly — if a skill could apply across projects, it belongs in `~/.nanite/skills/` (and possibly in `default_skills` if every agent needs it).
 
 Create a project skill when:
 - The operation is unique to this project

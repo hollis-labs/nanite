@@ -2,12 +2,12 @@
 
 > Loaded by `nanite-reviewer-backend`. Project-specific priorities for deep code review of the Nanite Go backend. Pair with `~/.nanite/skills/deep-review.md` for the review procedure and the severity rubric.
 >
-> **Release context:** Nanite is preparing its first beta for developer friends. Plugin reliability must be 100%, security-sensitive paths must be audited, and the reviewer should prioritize **ship blockers and high-impact issues** over nitpicks. This is not a "clean up all the lint" pass.
+> Plugin reliability must be 100%, security-sensitive paths must be audited, and the reviewer should prioritize by technical severity (Critical / High) over nitpicks. This is not a "clean up all the lint" pass.
 >
 > **Companion docs** (read before reviewing):
 > - `.nanite/agents/backend.md` — general backend context, stack, package map, resolved tech debt
 > - `.nanite/agents/plugin-dev.md` — plugin system state, known limitations, audit fix plan
-> - `docs/beta-known-issues.md` — canonical beta blocker list (treat as "do not re-flag")
+> - `docs/beta-known-issues.md` — pre-existing known-issue list (treat as "do not re-flag")
 > - `docs/architecture/plugin-audit-2026-04-10.md` — current plugin audit with prioritized fix list
 > - `docs/architecture/plugin-envelope-emission-findings-2026-04-10.md` — raw envelope gap findings
 
@@ -101,7 +101,7 @@ These are the Nanite subsystems a deep review should touch first. They concentra
 - `AgentExec` vs `UserExec` split — make sure they're actually used consistently. Any direct `exec.Command` in non-exec packages is a red flag.
 - `internal/sandbox/` — delegates to adapter plugins via `AdapterRegistry.PopulateAllSandboxes()`. Check error handling: a populate failure should NOT silently leave the sandbox partially populated.
 - Adapter plugins (`adapter-claude`, `adapter-codex`, `adapter-gemini`, `adapter-opencode`, `adapter-nanite-native`) — each writes files into a user directory. Managed section protocol (`<!-- nanite:start -->` / `<!-- nanite:end -->`) must be robust against user edits that insert nested markers or malformed HTML comments.
-- `adapter-opencode` — header admits "format is unverified against Opencode CLI." Beta-blocker per `plugin-dev.md`. Flag as High if this landed in scope.
+- `adapter-opencode` — header admits "format is unverified against Opencode CLI." Tracked in `plugin-dev.md`. Flag as High if this landed in scope.
 
 ### 5. Store (SQLite) & migrations
 
@@ -188,7 +188,7 @@ These are already tracked. Re-flagging them in findings is noise. If you find a 
 1. **Beta known issues** (`docs/beta-known-issues.md`) — all P0 items are closed as of 2026-04-10. P1 is empty.
 2. **Plugin framework limitations** (`.nanite/agents/plugin-dev.md` §Known Limitations, items 1–26). Particularly:
    - Scaffold templates have broken imports (P0-1)
-   - `adapter-opencode` format unverified (beta blocker)
+   - `adapter-opencode` format unverified
    - `oembed` envelope path is dead
    - `fragments-engine` chat-header 503s without Engine MCP
    - `Host.Shutdown()` mutex-across-Unload deadlock risk
@@ -234,4 +234,4 @@ When `nanite-reviewer-backend` is booted with a scope:
 - **Err on the side of severity for security and data-loss findings.** A "maybe exploitable" path is High at minimum.
 - **Praise is a valid Info finding.** If a package is well-tested and well-structured, say so — it tells the maintainer what to protect.
 - **Small findings can be grouped.** Don't create ten 3-line finding files when one `NN-info-style-observations.md` roundup is more useful.
-- **Release context is "first beta for developer friends."** Blockers = Critical/High. Polish = Low/Info. Medium is the grey zone; err on the side of High if the finding might hit a developer friend in their first hour of use.
+- **Severity tiers:** Correctness/security failures = Critical/High. Polish = Low/Info. Medium is the grey zone; err on the side of High if the finding is likely to cause correctness or security failures under realistic use.

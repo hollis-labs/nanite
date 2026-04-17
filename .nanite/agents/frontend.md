@@ -233,7 +233,7 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 ## Beta Known Issues (canonical list)
 
-**Primary tracking:** [`docs/beta-known-issues.md`](../../docs/beta-known-issues.md). Check this document before starting frontend work. P0 ship blockers there are currently backend-only, but that can change — always check first.
+**Primary tracking:** [`docs/beta-known-issues.md`](../../docs/beta-known-issues.md). Check this document before starting frontend work. P0 issues there are currently backend-only, but that can change — always check first.
 
 **Post-beta items filed to Engine backlog:** query `engine_backlog_list --project-id nanite` for deferred items.
 
@@ -241,7 +241,7 @@ Plugin envelopes are auto-generated via `scripts/generate-plugin-imports.mjs` (r
 
 ## Frontend Quick Wins (pre-beta polish)
 
-Small items the frontend agent should knock out during the beta-prep window. These are not ship blockers, but they're quick enough that clearing them improves the beta experience.
+Small items the frontend agent can knock out. These are not high-severity, but they're quick enough that clearing them improves the user experience.
 
 ### Code quality — from §Anti-Patterns Found above
 
@@ -279,7 +279,7 @@ After a search → jump-to-message lands, `useChat` fetches a centered window vi
 
 **Source:** [`docs/frontend-punchlist.md`](../../docs/frontend-punchlist.md) — ~60 UI polish items (command palette, infinite scroll, drawers redesign, widget controls, CRUD-in-modals, search, context menus, skeletons, optimistic UI, etc.).
 
-All polish-tier. Not beta blockers. Address in a dedicated post-beta sprint or opportunistically when touching the relevant files.
+All polish-tier. Not high-severity. Address in a dedicated post-beta sprint or opportunistically when touching the relevant files.
 
 ---
 
@@ -372,3 +372,14 @@ All polish-tier. Not beta blockers. Address in a dedicated post-beta sprint or o
 - [x] **Widget sort order (drag-drop)** — Drag-and-drop reordering. Persists to `widget_order` in `ext_settings`.
 - [x] **Plugin settings access from widget cards** — Gear icon opens `PluginConfigPanel` for the widget's source plugin.
 - [x] **Backend: widget preferences** — Stored in `ext_settings` JSON (no migration needed). `widget_visibility` (map) and `widget_order` (array) merged via existing partial update.
+
+---
+
+## Deferred from Phase 1 audit campaign (2026-04-11) — user-facing polish follow-ups
+
+Pulled out of the Phase 1 audit queue during the 2026-04-11 audit-orchestrator brainstorm. These are follow-up work items, not audits. Land in regular frontend work queue when the user picks them up.
+
+- **i18n readiness.** Hardcoded strings (frontend side), number/date formatting, RTL implications. Pairs with the DE/ES translation-file feature (see tracking.md delegated items). Go-side string sweep is a separate concern owned by backend.
+- **a11y — keyboard navigation, screen-reader labels, color contrast, focus management in shadcn components.** Covers the expansion scope proposed as `* a11y` plus the existing frontend queue item `keyboard-shortcuts-and-a11y`. Both moved here as one combined follow-up item per user direction.
+
+**Recommended shape:** these are normal frontend workstream items, not audits. When the user is ready to work on them, they belong in whatever the frontend-side task backlog is (Engine backlog `#nanite` project tag, or wherever frontend tasks currently live). They do not need a scoping session — the work is well-understood, it just needs to happen.

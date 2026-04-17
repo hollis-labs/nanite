@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // DefaultTimeoutSeconds bounds a runner when the caller doesn't set
@@ -49,6 +50,12 @@ type ApprovalEmitter interface {
 	Emit(ctx context.Context, sessionID, envelopeType string, payload []byte) (envelopeID string, err error)
 }
 
+// SettingsReader returns the per-user settings. Container-injected so the
+// subagent package doesn't take a hard dep on the full Store.
+type SettingsReader interface {
+	GetUserSettings() (*store.UserSettings, error)
+}
+
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
@@ -56,6 +63,7 @@ type Service struct {
 	runner     Runner
 	poster     MessagePoster
 	approver   ApprovalEmitter
+	settings   SettingsReader
 	streamSink SubagentStreamSink
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
@@ -72,13 +80,16 @@ type Service struct {
 // the reply message on completion (nil = reply skipped, run result
 // is still visible via Status). The approver emits approval envelopes
 // onto the parent session's stream (nil = approval emission disabled;
-// T10 will wire the real impl).
-func NewService(db *sql.DB, runner Runner, poster MessagePoster, approver ApprovalEmitter) *Service {
+// T10 will wire the real impl). The settings reader provides per-user
+// settings for gating decisions (nil = only ModeInteractive triggers
+// gating; T6 wires cfg.Store).
+func NewService(db *sql.DB, runner Runner, poster MessagePoster, approver ApprovalEmitter, settings SettingsReader) *Service {
 	return &Service{
 		db:        db,
 		runner:    runner,
 		poster:    poster,
 		approver:  approver,
+		settings:  settings,
 		cancelers: make(map[string]context.CancelFunc),
 	}
 }
@@ -140,7 +151,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		mode = ModeSync
 	}
 	switch mode {
-	case ModeSync, ModeAsync, ModeAPI:
+	case ModeSync, ModeAsync, ModeAPI, ModeInteractive:
 	default:
 		return "", fmt.Errorf("subagent: invalid mode %q", mode)
 	}
@@ -160,11 +171,67 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		Role:            req.Role,
 		Prompt:          req.Prompt,
 		Mode:            mode,
-		Status:          StatusRunning, // MVP: skip requested/approved
 		InputsJSON:      inputs,
 		TimeoutSeconds:  timeout,
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 	}
+
+	// Gate predicate: consult user settings + mode.
+	gate := false
+	if svc.settings != nil {
+		us, err := svc.settings.GetUserSettings()
+		if err != nil {
+			return "", fmt.Errorf("load settings: %w", err)
+		}
+		gate = us.SubagentApprovalRequired || mode == ModeInteractive
+	} else {
+		// Nil settings = tests that don't care about gating; fall through to
+		// ungated unless mode explicitly requests interactive approval.
+		gate = mode == ModeInteractive
+	}
+
+	if gate {
+		// Gated path: insert a requested row, emit the approval envelope,
+		// persist the envelope_instance_id, and return early WITHOUT launching
+		// the runner. Approve/Reject (T7/T8) will resume execution.
+		run.Status = StatusRequested
+		if err := svc.insertRun(ctx, run); err != nil {
+			return "", fmt.Errorf("insert run: %w", err)
+		}
+
+		if svc.approver == nil {
+			return "", fmt.Errorf("gated spawn requires approver but none configured")
+		}
+		payload, err := json.Marshal(map[string]any{
+			"run_id":          run.ID,
+			"role":            run.Role,
+			"prompt":          run.Prompt,
+			"mode":            run.Mode,
+			"parent_agent_id": run.ParentAgentID,
+			"timeout_seconds": run.TimeoutSeconds,
+			"inputs_json":     run.InputsJSON,
+			"risk_level":      "medium",
+		})
+		if err != nil {
+			return "", fmt.Errorf("marshal approval payload: %w", err)
+		}
+		envelopeID, err := svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)
+		if err != nil {
+			return "", fmt.Errorf("emit approval envelope: %w", err)
+		}
+
+		if _, err := svc.db.ExecContext(ctx,
+			`UPDATE subagent_runs SET envelope_instance_id=? WHERE id=?`, envelopeID, run.ID); err != nil {
+			return "", fmt.Errorf("persist envelope id: %w", err)
+		}
+		run.EnvelopeInstanceID = envelopeID
+
+		svc.emitStatus(run, "")
+		return run.ID, nil
+	}
+
+	// Ungated path — existing behavior preserved exactly.
+	run.Status = StatusRunning // MVP: skip requested/approved
 	run.StartedAt = run.CreatedAt
 	if err := svc.insertRun(ctx, run); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)

@@ -157,6 +157,10 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		return "", fmt.Errorf("insert run: %w", err)
 	}
 
+	// G-5: emit running event so the parent UI can render "subagent
+	// spawned" before the runner does any work.
+	svc.emitStatus(run, "")
+
 	switch mode {
 	case ModeSync:
 		// Blocking: caller holds until the runner returns. The

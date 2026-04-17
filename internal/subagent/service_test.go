@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -306,4 +307,97 @@ func TestCancel_PerRunContextCancellation(t *testing.T) {
 	if run == nil || run.Status != StatusCancelled {
 		t.Fatalf("Status = %+v, want StatusCancelled", run)
 	}
+}
+
+// recordingSink captures every SubagentStatusChanged invocation in
+// arrival order. Lets G-5 tests assert event count + payload shape.
+type recordingSink struct {
+	mu     sync.Mutex
+	events []recordedSinkEvent
+}
+
+type recordedSinkEvent struct {
+	ParentSessionID string
+	Payload         map[string]any
+}
+
+func (s *recordingSink) SubagentStatusChanged(parentSessionID string, payload []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var decoded map[string]any
+	_ = json.Unmarshal(payload, &decoded)
+	s.events = append(s.events, recordedSinkEvent{ParentSessionID: parentSessionID, Payload: decoded})
+}
+
+func (s *recordingSink) snapshot() []recordedSinkEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]recordedSinkEvent, len(s.events))
+	copy(out, s.events)
+	return out
+}
+
+// gateRunner blocks Run until release is closed, then returns success.
+// Used to inspect the sink mid-flight so we can isolate the Spawn-time
+// emission from the terminal-time emission.
+type gateRunner struct{ release chan struct{} }
+
+func (r gateRunner) Run(_ context.Context, run *Run) (*Result, error) {
+	<-r.release
+	return &Result{Summary: "ok-" + run.ID, ResultJSON: `{"ok":true}`}, nil
+}
+
+func TestSpawn_EmitsRunningEventBeforeRunner(t *testing.T) {
+	db, _ := newTestDB(t)
+	sink := &recordingSink{}
+
+	gate := make(chan struct{})
+	runner := gateRunner{release: gate}
+
+	svc := NewService(db, runner, &stubPoster{})
+	svc.SetStreamSink(sink)
+
+	doneCh := make(chan string, 1)
+	go func() {
+		id, err := svc.Spawn(context.Background(), SpawnRequest{
+			ParentSessionID: "sess-1",
+			ParentAgentID:   "file-backend",
+			Role:            "file-summarizer",
+			Prompt:          "p",
+			Mode:            ModeAsync,
+		})
+		if err != nil {
+			t.Errorf("Spawn: %v", err)
+		}
+		doneCh <- id
+	}()
+
+	// Async Spawn returns immediately. Wait briefly for the running event.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(sink.snapshot()) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(gate) // let the runner finish
+
+	events := sink.snapshot()
+	if len(events) == 0 {
+		t.Fatal("no running event emitted")
+	}
+	first := events[0]
+	if first.ParentSessionID != "sess-1" {
+		t.Errorf("ParentSessionID = %q, want sess-1", first.ParentSessionID)
+	}
+	if got := first.Payload["status"]; got != "running" {
+		t.Errorf("status = %v, want running", got)
+	}
+	if got := first.Payload["role"]; got != "file-summarizer" {
+		t.Errorf("role = %v, want file-summarizer", got)
+	}
+	if first.Payload["run_id"] == nil || first.Payload["run_id"] == "" {
+		t.Error("run_id missing from payload")
+	}
+	<-doneCh
 }

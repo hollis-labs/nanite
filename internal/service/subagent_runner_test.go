@@ -1,10 +1,15 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 func TestDrainCapture_DeltasConcatenateIntoSummary(t *testing.T) {
@@ -111,5 +116,36 @@ func TestDrainCapture_IgnoresOtherEventTypes(t *testing.T) {
 	}
 	if envelope != "{}" {
 		t.Errorf("envelope = %q", envelope)
+	}
+}
+
+// stubAgentReaderForRunner satisfies agentSlugResolver for ChatRunner tests.
+type stubAgentReaderForRunner struct {
+	agents map[string]*store.AgentProfile
+}
+
+func (s *stubAgentReaderForRunner) GetAgentBySlug(slug string) (*store.AgentProfile, error) {
+	a, ok := s.agents[slug]
+	if !ok {
+		return nil, fmt.Errorf("agent not found: %s", slug)
+	}
+	return a, nil
+}
+
+func TestChatRunner_ResolveRoleFails(t *testing.T) {
+	r := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{}},
+	}
+	_, err := r.Run(context.Background(), &subagent.Run{
+		ID:              "run-1",
+		Role:            "nonexistent",
+		ParentSessionID: "sess-1",
+		Prompt:          "p",
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown role, got nil")
+	}
+	if !errors.Is(err, errRoleResolveFailed) && !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error = %v, want wrapped role-not-found", err)
 	}
 }

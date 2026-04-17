@@ -91,3 +91,8 @@ core:
   - type: message-reply
   - type: message-notification
   - type: message-handoff
+
+  # G-4 — subagent spawn approval.
+  - type: subagent-spawn-approval
+    component: components/chat/envelopes/SubagentSpawnApprovalCard
+    export: SubagentSpawnApprovalCard

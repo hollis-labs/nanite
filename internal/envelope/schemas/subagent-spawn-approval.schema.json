@@ -1,0 +1,19 @@
+{
+  "$id": "subagent-spawn-approval",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Subagent Spawn Approval",
+  "description": "Requests user approval before a subagent spawn begins execution.",
+  "type": "object",
+  "required": ["run_id", "role", "prompt", "mode"],
+  "properties": {
+    "run_id":           { "type": "string" },
+    "role":             { "type": "string" },
+    "prompt":           { "type": "string" },
+    "mode":             { "type": "string", "enum": ["sync","async","api","interactive"] },
+    "parent_agent_id":  { "type": "string" },
+    "timeout_seconds":  { "type": "integer", "minimum": 0 },
+    "inputs_json":      { "type": "string" },
+    "risk_level":       { "type": "string", "enum": ["low","medium","high"] }
+  },
+  "additionalProperties": false
+}

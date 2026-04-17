@@ -67,6 +67,48 @@ func TestDrainCapture_LastEnvelopeWins(t *testing.T) {
 	}
 }
 
+// TestDrainCapture_CapturesStreamEndEnvelope verifies that the
+// aggregated envelope JSON that production generateResponse attaches
+// to stream_end.Envelope (chat_generate.go:837) is captured as
+// Result.ResultJSON. Without this, ResultJSON stays "{}" when
+// plugin_envelope routing doesn't fire mid-stream.
+func TestDrainCapture_CapturesStreamEndEnvelope(t *testing.T) {
+	ch := make(chan chat.StreamEvent, 4)
+	ch <- chat.StreamEvent{Type: "delta", Content: "final answer"}
+	ch <- chat.StreamEvent{Type: "stream_end", Envelope: `[{"type":"x"}]`}
+	close(ch)
+
+	summary, envelope, err := drainCapture(ch)
+	if err != nil {
+		t.Fatalf("drainCapture: %v", err)
+	}
+	if summary != "final answer" {
+		t.Errorf("summary = %q", summary)
+	}
+	if envelope != `[{"type":"x"}]` {
+		t.Errorf("envelope = %q, want stream_end.Envelope content", envelope)
+	}
+}
+
+// TestDrainCapture_StreamEndEnvelopePrefersPluginEnvelope verifies
+// precedence: a mid-stream plugin_envelope is kept when stream_end
+// has no Envelope (it was already captured by last-wins). If both
+// are present, stream_end wins (it's the terminal, aggregated truth).
+func TestDrainCapture_StreamEndEnvelopeWinsOverMidStream(t *testing.T) {
+	ch := make(chan chat.StreamEvent, 4)
+	ch <- chat.StreamEvent{Type: "plugin_envelope", Envelope: `{"mid":1}`}
+	ch <- chat.StreamEvent{Type: "stream_end", Envelope: `{"final":2}`}
+	close(ch)
+
+	_, envelope, err := drainCapture(ch)
+	if err != nil {
+		t.Fatalf("drainCapture: %v", err)
+	}
+	if envelope != `{"final":2}` {
+		t.Errorf("envelope = %q, want stream_end.Envelope to win", envelope)
+	}
+}
+
 func TestDrainCapture_EmptySummaryFallback(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 4)
 	ch <- chat.StreamEvent{Type: "stream_end"}
@@ -155,6 +197,7 @@ type recordingSessionStore struct {
 	created  []*store.Session
 	parents  map[string]*store.Session
 	bindings []sessionAgentBinding
+	messages []*store.Message
 }
 
 type sessionAgentBinding struct {
@@ -176,6 +219,11 @@ func (r *recordingSessionStore) GetSession(id string) (*store.Session, error) {
 
 func (r *recordingSessionStore) EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error {
 	r.bindings = append(r.bindings, sessionAgentBinding{sessionID, agentID, mode, isPrimary})
+	return nil
+}
+
+func (r *recordingSessionStore) CreateMessage(m *store.Message) error {
+	r.messages = append(r.messages, m)
 	return nil
 }
 
@@ -201,15 +249,16 @@ func TestChatRunner_DrainsSummaryAndEnvelope(t *testing.T) {
 		{Type: "stream_end"},
 	}}
 
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
 	runner := &ChatRunner{
 		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
 			"role-1": {ID: "ag-1", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
 		}},
-		store: &recordingSessionStore{
-			parents: map[string]*store.Session{
-				"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
-			},
-		},
+		store:     st,
 		invoker:   fake,
 		persistFn: func(_ context.Context, _, _ string) error { return nil },
 	}
@@ -233,4 +282,71 @@ func TestChatRunner_DrainsSummaryAndEnvelope(t *testing.T) {
 	if run.ChildSessionID == "" {
 		t.Error("ChildSessionID not set on run")
 	}
+
+	// User message must be persisted before invokeChat so the provider
+	// context assembly (ListMessages) sees the prompt. Without this the
+	// LLM receives an empty conversation and ignores run.Prompt.
+	if len(st.messages) != 1 {
+		t.Fatalf("messages created = %d, want 1", len(st.messages))
+	}
+	userMsg := st.messages[0]
+	if userMsg.SessionID != run.ChildSessionID {
+		t.Errorf("user message SessionID = %q, want child %q", userMsg.SessionID, run.ChildSessionID)
+	}
+	if userMsg.Role != "user" {
+		t.Errorf("user message Role = %q, want \"user\"", userMsg.Role)
+	}
+	if userMsg.Content != "summarize" {
+		t.Errorf("user message Content = %q, want %q", userMsg.Content, "summarize")
+	}
+}
+
+// TestChatRunner_UserMessageCreationError verifies that a failure to
+// persist the user message aborts Run before invoking the chat loop —
+// otherwise the provider would see an empty conversation and silently
+// produce wrong output.
+func TestChatRunner_UserMessageCreationError(t *testing.T) {
+	fake := &fakeChatService{}
+	st := &messageFailingStore{
+		recordingSessionStore: recordingSessionStore{
+			parents: map[string]*store.Session{
+				"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			},
+		},
+		createMessageErr: errors.New("db write failed"),
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"role-1": {ID: "ag-1"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+	_, err := runner.Run(context.Background(), &subagent.Run{
+		ID: "run-1", Role: "role-1", ParentSessionID: "sess-parent", Prompt: "p",
+	})
+	if err == nil {
+		t.Fatal("expected error from CreateMessage failure")
+	}
+	if !strings.Contains(err.Error(), "create user message") {
+		t.Errorf("error = %v, want create-user-message wrap", err)
+	}
+	if fake.called != 0 {
+		t.Errorf("generateResponse called %d times, want 0 (should abort before chat invocation)", fake.called)
+	}
+}
+
+// messageFailingStore extends recordingSessionStore with an injected
+// CreateMessage error.
+type messageFailingStore struct {
+	recordingSessionStore
+	createMessageErr error
+}
+
+func (m *messageFailingStore) CreateMessage(msg *store.Message) error {
+	if m.createMessageErr != nil {
+		return m.createMessageErr
+	}
+	return m.recordingSessionStore.CreateMessage(msg)
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
@@ -15,26 +16,38 @@ import (
 // id and a JSON-serialized envelope payload.
 func TestStreamManager_DeliverSessionEnvelopes_ActiveStream(t *testing.T) {
 	sm := NewStreamManager()
-	ch := sm.CreateStream("msg-1", "sess-1")
+	produce := sm.CreateStream("msg-1", "sess-1")
 	defer sm.CloseStream("msg-1")
+	defer close(produce)
+
+	// CW-20260418-0100: CreateStream now returns the producer channel; the
+	// consumer side is obtained via Subscribe. The plugin-envelope delivery
+	// path writes to the producer, the pump assigns EventID + rings, and
+	// the subscriber receives the event.
+	sub, _, ok := sm.Subscribe("msg-1", 0)
+	if !ok {
+		t.Fatal("Subscribe returned ok=false for freshly-created stream")
+	}
 
 	env := sdkplugin.EnvelopeOut{
 		Type: "oembed-card",
 		Data: map[string]interface{}{"url": "https://example.com/video"},
 	}
 
-	ok := sm.DeliverSessionEnvelopes("sess-1", "oembed", []sdkplugin.EnvelopeOut{env})
-	if !ok {
+	if ok := sm.DeliverSessionEnvelopes("sess-1", "oembed", []sdkplugin.EnvelopeOut{env}); !ok {
 		t.Fatalf("DeliverSessionEnvelopes returned false; want true when stream attached")
 	}
 
 	select {
-	case got := <-ch:
+	case got := <-sub:
 		if got.Type != "plugin_envelope" {
 			t.Fatalf("stream event type: want plugin_envelope, got %q", got.Type)
 		}
 		if got.PluginID != "oembed" {
 			t.Errorf("plugin id: want oembed, got %q", got.PluginID)
+		}
+		if got.EventID == 0 {
+			t.Errorf("EventID: want non-zero (ring-buffer assigned), got 0")
 		}
 		var decoded sdkplugin.EnvelopeOut
 		if err := json.Unmarshal([]byte(got.Envelope), &decoded); err != nil {
@@ -43,7 +56,7 @@ func TestStreamManager_DeliverSessionEnvelopes_ActiveStream(t *testing.T) {
 		if decoded.Type != "oembed-card" {
 			t.Errorf("envelope inner type: want oembed-card, got %q", decoded.Type)
 		}
-	default:
+	case <-time.After(500 * time.Millisecond):
 		t.Fatal("no event on the chat stream — delivery did not reach SSE consumer")
 	}
 

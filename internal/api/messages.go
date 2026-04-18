@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/hollis-labs/nanite/internal/chat"
 )
@@ -142,7 +143,20 @@ func (a *API) handleRetryStream(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("messageID")
 
-	ch, ok := a.Services.Streams.GetStream(messageID)
+	// CW-20260418-0100: optional ?from=<uint64> cursor lets a reconnecting
+	// client replay events missed during an SSE drop. 0 / absent means "give
+	// me everything" (ring-buffer retention still bounds the replay size).
+	fromEventID := uint64(0)
+	if raw := r.URL.Query().Get("from"); raw != "" {
+		if n, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			fromEventID = n
+		}
+	}
+
+	// streamClosed just tells us the generation finished before we connected;
+	// behavior is identical either way — the channel carries replay events
+	// (if any) and then EOFs. The for/select below handles both paths.
+	ch, _, ok := a.Services.Streams.Subscribe(messageID, fromEventID)
 	if !ok {
 		a.errorResp(w, http.StatusNotFound, "stream not found")
 		return
@@ -163,6 +177,10 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	// Register this SSE connection for session-level deduplication.
 	// If another tab already has an active SSE connection for this session,
 	// it will receive a session_takeover event and be closed.
+	//
+	// Note: when streamClosed=true the generation has already finished; we
+	// still drain the replay channel so the client can pick up missed final
+	// events before falling back to /api/sessions/{id}/messages.
 	var sseDone <-chan struct{}
 	if sessionID, found := a.Services.Streams.GetSessionForMessage(messageID); found {
 		sseDone = a.Services.Streams.RegisterSSE(sessionID)

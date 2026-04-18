@@ -98,6 +98,14 @@ export function useChat(sessionId: string | null) {
   const lastEventAtRef = useRef<number>(0);
   const watchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // CW-20260418-0100: ring-buffer cursor for SSE reconnect. The backend
+  // stamps every stream event with a monotonic event_id; we track the
+  // highest we've seen so reconnectStalledStream can resume from
+  // `?from=<lastEventId>` instead of the heavier /retry path. The current
+  // message id is captured alongside so the reconnect URL is correct.
+  const lastEventIdRef = useRef<number>(0);
+  const currentMessageIdRef = useRef<string | null>(null);
+
   const queryClient = useQueryClient();
 
   // Read reactive state via selectors (triggers re-renders)
@@ -111,6 +119,21 @@ export function useChat(sessionId: string | null) {
   // Store actions are stable — read via getState() inside callbacks to avoid
   // bloating dependency arrays. This helper gives typed access to all actions.
   const store = () => useChatStore.getState();
+
+  // recordEventId advances the reconnect cursor. Called from every SSE
+  // handler via touchStreamEvent below. Non-event_id-carrying events
+  // (synthetic, pre-ring-buffer) are ignored — the cursor only tracks
+  // events the server could replay.
+  const recordEventId = useCallback((raw: string) => {
+    try {
+      const evt = JSON.parse(raw) as { event_id?: number };
+      if (evt.event_id && evt.event_id > lastEventIdRef.current) {
+        lastEventIdRef.current = evt.event_id;
+      }
+    } catch {
+      // ignore — malformed events are already handled by the real handler
+    }
+  }, []);
 
   const touchStreamEvent = useCallback(() => {
     lastEventAtRef.current = Date.now();
@@ -317,6 +340,10 @@ export function useChat(sessionId: string | null) {
         const { message_id } = await api.sendMessage({ session_id: sessionId, content });
 
         // Connect to SSE stream
+        // CW-20260418-0100: track the message id + reset cursor so
+        // reconnectStalledStream can re-subscribe with ?from=<lastEventId>.
+        currentMessageIdRef.current = message_id;
+        lastEventIdRef.current = 0;
         const es = new EventSource(`/api/stream/${message_id}`);
         eventSourceRef.current = es;
         let accumulated = "";
@@ -324,6 +351,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
             accumulated += data.content;
@@ -598,6 +626,9 @@ export function useChat(sessionId: string | null) {
       }
 
       // Open a new SSE connection for the retry.
+      // CW-20260418-0100: fresh message id ⇒ reset cursor.
+      currentMessageIdRef.current = message_id;
+      lastEventIdRef.current = 0;
       const es = new EventSource(`/api/stream/${message_id}`);
       eventSourceRef.current = es;
       store().setStreaming(true);
@@ -605,6 +636,7 @@ export function useChat(sessionId: string | null) {
 
       es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
         touchStreamEvent();
+        recordEventId(e.data as string);
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content) {
           store().appendStreamContent(data.content);
@@ -698,9 +730,14 @@ export function useChat(sessionId: string | null) {
   }, [sessionId, stopStallWatchdog]);
 
   const reconnectStalledStream = useCallback(async () => {
-    // User-triggered from the stall banner. Abandon the current (possibly
-    // dead) SSE connection and request a fresh assistant turn via the
-    // existing retry endpoint — backend will issue a new message_id.
+    // User-triggered from the stall banner. Today this still delegates to
+    // the heavier /retry path (new message_id). CW-20260418-0100's backend
+    // ring buffer + Subscribe-with-cursor are wired on the server and the
+    // cursor is tracked on the client via lastEventIdRef, but the
+    // "reconnect to the SAME message with ?from=<cursor>" frontend path
+    // is deferred to a follow-up that extracts the big block of
+    // addEventListener registrations into a reusable helper. See
+    // CW-20260418-0103.
     stopStallWatchdog();
     store().setStreamStalled(false);
     if (eventSourceRef.current) {

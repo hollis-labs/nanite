@@ -84,6 +84,15 @@ type StreamEvent struct {
 	PluginID        string     `json:"plugin_id,omitempty"`         // emitting plugin id for plugin_envelope
 	Data            string     `json:"data,omitempty"`              // JSON payload for tool_warning events
 	Detail          string     `json:"detail,omitempty"`            // Short label for tool_call (e.g., command, path)
+
+	// EventID is a monotonically increasing sequence number per message stream,
+	// assigned by StreamManager when the event is written to the ring buffer.
+	// Frontends track the highest EventID seen and pass it back as `?from=<N>`
+	// when reconnecting, so the server can replay events missed during the
+	// disconnect. Zero means "not yet assigned" (e.g., synthetic events
+	// surfaced outside the ring-buffer path).
+	// CW-20260418-0100.
+	EventID uint64 `json:"event_id,omitempty"`
 }
 
 // Usage contains token usage for a completed response.

@@ -15,7 +15,7 @@ import (
 // StreamManager owns the concurrent state for message streams, SSE
 // connections, and presence. Extracted from Engine's 6 sync.Map fields.
 type StreamManager struct {
-	streams        sync.Map // messageID -> chan chat.StreamEvent
+	streams        sync.Map // messageID -> *messageStream (CW-20260418-0100)
 	msgToSession   sync.Map // messageID -> sessionID
 	sessionToMsgs  sync.Map // sessionID -> *sessionStreams (reverse index for session-scoped delivery)
 	sessionSSE     sync.Map // sessionID -> *sseConn
@@ -31,6 +31,152 @@ type StreamManager struct {
 	// chat SSE stream was attached for the target session at delivery time.
 	// BLG-20260413-012 — surfaced via PluginEnvelopeDropCount for diagnostics.
 	pluginEnvelopeDrops atomic.Uint64
+}
+
+// ringBufferCapacity bounds the per-message event history used for replay on
+// SSE reconnect. 256 covers a typical tool-heavy turn (many short deltas +
+// tool_call/tool_result pairs) without unbounded memory growth. Older events
+// are evicted first — a client that disconnects, sleeps past 256 events of
+// activity, and then reconnects will miss the oldest events but still pick
+// up from wherever in the buffer its cursor lands.
+// CW-20260418-0100.
+const ringBufferCapacity = 256
+
+// messageStream represents the per-message fan-out pipeline: a producer
+// channel written to by generateResponse, a ring buffer of recent events
+// with monotonically-assigned EventIDs, and the current SSE subscriber.
+//
+// The pump goroutine reads from produce, assigns the next EventID, appends
+// to the buffer (evicting oldest when full), and forwards to the current
+// subscriber channel (non-blocking — if the subscriber is slow or absent
+// the event still lives in the buffer for replay).
+//
+// CW-20260418-0100.
+type messageStream struct {
+	messageID string
+	sessionID string
+
+	// produce is returned by CreateStream and written by generateResponse.
+	// Exactly one producer; closed by the producer's defer when the stream
+	// ends. The pump goroutine reads until produce closes.
+	produce chan chat.StreamEvent
+
+	mu     sync.Mutex
+	buf    []chat.StreamEvent // ring; at most ringBufferCapacity entries. buf[len-1] is the newest.
+	nextID uint64             // next EventID to assign (starts at 1)
+
+	// subscriber is the current live SSE receiver. nil when no client is
+	// connected. Swapped atomically under mu. When the pump forwards an
+	// event to a nil subscriber, the event stays only in the buffer — the
+	// client will replay it when (or if) they connect via Subscribe.
+	subscriber chan chat.StreamEvent
+
+	// closed is set by the pump when produce closes and it has drained all
+	// remaining events. Subscribers connecting after closed=true receive a
+	// full replay followed by a closed channel.
+	closed bool
+}
+
+// newMessageStream starts a pump goroutine for a fresh message. The caller
+// receives the producer channel via CreateStream.
+func newMessageStream(messageID, sessionID string) *messageStream {
+	ms := &messageStream{
+		messageID: messageID,
+		sessionID: sessionID,
+		produce:   make(chan chat.StreamEvent, 128),
+		nextID:    1,
+	}
+	go ms.pump()
+	return ms
+}
+
+// pump is the per-message dispatcher goroutine. It owns all mutations to
+// buf/nextID/subscriber; Subscribe and the producer just push through it.
+func (ms *messageStream) pump() {
+	for evt := range ms.produce {
+		ms.mu.Lock()
+		evt.EventID = ms.nextID
+		ms.nextID++
+		if len(ms.buf) >= ringBufferCapacity {
+			ms.buf = ms.buf[1:]
+		}
+		ms.buf = append(ms.buf, evt)
+		sub := ms.subscriber
+		ms.mu.Unlock()
+
+		// Non-blocking forward. If the subscriber is slow or missing, the
+		// event is preserved in the ring buffer for the next Subscribe call
+		// to replay via EventID cursor.
+		if sub != nil {
+			select {
+			case sub <- evt:
+			default:
+				slog.Debug("stream: dropped event on slow subscriber",
+					"message_id", ms.messageID, "event_id", evt.EventID, "type", evt.Type)
+			}
+		}
+	}
+
+	// Producer closed. Mark closed and close the current subscriber so the
+	// SSE handler sees EOF.
+	ms.mu.Lock()
+	ms.closed = true
+	sub := ms.subscriber
+	ms.subscriber = nil
+	ms.mu.Unlock()
+	if sub != nil {
+		close(sub)
+	}
+}
+
+// subscribe replays buffered events with EventID > fromEventID then registers
+// the caller as the live subscriber. If an older subscriber is already
+// registered, it is replaced (and closed) — the SSE dedup at the handler
+// layer already enforces a single subscriber per session, so this is the
+// dedup's enforcement inside the pump.
+//
+// Returns a read-only channel of live events (replay events are pre-drained
+// into the returned channel before return), plus a boolean indicating
+// whether the stream has already closed. When closed=true the caller
+// receives the replay events and the channel is closed.
+func (ms *messageStream) subscribe(fromEventID uint64) (<-chan chat.StreamEvent, bool) {
+	out := make(chan chat.StreamEvent, 128)
+
+	ms.mu.Lock()
+	// Pre-fill out with buffered events the caller hasn't seen yet.
+	for _, evt := range ms.buf {
+		if evt.EventID > fromEventID {
+			// out is freshly made with cap 128; replay ≤ ringBufferCapacity
+			// (256) means it could block in theory. Guard with a select so a
+			// pathological cursor value never deadlocks Subscribe.
+			select {
+			case out <- evt:
+			default:
+				slog.Warn("stream: replay buffer exceeded subscriber channel capacity",
+					"message_id", ms.messageID, "from_event_id", fromEventID,
+					"buf_len", len(ms.buf))
+			}
+		}
+	}
+
+	// Replace any existing subscriber. Close the old one so the previous
+	// client sees EOF rather than a silently-abandoned channel.
+	prev := ms.subscriber
+	if ms.closed {
+		ms.mu.Unlock()
+		if prev != nil {
+			// Already closed by pump; nothing to do.
+			_ = prev
+		}
+		close(out)
+		return out, true
+	}
+	ms.subscriber = out
+	ms.mu.Unlock()
+	if prev != nil {
+		close(prev)
+	}
+	return out, false
 }
 
 // sessionStreams tracks the set of active message streams for a session so
@@ -52,15 +198,20 @@ func NewStreamManager() *StreamManager {
 
 // --- Message streams ---
 
-// CreateStream allocates a buffered stream channel for a message, maps the
-// message to its session, and returns the channel. The caller (generateResponse)
-// writes events to the channel; the SSE handler reads from it.
+// CreateStream allocates a message stream (producer channel + ring buffer
+// + pump goroutine) and registers it. The caller (generateResponse) writes
+// events to the returned channel; the pump assigns EventIDs, preserves the
+// last ringBufferCapacity events for replay, and forwards to the current
+// SSE subscriber registered via Subscribe.
+//
+// The returned channel must be closed by the producer when the stream
+// ends; the pump exits on that close.
 func (sm *StreamManager) CreateStream(messageID, sessionID string) chan chat.StreamEvent {
-	ch := make(chan chat.StreamEvent, 128)
-	sm.streams.Store(messageID, ch)
+	ms := newMessageStream(messageID, sessionID)
+	sm.streams.Store(messageID, ms)
 	sm.msgToSession.Store(messageID, sessionID)
 	sm.addSessionMessage(sessionID, messageID)
-	return ch
+	return ms.produce
 }
 
 // addSessionMessage records a (sessionID, messageID) pair in the reverse
@@ -112,17 +263,48 @@ func (sm *StreamManager) removeSessionMessage(sessionID, messageID string) {
 	}
 }
 
-// GetStream returns the event channel for a given message ID.
-func (sm *StreamManager) GetStream(messageID string) (<-chan chat.StreamEvent, bool) {
+// Subscribe registers the caller as the live SSE reader for a message and
+// replays buffered events with EventID > fromEventID before the channel
+// delivers live events. Returns (channel, closed). When closed=true the
+// stream has already ended — the channel contains any replay events and is
+// already closed. Returns (nil, false, false) if no such message exists.
+//
+// Passing fromEventID=0 is the normal "first connection" case; replay is
+// bounded by the ring-buffer retention (most recent ringBufferCapacity
+// events). Larger cursors are used when a client reconnects after an SSE
+// drop — replay catches them up to the latest event.
+//
+// CW-20260418-0100.
+func (sm *StreamManager) Subscribe(messageID string, fromEventID uint64) (<-chan chat.StreamEvent, bool, bool) {
 	val, ok := sm.streams.Load(messageID)
+	if !ok {
+		return nil, false, false
+	}
+	ms, ok := val.(*messageStream)
+	if !ok {
+		return nil, false, false
+	}
+	ch, closed := ms.subscribe(fromEventID)
+	return ch, closed, true
+}
+
+// GetStream returns a live event subscription for a given message ID with
+// no replay. Equivalent to Subscribe(messageID, 0) at a shape that matches
+// the pre-ring-buffer API. Retained so call sites that never dropped a
+// connection don't need to thread a cursor parameter.
+func (sm *StreamManager) GetStream(messageID string) (<-chan chat.StreamEvent, bool) {
+	ch, _, ok := sm.Subscribe(messageID, 0)
 	if !ok {
 		return nil, false
 	}
-	return val.(chan chat.StreamEvent), true
+	return ch, true
 }
 
 // CloseStream removes the stream and message-to-session mapping. It does NOT
-// close the channel — the producer (generateResponse) is responsible for that.
+// close the producer channel — generateResponse's defer owns that. The pump
+// goroutine exits when the producer closes; the messageStream lingers in
+// sm.streams until CloseStream removes it, so late reconnects within the
+// same session still get replay via Subscribe().
 func (sm *StreamManager) CloseStream(messageID string) {
 	if val, ok := sm.msgToSession.LoadAndDelete(messageID); ok {
 		sm.removeSessionMessage(val.(string), messageID)
@@ -299,8 +481,11 @@ func (sm *StreamManager) BroadcastSessionStreamEvent(sessionID string, evt chat.
 		if !ok {
 			continue
 		}
-		ch := chVal.(chan chat.StreamEvent)
-		if trySendEnvelope(ch, evt) == sendDelivered {
+		ms, ok := chVal.(*messageStream)
+		if !ok {
+			continue
+		}
+		if trySendEnvelope(ms.produce, evt) == sendDelivered {
 			delivered++
 		}
 	}
@@ -413,8 +598,11 @@ func (sm *StreamManager) DeliverSessionEnvelopes(sessionID, pluginID string, env
 			if !ok {
 				continue
 			}
-			ch := chVal.(chan chat.StreamEvent)
-			outcome := trySendEnvelope(ch, evt)
+			ms, ok := chVal.(*messageStream)
+			if !ok {
+				continue
+			}
+			outcome := trySendEnvelope(ms.produce, evt)
 			switch outcome {
 			case sendDelivered:
 				anyDelivered = true

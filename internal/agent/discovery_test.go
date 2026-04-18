@@ -127,7 +127,7 @@ func TestDiscover_PluginAgents(t *testing.T) {
 	root := t.TempDir()
 	pluginsDir := filepath.Join(root, "plugins")
 
-	writeAgentFile(t, filepath.Join(pluginsDir, "support-ticket", "agents"), "support.md", "support")
+	writeAgentFile(t, filepath.Join(pluginsDir, "example-plugin", "agents"), "support.md", "support")
 
 	defs, err := Discover(DiscoverOptions{
 		WorkingDir: root,

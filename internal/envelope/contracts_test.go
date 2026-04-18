@@ -37,7 +37,7 @@ var knownTypes = []string{
 	"diff-card",
 	// Plugin: giphy
 	"giphy-modal",
-	// Plugin: support-ticket
+	// KB + ticket primitives
 	"kb-result",
 	"ticket-form",
 	"ticket-confirmation",

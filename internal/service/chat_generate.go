@@ -275,8 +275,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	for ls.iteration = 0; ; ls.iteration++ {
 		// Check layered iteration limits.
-		if stop, reason := ls.shouldStop(); stop {
-			slog.Warn("chat-loop stopped", "reason", reason, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
+		if stop, code, reason := ls.shouldStop(); stop {
+			slog.Warn("chat-loop stopped", "reason", reason, "code", code, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
+			// CW-20260417-0485: emit a typed `chat-loop-terminated` envelope
+			// BEFORE the fallback status event so the FE (CW-20260418-0008)
+			// can render a terminal pause card. Any FE that doesn't yet
+			// understand the new envelope type will still see the status
+			// event, preserving existing behavior.
+			s.emitChatLoopTerminated(sessionID, ls, code, reason, ch)
 			ch <- chat.StreamEvent{Type: "status", Content: fmt.Sprintf("Stopped: %s", reason)}
 			break
 		}

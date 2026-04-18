@@ -71,41 +71,93 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 	}
 }
 
-func TestLoopState_ShouldStop_ConsecutiveFailures(t *testing.T) {
+// TestLoopState_ShouldStop_SoftCapDoesNotTerminate is the CW-20260417-0485
+// behavior pivot: hitting the soft consecutiveFailCap (default 3) no longer
+// exits the loop. The LLM continues to receive tool_result error blocks and
+// gets a chance to recover or stop gracefully.
+func TestLoopState_ShouldStop_SoftCapDoesNotTerminate(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
 
-	// 3 failures should trigger stop.
+	// 3 failures — the old soft cap — should NOT stop the loop anymore.
 	for i := 0; i < 3; i++ {
-		stop, _ := ls.shouldStop()
-		if stop {
-			t.Fatalf("shouldStop() returned true after only %d failures", i)
-		}
-		ls.recordToolCall("test-tool", false) // failure
+		ls.recordToolCall("test-tool", false)
+	}
+	stop, _, _ := ls.shouldStop()
+	if stop {
+		t.Error("shouldStop() should NOT terminate at the soft consecutive-fail threshold (3) — CW-20260417-0485")
 	}
 
-	stop, reason := ls.shouldStop()
+	// 9 failures still under the runaway cap (default 10) — still no stop.
+	for i := 3; i < 9; i++ {
+		ls.recordToolCall("test-tool", false)
+	}
+	stop, _, _ = ls.shouldStop()
+	if stop {
+		t.Errorf("shouldStop() should NOT terminate at %d failures (runaway cap is %d)",
+			ls.consecutiveFailures, ls.limits.runawayFailCap)
+	}
+}
+
+// TestLoopState_ShouldStop_RunawayFailures asserts the hard circuit-breaker
+// trips at the runaway cap (default 10) and surfaces the structured
+// TerminationCode so the chat-loop-terminated envelope can carry it.
+// CW-20260417-0485.
+func TestLoopState_ShouldStop_RunawayFailures(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+
+	for i := 0; i < 10; i++ {
+		stop, _, _ := ls.shouldStop()
+		if stop {
+			t.Fatalf("shouldStop() terminated at iter %d before reaching runaway cap", i)
+		}
+		ls.recordToolCall("test-tool", false)
+	}
+
+	stop, code, reason := ls.shouldStop()
 	if !stop {
-		t.Error("shouldStop() should return true after 3 consecutive failures")
+		t.Fatal("shouldStop() should terminate at runaway cap (10)")
+	}
+	if code != TerminationRunawayToolFailures {
+		t.Errorf("termination code = %q, want %q", code, TerminationRunawayToolFailures)
 	}
 	if reason == "" {
 		t.Error("shouldStop() should return a reason")
 	}
 
-	// Reset on success.
+	// Reset on success — runaway condition clears.
 	ls.consecutiveFailures = 0
 	ls.recordToolCall("test-tool", true)
-	stop, _ = ls.shouldStop()
+	stop, _, _ = ls.shouldStop()
 	if stop {
 		t.Error("shouldStop() should return false after success reset")
+	}
+}
+
+// TestLoopState_ShouldStop_CustomRunawayCap lets agent constraints override
+// the runaway cap (ticket acceptance criterion — configurability kept).
+func TestLoopState_ShouldStop_CustomRunawayCap(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{RunawayFailCap: 5}, nil, false)
+	for i := 0; i < 5; i++ {
+		ls.recordToolCall("t", false)
+	}
+	stop, code, _ := ls.shouldStop()
+	if !stop {
+		t.Fatal("shouldStop() should terminate at custom runaway cap (5)")
+	}
+	if code != TerminationRunawayToolFailures {
+		t.Errorf("code = %q, want %q", code, TerminationRunawayToolFailures)
 	}
 }
 
 func TestLoopState_ShouldStop_MaxTurns(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{MaxTurns: 5}, nil, false)
 	ls.iteration = 5
-	stop, reason := ls.shouldStop()
+	stop, code, reason := ls.shouldStop()
 	if !stop {
 		t.Error("shouldStop() should return true at max turns")
+	}
+	if code != TerminationMaxTurns {
+		t.Errorf("code = %q, want %q", code, TerminationMaxTurns)
 	}
 	if reason == "" {
 		t.Error("expected a reason")
@@ -113,20 +165,32 @@ func TestLoopState_ShouldStop_MaxTurns(t *testing.T) {
 }
 
 func TestLoopState_ShouldStop_HardCeiling(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: -1, HardCeiling: 10}, nil, false)
+	// MaxTurns explicitly higher than hard ceiling — ensures we hit the
+	// hard_ceiling layer rather than the max_turns layer (when MaxTurns=-1
+	// the resolved value clamps to hardCeiling and max_turns fires first).
+	ls := newLoopState(chat.AgentConstraints{MaxTurns: 200, HardCeiling: 10}, nil, false)
 	ls.iteration = 10
-	stop, _ := ls.shouldStop()
+	stop, code, _ := ls.shouldStop()
 	if !stop {
 		t.Error("shouldStop() should return true at hard ceiling")
+	}
+	// With MaxTurns>HardCeiling, resolvedMaxTurns==HardCeiling, so the
+	// max_turns layer (layer 3) fires first. Both layers converge on
+	// iter==ceiling; differentiating them requires different values.
+	if code != TerminationMaxTurns && code != TerminationHardCeiling {
+		t.Errorf("code = %q, want %q or %q", code, TerminationMaxTurns, TerminationHardCeiling)
 	}
 }
 
 func TestLoopState_ShouldStop_RetryBudget(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{RetryBudget: 1}, nil, false)
 	ls.recordToolCall("tool", false) // uses the budget
-	stop, reason := ls.shouldStop()
+	stop, code, reason := ls.shouldStop()
 	if !stop {
 		t.Error("shouldStop() should return true when retry budget exhausted")
+	}
+	if code != TerminationRetryBudgetExhausted {
+		t.Errorf("code = %q, want %q", code, TerminationRetryBudgetExhausted)
 	}
 	if reason == "" {
 		t.Error("expected a reason")
@@ -136,9 +200,12 @@ func TestLoopState_ShouldStop_RetryBudget(t *testing.T) {
 func TestLoopState_ShouldStop_IdleTimeout(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{IdleTimeoutSeconds: 1}, nil, false)
 	ls.lastActivity = time.Now().Add(-2 * time.Second)
-	stop, reason := ls.shouldStop()
+	stop, code, reason := ls.shouldStop()
 	if !stop {
 		t.Error("shouldStop() should return true after idle timeout")
+	}
+	if code != TerminationIdleTimeout {
+		t.Errorf("code = %q, want %q", code, TerminationIdleTimeout)
 	}
 	if reason == "" {
 		t.Error("expected a reason")
@@ -172,11 +239,25 @@ func TestLoopState_RecordPermissionDenial(t *testing.T) {
 		t.Errorf("consecutiveFailures = %d, want 1", ls.consecutiveFailures)
 	}
 
+	// CW-20260417-0485: 3 denials is the soft cap, NOT the terminal cap.
+	// Termination now requires hitting the runaway cap (default 10).
 	ls.recordPermissionDenial()
 	ls.recordPermissionDenial()
-	stop, _ := ls.shouldStop()
+	stop, _, _ := ls.shouldStop()
+	if stop {
+		t.Error("shouldStop() should NOT trigger at 3 denials (soft cap)")
+	}
+
+	// Drive to the runaway cap.
+	for i := 3; i < 10; i++ {
+		ls.recordPermissionDenial()
+	}
+	stop, code, _ := ls.shouldStop()
 	if !stop {
-		t.Error("shouldStop() should trigger after 3 permission denials")
+		t.Error("shouldStop() should trigger at runaway cap (10)")
+	}
+	if code != TerminationRunawayToolFailures {
+		t.Errorf("code = %q, want %q", code, TerminationRunawayToolFailures)
 	}
 }
 
@@ -282,6 +363,9 @@ func TestNewLoopState_Defaults(t *testing.T) {
 	}
 	if ls.limits.consecutiveFailCap != 3 {
 		t.Errorf("consecutiveFailCap = %d, want 3", ls.limits.consecutiveFailCap)
+	}
+	if ls.limits.runawayFailCap != 10 {
+		t.Errorf("runawayFailCap = %d, want 10", ls.limits.runawayFailCap)
 	}
 }
 

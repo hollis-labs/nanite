@@ -256,6 +256,11 @@ func (s *chatServiceImpl) preCheckTools(
 		if schema := s.tools.GetToolSchema(tu.Name); len(schema) > 0 {
 			if errMsg := s.argValidator.validate(tu.Name, schema, tu.Input); errMsg != "" {
 				ls.recordToolCall(tu.Name, false)
+				// CW-20260417-0485: arg-validation errors are the canonical
+				// trigger for the chat-loop-terminated envelope (see the
+				// session evidence in the ticket). Capture the payload so
+				// the envelope can surface it to the user.
+				ls.recordLastError(tu.Name, errMsg)
 				slog.Warn("chat-service: tool arg validation failed", "tool", tu.Name, "err", errMsg)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: errMsg}
@@ -483,6 +488,10 @@ func (s *chatServiceImpl) postProcessToolResults(
 
 		// Tool warning on errors.
 		if r.isError {
+			// CW-20260417-0485: remember the last tool error so a later
+			// chat-loop-terminated envelope (runaway breaker) can carry the
+			// triggering payload for the FE to render.
+			ls.recordLastError(tu.Name, r.rawOutput)
 			level := "warning"
 			if ls.consecutiveFailures >= ls.limits.consecutiveFailCap {
 				level = "critical"

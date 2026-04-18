@@ -1,10 +1,71 @@
 package provider
 
 import (
+	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// TestPacingWait_EmitsImmediateAndHeartbeat verifies the helper fires an
+// initial status event and keeps the stream warm with periodic heartbeats
+// during longer waits. The important property for the frontend stall
+// watchdog is that onStatus is called at least once well under 60s.
+// CW-20260418-0043.
+func TestPacingWait_EmitsImmediateAndHeartbeat(t *testing.T) {
+	var calls atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		_ = PacingWait(context.Background(), 120*time.Millisecond, func(msg string) {
+			calls.Add(1)
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PacingWait did not return")
+	}
+	if got := calls.Load(); got < 1 {
+		t.Fatalf("expected at least one onStatus call, got %d", got)
+	}
+}
+
+// TestPacingWait_ReturnsOnContextCancel verifies a cancelled ctx unblocks
+// the wait immediately, with ctx.Err propagated — needed so the per-session
+// takeover cancel (CW-20260418-0043 fix #2) actually aborts in-flight
+// provider waits.
+func TestPacingWait_ReturnsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- PacingWait(ctx, 5*time.Second, nil)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected non-nil error after cancel")
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("PacingWait did not return after cancel")
+	}
+}
+
+// TestPacingWait_ZeroDurationNoops verifies that a zero/negative wait is a
+// no-op and does not call onStatus. Guards against accidental status events
+// when the rate tracker reports no pacing needed.
+func TestPacingWait_ZeroDurationNoops(t *testing.T) {
+	var called atomic.Bool
+	if err := PacingWait(context.Background(), 0, func(string) { called.Store(true) }); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if called.Load() {
+		t.Fatal("onStatus should not have been called for zero wait")
+	}
+}
 
 func TestTokenRateTracker_Available_FullBudget(t *testing.T) {
 	tr := NewTokenRateTracker(30000)

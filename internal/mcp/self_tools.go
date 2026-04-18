@@ -229,7 +229,7 @@ func selfToolDefinitions() []Tool {
 				"properties": map[string]any{
 					"title":       map[string]any{"type": "string", "description": "Todo title"},
 					"scope":       map[string]any{"type": "string", "description": "Scope: workspace, project, or session"},
-					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Empty for workspace scope."},
+					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
 					"priority":    map[string]any{"type": "string", "description": "Priority: low, medium, high, critical (default: medium)"},
 					"description": map[string]any{"type": "string", "description": "Detailed description (optional)"},
 					"parent_id":   map[string]any{"type": "string", "description": "Parent todo ID for nesting (optional)"},
@@ -256,14 +256,15 @@ func selfToolDefinitions() []Tool {
 		},
 		{
 			Name:        "nanite_todo_list",
-			Description: "List todos with optional filters. Returns todos matching the given scope, status, and/or priority. When presenting results to the user, emit a todo-list envelope: ```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"todo-list\",\"data\":{\"scope\":\"session\",\"scope_id\":\"...\",\"title\":\"Session Todos\"}}\n``` The UI renders this as an interactive card with live data.",
+			Description: "List todos with optional filters. Returns a text summary plus an interactive todo-list card (when scope is provided) that the UI renders with live data. Pass scope and scope_id so the card is correctly scoped to the current session or project. Do NOT emit a nanite-envelope block manually — this tool already does that.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"scope":    map[string]any{"type": "string", "description": "Filter by scope: workspace, project, or session (optional)"},
-					"scope_id": map[string]any{"type": "string", "description": "Filter by scope ID (optional)"},
+					"scope":    map[string]any{"type": "string", "description": "Filter by scope: workspace, project, or session. Required to render an interactive card."},
+					"scope_id": map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
 					"status":   map[string]any{"type": "string", "description": "Filter by status: pending, in_progress, done, blocked (optional)"},
 					"priority": map[string]any{"type": "string", "description": "Filter by priority: low, medium, high, critical (optional)"},
+					"title":    map[string]any{"type": "string", "description": "Title shown at the top of the interactive card (optional, defaults to \"Todos\")"},
 				},
 			},
 		},
@@ -275,7 +276,7 @@ func selfToolDefinitions() []Tool {
 				"properties": map[string]any{
 					"title":       map[string]any{"type": "string", "description": "Plan title"},
 					"scope":       map[string]any{"type": "string", "description": "Scope: workspace, project, or session"},
-					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Empty for workspace scope."},
+					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
 					"description": map[string]any{"type": "string", "description": "Plan description (optional)"},
 					"steps":       map[string]any{"type": "string", "description": "JSON array of step objects: [{id, title, status, depends_on, acceptance, notes}]"},
 				},
@@ -293,6 +294,40 @@ func selfToolDefinitions() []Tool {
 					"title":   map[string]any{"type": "string", "description": "New plan title (optional, ignored if step_id set)"},
 					"status":  map[string]any{"type": "string", "description": "New status. Plan: proposed/approved/in_progress/complete/abandoned. Step: pending/in_progress/done/skipped."},
 					"notes":   map[string]any{"type": "string", "description": "Notes for the step (optional, only with step_id)"},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			Name:        "nanite_plan_list",
+			Description: "List plans with optional filters. Returns plans matching the given scope, scope_id, and/or status.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"scope":    map[string]any{"type": "string", "description": "Filter by scope: workspace, project, or session (optional)"},
+					"scope_id": map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
+					"status":   map[string]any{"type": "string", "description": "Filter by status: proposed, approved, in_progress, complete, abandoned (optional)"},
+				},
+			},
+		},
+		{
+			Name:        "nanite_plan_get",
+			Description: "Get a single plan by ID. Returns the full plan as JSON, including steps.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{"type": "string", "description": "Plan ID"},
+				},
+				"required": []string{"id"},
+			},
+		},
+		{
+			Name:        "nanite_plan_delete",
+			Description: "Delete a plan by ID. Irreversible.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{"type": "string", "description": "Plan ID to delete"},
 				},
 				"required": []string{"id"},
 			},

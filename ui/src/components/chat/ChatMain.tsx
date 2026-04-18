@@ -24,11 +24,13 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
     statusMessage,
     circuitOpen,
     sessionTakeover,
+    streamStalled,
     sendMessage,
     loadMessages,
     stopStreaming,
     retryStream,
     dismissCircuit,
+    reconnectStalledStream,
     loadOlderMessages,
     hasOlderMessages,
     loadingOlder,
@@ -69,6 +71,32 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
                   <button
                     onClick={() => window.location.reload()}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-info/15 text-info hover:bg-info/30 transition-colors"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Reconnect
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {streamStalled && !circuitOpen && !sessionTakeover && (
+          <div className="mx-4 mb-2 rounded-lg border border-warning/30 bg-warning/10 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-warning">
+                  Connection appears stalled
+                </p>
+                <p className="text-xs text-warning/70 mt-1">
+                  No activity from the server in the last minute. The stream may be stuck.
+                  Click reconnect to retry this turn with a fresh connection.
+                </p>
+                <div className="flex gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => void reconnectStalledStream()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-warning/20 text-warning hover:bg-warning/30 transition-colors"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                     Reconnect

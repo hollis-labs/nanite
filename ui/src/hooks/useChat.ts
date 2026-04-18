@@ -7,6 +7,13 @@ import { useLayoutStore } from "@/stores/useLayoutStore";
 
 const PAGE_SIZE = 50;
 
+/** Stall watchdog: flip `streamStalled` true when no SSE event arrives for this
+ * long while a stream is active. Intentionally conservative — tool calls can
+ * stretch well past the LLM's natural cadence. 60s matches the CW-0043 bug
+ * pattern (chat freezes after ~7 tool calls, no events fire). */
+const STALL_THRESHOLD_MS = 60_000;
+const STALL_CHECK_INTERVAL_MS = 5_000;
+
 /** SSE event type constants — single source of truth for stream event names */
 const SSE = {
   DELTA: "delta",
@@ -88,6 +95,8 @@ export function useChat(sessionId: string | null) {
   } | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const lastEventAtRef = useRef<number>(0);
+  const watchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -97,10 +106,49 @@ export function useChat(sessionId: string | null) {
   const statusMessage = useChatStore((s) => s.statusMessage);
   const circuitOpen = useChatStore((s) => s.circuitOpen);
   const sessionTakeover = useChatStore((s) => s.sessionTakeover);
+  const streamStalled = useChatStore((s) => s.streamStalled);
 
   // Store actions are stable — read via getState() inside callbacks to avoid
   // bloating dependency arrays. This helper gives typed access to all actions.
   const store = () => useChatStore.getState();
+
+  const touchStreamEvent = useCallback(() => {
+    lastEventAtRef.current = Date.now();
+    if (useChatStore.getState().streamStalled) {
+      store().setStreamStalled(false);
+    }
+  }, []);
+
+  const stopStallWatchdog = useCallback(() => {
+    if (watchdogRef.current !== null) {
+      clearInterval(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+  }, []);
+
+  const startStallWatchdog = useCallback(() => {
+    stopStallWatchdog();
+    lastEventAtRef.current = Date.now();
+    watchdogRef.current = setInterval(() => {
+      const state = useChatStore.getState();
+      // Only flag a stall if we're actively streaming, not already
+      // flagged, and no benign terminal state applies. The circuit
+      // breaker + takeover banners own their own paths.
+      if (!state.isStreaming || state.streamStalled || state.circuitOpen || state.sessionTakeover) {
+        return;
+      }
+      if (Date.now() - lastEventAtRef.current >= STALL_THRESHOLD_MS) {
+        state.setStreamStalled(true);
+      }
+    }, STALL_CHECK_INTERVAL_MS);
+  }, [stopStallWatchdog]);
+
+  // Clean up the watchdog on unmount so it doesn't outlive the hook.
+  useEffect(() => {
+    return () => {
+      stopStallWatchdog();
+    };
+  }, [stopStallWatchdog]);
 
   const loadMessages = useCallback(async () => {
     if (!sessionId) {
@@ -272,8 +320,10 @@ export function useChat(sessionId: string | null) {
         const es = new EventSource(`/api/stream/${message_id}`);
         eventSourceRef.current = es;
         let accumulated = "";
+        startStallWatchdog();
 
         es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
+          touchStreamEvent();
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
             accumulated += data.content;
@@ -284,6 +334,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
+          touchStreamEvent();
           const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string; detail?: string };
           if (data.tool) {
             store().addToolCall({
@@ -301,6 +352,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_RESULT, (e: MessageEvent) => {
+          touchStreamEvent();
           const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
           const toolId = data.tool_id || data.message_id;
           if (toolId) {
@@ -312,6 +364,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_WARNING, (e: MessageEvent) => {
+          touchStreamEvent();
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.data) {
             try {
@@ -328,6 +381,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.PLUGIN_ENVELOPE, (e: MessageEvent) => {
+          touchStreamEvent();
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
             if (!evt.envelope) return;
@@ -348,6 +402,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.APPROVAL_REQUEST, (e: MessageEvent) => {
+          touchStreamEvent();
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
             if (evt.data) {
@@ -363,6 +418,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.STATUS, (e: MessageEvent) => {
+          touchStreamEvent();
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
             store().setStatusMessage(data.content);
@@ -370,11 +426,13 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.CIRCUIT_OPEN, () => {
+          touchStreamEvent();
           store().setCircuitOpen(true);
           // Do NOT close the EventSource — keep it open for potential retry.
         });
 
         es.addEventListener(SSE.SESSION_TAKEOVER, () => {
+          stopStallWatchdog();
           // Another tab opened this session — stop streaming and show banner.
           console.warn("[useChat] Session takeover — another tab is now active");
           store().setSessionTakeover(true);
@@ -399,6 +457,8 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
+          touchStreamEvent();
+          stopStallWatchdog();
           const data: StreamEvent = JSON.parse(e.data as string);
           // Add the complete assistant message
           // Parse envelope from stream_end event if present.
@@ -429,6 +489,8 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.ERROR, (e: MessageEvent) => {
+          touchStreamEvent();
+          stopStallWatchdog();
           // Custom SSE error event from the backend (has data).
           if (e.data) {
             try {
@@ -482,6 +544,7 @@ export function useChat(sessionId: string | null) {
         es.onerror = () => {
           // Only handle if the custom error listener above didn't already fire.
           if (eventSourceRef.current) {
+            stopStallWatchdog();
             console.error("SSE connection lost");
             if (accumulated) {
               const assistantMsg: Message = {
@@ -503,23 +566,26 @@ export function useChat(sessionId: string | null) {
         };
       } catch (err) {
         console.error("Send failed:", err);
+        stopStallWatchdog();
         store().clearStream();
       }
     },
-    [sessionId, queryClient],
+    [sessionId, queryClient, startStallWatchdog, stopStallWatchdog, touchStreamEvent],
   );
 
   const stopStreaming = useCallback(() => {
+    stopStallWatchdog();
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
     store().clearStream();
-  }, []);
+  }, [stopStallWatchdog]);
 
   const retryStream = useCallback(async () => {
     if (!sessionId) return;
     store().setCircuitOpen(false);
+    store().setStreamStalled(false);
     store().clearToolCalls();
     store().clearToolWarnings();
 
@@ -535,8 +601,10 @@ export function useChat(sessionId: string | null) {
       const es = new EventSource(`/api/stream/${message_id}`);
       eventSourceRef.current = es;
       store().setStreaming(true);
+      startStallWatchdog();
 
       es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
+        touchStreamEvent();
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content) {
           store().appendStreamContent(data.content);
@@ -545,6 +613,8 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
+        touchStreamEvent();
+        stopStallWatchdog();
         const data: StreamEvent = JSON.parse(e.data as string);
         const assistantMsg: Message = {
           id: message_id,
@@ -563,10 +633,12 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.CIRCUIT_OPEN, () => {
+        touchStreamEvent();
         store().setCircuitOpen(true);
       });
 
       es.addEventListener(SSE.SESSION_TAKEOVER, () => {
+        stopStallWatchdog();
         console.warn("[useChat] Session takeover during retry — another tab is now active");
         store().setSessionTakeover(true);
         store().clearStream();
@@ -575,6 +647,7 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.ERROR, () => {
+        stopStallWatchdog();
         store().clearStream();
         es.close();
         eventSourceRef.current = null;
@@ -582,6 +655,7 @@ export function useChat(sessionId: string | null) {
 
       es.onerror = () => {
         if (eventSourceRef.current) {
+          stopStallWatchdog();
           store().clearStream();
           es.close();
           eventSourceRef.current = null;
@@ -589,15 +663,17 @@ export function useChat(sessionId: string | null) {
       };
     } catch (err) {
       console.error("Retry failed:", err);
+      stopStallWatchdog();
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
       store().clearStream();
     }
-  }, [sessionId]);
+  }, [sessionId, startStallWatchdog, stopStallWatchdog, touchStreamEvent]);
 
   const dismissCircuit = useCallback(() => {
+    stopStallWatchdog();
     store().setCircuitOpen(false);
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -619,7 +695,20 @@ export function useChat(sessionId: string | null) {
       setMessages((prev) => [...prev, msg]);
     }
     store().clearStream();
-  }, [sessionId]);
+  }, [sessionId, stopStallWatchdog]);
+
+  const reconnectStalledStream = useCallback(async () => {
+    // User-triggered from the stall banner. Abandon the current (possibly
+    // dead) SSE connection and request a fresh assistant turn via the
+    // existing retry endpoint — backend will issue a new message_id.
+    stopStallWatchdog();
+    store().setStreamStalled(false);
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    await retryStream();
+  }, [retryStream, stopStallWatchdog]);
 
   return {
     messages,
@@ -628,11 +717,13 @@ export function useChat(sessionId: string | null) {
     statusMessage,
     circuitOpen,
     sessionTakeover,
+    streamStalled,
     sendMessage,
     loadMessages,
     stopStreaming,
     retryStream,
     dismissCircuit,
+    reconnectStalledStream,
     loadOlderMessages,
     hasOlderMessages,
     loadingOlder,

@@ -35,6 +35,7 @@ func (a *API) handleCreateTodo(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.Services.Streams.BroadcastWorkChanged()
 	a.jsonResp(w, http.StatusCreated, t)
 }
 
@@ -58,6 +59,7 @@ func (a *API) handleUpdateTodo(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.Services.Streams.BroadcastWorkChanged()
 	a.jsonResp(w, http.StatusOK, t)
 }
 
@@ -66,6 +68,7 @@ func (a *API) handleDeleteTodo(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.Services.Streams.BroadcastWorkChanged()
 	a.jsonResp(w, http.StatusOK, map[string]string{"deleted": r.PathValue("id")})
 }
 

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
@@ -298,6 +299,14 @@ func (s *chatServiceImpl) executeToolBatch(
 	ch chan chat.StreamEvent,
 	sessionID string,
 ) []toolExecResult {
+	// CW-20260418 (c7 scope_id bug fix): stamp the current chat session
+	// onto ctx so downstream tool handlers — notably the MCP self-tools
+	// that write todos/plans — can auto-fill scope_id when the agent omits
+	// it. The LLM has no way to know its own session_id, so without this
+	// the records land in the DB with scope_id="" and the Work drawer
+	// (which queries by the real session UUID) never finds them.
+	ctx = mcp.WithSessionID(ctx, sessionID)
+
 	results := make([]toolExecResult, len(plans))
 
 	// Separate ready plans into concurrent and serial.

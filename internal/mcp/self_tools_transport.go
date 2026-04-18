@@ -19,6 +19,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
+// WorkBroadcaster notifies connected UI clients that session-scoped todos or
+// plans have changed so the Work drawer can refresh. Defined as a local
+// interface to avoid importing the service package (which would be circular).
+// CW-20260418-0044.
+type WorkBroadcaster interface {
+	BroadcastWorkChanged()
+}
+
 // TodoStoreInterface is the subset of store.Store needed by todo/plan MCP tools.
 // Defined here to avoid circular imports with the service package. Uses raw
 // store methods instead of the service layer's update structs.
@@ -34,6 +42,7 @@ type TodoStoreInterface interface {
 	ListPlans(f store.PlanFilter) ([]store.Plan, error)
 	UpdatePlan(p *store.Plan) error
 	UpdatePlanStep(planID, stepID string, updates store.PlanStep) error
+	DeletePlan(id string) error
 }
 
 // SelfToolsTransport provides self-service tools that let the agent
@@ -48,6 +57,18 @@ type SelfToolsTransport struct {
 	Messaging *messaging.Service
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
+	// Work is set post-construction from the container; nil-safe. When set,
+	// mutating todo/plan tools fire BroadcastWorkChanged after a successful
+	// write so the Work drawer rehydrates. CW-20260418-0044.
+	Work WorkBroadcaster
+}
+
+// notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
+// is wired. Called after every successful mutating todo/plan tool call.
+func (st *SelfToolsTransport) notifyWorkChanged() {
+	if st.Work != nil {
+		st.Work.BroadcastWorkChanged()
+	}
 }
 
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
@@ -105,15 +126,21 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "nanite_builder_step":
 		return st.callBuilderStep(args)
 	case "nanite_todo_create":
-		return st.callTodoCreate(args)
+		return st.callTodoCreate(ctx, args)
 	case "nanite_todo_update":
 		return st.callTodoUpdate(args)
 	case "nanite_todo_list":
-		return st.callTodoList(args)
+		return st.callTodoList(ctx, args)
 	case "nanite_plan_create":
-		return st.callPlanCreate(args)
+		return st.callPlanCreate(ctx, args)
 	case "nanite_plan_update":
 		return st.callPlanUpdate(args)
+	case "nanite_plan_list":
+		return st.callPlanList(ctx, args)
+	case "nanite_plan_get":
+		return st.callPlanGet(args)
+	case "nanite_plan_delete":
+		return st.callPlanDelete(args)
 	case "nanite_install_home":
 		return st.callInstallHome(args)
 	case "nanite_install_project":
@@ -621,7 +648,7 @@ func (st *SelfToolsTransport) callShowReport(args map[string]any) (*ToolResult, 
 
 // --- todo/plan handlers ---
 
-func (st *SelfToolsTransport) callTodoCreate(args map[string]any) (*ToolResult, error) {
+func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if st.TodoStore == nil {
 		return errorResult("todo service not available"), nil
 	}
@@ -631,10 +658,23 @@ func (st *SelfToolsTransport) callTodoCreate(args map[string]any) (*ToolResult, 
 		return errorResult("title and scope are required"), nil
 	}
 
+	// CW-20260418 (c7 scope_id fix): auto-fill scope_id from ctx when the
+	// agent omits it. The LLM has no way to know its session_id so for
+	// scope=session we must source it from the context stamped by the
+	// chat tool executor. Workspace scope legitimately has no scope_id.
+	scopeID := strArg(args, "scope_id", "")
+	if scope != "workspace" && scopeID == "" {
+		if sid := SessionIDFromContext(ctx); sid != "" {
+			scopeID = sid
+		} else {
+			return errorResult(fmt.Sprintf("scope_id is required for scope %q (no current session in context)", scope)), nil
+		}
+	}
+
 	t := &store.Todo{
 		Title:       title,
 		Scope:       scope,
-		ScopeID:     strArg(args, "scope_id", ""),
+		ScopeID:     scopeID,
 		Priority:    strArg(args, "priority", "medium"),
 		Description: strArg(args, "description", ""),
 		ParentID:    strArg(args, "parent_id", ""),
@@ -646,6 +686,7 @@ func (st *SelfToolsTransport) callTodoCreate(args map[string]any) (*ToolResult, 
 		return errorResult(fmt.Sprintf("create todo: %v", err)), nil
 	}
 
+	st.notifyWorkChanged()
 	out, _ := json.Marshal(t)
 	return textResult(fmt.Sprintf("Created todo %q (id=%s, scope=%s)\n%s", t.Title, t.ID, t.Scope, string(out))), nil
 }
@@ -684,17 +725,31 @@ func (st *SelfToolsTransport) callTodoUpdate(args map[string]any) (*ToolResult, 
 		return errorResult(fmt.Sprintf("update todo: %v", err)), nil
 	}
 
+	st.notifyWorkChanged()
 	return textResult(fmt.Sprintf("Updated todo %q (id=%s, status=%s, priority=%s)", t.Title, t.ID, t.Status, t.Priority)), nil
 }
 
-func (st *SelfToolsTransport) callTodoList(args map[string]any) (*ToolResult, error) {
+func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if st.TodoStore == nil {
 		return errorResult("todo service not available"), nil
 	}
 
+	// CW-20260418 (c7 scope_id fix): for scope=session, auto-fill scope_id
+	// from ctx when omitted so the emitted todo-list envelope carries the
+	// REAL session id. Otherwise TodoListCard lazy-fetches with scope_id=""
+	// and the drawer renders nothing. Listing itself still works fine with
+	// an empty filter, so this is best-effort — no error path.
+	scopeArg := strArg(args, "scope", "")
+	scopeIDArg := strArg(args, "scope_id", "")
+	if scopeArg == "session" && scopeIDArg == "" {
+		if sid := SessionIDFromContext(ctx); sid != "" {
+			scopeIDArg = sid
+		}
+	}
+
 	f := store.TodoFilter{
-		Scope:    strArg(args, "scope", ""),
-		ScopeID:  strArg(args, "scope_id", ""),
+		Scope:    scopeArg,
+		ScopeID:  scopeIDArg,
 		Status:   strArg(args, "status", ""),
 		Priority: strArg(args, "priority", ""),
 	}
@@ -704,23 +759,45 @@ func (st *SelfToolsTransport) callTodoList(args map[string]any) (*ToolResult, er
 		return errorResult(fmt.Sprintf("list todos: %v", err)), nil
 	}
 
-	if len(todos) == 0 {
-		return textResult("No todos found matching filters."), nil
-	}
-
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Found %d todo(s):\n\n", len(todos))
-	for _, t := range todos {
-		fmt.Fprintf(&sb, "- [%s] %s (id=%s, priority=%s, scope=%s/%s)\n",
-			t.Status, t.Title, t.ID, t.Priority, t.Scope, t.ScopeID)
-		if t.Description != "" {
-			fmt.Fprintf(&sb, "  %s\n", t.Description)
+	if len(todos) == 0 {
+		sb.WriteString("No todos found matching filters.")
+	} else {
+		fmt.Fprintf(&sb, "Found %d todo(s):\n\n", len(todos))
+		for _, t := range todos {
+			fmt.Fprintf(&sb, "- [%s] %s (id=%s, priority=%s, scope=%s/%s)\n",
+				t.Status, t.Title, t.ID, t.Priority, t.Scope, t.ScopeID)
+			if t.Description != "" {
+				fmt.Fprintf(&sb, "  %s\n", t.Description)
+			}
 		}
 	}
+
+	// Emit a todo-list envelope so the UI renders an interactive card. The
+	// TodoListCard component lazy-fetches /api/todos by scope + scope_id, so
+	// the envelope only needs to carry the filter coordinates — not the items
+	// themselves. We only attach the envelope when scope is present; an empty
+	// scope would render an un-scoped card that matches every session.
+	// CW-20260418-0045.
+	if f.Scope != "" {
+		title := strArg(args, "title", "Todos")
+		envJSON, _ := json.Marshal(map[string]any{
+			"kind":    "envelope",
+			"version": 1,
+			"type":    "todo-list",
+			"data": map[string]any{
+				"scope":    f.Scope,
+				"scope_id": f.ScopeID,
+				"title":    title,
+			},
+		})
+		fmt.Fprintf(&sb, "\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", string(envJSON))
+	}
+
 	return textResult(sb.String()), nil
 }
 
-func (st *SelfToolsTransport) callPlanCreate(args map[string]any) (*ToolResult, error) {
+func (st *SelfToolsTransport) callPlanCreate(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if st.TodoStore == nil {
 		return errorResult("todo service not available"), nil
 	}
@@ -730,10 +807,20 @@ func (st *SelfToolsTransport) callPlanCreate(args map[string]any) (*ToolResult, 
 		return errorResult("title and scope are required"), nil
 	}
 
+	// CW-20260418 (c7 scope_id fix): same auto-fill as callTodoCreate.
+	scopeID := strArg(args, "scope_id", "")
+	if scope != "workspace" && scopeID == "" {
+		if sid := SessionIDFromContext(ctx); sid != "" {
+			scopeID = sid
+		} else {
+			return errorResult(fmt.Sprintf("scope_id is required for scope %q (no current session in context)", scope)), nil
+		}
+	}
+
 	p := &store.Plan{
 		Title:       title,
 		Scope:       scope,
-		ScopeID:     strArg(args, "scope_id", ""),
+		ScopeID:     scopeID,
 		Description: strArg(args, "description", ""),
 		Steps:       strArg(args, "steps", "[]"),
 		CreatedBy:   "agent",
@@ -743,6 +830,7 @@ func (st *SelfToolsTransport) callPlanCreate(args map[string]any) (*ToolResult, 
 		return errorResult(fmt.Sprintf("create plan: %v", err)), nil
 	}
 
+	st.notifyWorkChanged()
 	out, _ := json.Marshal(p)
 	return textResult(fmt.Sprintf("Created plan %q (id=%s, scope=%s)\n%s", p.Title, p.ID, p.Scope, string(out))), nil
 }
@@ -766,6 +854,7 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*ToolResult, 
 		if err := st.TodoStore.UpdatePlanStep(id, stepID, stepUpdates); err != nil {
 			return errorResult(fmt.Sprintf("update plan step: %v", err)), nil
 		}
+		st.notifyWorkChanged()
 		return textResult(fmt.Sprintf("Updated step %s in plan %s", stepID, id)), nil
 	}
 
@@ -786,7 +875,84 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*ToolResult, 
 		return errorResult(fmt.Sprintf("update plan: %v", err)), nil
 	}
 
+	st.notifyWorkChanged()
 	return textResult(fmt.Sprintf("Updated plan %q (id=%s, status=%s)", p.Title, p.ID, p.Status)), nil
+}
+
+func (st *SelfToolsTransport) callPlanList(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+
+	// CW-20260418 (c7 scope_id fix): auto-fill session scope_id from ctx.
+	scopeArg := strArg(args, "scope", "")
+	scopeIDArg := strArg(args, "scope_id", "")
+	if scopeArg == "session" && scopeIDArg == "" {
+		if sid := SessionIDFromContext(ctx); sid != "" {
+			scopeIDArg = sid
+		}
+	}
+
+	f := store.PlanFilter{
+		Scope:   scopeArg,
+		ScopeID: scopeIDArg,
+		Status:  strArg(args, "status", ""),
+	}
+
+	plans, err := st.TodoStore.ListPlans(f)
+	if err != nil {
+		return errorResult(fmt.Sprintf("list plans: %v", err)), nil
+	}
+
+	if len(plans) == 0 {
+		return textResult("No plans found matching filters."), nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Found %d plan(s):\n\n", len(plans))
+	for _, p := range plans {
+		steps, _ := p.ParsePlanSteps()
+		fmt.Fprintf(&sb, "- [%s] %s (id=%s, scope=%s/%s, steps=%d)\n",
+			p.Status, p.Title, p.ID, p.Scope, p.ScopeID, len(steps))
+		if p.Description != "" {
+			fmt.Fprintf(&sb, "  %s\n", p.Description)
+		}
+	}
+	return textResult(sb.String()), nil
+}
+
+func (st *SelfToolsTransport) callPlanGet(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+	id, _ := args["id"].(string)
+	if id == "" {
+		return errorResult("id is required"), nil
+	}
+
+	p, err := st.TodoStore.GetPlan(id)
+	if err != nil {
+		return errorResult(fmt.Sprintf("get plan: %v", err)), nil
+	}
+
+	out, _ := json.Marshal(p)
+	return textResult(string(out)), nil
+}
+
+func (st *SelfToolsTransport) callPlanDelete(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+	id, _ := args["id"].(string)
+	if id == "" {
+		return errorResult("id is required"), nil
+	}
+
+	if err := st.TodoStore.DeletePlan(id); err != nil {
+		return errorResult(fmt.Sprintf("delete plan: %v", err)), nil
+	}
+	st.notifyWorkChanged()
+	return textResult(fmt.Sprintf("Deleted plan %s", id)), nil
 }
 
 // --- install handlers ---

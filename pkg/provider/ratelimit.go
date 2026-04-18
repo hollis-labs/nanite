@@ -1,9 +1,63 @@
 package provider
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
 )
+
+// PacingWait blocks for the given duration while emitting periodic status
+// updates via onStatus so downstream listeners (SSE streams) know the
+// provider is intentionally waiting — not hung. Returns early with ctx.Err
+// if ctx cancels.
+//
+// The first status fires immediately ("waiting Ns for rate limit budget"),
+// then every pacingHeartbeat while the wait remains. Without these
+// heartbeats the caller's stream goes silent for the full wait duration
+// and client-side stall watchdogs mis-classify the pause as a hang.
+// CW-20260418-0043.
+func PacingWait(ctx context.Context, wait time.Duration, onStatus func(string)) error {
+	if wait <= 0 {
+		return nil
+	}
+	notify := func(remaining time.Duration) {
+		if onStatus == nil {
+			return
+		}
+		secs := int(remaining.Seconds() + 0.5)
+		if secs < 1 {
+			secs = 1
+		}
+		onStatus(fmt.Sprintf("Rate-limit pacing: waiting %ds for provider budget...", secs))
+	}
+
+	notify(wait)
+
+	deadline := time.Now().Add(wait)
+	ticker := time.NewTicker(pacingHeartbeat)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case now := <-ticker.C:
+			remaining := deadline.Sub(now)
+			if remaining <= 0 {
+				return nil
+			}
+			notify(remaining)
+		case <-time.After(time.Until(deadline)):
+			return nil
+		}
+	}
+}
+
+// pacingHeartbeat controls how often PacingWait re-notifies. Short enough
+// to keep SSE alive well under the 60s frontend stall-watchdog, long enough
+// to avoid log/event spam.
+const pacingHeartbeat = 10 * time.Second
 
 const defaultWindowDuration = 60 * time.Second
 

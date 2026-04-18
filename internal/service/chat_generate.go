@@ -59,7 +59,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	)
 	defer span.End()
 
+	// CW-20260418-0043 diagnostic — track iteration reached for the defer log.
+	var diagCurrentIter = -1
+
 	defer func() {
+		diagLogDeferReached(sessionID, assistantMsgID, diagCurrentIter, "")
 		close(ch)
 		s.streams.CloseStream(assistantMsgID)
 
@@ -268,12 +272,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
 	}
 
+	// CW-20260418-0043 diagnostic — log effective loop config on entry.
+	diagLogLoopStart(sessionID, assistantMsgID, agent.ID, ls, cap(ch))
+
 	// --- Tool-use loop ---
 	var fullContent strings.Builder
 	var finalUsage *chat.Usage
 	var breakdown *chat.TokenBreakdown
 
 	for ls.iteration = 0; ; ls.iteration++ {
+		// CW-20260418-0043 diagnostic.
+		diagCurrentIter = ls.iteration
+		diagLogIterStart(ctx, sessionID, assistantMsgID, ls.iteration, ch)
+
 		// Check layered iteration limits.
 		if stop, code, reason := ls.shouldStop(); stop {
 			slog.Warn("chat-loop stopped", "reason", reason, "code", code, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
@@ -284,11 +295,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// event, preserving existing behavior.
 			s.emitChatLoopTerminated(sessionID, ls, code, reason, ch)
 			ch <- chat.StreamEvent{Type: "status", Content: fmt.Sprintf("Stopped: %s", reason)}
+			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "shouldStop:"+string(code), len(ls.toolCallRefs), ch)
 			break
 		}
 		// Deadline check.
 		if ctx.Err() != nil {
 			slog.Warn("generateResponse context cancelled", "err", ctx.Err(), "session_id", sessionID)
+			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "ctx_cancelled:"+ctx.Err().Error(), len(ls.toolCallRefs), ch)
 			ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
@@ -359,6 +372,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				blockMsg := "Message blocked by plugin policy."
 				ch <- chat.StreamEvent{Type: "delta", Content: blockMsg}
 				fullContent.WriteString(blockMsg)
+				diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "plugin_cancel:message.sending", len(ls.toolCallRefs), ch)
 				break
 			}
 		}
@@ -451,8 +465,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// should retry with a compacted request instead of terminating.
 		contextOverflowRecovered := false
 
+		// CW-20260418-0043 diagnostic — track provider stream duration + event count.
+		provStreamStart := time.Now()
+		diagProvEventCount := 0
+
 	streamLoop:
 		for evt := range provCh {
+			diagProvEventCount++
 			switch evt.Type {
 			case "delta":
 				if lastPTYToolPending != "" && chat.IsCLIProvider(providerName) {
@@ -464,7 +483,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				turnContent.WriteString(evt.Content)
 				fullContent.WriteString(evt.Content)
+				// CW-20260418-0043 diagnostic — watchdog on the hot delta send.
+				diagDone := diagWatchChSend(ctx, "streamLoop.delta", ch, sessionID, assistantMsgID, ls.iteration, "delta")
 				ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
+				close(diagDone)
 
 			case "tool_use":
 				if evt.ToolUse != nil {
@@ -550,6 +572,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			}
 		}
 
+		// CW-20260418-0043 diagnostic — provider stream closed.
+		diagLogProviderStream(sessionID, assistantMsgID, ls.iteration,
+			time.Since(provStreamStart), diagProvEventCount, stopReason, len(toolUseBlocks))
+
 		// T9 — the mid-stream overflow handler broke out of the stream loop so
 		// the outer loop can retry with a compacted request. Skip the
 		// post-stream processing (no content produced this attempt) and
@@ -582,6 +608,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					"stop_reason": "max_tokens", "iteration": ls.iteration, "model": model,
 				})
 			}
+			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "done:stop_reason="+stopReason, len(ls.toolCallRefs), ch)
 			break
 		}
 
@@ -680,6 +707,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				Type:    "circuit_open",
 				Content: "Provider rate limited. Tool-use loop stopped. Would you like to retry?",
 			}
+			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "circuit_open", len(ls.toolCallRefs), ch)
 			break
 		}
 	}

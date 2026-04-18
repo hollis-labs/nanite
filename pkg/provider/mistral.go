@@ -294,9 +294,6 @@ func waitForRateBudget(ctx context.Context, rt *TokenRateTracker, onStatus Statu
 			"rate_limit", limit,
 		)
 	}
-	if onStatus != nil {
-		onStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
-	}
 	slog.Info("provider: pacing for rate limit budget",
 		"provider", "mistral",
 		"wait", wait.Round(time.Millisecond).String(),
@@ -304,11 +301,7 @@ func waitForRateBudget(ctx context.Context, rt *TokenRateTracker, onStatus Statu
 		"available", avail,
 		"rate_limit", limit,
 	)
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(wait):
-	}
+	_ = PacingWait(ctx, wait, onStatus)
 }
 
 // compatStreamHandle bundles the SDK stream adapter with the peeked first

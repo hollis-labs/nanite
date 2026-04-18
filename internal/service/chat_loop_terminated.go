@@ -55,7 +55,7 @@ func (s *chatServiceImpl) emitChatLoopTerminated(
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		slog.Warn("chat-service: marshal chat-loop-terminated payload", "err", err)
+		slog.Warn("chat-service: marshal chat-loop-terminated payload", "session", sessionID, "err", err)
 		return
 	}
 	streamWrap, err := json.Marshal(map[string]any{
@@ -64,7 +64,7 @@ func (s *chatServiceImpl) emitChatLoopTerminated(
 		"data": json.RawMessage(data),
 	})
 	if err != nil {
-		slog.Warn("chat-service: marshal chat-loop-terminated wrap", "err", err)
+		slog.Warn("chat-service: marshal chat-loop-terminated wrap", "session", sessionID, "err", err)
 		return
 	}
 	ch <- chat.StreamEvent{

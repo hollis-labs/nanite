@@ -165,20 +165,50 @@ func TestLoopState_ShouldStop_MaxTurns(t *testing.T) {
 }
 
 func TestLoopState_ShouldStop_HardCeiling(t *testing.T) {
-	// MaxTurns explicitly higher than hard ceiling — ensures we hit the
-	// hard_ceiling layer rather than the max_turns layer (when MaxTurns=-1
-	// the resolved value clamps to hardCeiling and max_turns fires first).
+	// MaxTurns explicitly higher than hard ceiling. resolvedMaxTurns() clamps
+	// to hardCeiling, so at iter==10 both the maxTurns and hardCeiling checks
+	// are true. PR #64 feedback: hardCeiling must be checked first so the
+	// termination code reflects the actual constraint that tripped.
 	ls := newLoopState(chat.AgentConstraints{MaxTurns: 200, HardCeiling: 10}, nil, false)
 	ls.iteration = 10
 	stop, code, _ := ls.shouldStop()
 	if !stop {
 		t.Error("shouldStop() should return true at hard ceiling")
 	}
-	// With MaxTurns>HardCeiling, resolvedMaxTurns==HardCeiling, so the
-	// max_turns layer (layer 3) fires first. Both layers converge on
-	// iter==ceiling; differentiating them requires different values.
-	if code != TerminationMaxTurns && code != TerminationHardCeiling {
-		t.Errorf("code = %q, want %q or %q", code, TerminationMaxTurns, TerminationHardCeiling)
+	if code != TerminationHardCeiling {
+		t.Errorf("code = %q, want %q (hard_ceiling must be checked before max_turns)", code, TerminationHardCeiling)
+	}
+}
+
+// TestLoopState_ShouldStop_MaxTurnsBeforeCeiling asserts that when MaxTurns is
+// explicitly lower than HardCeiling, the max_turns layer still fires at the
+// configured MaxTurns value (not the ceiling). Complements HardCeiling test
+// to prove both codes remain reachable after the layer reorder.
+func TestLoopState_ShouldStop_MaxTurnsBeforeCeiling(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{MaxTurns: 5, HardCeiling: 50}, nil, false)
+	ls.iteration = 5
+	stop, code, _ := ls.shouldStop()
+	if !stop {
+		t.Error("shouldStop() should return true at max turns")
+	}
+	if code != TerminationMaxTurns {
+		t.Errorf("code = %q, want %q", code, TerminationMaxTurns)
+	}
+}
+
+// TestLoopState_ResolveIterationLimits_ClampsRunawayCap asserts that a
+// caller-supplied RunawayFailCap lower than ConsecutiveFailCap is silently
+// raised to the soft cap, so the "critical" tool_warning UI signal remains
+// reachable. PR #64 feedback.
+func TestLoopState_ResolveIterationLimits_ClampsRunawayCap(t *testing.T) {
+	c := chat.AgentConstraints{
+		ConsecutiveFailCap: 5,
+		RunawayFailCap:     2, // lower than soft cap — should clamp up
+	}
+	lim := resolveIterationLimits(c)
+	if lim.runawayFailCap < lim.consecutiveFailCap {
+		t.Errorf("runawayFailCap=%d should have been clamped up to >= consecutiveFailCap=%d",
+			lim.runawayFailCap, lim.consecutiveFailCap)
 	}
 }
 

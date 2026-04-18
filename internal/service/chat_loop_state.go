@@ -204,6 +204,19 @@ func resolveIterationLimits(c chat.AgentConstraints) iterationLimits {
 		lim.runawayFailCap = c.RunawayFailCap
 	}
 
+	// PR #64 feedback: a configured runaway cap lower than the soft cap would
+	// terminate the loop before the "critical" tool_warning UI signal fires —
+	// the whole point of splitting the caps. Clamp up so the soft-cap UX is
+	// always reachable. Log so operators notice a mis-configured override.
+	if lim.runawayFailCap < lim.consecutiveFailCap {
+		slog.Warn(
+			"RunawayFailCap lower than ConsecutiveFailCap; raising runaway cap to preserve soft-cap behavior",
+			"configured_runaway_fail_cap", lim.runawayFailCap,
+			"configured_consecutive_fail_cap", lim.consecutiveFailCap,
+		)
+		lim.runawayFailCap = lim.consecutiveFailCap
+	}
+
 	if c.IdleTimeoutSeconds > 0 {
 		lim.idleTimeout = time.Duration(c.IdleTimeoutSeconds) * time.Second
 	}
@@ -243,17 +256,21 @@ func (ls *loopState) shouldStop() (bool, TerminationCode, string) {
 			fmt.Sprintf("idle timeout after %s", ls.limits.idleTimeout)
 	}
 
-	// Layer 3: Max turns.
+	// Layer 3: Hard ceiling (absolute circuit-breaker).
+	// Checked before maxTurns so hitting the ceiling reports the correct code.
+	// resolvedMaxTurns() clamps maxTurns to hardCeiling, so without this order
+	// a hard-ceiling hit would always report as TerminationMaxTurns and the
+	// hard_ceiling envelope code would be unreachable (PR #64 feedback).
+	if ls.iteration >= ls.limits.hardCeiling {
+		return true, TerminationHardCeiling,
+			fmt.Sprintf("hard ceiling reached (%d)", ls.limits.hardCeiling)
+	}
+
+	// Layer 4: Max turns (configured, <= hardCeiling).
 	maxTurns := ls.resolvedMaxTurns()
 	if ls.iteration >= maxTurns {
 		return true, TerminationMaxTurns,
 			fmt.Sprintf("max turns reached (%d)", maxTurns)
-	}
-
-	// Layer 4: Hard ceiling (absolute, separate from maxTurns).
-	if ls.iteration >= ls.limits.hardCeiling {
-		return true, TerminationHardCeiling,
-			fmt.Sprintf("hard ceiling reached (%d)", ls.limits.hardCeiling)
 	}
 
 	// Layer 5: Retry budget exhausted.
@@ -311,8 +328,10 @@ func (ls *loopState) recordPermissionDenial() {
 func (ls *loopState) recordLastError(toolName, errText string) {
 	ls.lastToolName = toolName
 	const maxErrLen = 500
-	if len(errText) > maxErrLen {
-		errText = errText[:maxErrLen] + "... (truncated)"
+	// Truncate by rune count — byte-index slicing would split multibyte UTF-8
+	// and produce invalid bytes in the envelope payload (PR #64 feedback).
+	if runes := []rune(errText); len(runes) > maxErrLen {
+		errText = string(runes[:maxErrLen]) + "... (truncated)"
 	}
 	ls.lastToolError = errText
 }

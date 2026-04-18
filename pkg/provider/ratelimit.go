@@ -35,6 +35,14 @@ func PacingWait(ctx context.Context, wait time.Duration, onStatus func(string)) 
 	notify(wait)
 
 	deadline := time.Now().Add(wait)
+	// Use a single timer for the deadline. Earlier revision re-evaluated
+	// time.After(time.Until(deadline)) inside the select, which creates a
+	// fresh underlying timer on every ticker firing and orphans the previous
+	// one until it expires (PR #65 review). A single Timer + Stop avoids
+	// that whole class of leak.
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+
 	ticker := time.NewTicker(pacingHeartbeat)
 	defer ticker.Stop()
 
@@ -42,14 +50,14 @@ func PacingWait(ctx context.Context, wait time.Duration, onStatus func(string)) 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-timer.C:
+			return nil
 		case now := <-ticker.C:
 			remaining := deadline.Sub(now)
 			if remaining <= 0 {
 				return nil
 			}
 			notify(remaining)
-		case <-time.After(time.Until(deadline)):
-			return nil
 		}
 	}
 }

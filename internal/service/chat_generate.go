@@ -483,10 +483,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				turnContent.WriteString(evt.Content)
 				fullContent.WriteString(evt.Content)
-				// CW-20260418-0043 diagnostic — watchdog on the hot delta send.
-				diagDone := diagWatchChSend(ctx, "streamLoop.delta", ch, sessionID, assistantMsgID, ls.iteration, "delta")
+				// CW-20260418-0043 diagnostic — watchdog on the hot delta
+				// send. No-op (returns a nil-op stop func) unless
+				// NANITE_CHAT_LOOP_DIAG=1 so production is zero-cost.
+				stopDiag := diagWatchChSend(ctx, "streamLoop.delta", ch, sessionID, assistantMsgID, ls.iteration, "delta")
 				ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
-				close(diagDone)
+				stopDiag()
 
 			case "tool_use":
 				if evt.ToolUse != nil {

@@ -236,7 +236,7 @@ func (st *SelfToolsTransport) callListSkills(args map[string]any) (*ToolResult, 
 }
 
 func (st *SelfToolsTransport) callUpdateSkill(args map[string]any) (*ToolResult, error) {
-	id, _ := args["id"].(string)
+	id := strArg(args, "id", "")
 	if id == "" {
 		return errorResult("id is required"), nil
 	}
@@ -275,7 +275,7 @@ func (st *SelfToolsTransport) callUpdateSkill(args map[string]any) (*ToolResult,
 }
 
 func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*ToolResult, error) {
-	id, _ := args["id"].(string)
+	id := strArg(args, "id", "")
 	if id == "" {
 		return errorResult("id is required"), nil
 	}
@@ -336,7 +336,7 @@ func (st *SelfToolsTransport) callListAgents(args map[string]any) (*ToolResult, 
 }
 
 func (st *SelfToolsTransport) callUpdateAgent(args map[string]any) (*ToolResult, error) {
-	id, _ := args["id"].(string)
+	id := strArg(args, "id", "")
 	if id == "" {
 		return errorResult("id is required"), nil
 	}
@@ -695,7 +695,7 @@ func (st *SelfToolsTransport) callTodoUpdate(args map[string]any) (*ToolResult, 
 	if st.TodoStore == nil {
 		return errorResult("todo service not available"), nil
 	}
-	id, _ := args["id"].(string)
+	id := strArg(args, "id", "")
 	if id == "" {
 		return errorResult("id is required"), nil
 	}
@@ -839,7 +839,7 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*ToolResult, 
 	if st.TodoStore == nil {
 		return errorResult("todo service not available"), nil
 	}
-	id, _ := args["id"].(string)
+	id := strArg(args, "id", "")
 	if id == "" {
 		return errorResult("id is required"), nil
 	}
@@ -925,7 +925,7 @@ func (st *SelfToolsTransport) callPlanGet(args map[string]any) (*ToolResult, err
 	if st.TodoStore == nil {
 		return errorResult("todo service not available"), nil
 	}
-	id, _ := args["id"].(string)
+	id := strArg(args, "id", "")
 	if id == "" {
 		return errorResult("id is required"), nil
 	}
@@ -943,7 +943,7 @@ func (st *SelfToolsTransport) callPlanDelete(args map[string]any) (*ToolResult, 
 	if st.TodoStore == nil {
 		return errorResult("todo service not available"), nil
 	}
-	id, _ := args["id"].(string)
+	id := strArg(args, "id", "")
 	if id == "" {
 		return errorResult("id is required"), nil
 	}

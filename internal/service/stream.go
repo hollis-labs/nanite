@@ -104,15 +104,27 @@ func (ms *messageStream) pump() {
 		sub := ms.subscriber
 		ms.mu.Unlock()
 
-		// Non-blocking forward. If the subscriber is slow or missing, the
-		// event is preserved in the ring buffer for the next Subscribe call
-		// to replay via EventID cursor.
+		// Forward to subscriber non-blocking. If the subscriber's channel
+		// is full (slow consumer), close it so the SSE handler sees EOF
+		// and the client reconnects with its EventID cursor — the ring
+		// buffer still holds the event and replay will cover the gap.
+		// Silently dropping would lose events to an actively-connected
+		// client with no recovery path (PR #66 review #5).
 		if sub != nil {
 			select {
 			case sub <- evt:
 			default:
-				slog.Debug("stream: dropped event on slow subscriber",
-					"message_id", ms.messageID, "event_id", evt.EventID, "type", evt.Type)
+				ms.mu.Lock()
+				dropSub := ms.subscriber == sub
+				if dropSub {
+					ms.subscriber = nil
+				}
+				ms.mu.Unlock()
+				if dropSub {
+					slog.Debug("stream: closing slow subscriber to force cursor-replay",
+						"message_id", ms.messageID, "event_id", evt.EventID, "type", evt.Type)
+					close(sub)
+				}
 			}
 		}
 	}
@@ -140,22 +152,25 @@ func (ms *messageStream) pump() {
 // whether the stream has already closed. When closed=true the caller
 // receives the replay events and the channel is closed.
 func (ms *messageStream) subscribe(fromEventID uint64) (<-chan chat.StreamEvent, bool) {
-	out := make(chan chat.StreamEvent, 128)
-
 	ms.mu.Lock()
-	// Pre-fill out with buffered events the caller hasn't seen yet.
+	// Size out to fit every possible replay event plus a normal live-event
+	// headroom. The buffer can hold up to ringBufferCapacity entries;
+	// sizing out to max(128, len(buf)) means the pre-fill below never
+	// drops (PR #66 review #4). A fixed-128 channel was the original
+	// implementation and caused a silent loss of replay data whenever
+	// the client's cursor was more than 128 events behind.
+	outCap := 128
+	if len(ms.buf) > outCap {
+		outCap = len(ms.buf)
+	}
+	out := make(chan chat.StreamEvent, outCap)
+
+	// Pre-fill out with buffered events the caller hasn't seen yet. This
+	// is now a plain send (not a select-with-default) because outCap is
+	// guaranteed ≥ len(ms.buf).
 	for _, evt := range ms.buf {
 		if evt.EventID > fromEventID {
-			// out is freshly made with cap 128; replay ≤ ringBufferCapacity
-			// (256) means it could block in theory. Guard with a select so a
-			// pathological cursor value never deadlocks Subscribe.
-			select {
-			case out <- evt:
-			default:
-				slog.Warn("stream: replay buffer exceeded subscriber channel capacity",
-					"message_id", ms.messageID, "from_event_id", fromEventID,
-					"buf_len", len(ms.buf))
-			}
+			out <- evt
 		}
 	}
 
@@ -288,10 +303,12 @@ func (sm *StreamManager) Subscribe(messageID string, fromEventID uint64) (<-chan
 	return ch, closed, true
 }
 
-// GetStream returns a live event subscription for a given message ID with
-// no replay. Equivalent to Subscribe(messageID, 0) at a shape that matches
-// the pre-ring-buffer API. Retained so call sites that never dropped a
-// connection don't need to thread a cursor parameter.
+// GetStream returns a subscription to the event stream for a given message
+// ID, starting from EventID 0. Any events currently in the ring buffer are
+// replayed before live events begin — equivalent to Subscribe(messageID, 0).
+// Retained so call sites that never need a cursor don't have to thread one.
+// PR #66 review #6: the "no replay" claim from the old docstring was wrong
+// under the ring-buffer refactor.
 func (sm *StreamManager) GetStream(messageID string) (<-chan chat.StreamEvent, bool) {
 	ch, _, ok := sm.Subscribe(messageID, 0)
 	if !ok {
@@ -300,16 +317,43 @@ func (sm *StreamManager) GetStream(messageID string) (<-chan chat.StreamEvent, b
 	return ch, true
 }
 
-// CloseStream removes the stream and message-to-session mapping. It does NOT
-// close the producer channel — generateResponse's defer owns that. The pump
-// goroutine exits when the producer closes; the messageStream lingers in
-// sm.streams until CloseStream removes it, so late reconnects within the
-// same session still get replay via Subscribe().
+// CloseStream removes the stream and message-to-session mapping immediately.
+// Prefer ScheduleCleanup in generateResponse-like producers so the ring
+// buffer stays available for post-completion cursor reconnects.
+//
+// Does NOT close the producer channel — generateResponse's defer owns that.
+// The pump goroutine exits when the producer closes.
 func (sm *StreamManager) CloseStream(messageID string) {
 	if val, ok := sm.msgToSession.LoadAndDelete(messageID); ok {
 		sm.removeSessionMessage(val.(string), messageID)
 	}
 	sm.streams.Delete(messageID)
+}
+
+// defaultPostCompletionGrace is how long after the producer closes we keep
+// the messageStream around for late SSE reconnects (CW-20260418-0100). Long
+// enough that a tab that was backgrounded while the generation completed
+// can come back, reconnect with its EventID cursor, and replay the final
+// events including stream_end; short enough that process memory stays
+// bounded under heavy session churn.
+const defaultPostCompletionGrace = 60 * time.Second
+
+// ScheduleCleanup arranges for CloseStream to run after `delay`. This is the
+// cleanup call sites like generateResponse should use instead of invoking
+// CloseStream directly, so SSE clients that disconnect near the end of a
+// generation still get a replay window when they reconnect with an EventID
+// cursor. PR #66 review #7: without this grace period, the "reconnect to
+// a completed message" half of CW-20260418-0100 was unreachable in prod.
+//
+// Fire-and-forget; callers do not block on the timer.
+func (sm *StreamManager) ScheduleCleanup(messageID string, delay time.Duration) {
+	if delay <= 0 {
+		sm.CloseStream(messageID)
+		return
+	}
+	time.AfterFunc(delay, func() {
+		sm.CloseStream(messageID)
+	})
 }
 
 // GetSessionForMessage returns the session ID associated with a message stream.

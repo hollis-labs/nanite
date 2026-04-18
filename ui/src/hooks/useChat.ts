@@ -121,9 +121,12 @@ export function useChat(sessionId: string | null) {
   const store = () => useChatStore.getState();
 
   // recordEventId advances the reconnect cursor. Called from every SSE
-  // handler via touchStreamEvent below. Non-event_id-carrying events
-  // (synthetic, pre-ring-buffer) are ignored — the cursor only tracks
-  // events the server could replay.
+  // handler that receives a `(e: MessageEvent)` payload — PR #66 review #2:
+  // non-delta events also carry event_ids from the ring buffer, and missing
+  // them causes tool_call/tool_result replays on reconnect to look like
+  // duplicates. Non-event_id-carrying events (synthetic, pre-ring-buffer)
+  // are ignored by the try/catch — the cursor only tracks events the
+  // server could replay.
   const recordEventId = useCallback((raw: string) => {
     try {
       const evt = JSON.parse(raw) as { event_id?: number };
@@ -363,6 +366,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string; detail?: string };
           if (data.tool) {
             store().addToolCall({
@@ -381,6 +385,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.TOOL_RESULT, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
           const toolId = data.tool_id || data.message_id;
           if (toolId) {
@@ -393,6 +398,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.TOOL_WARNING, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.data) {
             try {
@@ -410,6 +416,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.PLUGIN_ENVELOPE, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
             if (!evt.envelope) return;
@@ -431,6 +438,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.APPROVAL_REQUEST, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
             if (evt.data) {
@@ -447,6 +455,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.STATUS, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
             store().setStatusMessage(data.content);
@@ -486,6 +495,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           stopStallWatchdog();
           const data: StreamEvent = JSON.parse(e.data as string);
           // Add the complete assistant message
@@ -518,6 +528,7 @@ export function useChat(sessionId: string | null) {
 
         es.addEventListener(SSE.ERROR, (e: MessageEvent) => {
           touchStreamEvent();
+          recordEventId(e.data as string);
           stopStallWatchdog();
           // Custom SSE error event from the backend (has data).
           if (e.data) {
@@ -646,6 +657,7 @@ export function useChat(sessionId: string | null) {
 
       es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
         touchStreamEvent();
+        recordEventId(e.data as string);
         stopStallWatchdog();
         const data: StreamEvent = JSON.parse(e.data as string);
         const assistantMsg: Message = {

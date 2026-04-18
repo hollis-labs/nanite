@@ -146,11 +146,16 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	// CW-20260418-0100: optional ?from=<uint64> cursor lets a reconnecting
 	// client replay events missed during an SSE drop. 0 / absent means "give
 	// me everything" (ring-buffer retention still bounds the replay size).
+	// Reject malformed values with 400 so a frontend bug surfaces instead of
+	// being silently coerced to "start from zero" (PR #66 review #1).
 	fromEventID := uint64(0)
 	if raw := r.URL.Query().Get("from"); raw != "" {
-		if n, err := strconv.ParseUint(raw, 10, 64); err == nil {
-			fromEventID = n
+		n, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("invalid from value: %q", raw))
+			return
 		}
+		fromEventID = n
 	}
 
 	// streamClosed just tells us the generation finished before we connected;

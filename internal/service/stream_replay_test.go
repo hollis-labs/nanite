@@ -7,6 +7,21 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
+// waitUntil polls cond with a short backoff until it returns true or the
+// deadline elapses. Replaces fixed time.Sleep in tests that need to
+// observe the pump goroutine catching up. PR #66 review #3.
+func waitUntil(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("condition never became true within %s", timeout)
+}
+
 // TestMessageStream_AssignsMonotonicEventIDs verifies the pump stamps each
 // event with a monotonically increasing EventID starting at 1, and that
 // identical event contents on either side of the pump retain the assigned
@@ -104,12 +119,30 @@ func TestMessageStream_LiveAfterReplay(t *testing.T) {
 	// Produce 2 events before any subscriber.
 	ch <- chat.StreamEvent{Type: "delta", Content: "x"}
 	ch <- chat.StreamEvent{Type: "delta", Content: "y"}
-	// Give the pump a tick to drain produce.
-	time.Sleep(20 * time.Millisecond)
 
+	// PR #66 review #3: drain both events via a sync subscription so the
+	// pump has deterministically processed them before we take a second
+	// subscription to exercise the replay path. The previous version
+	// relied on time.Sleep(20ms) which was flaky under CI load.
+	syncSub, closed, ok := sm.Subscribe("msg-C", 0)
+	if !ok || closed {
+		t.Fatalf("sync subscribe: ok=%v closed=%v", ok, closed)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case evt := <-syncSub:
+			if evt.EventID != uint64(i+1) {
+				t.Fatalf("sync drain[%d]: want EventID=%d, got %d", i, i+1, evt.EventID)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("timed out draining sync subscription at event %d", i)
+		}
+	}
+
+	// Now take the "real" subscription — Subscribe takes over from syncSub,
+	// and the buffer is guaranteed to have events 1 and 2 available for replay.
 	sub, _, _ := sm.Subscribe("msg-C", 0)
 
-	// Replay events first.
 	first := <-sub
 	second := <-sub
 	if first.Content != "x" || second.Content != "y" {
@@ -137,23 +170,30 @@ func TestMessageStream_RingEvicts(t *testing.T) {
 	sm := NewStreamManager()
 	ch := sm.CreateStream("msg-D", "sess-1")
 
-	// Overproduce: 2x the buffer cap + a little. A transient subscriber keeps
-	// the pump from wedging on a full subscriber channel.
+	// Interleave produce + drain so the subscriber channel never fills —
+	// the pump's "close slow subscriber on overflow" behavior (PR #66
+	// review #5) would otherwise terminate sub1 partway through and the
+	// test would never see the final events. Draining synchronously per
+	// producer write also replaces the earlier time.Sleep with a
+	// deterministic wait (PR #66 review #3).
 	sub1, _, _ := sm.Subscribe("msg-D", 0)
-	go func() {
-		for range sub1 {
-		}
-	}()
-
 	total := ringBufferCapacity*2 + 10
 	for i := 0; i < total; i++ {
 		ch <- chat.StreamEvent{Type: "delta", Content: "x"}
+		select {
+		case evt, ok := <-sub1:
+			if !ok {
+				t.Fatalf("sub1 closed before producing all %d events (at iter=%d)", total, i)
+			}
+			if evt.EventID != uint64(i+1) {
+				t.Fatalf("sub1 drain[%d]: want EventID=%d, got %d", i, i+1, evt.EventID)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatalf("sub1 drain timed out at iter=%d", i)
+		}
 	}
-	// Let the pump catch up.
-	time.Sleep(50 * time.Millisecond)
 
-	// Reconnect with a cursor older than any retained event. Replay should
-	// yield at most ringBufferCapacity events.
+	// Reconnect with cursor=0. Replay should yield at most ringBufferCapacity.
 	sub2, _, _ := sm.Subscribe("msg-D", 0)
 	close(ch)
 
@@ -191,7 +231,21 @@ func TestMessageStream_SubscribeAfterClose(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "delta", Content: "p"}
 	ch <- chat.StreamEvent{Type: "delta", Content: "q"}
 	close(ch)
-	// Wait for the pump to drain and mark closed.
+	// Wait for the pump to exit so closed=true is visible to Subscribe.
+	// Replaces the earlier time.Sleep(50ms) — PR #66 review #3.
+	waitUntil(t, 2*time.Second, func() bool {
+		val, ok := sm.streams.Load("msg-E")
+		if !ok {
+			return false
+		}
+		ms, ok := val.(*messageStream)
+		if !ok {
+			return false
+		}
+		ms.mu.Lock()
+		defer ms.mu.Unlock()
+		return ms.closed
+	})
 	time.Sleep(50 * time.Millisecond)
 
 	sub, closed, ok := sm.Subscribe("msg-E", 0)

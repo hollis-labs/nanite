@@ -2,7 +2,9 @@ package toolclient
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -271,6 +273,10 @@ func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[strin
 // they have no agent_profiles row by design, so a store miss is expected.
 // DB-backed agent IDs fall through to the store; a miss there is a real
 // signal (stale binding or deleted profile) and is logged at WARN.
+//
+// Only sql.ErrNoRows for file-based IDs is downgraded to DEBUG — a real DB
+// error (busy, corruption, I/O) stays at WARN for every agent ID so operational
+// issues remain visible.
 func (tb *ToolClient) GetPermissions(agentID string) ToolPermissions {
 	if tb.PermissionResolver != nil {
 		if perms, ok := tb.PermissionResolver(agentID); ok {
@@ -286,7 +292,7 @@ func (tb *ToolClient) GetPermissions(agentID string) ToolPermissions {
 
 	agent, err := tb.Store.GetAgent(agentID)
 	if err != nil {
-		if fileBased {
+		if fileBased && errors.Is(err, sql.ErrNoRows) {
 			slog.Debug("toolclient: file-based agent not in store; using default-permit",
 				"agent", agentID, "err", err)
 		} else {

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// CW-20260417-0487: tool_permissions frontmatter on a file-based agent must
+// CW-20260417-0487: toolPermissions frontmatter on a file-based agent must
 // surface through ToProfile so file agents can express deny rules and call
 // budgets without being seeded into agent_profiles.
 func TestParseMD_ToolPermissions(t *testing.T) {

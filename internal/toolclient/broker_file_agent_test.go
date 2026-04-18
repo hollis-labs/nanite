@@ -3,9 +3,34 @@ package toolclient
 import (
 	"bytes"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// newStoreForTest builds a fresh on-disk SQLite store under t.TempDir. The
+// toolclient package is separate from internal/store, so it cannot reuse
+// store.newTestStore (unexported); this helper is the minimal equivalent.
+func newStoreForTest(t *testing.T) *store.Store {
+	t.Helper()
+	s, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
 
 // CW-20260417-0487: file-based agents have no agent_profiles row by design.
 // GetPermissions must consult an injected resolver (set by the service layer
@@ -33,46 +58,66 @@ func TestGetPermissions_FileAgentResolverShortCircuitsStore(t *testing.T) {
 	}
 }
 
-// When the store is nil and no resolver is wired, file-based agents must
-// fall through to default-permit without an info-level WARN — the noise this
-// ticket exists to fix. We capture slog output to assert log discipline.
-func TestGetPermissions_FileAgentMissingDoesNotWarn(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+// A resolver-miss for a file-based ID followed by a real store lookup that
+// returns sql.ErrNoRows must fall through to default-permit *without* a WARN.
+// This is the exact noise the ticket was filed to eliminate.
+func TestGetPermissions_FileAgentStoreMissIsDebug(t *testing.T) {
+	buf := captureLogs(t)
 
-	tb := New(nil, nil, DefaultConfig())
+	s := newStoreForTest(t)
+	tb := New(nil, s, DefaultConfig())
+
 	got := tb.GetPermissions("file-default")
 	if got.MaxCallsPerTurn != DefaultMaxCallsPerTurn {
-		t.Errorf("MaxCallsPerTurn = %d, want %d (default-permit fallback)", got.MaxCallsPerTurn, DefaultMaxCallsPerTurn)
+		t.Errorf("MaxCallsPerTurn = %d, want %d (default-permit fallback)",
+			got.MaxCallsPerTurn, DefaultMaxCallsPerTurn)
 	}
 	if strings.Contains(buf.String(), "could not load agent for permissions") {
 		t.Errorf("expected no WARN for file-based agent miss, got log: %s", buf.String())
 	}
 }
 
-// Non-file agents must still WARN on miss (real signal — a chat is asking
-// permissions for an unknown DB-backed agent ID, which usually means a stale
-// session_agents binding or a deleted profile).
-func TestGetPermissions_NonFileAgentWarnsOnMiss(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+// A non-file agent ID that misses in the store is a real signal (stale
+// session_agents binding or deleted profile) and must WARN. This is the test
+// that used to be misnamed; it now exercises the actual WARN path via a real
+// store whose GetAgent returns sql.ErrNoRows.
+func TestGetPermissions_NonFileAgentStoreMissWarns(t *testing.T) {
+	buf := captureLogs(t)
 
-	tb := New(nil, nil, DefaultConfig())
-	tb.PermissionResolver = func(agentID string) (ToolPermissions, bool) {
-		return ToolPermissions{}, false
-	}
-	// Store is nil, so we fall through to default-permit. The store-nil branch
-	// also must not WARN (no DB to fail against). To assert the WARN-on-miss
-	// behavior for non-file IDs we rely on broker_permissions_test.go's
-	// integration coverage — here we only assert the file-based path stays
-	// quiet, and that the default fallback applies for unknown non-file IDs
-	// when no store is wired.
+	s := newStoreForTest(t)
+	tb := New(nil, s, DefaultConfig())
+
 	got := tb.GetPermissions("mentat-001")
 	if got.MaxCallsPerTurn != DefaultMaxCallsPerTurn {
+		t.Errorf("MaxCallsPerTurn = %d, want %d (default-permit fallback)",
+			got.MaxCallsPerTurn, DefaultMaxCallsPerTurn)
+	}
+	if !strings.Contains(buf.String(), "could not load agent for permissions") {
+		t.Errorf("expected WARN on DB-backed agent miss, got log: %s", buf.String())
+	}
+}
+
+// When the store is returning a non-ErrNoRows error (busy, corruption, I/O)
+// even a file-based ID must log WARN so operational issues are visible. We
+// simulate this by closing the store before querying, which makes every
+// subsequent GetAgent return a driver error distinct from sql.ErrNoRows.
+func TestGetPermissions_FileAgentDriverErrorStillWarns(t *testing.T) {
+	buf := captureLogs(t)
+
+	s := newStoreForTest(t)
+	// Force driver errors for subsequent GetAgent calls. This mimics the
+	// "busy/corruption/IO" class of failures that the ticket reviewer flagged
+	// as not-to-be-silenced.
+	if err := s.DB.Close(); err != nil {
+		t.Fatalf("DB.Close: %v", err)
+	}
+
+	tb := New(nil, s, DefaultConfig())
+	got := tb.GetPermissions("file-default")
+	if got.MaxCallsPerTurn != DefaultMaxCallsPerTurn {
 		t.Errorf("MaxCallsPerTurn = %d, want default", got.MaxCallsPerTurn)
+	}
+	if !strings.Contains(buf.String(), "could not load agent for permissions") {
+		t.Errorf("expected WARN on file-based agent driver error, got log: %s", buf.String())
 	}
 }

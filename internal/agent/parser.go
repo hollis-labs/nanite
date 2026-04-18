@@ -67,9 +67,9 @@ type AgentConstraints struct {
 }
 
 // AgentToolPermissions mirrors toolclient.ToolPermissions in shape but is
-// declared here to avoid an import cycle (toolclient depends on agent for the
-// IsFileBasedID helper). YAML tags use canonical snake_case so frontmatter
-// matches the JSON shape stored in agent_profiles.tool_permissions.
+// declared here so agent frontmatter parsing does not depend on toolclient.
+// YAML tags use canonical snake_case so frontmatter matches the JSON shape
+// stored in agent_profiles.tool_permissions.
 type AgentToolPermissions struct {
 	AllowList          []string `yaml:"allow_list" json:"allow_list,omitempty"`
 	DenyList           []string `yaml:"deny_list" json:"deny_list,omitempty"`

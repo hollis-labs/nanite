@@ -17,26 +17,29 @@ import (
 // An empty permissions block parses to default-permit with the standard
 // MaxCallsPerTurn cap, matching the long-standing fallback behavior the
 // pre-fix code provided via WARN-then-default.
+//
+// Permissions are resolved once at construction so CheckPermission is a pure
+// map lookup — no per-call JSON marshal/unmarshal on the hot path.
 func newFileAgentPermissionResolver(defs []*agent.Definition) toolclient.PermissionResolver {
 	if len(defs) == 0 {
 		return nil
 	}
-	bySlug := make(map[string]*agent.Definition, len(defs))
+	bySlug := make(map[string]toolclient.ToolPermissions, len(defs))
 	for _, d := range defs {
 		if d == nil || d.Slug == "" {
 			continue
 		}
-		bySlug[d.Slug] = d
+		bySlug[d.Slug] = toolclient.ParsePermissions(d.ToProfile().ToolPermissions)
 	}
 
 	return func(agentID string) (toolclient.ToolPermissions, bool) {
 		if !agent.IsFileBasedID(agentID) {
 			return toolclient.ToolPermissions{}, false
 		}
-		d, ok := bySlug[agent.SlugFromFileID(agentID)]
+		perms, ok := bySlug[agent.SlugFromFileID(agentID)]
 		if !ok {
 			return toolclient.ToolPermissions{}, false
 		}
-		return toolclient.ParsePermissions(d.ToProfile().ToolPermissions), true
+		return perms, true
 	}
 }

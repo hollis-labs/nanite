@@ -96,3 +96,8 @@ core:
   - type: subagent-spawn-approval
     component: components/chat/envelopes/SubagentSpawnApprovalCard
     export: SubagentSpawnApprovalCard
+
+  # CW-20260417-0485 — chat-loop terminal pause envelope. Registered for
+  # validation only; the FE component ships with CW-20260418-0008 so the BE
+  # can emit the envelope independently of FE render work.
+  - type: chat-loop-terminated

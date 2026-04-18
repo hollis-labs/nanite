@@ -18,7 +18,15 @@ type AgentConstraints struct {
 	// Phase 4 — Chat Loop Hardening.
 	MaxTurns           int `json:"max_turns"`              // 0=default(25), -1=unlimited, >0=value
 	HardCeiling        int `json:"hard_ceiling"`           // 0=default(100), absolute max turns
-	ConsecutiveFailCap int `json:"consecutive_fail_cap"`   // 0=default(3), pause after N consecutive failures
+	// ConsecutiveFailCap is the soft-warning threshold. CW-20260417-0485:
+	// reaching this count no longer terminates the loop — it only drives the
+	// "critical"-level tool_warning SSE so the UI can warn the user that a
+	// runaway is imminent. See RunawayFailCap for the terminal cap.
+	ConsecutiveFailCap int `json:"consecutive_fail_cap"`   // 0=default(3), tool_warning turns critical after N consecutive failures
+	// RunawayFailCap is the hard circuit-breaker. When consecutive tool
+	// failures reach this count the loop emits a chat-loop-terminated
+	// envelope and exits. CW-20260417-0485.
+	RunawayFailCap     int `json:"runaway_fail_cap"`       // 0=default(10), hard terminate after N consecutive failures
 	IdleTimeoutSeconds int `json:"idle_timeout_seconds"`   // 0=default(900), seconds of inactivity before suspend
 }
 

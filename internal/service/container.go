@@ -202,6 +202,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Overrides:  cfg.Store,
 	})
 
+	// Wire the toolclient's file-agent permission resolver. File-based agents
+	// have synthetic IDs ("file-<slug>") and live on disk, not in
+	// agent_profiles — a store-backed permission lookup would miss every
+	// time. Resolving through the AgentService lets a file agent's
+	// frontmatter (or implicit Tools allowlist) flow into the broker.
+	if cfg.ToolClient != nil {
+		cfg.ToolClient.PermissionResolver = newFileAgentPermissionResolver(agentDefs)
+	}
+
 	// Messaging service. Uses the AgentService as its resolver so both
 	// DB-backed and file-based agents validate uniformly. Takes the
 	// SQLite-backed messaging Store plus the underlying *sql.DB so

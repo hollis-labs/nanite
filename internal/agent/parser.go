@@ -38,6 +38,11 @@ type Definition struct {
 	// Modes (inline)
 	Modes []ModeDefinition `yaml:"modes"`
 
+	// ToolPermissions, when set, replaces the implicit allow_list derived from
+	// Tools. Lets file-based agents express deny rules, allow-list patterns,
+	// and call-budget caps without needing an agent_profiles row.
+	ToolPermissions *AgentToolPermissions `yaml:"toolPermissions,omitempty"`
+
 	// SystemPrompt is the markdown body below the YAML frontmatter.
 	SystemPrompt string `yaml:"-"`
 
@@ -59,6 +64,18 @@ type AgentConstraints struct {
 	MaxIterations  int `yaml:"maxIterations" json:"max_iterations,omitempty"`
 	MaxTimeSeconds int `yaml:"maxTimeSeconds" json:"max_time_seconds,omitempty"`
 	RetryBudget    int `yaml:"retryBudget" json:"retry_budget,omitempty"`
+}
+
+// AgentToolPermissions mirrors toolclient.ToolPermissions in shape but is
+// declared here so agent frontmatter parsing does not depend on toolclient.
+// YAML tags use canonical snake_case so frontmatter matches the JSON shape
+// stored in agent_profiles.tool_permissions.
+type AgentToolPermissions struct {
+	AllowList          []string `yaml:"allow_list" json:"allow_list,omitempty"`
+	DenyList           []string `yaml:"deny_list" json:"deny_list,omitempty"`
+	MaxCallsPerTurn    int      `yaml:"max_calls_per_turn" json:"max_calls_per_turn,omitempty"`
+	AllowDelegation    bool     `yaml:"allow_delegation" json:"allow_delegation,omitempty"`
+	AllowCodeExecution bool     `yaml:"allow_code_execution" json:"allow_code_execution,omitempty"`
 }
 
 var frontmatterDelim = []byte("---")

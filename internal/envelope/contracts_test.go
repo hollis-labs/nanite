@@ -42,6 +42,8 @@ var knownTypes = []string{
 	"ticket-form",
 	"ticket-confirmation",
 	"resolution-capture",
+	// CW-20260417-0485 — chat-loop terminal pause envelope.
+	"chat-loop-terminated",
 }
 
 // examplePayloads provides a valid payload for each envelope type.
@@ -210,6 +212,15 @@ var examplePayloads = map[string]string{
 		"categories": ["networking", "hardware", "software", "access"]
 	}`,
 	"subagent-spawn-approval": `{"run_id":"r-1","role":"file-backend","prompt":"summarize messaging","mode":"interactive"}`,
+	"chat-loop-terminated": `{
+		"reason": "hard circuit-breaker tripped: 10 consecutive tool failures",
+		"code": "runaway_tool_failures",
+		"iteration": 10,
+		"consecutive_failures": 10,
+		"last_error": "ARG_VALIDATION_FAILED: /limit: got string, want number",
+		"last_tool": "list_tasks",
+		"timestamp": "2026-04-17T17:48:44Z"
+	}`,
 }
 
 // invalidPayloads provides a payload expected to fail validation for each envelope type.

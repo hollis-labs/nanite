@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -52,6 +54,15 @@ func (v *argValidator) validate(toolName string, schema map[string]any, args map
 		return ""
 	}
 
+	// CW-20260417-0486: coerce primitive types at the validator boundary before
+	// strict schema validation. LLM providers routinely send "5" where the
+	// schema declares number/integer, and "true" where boolean is declared.
+	// Mutations land in the caller's map so downstream code (permissions,
+	// tool execution, telemetry, retry prompts) sees the coerced form.
+	if args != nil {
+		coercePrimitives(schema, args)
+	}
+
 	// Convert args to any for the validator (it expects the value to match
 	// the schema root, which is typically type:object).
 	var val any = args
@@ -63,6 +74,191 @@ func (v *argValidator) validate(toolName string, schema map[string]any, args map
 		return formatValidationError(toolName, err)
 	}
 	return ""
+}
+
+// coercePrimitives walks the schema's top-level properties and rewrites args
+// in place when a primitive-type mismatch has a safe, well-defined conversion:
+//
+//   - number: numeric-looking string → float64
+//   - integer: numeric-looking string with no fractional part → float64; or
+//     an integral float64 → unchanged (already valid)
+//   - boolean: "true"/"false"/"1"/"0" (case-insensitive) → bool
+//
+// Lossy or undefined conversions (e.g. "5.5" → integer, "yes" → boolean,
+// "abc" → number) are left untouched so the existing validator surfaces
+// ARG_VALIDATION_FAILED with the original value preserved for the retry
+// message. We deliberately do NOT coerce strings, objects, or arrays.
+func coercePrimitives(schema map[string]any, args map[string]any) {
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	for name, raw := range args {
+		propSchema, ok := props[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		types := extractSchemaTypes(propSchema["type"])
+		if len(types) == 0 {
+			continue
+		}
+		if coerced, changed := coerceValue(raw, types); changed {
+			args[name] = coerced
+		}
+	}
+}
+
+// extractSchemaTypes normalizes JSON Schema's type field, which may be a
+// single string (e.g. "integer") or an array of strings (e.g. ["integer",
+// "null"]). Returns the set of candidate types for coercion decisions.
+func extractSchemaTypes(raw any) []string {
+	switch t := raw.(type) {
+	case string:
+		return []string{t}
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// coerceValue returns the coerced value and true when a safe conversion
+// applies for any of the allowed schema types. Integer coercion is tried
+// before number so "5" under ["integer","number"] lands as an integral
+// float64 suitable for either.
+func coerceValue(raw any, types []string) (any, bool) {
+	hasType := func(t string) bool {
+		for _, s := range types {
+			if s == t {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Integer first (stricter than number).
+	if hasType("integer") {
+		if f, ok := toInteger(raw); ok {
+			return f, !sameValue(raw, f)
+		}
+	}
+	if hasType("number") {
+		if f, ok := toNumber(raw); ok {
+			return f, !sameValue(raw, f)
+		}
+	}
+	if hasType("boolean") {
+		if b, ok := toBoolean(raw); ok {
+			return b, !sameValue(raw, b)
+		}
+	}
+	return raw, false
+}
+
+// sameValue reports whether raw already equals the coerced form — used to
+// avoid spurious mutations when the input already matched the schema.
+func sameValue(raw, coerced any) bool {
+	return raw == coerced
+}
+
+// toInteger attempts to produce a float64 carrying an integral value suitable
+// for an integer-typed JSON Schema slot. Returns (value, ok).
+func toInteger(raw any) (float64, bool) {
+	switch v := raw.(type) {
+	case float64:
+		if math.Trunc(v) == v && !math.IsInf(v, 0) && !math.IsNaN(v) {
+			return v, true
+		}
+		return 0, false
+	case float32:
+		f := float64(v)
+		if math.Trunc(f) == f {
+			return f, true
+		}
+		return 0, false
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return float64(i), true
+		}
+		if f, err := v.Float64(); err == nil && math.Trunc(f) == f {
+			return f, true
+		}
+		return 0, false
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0, false
+		}
+		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return float64(i), true
+		}
+		// Accept strings like "5.0" only if integral; reject "5.5".
+		if f, err := strconv.ParseFloat(s, 64); err == nil && math.Trunc(f) == f {
+			return f, true
+		}
+		return 0, false
+	}
+	return 0, false
+}
+
+// toNumber attempts to produce a float64 for a number-typed JSON Schema slot.
+func toNumber(raw any) (float64, bool) {
+	switch v := raw.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return f, true
+		}
+		return 0, false
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0, false
+		}
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return f, true
+		}
+		return 0, false
+	}
+	return 0, false
+}
+
+// toBoolean accepts "true"/"false"/"1"/"0" (case-insensitive) and existing
+// bool values. Fuzzy truth words (yes/no/on/off) are intentionally rejected
+// to avoid hiding provider bugs behind lenient conversions.
+func toBoolean(raw any) (bool, bool) {
+	switch v := raw.(type) {
+	case bool:
+		return v, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1":
+			return true, true
+		case "false", "0":
+			return false, true
+		}
+	}
+	return false, false
 }
 
 // getOrCompile returns a cached compiled schema or compiles and caches it.

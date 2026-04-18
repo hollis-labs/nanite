@@ -177,6 +177,9 @@ func toInteger(raw any) (float64, bool) {
 		return 0, false
 	case float32:
 		f := float64(v)
+		if math.IsInf(f, 0) || math.IsNaN(f) {
+			return 0, false
+		}
 		if math.Trunc(f) == f {
 			return f, true
 		}
@@ -191,7 +194,7 @@ func toInteger(raw any) (float64, bool) {
 		if i, err := v.Int64(); err == nil {
 			return float64(i), true
 		}
-		if f, err := v.Float64(); err == nil && math.Trunc(f) == f {
+		if f, err := v.Float64(); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) && math.Trunc(f) == f {
 			return f, true
 		}
 		return 0, false
@@ -204,7 +207,9 @@ func toInteger(raw any) (float64, bool) {
 			return float64(i), true
 		}
 		// Accept strings like "5.0" only if integral; reject "5.5".
-		if f, err := strconv.ParseFloat(s, 64); err == nil && math.Trunc(f) == f {
+		// strconv.ParseFloat accepts "Inf"/"NaN" — explicitly reject them so
+		// non-finite inputs don't slip past integer validation downstream.
+		if f, err := strconv.ParseFloat(s, 64); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) && math.Trunc(f) == f {
 			return f, true
 		}
 		return 0, false
@@ -213,12 +218,21 @@ func toInteger(raw any) (float64, bool) {
 }
 
 // toNumber attempts to produce a float64 for a number-typed JSON Schema slot.
+// Non-finite values (NaN, +Inf, -Inf) are rejected so coercion never widens
+// the accepted input set beyond what the schema author intended.
 func toNumber(raw any) (float64, bool) {
 	switch v := raw.(type) {
 	case float64:
+		if math.IsInf(v, 0) || math.IsNaN(v) {
+			return 0, false
+		}
 		return v, true
 	case float32:
-		return float64(v), true
+		f := float64(v)
+		if math.IsInf(f, 0) || math.IsNaN(f) {
+			return 0, false
+		}
+		return f, true
 	case int:
 		return float64(v), true
 	case int32:
@@ -226,7 +240,7 @@ func toNumber(raw any) (float64, bool) {
 	case int64:
 		return float64(v), true
 	case json.Number:
-		if f, err := v.Float64(); err == nil {
+		if f, err := v.Float64(); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
 			return f, true
 		}
 		return 0, false
@@ -235,7 +249,8 @@ func toNumber(raw any) (float64, bool) {
 		if s == "" {
 			return 0, false
 		}
-		if f, err := strconv.ParseFloat(s, 64); err == nil {
+		// strconv.ParseFloat accepts "NaN"/"Inf" — explicitly reject them.
+		if f, err := strconv.ParseFloat(s, 64); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
 			return f, true
 		}
 		return 0, false

@@ -236,6 +236,44 @@ func TestArgValidator_InvalidStringToNumber(t *testing.T) {
 	}
 }
 
+// TestArgValidator_RejectNonFiniteStrings covers Copilot PR #63 feedback:
+// strconv.ParseFloat accepts "NaN"/"Inf"/"+Inf"/"-Inf" without error, and
+// without an explicit check those values would slip past coercion and land
+// in downstream tool calls. Coerce must treat them as un-coercible so the
+// caller gets ARG_VALIDATION_FAILED instead of a surprise Inf/NaN.
+func TestArgValidator_RejectNonFiniteStrings(t *testing.T) {
+	v := newArgValidator()
+	for _, tc := range []struct {
+		typ string
+		in  string
+	}{
+		{"number", "Inf"},
+		{"number", "+Inf"},
+		{"number", "-Inf"},
+		{"number", "NaN"},
+		{"integer", "Inf"},
+		{"integer", "NaN"},
+	} {
+		tc := tc
+		t.Run(tc.typ+"_"+tc.in, func(t *testing.T) {
+			schema := map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"v": map[string]any{"type": tc.typ},
+				},
+			}
+			args := map[string]any{"v": tc.in}
+			msg := v.validate("test_tool", schema, args)
+			if msg == "" {
+				t.Fatalf("expected ARG_VALIDATION_FAILED for %q -> %s", tc.in, tc.typ)
+			}
+			if _, coercedToFloat := args["v"].(float64); coercedToFloat {
+				t.Errorf("value was silently coerced to float64 despite being non-finite: %v", args["v"])
+			}
+		})
+	}
+}
+
 // TestArgValidator_CoerceStringToBool covers "true"/"false" (case-insensitive)
 // and "1"/"0" forms.
 func TestArgValidator_CoerceStringToBool(t *testing.T) {

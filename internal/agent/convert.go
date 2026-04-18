@@ -73,11 +73,15 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 		p.DefaultMode = "default"
 	}
 
-	// ToolPermissions — derive from tools allowlist if specified.
-	if len(d.Tools) > 0 {
+	// ToolPermissions — frontmatter wins; fall back to deriving an allow_list
+	// from Tools so existing agents keep their implicit allowlist behavior.
+	switch {
+	case d.ToolPermissions != nil:
+		p.ToolPermissions = marshalJSONOr(d.ToolPermissions, "{}")
+	case len(d.Tools) > 0:
 		tp := map[string]any{"allow_list": d.Tools}
 		p.ToolPermissions = marshalJSONOr(tp, "{}")
-	} else {
+	default:
 		p.ToolPermissions = "{}"
 	}
 

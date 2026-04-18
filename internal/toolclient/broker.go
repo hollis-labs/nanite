@@ -20,13 +20,23 @@ const MaxSelectedTools = 15
 // a wildcard or empty — a minimal safe set instead of everything.
 const DefaultFallbackToolCount = 5
 
+// PermissionResolver resolves an agent's ToolPermissions outside of the
+// database. It is intended for file-based agents (synthetic ID prefix
+// "file-"), which have no agent_profiles row by design — their definitions
+// live on disk. Return ok=false to defer to the store-backed lookup.
+//
+// Wired by the service layer once the AgentService knows about file
+// definitions; tests typically leave it nil and rely on default-permit.
+type PermissionResolver func(agentID string) (ToolPermissions, bool)
+
 // ToolClient mediates all tool access: selection, permissions, and execution.
 type ToolClient struct {
-	LocalBroker *broker.LocalBroker
-	MCPManager  *mcp.Manager
-	Store       *store.Store
-	Config      *Config
-	Builtins    *BuiltinToolRegistry
+	LocalBroker        *broker.LocalBroker
+	MCPManager         *mcp.Manager
+	Store              *store.Store
+	Config             *Config
+	Builtins           *BuiltinToolRegistry
+	PermissionResolver PermissionResolver
 }
 
 // New creates a new ToolClient.
@@ -256,15 +266,33 @@ func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[strin
 		len(permitted), agentID, strings.Join(names, ", "), strings.Join(denied, ", "))
 }
 
-// GetPermissions loads tool permissions for an agent from the store.
+// GetPermissions loads tool permissions for an agent. File-based agents
+// (ID prefix "file-") are resolved through PermissionResolver when wired —
+// they have no agent_profiles row by design, so a store miss is expected.
+// DB-backed agent IDs fall through to the store; a miss there is a real
+// signal (stale binding or deleted profile) and is logged at WARN.
 func (tb *ToolClient) GetPermissions(agentID string) ToolPermissions {
+	if tb.PermissionResolver != nil {
+		if perms, ok := tb.PermissionResolver(agentID); ok {
+			return perms
+		}
+	}
+
+	fileBased := strings.HasPrefix(agentID, "file-")
+
 	if tb.Store == nil {
 		return ToolPermissions{MaxCallsPerTurn: DefaultMaxCallsPerTurn}
 	}
 
 	agent, err := tb.Store.GetAgent(agentID)
 	if err != nil {
-		slog.Warn("toolclient: could not load agent for permissions", "agent", agentID, "err", err)
+		if fileBased {
+			slog.Debug("toolclient: file-based agent not in store; using default-permit",
+				"agent", agentID, "err", err)
+		} else {
+			slog.Warn("toolclient: could not load agent for permissions",
+				"agent", agentID, "err", err)
+		}
 		return ToolPermissions{MaxCallsPerTurn: DefaultMaxCallsPerTurn}
 	}
 

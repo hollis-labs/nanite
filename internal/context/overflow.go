@@ -3,6 +3,8 @@ package context
 import (
 	"errors"
 	"strings"
+
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 // ErrContextOverflow is a sentinel for "provider rejected the request because
@@ -71,4 +73,29 @@ func IsContextOverflowMessage(msg string) bool {
 		}
 	}
 	return false
+}
+
+// IsCompactRecoverable reports whether err should trigger the chat loop's
+// compaction-and-retry pipeline. Two distinct failure modes converge on the
+// same remedy — shrink the prompt and try again:
+//
+//  1. Provider context-window overflow — the prompt is too large for the
+//     model. Detected via IsContextOverflow (sentinel or message match).
+//  2. Per-minute rate-budget overflow — the prompt estimate exceeds the
+//     provider's per-minute token budget. Pacing can't fix it because the
+//     request will never fit in a single window. Surfaced as
+//     provider.ErrRequestExceedsRateBudget by go-providers ≥ v0.2.1.
+//
+// Without this unified predicate the chat loop would compact on (1) and
+// repeat 58-second pacing waits on (2) until the 5-minute wall-clock
+// deadline fired — which is what session c9 hit during UAT.
+// CW-20260418-0099.
+func IsCompactRecoverable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
+		return true
+	}
+	return IsContextOverflow(err)
 }

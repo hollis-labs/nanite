@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -400,13 +401,24 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			Tools:        tools,
 		})
 		if err != nil {
-			// T9 — provider context-overflow recovery: detect the sentinel /
-			// matching error text, run the compaction pipeline synchronously,
-			// and retry once. Second failure surfaces as a user-facing error.
-			if ctxpkg.IsContextOverflow(err) && !ls.contextOverflowRetried {
+			// T9 — provider-error recovery: detect a compaction-recoverable
+			// failure (context-window overflow OR rate-budget overflow), run
+			// the compaction pipeline synchronously, and retry once. Second
+			// failure surfaces as a user-facing error.
+			//
+			// CW-20260418-0099: IsCompactRecoverable covers both the original
+			// context-overflow case and the new go-providers ≥ v0.2.1
+			// ErrRequestExceedsRateBudget sentinel — when the estimated
+			// request is bigger than the per-minute rate budget, waiting is
+			// futile and compaction is the right response.
+			if ctxpkg.IsCompactRecoverable(err) && !ls.contextOverflowRetried {
 				provSpan.End()
 				ls.contextOverflowRetried = true
-				ls.continueWith(ContinueRecovery, "context_overflow at stream start")
+				recoveryReason := "context_overflow at stream start"
+				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
+					recoveryReason = "rate_budget_exceeded at stream start"
+				}
+				ls.continueWith(ContinueRecovery, recoveryReason)
 				if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error()); ok {
 					chatMessages = newMsgs
 					tools = newTools
@@ -441,11 +453,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			if ls.retryBudget > 0 {
 				ls.retryBudget--
 			}
-			if ctxpkg.IsContextOverflow(err) && ls.contextOverflowRetried {
-				// Already retried once — emit the plan's user-facing message.
-				slog.Warn("chat-service: context_overflow after compaction retry",
-					"session_id", sessionID, "iter", ls.iteration)
+			if ctxpkg.IsCompactRecoverable(err) && ls.contextOverflowRetried {
+				// Already retried once — emit a user-facing message tailored
+				// to which recoverable mode tripped. CW-20260418-0099.
+				slog.Warn("chat-service: compaction-recoverable error persisted after retry",
+					"session_id", sessionID, "iter", ls.iteration, "err", err)
 				msg := "Context is still too large after compaction. Use `/clear` or split the request."
+				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
+					msg = "Request exceeds the per-minute rate budget even after compaction. Use `/clear` or wait a moment before sending more."
+				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				return

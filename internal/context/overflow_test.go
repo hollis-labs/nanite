@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 func TestIsContextOverflow_Sentinel(t *testing.T) {
@@ -56,5 +58,33 @@ func TestIsContextOverflow_ProviderPhrases(t *testing.T) {
 func TestIsContextOverflow_CaseInsensitive(t *testing.T) {
 	if !IsContextOverflowMessage("PROMPT IS TOO LONG") {
 		t.Fatal("classifier should be case-insensitive")
+	}
+}
+
+// TestIsCompactRecoverable covers the unified predicate used by the chat
+// loop to decide whether to compact-and-retry. CW-20260418-0099.
+func TestIsCompactRecoverable(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"random error", errors.New("some unrelated failure"), false},
+		{"rate budget sentinel", provider.ErrRequestExceedsRateBudget, true},
+		{"wrapped rate budget", fmt.Errorf("stream start: %w", provider.ErrRequestExceedsRateBudget), true},
+		{"context overflow sentinel", ErrContextOverflow, true},
+		{"wrapped context overflow", fmt.Errorf("x: %w", ErrContextOverflow), true},
+		{"anthropic prompt too long text", errors.New("400 prompt is too long: 224213 tokens > 200000"), true},
+		{"openai context length text", errors.New("context_length_exceeded"), true},
+		{"rate limit hit text", errors.New("rate_limit_exceeded"), false},
+		{"auth error", errors.New("invalid_api_key"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsCompactRecoverable(tc.err); got != tc.want {
+				t.Fatalf("IsCompactRecoverable(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

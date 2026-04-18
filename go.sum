@@ -61,8 +61,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/hollis-labs/go-otel v0.0.2 h1:Pg0IJtRfC/QdXSeZwHpe5pDQy/dnbx49XR5BgJzlkQk=
 github.com/hollis-labs/go-otel v0.0.2/go.mod h1:E9MbBfbyc+TfJGsaweDIZ8mFq50oTKLONpGbAcaWIQY=
-github.com/hollis-labs/go-providers v0.2.0 h1:JMAonjXnrS4awP/JRZu+0VvHoRYfYrKFmXpPfrGqGOI=
-github.com/hollis-labs/go-providers v0.2.0/go.mod h1:7S6zvE5didBoY5cA0JY/rtB0pzy8s9dltuqWMtUPwK0=
+github.com/hollis-labs/go-providers v0.2.1 h1:cV2DNmxe3VnwPzOOXH+oGzQxSvGeO2Ht1l9HsWUSqH4=
+github.com/hollis-labs/go-providers v0.2.1/go.mod h1:7S6zvE5didBoY5cA0JY/rtB0pzy8s9dltuqWMtUPwK0=
 github.com/hollis-labs/go-queue v0.1.2 h1:FT0te+K0gLM3wvhnZc+nGBIcSW5ebgkhPw4ja/bJl68=
 github.com/hollis-labs/go-queue v0.1.2/go.mod h1:wAP95gDz9kxAhcCWaR4e07Jz54OvFpiNEq+5ERgt2/E=
 github.com/hollis-labs/go-toolbroker v0.0.2 h1:ZLRw8XJiAy5AOCASESfIcNJSAHh8jeX/FqxKLa67/l0=

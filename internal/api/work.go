@@ -3,9 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
-	"time"
 
-	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -80,10 +78,7 @@ func (a *API) handleSyncWork(w http.ResponseWriter, r *http.Request) {
 	// The sync endpoint only processes todo/step changes and broadcasts.
 
 	// Notify other UI tabs that work items changed.
-	a.Services.Streams.BroadcastPresence(chat.PresenceEvent{
-		Type:      "work_changed",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	})
+	a.Services.Streams.BroadcastWorkChanged()
 
 	a.jsonResp(w, http.StatusOK, map[string]bool{"ok": true})
 }

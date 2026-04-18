@@ -192,6 +192,18 @@ func (sm *StreamManager) UnregisterPresenceClient(clientID string) {
 	}
 }
 
+// BroadcastWorkChanged notifies all connected clients that session-scoped
+// todos or plans have changed, so the Work drawer can refresh. Covers every
+// mutation entrypoint — REST handlers, MCP self-tools, and the work-sync
+// endpoint — so the drawer stays consistent regardless of who wrote the
+// change. CW-20260418-0044.
+func (sm *StreamManager) BroadcastWorkChanged() {
+	sm.BroadcastPresence(chat.PresenceEvent{
+		Type:      "work_changed",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 // BroadcastPresence sends a presence event to all connected presence clients.
 // Slow clients have the event dropped rather than blocking the broadcast.
 func (sm *StreamManager) BroadcastPresence(event chat.PresenceEvent) {

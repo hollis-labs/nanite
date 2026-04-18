@@ -61,6 +61,11 @@ interface ChatState {
   sessionTakeover: boolean
   setSessionTakeover: (taken: boolean) => void
 
+  // Stream stalled watchdog — flipped when the SSE connection delivers no
+  // events for an extended period while streaming is still marked active.
+  streamStalled: boolean
+  setStreamStalled: (stalled: boolean) => void
+
   // Tool call display mode (per-session override)
   toolCallDisplayMode: ToolCallDisplayMode
   setToolCallDisplayMode: (mode: ToolCallDisplayMode) => void
@@ -102,7 +107,7 @@ export const useChatStore = create<ChatState>((set) => ({
   setStreamingSessionId: (id) => set({ streamingSessionId: id }),
   appendStreamContent: (content) =>
     set((state) => ({ streamingContent: state.streamingContent + content })),
-  clearStream: () => set({ streamingContent: '', isStreaming: false, streamingSessionId: null, statusMessage: null }),
+  clearStream: () => set({ streamingContent: '', isStreaming: false, streamingSessionId: null, statusMessage: null, streamStalled: false }),
 
   // Status messages
   statusMessage: null,
@@ -249,6 +254,10 @@ export const useChatStore = create<ChatState>((set) => ({
   // Session takeover
   sessionTakeover: false,
   setSessionTakeover: (taken: boolean) => set({ sessionTakeover: taken }),
+
+  // Stream stalled watchdog
+  streamStalled: false,
+  setStreamStalled: (stalled: boolean) => set({ streamStalled: stalled }),
 
   // Tool call display mode — per-session override stored in localStorage
   toolCallDisplayMode: (typeof window !== 'undefined'

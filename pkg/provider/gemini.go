@@ -115,16 +115,11 @@ func (g *Gemini) doGeminiRequest(ctx context.Context, method, urlStr string, pay
 				slog.Warn("provider: request exceeds per-minute rate limit, proceeding anyway",
 					"provider", "gemini", "est_tokens", estimatedTokens, "limit", limit)
 			}
-			if g.OnStatus != nil {
-				g.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
-			}
 			slog.Info("provider: pacing for rate limit budget",
 				"provider", "gemini", "wait", wait.Round(time.Millisecond),
 				"est_tokens", estimatedTokens, "available", avail, "limit", limit)
-			select {
-			case <-ctx.Done():
-				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
-			case <-time.After(wait):
+			if err := PacingWait(ctx, wait, g.OnStatus); err != nil {
+				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", err)
 			}
 		}
 	}

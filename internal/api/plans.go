@@ -32,6 +32,7 @@ func (a *API) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.Services.Streams.BroadcastWorkChanged()
 	a.jsonResp(w, http.StatusCreated, p)
 }
 
@@ -55,6 +56,7 @@ func (a *API) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.Services.Streams.BroadcastWorkChanged()
 	a.jsonResp(w, http.StatusOK, p)
 }
 
@@ -74,6 +76,7 @@ func (a *API) handleUpdatePlanStep(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.Services.Streams.BroadcastWorkChanged()
 	a.jsonResp(w, http.StatusOK, p)
 }
 
@@ -82,6 +85,7 @@ func (a *API) handleDeletePlan(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.Services.Streams.BroadcastWorkChanged()
 	a.jsonResp(w, http.StatusOK, map[string]string{"deleted": r.PathValue("id")})
 }
 
@@ -96,5 +100,6 @@ func (a *API) handleApprovePlan(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.Services.Streams.BroadcastWorkChanged()
 	a.jsonResp(w, http.StatusOK, p)
 }

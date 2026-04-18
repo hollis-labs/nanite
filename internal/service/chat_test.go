@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/go-providers/provider"
@@ -425,6 +426,67 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestChatService_RegisterGeneration_Takeover verifies that registering a
+// new generation for a session returns the prior cancel — the takeover
+// primitive that prevents concurrent duplicate loops on retry.
+// CW-20260418-0043.
+func TestChatService_RegisterGeneration_Takeover(t *testing.T) {
+	svc := &chatServiceImpl{activeGen: make(map[string]*inFlightGen)}
+
+	cancelledA := make(chan struct{})
+	cancelA := context.CancelFunc(func() { close(cancelledA) })
+
+	// First registration: no prior cancel.
+	if prev := svc.registerGeneration("sess", "msg-A", cancelA); prev != nil {
+		t.Fatalf("expected nil prev for first register, got %v", prev)
+	}
+
+	// Second registration on the same session: returns the first cancel.
+	cancelB := context.CancelFunc(func() {})
+	prev := svc.registerGeneration("sess", "msg-B", cancelB)
+	if prev == nil {
+		t.Fatal("expected prev cancel on second register, got nil")
+	}
+	prev()
+	select {
+	case <-cancelledA:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("prior cancel was not invoked")
+	}
+
+	// Deregistering the first msgID is a no-op because msg-B is current.
+	svc.deregisterGeneration("sess", "msg-A")
+	svc.activeGenMu.Lock()
+	cur := svc.activeGen["sess"]
+	svc.activeGenMu.Unlock()
+	if cur == nil || cur.msgID != "msg-B" {
+		t.Fatalf("expected msg-B still active, got %+v", cur)
+	}
+
+	// Deregistering the current msgID clears the slot.
+	svc.deregisterGeneration("sess", "msg-B")
+	svc.activeGenMu.Lock()
+	if _, ok := svc.activeGen["sess"]; ok {
+		t.Fatal("expected slot cleared after deregister of active msg")
+	}
+	svc.activeGenMu.Unlock()
+}
+
+// TestChatService_RegisterGeneration_ScopedPerSession verifies two sessions
+// do not interfere with each other's takeover registry.
+func TestChatService_RegisterGeneration_ScopedPerSession(t *testing.T) {
+	svc := &chatServiceImpl{activeGen: make(map[string]*inFlightGen)}
+	cancelA := context.CancelFunc(func() {})
+	cancelB := context.CancelFunc(func() {})
+
+	if prev := svc.registerGeneration("sess-1", "msg-1", cancelA); prev != nil {
+		t.Fatalf("expected nil prev for sess-1, got %v", prev)
+	}
+	if prev := svc.registerGeneration("sess-2", "msg-2", cancelB); prev != nil {
+		t.Fatal("expected nil prev for sess-2 — different session")
+	}
 }
 
 // Verify ChatService interface is satisfied at compile time.

@@ -142,6 +142,23 @@ type chatServiceImpl struct {
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
 	lifecycle *lifecycle.Manager
+
+	// activeGenMu guards activeGen. CW-20260418-0043: when the user retries
+	// or sends a new message while an older generateResponse is still
+	// running for the same session, we must cancel the old one before
+	// launching the new one. Without this, concurrent loops fight over the
+	// same provider rate-limit budget and the session spirals into pacing
+	// waits that look like stalls from the UI.
+	activeGenMu sync.Mutex
+	activeGen   map[string]*inFlightGen // sessionID -> current in-flight generation
+}
+
+// inFlightGen records the currently-running generateResponse for a session
+// so a fresh launch can cancel it. Keyed by msgID so the deregister path
+// only clears the slot if we're still the active one.
+type inFlightGen struct {
+	msgID  string
+	cancel context.CancelFunc
 }
 
 // NewChatService creates a ChatService from its dependencies.
@@ -179,7 +196,74 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		argValidator:            newArgValidator(),
 		resultCache:             cfg.ResultCache,
 		lifecycle:               lifecycle.NewManager("service.chat"),
+		activeGen:               make(map[string]*inFlightGen),
 	}
+}
+
+// registerGeneration stores the cancel for a new in-flight generation and
+// returns the prior cancel if any, which the caller must invoke to abort
+// the stale goroutine. Separated from launchGeneration so the takeover
+// semantics are unit-testable without spinning up generateResponse.
+// CW-20260418-0043.
+func (s *chatServiceImpl) registerGeneration(sessionID, msgID string, cancel context.CancelFunc) (prev context.CancelFunc) {
+	s.activeGenMu.Lock()
+	defer s.activeGenMu.Unlock()
+	if cur := s.activeGen[sessionID]; cur != nil {
+		prev = cur.cancel
+	}
+	s.activeGen[sessionID] = &inFlightGen{msgID: msgID, cancel: cancel}
+	return prev
+}
+
+// deregisterGeneration clears the registry slot if and only if the caller
+// is still the active generation. A takeover will have replaced the slot;
+// in that case this is a no-op.
+func (s *chatServiceImpl) deregisterGeneration(sessionID, msgID string) {
+	s.activeGenMu.Lock()
+	defer s.activeGenMu.Unlock()
+	if cur := s.activeGen[sessionID]; cur != nil && cur.msgID == msgID {
+		delete(s.activeGen, sessionID)
+	}
+}
+
+// launchGeneration starts a cancellable generateResponse goroutine for the
+// given target session. If another generateResponse is already running for
+// this session, it is cancelled first — prevents concurrent duplicate loops
+// when the user retries mid-stream (CW-20260418-0043).
+//
+// The cancel is wired into both our per-session registry (for takeover) and
+// the lifecycle manager (for graceful Shutdown) via a small bridge goroutine.
+func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent) {
+	// Build cancel BEFORE launching so a near-simultaneous retry cannot
+	// register its own cancel before this one — the window would let the
+	// retry cancel itself. context.Background() is deliberate: lifecycle
+	// shutdown is bridged in below.
+	genCtx, cancel := context.WithCancel(context.Background())
+
+	prev := s.registerGeneration(sessionID, assistantMsgID, cancel)
+	if prev != nil {
+		slog.Info("chat-service: cancelling prior in-flight generation for session",
+			"session_id", sessionID, "new_msg_id", assistantMsgID)
+		prev()
+	}
+
+	s.lifecycle.Go(name, func(bgCtx context.Context) {
+		// Bridge lifecycle shutdown (bgCtx) into our takeover-ctx so
+		// generateResponse still aborts on process Shutdown.
+		stopBridge := make(chan struct{})
+		go func() {
+			select {
+			case <-bgCtx.Done():
+				cancel()
+			case <-stopBridge:
+			}
+		}()
+		defer close(stopBridge)
+		defer cancel()
+		defer s.deregisterGeneration(sessionID, assistantMsgID)
+
+		s.generateResponse(genCtx, sessionID, assistantMsgID, userContent, ch)
+	})
 }
 
 // maybeEmitEmbeddingWarning pushes a one-time dismissible warning onto the
@@ -252,14 +336,13 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	// Start async generation on the service's lifecycle-owned context. The
-	// HTTP request context is cancelled when the handler returns
-	// (202 Accepted), so we cannot use it — but we also must not orphan the
-	// goroutine. The lifecycle manager's context is detached from the
-	// request and cancelled on Shutdown, giving us both properties.
-	s.lifecycle.Go("handleMessage.generateResponse", func(bgCtx context.Context) {
-		s.generateResponse(bgCtx, sessionID, assistantMsgID, content, ch)
-	})
+	// Start async generation on a per-session cancellable ctx. If a prior
+	// generateResponse is still running for this session it will be
+	// cancelled — concurrent loops on the same session fight over the
+	// provider rate-limit budget and look like stalls from the UI
+	// (CW-20260418-0043). The lifecycle manager's shutdown ctx is bridged
+	// inside launchGeneration so process Shutdown still drains cleanly.
+	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch)
 
 	return assistantMsgID, nil
 }
@@ -302,9 +385,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.lifecycle.Go("retryLastMessage.generateResponse", func(bgCtx context.Context) {
-		s.generateResponse(bgCtx, sessionID, assistantMsgID, userContent, ch)
-	})
+	s.launchGeneration("retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch)
 
 	return assistantMsgID, nil
 }
@@ -334,9 +415,7 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, toSessionID)
 
-	s.lifecycle.Go("sendAgentMessage.generateResponse", func(bgCtx context.Context) {
-		s.generateResponse(bgCtx, toSessionID, assistantMsgID, content, ch)
-	})
+	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch)
 
 	return assistantMsgID, nil
 }

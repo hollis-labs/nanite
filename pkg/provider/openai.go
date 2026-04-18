@@ -264,9 +264,6 @@ func (o *OpenAI) streamChatInternal(ctx context.Context, systemPrompt string, me
 					"rate_limit", limit,
 				)
 			}
-			if o.OnStatus != nil {
-				o.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
-			}
 			slog.Info("provider: pacing for rate limit budget",
 				"provider", "openai",
 				"wait", wait.Round(time.Millisecond).String(),
@@ -274,10 +271,8 @@ func (o *OpenAI) streamChatInternal(ctx context.Context, systemPrompt string, me
 				"available", avail,
 				"rate_limit", limit,
 			)
-			select {
-			case <-ctx.Done():
-				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
-			case <-time.After(wait):
+			if err := PacingWait(ctx, wait, o.OnStatus); err != nil {
+				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", err)
 			}
 		}
 	}

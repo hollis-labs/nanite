@@ -434,9 +434,6 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 					"rate_limit", limit,
 				)
 			}
-			if a.OnStatus != nil {
-				a.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
-			}
 			slog.Info("provider: pacing for rate limit budget",
 				"provider", "anthropic",
 				"wait", wait.Round(time.Millisecond).String(),
@@ -444,10 +441,8 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 				"available", avail,
 				"rate_limit", limit,
 			)
-			select {
-			case <-ctx.Done():
-				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
-			case <-time.After(wait):
+			if err := PacingWait(ctx, wait, a.OnStatus); err != nil {
+				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", err)
 			}
 		}
 	}

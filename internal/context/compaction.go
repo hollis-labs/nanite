@@ -2,9 +2,11 @@ package context
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 
 	"github.com/hollis-labs/go-providers/provider"
@@ -124,7 +126,7 @@ func (p *CompactionPipeline) refreshConversationSlot() {
 	p.Window.SetContent(SlotConversation, content)
 }
 
-// --- Stage 1: Drop Context slot enrichment ---
+// --- Stage: Drop Context slot enrichment ---
 
 func stageDropEnrichment(ctx context.Context, p *CompactionPipeline) (bool, error) {
 	slot := p.Window.Slot(SlotContext)
@@ -138,7 +140,7 @@ func stageDropEnrichment(ctx context.Context, p *CompactionPipeline) (bool, erro
 	return true, nil
 }
 
-// --- Stage 2: Summarize oldest messages ---
+// --- Stage: Summarize oldest messages ---
 
 func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, error) {
 	if p.Summarizer == nil {
@@ -200,7 +202,7 @@ func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, err
 	return true, nil
 }
 
-// --- Stage 3: Strip tool blocks from non-tool-use spans ---
+// --- Stage: Strip tool blocks from non-tool-use spans ---
 
 func stageStripToolBlocks(ctx context.Context, p *CompactionPipeline) (bool, error) {
 	stripped := 0
@@ -261,8 +263,13 @@ func stageStripToolBlocks(ctx context.Context, p *CompactionPipeline) (bool, err
 // the same sprint. Each repeat pays the full tool-result size in the
 // conversation slot. Dedupe drops every copy after the first.
 //
-// Design: we identify invocations by (tool_name, canonical(input_json)).
-// The first occurrence's (tool_use_id) is used as the reference target.
+// Design: we identify invocations by (tool_name, canonical(input_json),
+// sha256(tool_result_content)). Including the result-content digest
+// prevents silent data loss when the same call returns different content
+// (e.g., a file edited between reads). The digest keeps signature size
+// bounded at 64 hex chars regardless of result body size — critical for
+// this stage, which specifically runs when prompts are large.
+// The first occurrence's tool_use_id is used as the reference target.
 // Subsequent tool_use blocks keep their ID but their paired tool_result
 // block's Content is replaced with a short pointer string. The tool_use
 // block itself is left intact so the conversation's role/block shape
@@ -270,10 +277,26 @@ func stageStripToolBlocks(ctx context.Context, p *CompactionPipeline) (bool, err
 //
 // CW-20260419-0004 Part 2.
 func stageDedupeToolResults(ctx context.Context, p *CompactionPipeline) (bool, error) {
-	// First pass: collect tool_use blocks in order, hash their signatures.
+	// Index tool_use_id -> sha256(tool_result content) so the signature
+	// can fold result identity into the key with bounded size. Hashing
+	// happens once per tool_result block; map lookups hash a 64-byte key
+	// instead of the full body.
+	resultDigestByID := map[string]string{}
+	for mi := range p.ConversationMessages {
+		m := &p.ConversationMessages[mi]
+		for _, b := range m.ContentBlocks {
+			if b.Type == "tool_result" {
+				sum := sha256.Sum256([]byte(b.Content))
+				resultDigestByID[b.ToolUseID] = hex.EncodeToString(sum[:])
+			}
+		}
+	}
+
+	// Collect tool_use blocks in order, hash their signatures.
 	type sig struct {
-		name  string
-		input string // canonicalized
+		name         string
+		input        string // canonicalized
+		resultDigest string // sha256 hex of paired tool_result content
 	}
 	firstSeen := map[sig]string{} // signature -> tool_use_id of first occurrence
 	// Map tool_use_id -> signature for duplicates we encounter later.
@@ -285,7 +308,11 @@ func stageDedupeToolResults(ctx context.Context, p *CompactionPipeline) (bool, e
 			if b.Type != "tool_use" {
 				continue
 			}
-			s := sig{name: b.Name, input: canonicalizeToolInput(b.Input)}
+			s := sig{
+				name:         b.Name,
+				input:        canonicalizeToolInput(b.Input),
+				resultDigest: resultDigestByID[b.ID],
+			}
 			if firstID, seen := firstSeen[s]; seen {
 				duplicateOf[b.ID] = firstID
 			} else {
@@ -331,26 +358,22 @@ func stageDedupeToolResults(ctx context.Context, p *CompactionPipeline) (bool, e
 }
 
 // canonicalizeToolInput produces a stable string representation of a
-// tool_use block's Input field for dedupe equality. Maps with reordered
-// keys still compare equal after canonicalization. Nil/missing input is
-// represented as the empty string.
+// tool_use block's Input field for dedupe equality. Uses json.Marshal,
+// which sorts map keys and recursively normalizes nested structures so
+// signatures are deterministic for arbitrarily nested inputs. Nil/missing
+// input is represented as the empty string. The %v fallback only fires
+// if the input contains a value type json cannot marshal (e.g., a
+// channel, func, or cycle) — in practice it does not occur for
+// provider-supplied tool inputs. Treat the fallback as best-effort.
 func canonicalizeToolInput(input *map[string]any) string {
 	if input == nil || len(*input) == 0 {
 		return ""
 	}
-	keys := make([]string, 0, len(*input))
-	for k := range *input {
-		keys = append(keys, k)
+	data, err := json.Marshal(*input)
+	if err != nil {
+		return fmt.Sprintf("%v", *input)
 	}
-	sort.Strings(keys)
-	var b strings.Builder
-	for _, k := range keys {
-		b.WriteString(k)
-		b.WriteByte('=')
-		fmt.Fprintf(&b, "%v", (*input)[k])
-		b.WriteByte('\x1f') // unit separator — cannot appear in normal values
-	}
-	return b.String()
+	return string(data)
 }
 
 // summarySystemPrompt returns a mode-aware prompt for the summarization model.

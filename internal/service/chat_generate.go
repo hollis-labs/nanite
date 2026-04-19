@@ -426,7 +426,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// request is bigger than the per-minute rate budget, waiting is
 			// futile and compaction is the right response.
 			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableAttempts < maxCompactRecoverableAttempts {
-				provSpan.End()
+				// provSpan.End() is deferred until the recovery outcome is
+				// known so the span is ended exactly once. On success we
+				// end it cleanly before retrying; on refused recovery the
+				// branch below records the error, then ends the span.
 				triggerKind := compactTriggerContextOverflow
 				recoveryReason := "context_overflow at stream start"
 				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
@@ -436,14 +439,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				ls.continueWith(ContinueRecovery, recoveryReason)
 				newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind)
 				if ok {
-					// Recovery produced stages — increment the attempt
-					// counter and continue the loop with the compacted
-					// request. The "failed after retry" branch below catches
-					// us if we exhaust attempts later.
+					// Recovery produced stages — end the span cleanly (this
+					// wasn't a provider failure from the user's perspective),
+					// increment the attempt counter, and continue the loop
+					// with the compacted request. The "failed after retry"
+					// branch below catches us if we exhaust attempts later.
 					// CW-20260419-0018: incrementing (not latching) lets a
 					// second compaction run when tool results later blow the
 					// budget again, while the maxCompactRecoverableAttempts
 					// cap still prevents infinite loops.
+					provSpan.End()
 					ls.compactRecoverableAttempts++
 					// CW-20260419-0012: compaction's strip_tool_blocks stage
 					// drops tool-definition context from the conversation,
@@ -627,6 +632,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					ls.compactRecoverableAttempts++
 					ls.continueWith(ContinueRecovery, "context_overflow mid-stream")
 					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error, compactTriggerContextOverflow); ok {
+						// Mirror the stream-start recovery path: strip_tool_blocks
+						// drops tool-definition context, so post-compaction the
+						// LLM has to re-request tools. Reset the discovery-call
+						// counters so pre-compaction calls don't eat the
+						// post-compaction budget (CW-20260419-0012).
+						ls.totalRequestToolsCalls = 0
+						ls.consecutiveEmptyRequests = 0
 						chatMessages = newMsgs
 						tools = newTools
 						systemPrompt = slotResult.SystemPrompt

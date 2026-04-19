@@ -55,6 +55,97 @@ func TestCompactionPipeline_noCompactionNeeded(t *testing.T) {
 	}
 }
 
+// TestStageDedupeToolResults verifies that identical tool_call+tool_result
+// pairs get collapsed to a pointer-back reference. Deterministic, no LLM.
+// CW-20260419-0004 Part 2.
+func TestStageDedupeToolResults(t *testing.T) {
+	input := map[string]any{"path": "/Users/x/foo.md"}
+	bigResult := strings.Repeat("x", 4000)
+
+	msgs := []provider.ChatMessage{
+		// Turn 1: tool_use + tool_result (the original).
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "call-1", Name: "dev_read", Input: &input},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call-1", Content: bigResult},
+		}},
+		// Turn 2: identical call — should become dedupe target.
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "call-2", Name: "dev_read", Input: &input},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call-2", Content: bigResult},
+		}},
+		// Turn 3: different input — unique, should survive intact.
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "call-3", Name: "dev_read", Input: &map[string]any{"path": "/Users/x/bar.md"}},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call-3", Content: bigResult},
+		}},
+	}
+
+	p := &CompactionPipeline{
+		ConversationMessages: msgs,
+	}
+
+	progress, err := stageDedupeToolResults(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !progress {
+		t.Fatal("expected progress=true when duplicates present")
+	}
+
+	// Turn 1 (original) — untouched.
+	if p.ConversationMessages[1].ContentBlocks[0].Content != bigResult {
+		t.Error("original tool_result should be untouched")
+	}
+	// Turn 2 (duplicate) — replaced with pointer.
+	dupContent := p.ConversationMessages[3].ContentBlocks[0].Content
+	if !strings.Contains(dupContent, "DUPLICATE") || !strings.Contains(dupContent, "call-1") {
+		t.Errorf("duplicate tool_result should point back to call-1; got %q", dupContent)
+	}
+	if len(dupContent) > 200 {
+		t.Errorf("duplicate pointer should be short; got %d bytes", len(dupContent))
+	}
+	// Turn 3 (unique) — untouched.
+	if p.ConversationMessages[5].ContentBlocks[0].Content != bigResult {
+		t.Error("unique tool_result should be untouched")
+	}
+
+	// Second call with no new duplicates → no progress.
+	progress, err = stageDedupeToolResults(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progress {
+		t.Error("idempotency: dedupe should not report progress on a second pass")
+	}
+}
+
+// TestStageDedupeToolResults_NoDuplicates verifies the stage is a no-op
+// when every tool invocation is unique.
+func TestStageDedupeToolResults_NoDuplicates(t *testing.T) {
+	msgs := []provider.ChatMessage{
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "c1", Name: "dev_read", Input: &map[string]any{"path": "/a"}},
+		}},
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "c2", Name: "dev_read", Input: &map[string]any{"path": "/b"}},
+		}},
+	}
+	p := &CompactionPipeline{ConversationMessages: msgs}
+	progress, err := stageDedupeToolResults(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progress {
+		t.Error("no duplicates → no progress")
+	}
+}
+
 // TestCompactionPipeline_RunForce_bypassesGate confirms that RunForce runs
 // stages even when the window reports NeedsCompaction()=false. This is the
 // invariant the rate-budget recovery path depends on (PR #68): a request

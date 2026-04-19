@@ -132,11 +132,15 @@ type loopState struct {
 	lastSite   ContinueSite
 	lastReason string
 
-	// S3b T9 — true once we've run the synchronous compaction+retry after a
-	// provider returned a context-overflow error. A second overflow in the
-	// same generateResponse surfaces as a user-visible error rather than
-	// looping indefinitely.
-	contextOverflowRetried bool
+	// S3b T9 — true once we've run the synchronous compaction+retry for any
+	// compact-recoverable provider failure (see
+	// internal/context.IsCompactRecoverable). Originally named
+	// contextOverflowRetried when it guarded only the context-window-overflow
+	// path; broadened in CW-20260418-0099 to cover
+	// provider.ErrRequestExceedsRateBudget too — both modes are fixed by
+	// compacting the request, so a single retry gate covers both. PR #67
+	// review #2.
+	compactRecoverableRetried bool
 }
 
 // newLoopState creates a loopState with resolved limits from agent constraints.

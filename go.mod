@@ -17,7 +17,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.35.0
 	github.com/google/jsonschema-go v0.4.2
 	github.com/hollis-labs/go-otel v0.0.2
-	github.com/hollis-labs/go-providers v0.2.0
+	github.com/hollis-labs/go-providers v0.2.1
 	github.com/hollis-labs/go-toolbroker v0.0.2
 	github.com/hollis-labs/vanta-conduit v0.4.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0

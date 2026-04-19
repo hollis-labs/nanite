@@ -14,9 +14,9 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 		want        int
 	}{
 		{
-			name:        "zero uses default 25",
+			name:        "zero uses default 75",
 			constraints: chat.AgentConstraints{},
-			want:        25,
+			want:        75,
 		},
 		{
 			name:        "explicit max turns",
@@ -25,13 +25,13 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 		},
 		{
 			name:        "max turns clamped to hard ceiling",
-			constraints: chat.AgentConstraints{MaxTurns: 200},
-			want:        100, // default hard ceiling
+			constraints: chat.AgentConstraints{MaxTurns: 300},
+			want:        200, // default hard ceiling
 		},
 		{
 			name:        "unlimited uses hard ceiling",
 			constraints: chat.AgentConstraints{MaxTurns: -1},
-			want:        100,
+			want:        200,
 		},
 		{
 			name:        "unlimited with custom hard ceiling",
@@ -49,12 +49,17 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 			want:        10,
 		},
 		{
-			name:        "custom hard ceiling",
-			constraints: chat.AgentConstraints{HardCeiling: 50},
-			want:        25, // default maxTurns < custom ceiling
+			name:        "custom hard ceiling higher than default max turns",
+			constraints: chat.AgentConstraints{HardCeiling: 300},
+			want:        75, // default maxTurns, not bumped by higher ceiling
 		},
 		{
-			name:        "hard ceiling lower than max turns",
+			name:        "custom hard ceiling lower than default max turns",
+			constraints: chat.AgentConstraints{HardCeiling: 50},
+			want:        50, // default maxTurns clamped by tighter ceiling
+		},
+		{
+			name:        "hard ceiling lower than explicit max turns",
 			constraints: chat.AgentConstraints{MaxTurns: 80, HardCeiling: 60},
 			want:        60,
 		},
@@ -385,11 +390,11 @@ func TestNewLoopState_Defaults(t *testing.T) {
 	if ls.debugMode {
 		t.Error("debugMode should be false")
 	}
-	if ls.limits.maxTurns != 25 {
-		t.Errorf("maxTurns = %d, want 25", ls.limits.maxTurns)
+	if ls.limits.maxTurns != 75 {
+		t.Errorf("maxTurns = %d, want 75", ls.limits.maxTurns)
 	}
-	if ls.limits.hardCeiling != 100 {
-		t.Errorf("hardCeiling = %d, want 100", ls.limits.hardCeiling)
+	if ls.limits.hardCeiling != 200 {
+		t.Errorf("hardCeiling = %d, want 200", ls.limits.hardCeiling)
 	}
 	if ls.limits.consecutiveFailCap != 3 {
 		t.Errorf("consecutiveFailCap = %d, want 3", ls.limits.consecutiveFailCap)

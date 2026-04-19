@@ -23,11 +23,11 @@ const (
 
 // Default iteration limits.
 //
-// CW-20260419-0021 (UAT c18): `defaultMaxTurns = 25` is the wrong shape
-// long-term. The tool broker doesn't know upfront whether a task is
-// small or large, and a fixed ceiling cuts the agent off mid-thought
-// when scope legitimately expands. The intended design (see the task
-// for full spec) is a negotiated budget:
+// CW-20260419-0020 (tracked for the long-term fix): `defaultMaxTurns`
+// as a fixed constant is the wrong shape — the tool broker doesn't
+// know upfront whether a task is small or large, and any fixed ceiling
+// cuts the agent off mid-thought when scope legitimately expands. The
+// intended design (see the task for full spec) is a negotiated budget:
 //
 //   1. Broker picks an initial budget based on classified task size.
 //   2. On hitting the budget, the loop asks the agent to explain WHY
@@ -36,13 +36,15 @@ const (
 //   3. Broker decides whether to raise (and by how much) or stop.
 //   4. Every decision + reasoning is logged so we can audit over time.
 //
-// Until that lands: raise the ceiling carefully. 25 is too low in
-// practice — large list-view tasks exceed it — but we shouldn't
-// uncork without the negotiation loop because runaway cost is real.
-// Tunable via user_settings once the negotiation protocol ships.
+// Until that lands: interim bump to 75 (from 25) after c17/c27 UAT showed
+// 25 is the default-case ceiling, not a rare safety net — list+analyze
+// asks routinely need 20-30 tool calls just for the fetching phase, and
+// the LLM was being cut off mid-thought with no final message. 75 gives
+// headroom without uncorking; hardCeiling=200 still catches true runaways.
+// Tunable via user_settings once CW-20260419-0020 ships.
 const (
-	defaultMaxTurns            = 25
-	defaultHardCeiling         = 100
+	defaultMaxTurns            = 75
+	defaultHardCeiling         = 200
 	// CW-20260417-0485: ConsecutiveFailCap used to terminate the chat loop,
 	// cutting the LLM off before it could respond to the tool errors it had
 	// just received as tool_result blocks. The loop now threads tool errors

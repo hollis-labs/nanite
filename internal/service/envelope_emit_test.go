@@ -36,9 +36,15 @@ func TestApprovalEmitter_PersistsAndStreams(t *testing.T) {
 
 	sm := NewStreamManager()
 
-	// Subscribe via CreateStream (registers in session reverse index so
-	// BroadcastSessionStreamEvent can fan out).
-	ch := sm.CreateStream("msg-1", sessionID)
+	// CW-20260418-0100: CreateStream returns the producer channel; the live
+	// consumer side is obtained via Subscribe. The pump sits between the two
+	// and assigns EventID.
+	produce := sm.CreateStream("msg-1", sessionID)
+	defer close(produce)
+	ch, _, ok := sm.Subscribe("msg-1", 0)
+	if !ok {
+		t.Fatal("Subscribe returned ok=false for freshly-created stream")
+	}
 
 	emitter := NewApprovalEmitter(s, sm)
 

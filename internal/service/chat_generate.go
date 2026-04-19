@@ -65,7 +65,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	defer func() {
 		diagLogDeferReached(sessionID, assistantMsgID, diagCurrentIter, "")
 		close(ch)
-		s.streams.CloseStream(assistantMsgID)
+		// CW-20260418-0100: hold the stream's ring buffer for a grace
+		// window after completion so an SSE client that was disconnected
+		// across the final events (tab backgrounded, proxy idle-close)
+		// can reconnect with its EventID cursor and replay — instead of
+		// silently losing stream_end. PR #66 review #7.
+		s.streams.ScheduleCleanup(assistantMsgID, 60*time.Second)
 
 		// Broadcast presence: stream ended.
 		s.streams.ClearActivePresence(sessionID)

@@ -44,6 +44,8 @@ If any of these are missing, stop and ask the user to produce them first (usuall
 **Last updated:** <date> after the planner session.
 **Scope:** This boot prompt is **focused on <feature> only**. For session-agnostic state use `boot/<project>/boot-prompt.md`.
 
+> **Memory + knowledge:** Vanta-primary (`vanta-primary-since: 2026-04-19`). Recall Vanta first (`memory_recall`/`conduit_lookup`), file-based is legacy fallback. Writes → Vanta only via `capture-to-vanta`. See `~/.claude/CLAUDE.md` for full contract.
+
 ## Where we are
 
 - **`main` tip at handoff:** `<sha>` — <description>. Prior track commits: ...
@@ -162,6 +164,7 @@ Two-root contract: code → work_root, tracking → tracking_root.
 - **Out-of-scope section is a fence, not a wish list.** Every deferred item should either be a BLG or a KB GAP with a pointer.
 - **Two-root contract** must be stated — code → work_root, tracking → tracking_root — so the executor doesn't mix artifacts.
 - **Exit gate must be copy-paste from the spec.** Don't invent new criteria in the boot prompt.
+- **Vanta-first anchor is required.** Insert the blockquote between the `**Scope:**` line and the first `##` section, verbatim from this skill's template. This ensures direct-boot sessions (`Boot @path`) still honor the Vanta-primary memory contract even when nanite agent resolution is skipped.
 
 ## Adjacent skills + docs
 

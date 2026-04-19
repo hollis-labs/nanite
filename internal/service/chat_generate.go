@@ -418,7 +418,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// futile and compaction is the right response.
 			if ctxpkg.IsCompactRecoverable(err) && !ls.compactRecoverableRetried {
 				provSpan.End()
-				ls.compactRecoverableRetried = true
 				triggerKind := compactTriggerContextOverflow
 				recoveryReason := "context_overflow at stream start"
 				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
@@ -426,15 +425,40 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					recoveryReason = "rate_budget_exceeded at stream start"
 				}
 				ls.continueWith(ContinueRecovery, recoveryReason)
-				if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind); ok {
+				newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind)
+				if ok {
+					// Recovery produced stages — mark retried and continue
+					// the loop with the compacted request. The "failed after
+					// retry" branch below guards against infinite retries.
+					// PR #67 review follow-up: compactRecoverableRetried is
+					// set only AFTER success, so a recovery-refused path
+					// can surface a distinct message instead of lying with
+					// "even after compaction".
+					ls.compactRecoverableRetried = true
 					chatMessages = newMsgs
 					tools = newTools
 					systemPrompt = slotResult.SystemPrompt
 					ls.iteration-- // the retry isn't a fresh turn
 					continue
 				}
-				// Recovery refused (flag off / no summarizer / no stages) —
-				// fall through to the normal error path.
+				// Recovery refused (flag off / no summarizer / no stages).
+				// Surface a specific error instead of pretending we retried.
+				// Still set the retried flag so a subsequent compact-recoverable
+				// error from the same request doesn't loop re-entering this
+				// branch.
+				ls.compactRecoverableRetried = true
+				slog.Warn("chat-service: compact-recoverable recovery refused — surfacing unrecovered error",
+					"session_id", sessionID, "iter", ls.iteration, "trigger_kind", triggerKind)
+				var msg string
+				switch triggerKind {
+				case compactTriggerRateBudget:
+					msg = "Request exceeds the per-minute rate budget and automatic compaction could not reduce it. Reduce or split the request, or use `/clear` to remove context."
+				default:
+					msg = "Context is too large and automatic compaction could not reduce it. Use `/clear` or split the request."
+				}
+				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
+				return
 			}
 			provSpan.RecordError(err)
 			provSpan.SetStatus(codes.Error, err.Error())
@@ -989,7 +1013,22 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	}
 
 	tokensBefore := result.Window.UsedTokens()
-	cr, err := pipeline.Run(ctx)
+
+	// CW-20260418-0099 bugfix: Run() short-circuits when Window.NeedsCompaction()
+	// is false — and NeedsCompaction evaluates against the MODEL's context
+	// window (e.g. 200K for Sonnet), not the per-minute rate budget (30–40K).
+	// A request that fits in the context window but exceeds the rate budget
+	// would get zero stages applied and the caller would bail with "failed
+	// after retry" without ever actually compacting. For rate-budget
+	// triggers we use RunForce, which runs every stage unconditionally —
+	// the shrinkage is the whole point of the recovery at that point.
+	var cr *ctxpkg.CompactionResult
+	var err error
+	if triggerKind == compactTriggerRateBudget {
+		cr, err = pipeline.RunForce(ctx)
+	} else {
+		cr, err = pipeline.Run(ctx)
+	}
 	if err != nil {
 		slog.Warn("chat-service: compact-recoverable recovery pipeline failed",
 			"err", err, "session_id", sessionID, "trigger_kind", triggerKind)

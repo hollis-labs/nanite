@@ -168,32 +168,36 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_show_document",
-			Description: "Display a document in chat as a rich scrollable viewer. Use for executive summaries, reports, meeting notes, or any long-form content the user should read.",
+			Name: "nanite_show_document",
+			Description: "Display a document in chat as a rich scrollable viewer. Use for executive summaries, reports, meeting notes, or any long-form content the user should read. " +
+				"The user expects LIVE data: you MUST ground the content in data returned from previous tool calls made during this generation. Cite those tool calls in the `sources` field. Do NOT compose from memory or pattern-completion.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"title":             map[string]any{"type": "string", "description": "Document title"},
-					"content":           map[string]any{"type": "string", "description": "Document body (HTML or markdown)"},
+					"content":           map[string]any{"type": "string", "description": "Document body (HTML or markdown). Must be derived from the tool_use_ids listed in `sources`."},
 					"format":            map[string]any{"type": "string", "description": "Content format: html or markdown (default: markdown)"},
 					"sections":          map[string]any{"type": "string", "description": "Comma-separated section names for jump-nav (optional)"},
 					"download_filename": map[string]any{"type": "string", "description": "Filename for download button (optional, e.g. report.html)"},
+					"sources":           map[string]any{"type": "string", "description": "JSON array of objects documenting the grounding: [{tool_use_id, tool_name, note?}]. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the content. Minimum 1 source. If you didn't fetch the data, don't render the document — say so in plain text instead."},
 				},
-				"required": []string{"title", "content"},
+				"required": []string{"title", "content", "sources"},
 			},
 		},
 		{
-			Name:        "nanite_show_report",
-			Description: "Display a metrics report card in chat with labeled values, progress bars, and action buttons. Use for sprint progress, portfolio health, or status summaries.",
+			Name: "nanite_show_report",
+			Description: "Display a metrics report card in chat with labeled values, progress bars, and action buttons. Use for sprint progress, portfolio health, or status summaries. " +
+				"The user expects LIVE data: you MUST ground every metric and summary bullet in data returned from previous tool calls made during this generation. Cite those tool calls in the `sources` field. Do NOT compose from memory or pattern-completion — if you haven't fetched the numbers, don't render a card.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"title":   map[string]any{"type": "string", "description": "Report title"},
-					"metrics": map[string]any{"type": "string", "description": "JSON array of metric objects: [{label, value, percent?, color?}]. Colors: emerald, green, amber, red, blue, violet."},
-					"summary": map[string]any{"type": "string", "description": "Summary text (markdown). Optional."},
+					"metrics": map[string]any{"type": "string", "description": "JSON array of metric objects: [{label, value, percent?, color?}]. Every value must come from a tool result cited in `sources`. Colors: emerald, green, amber, red, blue, violet."},
+					"summary": map[string]any{"type": "string", "description": "Summary text (markdown). Must be derived from the tool_use_ids listed in `sources`. Optional."},
 					"actions": map[string]any{"type": "string", "description": "JSON array of action objects: [{label, action, id?}]. Optional."},
+					"sources": map[string]any{"type": "string", "description": "JSON array of objects documenting the grounding: [{tool_use_id, tool_name, note?}]. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the report. Minimum 1 source. If you didn't fetch the data, don't render the report — say so in plain text instead."},
 				},
-				"required": []string{"title", "metrics"},
+				"required": []string{"title", "metrics", "sources"},
 			},
 		},
 		// Builder tools — interactive step-by-step creation flows

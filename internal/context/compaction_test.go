@@ -55,6 +55,57 @@ func TestCompactionPipeline_noCompactionNeeded(t *testing.T) {
 	}
 }
 
+// TestCompactionPipeline_RunForce_bypassesGate confirms that RunForce runs
+// stages even when the window reports NeedsCompaction()=false. This is the
+// invariant the rate-budget recovery path depends on (PR #68): a request
+// can exceed the per-minute rate budget while the model context window is
+// nowhere near capacity, and we still need the stages to run. Regression
+// guard against the c9 UAT failure where Run() returned nil in <1ms
+// without applying any stages.
+func TestCompactionPipeline_RunForce_bypassesGate(t *testing.T) {
+	// Large window, small content — NeedsCompaction is false.
+	cw := NewContextWindow(200_000, nil)
+	cw.SetContent(SlotSystem, "system")
+	cw.SetContent(SlotContext, strings.Repeat("x", 2000)) // 500 tokens of enrichment
+	msgs := makeMessages(6, 200)                          // 1200 tokens — well under budget
+	cw.SetContent(SlotConversation, serializeMessages(msgs, DefaultEstimator{}))
+
+	if cw.NeedsCompaction() {
+		t.Fatal("precondition: NeedsCompaction must be false for this test")
+	}
+
+	p := &CompactionPipeline{
+		Window:               cw,
+		Estimator:            DefaultEstimator{},
+		Summarizer:           &mockSummarizer{},
+		Mode:                 CompactionModeGeneral,
+		ConversationMessages: msgs,
+	}
+
+	// Run() must be a no-op — proves the gate is engaged.
+	res, err := p.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() err: %v", err)
+	}
+	if res != nil {
+		t.Errorf("Run() should return nil when NeedsCompaction=false; got %+v", res)
+	}
+
+	// RunForce must still apply stages — proves the rate-budget path works.
+	forced, err := p.RunForce(context.Background())
+	if err != nil {
+		t.Fatalf("RunForce err: %v", err)
+	}
+	if forced == nil || len(forced.StagesApplied) == 0 {
+		t.Fatalf("RunForce must apply stages even when NeedsCompaction=false; got %+v", forced)
+	}
+	// drop_enrichment is the first stage and should clear the context slot
+	// unconditionally when enrichment content exists.
+	if cw.Slot(SlotContext).Content != "" {
+		t.Error("RunForce should have dropped context enrichment")
+	}
+}
+
 func TestCompactionPipeline_dropsEnrichment(t *testing.T) {
 	// Small window to force compaction.
 	cw := NewContextWindow(2000, nil) // budget = 1600 tokens

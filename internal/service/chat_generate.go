@@ -442,13 +442,31 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					continue
 				}
 				// Recovery refused (flag off / no summarizer / no stages).
-				// Surface a specific error instead of pretending we retried.
-				// Still set the retried flag so a subsequent compact-recoverable
-				// error from the same request doesn't loop re-entering this
-				// branch.
+				// Set the retried flag so the same request can't loop back
+				// into this branch, and preserve the normal provider-error
+				// telemetry so refused recovery is as diagnosable as any
+				// other provider failure (PR #68 review #2).
 				ls.compactRecoverableRetried = true
+				provSpan.RecordError(err)
+				provSpan.SetStatus(codes.Error, err.Error())
+				provSpan.End()
 				slog.Warn("chat-service: compact-recoverable recovery refused — surfacing unrecovered error",
-					"session_id", sessionID, "iter", ls.iteration, "trigger_kind", triggerKind)
+					"session_id", sessionID, "iter", ls.iteration, "trigger_kind", triggerKind, "err", err)
+				s.store.LogEvent(sessionID, "provider_error", "error",
+					fmt.Sprintf("iteration %d: %v (recovery refused, trigger=%s)", ls.iteration, err, triggerKind),
+					fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d,"trigger_kind":%q}`, model, len(tools), len(chatMessages), triggerKind))
+				if s.events != nil {
+					s.events.EmitError(ctx, sessionID, "provider_error", err.Error())
+					if chat.ClassifyError(err) == chat.ErrorCodeRateLimit {
+						s.events.EmitRateLimitHit(ctx, sessionID, "anthropic", 0)
+					}
+				}
+				if s.pluginHost != nil {
+					errMsg := err.Error()
+					safego.Go(ctx, "service.chat.emit.provider-error", func() {
+						s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
+					})
+				}
 				var msg string
 				switch triggerKind {
 				case compactTriggerRateBudget:
@@ -958,20 +976,31 @@ const (
 	compactTriggerRateBudget      = "rate_budget_exceeded"
 )
 
-// recoverFromContextOverflow runs the CompactionPipeline synchronously —
-// ignoring the NeedsCompaction gate, because the provider has already told
-// us the current request is over budget. Returns the rebuilt chat messages
-// and tools plus true on success; false when the feature flag is off, the
-// summarizer isn't available, or the pipeline produced no new stages.
+// recoverFromContextOverflow runs the CompactionPipeline synchronously.
+// Returns the rebuilt chat messages and tools plus true on success;
+// false when the feature flag is off, the summarizer isn't available, or
+// the pipeline produced no new stages.
 //
-// triggerKind is one of compactTriggerContextOverflow or
-// compactTriggerRateBudget (PR #67 review #3) — surfaced in logs and the
-// slot_changed "reasoning" string so an operator reading journal output or
-// the dev panel can tell which failure mode fired the compaction.
+// Stage gating depends on triggerKind (PR #68 review #3):
+//   - compactTriggerContextOverflow: uses pipeline.Run(), which respects
+//     Window.NeedsCompaction() — the model-context-window gate. The
+//     normal case; a context-overflow error implies the window is full.
+//   - compactTriggerRateBudget: uses pipeline.RunForce(), which bypasses
+//     the gate. Rate-budget overflow fires even when the model context
+//     window is well under capacity, so gating on NeedsCompaction would
+//     skip every stage (observed in c9 UAT — "no stages" in ~1ms).
+//
+// triggerKind is surfaced in logs and the slot_changed "reasoning"
+// string so an operator reading journal output or the dev panel can
+// tell which failure mode fired the compaction.
 //
 // Caller is expected to have already classified the incoming error via
-// ctxpkg.IsCompactRecoverable and to set ls.compactRecoverableRetried =
-// true before calling.
+// ctxpkg.IsCompactRecoverable. ls.compactRecoverableRetried is set by
+// the caller ONLY after this function returns ok=true (so a refused
+// recovery can surface a distinct error message rather than masquerade
+// as "even after compaction"); on refused recovery the caller sets the
+// flag before returning so the same request cannot re-enter this path.
+// PR #68 review #1.
 //
 // Folded from BLG-20260410-003 — plan §T9.
 func (s *chatServiceImpl) recoverFromContextOverflow(

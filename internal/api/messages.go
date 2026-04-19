@@ -195,6 +195,7 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	clearSSEWriteDeadline(w)
 	flusher.Flush()
 
 	// Register this SSE connection for session-level deduplication.

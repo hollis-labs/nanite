@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,14 +35,22 @@ const nativeToolGuide = `
 
 ## Native Tool Usage
 
-When using file and search tools, follow these rules:
-
+Parameter shape:
 - **All paths must be absolute** (start with /Users/). Never use ~ or relative paths.
-- **dev_glob requires TWO separate params**: pattern (relative glob like **/*.md) and directory (absolute path like /Users/chrispian/Projects-apps/mentat). Do NOT put the full path in the pattern.
-- **dev_grep requires TWO separate params**: pattern (regex) and directory (absolute path). Same rule — keep them separate.
+- **dev_glob** takes TWO separate params: pattern (relative glob like **/*.md) and directory (absolute path like /Users/chrispian/Projects-apps/my-project). Do NOT put the full path in the pattern.
+- **dev_grep** takes TWO separate params: pattern (regex) and directory (absolute path). Same rule — keep them separate.
 - **dev_read/dev_write/dev_edit**: path must be absolute.
 - **web_fetch**: many news/social sites block automated requests. Works best with APIs, docs sites, and raw content URLs.
-- **Allowed directories**: /Users/chrispian/Projects-apps, /Users/chrispian/Projects. Files outside these paths will be rejected.`
+- **Allowed directories**: /Users/chrispian/Projects-apps, /Users/chrispian/Projects. Files outside these paths will be rejected.
+
+Workflow:
+- **Discover before read.** Use dev_glob or dev_grep first if you aren't already sure the path exists. Running dev_read on a speculative path wastes a tool call.
+- **Cache pointer pattern.** When a tool result ends with a footer like ` + "`[TRUNCATED — full result cached as tool_result://<ULID> ...]`" + `, don't re-invoke the source tool to get more. Call ` + "`fetch_tool_result`" + ` with the ULID to retrieve slices, or ` + "`search_tool_result`" + ` to regex-match across the full cached body.
+- **Parallelize independent calls.** If two lookups don't depend on each other, request them in the same assistant turn — the harness executes tool blocks in parallel.
+- **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
+
+Grounded rendering:
+- ` + "`nanite_show_report`" + ` and ` + "`nanite_show_document`" + ` require a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.`
 
 // generateResponse loads context, calls the provider, streams events, and saves
 // the result. This is the refactored version of Engine.generateResponse — it
@@ -416,9 +425,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// ErrRequestExceedsRateBudget sentinel — when the estimated
 			// request is bigger than the per-minute rate budget, waiting is
 			// futile and compaction is the right response.
-			if ctxpkg.IsCompactRecoverable(err) && !ls.compactRecoverableRetried {
+			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableAttempts < maxCompactRecoverableAttempts {
 				provSpan.End()
-				ls.compactRecoverableRetried = true
 				triggerKind := compactTriggerContextOverflow
 				recoveryReason := "context_overflow at stream start"
 				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
@@ -426,15 +434,68 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					recoveryReason = "rate_budget_exceeded at stream start"
 				}
 				ls.continueWith(ContinueRecovery, recoveryReason)
-				if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind); ok {
+				newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind)
+				if ok {
+					// Recovery produced stages — increment the attempt
+					// counter and continue the loop with the compacted
+					// request. The "failed after retry" branch below catches
+					// us if we exhaust attempts later.
+					// CW-20260419-0018: incrementing (not latching) lets a
+					// second compaction run when tool results later blow the
+					// budget again, while the maxCompactRecoverableAttempts
+					// cap still prevents infinite loops.
+					ls.compactRecoverableAttempts++
+					// CW-20260419-0012: compaction's strip_tool_blocks stage
+					// drops tool-definition context from the conversation,
+					// so the LLM has to re-request tools post-compaction.
+					// Reset the discovery-call counter so pre-compaction
+					// calls don't eat the post-compaction budget (observed
+					// in nanite-chat-debug-3.md: total_calls jumped 4→5
+					// immediately after a successful compaction).
+					ls.totalRequestToolsCalls = 0
+					ls.consecutiveEmptyRequests = 0
 					chatMessages = newMsgs
 					tools = newTools
 					systemPrompt = slotResult.SystemPrompt
 					ls.iteration-- // the retry isn't a fresh turn
 					continue
 				}
-				// Recovery refused (flag off / no summarizer / no stages) —
-				// fall through to the normal error path.
+				// Recovery refused (flag off / no summarizer / no stages).
+				// Exhaust attempts so the same request can't loop back
+				// into this branch, and preserve the normal provider-error
+				// telemetry so refused recovery is as diagnosable as any
+				// other provider failure (PR #68 review #2).
+				ls.compactRecoverableAttempts = maxCompactRecoverableAttempts
+				provSpan.RecordError(err)
+				provSpan.SetStatus(codes.Error, err.Error())
+				provSpan.End()
+				slog.Warn("chat-service: compact-recoverable recovery refused — surfacing unrecovered error",
+					"session_id", sessionID, "iter", ls.iteration, "trigger_kind", triggerKind, "err", err)
+				s.store.LogEvent(sessionID, "provider_error", "error",
+					fmt.Sprintf("iteration %d: %v (recovery refused, trigger=%s)", ls.iteration, err, triggerKind),
+					fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d,"trigger_kind":%q}`, model, len(tools), len(chatMessages), triggerKind))
+				if s.events != nil {
+					s.events.EmitError(ctx, sessionID, "provider_error", err.Error())
+					if chat.ClassifyError(err) == chat.ErrorCodeRateLimit {
+						s.events.EmitRateLimitHit(ctx, sessionID, "anthropic", 0)
+					}
+				}
+				if s.pluginHost != nil {
+					errMsg := err.Error()
+					safego.Go(ctx, "service.chat.emit.provider-error", func() {
+						s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
+					})
+				}
+				var msg string
+				switch triggerKind {
+				case compactTriggerRateBudget:
+					msg = "Request exceeds the per-minute rate budget and automatic compaction could not reduce it. Reduce or split the request, or use `/clear` to remove context."
+				default:
+					msg = "Context is too large and automatic compaction could not reduce it. Use `/clear` or split the request."
+				}
+				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
+				return
 			}
 			provSpan.RecordError(err)
 			provSpan.SetStatus(codes.Error, err.Error())
@@ -460,7 +521,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			if ls.retryBudget > 0 {
 				ls.retryBudget--
 			}
-			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableRetried {
+			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
 				// Already retried once — emit a user-facing message tailored
 				// to which recoverable mode tripped. CW-20260418-0099.
 				// PR #67 review #1: waiting does not help ErrRequestExceedsRateBudget
@@ -562,8 +623,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				// stream-start case above. Streaming surgery isn't attempted
 				// (plan non-goal) — we abort the in-flight stream, recover,
 				// and the outer loop retries with a rebuilt request.
-				if ctxpkg.IsContextOverflowMessage(evt.Error) && !ls.compactRecoverableRetried {
-					ls.compactRecoverableRetried = true
+				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableAttempts < maxCompactRecoverableAttempts {
+					ls.compactRecoverableAttempts++
 					ls.continueWith(ContinueRecovery, "context_overflow mid-stream")
 					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error, compactTriggerContextOverflow); ok {
 						chatMessages = newMsgs
@@ -578,7 +639,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					}
 				}
 				errDetails := map[string]interface{}{"raw": evt.Error, "model": model}
-				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableRetried {
+				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
 					msg := "Context is still too large after compaction. Use `/clear` or split the request."
 					errDetails["recovery"] = "failed_after_retry"
 					ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, errDetails)
@@ -934,20 +995,32 @@ const (
 	compactTriggerRateBudget      = "rate_budget_exceeded"
 )
 
-// recoverFromContextOverflow runs the CompactionPipeline synchronously —
-// ignoring the NeedsCompaction gate, because the provider has already told
-// us the current request is over budget. Returns the rebuilt chat messages
-// and tools plus true on success; false when the feature flag is off, the
-// summarizer isn't available, or the pipeline produced no new stages.
+// recoverFromContextOverflow runs the CompactionPipeline synchronously.
+// Returns the rebuilt chat messages and tools plus true on success;
+// false when the feature flag is off, the summarizer isn't available, or
+// the pipeline produced no new stages.
 //
-// triggerKind is one of compactTriggerContextOverflow or
-// compactTriggerRateBudget (PR #67 review #3) — surfaced in logs and the
-// slot_changed "reasoning" string so an operator reading journal output or
-// the dev panel can tell which failure mode fired the compaction.
+// Stage gating depends on triggerKind (PR #68 review #3):
+//   - compactTriggerContextOverflow: uses pipeline.Run(), which respects
+//     Window.NeedsCompaction() — the model-context-window gate. The
+//     normal case; a context-overflow error implies the window is full.
+//   - compactTriggerRateBudget: uses pipeline.RunForce(), which bypasses
+//     the gate. Rate-budget overflow fires even when the model context
+//     window is well under capacity, so gating on NeedsCompaction would
+//     skip every stage (observed in c9 UAT — "no stages" in ~1ms).
+//
+// triggerKind is surfaced in logs and the slot_changed "reasoning"
+// string so an operator reading journal output or the dev panel can
+// tell which failure mode fired the compaction.
 //
 // Caller is expected to have already classified the incoming error via
-// ctxpkg.IsCompactRecoverable and to set ls.compactRecoverableRetried =
-// true before calling.
+// ctxpkg.IsCompactRecoverable. ls.compactRecoverableAttempts is incremented
+// by the caller only after this function returns ok=true so a refused
+// recovery surfaces a distinct error message instead of masquerading as
+// "even after compaction". On refused recovery the caller saturates
+// compactRecoverableAttempts at maxCompactRecoverableAttempts so the same
+// request cannot re-enter this path. PR #68 review #1 +
+// CW-20260419-0018 (one-shot → multi-attempt cap).
 //
 // Folded from BLG-20260410-003 — plan §T9.
 func (s *chatServiceImpl) recoverFromContextOverflow(
@@ -989,7 +1062,22 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	}
 
 	tokensBefore := result.Window.UsedTokens()
-	cr, err := pipeline.Run(ctx)
+
+	// CW-20260418-0099 bugfix: Run() short-circuits when Window.NeedsCompaction()
+	// is false — and NeedsCompaction evaluates against the MODEL's context
+	// window (e.g. 200K for Sonnet), not the per-minute rate budget (30–40K).
+	// A request that fits in the context window but exceeds the rate budget
+	// would get zero stages applied and the caller would bail with "failed
+	// after retry" without ever actually compacting. For rate-budget
+	// triggers we use RunForce, which runs every stage unconditionally —
+	// the shrinkage is the whole point of the recovery at that point.
+	var cr *ctxpkg.CompactionResult
+	var err error
+	if triggerKind == compactTriggerRateBudget {
+		cr, err = pipeline.RunForce(ctx)
+	} else {
+		cr, err = pipeline.Run(ctx)
+	}
 	if err != nil {
 		slog.Warn("chat-service: compact-recoverable recovery pipeline failed",
 			"err", err, "session_id", sessionID, "trigger_kind", triggerKind)
@@ -1121,6 +1209,19 @@ func rebuildLegacySystemPrompt(cw *ctxpkg.ContextWindow) string {
 // slotBlocksFor projects the context package's SlotBlock onto the provider
 // package's mirror type. The two are kept separate so the provider module has
 // no dependency on the host's context package.
+//
+// CW-20260419-0007: every SlotBlock is forwarded with Changed=true
+// regardless of the context-side tracking. go-providers v0.2.1's
+// buildSystemFromRequest emits one `cache_control: ephemeral` marker per
+// unchanged slot, but Anthropic caps total cache_control markers per
+// request at 4 — and DefaultCacheStrategy already consumes all 4 (system
+// + tools + 2 recent_message). Any unchanged slot pushes us past the cap
+// and the request fails with
+// `"A maximum of 4 blocks with cache_control may be provided. Found N"`.
+// Forcing Changed=true opts every slot block out of the cache_control
+// path, effectively disabling slot-level prompt caching until the
+// go-providers side learns to budget markers. The rest of the
+// DefaultCacheStrategy (system / tools / recent messages) still applies.
 func slotBlocksFor(result *SlotAssemblyResult) []provider.SlotBlock {
 	if result == nil || len(result.Blocks) == 0 {
 		return nil
@@ -1134,7 +1235,7 @@ func slotBlocksFor(result *SlotAssemblyResult) []provider.SlotBlock {
 			Name:     b.SlotName,
 			Content:  b.Content,
 			CacheKey: b.CacheKey,
-			Changed:  b.Changed,
+			Changed:  true, // see function-level comment — CW-20260419-0007
 		})
 	}
 	return out
@@ -1295,10 +1396,29 @@ func (s *chatServiceImpl) handleRequestTools(
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
 
-	// Hard cap.
+	// Hard cap. CW-20260419-0012: friendlier halt message that actually
+	// helps the LLM decide what to do instead of just telling it "no."
+	// It lists what IS loaded (so the LLM can inventory), prompts goal
+	// reflection, and offers two escape paths (use what's there OR ask
+	// user) — rather than the previous "do NOT call request_tools again"
+	// which read as a punishment. Real conceptual rework lives in
+	// CW-20260419-0011; this is the low-lift polish.
 	if *totalCalls > maxCalls || *consecutiveEmpty >= 2 {
 		reason := fmt.Sprintf("consecutive_empty=%d, total_calls=%d", *consecutiveEmpty, *totalCalls)
-		rtResult := "Tool discovery limit reached (" + reason + "). No more request_tools calls will be processed. Proceed with the tools you already have — do NOT call request_tools again."
+		loadedList := make([]string, 0, len(loadedTools))
+		for name := range loadedTools {
+			loadedList = append(loadedList, name)
+		}
+		sort.Strings(loadedList)
+		rtResult := fmt.Sprintf(
+			"Tool discovery cap reached (%s). The tools currently loaded for this turn are:\n\n  %s\n\n"+
+				"Before asking for more tools, consider:\n"+
+				"1. What is the underlying goal the user asked you to accomplish? State it in one sentence.\n"+
+				"2. Can any tool above make partial progress toward that goal? Try it, then re-evaluate.\n"+
+				"3. If no loaded tool fits, describe the specific capability you need to the user so they can guide you or load more tools manually.\n\n"+
+				"Further request_tools calls this turn will be ignored; use a loaded tool or respond to the user.",
+			reason, strings.Join(loadedList, ", "),
+		)
 		slog.Warn("chat-service: request_tools halted", "reason", reason)
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 		resultBlocks = append(resultBlocks, provider.ContentBlock{
@@ -1352,17 +1472,16 @@ func (s *chatServiceImpl) detectStuckLoop(
 		repeats := repeatCount[toolName]
 		if repeats >= 2 {
 			blocked[toolName] = true
-			resultText = fmt.Sprintf("ERROR: Tool %q has been called %d times with identical results. "+
-				"This tool is now BLOCKED for this session turn. "+
-				"You MUST stop calling this tool and either try a completely different approach "+
-				"or tell the user: \"I was unable to complete this task because the tool returned the same result repeatedly.\"",
+			resultText = fmt.Sprintf("Tool %q returned the same result %d times in a row, so the harness is holding further calls for this turn. "+
+				"The result you already have is the tool's answer — re-running it won't produce new data. "+
+				"Pivot: try different arguments, a different tool, or summarize what you have and tell the user what's missing.",
 				toolName, repeats+1)
 			slog.Warn("chat-service: tool BLOCKED after identical results", "tool", toolName, "count", repeats+1)
 		} else {
-			resultText += "\n\nWARNING: This tool has returned the same result " +
-				fmt.Sprintf("%d times in a row. You are likely stuck in a loop. ", repeats+1) +
-				"Do NOT call this tool again with the same arguments. " +
-				"Either provide different arguments or inform the user that this task cannot be completed."
+			resultText += fmt.Sprintf(
+				"\n\nNote: this tool has returned the same result %d times in a row. "+
+					"Re-calling it with the same arguments won't add new data. If you need something different, change the arguments or switch approach.",
+				repeats+1)
 			slog.Warn("chat-service: tool repeat detected", "tool", toolName, "count", repeats+1)
 		}
 	} else {

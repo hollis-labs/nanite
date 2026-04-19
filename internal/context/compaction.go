@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/hollis-labs/go-providers/provider"
@@ -61,11 +62,18 @@ type namedStage struct {
 
 // DefaultStages returns the escalation stages in order:
 // 1. Drop Context slot enrichment
-// 2. Summarize oldest conversation messages
-// 3. Strip tool blocks from non-tool-use spans
+// 2. Dedupe identical tool_call+tool_result pairs (CW-20260419-0004 Part 2)
+// 3. Summarize oldest conversation messages
+// 4. Strip tool blocks from non-tool-use spans
+//
+// Dedupe runs BEFORE summarize so the summarizer doesn't burn tokens
+// summarizing duplicate tool chatter, and BEFORE strip so strip's fallback
+// "N blocks removed" note doesn't hide the fact that some of those blocks
+// were exact duplicates.
 func DefaultStages() []namedStage {
 	return []namedStage{
 		{"drop_enrichment", stageDropEnrichment},
+		{"dedupe_tool_results", stageDedupeToolResults},
 		{"summarize_oldest", stageSummarizeOldest},
 		{"strip_tool_blocks", stageStripToolBlocks},
 	}
@@ -240,6 +248,109 @@ func stageStripToolBlocks(ctx context.Context, p *CompactionPipeline) (bool, err
 		slog.Info("compaction: stripped tool blocks from conversation", "count", stripped)
 	}
 	return stripped > 0, nil
+}
+
+// --- Stage: dedupe identical tool_call+tool_result pairs ---
+//
+// Walks the conversation and collapses exact-duplicate tool invocations
+// (same tool_name + same canonical inputs) to a short reference pointing
+// at the first occurrence. Deterministic, no LLM involvement.
+//
+// Why this matters: tool-heavy turns frequently repeat the same call —
+// the agent re-reads the same file, re-lists the same task set, re-queries
+// the same sprint. Each repeat pays the full tool-result size in the
+// conversation slot. Dedupe drops every copy after the first.
+//
+// Design: we identify invocations by (tool_name, canonical(input_json)).
+// The first occurrence's (tool_use_id) is used as the reference target.
+// Subsequent tool_use blocks keep their ID but their paired tool_result
+// block's Content is replaced with a short pointer string. The tool_use
+// block itself is left intact so the conversation's role/block shape
+// stays valid for the provider.
+//
+// CW-20260419-0004 Part 2.
+func stageDedupeToolResults(ctx context.Context, p *CompactionPipeline) (bool, error) {
+	// First pass: collect tool_use blocks in order, hash their signatures.
+	type sig struct {
+		name  string
+		input string // canonicalized
+	}
+	firstSeen := map[sig]string{} // signature -> tool_use_id of first occurrence
+	// Map tool_use_id -> signature for duplicates we encounter later.
+	duplicateOf := map[string]string{}
+
+	for mi := range p.ConversationMessages {
+		m := &p.ConversationMessages[mi]
+		for _, b := range m.ContentBlocks {
+			if b.Type != "tool_use" {
+				continue
+			}
+			s := sig{name: b.Name, input: canonicalizeToolInput(b.Input)}
+			if firstID, seen := firstSeen[s]; seen {
+				duplicateOf[b.ID] = firstID
+			} else {
+				firstSeen[s] = b.ID
+			}
+		}
+	}
+
+	if len(duplicateOf) == 0 {
+		return false, nil
+	}
+
+	// Second pass: replace the Content of any tool_result whose ToolUseID
+	// is a duplicate with a pointer-back-to-original. Idempotent — blocks
+	// that already carry a `[DUPLICATE ...]` pointer are skipped so
+	// re-running the stage on an already-compacted conversation is a no-op.
+	const dupMarker = "[DUPLICATE — identical tool call"
+	replaced := 0
+	for mi := range p.ConversationMessages {
+		m := &p.ConversationMessages[mi]
+		for bi := range m.ContentBlocks {
+			b := &m.ContentBlocks[bi]
+			if b.Type != "tool_result" {
+				continue
+			}
+			if strings.HasPrefix(b.Content, dupMarker) {
+				continue // already pointered by a prior pass
+			}
+			firstID, ok := duplicateOf[b.ToolUseID]
+			if !ok {
+				continue
+			}
+			b.Content = fmt.Sprintf("%s earlier in conversation, tool_use_id=%s. Reuse that result.]", dupMarker, firstID)
+			replaced++
+		}
+	}
+
+	if replaced > 0 {
+		slog.Info("compaction: deduped identical tool_result blocks",
+			"replaced", replaced, "unique_signatures", len(firstSeen))
+	}
+	return replaced > 0, nil
+}
+
+// canonicalizeToolInput produces a stable string representation of a
+// tool_use block's Input field for dedupe equality. Maps with reordered
+// keys still compare equal after canonicalization. Nil/missing input is
+// represented as the empty string.
+func canonicalizeToolInput(input *map[string]any) string {
+	if input == nil || len(*input) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(*input))
+	for k := range *input {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		fmt.Fprintf(&b, "%v", (*input)[k])
+		b.WriteByte('\x1f') // unit separator — cannot appear in normal values
+	}
+	return b.String()
 }
 
 // summarySystemPrompt returns a mode-aware prompt for the summarization model.

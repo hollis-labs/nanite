@@ -121,7 +121,17 @@ export const useChatStore = create<ChatState>((set) => ({
       const targetSession = sessionId ?? state.streamingSessionId
       const next = new Map(state.toolCallsBySession)
       const existing = targetSession ? next.get(targetSession)?.calls ?? [] : state.toolCalls
-      const updated = [...existing, tc].slice(-50)
+      // CW-20260419-0014: upsert by id. SSE replay on reconnect (ring
+      // buffer + Last-Event-ID) should prevent duplicates at the wire
+      // level, but this is defense-in-depth — same id means update the
+      // existing entry, not append. Prevents the 14→28 doubling we saw
+      // in UAT c13/c14 when the browser auto-reconnected without a
+      // cursor.
+      const existingIdx = existing.findIndex((x) => x.id === tc.id)
+      const updated =
+        existingIdx >= 0
+          ? existing.map((x, i) => (i === existingIdx ? { ...x, ...tc } : x))
+          : [...existing, tc].slice(-50)
       if (targetSession) {
         next.set(targetSession, { calls: updated, lastActivity: Date.now() })
       }

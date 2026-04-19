@@ -410,14 +410,18 @@ func (st *SelfToolsTransport) callNavigateEngine(args map[string]any) (*ToolResu
 	defer cancel()
 
 	if err := crossapp.NavigateEngine(ctx, page, params); err != nil {
-		return textResult(fmt.Sprintf("Navigation sent for %q (Engine may be offline: %v). Tell the user briefly and stop.", page, err)), nil
+		return textResult(fmt.Sprintf("Navigation failed — Engine may be offline: %v", err)), nil
 	}
 
-	msg := fmt.Sprintf("Done. Engine GUI navigated to %s", page)
+	// CW-20260419-0013 (user-reported via c17): the LLM-coaching trailer
+	// ("Tell the user what you navigated to in one sentence. Do NOT call
+	// any more tools.") leaked into the user-visible chat surface. Tool
+	// result now reports only what happened; the tool description already
+	// instructs the LLM how to behave.
+	msg := fmt.Sprintf("Navigated Engine GUI to %s", page)
 	if len(params) > 0 {
-		msg += fmt.Sprintf(" with filters %v", params)
+		msg += fmt.Sprintf(" (filters: %v)", params)
 	}
-	msg += ". Tell the user what you navigated to in one sentence. Do NOT call any more tools."
 	return textResult(msg), nil
 }
 
@@ -426,9 +430,10 @@ func (st *SelfToolsTransport) callRefreshEngine(args map[string]any) (*ToolResul
 	defer cancel()
 
 	if err := crossapp.RefreshEngine(ctx); err != nil {
-		return textResult(fmt.Sprintf("Refresh sent (Engine may be offline: %v). Do NOT call any more tools.", err)), nil
+		return textResult(fmt.Sprintf("Refresh failed — Engine may be offline: %v", err)), nil
 	}
-	return textResult("Engine GUI data refreshed. Do NOT call any more tools."), nil
+	// CW-20260419-0013: LLM-coaching trailer removed (see callNavigateEngine).
+	return textResult("Engine GUI data refreshed."), nil
 }
 
 func (st *SelfToolsTransport) callShowGiphy(args map[string]any) (*ToolResult, error) {
@@ -574,6 +579,17 @@ func (st *SelfToolsTransport) callShowDocument(args map[string]any) (*ToolResult
 		return errorResult("title and content are required"), nil
 	}
 
+	// CW-20260419-0022 (UAT c19): the user expects LIVE data in rendered
+	// documents. Reject calls without documented sources so the LLM can't
+	// fabricate content from memory / pattern completion without at least
+	// declaring what it grounded on. This is a shallow check — it validates
+	// shape, not that the cited tool_use_ids were actually called in this
+	// generation. The deep check is tracked in the grounding-design ticket.
+	sources, sourcesErr := parseSourcesArg(args)
+	if sourcesErr != nil {
+		return errorResult(sourcesErr.Error()), nil
+	}
+
 	format := strArg(args, "format", "markdown")
 	downloadFilename := strArg(args, "download_filename", "")
 
@@ -581,6 +597,7 @@ func (st *SelfToolsTransport) callShowDocument(args map[string]any) (*ToolResult
 		"title":   title,
 		"content": content,
 		"format":  format,
+		"sources": sources,
 	}
 	if downloadFilename != "" {
 		envData["download_filename"] = downloadFilename
@@ -620,10 +637,17 @@ func (st *SelfToolsTransport) callShowReport(args map[string]any) (*ToolResult, 
 		return errorResult(fmt.Sprintf("invalid metrics JSON: %v", err)), nil
 	}
 
+	// CW-20260419-0022 (UAT c19): see callShowDocument for rationale.
+	sources, sourcesErr := parseSourcesArg(args)
+	if sourcesErr != nil {
+		return errorResult(sourcesErr.Error()), nil
+	}
+
 	envData := map[string]any{
 		"title":        title,
 		"generated_at": time.Now().Format(time.RFC3339),
 		"metrics":      metrics,
+		"sources":      sources,
 	}
 	if summary, _ := args["summary"].(string); summary != "" {
 		envData["summary"] = summary
@@ -1294,4 +1318,32 @@ func strArg(args map[string]any, key, def string) string {
 		return def
 	}
 	return v
+}
+
+// parseSourcesArg decodes the `sources` argument for nanite_show_document /
+// nanite_show_report. Shape: JSON array of objects with at least a
+// `tool_use_id` or `tool_name` field. Enforces presence + non-empty + basic
+// per-entry shape — this is the cheap grounding check (CW-20260419-0022).
+// Validating that the cited tool_use_ids were actually invoked in this
+// generation is the deep check tracked separately.
+func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
+	raw, ok := args["sources"].(string)
+	if !ok || raw == "" {
+		return nil, fmt.Errorf("sources is required: pass a JSON array of objects like [{\"tool_use_id\":\"...\",\"tool_name\":\"...\"}] citing the tool calls whose results ground this card. If you did not fetch the data, do NOT render the card — respond in plain text instead")
+	}
+	var sources []map[string]any
+	if err := json.Unmarshal([]byte(raw), &sources); err != nil {
+		return nil, fmt.Errorf("invalid sources JSON: %v", err)
+	}
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("sources must contain at least one entry — cite the tool calls whose results ground this card")
+	}
+	for i, s := range sources {
+		id, _ := s["tool_use_id"].(string)
+		name, _ := s["tool_name"].(string)
+		if id == "" && name == "" {
+			return nil, fmt.Errorf("sources[%d] must include tool_use_id or tool_name", i)
+		}
+	}
+	return sources, nil
 }

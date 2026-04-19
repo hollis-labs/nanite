@@ -7,7 +7,12 @@
 -- UserSettings columns for execution-path tuning.
 ALTER TABLE user_settings ADD COLUMN tool_per_turn_cap INTEGER NOT NULL DEFAULT 10;
 ALTER TABLE user_settings ADD COLUMN tool_result_cache_ttl_seconds INTEGER NOT NULL DEFAULT 3600;
-ALTER TABLE user_settings ADD COLUMN tool_result_soft_truncate_bytes INTEGER NOT NULL DEFAULT 65536;
+-- CW-20260419-0018 (UAT c17) lowered this default from 65536 to 2048 after
+-- a 89 KiB clockwork_task_list result bypassed the cache-pointer gate and
+-- blew the per-minute rate budget. Existing databases get updated by the
+-- UPDATE in migration 021 (ADD COLUMN is idempotent and skipped on re-run,
+-- so this default only applies to fresh databases).
+ALTER TABLE user_settings ADD COLUMN tool_result_soft_truncate_bytes INTEGER NOT NULL DEFAULT 2048;
 ALTER TABLE user_settings ADD COLUMN tool_result_hard_cap_bytes INTEGER NOT NULL DEFAULT 1048576;
 
 -- Session-scoped cache for large tool results. The LLM sees a truncated

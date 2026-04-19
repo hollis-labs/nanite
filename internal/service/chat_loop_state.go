@@ -22,9 +22,29 @@ const (
 )
 
 // Default iteration limits.
+//
+// CW-20260419-0020 (tracked for the long-term fix): `defaultMaxTurns`
+// as a fixed constant is the wrong shape — the tool broker doesn't
+// know upfront whether a task is small or large, and any fixed ceiling
+// cuts the agent off mid-thought when scope legitimately expands. The
+// intended design (see the task for full spec) is a negotiated budget:
+//
+//   1. Broker picks an initial budget based on classified task size.
+//   2. On hitting the budget, the loop asks the agent to explain WHY
+//      it needs more (scope grew, tool failure streak, exploration
+//      fan-out, etc.) instead of terminating.
+//   3. Broker decides whether to raise (and by how much) or stop.
+//   4. Every decision + reasoning is logged so we can audit over time.
+//
+// Until that lands: interim bump to 75 (from 25) after c17/c27 UAT showed
+// 25 is the default-case ceiling, not a rare safety net — list+analyze
+// asks routinely need 20-30 tool calls just for the fetching phase, and
+// the LLM was being cut off mid-thought with no final message. 75 gives
+// headroom without uncorking; hardCeiling=200 still catches true runaways.
+// Tunable via user_settings once CW-20260419-0020 ships.
 const (
-	defaultMaxTurns            = 25
-	defaultHardCeiling         = 100
+	defaultMaxTurns            = 75
+	defaultHardCeiling         = 200
 	// CW-20260417-0485: ConsecutiveFailCap used to terminate the chat loop,
 	// cutting the LLM off before it could respond to the tool errors it had
 	// just received as tool_result blocks. The loop now threads tool errors
@@ -42,7 +62,12 @@ const (
 	// breaker trips.
 	defaultRunawayFailCap      = 10
 	defaultIdleTimeoutSeconds  = 900 // 15 minutes
-	defaultMaxRequestToolsCalls = 3
+	// CW-20260419-0012 (quick fix): 3 → 6. 3 was an arbitrary
+	// conservative floor; empirically the agent needs 3 passes for
+	// intent-warmup and another 2-3 for follow-on exploration within
+	// the same turn. The runaway_fail_cap (10) still catches infinite
+	// loops. Tunable via user_settings once CW-20260419-0012 lands.
+	defaultMaxRequestToolsCalls = 6
 )
 
 // TerminationCode is the machine-readable reason a chat loop terminated
@@ -132,16 +157,27 @@ type loopState struct {
 	lastSite   ContinueSite
 	lastReason string
 
-	// S3b T9 — true once we've run the synchronous compaction+retry for any
-	// compact-recoverable provider failure (see
-	// internal/context.IsCompactRecoverable). Originally named
-	// contextOverflowRetried when it guarded only the context-window-overflow
-	// path; broadened in CW-20260418-0099 to cover
-	// provider.ErrRequestExceedsRateBudget too — both modes are fixed by
-	// compacting the request, so a single retry gate covers both. PR #67
-	// review #2.
-	compactRecoverableRetried bool
+	// S3b T9 — counts how many synchronous compaction+retries we've run for
+	// compact-recoverable provider failures (see
+	// internal/context.IsCompactRecoverable) during this generation.
+	// Originally a boolean (contextOverflowRetried → compactRecoverableRetried);
+	// converted to a counter in CW-20260419-0018 after c21 UAT showed the
+	// one-shot latch refusing a second compaction when we were only 86 tokens
+	// over the rate budget. A second compaction pass would trivially free
+	// more than that — the refusal was defensive but too strict.
+	//
+	// Capped at maxCompactRecoverableAttempts (2 for now). A refused recovery
+	// (summarizer off, no stages applied) burns an attempt too, so the same
+	// request can't loop back into the branch forever. Full progress-aware
+	// guard design is tracked in CW-20260419-0018 (kept open for the deep fix).
+	compactRecoverableAttempts int
 }
+
+// maxCompactRecoverableAttempts caps the number of synchronous compaction
+// retries per generation. 2 is the smallest value that fixes the observed
+// "second compaction would obviously help" failure mode (UAT c21) without
+// allowing runaway retry loops on a conversation that's truly too large.
+const maxCompactRecoverableAttempts = 2
 
 // newLoopState creates a loopState with resolved limits from agent constraints.
 func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode bool) *loopState {

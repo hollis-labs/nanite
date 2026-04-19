@@ -95,7 +95,7 @@ func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts)
 		}
 	}
 	if agentID == "" {
-		agentID = "mentat-001"
+		agentID = "file-default"
 	}
 
 	// Assign the resolved agent as primary (best-effort).

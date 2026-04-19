@@ -64,6 +64,7 @@ func handlePluginsEvents(w http.ResponseWriter, r *http.Request, host *naniteplu
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	clearSSEWriteDeadline(w)
 	// Initial comment flushes headers and establishes the stream before the
 	// first event arrives.
 	fmt.Fprint(w, ": plugin lifecycle stream open\n\n")

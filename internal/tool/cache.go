@@ -13,8 +13,21 @@ import (
 )
 
 // DefaultSoftTruncBytes is the default byte threshold above which tool results
-// are truncated for the LLM and the full body is cached.
-const DefaultSoftTruncBytes = 64 * 1024 // 64 KiB
+// are truncated for the LLM and the full body is cached. The LLM-visible slice
+// is also capped at this size; anything longer gets replaced with the slice
+// plus a `tool_result://<id>` pointer footer the LLM can fetch via
+// `fetch_tool_result` / `search_tool_result` when it actually needs more.
+//
+// CW-20260419-0004 Part 1: lowered from 64 KiB → 2 KiB. At 64 KiB nothing in
+// practical use ever hit the cache path — every tool result fell through to
+// `truncate.Output`'s 4 KiB fallback and accumulated in the conversation
+// slot. The c9 UAT died at ~45 K tokens with 13 tool calls × ~4 KiB each.
+// At 2 KiB, most tool results (clockwork_task_list, dev_read, etc.) become
+// pointers and the conversation slot stays tiny; tiny results (health
+// checks, small lookups) still pass through untouched. Once
+// CW-20260419-0001 ships a settings UI, this becomes a user-tunable knob
+// with this value as the safe default.
+const DefaultSoftTruncBytes = 2 * 1024 // 2 KiB
 
 // DefaultHardCapBytes is the maximum body size stored in the cache. Results
 // exceeding this are stored as metadata-only (body=NULL).

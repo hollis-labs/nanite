@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -305,33 +306,65 @@ func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *s
 
 // buildRulesSlotContent renders the Rules slot from the agent profile. S4a
 // expands this with policy-layer rules; for now it surfaces tags + allowlist.
+//
+// Tags and tools are stored as JSON arrays in the agent profile; rendering
+// them as raw JSON forces the LLM to parse — a Markdown bulleted list is
+// cheaper to consume and more robust to surrounding-prose pattern-matching.
 func buildRulesSlotContent(agent *store.AgentProfile) string {
 	var b strings.Builder
-	if agent.Tags != "" && agent.Tags != "[]" {
-		b.WriteString("Agent tags: ")
-		b.WriteString(agent.Tags)
-		b.WriteByte('\n')
+	if items := parseJSONStringArray(agent.Tags); len(items) > 0 {
+		b.WriteString("Agent tags:\n")
+		for _, t := range items {
+			fmt.Fprintf(&b, "- %s\n", t)
+		}
 	}
-	if agent.Tools != "" && agent.Tools != "[]" {
-		b.WriteString("Tool allowlist: ")
-		b.WriteString(agent.Tools)
-		b.WriteByte('\n')
+	if items := parseJSONStringArray(agent.Tools); len(items) > 0 {
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString("Tool allowlist:\n")
+		for _, t := range items {
+			fmt.Fprintf(&b, "- %s\n", t)
+		}
 	}
 	return b.String()
 }
 
+// parseJSONStringArray parses a JSON string array like `["foo","bar"]` into
+// a Go slice. Empty / null / parse-error input returns an empty slice so the
+// caller can render nothing without branching on shape.
+func parseJSONStringArray(raw string) []string {
+	if raw == "" || raw == "[]" || raw == "null" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		// Defensive: a malformed tags/tools column shouldn't break the slot
+		// render; log once at debug and return empty so the slot shows no
+		// rules rather than raw JSON garbage.
+		slog.Debug("chat: parseJSONStringArray failed", "raw", raw, "err", err)
+		return nil
+	}
+	return out
+}
+
 // buildSessionSlotContent renders the Session slot — small, stable identifiers
-// the model uses to anchor itself to the active session.
-func buildSessionSlotContent(session *store.Session, mode *store.AgentMode, workspace *store.Workspace) string {
+// the model uses to anchor itself to the active session. Today's date anchors
+// the LLM against drift toward training-cutoff dates in its outputs.
+// Workspace is intentionally omitted here because SlotSystem already carries
+// it — we don't want to waste tokens on a duplicate.
+func buildSessionSlotContent(session *store.Session, mode *store.AgentMode, _ *store.Workspace) string {
 	var b strings.Builder
-	if session.Title != "" {
-		fmt.Fprintf(&b, "Session: %s\n", session.Title)
+	now := time.Now()
+	fmt.Fprintf(&b, "Today: %s (%s)\n", now.Format("2006-01-02"), now.Format("Monday"))
+	// Auto-generated chat titles (c17, c18) add no signal — only surface a
+	// title if it looks user-assigned. Heuristic: > 4 chars or contains
+	// a space is treated as intentional.
+	if t := session.Title; t != "" && (len(t) > 4 || strings.Contains(t, " ")) {
+		fmt.Fprintf(&b, "Session: %s\n", t)
 	}
-	if mode != nil && mode.Slug != "" {
+	if mode != nil && mode.Slug != "" && mode.Slug != "default" {
 		fmt.Fprintf(&b, "Mode: %s\n", mode.Slug)
-	}
-	if workspace != nil && workspace.Name != "" {
-		fmt.Fprintf(&b, "Workspace: %s\n", workspace.Name)
 	}
 	return b.String()
 }

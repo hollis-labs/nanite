@@ -250,7 +250,12 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	}
 	toolResultSoftTrunc := us.ToolResultSoftTruncBytes
 	if toolResultSoftTrunc <= 0 {
-		toolResultSoftTrunc = 65536
+		// Matches tool.DefaultSoftTruncBytes — inlined to avoid a store→tool
+		// import (store is the lower layer). CW-20260419-0018: lowered from
+		// 64 KiB to 2 KiB after c17 UAT showed 64 KiB let large MCP list
+		// results (89 KiB clockwork_task_list) bypass the cache-pointer gate
+		// and blow the rate budget.
+		toolResultSoftTrunc = 2048
 	}
 	toolResultHardCap := us.ToolResultHardCapBytes
 	if toolResultHardCap <= 0 {

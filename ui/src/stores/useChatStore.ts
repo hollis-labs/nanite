@@ -130,7 +130,7 @@ export const useChatStore = create<ChatState>((set) => ({
       const existingIdx = existing.findIndex((x) => x.id === tc.id)
       const updated =
         existingIdx >= 0
-          ? existing.map((x, i) => (i === existingIdx ? { ...x, ...tc } : x))
+          ? existing.map((x, i) => (i === existingIdx ? { ...x, ...tc } : x)).slice(-50)
           : [...existing, tc].slice(-50)
       if (targetSession) {
         next.set(targetSession, { calls: updated, lastActivity: Date.now() })

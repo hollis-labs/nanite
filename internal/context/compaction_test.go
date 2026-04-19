@@ -125,6 +125,67 @@ func TestStageDedupeToolResults(t *testing.T) {
 	}
 }
 
+// TestStageDedupeToolResults_DifferentResultsNotDeduped guards against
+// silent data loss when the same tool is called twice with the same input
+// but the result content differs between calls (e.g., a file was edited
+// between reads). Dedupe must match on (name, input, result content) so
+// genuinely changed state is preserved.
+func TestStageDedupeToolResults_DifferentResultsNotDeduped(t *testing.T) {
+	input := map[string]any{"path": "/Users/x/foo.md"}
+	msgs := []provider.ChatMessage{
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "call-1", Name: "dev_read", Input: &input},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call-1", Content: "original content"},
+		}},
+		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_use", ID: "call-2", Name: "dev_read", Input: &input},
+		}},
+		{Role: "user", ContentBlocks: []provider.ContentBlock{
+			{Type: "tool_result", ToolUseID: "call-2", Content: "content after edit"},
+		}},
+	}
+	p := &CompactionPipeline{ConversationMessages: msgs}
+	progress, err := stageDedupeToolResults(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progress {
+		t.Error("differing tool_result content must not be deduped")
+	}
+	if p.ConversationMessages[1].ContentBlocks[0].Content != "original content" {
+		t.Error("first tool_result should be untouched")
+	}
+	if p.ConversationMessages[3].ContentBlocks[0].Content != "content after edit" {
+		t.Errorf("second tool_result must not be replaced with a pointer; got %q",
+			p.ConversationMessages[3].ContentBlocks[0].Content)
+	}
+}
+
+// TestCanonicalizeToolInput_StableForNestedMaps guards against nondeterministic
+// signatures from fmt.Sprintf("%v", ...) on nested maps (Go randomizes map
+// iteration order). Many invocations on the same input must produce identical
+// output.
+func TestCanonicalizeToolInput_StableForNestedMaps(t *testing.T) {
+	input := map[string]any{
+		"nested": map[string]any{
+			"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8,
+		},
+		"list": []any{
+			map[string]any{"k1": "v1", "k2": "v2", "k3": "v3"},
+			map[string]any{"x": 1, "y": 2, "z": 3},
+		},
+	}
+	first := canonicalizeToolInput(&input)
+	for i := 0; i < 200; i++ {
+		got := canonicalizeToolInput(&input)
+		if got != first {
+			t.Fatalf("iteration %d: canonicalize not stable\nfirst: %s\ngot:   %s", i, first, got)
+		}
+	}
+}
+
 // TestStageDedupeToolResults_NoDuplicates verifies the stage is a no-op
 // when every tool invocation is unique.
 func TestStageDedupeToolResults_NoDuplicates(t *testing.T) {

@@ -155,16 +155,27 @@ type loopState struct {
 	lastSite   ContinueSite
 	lastReason string
 
-	// S3b T9 — true once we've run the synchronous compaction+retry for any
-	// compact-recoverable provider failure (see
-	// internal/context.IsCompactRecoverable). Originally named
-	// contextOverflowRetried when it guarded only the context-window-overflow
-	// path; broadened in CW-20260418-0099 to cover
-	// provider.ErrRequestExceedsRateBudget too — both modes are fixed by
-	// compacting the request, so a single retry gate covers both. PR #67
-	// review #2.
-	compactRecoverableRetried bool
+	// S3b T9 — counts how many synchronous compaction+retries we've run for
+	// compact-recoverable provider failures (see
+	// internal/context.IsCompactRecoverable) during this generation.
+	// Originally a boolean (contextOverflowRetried → compactRecoverableRetried);
+	// converted to a counter in CW-20260419-0018 after c21 UAT showed the
+	// one-shot latch refusing a second compaction when we were only 86 tokens
+	// over the rate budget. A second compaction pass would trivially free
+	// more than that — the refusal was defensive but too strict.
+	//
+	// Capped at maxCompactRecoverableAttempts (2 for now). A refused recovery
+	// (summarizer off, no stages applied) burns an attempt too, so the same
+	// request can't loop back into the branch forever. Full progress-aware
+	// guard design is tracked in CW-20260419-0018 (kept open for the deep fix).
+	compactRecoverableAttempts int
 }
+
+// maxCompactRecoverableAttempts caps the number of synchronous compaction
+// retries per generation. 2 is the smallest value that fixes the observed
+// "second compaction would obviously help" failure mode (UAT c21) without
+// allowing runaway retry loops on a conversation that's truly too large.
+const maxCompactRecoverableAttempts = 2
 
 // newLoopState creates a loopState with resolved limits from agent constraints.
 func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode bool) *loopState {

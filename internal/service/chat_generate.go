@@ -425,7 +425,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// ErrRequestExceedsRateBudget sentinel — when the estimated
 			// request is bigger than the per-minute rate budget, waiting is
 			// futile and compaction is the right response.
-			if ctxpkg.IsCompactRecoverable(err) && !ls.compactRecoverableRetried {
+			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableAttempts < maxCompactRecoverableAttempts {
 				provSpan.End()
 				triggerKind := compactTriggerContextOverflow
 				recoveryReason := "context_overflow at stream start"
@@ -436,14 +436,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				ls.continueWith(ContinueRecovery, recoveryReason)
 				newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind)
 				if ok {
-					// Recovery produced stages — mark retried and continue
-					// the loop with the compacted request. The "failed after
-					// retry" branch below guards against infinite retries.
-					// PR #67 review follow-up: compactRecoverableRetried is
-					// set only AFTER success, so a recovery-refused path
-					// can surface a distinct message instead of lying with
-					// "even after compaction".
-					ls.compactRecoverableRetried = true
+					// Recovery produced stages — increment the attempt
+					// counter and continue the loop with the compacted
+					// request. The "failed after retry" branch below catches
+					// us if we exhaust attempts later.
+					// CW-20260419-0018: incrementing (not latching) lets a
+					// second compaction run when tool results later blow the
+					// budget again, while the maxCompactRecoverableAttempts
+					// cap still prevents infinite loops.
+					ls.compactRecoverableAttempts++
 					// CW-20260419-0012: compaction's strip_tool_blocks stage
 					// drops tool-definition context from the conversation,
 					// so the LLM has to re-request tools post-compaction.
@@ -460,11 +461,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					continue
 				}
 				// Recovery refused (flag off / no summarizer / no stages).
-				// Set the retried flag so the same request can't loop back
+				// Exhaust attempts so the same request can't loop back
 				// into this branch, and preserve the normal provider-error
 				// telemetry so refused recovery is as diagnosable as any
 				// other provider failure (PR #68 review #2).
-				ls.compactRecoverableRetried = true
+				ls.compactRecoverableAttempts = maxCompactRecoverableAttempts
 				provSpan.RecordError(err)
 				provSpan.SetStatus(codes.Error, err.Error())
 				provSpan.End()
@@ -520,7 +521,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			if ls.retryBudget > 0 {
 				ls.retryBudget--
 			}
-			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableRetried {
+			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
 				// Already retried once — emit a user-facing message tailored
 				// to which recoverable mode tripped. CW-20260418-0099.
 				// PR #67 review #1: waiting does not help ErrRequestExceedsRateBudget
@@ -622,8 +623,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				// stream-start case above. Streaming surgery isn't attempted
 				// (plan non-goal) — we abort the in-flight stream, recover,
 				// and the outer loop retries with a rebuilt request.
-				if ctxpkg.IsContextOverflowMessage(evt.Error) && !ls.compactRecoverableRetried {
-					ls.compactRecoverableRetried = true
+				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableAttempts < maxCompactRecoverableAttempts {
+					ls.compactRecoverableAttempts++
 					ls.continueWith(ContinueRecovery, "context_overflow mid-stream")
 					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error, compactTriggerContextOverflow); ok {
 						chatMessages = newMsgs
@@ -638,7 +639,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					}
 				}
 				errDetails := map[string]interface{}{"raw": evt.Error, "model": model}
-				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableRetried {
+				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
 					msg := "Context is still too large after compaction. Use `/clear` or split the request."
 					errDetails["recovery"] = "failed_after_retry"
 					ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, errDetails)
@@ -1013,12 +1014,13 @@ const (
 // tell which failure mode fired the compaction.
 //
 // Caller is expected to have already classified the incoming error via
-// ctxpkg.IsCompactRecoverable. ls.compactRecoverableRetried is set by
-// the caller ONLY after this function returns ok=true (so a refused
-// recovery can surface a distinct error message rather than masquerade
-// as "even after compaction"); on refused recovery the caller sets the
-// flag before returning so the same request cannot re-enter this path.
-// PR #68 review #1.
+// ctxpkg.IsCompactRecoverable. ls.compactRecoverableAttempts is incremented
+// by the caller only after this function returns ok=true so a refused
+// recovery surfaces a distinct error message instead of masquerading as
+// "even after compaction". On refused recovery the caller saturates
+// compactRecoverableAttempts at maxCompactRecoverableAttempts so the same
+// request cannot re-enter this path. PR #68 review #1 +
+// CW-20260419-0018 (one-shot → multi-attempt cap).
 //
 // Folded from BLG-20260410-003 — plan §T9.
 func (s *chatServiceImpl) recoverFromContextOverflow(

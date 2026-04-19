@@ -97,7 +97,9 @@ core:
     component: components/chat/envelopes/SubagentSpawnApprovalCard
     export: SubagentSpawnApprovalCard
 
-  # CW-20260417-0485 — chat-loop terminal pause envelope. Registered for
-  # validation only; the FE component ships with CW-20260418-0008 so the BE
-  # can emit the envelope independently of FE render work.
+  # CW-20260417-0485 — chat-loop terminal pause envelope. Renders when the
+  # loop exits abnormally (max turns, hard ceiling, idle timeout, runaway
+  # failures) so the user sees a termination card instead of silence.
   - type: chat-loop-terminated
+    component: components/chat/envelopes/ChatLoopTerminatedCard
+    export: ChatLoopTerminatedCard

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -435,6 +436,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					// can surface a distinct message instead of lying with
 					// "even after compaction".
 					ls.compactRecoverableRetried = true
+					// CW-20260419-0012: compaction's strip_tool_blocks stage
+					// drops tool-definition context from the conversation,
+					// so the LLM has to re-request tools post-compaction.
+					// Reset the discovery-call counter so pre-compaction
+					// calls don't eat the post-compaction budget (observed
+					// in nanite-chat-debug-3.md: total_calls jumped 4→5
+					// immediately after a successful compaction).
+					ls.totalRequestToolsCalls = 0
+					ls.consecutiveEmptyRequests = 0
 					chatMessages = newMsgs
 					tools = newTools
 					systemPrompt = slotResult.SystemPrompt
@@ -1376,10 +1386,29 @@ func (s *chatServiceImpl) handleRequestTools(
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
 
-	// Hard cap.
+	// Hard cap. CW-20260419-0012: friendlier halt message that actually
+	// helps the LLM decide what to do instead of just telling it "no."
+	// It lists what IS loaded (so the LLM can inventory), prompts goal
+	// reflection, and offers two escape paths (use what's there OR ask
+	// user) — rather than the previous "do NOT call request_tools again"
+	// which read as a punishment. Real conceptual rework lives in
+	// CW-20260419-0011; this is the low-lift polish.
 	if *totalCalls > maxCalls || *consecutiveEmpty >= 2 {
 		reason := fmt.Sprintf("consecutive_empty=%d, total_calls=%d", *consecutiveEmpty, *totalCalls)
-		rtResult := "Tool discovery limit reached (" + reason + "). No more request_tools calls will be processed. Proceed with the tools you already have — do NOT call request_tools again."
+		loadedList := make([]string, 0, len(loadedTools))
+		for name := range loadedTools {
+			loadedList = append(loadedList, name)
+		}
+		sort.Strings(loadedList)
+		rtResult := fmt.Sprintf(
+			"Tool discovery cap reached (%s). The tools currently loaded for this turn are:\n\n  %s\n\n"+
+				"Before asking for more tools, consider:\n"+
+				"1. What is the underlying goal the user asked you to accomplish? State it in one sentence.\n"+
+				"2. Can any tool above make partial progress toward that goal? Try it, then re-evaluate.\n"+
+				"3. If no loaded tool fits, describe the specific capability you need to the user so they can guide you or load more tools manually.\n\n"+
+				"Further request_tools calls this turn will be ignored; use a loaded tool or respond to the user.",
+			reason, strings.Join(loadedList, ", "),
+		)
 		slog.Warn("chat-service: request_tools halted", "reason", reason)
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 		resultBlocks = append(resultBlocks, provider.ContentBlock{

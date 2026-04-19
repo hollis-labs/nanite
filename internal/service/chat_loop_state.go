@@ -42,7 +42,12 @@ const (
 	// breaker trips.
 	defaultRunawayFailCap      = 10
 	defaultIdleTimeoutSeconds  = 900 // 15 minutes
-	defaultMaxRequestToolsCalls = 3
+	// CW-20260419-0012 (quick fix): 3 → 6. 3 was an arbitrary
+	// conservative floor; empirically the agent needs 3 passes for
+	// intent-warmup and another 2-3 for follow-on exploration within
+	// the same turn. The runaway_fail_cap (10) still catches infinite
+	// loops. Tunable via user_settings once CW-20260419-0012 lands.
+	defaultMaxRequestToolsCalls = 6
 )
 
 // TerminationCode is the machine-readable reason a chat loop terminated

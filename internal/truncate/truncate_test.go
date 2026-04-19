@@ -36,8 +36,14 @@ func TestOutput_LargeResult_Truncates(t *testing.T) {
 	if len(r.Content) >= len(big) {
 		t.Error("expected content to be shorter than original")
 	}
-	if !strings.Contains(r.Content, "Full output saved to:") {
-		t.Error("expected file pointer hint in content")
+	// CW-20260419-0014: the LLM-visible content must NOT include the
+	// on-disk file path — the LLM was mis-using it as a fetch_tool_result
+	// id. The path is still on r.OutputPath for operator debugging.
+	if strings.Contains(r.Content, r.OutputPath) {
+		t.Errorf("LLM-visible content should not include the on-disk path %q", r.OutputPath)
+	}
+	if strings.Contains(r.Content, "Full output saved to:") {
+		t.Error("stale file-pointer hint leaked into LLM-visible content")
 	}
 	if !strings.Contains(r.Content, "more lines") {
 		t.Error("expected truncation info in content")

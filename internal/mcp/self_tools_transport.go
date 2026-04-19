@@ -410,14 +410,18 @@ func (st *SelfToolsTransport) callNavigateEngine(args map[string]any) (*ToolResu
 	defer cancel()
 
 	if err := crossapp.NavigateEngine(ctx, page, params); err != nil {
-		return textResult(fmt.Sprintf("Navigation sent for %q (Engine may be offline: %v). Tell the user briefly and stop.", page, err)), nil
+		return textResult(fmt.Sprintf("Navigation failed — Engine may be offline: %v", err)), nil
 	}
 
-	msg := fmt.Sprintf("Done. Engine GUI navigated to %s", page)
+	// CW-20260419-0013 (user-reported via c17): the LLM-coaching trailer
+	// ("Tell the user what you navigated to in one sentence. Do NOT call
+	// any more tools.") leaked into the user-visible chat surface. Tool
+	// result now reports only what happened; the tool description already
+	// instructs the LLM how to behave.
+	msg := fmt.Sprintf("Navigated Engine GUI to %s", page)
 	if len(params) > 0 {
-		msg += fmt.Sprintf(" with filters %v", params)
+		msg += fmt.Sprintf(" (filters: %v)", params)
 	}
-	msg += ". Tell the user what you navigated to in one sentence. Do NOT call any more tools."
 	return textResult(msg), nil
 }
 
@@ -426,9 +430,10 @@ func (st *SelfToolsTransport) callRefreshEngine(args map[string]any) (*ToolResul
 	defer cancel()
 
 	if err := crossapp.RefreshEngine(ctx); err != nil {
-		return textResult(fmt.Sprintf("Refresh sent (Engine may be offline: %v). Do NOT call any more tools.", err)), nil
+		return textResult(fmt.Sprintf("Refresh failed — Engine may be offline: %v", err)), nil
 	}
-	return textResult("Engine GUI data refreshed. Do NOT call any more tools."), nil
+	// CW-20260419-0013: LLM-coaching trailer removed (see callNavigateEngine).
+	return textResult("Engine GUI data refreshed."), nil
 }
 
 func (st *SelfToolsTransport) callShowGiphy(args map[string]any) (*ToolResult, error) {

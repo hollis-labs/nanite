@@ -124,12 +124,18 @@ func Output(text string, toolName string, opts ...OutputOption) Result {
 			"The data above shows the shape and structure — refine your query based on what you see."
 	}
 
+	// CW-20260419-0014 (user-reported via c17): do NOT include the on-disk
+	// file path in the LLM-visible hint. The LLM was mis-using it as a
+	// `fetch_tool_result` id and getting confused when the cache lookup
+	// failed. The file is still saved (for operator debugging via
+	// `~/.nanite/tool-output/`) but the LLM should not see the path.
+	// Large results have a proper cache_id via ResultCache's pointer
+	// footer — that's the intended retrieval mechanism.
 	hint := fmt.Sprintf(
-		"\n\n... %d more lines (%d bytes) truncated ...\n\n"+
-			"Full output saved to: %s\n"+
-			"%s",
-		remainingLines, remainingBytes, outPath, actionHint,
+		"\n\n... %d more lines (%d bytes) truncated ...\n\n%s",
+		remainingLines, remainingBytes, actionHint,
 	)
+	_ = outPath // still saved for operator debugging; not surfaced to LLM
 
 	return Result{
 		Content:     preview.String() + hint,

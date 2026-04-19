@@ -145,7 +145,7 @@ func (s *agentServiceImpl) ListModes(_ context.Context, agentID string) ([]store
 //
 //  1. Look up the session's primary agent binding (session_agents table).
 //  2. If no binding exists, check user_settings.default_agent.
-//  3. If still empty, fall back to the hardcoded default ("mentat-001").
+//  3. If still empty, fall back to the hardcoded default ("file-default").
 //  4. Auto-assign the resolved agent to the session.
 //  5. Load the agent profile by ID, falling back to slug lookup.
 //  6. Reject disabled agents.

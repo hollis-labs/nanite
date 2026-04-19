@@ -41,7 +41,7 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		if agent, _, resolveErr := s.agents.ResolveForSession(ctx, req.ParentSessionID); resolveErr == nil {
 			agentID = agent.ID
 		} else {
-			agentID = "mentat-001"
+			agentID = "file-default"
 		}
 	}
 	mode := req.Mode

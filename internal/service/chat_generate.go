@@ -38,7 +38,7 @@ const nativeToolGuide = `
 When using file and search tools, follow these rules:
 
 - **All paths must be absolute** (start with /Users/). Never use ~ or relative paths.
-- **dev_glob requires TWO separate params**: pattern (relative glob like **/*.md) and directory (absolute path like /Users/chrispian/Projects-apps/mentat). Do NOT put the full path in the pattern.
+- **dev_glob requires TWO separate params**: pattern (relative glob like **/*.md) and directory (absolute path like /Users/chrispian/Projects-apps/my-project). Do NOT put the full path in the pattern.
 - **dev_grep requires TWO separate params**: pattern (regex) and directory (absolute path). Same rule — keep them separate.
 - **dev_read/dev_write/dev_edit**: path must be absolute.
 - **web_fetch**: many news/social sites block automated requests. Works best with APIs, docs sites, and raw content URLs.

@@ -126,7 +126,7 @@ func selfToolDefinitions() []Tool {
 					},
 					"id": map[string]any{
 						"type":        "string",
-						"description": "Entity ID for detail pages (e.g. TASK-123 for task-detail, SPR-456 for sprint-detail). Optional.",
+						"description": "Entity ID for detail pages. Must be an ID returned by a prior tool call in this turn — do NOT invent IDs. Optional; omit for list pages.",
 					},
 					"project_id": map[string]any{
 						"type":        "string",

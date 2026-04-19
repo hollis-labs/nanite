@@ -143,11 +143,22 @@ func (a *API) handleRetryStream(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("messageID")
 
-	// CW-20260418-0100: optional ?from=<uint64> cursor lets a reconnecting
-	// client replay events missed during an SSE drop. 0 / absent means "give
-	// me everything" (ring-buffer retention still bounds the replay size).
-	// Reject malformed values with 400 so a frontend bug surfaces instead of
-	// being silently coerced to "start from zero" (PR #66 review #1).
+	// CW-20260418-0100 / CW-20260419-0014: resume cursor has two sources:
+	//   1. ?from=<uint64> query param — explicit, app-controlled.
+	//   2. Last-Event-ID header — sent automatically by browser EventSource
+	//      on auto-reconnect after a network blip, per the SSE spec.
+	// Query param takes precedence when both are present (explicit override).
+	// Missing/zero from either means "give me everything the ring buffer
+	// still holds". Reject malformed ?from= with 400 so frontend bugs
+	// surface instead of being silently coerced to zero.
+	//
+	// Why this matters (the c13/c14 UAT bug): before this, browser
+	// EventSource auto-reconnects on a network blip replayed from cursor=0,
+	// which re-delivered every event in the ring buffer. The FE's
+	// addToolCall is append-without-dedup, so tool-call counts doubled
+	// (14 → 28, 16 → 32). With Last-Event-ID read here AND the SSE `id:`
+	// line emitted below, the browser transparently resumes from where
+	// it left off — no duplicate events.
 	fromEventID := uint64(0)
 	if raw := r.URL.Query().Get("from"); raw != "" {
 		n, err := strconv.ParseUint(raw, 10, 64)
@@ -156,6 +167,13 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fromEventID = n
+	} else if raw := r.Header.Get("Last-Event-ID"); raw != "" {
+		if n, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			fromEventID = n
+		}
+		// Malformed Last-Event-ID is silently treated as zero — it comes
+		// from the browser, not the app, so there's no caller bug to
+		// surface with a 400.
 	}
 
 	// streamClosed just tells us the generation finished before we connected;
@@ -209,7 +227,16 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			data, _ := json.Marshal(evt)
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+			// Emit an SSE `id:` line so browser EventSource auto-reconnect
+			// can send Last-Event-ID and resume via the ring buffer.
+			// CW-20260419-0014. Zero-EventID events (synthetic, pre-pump)
+			// are emitted without an id: line so they don't clobber the
+			// browser's stored id.
+			if evt.EventID > 0 {
+				fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", evt.EventID, evt.Type, data)
+			} else {
+				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+			}
 			flusher.Flush()
 		}
 	}

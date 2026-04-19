@@ -35,14 +35,22 @@ const nativeToolGuide = `
 
 ## Native Tool Usage
 
-When using file and search tools, follow these rules:
-
+Parameter shape:
 - **All paths must be absolute** (start with /Users/). Never use ~ or relative paths.
-- **dev_glob requires TWO separate params**: pattern (relative glob like **/*.md) and directory (absolute path like /Users/chrispian/Projects-apps/my-project). Do NOT put the full path in the pattern.
-- **dev_grep requires TWO separate params**: pattern (regex) and directory (absolute path). Same rule — keep them separate.
+- **dev_glob** takes TWO separate params: pattern (relative glob like **/*.md) and directory (absolute path like /Users/chrispian/Projects-apps/my-project). Do NOT put the full path in the pattern.
+- **dev_grep** takes TWO separate params: pattern (regex) and directory (absolute path). Same rule — keep them separate.
 - **dev_read/dev_write/dev_edit**: path must be absolute.
 - **web_fetch**: many news/social sites block automated requests. Works best with APIs, docs sites, and raw content URLs.
-- **Allowed directories**: /Users/chrispian/Projects-apps, /Users/chrispian/Projects. Files outside these paths will be rejected.`
+- **Allowed directories**: /Users/chrispian/Projects-apps, /Users/chrispian/Projects. Files outside these paths will be rejected.
+
+Workflow:
+- **Discover before read.** Use dev_glob or dev_grep first if you aren't already sure the path exists. Running dev_read on a speculative path wastes a tool call.
+- **Cache pointer pattern.** When a tool result ends with a footer like ` + "`[TRUNCATED — full result cached as tool_result://<ULID> ...]`" + `, don't re-invoke the source tool to get more. Call ` + "`fetch_tool_result`" + ` with the ULID to retrieve slices, or ` + "`search_tool_result`" + ` to regex-match across the full cached body.
+- **Parallelize independent calls.** If two lookups don't depend on each other, request them in the same assistant turn — the harness executes tool blocks in parallel.
+- **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
+
+Grounded rendering:
+- ` + "`nanite_show_report`" + ` and ` + "`nanite_show_document`" + ` require a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.`
 
 // generateResponse loads context, calls the provider, streams events, and saves
 // the result. This is the refactored version of Engine.generateResponse — it

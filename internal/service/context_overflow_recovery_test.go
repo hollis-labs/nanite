@@ -42,7 +42,7 @@ func TestRecoverFromContextOverflow_DisabledFlag(t *testing.T) {
 		[]provider.ChatMessage{{Role: "user", Content: "hi"}},
 		nil,
 		nil, // nil stream channel — helper must tolerate
-		"prompt is too long",
+		"prompt is too long", compactTriggerContextOverflow,
 	)
 	if ok {
 		t.Fatalf("recovery should be a no-op when flag is disabled; got ok=true")
@@ -78,7 +78,7 @@ func TestRecoverFromContextOverflow_NoSummarizerSkips(t *testing.T) {
 		[]provider.ChatMessage{{Role: "user", Content: "hi"}},
 		nil,
 		nil,
-		"prompt is too long",
+		"prompt is too long", compactTriggerContextOverflow,
 	)
 	if ok {
 		t.Fatalf("recovery should be skipped when no summarizer is available; got ok=true")
@@ -93,7 +93,7 @@ func TestRecoverFromContextOverflow_NilResult(t *testing.T) {
 		"s",
 		nil,
 		&store.AgentProfile{},
-		nil, nil, nil, "prompt is too long",
+		nil, nil, nil, "prompt is too long", compactTriggerContextOverflow,
 	)
 	if ok {
 		t.Fatal("nil result should not succeed")

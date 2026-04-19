@@ -411,15 +411,17 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// ErrRequestExceedsRateBudget sentinel — when the estimated
 			// request is bigger than the per-minute rate budget, waiting is
 			// futile and compaction is the right response.
-			if ctxpkg.IsCompactRecoverable(err) && !ls.contextOverflowRetried {
+			if ctxpkg.IsCompactRecoverable(err) && !ls.compactRecoverableRetried {
 				provSpan.End()
-				ls.contextOverflowRetried = true
+				ls.compactRecoverableRetried = true
+				triggerKind := compactTriggerContextOverflow
 				recoveryReason := "context_overflow at stream start"
 				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
+					triggerKind = compactTriggerRateBudget
 					recoveryReason = "rate_budget_exceeded at stream start"
 				}
 				ls.continueWith(ContinueRecovery, recoveryReason)
-				if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error()); ok {
+				if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind); ok {
 					chatMessages = newMsgs
 					tools = newTools
 					systemPrompt = slotResult.SystemPrompt
@@ -453,14 +455,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			if ls.retryBudget > 0 {
 				ls.retryBudget--
 			}
-			if ctxpkg.IsCompactRecoverable(err) && ls.contextOverflowRetried {
+			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableRetried {
 				// Already retried once — emit a user-facing message tailored
 				// to which recoverable mode tripped. CW-20260418-0099.
+				// PR #67 review #1: waiting does not help ErrRequestExceedsRateBudget
+				// because the request itself is bigger than a single window.
 				slog.Warn("chat-service: compaction-recoverable error persisted after retry",
 					"session_id", sessionID, "iter", ls.iteration, "err", err)
 				msg := "Context is still too large after compaction. Use `/clear` or split the request."
 				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
-					msg = "Request exceeds the per-minute rate budget even after compaction. Use `/clear` or wait a moment before sending more."
+					msg = "Request exceeds the per-minute rate budget even after compaction. Reduce or split the request, or use `/clear` to remove context."
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
@@ -553,10 +557,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				// stream-start case above. Streaming surgery isn't attempted
 				// (plan non-goal) — we abort the in-flight stream, recover,
 				// and the outer loop retries with a rebuilt request.
-				if ctxpkg.IsContextOverflowMessage(evt.Error) && !ls.contextOverflowRetried {
-					ls.contextOverflowRetried = true
+				if ctxpkg.IsContextOverflowMessage(evt.Error) && !ls.compactRecoverableRetried {
+					ls.compactRecoverableRetried = true
 					ls.continueWith(ContinueRecovery, "context_overflow mid-stream")
-					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error); ok {
+					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error, compactTriggerContextOverflow); ok {
 						chatMessages = newMsgs
 						tools = newTools
 						systemPrompt = slotResult.SystemPrompt
@@ -569,7 +573,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					}
 				}
 				errDetails := map[string]interface{}{"raw": evt.Error, "model": model}
-				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.contextOverflowRetried {
+				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableRetried {
 					msg := "Context is still too large after compaction. Use `/clear` or split the request."
 					errDetails["recovery"] = "failed_after_retry"
 					ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, errDetails)
@@ -916,15 +920,29 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // Private helper methods
 // ---------------------------------------------------------------------------
 
+// Compact-recovery trigger kinds. CW-20260418-0099: the pipeline serves two
+// distinct failure modes that share the same remedy; the kind is threaded
+// through so logs / slot_changed reasoning reflect the actual trigger
+// instead of hardcoding "context-overflow" for rate-budget failures too.
+const (
+	compactTriggerContextOverflow = "context_overflow"
+	compactTriggerRateBudget      = "rate_budget_exceeded"
+)
+
 // recoverFromContextOverflow runs the CompactionPipeline synchronously —
 // ignoring the NeedsCompaction gate, because the provider has already told
 // us the current request is over budget. Returns the rebuilt chat messages
 // and tools plus true on success; false when the feature flag is off, the
 // summarizer isn't available, or the pipeline produced no new stages.
 //
+// triggerKind is one of compactTriggerContextOverflow or
+// compactTriggerRateBudget (PR #67 review #3) — surfaced in logs and the
+// slot_changed "reasoning" string so an operator reading journal output or
+// the dev panel can tell which failure mode fired the compaction.
+//
 // Caller is expected to have already classified the incoming error via
-// ctxpkg.IsContextOverflow / IsContextOverflowMessage and to set
-// ls.contextOverflowRetried = true before calling.
+// ctxpkg.IsCompactRecoverable and to set ls.compactRecoverableRetried =
+// true before calling.
 //
 // Folded from BLG-20260410-003 — plan §T9.
 func (s *chatServiceImpl) recoverFromContextOverflow(
@@ -936,20 +954,24 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	tools []provider.ToolDefinition,
 	ch chan chat.StreamEvent,
 	triggerMsg string,
+	triggerKind string,
 ) ([]provider.ChatMessage, []provider.ToolDefinition, bool) {
+	if triggerKind == "" {
+		triggerKind = compactTriggerContextOverflow
+	}
 	if result == nil || result.Window == nil {
 		return chatMessages, tools, false
 	}
 	settings, _ := s.store.GetUserSettings()
 	if settings == nil || !settings.ContextOverflowRecovery {
-		slog.Info("chat-service: context_overflow recovery disabled by user setting",
-			"session_id", sessionID, "trigger", triggerMsg)
+		slog.Info("chat-service: compact-recoverable recovery disabled by user setting",
+			"session_id", sessionID, "trigger_kind", triggerKind, "trigger", triggerMsg)
 		return chatMessages, tools, false
 	}
 	summarizer := s.buildSummarizer(settings)
 	if summarizer == nil {
-		slog.Warn("chat-service: context_overflow recovery skipped; no summarizer available",
-			"session_id", sessionID)
+		slog.Warn("chat-service: compact-recoverable recovery skipped; no summarizer available",
+			"session_id", sessionID, "trigger_kind", triggerKind)
 		return chatMessages, tools, false
 	}
 
@@ -964,13 +986,13 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	tokensBefore := result.Window.UsedTokens()
 	cr, err := pipeline.Run(ctx)
 	if err != nil {
-		slog.Warn("chat-service: context_overflow recovery pipeline failed",
-			"err", err, "session_id", sessionID)
+		slog.Warn("chat-service: compact-recoverable recovery pipeline failed",
+			"err", err, "session_id", sessionID, "trigger_kind", triggerKind)
 		return chatMessages, tools, false
 	}
 	if cr == nil || len(cr.StagesApplied) == 0 {
-		slog.Warn("chat-service: context_overflow recovery produced no stages",
-			"session_id", sessionID, "trigger", triggerMsg)
+		slog.Warn("chat-service: compact-recoverable recovery produced no stages",
+			"session_id", sessionID, "trigger_kind", triggerKind, "trigger", triggerMsg)
 		return chatMessages, tools, false
 	}
 
@@ -981,21 +1003,27 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	result.NeedsCompaction = result.Window.NeedsCompaction()
 	result.SystemPrompt = rebuildLegacySystemPrompt(result.Window)
 
+	reasoningPrefix := "Provider returned context-overflow"
+	if triggerKind == compactTriggerRateBudget {
+		reasoningPrefix = "Provider request exceeded per-minute rate budget"
+	}
 	if emitErr := chat.EmitSlotChangedEvent(ch, chat.SlotChangedV1{
 		Slot:         ctxpkg.SlotConversation,
 		Change:       chat.SlotChangeSummarized,
-		Reasoning:    fmt.Sprintf("Provider returned context-overflow; synchronously compacted %d stage(s).", len(cr.StagesApplied)),
+		Reasoning:    fmt.Sprintf("%s; synchronously compacted %d stage(s).", reasoningPrefix, len(cr.StagesApplied)),
 		TokensBefore: tokensBefore,
 		TokensAfter:  tokensAfter,
 	}); emitErr != nil {
-		slog.Warn("chat-service: slot_changed emit failed during overflow recovery", "err", emitErr)
+		slog.Warn("chat-service: slot_changed emit failed during compact-recoverable recovery",
+			"err", emitErr, "trigger_kind", triggerKind)
 	}
 
-	slog.Info("chat-service: context_overflow recovery ran",
+	slog.Info("chat-service: compact-recoverable recovery ran",
 		"session_id", sessionID,
 		"tokens_before", tokensBefore,
 		"tokens_after", tokensAfter,
 		"stages", cr.StagesApplied,
+		"trigger_kind", triggerKind,
 		"trigger", triggerMsg,
 	)
 

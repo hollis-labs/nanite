@@ -1472,17 +1472,16 @@ func (s *chatServiceImpl) detectStuckLoop(
 		repeats := repeatCount[toolName]
 		if repeats >= 2 {
 			blocked[toolName] = true
-			resultText = fmt.Sprintf("ERROR: Tool %q has been called %d times with identical results. "+
-				"This tool is now BLOCKED for this session turn. "+
-				"You MUST stop calling this tool and either try a completely different approach "+
-				"or tell the user: \"I was unable to complete this task because the tool returned the same result repeatedly.\"",
+			resultText = fmt.Sprintf("Tool %q returned the same result %d times in a row, so the harness is holding further calls for this turn. "+
+				"The result you already have is the tool's answer — re-running it won't produce new data. "+
+				"Pivot: try different arguments, a different tool, or summarize what you have and tell the user what's missing.",
 				toolName, repeats+1)
 			slog.Warn("chat-service: tool BLOCKED after identical results", "tool", toolName, "count", repeats+1)
 		} else {
-			resultText += "\n\nWARNING: This tool has returned the same result " +
-				fmt.Sprintf("%d times in a row. You are likely stuck in a loop. ", repeats+1) +
-				"Do NOT call this tool again with the same arguments. " +
-				"Either provide different arguments or inform the user that this task cannot be completed."
+			resultText += fmt.Sprintf(
+				"\n\nNote: this tool has returned the same result %d times in a row. "+
+					"Re-calling it with the same arguments won't add new data. If you need something different, change the arguments or switch approach.",
+				repeats+1)
 			slog.Warn("chat-service: tool repeat detected", "tool", toolName, "count", repeats+1)
 		}
 	} else {

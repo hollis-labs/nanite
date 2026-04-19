@@ -94,8 +94,8 @@ func (s *chatServiceImpl) preCheckTools(
 		// Check blocked tools.
 		if ls.blockedTools[tu.Name] || ls.isToolExhausted(tu.Name) {
 			ls.recordToolCall(tu.Name, false)
-			blockedResult := fmt.Sprintf("BLOCKED: Tool %q has been hard-blocked due to repeated identical results or iteration limit. "+
-				"Do NOT call this tool again. Use a different approach or inform the user.", tu.Name)
+			blockedResult := fmt.Sprintf("Tool %q isn't available for the rest of this turn — it returned the same result repeatedly (or hit its per-turn cap), so the harness is holding further calls to protect your context budget. "+
+				"If you need the data it produced, it's already in the conversation above. If you need something different, try a related tool, change the arguments meaningfully, or summarize what you have for the user.", tu.Name)
 			slog.Warn("chat-service: tool SKIPPED (blocked)", "tool", tu.Name)
 			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult}
@@ -218,7 +218,7 @@ func (s *chatServiceImpl) preCheckTools(
 			})
 			if cancelled {
 				ls.recordToolCall(tu.Name, false)
-				blockMsg := fmt.Sprintf("BLOCKED: Tool %q was blocked by a plugin policy hook. Do NOT retry this tool call with the same input.", tu.Name)
+				blockMsg := fmt.Sprintf("Tool %q was refused by a policy plugin for this input. Retrying with the same arguments will be refused again — adjust the arguments, pick a different tool, or explain to the user that this action is gated.", tu.Name)
 				slog.Info("chat-service: tool blocked by plugin pre-hook", "tool", tu.Name)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockMsg}

@@ -190,6 +190,55 @@ func TestSessionObject_PutPayloadRequired(t *testing.T) {
 	}
 }
 
+func TestSessionObject_EndToEnd_ArchiveEvictsAndCrossSessionFails(t *testing.T) {
+	// Full P2 contract walk:
+	//   1. Put object in session A.
+	//   2. Get succeeds from A, fails from B (D5).
+	//   3. Archive A — object disappears; session-B object unaffected.
+	//   4. Post-archive Get from A returns ErrSessionObjectNotFound.
+	s := newTestStore(t)
+
+	sessA := makeTestSession(t, s, "workspace-1")
+	sessB := makeTestSession(t, s, "workspace-1")
+
+	objA, err := s.PutSessionObject(SessionObjectInput{
+		SessionID:   sessA.ID,
+		ContentType: "application/json",
+		Payload:     `{"kind":"card","id":"abc"}`,
+	})
+	if err != nil {
+		t.Fatalf("put A: %v", err)
+	}
+	objB, err := s.PutSessionObject(SessionObjectInput{
+		SessionID: sessB.ID,
+		Payload:   `{"keep":"me"}`,
+	})
+	if err != nil {
+		t.Fatalf("put B: %v", err)
+	}
+
+	// 2. In-session lookup works; cross-session fails.
+	if _, err := s.GetSessionObject(sessA.ID, objA.ID); err != nil {
+		t.Fatalf("A lookup: %v", err)
+	}
+	if _, err := s.GetSessionObject(sessB.ID, objA.ID); !errors.Is(err, ErrSessionObjectNotFound) {
+		t.Errorf("D5: cross-session lookup must fail, got %v", err)
+	}
+
+	// 3. Archive A.
+	if err := s.ArchiveSession(sessA.ID); err != nil {
+		t.Fatalf("archive A: %v", err)
+	}
+
+	// 4. A's object is unreachable from its own session; B's is untouched.
+	if _, err := s.GetSessionObject(sessA.ID, objA.ID); !errors.Is(err, ErrSessionObjectNotFound) {
+		t.Errorf("post-archive: expected not-found for A's object, got %v", err)
+	}
+	if _, err := s.GetSessionObject(sessB.ID, objB.ID); err != nil {
+		t.Errorf("post-archive: B's object unexpectedly gone: %v", err)
+	}
+}
+
 // makeTestSession helper — creates a real session row so FK constraints hold.
 // Delegates workspace seeding to seedWorkspace (idempotent), so multiple
 // sessions can share the same workspace without colliding on the workspace row.

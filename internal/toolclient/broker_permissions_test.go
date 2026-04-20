@@ -126,14 +126,14 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 		{Name: "dev_read", Description: "Read files"},
 	})
 
-	defs, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive")
+	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive")
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}
 
 	// Permissive default → both builtins present.
 	names := map[string]bool{}
-	for _, d := range defs {
+	for _, d := range res.Tools {
 		names[d.Name] = true
 	}
 	if !names["dev_bash"] || !names["dev_read"] {

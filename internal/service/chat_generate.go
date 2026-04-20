@@ -242,11 +242,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 	}
 
-	// The per-tool override block is composed upstream by the toolbroker
-	// (go-toolbroker v0.1.0+) and plumbed through service.ToolSelection in a
-	// follow-up commit — for now pass an empty string so the helper shape
-	// matches its pure-function contract without a stale broker import.
-	extraSystemPrefix := composeExtraSystemPrefix("", composeConfig{
+	// selection.OverrideBlock is composed upstream by ToolClient via
+	// go-toolbroker's ComposeOverrideBlock over the FINAL tool set (post
+	// permission filtering + token budget prune), so the block never mentions
+	// a tool the LLM won't see. Empty string when no enricher is configured
+	// or no selected tool has Hints — composeExtraSystemPrefix skips the
+	// section in that case.
+	extraSystemPrefix := composeExtraSystemPrefix(selection.OverrideBlock, composeConfig{
 		noTools:            noTools,
 		progressiveActive:  selection.Progressive,
 		progressiveCatalog: selection.Catalog,

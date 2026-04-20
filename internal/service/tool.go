@@ -16,9 +16,10 @@ import (
 // ToolSelection holds the result of tool selection, including progressive
 // discovery metadata. Mirrors chat.toolSelection but is owned by the service layer.
 type ToolSelection struct {
-	Tools       []provider.ToolDefinition // tools to send to the LLM
-	Catalog     string                    // non-empty when progressive discovery is active
-	Progressive bool                      // true when using progressive discovery
+	Tools         []provider.ToolDefinition // tools to send to the LLM
+	Catalog       string                    // non-empty when progressive discovery is active
+	Progressive   bool                      // true when using progressive discovery
+	OverrideBlock string                    // markdown "## Tool Overrides" section composed from per-tool Hints (go-toolbroker); empty when no tool in the final selection has enrichment
 }
 
 // ToolResult holds the outcome of a single tool execution.
@@ -106,14 +107,16 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 
 	// Collect tools via broker selection.
 	var allTools []provider.ToolDefinition
+	var overrideBlock string
 	seen := map[string]bool{} // dedup: Anthropic API rejects duplicate tool names
 
 	if s.toolClient != nil {
-		selected, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
+		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
 		if err != nil {
 			slog.Warn("service/tool: broker selection failed — falling back to MCP manager", "err", err)
 		} else {
-			for _, t := range selected {
+			overrideBlock = res.OverrideBlock
+			for _, t := range res.Tools {
 				if !seen[t.Name] {
 					seen[t.Name] = true
 					allTools = append(allTools, t)
@@ -174,7 +177,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		layer = "empty"
 	}
 	s.logDecision(sessionID, intent, layer, allTools)
-	return &ToolSelection{Tools: allTools}, nil
+	return &ToolSelection{Tools: allTools, OverrideBlock: overrideBlock}, nil
 }
 
 // logDecision persists the broker selection decision for the debug panel.

@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"testing"
-	"time"
 )
 
 func TestSessionObject_PutAndGet(t *testing.T) {
@@ -103,6 +102,8 @@ func TestSessionObject_List(t *testing.T) {
 	s := newTestStore(t)
 	sess := makeTestSession(t, s, "workspace-1")
 
+	// Ordering determinism comes from the SQL tiebreak on `id DESC` — ULIDs
+	// are monotonic within a millisecond, so no sleep is needed between puts.
 	for i := 0; i < 3; i++ {
 		if _, err := s.PutSessionObject(SessionObjectInput{
 			SessionID: sess.ID,
@@ -110,9 +111,6 @@ func TestSessionObject_List(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("put %d: %v", i, err)
 		}
-		// Nudge so ULID timestamps are monotonically increasing even within the same second;
-		// the SQL tiebreak on `id DESC` makes ordering deterministic regardless.
-		time.Sleep(time.Millisecond)
 	}
 
 	list, err := s.ListSessionObjects(sess.ID)

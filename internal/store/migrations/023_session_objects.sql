@@ -18,5 +18,7 @@ CREATE TABLE IF NOT EXISTS session_objects (
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_session_objects_session ON session_objects(session_id);
-CREATE INDEX IF NOT EXISTS idx_session_objects_created ON session_objects(created_at DESC);
+-- Composite index covers both the WHERE (session_id) and ORDER BY
+-- (created_at DESC, id DESC) of ListSessionObjects in one index scan.
+CREATE INDEX IF NOT EXISTS idx_session_objects_session_created_id
+    ON session_objects(session_id, created_at DESC, id DESC);

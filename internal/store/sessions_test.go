@@ -7,10 +7,11 @@ import (
 
 func seedWorkspace(t *testing.T, s *Store, id string) {
 	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.DB.Exec(
 		`INSERT OR IGNORE INTO workspaces (id, name, description, icon, sort_order, settings, created_at, updated_at)
-		 VALUES (?, ?, '', '', 0, '{}', datetime('now'), datetime('now'))`,
-		id, "Test Workspace",
+		 VALUES (?, ?, '', '', 0, '{}', ?, ?)`,
+		id, "Test Workspace", now, now,
 	)
 	if err != nil {
 		t.Fatalf("seedWorkspace: %v", err)

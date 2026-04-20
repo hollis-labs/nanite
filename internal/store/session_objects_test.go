@@ -110,7 +110,8 @@ func TestSessionObject_List(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("put %d: %v", i, err)
 		}
-		// Brief sleep so created_at strings differ at RFC3339 resolution (1s).
+		// Nudge so ULID timestamps are monotonically increasing even within the same second;
+		// the SQL tiebreak on `id DESC` makes ordering deterministic regardless.
 		time.Sleep(time.Millisecond)
 	}
 

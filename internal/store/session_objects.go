@@ -126,7 +126,7 @@ func (s *Store) ListSessionObjects(sessionID string) ([]SessionObject, error) {
 	}
 	defer rows.Close()
 
-	var out []SessionObject
+	out := make([]SessionObject, 0)
 	for rows.Next() {
 		var rec SessionObject
 		var createdAtStr string
@@ -144,8 +144,10 @@ func (s *Store) ListSessionObjects(sessionID string) ([]SessionObject, error) {
 }
 
 // EvictSessionObjects deletes all session_objects rows for the given session
-// and returns the count of deleted rows. Called from ArchiveSession inside its
-// transaction (D5: atomic archive + eviction). Safe to call standalone.
+// and returns the count of deleted rows. ArchiveSession inlines an equivalent
+// DELETE inside its transaction so archive + eviction are atomic (D5); this
+// method uses s.DB directly, so it must NOT be called from within an
+// in-progress transaction — inline the DELETE via tx.Exec instead.
 func (s *Store) EvictSessionObjects(sessionID string) (int, error) {
 	res, err := s.DB.Exec(`DELETE FROM session_objects WHERE session_id = ?`, sessionID)
 	if err != nil {

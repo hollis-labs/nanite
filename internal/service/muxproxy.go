@@ -1,0 +1,169 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/chrispian/agent-mux/pkg/claudestream"
+	agentmux "github.com/hollis-labs/go-agentmux-client"
+	"github.com/hollis-labs/nanite/internal/muxproxy"
+)
+
+// ErrUnsupportedProvider is returned when LaunchSubordinate is invoked
+// against a non-claudestream provider. POC is claudestream-only.
+var ErrUnsupportedProvider = errors.New("muxproxy: POC supports claudestream providers only")
+
+// muxClient is the subset of *agentmux.Client the service depends on.
+// Test seam.
+type muxClient interface {
+	ListLaunches(ctx context.Context) ([]agentmux.Launch, error)
+	Launch(ctx context.Context, launchID string) (agentmux.LaunchResponse, error)
+	SendInput(ctx context.Context, sessionID string, data []byte) error
+	StopSession(ctx context.Context, sessionID string) error
+}
+
+// LaunchSummary is the LLM-visible projection of agentmux.Launch.
+type LaunchSummary struct {
+	ID       string `json:"id"`
+	Project  string `json:"project"`
+	Agent    string `json:"agent"`
+	Provider string `json:"provider"`
+}
+
+// LaunchResult is returned from LaunchSubordinate.
+type LaunchResult struct {
+	SessionID  string `json:"session_id"`
+	ProviderID string `json:"provider_id"`
+	Nickname   string `json:"nickname"`
+}
+
+// SendResult is returned from Send.
+type SendResult struct {
+	Transcript   string        `json:"transcript"`
+	ToolUses     []SendToolUse `json:"tool_uses"`
+	InputTokens  int           `json:"input_tokens,omitempty"`
+	OutputTokens int           `json:"output_tokens,omitempty"`
+	ExitStatus   string        `json:"exit_status"` // done | error | timeout
+	Error        string        `json:"error,omitempty"`
+}
+
+// SendToolUse is a trimmed projection of claudestream.ToolUseBlock.
+type SendToolUse struct {
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+// MuxProxy is the chat-session-facing service layer.
+type MuxProxy struct {
+	client      muxClient
+	mgr         *muxproxy.Manager
+	sendTimeout time.Duration
+}
+
+// NewMuxProxy constructs a service. Default sendTimeout is 5 minutes.
+func NewMuxProxy(c muxClient, mgr *muxproxy.Manager) *MuxProxy {
+	return &MuxProxy{
+		client:      c,
+		mgr:         mgr,
+		sendTimeout: 5 * time.Minute,
+	}
+}
+
+// ListAvailableLaunches returns the daemon's catalog of launches.
+func (s *MuxProxy) ListAvailableLaunches(ctx context.Context) ([]LaunchSummary, error) {
+	launches, err := s.client.ListLaunches(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]LaunchSummary, 0, len(launches))
+	for _, l := range launches {
+		out = append(out, LaunchSummary{
+			ID:       l.ID,
+			Project:  l.Project,
+			Agent:    l.Agent,
+			Provider: l.Provider,
+		})
+	}
+	return out, nil
+}
+
+// LaunchSubordinate starts a claudestream-kind subordinate and
+// registers its nickname in the Manager.
+func (s *MuxProxy) LaunchSubordinate(ctx context.Context, launchID, nickname string) (LaunchResult, error) {
+	resp, err := s.client.Launch(ctx, launchID)
+	if err != nil {
+		return LaunchResult{}, err
+	}
+	if resp.ProviderID != "claudestream" {
+		return LaunchResult{}, fmt.Errorf("%w: got provider_id=%q", ErrUnsupportedProvider, resp.ProviderID)
+	}
+	s.mgr.Register(resp.ID, nickname)
+	return LaunchResult{
+		SessionID:  resp.ID,
+		ProviderID: resp.ProviderID,
+		Nickname:   nickname,
+	}, nil
+}
+
+// Send delivers text to the subordinate and blocks until KindDone /
+// KindError / timeout.
+func (s *MuxProxy) Send(ctx context.Context, sessionID, text string) (SendResult, error) {
+	if err := s.client.SendInput(ctx, sessionID, []byte(text+"\n")); err != nil {
+		return SendResult{}, err
+	}
+	ch := s.mgr.WaiterChannel(sessionID)
+	if ch == nil {
+		return SendResult{}, fmt.Errorf("muxproxy: session %q not registered", sessionID)
+	}
+
+	var (
+		transcript strings.Builder
+		toolUses   []SendToolUse
+	)
+	deadline := time.NewTimer(s.sendTimeout)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: ctx.Err().Error()}, nil
+		case <-deadline.C:
+			return SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "timeout"}, nil
+		case ev, ok := <-ch:
+			if !ok {
+				return SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: "channel closed"}, nil
+			}
+			switch ev.Kind {
+			case claudestream.KindDelta:
+				transcript.WriteString(ev.Text)
+			case claudestream.KindToolUse:
+				if ev.ToolUse != nil {
+					raw, _ := json.Marshal(ev.ToolUse.Input) //nolint:errcheck // map[string]any marshal cannot fail
+					toolUses = append(toolUses, SendToolUse{Name: ev.ToolUse.Name, Input: raw})
+				}
+			case claudestream.KindDone:
+				out := SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "done"}
+				if ev.Usage != nil {
+					out.InputTokens = ev.Usage.InputTokens
+					out.OutputTokens = ev.Usage.OutputTokens
+				}
+				return out, nil
+			case claudestream.KindError:
+				return SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: ev.ErrorMsg}, nil
+			case claudestream.KindSessionID, claudestream.KindUsage:
+				// informational only; no action needed in the blocking-send path
+			}
+		}
+	}
+}
+
+// Stop kills the subordinate session and unregisters its nickname.
+func (s *MuxProxy) Stop(ctx context.Context, sessionID string) error {
+	err := s.client.StopSession(ctx, sessionID)
+	s.mgr.Unregister(sessionID)
+	return err
+}

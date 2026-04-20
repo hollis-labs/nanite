@@ -15,12 +15,12 @@ type fakeMuxService struct {
 
 func (f *fakeMuxService) ListAvailableLaunches(_ context.Context) ([]LaunchSummary, error) {
 	f.listCalled = true
-	return []LaunchSummary{{ID: "lx-1", Provider: "claudestream"}}, nil
+	return []LaunchSummary{{ID: "lx-1", Provider: "claude-stream"}}, nil
 }
 
 func (f *fakeMuxService) LaunchSubordinate(_ context.Context, launchID, nickname string) (LaunchResult, error) {
 	f.launchCalled = true
-	return LaunchResult{SessionID: "sess-A", ProviderID: "claudestream", Nickname: nickname}, nil
+	return LaunchResult{SessionID: "sess-A", ProviderID: "claude-stream", Nickname: nickname}, nil
 }
 
 func (f *fakeMuxService) Send(_ context.Context, sessionID, text string) (SendResult, error) {

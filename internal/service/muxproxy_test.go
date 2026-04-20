@@ -45,7 +45,7 @@ func (f *fakeMuxClient) StopSession(_ context.Context, sessionID string) error {
 
 func TestMuxProxy_ListAvailableLaunches(t *testing.T) {
 	fake := &fakeMuxClient{launches: []agentmux.Launch{
-		{ID: "lx-1", Project: "nanite", Agent: "backend", Provider: "claudestream"},
+		{ID: "lx-1", Project: "nanite", Agent: "backend", Provider: "claude-stream"},
 	}}
 	mgr := muxproxy.NewManagerWithStream(nil)
 	svc := NewMuxProxy(fake, mgr)
@@ -76,7 +76,7 @@ func TestMuxProxy_LaunchSubordinate_RejectsNonClaudestream(t *testing.T) {
 func TestMuxProxy_LaunchSubordinate_RegistersNickname(t *testing.T) {
 	fake := &fakeMuxClient{launchResp: agentmux.LaunchResponse{
 		ID:         "sess-A",
-		ProviderID: "claudestream",
+		ProviderID: "claude-stream",
 	}}
 	mgr := muxproxy.NewManagerWithStream(nil)
 	svc := NewMuxProxy(fake, mgr)

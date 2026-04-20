@@ -70,7 +70,7 @@ func (s *MuxProxy) LaunchSubordinate(ctx context.Context, launchID, nickname str
 	if err != nil {
 		return muxproxy.LaunchResult{}, err
 	}
-	if resp.ProviderID != "claudestream" {
+	if resp.ProviderID != "claude-stream" {
 		return muxproxy.LaunchResult{}, fmt.Errorf("%w: got provider_id=%q", ErrUnsupportedProvider, resp.ProviderID)
 	}
 	chatSessionID := mcp.SessionIDFromContext(ctx)

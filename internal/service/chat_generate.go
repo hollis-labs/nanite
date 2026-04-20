@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
@@ -328,7 +329,20 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 	// Debug mode: per-agent setting or global developer_mode.
 	debugMode := isAgentDebugEnabled(agent.Settings) || s.isGlobalDebugMode()
+
+	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
+	// generation; downstream consumers read via loopState.Classification().
+	intent := buildIntentSignals(userContent, toolNames, false /* attachments — see recon-notes.md */)
+	scopeTier, execPattern := classify.Classify(intent)
+	slog.Info("chat.classify",
+		"session_id", sessionID,
+		"scope_tier", scopeTier.String(),
+		"execution_pattern", execPattern.String(),
+		"message_token_est", intent.MessageTokenEst,
+		"tools_available", intent.ToolsAvailable,
+	)
 	ls := newLoopState(constraints, toolNames, debugMode)
+	ls.SetClassification(scopeTier, execPattern)
 
 	// Load per-tool cap from UserSettings.
 	if us, err := s.store.GetUserSettings(); err == nil && us.ToolPerTurnCap > 0 {
@@ -1419,6 +1433,19 @@ func BuildSummarizer(registry *provider.Registry, settings *store.UserSettings) 
 // same classification heuristic as the chat hot path.
 func ClassifyCompactionMode(agent *store.AgentProfile) string {
 	return classifyModeFromAgentTags(agent)
+}
+
+// buildIntentSignals assembles the pre-loop signal struct consumed by
+// classify.Classify. Pulled out as a helper for unit-testability; the
+// full generation wires this plus the Classify call at the pre-loop
+// boundary of generateResponse (CW-20260420-0013, P3).
+func buildIntentSignals(userContent string, tools []string, hasAttachments bool) classify.IntentSignals {
+	return classify.IntentSignals{
+		Message:         userContent,
+		MessageTokenEst: len(userContent) / 4, // coarse byte→token heuristic, matches internal/context conventions
+		HasAttachments:  hasAttachments,
+		ToolsAvailable:  len(tools),
+	}
 }
 
 // classifyModeFromAgentTags maps agent tags to a CompactionPipeline mode.

@@ -218,7 +218,7 @@ func (s *Store) ArchiveSession(id string) error {
 		`UPDATE sessions SET status = 'archived', updated_at = ? WHERE id = ?`,
 		now, id,
 	); err != nil {
-		return fmt.Errorf("archive session %s: %w", id, err)
+		return fmt.Errorf("archive session %s: update status: %w", id, err)
 	}
 	if _, err := tx.Exec(
 		`DELETE FROM session_objects WHERE session_id = ?`, id,

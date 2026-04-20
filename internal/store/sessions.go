@@ -201,15 +201,33 @@ func (s *Store) UpdateSessionMetadata(id, metadataJSON string) error {
 	return nil
 }
 
-// ArchiveSession sets a session's status to "archived".
+// ArchiveSession sets a session's status to "archived" and atomically evicts
+// all session_objects rows scoped to that session. The DELETE + UPDATE run
+// inside a single transaction so D5 (hard ephemeral: no cross-session lookup
+// and no orphan payloads on archived sessions) holds even under mid-operation
+// failure.
 func (s *Store) ArchiveSession(id string) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("archive session %s: begin tx: %w", id, err)
+	}
+	defer tx.Rollback()
+
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	if _, err := tx.Exec(
 		`UPDATE sessions SET status = 'archived', updated_at = ? WHERE id = ?`,
 		now, id,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("archive session %s: %w", id, err)
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM session_objects WHERE session_id = ?`, id,
+	); err != nil {
+		return fmt.Errorf("archive session %s: evict session objects: %w", id, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("archive session %s: commit: %w", id, err)
 	}
 	return nil
 }

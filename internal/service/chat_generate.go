@@ -333,16 +333,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
 	// generation; downstream consumers read via loopState.Classification().
 	intent := buildIntentSignals(userContent, toolNames, false /* attachments — see recon-notes.md */)
-	scopeTier, execPattern := classify.Classify(intent)
-	slog.Info("chat.classify",
+	scopeTier, executionPattern := classify.Classify(intent)
+	slog.Info("chat-service: pre-loop classification",
 		"session_id", sessionID,
 		"scope_tier", scopeTier.String(),
-		"execution_pattern", execPattern.String(),
+		"execution_pattern", executionPattern.String(),
 		"message_token_est", intent.MessageTokenEst,
 		"tools_available", intent.ToolsAvailable,
 	)
 	ls := newLoopState(constraints, toolNames, debugMode)
-	ls.SetClassification(scopeTier, execPattern)
+	ls.SetClassification(scopeTier, executionPattern)
 
 	// Load per-tool cap from UserSettings.
 	if us, err := s.store.GetUserSettings(); err == nil && us.ToolPerTurnCap > 0 {
@@ -1441,8 +1441,11 @@ func ClassifyCompactionMode(agent *store.AgentProfile) string {
 // boundary of generateResponse (CW-20260420-0013, P3).
 func buildIntentSignals(userContent string, tools []string, hasAttachments bool) classify.IntentSignals {
 	return classify.IntentSignals{
-		Message:         userContent,
-		MessageTokenEst: len(userContent) / 4, // coarse byte→token heuristic, matches internal/context conventions
+		Message: userContent,
+		// NOTE: deliberately inline rather than internal/context.DefaultEstimator —
+		// the floor-of-1 behavior that DefaultEstimator adds is irrelevant here because
+		// classifyTier branches on est>0 explicitly. See planning/agent-platform/2026-04-19-p3-scopetier-plan.md Task 4.
+		MessageTokenEst: len(userContent) / 4,
 		HasAttachments:  hasAttachments,
 		ToolsAvailable:  len(tools),
 	}

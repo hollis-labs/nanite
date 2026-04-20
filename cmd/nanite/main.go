@@ -197,7 +197,7 @@ func cmdServe(args []string) {
 	slog.Info("output filters registered", "filters", outputFilters.Names())
 
 	// Set up MCP manager, tool broker, and self-service tools.
-	mcpManager, tb, selfTools, muxMgr := initMCP(s)
+	mcpManager, tb, selfTools, muxMgr, muxSvc := initMCP(s)
 
 	// Set up activity emitter (Volon GUI events).
 	activity := chat.NewActivityEmitter("")
@@ -348,8 +348,14 @@ func cmdServe(args []string) {
 
 	// POC: CW-20260420-0047 — start the mux Manager event-fan goroutine.
 	// Publisher was set above; Run drives the StreamEvents subscription.
+	// After Run returns (ctx canceled), best-effort cleanup of subordinates.
 	daemonLifecycle.Go("mux-manager", func(ctx context.Context) {
 		muxMgr.Run(ctx)
+		// ctx is already canceled here; use a fresh background ctx with a short
+		// timeout so StopSession calls can actually reach the daemon.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		muxSvc.StopAll(cleanupCtx)
 	})
 
 	// Shutdown handler. Uses context.Background() because cmdServe has no
@@ -501,8 +507,9 @@ func registerLegacyPTYAlias(registry *provider.Registry) {
 
 // initMCP sets up the MCP manager with built-in and user-configured servers,
 // runs auto-discovery, and creates the tool broker. Returns the mux Manager
-// so the caller can wire a StreamPublisher and start Run after container init.
-func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager) {
+// and MuxProxy service so the caller can wire a StreamPublisher, start Run,
+// and call StopAll on shutdown. CW-20260420-0047.
+func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager, *service.MuxProxy) {
 	mcpManager := mcp.NewManager()
 
 	homeDir, _ := os.UserHomeDir()
@@ -576,7 +583,7 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 		toolclient.SearchToolResultMetaTool(),
 	})
 
-	return mcpManager, tb, selfTools, muxMgr
+	return mcpManager, tb, selfTools, muxMgr, muxSvc
 }
 
 // startBackgroundWorkers launches periodic goroutines for cleanup, snapshots,

@@ -81,6 +81,38 @@ func TestManager_RegisterAndFanout(t *testing.T) {
 	}
 }
 
+func TestManager_StopAllForChat(t *testing.T) {
+	mgr := NewManagerWithStream(nil)
+	mgr.Register("chat-1", "sess-A", "Alice")
+	mgr.Register("chat-1", "sess-B", "Bob")
+	mgr.Register("chat-2", "sess-C", "Charlie")
+
+	stopped := mgr.StopAllForChat("chat-1")
+	if len(stopped) != 2 {
+		t.Fatalf("want 2 stopped, got %d (%v)", len(stopped), stopped)
+	}
+	if mgr.Nickname("sess-A") != "" || mgr.Nickname("sess-B") != "" {
+		t.Fatal("sess-A/B should be cleared")
+	}
+	if mgr.Nickname("sess-C") == "" {
+		t.Fatal("sess-C should still be registered")
+	}
+}
+
+func TestManager_StopAll(t *testing.T) {
+	mgr := NewManagerWithStream(nil)
+	mgr.Register("chat-1", "sess-A", "Alice")
+	mgr.Register("chat-2", "sess-C", "Charlie")
+
+	all := mgr.StopAll()
+	if len(all) != 2 {
+		t.Fatalf("want 2 stopped, got %d (%v)", len(all), all)
+	}
+	if mgr.Nickname("sess-A") != "" || mgr.Nickname("sess-C") != "" {
+		t.Fatal("all nicknames should be cleared")
+	}
+}
+
 func TestManager_IgnoresUnregisteredSessions(t *testing.T) {
 	f := &fakeStream{
 		events: make(chan agentmux.StreamEvent, 2),

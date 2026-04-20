@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -129,6 +130,18 @@ func (s *MuxProxy) Send(ctx context.Context, sessionID, text string) (muxproxy.S
 			case claudestream.KindSessionID, claudestream.KindUsage:
 				// informational only; no action needed in the blocking-send path
 			}
+		}
+	}
+}
+
+// StopAll terminates every live subordinate. Best-effort — errors are
+// logged but not propagated. Used at app shutdown from Manager.Run's
+// ctx-cancel path.
+func (s *MuxProxy) StopAll(ctx context.Context) {
+	ids := s.mgr.StopAll()
+	for _, id := range ids {
+		if err := s.client.StopSession(ctx, id); err != nil {
+			slog.Error("muxproxy: StopSession failed at shutdown", "session", id, "err", err)
 		}
 	}
 }

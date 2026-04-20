@@ -143,6 +143,24 @@ func TestMuxProxy_Send_Timeout(t *testing.T) {
 	}
 }
 
+func TestMuxProxy_StopAll(t *testing.T) {
+	fake := &fakeMuxClient{}
+	mgr := muxproxy.NewManagerWithStream(nil)
+	svc := NewMuxProxy(fake, mgr)
+	mgr.Register("chat-1", "sess-A", "Alice")
+	mgr.Register("chat-2", "sess-B", "Bob")
+
+	svc.StopAll(context.Background())
+
+	if len(fake.stopped) != 2 {
+		t.Fatalf("want 2 daemon-side stops, got %d (%v)", len(fake.stopped), fake.stopped)
+	}
+	// Manager should be cleared.
+	if mgr.Nickname("sess-A") != "" || mgr.Nickname("sess-B") != "" {
+		t.Fatal("nicknames should be cleared")
+	}
+}
+
 func TestMuxProxy_Stop(t *testing.T) {
 	fake := &fakeMuxClient{}
 	mgr := muxproxy.NewManagerWithStream(nil)

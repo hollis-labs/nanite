@@ -215,6 +215,48 @@ func toSubEvent(nickname string, cev claudestream.Event) (SubEvent, bool) {
 	}
 }
 
+// StopAllForChat unregisters every subordinate session owned by the
+// given chat session and returns their IDs. The caller is responsible
+// for invoking client.StopSession on each to actually terminate the
+// daemon-side process.
+func (m *Manager) StopAllForChat(chatSessionID string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var ids []string
+	for subID, owner := range m.chatOwner {
+		if owner == chatSessionID {
+			ids = append(ids, subID)
+		}
+	}
+	for _, subID := range ids {
+		if ch, ok := m.chanFor[subID]; ok {
+			close(ch)
+		}
+		delete(m.chanFor, subID)
+		delete(m.nickFor, subID)
+		delete(m.chatOwner, subID)
+	}
+	return ids
+}
+
+// StopAll unregisters every live subordinate session and returns their
+// IDs. Used at process-exit cleanup.
+func (m *Manager) StopAll() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ids := make([]string, 0, len(m.chanFor))
+	for subID, ch := range m.chanFor {
+		close(ch)
+		ids = append(ids, subID)
+	}
+	m.chanFor = make(map[string]chan claudestream.Event)
+	m.nickFor = make(map[string]string)
+	m.chatOwner = make(map[string]string)
+	return ids
+}
+
 // LaunchSummary mirrors service.LaunchSummary to avoid a package
 // cycle: transport.go lives in muxproxy, service in service,
 // transport dispatches *into* service.

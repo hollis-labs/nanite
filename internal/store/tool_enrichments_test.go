@@ -100,6 +100,73 @@ func TestToolEnrichment_List(t *testing.T) {
 	}
 }
 
+// TestToolEnrichment_NanoPrecisionRoundTrip locks in the RFC3339Nano read/write
+// contract: a record upserted with sub-second precision must round-trip through
+// GetToolEnrichment and ListToolEnrichments without a parse failure. Guards
+// against regression to RFC3339-only parsing that drops fractional seconds.
+func TestToolEnrichment_NanoPrecisionRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+
+	nanoTime := time.Date(2026, 4, 20, 12, 34, 56, 789_012_345, time.UTC)
+	rec := ToolEnrichment{
+		ToolName:  "nano_tool",
+		HintsJSON: `{}`,
+		UpdatedAt: nanoTime,
+	}
+	if err := s.UpsertToolEnrichment(rec); err != nil {
+		t.Fatalf("UpsertToolEnrichment: %v", err)
+	}
+
+	got, err := s.GetToolEnrichment("nano_tool")
+	if err != nil {
+		t.Fatalf("GetToolEnrichment with nano-precision stamp failed: %v", err)
+	}
+	if !got.UpdatedAt.Equal(nanoTime) {
+		t.Errorf("GetToolEnrichment lost precision: got %v, want %v", got.UpdatedAt, nanoTime)
+	}
+
+	list, err := s.ListToolEnrichments()
+	if err != nil {
+		t.Fatalf("ListToolEnrichments with nano-precision stamp failed: %v", err)
+	}
+	var found bool
+	for _, r := range list {
+		if r.ToolName == "nano_tool" {
+			found = true
+			if !r.UpdatedAt.Equal(nanoTime) {
+				t.Errorf("ListToolEnrichments lost precision: got %v, want %v", r.UpdatedAt, nanoTime)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("nano_tool missing from ListToolEnrichments output")
+	}
+}
+
+// TestToolEnrichment_ExternalWriterCompat simulates admin tooling / SQL scripts
+// writing updated_at with RFC3339Nano-precision strings directly into the
+// tool_enrichments table (bypassing UpsertToolEnrichment's Go formatting).
+// Reads must not fail on the higher-precision stamp.
+func TestToolEnrichment_ExternalWriterCompat(t *testing.T) {
+	s := newTestStore(t)
+
+	_, err := s.DB.Exec(
+		`INSERT INTO tool_enrichments (tool_name, hints_json, updated_at) VALUES (?, ?, ?)`,
+		"external_tool", `{}`, "2026-04-20T12:34:56.123456789Z",
+	)
+	if err != nil {
+		t.Fatalf("direct INSERT: %v", err)
+	}
+
+	got, err := s.GetToolEnrichment("external_tool")
+	if err != nil {
+		t.Fatalf("GetToolEnrichment rejected RFC3339Nano string: %v", err)
+	}
+	if got.UpdatedAt.IsZero() {
+		t.Error("GetToolEnrichment returned zero UpdatedAt for RFC3339Nano input")
+	}
+}
+
 func TestToolEnrichment_Delete(t *testing.T) {
 	s := newTestStore(t)
 	rec := ToolEnrichment{

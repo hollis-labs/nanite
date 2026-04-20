@@ -7,7 +7,12 @@ import (
 
 func seedWorkspace(t *testing.T, s *Store, id string) {
 	t.Helper()
-	err := s.CreateWorkspace(&Workspace{ID: id, Name: "Test Workspace"})
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(
+		`INSERT OR IGNORE INTO workspaces (id, name, description, icon, sort_order, settings, created_at, updated_at)
+		 VALUES (?, ?, '', '', 0, '{}', ?, ?)`,
+		id, "Test Workspace", now, now,
+	)
 	if err != nil {
 		t.Fatalf("seedWorkspace: %v", err)
 	}
@@ -294,5 +299,52 @@ func TestListSessionsReturnsEmptyArray(t *testing.T) {
 	}
 	if len(sessions) != 0 {
 		t.Fatalf("expected 0 sessions, got %d", len(sessions))
+	}
+}
+
+func TestArchiveSession_EvictsSessionObjects(t *testing.T) {
+	// D5 guarantee: archiving a session must also remove its session_objects
+	// rows — in the same transaction, so a failure can't leave orphan objects
+	// attached to an archived session.
+	s := newTestStore(t)
+	sess := makeTestSession(t, s, "workspace-1")
+
+	// Put two objects on this session and one on a sibling session (control).
+	for i := 0; i < 2; i++ {
+		if _, err := s.PutSessionObject(SessionObjectInput{SessionID: sess.ID, Payload: `{}`}); err != nil {
+			t.Fatalf("put %d on sess: %v", i, err)
+		}
+	}
+	sibling := makeTestSession(t, s, "workspace-1")
+	siblingObj, err := s.PutSessionObject(SessionObjectInput{SessionID: sibling.ID, Payload: `{}`})
+	if err != nil {
+		t.Fatalf("put on sibling: %v", err)
+	}
+
+	if err := s.ArchiveSession(sess.ID); err != nil {
+		t.Fatalf("ArchiveSession: %v", err)
+	}
+
+	// Archived-session objects should be gone.
+	list, err := s.ListSessionObjects(sess.ID)
+	if err != nil {
+		t.Fatalf("list after archive: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("expected 0 rows for archived session, got %d", len(list))
+	}
+
+	// Sibling-session objects must be untouched.
+	if _, err := s.GetSessionObject(sibling.ID, siblingObj.ID); err != nil {
+		t.Errorf("sibling object should still be present: %v", err)
+	}
+
+	// Archive itself should still have succeeded.
+	got, err := s.GetSession(sess.ID)
+	if err != nil {
+		t.Fatalf("get archived session: %v", err)
+	}
+	if got.Status != "archived" {
+		t.Errorf("expected status=archived, got %q", got.Status)
 	}
 }

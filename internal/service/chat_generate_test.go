@@ -1,8 +1,14 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hollis-labs/go-toolbroker/broker"
+	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // TestExtraSystemPrefix_IncludesOverrideBlock verifies that when a non-empty
@@ -66,5 +72,106 @@ func TestExtraSystemPrefix_ProgressiveCatalog(t *testing.T) {
 	nativeIdx := strings.Index(prefix, "Native Tool Usage")
 	if catIdx > nativeIdx {
 		t.Errorf("expected catalog BEFORE native tool guide; catalog=%d native=%d", catIdx, nativeIdx)
+	}
+}
+
+// TestOverrideBlockReachesPrefix_EndToEnd exercises the full P1 ToolSurface
+// pipeline against a real store: migration 022 applies, a synthetic
+// example_tool enrichment is upserted directly (no migration seed), a
+// ToolClient is constructed (which wires the storeEnricher), the tool is
+// registered, SelectToolsAsProvider is called, and the resulting
+// SelectResult.OverrideBlock is passed to composeExtraSystemPrefix. The
+// final prefix must contain the override section with the tool name and
+// hint content.
+//
+// This is the real-path integration test: store → toolclient.storeEnricher
+// → go-toolbroker ComposeOverrideBlock → toolclient.SelectResult →
+// composeExtraSystemPrefix.
+func TestOverrideBlockReachesPrefix_EndToEnd(t *testing.T) {
+	// 1. Real store, migration 022 applied via store.New.
+	s, err := store.New(t.TempDir() + "/e2e.db")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	// 2. Seed a synthetic enrichment. Synthetic name — no external-app
+	// coupling. Four fields populated so summarizeHints exercises each
+	// section of the output line.
+	hints := broker.Hints{
+		Preconditions: []string{"call list_example first to get a real ID"},
+		AntiPatterns:  []string{"IDs are ULIDs, not file paths"},
+		ChainsWith:    []string{"example_get"},
+		OutputShape:   "Array of {id, name, status}",
+	}
+	hintsJSON, err := broker.MarshalHints(hints)
+	if err != nil {
+		t.Fatalf("MarshalHints: %v", err)
+	}
+	if err := s.UpsertToolEnrichment(store.ToolEnrichment{
+		ToolName:  "example_tool",
+		HintsJSON: hintsJSON,
+		UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertToolEnrichment: %v", err)
+	}
+
+	// 3. ToolClient wires the storeEnricher against the real store.
+	tc := toolclient.New(nil, s, toolclient.DefaultConfig())
+
+	// 4. Register the matching broker ToolDefinition so selection will
+	// include it in the final tool set.
+	tc.RegisterTools([]broker.ToolDefinition{
+		{Name: "example_tool", Description: "a synthetic tool used for E2E validation"},
+	})
+
+	// 5. Call the production selection path. A permissive/unknown agent ID
+	// defaults to permit, so the tool clears CheckPermission.
+	res, err := tc.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-e2e")
+	if err != nil {
+		t.Fatalf("SelectToolsAsProvider: %v", err)
+	}
+
+	// Confirm the broker actually selected the tool we expect (not hidden
+	// by a permission filter) and that the override block mentions it.
+	var gotToolInSelection bool
+	for _, d := range res.Tools {
+		if d.Name == "example_tool" {
+			gotToolInSelection = true
+			break
+		}
+	}
+	if !gotToolInSelection {
+		t.Fatalf("example_tool missing from selected tools; got %+v", res.Tools)
+	}
+	if !strings.Contains(res.OverrideBlock, "## Tool Overrides") {
+		t.Errorf("expected ## Tool Overrides header in OverrideBlock, got:\n%s", res.OverrideBlock)
+	}
+	if !strings.Contains(res.OverrideBlock, "example_tool") {
+		t.Errorf("expected tool name in OverrideBlock, got:\n%s", res.OverrideBlock)
+	}
+	if !strings.Contains(res.OverrideBlock, "Array of {id, name, status}") {
+		t.Errorf("expected OutputShape hint in OverrideBlock, got:\n%s", res.OverrideBlock)
+	}
+	if !strings.Contains(res.OverrideBlock, "ULID") {
+		t.Errorf("expected AntiPatterns hint in OverrideBlock, got:\n%s", res.OverrideBlock)
+	}
+
+	// 6. Feed the block into the system-prompt helper and confirm it lands
+	// in the final prefix AFTER the native tool guide.
+	prefix := composeExtraSystemPrefix(res.OverrideBlock, composeConfig{})
+	if !strings.Contains(prefix, "Native Tool Usage") {
+		t.Errorf("prefix missing native tool guide:\n%s", prefix)
+	}
+	if !strings.Contains(prefix, "## Tool Overrides") {
+		t.Errorf("prefix missing tool overrides section:\n%s", prefix)
+	}
+	if !strings.Contains(prefix, "example_tool") {
+		t.Errorf("prefix missing tool name:\n%s", prefix)
+	}
+	nativeIdx := strings.Index(prefix, "Native Tool Usage")
+	overrideIdx := strings.Index(prefix, "Tool Overrides")
+	if overrideIdx < nativeIdx {
+		t.Errorf("expected Tool Overrides to appear AFTER Native Tool Usage; native=%d override=%d", nativeIdx, overrideIdx)
 	}
 }

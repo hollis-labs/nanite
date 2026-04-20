@@ -46,16 +46,13 @@ func TestBuildIntentSignals(t *testing.T) {
 	}
 }
 
-// TestGenerateResponse_AttachesClassification asserts that the chat loop's
-// pre-loop hook runs Classify and stores the pair on loopState before the
-// loop body runs. This is the E2E gate for CW-20260420-0013.
-//
-// Uses the classifyFn package-level indirection to avoid spinning up the
-// full chat-generation harness: we install a recording fake, drive the
-// pre-loop block directly via a small test helper, and assert both that
-// the captured IntentSignals are well-formed AND that the loopState
-// carries the faked classification pair.
-func TestGenerateResponse_AttachesClassification(t *testing.T) {
+// TestClassifyAndAttach_AttachesClassification asserts that the pre-loop
+// classify helper (called from generateResponse) feeds Classify with the
+// expected signals AND writes the result to loopState. The classifyFn
+// indirection lets us install a recording fake to capture the inputs.
+// This is the E2E gate for CW-20260420-0013 — exercising the same helper
+// generateResponse calls, not reconstructing it.
+func TestClassifyAndAttach_AttachesClassification(t *testing.T) {
 	var captured classify.IntentSignals
 	originalFn := classifyFn
 	classifyFn = func(i classify.IntentSignals) (classify.ScopeTier, classify.ExecutionPattern) {
@@ -64,20 +61,15 @@ func TestGenerateResponse_AttachesClassification(t *testing.T) {
 	}
 	t.Cleanup(func() { classifyFn = originalFn })
 
-	// Drive the pre-loop hook directly. Full generateResponse requires a
-	// chatServiceImpl + session + streaming channel scaffolding; the
-	// classifyFn indirection lets us verify the hook contract without that.
-	intent := buildIntentSignals("investigate why the export is missing rows", []string{"edit", "grep"}, false)
-	tier, pattern := classifyFn(intent)
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
-	ls.SetClassification(tier, pattern)
+	classifyAndAttach(ls, "session-123", "investigate why the export is missing rows", []string{"edit", "grep"})
 
-	gotTier, gotPattern := ls.Classification()
-	if gotTier != classify.TierMedium {
-		t.Errorf("tier = %v, want TierMedium", gotTier)
+	tier, pattern := ls.Classification()
+	if tier != classify.TierMedium {
+		t.Errorf("tier = %v, want TierMedium", tier)
 	}
-	if gotPattern != classify.PatternSubagent {
-		t.Errorf("pattern = %v, want PatternSubagent", gotPattern)
+	if pattern != classify.PatternSubagent {
+		t.Errorf("pattern = %v, want PatternSubagent", pattern)
 	}
 	if captured.Message != "investigate why the export is missing rows" {
 		t.Errorf("Classify called with wrong Message: %q", captured.Message)
@@ -87,5 +79,16 @@ func TestGenerateResponse_AttachesClassification(t *testing.T) {
 	}
 	if captured.HasAttachments {
 		t.Errorf("Classify called with HasAttachments=true, want false")
+	}
+}
+
+// TestBuildIntentSignals_ShortNonEmptyMessage guards against regression of
+// the floor-of-1 MessageTokenEst behavior. A 2-char message like "hi"
+// must yield a positive estimate so classifyTier's est>0 branches can
+// fire. Addresses Copilot review on PR #74.
+func TestBuildIntentSignals_ShortNonEmptyMessage(t *testing.T) {
+	got := buildIntentSignals("hi", nil, false)
+	if got.MessageTokenEst <= 0 {
+		t.Errorf("short non-empty message: MessageTokenEst = %d, want > 0 (floor-of-1 contract)", got.MessageTokenEst)
 	}
 }

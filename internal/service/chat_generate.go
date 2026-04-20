@@ -332,17 +332,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
 	// generation; downstream consumers read via loopState.Classification().
-	intent := buildIntentSignals(userContent, toolNames, false /* attachments — see recon-notes.md */)
-	scopeTier, executionPattern := classifyFn(intent)
-	slog.Info("chat-service: pre-loop classification",
-		"session_id", sessionID,
-		"scope_tier", scopeTier.String(),
-		"execution_pattern", executionPattern.String(),
-		"message_token_est", intent.MessageTokenEst,
-		"tools_available", intent.ToolsAvailable,
-	)
 	ls := newLoopState(constraints, toolNames, debugMode)
-	ls.SetClassification(scopeTier, executionPattern)
+	// P3 (CW-20260420-0013): pre-loop classification. Downstream consumers
+	// read via loopState.Classification().
+	classifyAndAttach(ls, sessionID, userContent, toolNames)
 
 	// Load per-tool cap from UserSettings.
 	if us, err := s.store.GetUserSettings(); err == nil && us.ToolPerTurnCap > 0 {
@@ -1440,17 +1433,31 @@ func ClassifyCompactionMode(agent *store.AgentProfile) string {
 // up the full classifier path. Production code path stays direct.
 var classifyFn = classify.Classify
 
+// classifyAndAttach runs the P3 pre-loop classifier for a generation,
+// logs the result, and attaches it to the loop state. Extracted from
+// generateResponse so TestClassifyAndAttach_AttachesClassification can
+// exercise the wire itself rather than reconstructing it (CW-20260420-0013).
+func classifyAndAttach(ls *loopState, sessionID, userContent string, toolNames []string) {
+	intent := buildIntentSignals(userContent, toolNames, false /* attachments currently not tracked in pre-loop intent signals */)
+	scopeTier, executionPattern := classifyFn(intent)
+	slog.Info("chat-service: pre-loop classification",
+		"session_id", sessionID,
+		"scope_tier", scopeTier.String(),
+		"execution_pattern", executionPattern.String(),
+		"message_token_est", intent.MessageTokenEst,
+		"tools_available", intent.ToolsAvailable,
+	)
+	ls.SetClassification(scopeTier, executionPattern)
+}
+
 // buildIntentSignals assembles the pre-loop signal struct consumed by
 // classify.Classify. Pulled out as a helper for unit-testability; the
 // full generation wires this plus the Classify call at the pre-loop
 // boundary of generateResponse (CW-20260420-0013, P3).
 func buildIntentSignals(userContent string, tools []string, hasAttachments bool) classify.IntentSignals {
 	return classify.IntentSignals{
-		Message: userContent,
-		// NOTE: deliberately inline rather than internal/context.DefaultEstimator —
-		// the floor-of-1 behavior that DefaultEstimator adds is irrelevant here because
-		// classifyTier branches on est>0 explicitly. See planning/agent-platform/2026-04-19-p3-scopetier-plan.md Task 4.
-		MessageTokenEst: len(userContent) / 4,
+		Message:         userContent,
+		MessageTokenEst: ctxpkg.DefaultEstimator{}.Estimate(userContent), // floor-of-1 for non-empty strings matters: classifyTier branches require est>0
 		HasAttachments:  hasAttachments,
 		ToolsAvailable:  len(tools),
 	}

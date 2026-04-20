@@ -139,11 +139,9 @@ func (m *Manager) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			cev, parseOK := parseOne(ev.PayloadJSON)
-			if !parseOK {
-				continue
+			for _, cev := range parseAll(ev.PayloadJSON) {
+				m.dispatch(ev.SessionID, cev)
 			}
-			m.dispatch(ev.SessionID, cev)
 		}
 	}
 }

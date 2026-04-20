@@ -65,8 +65,8 @@ github.com/hollis-labs/go-providers v0.2.1 h1:cV2DNmxe3VnwPzOOXH+oGzQxSvGeO2Ht1l
 github.com/hollis-labs/go-providers v0.2.1/go.mod h1:7S6zvE5didBoY5cA0JY/rtB0pzy8s9dltuqWMtUPwK0=
 github.com/hollis-labs/go-queue v0.1.2 h1:FT0te+K0gLM3wvhnZc+nGBIcSW5ebgkhPw4ja/bJl68=
 github.com/hollis-labs/go-queue v0.1.2/go.mod h1:wAP95gDz9kxAhcCWaR4e07Jz54OvFpiNEq+5ERgt2/E=
-github.com/hollis-labs/go-toolbroker v0.0.2 h1:ZLRw8XJiAy5AOCASESfIcNJSAHh8jeX/FqxKLa67/l0=
-github.com/hollis-labs/go-toolbroker v0.0.2/go.mod h1:OWsxhIzSjtbVRDXANuyfLQ/NjaQt9jSWEGxBLtAKD4U=
+github.com/hollis-labs/go-toolbroker v0.1.0 h1:2b2c3gcjLRphxbj4NC95OZ/eH1EGw3HOYCr+7QrKF2s=
+github.com/hollis-labs/go-toolbroker v0.1.0/go.mod h1:OWsxhIzSjtbVRDXANuyfLQ/NjaQt9jSWEGxBLtAKD4U=
 github.com/hollis-labs/plugin-sdk v0.3.0 h1:xlFWssODdGkrInZv36ocSkDruYarMo2Rvvq6CrCujHY=
 github.com/hollis-labs/plugin-sdk v0.3.0/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
 github.com/hollis-labs/vanta-conduit v0.5.0 h1:ZV/lOLQR1rtm3ZE6l3UjcQ8u+V/7g2xYiWJvJI+4dW4=

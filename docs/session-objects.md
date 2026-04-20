@@ -1,6 +1,6 @@
 # SessionObjects — operator notes
 
-Ticket: [CW-20260420-0012](../../agent-workspaces/planning/agent-platform/2026-04-19-initial-decomposition.md#ticket-id-mapping-post-creation-2026-04-19) (Arc 3 / P2 primitive).
+Ticket: `CW-20260420-0012` (Arc 3 / P2 primitive).
 
 ## What this ships
 

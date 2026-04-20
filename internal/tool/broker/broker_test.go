@@ -4,11 +4,21 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/tool/broker"
+	"github.com/hollis-labs/nanite/internal/tool/enrichment"
 )
+
+// stubEnricher is a map-backed Enricher for tests.
+type stubEnricher map[string]enrichment.Hints
+
+func (s stubEnricher) LookupByToolName(_ context.Context, name string) (enrichment.Hints, bool, error) {
+	h, ok := s[name]
+	return h, ok, nil
+}
 
 // testTool creates a simple tool for testing.
 func testTool(name, category string, tags ...string) tool.Tool {
@@ -457,6 +467,57 @@ func TestBroker_SelectionSignals(t *testing.T) {
 
 	if sel.Signals == "" {
 		t.Error("Signals should be non-empty JSON")
+	}
+}
+
+// --- OverrideBlock (P1 ToolSurface) ---
+
+func TestSelection_OverrideBlockPopulated(t *testing.T) {
+	reg := testRegistry()
+	enr := stubEnricher{
+		"dev_read": {OutputShape: "returns file bytes"},
+	}
+	b := broker.New(reg, nil, broker.WithEnricher(enr))
+
+	sel := b.Select(context.Background(), broker.IntentSignals{
+		ExplicitTools: []string{"dev_read"},
+	})
+
+	if !strings.Contains(sel.OverrideBlock, "dev_read") {
+		t.Errorf("expected OverrideBlock to mention dev_read, got: %q", sel.OverrideBlock)
+	}
+	if !strings.Contains(sel.OverrideBlock, "returns file bytes") {
+		t.Errorf("expected OverrideBlock to contain hint, got: %q", sel.OverrideBlock)
+	}
+	if !strings.Contains(sel.OverrideBlock, "## Tool Overrides") {
+		t.Errorf("expected OverrideBlock to contain header, got: %q", sel.OverrideBlock)
+	}
+}
+
+func TestSelection_OverrideBlockEmptyWithoutEnricher(t *testing.T) {
+	reg := testRegistry()
+	b := broker.New(reg, nil) // no WithEnricher option → enricher is nil
+
+	sel := b.Select(context.Background(), broker.IntentSignals{
+		ExplicitTools: []string{"dev_read"},
+	})
+
+	if sel.OverrideBlock != "" {
+		t.Errorf("expected empty OverrideBlock without enricher, got: %q", sel.OverrideBlock)
+	}
+}
+
+func TestSelection_OverrideBlockEmptyWithoutEnrichedTools(t *testing.T) {
+	reg := testRegistry()
+	enr := stubEnricher{} // empty — no tool has enrichment
+	b := broker.New(reg, nil, broker.WithEnricher(enr))
+
+	sel := b.Select(context.Background(), broker.IntentSignals{
+		ExplicitTools: []string{"dev_read"},
+	})
+
+	if sel.OverrideBlock != "" {
+		t.Errorf("expected empty OverrideBlock without enriched tools, got: %q", sel.OverrideBlock)
 	}
 }
 

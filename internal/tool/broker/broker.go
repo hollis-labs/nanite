@@ -17,24 +17,41 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/tool"
+	"github.com/hollis-labs/nanite/internal/tool/enrichment"
 )
 
 // Broker performs progressive tool resolution across three layers.
 type Broker struct {
 	registry *Registry
 	rules    *RuleSet
+	enricher enrichment.Enricher
+}
+
+// Option configures a Broker at construction time.
+type Option func(*Broker)
+
+// WithEnricher wires an enrichment.Enricher into the broker so Select() populates
+// Selection.OverrideBlock. Nil is permitted and makes overrides a no-op.
+func WithEnricher(e enrichment.Enricher) Option {
+	return func(b *Broker) {
+		b.enricher = e
+	}
 }
 
 // New creates a Broker with the given tool registry and rule set.
 // If rules is nil, an empty rule set is used.
-func New(registry *Registry, rules *RuleSet) *Broker {
+func New(registry *Registry, rules *RuleSet, opts ...Option) *Broker {
 	if rules == nil {
 		rules = &RuleSet{}
 	}
-	return &Broker{
+	b := &Broker{
 		registry: registry,
 		rules:    rules,
 	}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
 }
 
 // IntentSignals carries all available context for tool selection.
@@ -64,6 +81,11 @@ type Selection struct {
 	LayerReached string      `json:"layer_reached"` // "explicit", "rules", "classifier", "fallback"
 	Intent       string      `json:"intent"`
 	Signals      string      `json:"signals"` // JSON-encoded IntentSignals snapshot
+
+	// OverrideBlock is the markdown section produced by enrichment.ComposeOverrideBlock
+	// for the selected tools, ready to append to the system prompt. Empty when no
+	// tool has enrichment or no Enricher is configured on the broker.
+	OverrideBlock string `json:"-"`
 }
 
 // Select performs progressive resolution across all layers.
@@ -76,6 +98,7 @@ func (b *Broker) Select(ctx context.Context, signals IntentSignals) *Selection {
 	// Layer 1: Explicit.
 	if sel := b.layerExplicit(signals); sel != nil {
 		sel.Signals = string(sigJSON)
+		b.applyOverrideBlock(ctx, sel)
 		slog.Debug("broker: layer 1 (explicit) resolved", "count", len(sel.Tools), "duration", time.Since(start))
 		return sel
 	}
@@ -83,6 +106,7 @@ func (b *Broker) Select(ctx context.Context, signals IntentSignals) *Selection {
 	// Layer 2: Rule-based.
 	if sel := b.layerRules(signals); sel != nil {
 		sel.Signals = string(sigJSON)
+		b.applyOverrideBlock(ctx, sel)
 		slog.Debug("broker: layer 2 (rules) resolved", "count", len(sel.Tools), "duration", time.Since(start))
 		return sel
 	}
@@ -90,6 +114,7 @@ func (b *Broker) Select(ctx context.Context, signals IntentSignals) *Selection {
 	// Layer 3: Classifier.
 	if sel := b.layerClassifier(signals); sel != nil {
 		sel.Signals = string(sigJSON)
+		b.applyOverrideBlock(ctx, sel)
 		slog.Debug("broker: layer 3 (classifier) resolved", "count", len(sel.Tools), "duration", time.Since(start))
 		return sel
 	}
@@ -97,8 +122,24 @@ func (b *Broker) Select(ctx context.Context, signals IntentSignals) *Selection {
 	// Fallback: always-available set + top tools by category diversity.
 	sel := b.fallback(signals)
 	sel.Signals = string(sigJSON)
+	b.applyOverrideBlock(ctx, sel)
 	slog.Debug("broker: fallback resolved", "count", len(sel.Tools), "duration", time.Since(start))
 	return sel
+}
+
+// applyOverrideBlock composes Selection.OverrideBlock from the configured enricher,
+// if any. Errors are logged and swallowed — selection cannot fail on enrichment,
+// worst case no overrides ship this turn.
+func (b *Broker) applyOverrideBlock(ctx context.Context, sel *Selection) {
+	if b.enricher == nil || sel == nil {
+		return
+	}
+	block, err := enrichment.ComposeOverrideBlock(ctx, sel.ToolNames, b.enricher)
+	if err != nil {
+		slog.Warn("broker: compose override block failed", "err", err)
+		return
+	}
+	sel.OverrideBlock = block
 }
 
 // fallback returns the always-available tools plus a best-effort selection.

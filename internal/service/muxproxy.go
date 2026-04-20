@@ -26,36 +26,6 @@ type muxClient interface {
 	StopSession(ctx context.Context, sessionID string) error
 }
 
-// LaunchSummary is the LLM-visible projection of agentmux.Launch.
-type LaunchSummary struct {
-	ID       string `json:"id"`
-	Project  string `json:"project"`
-	Agent    string `json:"agent"`
-	Provider string `json:"provider"`
-}
-
-// LaunchResult is returned from LaunchSubordinate.
-type LaunchResult struct {
-	SessionID  string `json:"session_id"`
-	ProviderID string `json:"provider_id"`
-	Nickname   string `json:"nickname"`
-}
-
-// SendResult is returned from Send.
-type SendResult struct {
-	Transcript   string        `json:"transcript"`
-	ToolUses     []SendToolUse `json:"tool_uses"`
-	InputTokens  int           `json:"input_tokens,omitempty"`
-	OutputTokens int           `json:"output_tokens,omitempty"`
-	ExitStatus   string        `json:"exit_status"` // done | error | timeout
-	Error        string        `json:"error,omitempty"`
-}
-
-// SendToolUse is a trimmed projection of claudestream.ToolUseBlock.
-type SendToolUse struct {
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
-}
 
 // MuxProxy is the chat-session-facing service layer.
 type MuxProxy struct {
@@ -74,14 +44,14 @@ func NewMuxProxy(c muxClient, mgr *muxproxy.Manager) *MuxProxy {
 }
 
 // ListAvailableLaunches returns the daemon's catalog of launches.
-func (s *MuxProxy) ListAvailableLaunches(ctx context.Context) ([]LaunchSummary, error) {
+func (s *MuxProxy) ListAvailableLaunches(ctx context.Context) ([]muxproxy.LaunchSummary, error) {
 	launches, err := s.client.ListLaunches(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]LaunchSummary, 0, len(launches))
+	out := make([]muxproxy.LaunchSummary, 0, len(launches))
 	for _, l := range launches {
-		out = append(out, LaunchSummary{
+		out = append(out, muxproxy.LaunchSummary{
 			ID:       l.ID,
 			Project:  l.Project,
 			Agent:    l.Agent,
@@ -93,16 +63,16 @@ func (s *MuxProxy) ListAvailableLaunches(ctx context.Context) ([]LaunchSummary, 
 
 // LaunchSubordinate starts a claudestream-kind subordinate and
 // registers its nickname in the Manager.
-func (s *MuxProxy) LaunchSubordinate(ctx context.Context, launchID, nickname string) (LaunchResult, error) {
+func (s *MuxProxy) LaunchSubordinate(ctx context.Context, launchID, nickname string) (muxproxy.LaunchResult, error) {
 	resp, err := s.client.Launch(ctx, launchID)
 	if err != nil {
-		return LaunchResult{}, err
+		return muxproxy.LaunchResult{}, err
 	}
 	if resp.ProviderID != "claudestream" {
-		return LaunchResult{}, fmt.Errorf("%w: got provider_id=%q", ErrUnsupportedProvider, resp.ProviderID)
+		return muxproxy.LaunchResult{}, fmt.Errorf("%w: got provider_id=%q", ErrUnsupportedProvider, resp.ProviderID)
 	}
 	s.mgr.Register(resp.ID, nickname)
-	return LaunchResult{
+	return muxproxy.LaunchResult{
 		SessionID:  resp.ID,
 		ProviderID: resp.ProviderID,
 		Nickname:   nickname,
@@ -111,18 +81,18 @@ func (s *MuxProxy) LaunchSubordinate(ctx context.Context, launchID, nickname str
 
 // Send delivers text to the subordinate and blocks until KindDone /
 // KindError / timeout.
-func (s *MuxProxy) Send(ctx context.Context, sessionID, text string) (SendResult, error) {
+func (s *MuxProxy) Send(ctx context.Context, sessionID, text string) (muxproxy.SendResult, error) {
 	if err := s.client.SendInput(ctx, sessionID, []byte(text+"\n")); err != nil {
-		return SendResult{}, err
+		return muxproxy.SendResult{}, err
 	}
 	ch := s.mgr.WaiterChannel(sessionID)
 	if ch == nil {
-		return SendResult{}, fmt.Errorf("muxproxy: session %q not registered", sessionID)
+		return muxproxy.SendResult{}, fmt.Errorf("muxproxy: session %q not registered", sessionID)
 	}
 
 	var (
 		transcript strings.Builder
-		toolUses   []SendToolUse
+		toolUses   []muxproxy.SendToolUse
 	)
 	deadline := time.NewTimer(s.sendTimeout)
 	defer deadline.Stop()
@@ -130,12 +100,12 @@ func (s *MuxProxy) Send(ctx context.Context, sessionID, text string) (SendResult
 	for {
 		select {
 		case <-ctx.Done():
-			return SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: ctx.Err().Error()}, nil
+			return muxproxy.SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: ctx.Err().Error()}, nil
 		case <-deadline.C:
-			return SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "timeout"}, nil
+			return muxproxy.SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "timeout"}, nil
 		case ev, ok := <-ch:
 			if !ok {
-				return SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: "channel closed"}, nil
+				return muxproxy.SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: "channel closed"}, nil
 			}
 			switch ev.Kind {
 			case claudestream.KindDelta:
@@ -143,17 +113,17 @@ func (s *MuxProxy) Send(ctx context.Context, sessionID, text string) (SendResult
 			case claudestream.KindToolUse:
 				if ev.ToolUse != nil {
 					raw, _ := json.Marshal(ev.ToolUse.Input) //nolint:errcheck // map[string]any marshal cannot fail
-					toolUses = append(toolUses, SendToolUse{Name: ev.ToolUse.Name, Input: raw})
+					toolUses = append(toolUses, muxproxy.SendToolUse{Name: ev.ToolUse.Name, Input: raw})
 				}
 			case claudestream.KindDone:
-				out := SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "done"}
+				out := muxproxy.SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "done"}
 				if ev.Usage != nil {
 					out.InputTokens = ev.Usage.InputTokens
 					out.OutputTokens = ev.Usage.OutputTokens
 				}
 				return out, nil
 			case claudestream.KindError:
-				return SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: ev.ErrorMsg}, nil
+				return muxproxy.SendResult{Transcript: transcript.String(), ToolUses: toolUses, ExitStatus: "error", Error: ev.ErrorMsg}, nil
 			case claudestream.KindSessionID, claudestream.KindUsage:
 				// informational only; no action needed in the blocking-send path
 			}

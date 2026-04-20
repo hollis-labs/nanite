@@ -152,6 +152,39 @@ func (m *Manager) dispatch(ctx context.Context, sessionID string, cev claudestre
 	}
 }
 
+// LaunchSummary mirrors service.LaunchSummary to avoid a package
+// cycle: transport.go lives in muxproxy, service in service,
+// transport dispatches *into* service.
+type LaunchSummary struct {
+	ID       string `json:"id"`
+	Project  string `json:"project"`
+	Agent    string `json:"agent"`
+	Provider string `json:"provider"`
+}
+
+// LaunchResult mirrors service.LaunchResult (see LaunchSummary note).
+type LaunchResult struct {
+	SessionID  string `json:"session_id"`
+	ProviderID string `json:"provider_id"`
+	Nickname   string `json:"nickname"`
+}
+
+// SendToolUse mirrors service.SendToolUse.
+type SendToolUse struct {
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+// SendResult mirrors service.SendResult.
+type SendResult struct {
+	Transcript   string        `json:"transcript"`
+	ToolUses     []SendToolUse `json:"tool_uses"`
+	InputTokens  int           `json:"input_tokens,omitempty"`
+	OutputTokens int           `json:"output_tokens,omitempty"`
+	ExitStatus   string        `json:"exit_status"`
+	Error        string        `json:"error,omitempty"`
+}
+
 func toSinkEvent(sessionID, nickname string, cev claudestream.Event) (SubordinateStreamEvent, bool) {
 	switch cev.Kind {
 	case claudestream.KindDelta:

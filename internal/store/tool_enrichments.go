@@ -34,7 +34,7 @@ func (s *Store) GetToolEnrichment(toolName string) (ToolEnrichment, error) {
 	if err != nil {
 		return ToolEnrichment{}, fmt.Errorf("get tool enrichment: %w", err)
 	}
-	t, err := time.Parse(time.RFC3339, updatedAtStr)
+	t, err := time.Parse(time.RFC3339Nano, updatedAtStr)
 	if err != nil {
 		return ToolEnrichment{}, fmt.Errorf("parse updated_at: %w", err)
 	}
@@ -58,7 +58,7 @@ func (s *Store) UpsertToolEnrichment(rec ToolEnrichment) error {
 	_, err := s.DB.Exec(
 		`INSERT INTO tool_enrichments (tool_name, hints_json, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT(tool_name) DO UPDATE SET hints_json = excluded.hints_json, updated_at = excluded.updated_at`,
-		rec.ToolName, rec.HintsJSON, rec.UpdatedAt.UTC().Format(time.RFC3339),
+		rec.ToolName, rec.HintsJSON, rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert tool enrichment: %w", err)
@@ -83,7 +83,7 @@ func (s *Store) ListToolEnrichments() ([]ToolEnrichment, error) {
 		if err := rows.Scan(&rec.ToolName, &rec.HintsJSON, &updatedAtStr); err != nil {
 			return nil, fmt.Errorf("scan tool enrichment: %w", err)
 		}
-		t, err := time.Parse(time.RFC3339, updatedAtStr)
+		t, err := time.Parse(time.RFC3339Nano, updatedAtStr)
 		if err != nil {
 			return nil, fmt.Errorf("parse updated_at for %s: %w", rec.ToolName, err)
 		}

@@ -33,6 +33,29 @@ Today, enrichment records are written via the store's `UpsertToolEnrichment`
 method. Expected authors: admin tooling, CLI scripts, or (planned) the
 Tool Broker Enrichment Pipeline probe agent (`CW-20260419-0024`).
 
+### Picking the right `tool_name`
+
+The lookup key is **the name the LLM sees**, not the raw tool name from its
+source. `toolclient.SelectToolsAsProvider` builds the final set with:
+
+- **Built-in tools:** raw name, no prefix. Examples: `dev_bash`, `dev_read`,
+  `request_tools`.
+- **MCP-provided tools:** prefixed with `mcp__<server>__` so different MCP
+  servers that expose the same tool name don't collide. Example: a server
+  registered as `clockwork` exposing a `task_list` tool is surfaced to the
+  LLM (and therefore stored / looked up) as `mcp__clockwork__task_list`.
+
+The broker composes the override block from this final, provider-visible
+name list. An enrichment row with `tool_name = 'task_list'` for an
+MCP-served `task_list` will never match; write it as
+`mcp__<server>__task_list` instead.
+
+To discover the exact name for a running instance, log the
+`provider.ToolDefinition.Name` values from `SelectToolsAsProvider` in dev,
+or inspect the tool block the provider receives in the request payload.
+
+### Examples
+
 Manual insertion via a one-off Go script:
 
 ```go
@@ -50,17 +73,22 @@ err := s.UpsertToolEnrichment(store.ToolEnrichment{
 })
 ```
 
-Direct SQL insertion (for operators comfortable with sqlite3):
+Direct SQL insertion for an MCP-served tool (for operators comfortable with
+sqlite3 — note the `mcp__<server>__` prefix per the naming rules above):
 
 ```sql
 INSERT INTO tool_enrichments (tool_name, hints_json, updated_at) VALUES (
-    'my_tool',
+    'mcp__my_server__my_tool',
     '{"output_shape":"Paginated array","anti_patterns":["do not X"]}',
     '2026-04-20T00:00:00Z'
 ) ON CONFLICT(tool_name) DO UPDATE SET
     hints_json = excluded.hints_json,
     updated_at = excluded.updated_at;
 ```
+
+`updated_at` accepts both `RFC3339` (`2026-04-20T00:00:00Z`) and
+`RFC3339Nano` (`2026-04-20T00:00:00.123456789Z`) — the store reads with
+`time.RFC3339Nano`, which is a strict superset of RFC3339.
 
 Field reference (all optional, JSON snake_case):
 

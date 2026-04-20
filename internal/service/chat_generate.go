@@ -22,8 +22,53 @@ import (
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/tool/broker"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
+
+// noToolsWarningPrefix is prepended to the per-turn system prefix when the
+// agent has no MCP tools and progressive discovery is not active. Kept as a
+// package-level const so composeExtraSystemPrefix stays a pure function of its
+// inputs.
+const noToolsWarningPrefix = "IMPORTANT: You have no tools available in this session. Do NOT attempt to call any tools — all tool calls will fail. Respond with text only. If the user's request requires tools (data lookup, task management, code execution, etc.), clearly explain that this agent is not configured with the necessary tools and suggest they switch to an agent that has tools configured.\n\n"
+
+// composeConfig captures the per-turn flags that shape the system prefix
+// composed by composeExtraSystemPrefix. All fields are set by the caller in
+// generateResponse; the helper itself performs no side effects.
+type composeConfig struct {
+	// noTools is true when the agent has zero MCP tools and progressive
+	// discovery is not active. Triggers the no-tools warning prefix.
+	noTools bool
+	// progressiveActive is true when progressive tool discovery is in effect
+	// for this turn.
+	progressiveActive bool
+	// progressiveCatalog is the catalog string to inject when progressiveActive
+	// is true. Empty string is tolerated (skipped).
+	progressiveCatalog string
+}
+
+// composeExtraSystemPrefix builds the per-turn system prompt prefix: optional
+// no-tools warning, optional progressive discovery catalog, the native tool
+// guide, and (when non-empty) the selection's override block appended after
+// the native guide. Order is significant — tool-specific overrides ship AFTER
+// the general guide so they can override conflicting general rules for the
+// named tool.
+func composeExtraSystemPrefix(sel broker.Selection, cfg composeConfig) string {
+	var b strings.Builder
+	if cfg.noTools {
+		b.WriteString(noToolsWarningPrefix)
+	}
+	if cfg.progressiveActive && cfg.progressiveCatalog != "" {
+		b.WriteString(cfg.progressiveCatalog)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(strings.TrimLeft(nativeToolGuide, "\n"))
+	if sel.OverrideBlock != "" {
+		b.WriteString("\n\n")
+		b.WriteString(sel.OverrideBlock)
+	}
+	return b.String()
+}
 
 // generateResponseTimeout is the maximum wall-clock time a single
 // generateResponse goroutine is allowed to run before being cancelled.
@@ -181,30 +226,30 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks
 	// in the provider payload) and varies per turn; static agent / rules /
 	// session content lives in the slot blocks.
-	var prefixB strings.Builder
-
-	// Warn if no MCP tools and not progressive discovery.
-	if !selection.Progressive {
-		mcpCount := countMCPTools(tools)
-		if mcpCount == 0 {
-			warningPayload := chat.ToolWarningPayload{
-				Error: "This agent has no MCP tools configured. Responses will be text-only.",
-				Level: "critical",
-			}
-			warningJSON, _ := json.Marshal(warningPayload)
-			ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
-			prefixB.WriteString("IMPORTANT: You have no tools available in this session. Do NOT attempt to call any tools — all tool calls will fail. Respond with text only. If the user's request requires tools (data lookup, task management, code execution, etc.), clearly explain that this agent is not configured with the necessary tools and suggest they switch to an agent that has tools configured.\n\n")
+	//
+	// Determine the no-tools condition up front so we can both emit the client
+	// warning event (side-effect, stays here) and pass the flag to the pure
+	// composeExtraSystemPrefix helper.
+	noTools := false
+	if !selection.Progressive && countMCPTools(tools) == 0 {
+		noTools = true
+		warningPayload := chat.ToolWarningPayload{
+			Error: "This agent has no MCP tools configured. Responses will be text-only.",
+			Level: "critical",
 		}
+		warningJSON, _ := json.Marshal(warningPayload)
+		ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 	}
 
-	// Inject progressive discovery catalog.
-	if selection.Progressive && selection.Catalog != "" {
-		prefixB.WriteString(selection.Catalog)
-		prefixB.WriteString("\n\n")
-	}
-
-	prefixB.WriteString(strings.TrimLeft(nativeToolGuide, "\n"))
-	extraSystemPrefix := prefixB.String()
+	// Task 6 (CW-20260420-0006): once the runtime broker is wired to the
+	// service-layer ToolSelection, selection.OverrideBlock will flow here.
+	// Until Task 7's wiring lands, pass an empty Selection so the helper is
+	// exercised but no override block is injected yet.
+	extraSystemPrefix := composeExtraSystemPrefix(broker.Selection{}, composeConfig{
+		noTools:            noTools,
+		progressiveActive:  selection.Progressive,
+		progressiveCatalog: selection.Catalog,
+	})
 
 	// --- Plugin filter: system_prompt ---
 	// In the slot model the filter operates on the dynamic per-turn prefix

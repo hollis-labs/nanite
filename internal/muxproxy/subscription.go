@@ -16,28 +16,38 @@ type streamSource interface {
 	StreamEvents(ctx context.Context, opts agentmux.StreamEventsOptions) (<-chan agentmux.StreamEvent, <-chan error)
 }
 
-// SubordinateStreamEvent is the chat-SSE shape for a subordinate's
-// parsed claudestream event. The chat engine's renderer maps these
-// onto its existing StreamEvent wire format.
-type SubordinateStreamEvent struct {
-	Type         string          // subordinate_delta | subordinate_tool_use | subordinate_done
-	SessionID    string          // subordinate agent-mux session ID
-	Nickname     string          // human-readable label registered at launch
-	Text         string          // populated for subordinate_delta
-	ToolName     string          // populated for subordinate_tool_use
-	ToolInput    json.RawMessage // populated for subordinate_tool_use
-	InputTokens  int             // populated for subordinate_done
-	OutputTokens int             // populated for subordinate_done
+// SubEvent is a subordinate stream event emitted from the Manager for
+// live SSE rendering. It mirrors the fields of chat.StreamEvent that
+// subordinate events populate, without importing the chat package
+// (which would create a dependency cycle via chat→mcp→muxproxy).
+// CW-20260420-0047.
+type SubEvent struct {
+	Type         string // subordinate_delta | subordinate_tool_use | subordinate_done
+	Content      string // text delta (subordinate_delta) or JSON tool input (subordinate_tool_use)
+	AgentID      string // nickname
+	InputTokens  int    // subordinate_done only
+	OutputTokens int    // subordinate_done only
+	Tool         string // tool name (subordinate_tool_use only)
+}
+
+// StreamPublisher publishes subordinate events into an active chat
+// session's SSE stream. The caller (main.go) provides an adapter that
+// converts SubEvent → chat.StreamEvent and calls
+// StreamManager.BroadcastSessionStreamEvent. CW-20260420-0047.
+type StreamPublisher interface {
+	PublishSubEvent(sessionID string, evt SubEvent)
 }
 
 // Manager fans out claudestream events from a single shared
 // StreamEvents subscription to per-session blocking waiters AND to
-// the chat session's SSE sink for live rendering.
+// the chat session's SSE stream via StreamPublisher.
 type Manager struct {
-	stream  streamSource
-	mu      sync.RWMutex
-	chanFor map[string]chan claudestream.Event
-	nickFor map[string]string
+	stream    streamSource
+	publisher StreamPublisher // may be nil; Manager works without one
+	mu        sync.RWMutex
+	chanFor   map[string]chan claudestream.Event
+	nickFor   map[string]string
+	chatOwner map[string]string // subordinate session ID → chat session ID
 }
 
 // NewManager constructs a Manager backed by the singleton Client.
@@ -48,20 +58,32 @@ func NewManager() *Manager {
 // NewManagerWithStream is the test seam.
 func NewManagerWithStream(s streamSource) *Manager {
 	return &Manager{
-		stream:  s,
-		chanFor: make(map[string]chan claudestream.Event),
-		nickFor: make(map[string]string),
+		stream:    s,
+		chanFor:   make(map[string]chan claudestream.Event),
+		nickFor:   make(map[string]string),
+		chatOwner: make(map[string]string),
 	}
 }
 
-// Register allocates a per-session event channel and records a
-// nickname for rendering. Returns the channel the caller reads from
+// SetPublisher wires in a StreamPublisher for live SSE rendering.
+// Safe to call after construction and before Run.
+func (m *Manager) SetPublisher(p StreamPublisher) {
+	m.mu.Lock()
+	m.publisher = p
+	m.mu.Unlock()
+}
+
+// Register allocates a per-session event channel, records a nickname and
+// the owning chat session ID. Returns the channel the caller reads from
 // (e.g. a blocking mux_send waiter).
-func (m *Manager) Register(sessionID, nickname string) <-chan claudestream.Event {
+// chatSessionID is the Nanite chat session that owns this subordinate;
+// pass "" when the chat session ID is not available (e.g. in tests).
+func (m *Manager) Register(chatSessionID, subordinateSessionID, nickname string) <-chan claudestream.Event {
 	ch := make(chan claudestream.Event, 64)
 	m.mu.Lock()
-	m.chanFor[sessionID] = ch
-	m.nickFor[sessionID] = nickname
+	m.chanFor[subordinateSessionID] = ch
+	m.nickFor[subordinateSessionID] = nickname
+	m.chatOwner[subordinateSessionID] = chatSessionID
 	m.mu.Unlock()
 	return ch
 }
@@ -74,6 +96,7 @@ func (m *Manager) Unregister(sessionID string) {
 	}
 	delete(m.chanFor, sessionID)
 	delete(m.nickFor, sessionID)
+	delete(m.chatOwner, sessionID)
 	m.mu.Unlock()
 }
 
@@ -94,9 +117,9 @@ func (m *Manager) WaiterChannel(sessionID string) chan claudestream.Event {
 
 // Run drives the shared StreamEvents subscription until ctx is done.
 // Every claudestream event is dispatched to BOTH the per-session
-// waiter channel (non-blocking drop on full) AND the chat SSE sink
-// (blocking — chat SSE backpressure applies).
-func (m *Manager) Run(ctx context.Context, sink chan<- SubordinateStreamEvent) {
+// waiter channel (non-blocking drop on full) AND the chat SSE stream
+// via the configured StreamPublisher (if set).
+func (m *Manager) Run(ctx context.Context) {
 	events, errs := m.stream.StreamEvents(ctx, agentmux.StreamEventsOptions{
 		Scopes: []string{"session"},
 	})
@@ -120,15 +143,17 @@ func (m *Manager) Run(ctx context.Context, sink chan<- SubordinateStreamEvent) {
 			if !parseOK {
 				continue
 			}
-			m.dispatch(ctx, ev.SessionID, cev, sink)
+			m.dispatch(ev.SessionID, cev)
 		}
 	}
 }
 
-func (m *Manager) dispatch(ctx context.Context, sessionID string, cev claudestream.Event, sink chan<- SubordinateStreamEvent) {
+func (m *Manager) dispatch(sessionID string, cev claudestream.Event) {
 	m.mu.RLock()
 	ch, known := m.chanFor[sessionID]
 	nick := m.nickFor[sessionID]
+	chatID := m.chatOwner[sessionID]
+	pub := m.publisher
 	m.mu.RUnlock()
 	if !known {
 		return
@@ -142,13 +167,51 @@ func (m *Manager) dispatch(ctx context.Context, sessionID string, cev claudestre
 			"session", sessionID, "kind", cev.Kind)
 	}
 
-	sev, emit := toSinkEvent(sessionID, nick, cev)
+	// Live-render path: publish to chat SSE if publisher and chatID are set.
+	if pub == nil || chatID == "" {
+		return
+	}
+	sev, emit := toSubEvent(nick, cev)
 	if !emit {
 		return
 	}
-	select {
-	case sink <- sev:
-	case <-ctx.Done():
+	pub.PublishSubEvent(chatID, sev)
+}
+
+// toSubEvent converts a claudestream.Event into a SubEvent for live SSE
+// rendering. Returns (event, true) when the event kind is renderable,
+// (zero, false) otherwise.
+func toSubEvent(nickname string, cev claudestream.Event) (SubEvent, bool) {
+	switch cev.Kind {
+	case claudestream.KindDelta:
+		return SubEvent{
+			Type:    "subordinate_delta",
+			Content: cev.Text,
+			AgentID: nickname,
+		}, true
+	case claudestream.KindToolUse:
+		if cev.ToolUse == nil {
+			return SubEvent{}, false
+		}
+		raw, _ := json.Marshal(cev.ToolUse.Input)
+		return SubEvent{
+			Type:    "subordinate_tool_use",
+			Tool:    cev.ToolUse.Name,
+			Content: string(raw),
+			AgentID: nickname,
+		}, true
+	case claudestream.KindDone:
+		sev := SubEvent{
+			Type:    "subordinate_done",
+			AgentID: nickname,
+		}
+		if cev.Usage != nil {
+			sev.InputTokens = cev.Usage.InputTokens
+			sev.OutputTokens = cev.Usage.OutputTokens
+		}
+		return sev, true
+	default:
+		return SubEvent{}, false
 	}
 }
 
@@ -183,41 +246,4 @@ type SendResult struct {
 	OutputTokens int           `json:"output_tokens,omitempty"`
 	ExitStatus   string        `json:"exit_status"`
 	Error        string        `json:"error,omitempty"`
-}
-
-func toSinkEvent(sessionID, nickname string, cev claudestream.Event) (SubordinateStreamEvent, bool) {
-	switch cev.Kind {
-	case claudestream.KindDelta:
-		return SubordinateStreamEvent{
-			Type:      "subordinate_delta",
-			SessionID: sessionID,
-			Nickname:  nickname,
-			Text:      cev.Text,
-		}, true
-	case claudestream.KindToolUse:
-		if cev.ToolUse == nil {
-			return SubordinateStreamEvent{}, false
-		}
-		raw, _ := json.Marshal(cev.ToolUse.Input)
-		return SubordinateStreamEvent{
-			Type:      "subordinate_tool_use",
-			SessionID: sessionID,
-			Nickname:  nickname,
-			ToolName:  cev.ToolUse.Name,
-			ToolInput: raw,
-		}, true
-	case claudestream.KindDone:
-		sev := SubordinateStreamEvent{
-			Type:      "subordinate_done",
-			SessionID: sessionID,
-			Nickname:  nickname,
-		}
-		if cev.Usage != nil {
-			sev.InputTokens = cev.Usage.InputTokens
-			sev.OutputTokens = cev.Usage.OutputTokens
-		}
-		return sev, true
-	default:
-		return SubordinateStreamEvent{}, false
-	}
 }

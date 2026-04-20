@@ -119,6 +119,14 @@ type StreamEvent struct {
 	EventID uint64 `json:"event_id,omitempty"`
 }
 
+// Subordinate event type constants for mux-orchestrated agents.
+// CW-20260420-0047.
+const (
+	StreamEventSubordinateDelta   = "subordinate_delta"
+	StreamEventSubordinateToolUse = "subordinate_tool_use"
+	StreamEventSubordinateDone    = "subordinate_done"
+)
+
 // Usage contains token usage for a completed response.
 type Usage struct {
 	InputTokens         int    `json:"input_tokens"`

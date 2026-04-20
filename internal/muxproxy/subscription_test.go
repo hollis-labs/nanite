@@ -2,7 +2,6 @@ package muxproxy
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -20,6 +19,20 @@ func (f *fakeStream) StreamEvents(ctx context.Context, _ agentmux.StreamEventsOp
 	return f.events, f.errs
 }
 
+// fakePublisher records PublishSubEvent calls.
+type publishedEvent struct {
+	sessionID string
+	evt       SubEvent
+}
+
+type fakePublisher struct {
+	published []publishedEvent
+}
+
+func (fp *fakePublisher) PublishSubEvent(sessionID string, evt SubEvent) {
+	fp.published = append(fp.published, publishedEvent{sessionID: sessionID, evt: evt})
+}
+
 func TestManager_RegisterAndFanout(t *testing.T) {
 	f := &fakeStream{
 		events: make(chan agentmux.StreamEvent, 4),
@@ -28,11 +41,12 @@ func TestManager_RegisterAndFanout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sink := make(chan SubordinateStreamEvent, 16)
+	fp := &fakePublisher{}
 	m := NewManagerWithStream(f)
-	ch := m.Register("sess-A", "Alice")
+	m.SetPublisher(fp)
+	ch := m.Register("chat-1", "sess-A", "Alice")
 
-	go m.Run(ctx, sink)
+	go m.Run(ctx)
 
 	payload := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}`
 	f.events <- agentmux.StreamEvent{SessionID: "sess-A", PayloadJSON: payload}
@@ -46,15 +60,25 @@ func TestManager_RegisterAndFanout(t *testing.T) {
 		t.Fatal("waiter channel did not receive event")
 	}
 
-	select {
-	case sev := <-sink:
-		if sev.Nickname != "Alice" || sev.Type != "subordinate_delta" {
-			t.Fatalf("unexpected sink event: %+v", sev)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("sink did not receive live-render event")
+	// Give dispatch a moment to call the publisher.
+	time.Sleep(20 * time.Millisecond)
+
+	if len(fp.published) == 0 {
+		t.Fatal("publisher received no events")
 	}
-	_ = json.RawMessage{}
+	got := fp.published[0]
+	if got.sessionID != "chat-1" {
+		t.Fatalf("want sessionID=chat-1, got %q", got.sessionID)
+	}
+	if got.evt.Type != "subordinate_delta" {
+		t.Fatalf("want type=subordinate_delta, got %q", got.evt.Type)
+	}
+	if got.evt.Content != "hi" {
+		t.Fatalf("want content=hi, got %q", got.evt.Content)
+	}
+	if got.evt.AgentID != "Alice" {
+		t.Fatalf("want agent_id=Alice, got %q", got.evt.AgentID)
+	}
 }
 
 func TestManager_IgnoresUnregisteredSessions(t *testing.T) {
@@ -65,17 +89,17 @@ func TestManager_IgnoresUnregisteredSessions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sink := make(chan SubordinateStreamEvent, 4)
+	fp := &fakePublisher{}
 	m := NewManagerWithStream(f)
-	go m.Run(ctx, sink)
+	m.SetPublisher(fp)
+	go m.Run(ctx)
 
 	payload := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ignore me"}]}}`
 	f.events <- agentmux.StreamEvent{SessionID: "not-ours", PayloadJSON: payload}
 
-	select {
-	case sev := <-sink:
-		t.Fatalf("sink received event for unregistered session: %+v", sev)
-	case <-time.After(100 * time.Millisecond):
-		// good — no event delivered
+	time.Sleep(100 * time.Millisecond)
+
+	if len(fp.published) != 0 {
+		t.Fatalf("publisher received event for unregistered session: %+v", fp.published)
 	}
 }

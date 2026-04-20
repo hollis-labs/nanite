@@ -10,6 +10,7 @@ import (
 
 	"github.com/chrispian/agent-mux/pkg/claudestream"
 	agentmux "github.com/hollis-labs/go-agentmux-client"
+	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
 )
 
@@ -71,7 +72,8 @@ func (s *MuxProxy) LaunchSubordinate(ctx context.Context, launchID, nickname str
 	if resp.ProviderID != "claudestream" {
 		return muxproxy.LaunchResult{}, fmt.Errorf("%w: got provider_id=%q", ErrUnsupportedProvider, resp.ProviderID)
 	}
-	s.mgr.Register(resp.ID, nickname)
+	chatSessionID := mcp.SessionIDFromContext(ctx)
+	s.mgr.Register(chatSessionID, resp.ID, nickname)
 	return muxproxy.LaunchResult{
 		SessionID:  resp.ID,
 		ProviderID: resp.ProviderID,

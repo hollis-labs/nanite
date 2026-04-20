@@ -100,7 +100,7 @@ func TestMuxProxy_Send_BlocksUntilDone(t *testing.T) {
 	svc.sendTimeout = 2 * time.Second
 
 	// Pre-register channel so Send can find it.
-	mgr.Register("sess-A", "Alice")
+	mgr.Register("chat-test", "sess-A", "Alice")
 
 	go func() {
 		// Simulate Manager dispatching events to the waiter.
@@ -132,7 +132,7 @@ func TestMuxProxy_Send_Timeout(t *testing.T) {
 	svc := NewMuxProxy(fake, mgr)
 	svc.sendTimeout = 100 * time.Millisecond
 
-	mgr.Register("sess-A", "Alice")
+	mgr.Register("chat-test", "sess-A", "Alice")
 
 	out, err := svc.Send(context.Background(), "sess-A", "ping")
 	if err != nil {
@@ -147,7 +147,7 @@ func TestMuxProxy_Stop(t *testing.T) {
 	fake := &fakeMuxClient{}
 	mgr := muxproxy.NewManagerWithStream(nil)
 	svc := NewMuxProxy(fake, mgr)
-	mgr.Register("sess-A", "Alice")
+	mgr.Register("chat-test", "sess-A", "Alice")
 
 	if err := svc.Stop(context.Background(), "sess-A"); err != nil {
 		t.Fatal(err)

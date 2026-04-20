@@ -197,7 +197,7 @@ func cmdServe(args []string) {
 	slog.Info("output filters registered", "filters", outputFilters.Names())
 
 	// Set up MCP manager, tool broker, and self-service tools.
-	mcpManager, tb, selfTools := initMCP(s)
+	mcpManager, tb, selfTools, muxMgr := initMCP(s)
 
 	// Set up activity emitter (Volon GUI events).
 	activity := chat.NewActivityEmitter("")
@@ -280,6 +280,11 @@ func cmdServe(args []string) {
 		slogx.Fatal("failed to create service container", "err", err)
 	}
 
+	// POC: CW-20260420-0047 — wire mux Manager's StreamPublisher now that
+	// StreamManager is available. Run goroutine is started after
+	// daemonLifecycle is constructed below.
+	muxMgr.SetPublisher(muxStreamAdapter{streams: container.Streams})
+
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
 	selfTools.Messaging = container.Messaging
@@ -340,6 +345,12 @@ func cmdServe(args []string) {
 	// snapshots, reapers). Owned by cmdServe; shut down on signal before
 	// container.Shutdown so daemons stop referencing container state.
 	daemonLifecycle := lifecycle.NewManager("cmd.nanite.daemons")
+
+	// POC: CW-20260420-0047 — start the mux Manager event-fan goroutine.
+	// Publisher was set above; Run drives the StreamEvents subscription.
+	daemonLifecycle.Go("mux-manager", func(ctx context.Context) {
+		muxMgr.Run(ctx)
+	})
 
 	// Shutdown handler. Uses context.Background() because cmdServe has no
 	// parent ctx at this scope; the goroutine lives until the process exits.
@@ -489,8 +500,9 @@ func registerLegacyPTYAlias(registry *provider.Registry) {
 }
 
 // initMCP sets up the MCP manager with built-in and user-configured servers,
-// runs auto-discovery, and creates the tool broker.
-func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport) {
+// runs auto-discovery, and creates the tool broker. Returns the mux Manager
+// so the caller can wire a StreamPublisher and start Run after container init.
+func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager) {
 	mcpManager := mcp.NewManager()
 
 	homeDir, _ := os.UserHomeDir()
@@ -564,7 +576,7 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 		toolclient.SearchToolResultMetaTool(),
 	})
 
-	return mcpManager, tb, selfTools
+	return mcpManager, tb, selfTools, muxMgr
 }
 
 // startBackgroundWorkers launches periodic goroutines for cleanup, snapshots,
@@ -796,4 +808,27 @@ func cmdMCPServe(args []string) {
 		fmt.Fprintf(os.Stderr, "%s mcp: %v\n", brand.BinaryName, err)
 		os.Exit(1)
 	}
+}
+
+// muxStreamAdapter adapts *service.StreamManager to the muxproxy.StreamPublisher
+// interface. It converts muxproxy.SubEvent → chat.StreamEvent and calls
+// BroadcastSessionStreamEvent. CW-20260420-0047.
+type muxStreamAdapter struct {
+	streams *service.StreamManager
+}
+
+func (a muxStreamAdapter) PublishSubEvent(sessionID string, evt muxproxy.SubEvent) {
+	sev := chat.StreamEvent{
+		Type:    evt.Type,
+		Content: evt.Content,
+		AgentID: evt.AgentID,
+		Tool:    evt.Tool,
+	}
+	if evt.InputTokens != 0 || evt.OutputTokens != 0 {
+		sev.Usage = &chat.Usage{
+			InputTokens:  evt.InputTokens,
+			OutputTokens: evt.OutputTokens,
+		}
+	}
+	a.streams.BroadcastSessionStreamEvent(sessionID, sev)
 }

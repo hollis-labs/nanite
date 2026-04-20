@@ -10,8 +10,9 @@ import (
 // ErrToolEnrichmentNotFound is returned by GetToolEnrichment when the named tool has no record.
 var ErrToolEnrichmentNotFound = errors.New("tool enrichment not found")
 
-// ToolEnrichment is the row in the tool_enrichments table. HintsJSON is the serialized
-// internal/tool/enrichment.Hints struct; callers should marshal/unmarshal via that package.
+// ToolEnrichment is the row in the tool_enrichments table. HintsJSON is the
+// serialized broker.Hints struct (from github.com/hollis-labs/go-toolbroker);
+// callers should marshal/unmarshal via broker.MarshalHints / broker.UnmarshalHints.
 type ToolEnrichment struct {
 	ToolName  string    `json:"tool_name"`
 	HintsJSON string    `json:"hints_json"`

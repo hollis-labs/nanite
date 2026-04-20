@@ -1,12 +1,13 @@
-package enrichment_test
+package toolclient_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/tool/enrichment"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 func newTestStoreForEnricher(t *testing.T) *store.Store {
@@ -22,21 +23,21 @@ func newTestStoreForEnricher(t *testing.T) *store.Store {
 func TestStoreEnricher_LookupExisting(t *testing.T) {
 	s := newTestStoreForEnricher(t)
 
-	h := enrichment.Hints{OutputShape: "array of strings"}
-	hj, err := enrichment.MarshalHints(h)
+	h := broker.Hints{OutputShape: "array of strings"}
+	hj, err := broker.MarshalHints(h)
 	if err != nil {
 		t.Fatalf("MarshalHints: %v", err)
 	}
 	if err := s.UpsertToolEnrichment(store.ToolEnrichment{
-		ToolName:  "test_tool",
+		ToolName:  "example_tool",
 		HintsJSON: hj,
 		UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertToolEnrichment: %v", err)
 	}
 
-	enr := enrichment.NewStoreEnricher(s)
-	got, ok, err := enr.LookupByToolName(context.Background(), "test_tool")
+	enr := toolclient.NewStoreEnricher(s)
+	got, ok, err := enr.LookupByToolName(context.Background(), "example_tool")
 	if err != nil {
 		t.Fatalf("LookupByToolName: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestStoreEnricher_LookupExisting(t *testing.T) {
 
 func TestStoreEnricher_LookupMissing(t *testing.T) {
 	s := newTestStoreForEnricher(t)
-	enr := enrichment.NewStoreEnricher(s)
+	enr := toolclient.NewStoreEnricher(s)
 
 	_, ok, err := enr.LookupByToolName(context.Background(), "no_such_tool")
 	if err != nil {
@@ -62,9 +63,10 @@ func TestStoreEnricher_LookupMissing(t *testing.T) {
 }
 
 func TestStoreEnricher_LookupNilStore(t *testing.T) {
-	// Nil-safe enricher: returns ok=false without error. Lets broker ship
-	// without requiring the store wiring to be plumbed yet.
-	var enr enrichment.Enricher = enrichment.NewStoreEnricher(nil)
+	// Nil-safe enricher: returns ok=false without error. Lets toolclient
+	// construction sites that don't wire a store (tests, CLI) still satisfy
+	// broker.Enricher without branching.
+	var enr broker.Enricher = toolclient.NewStoreEnricher(nil)
 	_, ok, err := enr.LookupByToolName(context.Background(), "anything")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)

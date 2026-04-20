@@ -118,7 +118,7 @@ func (s *Store) GetSessionObject(sessionID, id string) (SessionObject, error) {
 func (s *Store) ListSessionObjects(sessionID string) ([]SessionObject, error) {
 	rows, err := s.DB.Query(
 		`SELECT id, session_id, content_type, byte_size, payload, created_at
-		 FROM session_objects WHERE session_id = ? ORDER BY created_at DESC`,
+		 FROM session_objects WHERE session_id = ? ORDER BY created_at DESC, id DESC`,
 		sessionID,
 	)
 	if err != nil {

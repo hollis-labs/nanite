@@ -191,19 +191,12 @@ func TestSessionObject_PutPayloadRequired(t *testing.T) {
 }
 
 // makeTestSession helper — creates a real session row so FK constraints hold.
-// Seeds the workspace with INSERT OR IGNORE so multiple sessions in the same
-// workspace (e.g. cross-session isolation tests) don't collide on the workspace row.
+// Delegates workspace seeding to seedWorkspace (idempotent), so multiple
+// sessions can share the same workspace without colliding on the workspace row.
 func makeTestSession(t *testing.T, s *Store, workspaceID string) *Session {
 	t.Helper()
 	if workspaceID != "" {
-		_, err := s.DB.Exec(
-			`INSERT OR IGNORE INTO workspaces (id, name, sort_order, settings, created_at, updated_at)
-			 VALUES (?, ?, 0, '{}', datetime('now'), datetime('now'))`,
-			workspaceID, workspaceID,
-		)
-		if err != nil {
-			t.Fatalf("makeTestSession seed workspace: %v", err)
-		}
+		seedWorkspace(t, s, workspaceID)
 	}
 	sess := &Session{
 		WorkspaceID: workspaceID,

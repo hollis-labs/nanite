@@ -30,6 +30,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
+	"github.com/hollis-labs/nanite/internal/muxproxy"
 	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
@@ -519,6 +520,15 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
 	}
 
+	// POC: CW-20260420-0047 — mux orchestrator subordinate-agent transport.
+	// Removing the next four lines + import reverts the MCP wiring.
+	muxMgr := muxproxy.NewManager()
+	muxSvc := service.NewMuxProxy(muxproxy.Client(), muxMgr)
+	muxTransport := muxproxy.NewTransport(muxSvc)
+	if err := mcpManager.AddServer("mux-orchestrator", &mcp.MuxTransportAdapter{Inner: muxTransport}, mcp.TierBuiltin); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", "mux-orchestrator", "err", err)
+	}
+
 	loadPersistedMCPServers(s, mcpManager)
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
 	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
@@ -542,6 +552,10 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	selfToolDefs := mcp.SelfToolProviderDefinitions()
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	slog.Info("registered self-service built-in tools", "count", len(selfToolDefs))
+
+	// POC: tool broker registration for the four mux_* tools.
+	tb.Builtins.RegisterBuiltins("mux-orchestrator", muxproxy.ToolDefinitions())
+	slog.Info("registered mux orchestrator built-in tools", "count", len(muxproxy.ToolDefinitions()))
 
 	// Register result-cache meta-tools (S4a). These let the LLM recall
 	// truncated tool results via fetch_tool_result / search_tool_result.

@@ -333,7 +333,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
 	// generation; downstream consumers read via loopState.Classification().
 	intent := buildIntentSignals(userContent, toolNames, false /* attachments — see recon-notes.md */)
-	scopeTier, executionPattern := classify.Classify(intent)
+	scopeTier, executionPattern := classifyFn(intent)
 	slog.Info("chat-service: pre-loop classification",
 		"session_id", sessionID,
 		"scope_tier", scopeTier.String(),
@@ -1434,6 +1434,11 @@ func BuildSummarizer(registry *provider.Registry, settings *store.UserSettings) 
 func ClassifyCompactionMode(agent *store.AgentProfile) string {
 	return classifyModeFromAgentTags(agent)
 }
+
+// classifyFn is the package-level indirection for classify.Classify.
+// Tests override this to record inputs or force outputs without spinning
+// up the full classifier path. Production code path stays direct.
+var classifyFn = classify.Classify
 
 // buildIntentSignals assembles the pre-loop signal struct consumed by
 // classify.Classify. Pulled out as a helper for unit-testability; the

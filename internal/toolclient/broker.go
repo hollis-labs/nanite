@@ -39,9 +39,26 @@ type ToolClient struct {
 	Config             *Config
 	Builtins           *BuiltinToolRegistry
 	PermissionResolver PermissionResolver
+
+	// enricher backs the per-turn override block composition. Set by New when
+	// a store is available; nil-safe via the storeEnricher's own fallback.
+	// Kept unexported — callers work with broker.Enricher through the
+	// SelectToolsAsProvider result.
+	enricher broker.Enricher
 }
 
-// New creates a new ToolClient.
+// SelectResult is the return shape of ToolClient.SelectToolsAsProvider. It
+// carries both the provider-shaped tool definitions for the LLM and the
+// markdown override block composed from per-tool Hints (go-toolbroker
+// broker.ComposeOverrideBlock), ready to append to the system prompt.
+type SelectResult struct {
+	Tools         []provider.ToolDefinition
+	OverrideBlock string
+}
+
+// New creates a new ToolClient. When s is non-nil, a storeEnricher is wired
+// so SelectToolsAsProvider returns per-tool override blocks composed from
+// the tool_enrichments table.
 func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 	if cfg == nil {
 		cfg = DefaultConfig()
@@ -55,6 +72,7 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 		Store:       s,
 		Config:      cfg,
 		Builtins:    NewBuiltinToolRegistry(),
+		enricher:    NewStoreEnricher(s),
 	}
 }
 
@@ -122,9 +140,13 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 	return tools, nil
 }
 
-// SelectToolsAsProvider returns selected tools converted to provider.ToolDefinition format.
-// Built-in tools are always prepended and do not count against selection limits.
-func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]provider.ToolDefinition, error) {
+// SelectToolsAsProvider returns selected tools converted to provider.ToolDefinition format,
+// together with the per-turn override block composed from per-tool Hints for
+// the FINAL tool set (post permission filtering). Built-in tools are always
+// prepended and do not count against selection limits. Enrichment compose
+// runs after permission filtering so the override block never mentions a
+// tool the LLM won't actually see.
+func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (*SelectResult, error) {
 	tools, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
 		return nil, err
@@ -164,7 +186,27 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 			InputSchema: t.InputSchema,
 		})
 	}
-	return defs, nil
+
+	// Compose override block from the FINAL selection (post-permission,
+	// post-prune). Nil enricher or no-enriched-tools both yield empty block.
+	// Enrichment is cosmetic — a compose error never fails selection; it is
+	// logged and the block ships empty. ComposeOverrideBlock itself returns
+	// ("", nil) on nil enricher, so the guard below is for log clarity only.
+	var overrideBlock string
+	if tb.enricher != nil && len(defs) > 0 {
+		names := make([]string, len(defs))
+		for i, d := range defs {
+			names[i] = d.Name
+		}
+		block, err := broker.ComposeOverrideBlock(ctx, names, tb.enricher)
+		if err != nil {
+			slog.Warn("toolclient: compose override block failed", "err", err)
+		} else {
+			overrideBlock = block
+		}
+	}
+
+	return &SelectResult{Tools: defs, OverrideBlock: overrideBlock}, nil
 }
 
 // CallTool executes a tool call after checking permissions. Routes through the MCP Manager.

@@ -22,7 +22,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/tool/broker"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
@@ -49,11 +48,13 @@ type composeConfig struct {
 
 // composeExtraSystemPrefix builds the per-turn system prompt prefix: optional
 // no-tools warning, optional progressive discovery catalog, the native tool
-// guide, and (when non-empty) the selection's override block appended after
-// the native guide. Order is significant — tool-specific overrides ship AFTER
-// the general guide so they can override conflicting general rules for the
-// named tool.
-func composeExtraSystemPrefix(sel broker.Selection, cfg composeConfig) string {
+// guide, and (when non-empty) the per-tool override block appended after the
+// native guide. Order is significant — tool-specific overrides ship AFTER the
+// general guide so they override conflicting general rules for the named tool.
+//
+// overrideBlock is the markdown "## Tool Overrides" section composed by the
+// broker (via broker.ComposeOverrideBlock). Empty string skips the section.
+func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
 	var b strings.Builder
 	if cfg.noTools {
 		b.WriteString(noToolsWarningPrefix)
@@ -63,9 +64,9 @@ func composeExtraSystemPrefix(sel broker.Selection, cfg composeConfig) string {
 		b.WriteString("\n\n")
 	}
 	b.WriteString(strings.TrimLeft(nativeToolGuide, "\n"))
-	if sel.OverrideBlock != "" {
+	if overrideBlock != "" {
 		b.WriteString("\n\n")
-		b.WriteString(sel.OverrideBlock)
+		b.WriteString(overrideBlock)
 	}
 	return b.String()
 }
@@ -241,11 +242,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 	}
 
-	// Task 6 (CW-20260420-0006): once the runtime broker is wired to the
-	// service-layer ToolSelection, selection.OverrideBlock will flow here.
-	// Until Task 7's wiring lands, pass an empty Selection so the helper is
-	// exercised but no override block is injected yet.
-	extraSystemPrefix := composeExtraSystemPrefix(broker.Selection{}, composeConfig{
+	// The per-tool override block is composed upstream by the toolbroker
+	// (go-toolbroker v0.1.0+) and plumbed through service.ToolSelection in a
+	// follow-up commit — for now pass an empty string so the helper shape
+	// matches its pure-function contract without a stale broker import.
+	extraSystemPrefix := composeExtraSystemPrefix("", composeConfig{
 		noTools:            noTools,
 		progressiveActive:  selection.Progressive,
 		progressiveCatalog: selection.Catalog,

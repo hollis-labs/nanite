@@ -413,6 +413,13 @@ func isMetaTool(name string) bool {
 // Classification returns the pre-loop (ScopeTier, ExecutionPattern) pair
 // for this generation. Returns (TierInvalid, PatternInvalid) if Classify
 // has not been called yet.
+//
+// Consumers feeding these values into metrics, budget math, or dispatch
+// logic MUST check ScopeTier.IsValid() and ExecutionPattern.IsValid()
+// before trusting them. The invalid-sentinel strings exist specifically to
+// surface "classifier not run" as a detectable condition; letting them
+// reach a log or budget computation unchecked is a bug. See the
+// internal/classify package doc for the full consumer contract.
 func (ls *loopState) Classification() (classify.ScopeTier, classify.ExecutionPattern) {
 	return ls.scopeTier, ls.executionPattern
 }

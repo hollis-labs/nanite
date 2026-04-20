@@ -13,9 +13,9 @@ var ErrToolEnrichmentNotFound = errors.New("tool enrichment not found")
 // ToolEnrichment is the row in the tool_enrichments table. HintsJSON is the serialized
 // internal/tool/enrichment.Hints struct; callers should marshal/unmarshal via that package.
 type ToolEnrichment struct {
-	ToolName  string
-	HintsJSON string
-	UpdatedAt time.Time
+	ToolName  string    `json:"tool_name"`
+	HintsJSON string    `json:"hints_json"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // GetToolEnrichment loads the enrichment record for a tool by name.
@@ -42,6 +42,8 @@ func (s *Store) GetToolEnrichment(toolName string) (ToolEnrichment, error) {
 }
 
 // UpsertToolEnrichment inserts or replaces the enrichment record for a tool.
+// Returns an error if ToolName is empty or UpdatedAt is zero — callers must
+// stamp UpdatedAt explicitly (the service layer is responsible for timestamping).
 func (s *Store) UpsertToolEnrichment(rec ToolEnrichment) error {
 	if rec.ToolName == "" {
 		return fmt.Errorf("upsert tool enrichment: tool_name is required")
@@ -49,14 +51,13 @@ func (s *Store) UpsertToolEnrichment(rec ToolEnrichment) error {
 	if rec.HintsJSON == "" {
 		rec.HintsJSON = "{}"
 	}
-	updatedAt := rec.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = time.Now().UTC()
+	if rec.UpdatedAt.IsZero() {
+		return fmt.Errorf("upsert tool enrichment: updated_at is required")
 	}
 	_, err := s.DB.Exec(
 		`INSERT INTO tool_enrichments (tool_name, hints_json, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT(tool_name) DO UPDATE SET hints_json = excluded.hints_json, updated_at = excluded.updated_at`,
-		rec.ToolName, rec.HintsJSON, updatedAt.UTC().Format(time.RFC3339),
+		rec.ToolName, rec.HintsJSON, rec.UpdatedAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert tool enrichment: %w", err)

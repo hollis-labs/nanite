@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -32,7 +34,7 @@ func TestToolEnrichment_UpsertAndGet(t *testing.T) {
 func TestToolEnrichment_GetNotFound(t *testing.T) {
 	s := newTestStore(t)
 	_, err := s.GetToolEnrichment("nonexistent_tool")
-	if err != ErrToolEnrichmentNotFound {
+	if !errors.Is(err, ErrToolEnrichmentNotFound) {
 		t.Errorf("expected ErrToolEnrichmentNotFound, got %v", err)
 	}
 }
@@ -69,6 +71,7 @@ func TestToolEnrichment_UpsertReplaces(t *testing.T) {
 func TestToolEnrichment_List(t *testing.T) {
 	s := newTestStore(t)
 	now := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
+	testNames := map[string]bool{"a_tool": true, "b_tool": true, "c_tool": true}
 	for i, name := range []string{"a_tool", "b_tool", "c_tool"} {
 		rec := ToolEnrichment{
 			ToolName:  name,
@@ -84,9 +87,16 @@ func TestToolEnrichment_List(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	// Seed row from migration (clockwork_task_list) adds +1 to the count.
-	if len(list) < 3 {
-		t.Errorf("expected >= 3 records, got %d", len(list))
+
+	var gotNames []string
+	for _, r := range list {
+		if testNames[r.ToolName] {
+			gotNames = append(gotNames, r.ToolName)
+		}
+	}
+	wantNames := []string{"c_tool", "b_tool", "a_tool"}
+	if !reflect.DeepEqual(gotNames, wantNames) {
+		t.Errorf("list order (filtered to test rows): got %v, want %v", gotNames, wantNames)
 	}
 }
 
@@ -103,7 +113,7 @@ func TestToolEnrichment_Delete(t *testing.T) {
 	if err := s.DeleteToolEnrichment("del_tool"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, err := s.GetToolEnrichment("del_tool"); err != ErrToolEnrichmentNotFound {
+	if _, err := s.GetToolEnrichment("del_tool"); !errors.Is(err, ErrToolEnrichmentNotFound) {
 		t.Errorf("expected not-found after delete, got %v", err)
 	}
 }

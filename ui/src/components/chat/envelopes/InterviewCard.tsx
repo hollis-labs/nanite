@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { X, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { type Answer, ResponseStatus } from "@/lib/envelope-response";
@@ -22,7 +22,7 @@ interface InterviewCardProps {
 }
 
 export function InterviewCard({ envelope, onRespond, userMessageCount }: InterviewCardProps) {
-  const questions = envelope.questions ?? [];
+  const questions = useMemo(() => envelope.questions ?? [], [envelope.questions]);
   const alreadyAnswered = envelope.prior_response != null;
 
   const [answers, setAnswers] = useState<Record<number, string | string[]>>(() => {
@@ -63,13 +63,17 @@ export function InterviewCard({ envelope, onRespond, userMessageCount }: Intervi
   }, [questions, answers]);
 
   const buildAnswers = useCallback(
-    (overrideWithDefaults = false): Answer[] =>
-      questions.map((q, i) => ({
-        questionId: `q-${i}`,
-        value: overrideWithDefaults
-          ? (answers[i] || q.default || "")
-          : (answers[i] ?? ""),
-      })),
+    (overrideWithDefaults = false, markAccepted = false): Answer[] =>
+      questions.map((q, i) => {
+        const val = overrideWithDefaults
+          ? (answers[i] !== undefined && answers[i] !== "" ? answers[i] : (q.default ?? ""))
+          : (answers[i] ?? "");
+        return {
+          questionId: `q-${i}`,
+          value: val,
+          ...(markAccepted ? { acceptedSuggestion: true } : {}),
+        };
+      }),
     [questions, answers],
   );
 
@@ -89,7 +93,7 @@ export function InterviewCard({ envelope, onRespond, userMessageCount }: Intervi
 
   const handleAcceptSuggested = useCallback(async () => {
     setSubmitError(null);
-    const typed = buildAnswers(true);
+    const typed = buildAnswers(true, true);
     setSubmitted(true);
     if (!onRespond) return;
     try {

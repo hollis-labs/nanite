@@ -490,6 +490,7 @@ func (ls *loopState) scratchpadRead(key string) (map[string]any, bool) {
 		}
 		return map[string]any{key: v}, true
 	}
+	// Shallow copy: reference-type values (maps, slices) are shared with the scratchpad.
 	result := make(map[string]any, len(ls.scratchpad))
 	for k, v := range ls.scratchpad {
 		result[k] = v
@@ -503,11 +504,16 @@ func (ls *loopState) scratchpadClear(key string) bool {
 	if !ok {
 		return false
 	}
+	// Marshal cannot fail here: scratchpadWrite already validated serializability
+	// before storing. If it somehow does (direct map write bypassing scratchpadWrite),
+	// we clamp to zero rather than leak bytes.
 	if encoded, encErr := json.Marshal(v); encErr == nil {
 		ls.scratchpadBytes -= len(encoded)
 		if ls.scratchpadBytes < 0 {
 			ls.scratchpadBytes = 0
 		}
+	} else {
+		ls.scratchpadBytes = 0
 	}
 	delete(ls.scratchpad, key)
 	return true

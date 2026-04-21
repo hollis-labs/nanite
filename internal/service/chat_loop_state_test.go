@@ -541,6 +541,9 @@ func TestScratchpadClear_MissingKeyReturnsFalse(t *testing.T) {
 	if ls.scratchpadClear("nope") {
 		t.Fatal("expected cleared=false for missing key")
 	}
+	if ls.scratchpadBytes != 0 {
+		t.Errorf("scratchpadBytes changed on clear of missing key: got %d", ls.scratchpadBytes)
+	}
 }
 
 func TestScratchpad_TurnExitEviction(t *testing.T) {

@@ -282,6 +282,10 @@ func (s *chatServiceImpl) preCheckTools(
 		if toolInfo, ok := s.tools.GetToolMeta(tu.Name); ok {
 			plan.concurrent = toolInfo.IsConcurrencySafe
 		}
+		// Scratchpad tools access loopState directly with no mutex; always serial.
+		if isScratchpadTool(tu.Name) {
+			plan.concurrent = false
+		}
 		plans = append(plans, plan)
 	}
 
@@ -336,7 +340,7 @@ func (s *chatServiceImpl) executeToolBatch(
 			ipc := ip
 			safego.Go(ctx, "service.chat.executeSingleTool.concurrent", func() {
 				defer wg.Done()
-				result := s.executeSingleTool(ctx, ipc.plan.tu, agentID, sessionID, ch, &mu)
+				result := s.executeSingleTool(ctx, ipc.plan.tu, ls, agentID, sessionID, ch, &mu)
 				results[ipc.planIdx] = result
 			})
 		}
@@ -345,7 +349,7 @@ func (s *chatServiceImpl) executeToolBatch(
 
 	// Execute serial tools one at a time.
 	for _, ip := range serial {
-		result := s.executeSingleTool(ctx, ip.plan.tu, agentID, sessionID, ch, nil)
+		result := s.executeSingleTool(ctx, ip.plan.tu, ls, agentID, sessionID, ch, nil)
 		results[ip.planIdx] = result
 	}
 
@@ -357,6 +361,7 @@ func (s *chatServiceImpl) executeToolBatch(
 func (s *chatServiceImpl) executeSingleTool(
 	ctx context.Context,
 	tu provider.ToolUseBlock,
+	ls *loopState,
 	agentID string,
 	sessionID string,
 	ch chan chat.StreamEvent,
@@ -367,6 +372,11 @@ func (s *chatServiceImpl) executeSingleTool(
 	// Handle result-cache meta-tools locally (no MCP routing).
 	if tu.Name == "fetch_tool_result" || tu.Name == "search_tool_result" {
 		return s.handleResultCacheMetaTool(tu, sessionID, ch, mu, start)
+	}
+
+	// Handle P4 scratchpad tools locally (pure loopState access — no MCP routing).
+	if isScratchpadTool(tu.Name) {
+		return handleScratchpadTool(tu, ls, ch, mu, start)
 	}
 
 	// Broadcast tool pending.
@@ -521,7 +531,15 @@ func (s *chatServiceImpl) postProcessToolResults(
 		}
 
 		// Detect stuck loops (modifies result text).
-		resultText := s.detectStuckLoop(tu.Name, r.rawOutput, ls.lastToolResults, ls.toolRepeatCount, ls.blockedTools)
+		// Scratchpad tools are exempt: nanite_scratchpad_read legitimately returns
+		// the same value on repeated reads (the scratchpad contents haven't changed),
+		// and blocking it would deny the agent its own working memory.
+		var resultText string
+		if isScratchpadTool(tu.Name) {
+			resultText = r.rawOutput
+		} else {
+			resultText = s.detectStuckLoop(tu.Name, r.rawOutput, ls.lastToolResults, ls.toolRepeatCount, ls.blockedTools)
+		}
 
 		// Cache-and-pointer: route through ResultCache before truncation.
 		// If the result exceeds the soft threshold, the cache returns a
@@ -529,7 +547,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// that case — the cache already sized the LLM-visible view and
 		// truncate.Output's 4K cap would drop the pointer footer.
 		wasCached := false
-		if s.resultCache != nil && !r.isError {
+		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) {
 			visible, cached, err := s.resultCache.StoreResult(sessionID, tu.ID, tu.Name, resultText)
 			if err != nil {
 				slog.Warn("chat-service: result cache store error", "tool", tu.Name, "err", err)
@@ -542,7 +560,9 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// Truncate for LLM context (handles results not caught by the cache).
 		// Skip when the cache already produced the LLM-visible view.
 		var tr truncate.Result
-		if wasCached {
+		if wasCached || isScratchpadTool(tu.Name) {
+			// Scratchpad results are bounded by the 64 KiB turn cap enforced in
+			// loopState.scratchpadWrite — no caching or disk truncation needed.
 			tr = truncate.Result{Content: resultText}
 		} else {
 			canDelegate := s.orchestrator != nil && s.orchestrator.HasDecomposer()

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -431,5 +433,127 @@ func TestToolMetaInfo_ConcurrencySafe(t *testing.T) {
 				t.Errorf("GetToolMeta(%q).IsConcurrencySafe = %v, want %v", tt.tool, meta.IsConcurrencySafe, tt.wantSafe)
 			}
 		})
+	}
+}
+
+func TestNewLoopState_ScratchpadInitialized(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	if ls.scratchpad == nil {
+		t.Fatal("scratchpad map must be initialized, got nil")
+	}
+	if ls.scratchpadBytes != 0 {
+		t.Errorf("scratchpadBytes must start at 0, got %d", ls.scratchpadBytes)
+	}
+}
+
+func TestScratchpadWrite_BasicRoundTrip(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	if err := ls.scratchpadWrite("k", "hello"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entries, ok := ls.scratchpadRead("k")
+	if !ok {
+		t.Fatal("key not found after write")
+	}
+	if entries["k"] != "hello" {
+		t.Errorf("expected 'hello', got %v", entries["k"])
+	}
+}
+
+func TestScratchpadWrite_ValueTooLarge(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	big := strings.Repeat("x", scratchpadMaxValueBytes+1)
+	err := ls.scratchpadWrite("k", big)
+	if err == nil {
+		t.Fatal("expected error for oversized value, got nil")
+	}
+}
+
+func TestScratchpadWrite_TotalExceeded(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	// Each chunk is just under 8 KiB. After 8 writes, total > 64 KiB.
+	chunk := strings.Repeat("y", scratchpadMaxValueBytes-10)
+	for i := 0; i < 8; i++ {
+		key := fmt.Sprintf("k%d", i)
+		_ = ls.scratchpadWrite(key, chunk)
+	}
+	err := ls.scratchpadWrite("overflow", chunk)
+	if err == nil {
+		t.Fatal("expected total-size error, got nil")
+	}
+}
+
+func TestScratchpadWrite_UpsertAdjustsByteCount(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	if err := ls.scratchpadWrite("k", strings.Repeat("a", 100)); err != nil {
+		t.Fatal(err)
+	}
+	before := ls.scratchpadBytes
+	// Overwrite with smaller value — bytes should decrease.
+	if err := ls.scratchpadWrite("k", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if ls.scratchpadBytes >= before {
+		t.Errorf("expected bytes to decrease on upsert, got %d (was %d)", ls.scratchpadBytes, before)
+	}
+}
+
+func TestScratchpadRead_AllEntries(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	_ = ls.scratchpadWrite("a", 1)
+	_ = ls.scratchpadWrite("b", 2)
+	entries, ok := ls.scratchpadRead("") // empty key = read all
+	if !ok {
+		t.Fatal("read all should always return ok=true")
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+}
+
+func TestScratchpadRead_MissingKey(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	_, ok := ls.scratchpadRead("nope")
+	if ok {
+		t.Fatal("expected ok=false for missing key")
+	}
+}
+
+func TestScratchpadClear_RemovesKey(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	_ = ls.scratchpadWrite("k", "v")
+	bytesBefore := ls.scratchpadBytes
+	cleared := ls.scratchpadClear("k")
+	if !cleared {
+		t.Fatal("expected cleared=true")
+	}
+	if ls.scratchpadBytes >= bytesBefore {
+		t.Errorf("expected bytes to decrease after clear, got %d (was %d)", ls.scratchpadBytes, bytesBefore)
+	}
+	_, ok := ls.scratchpadRead("k")
+	if ok {
+		t.Fatal("key still readable after clear")
+	}
+}
+
+func TestScratchpadClear_MissingKeyReturnsFalse(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	if ls.scratchpadClear("nope") {
+		t.Fatal("expected cleared=false for missing key")
+	}
+	if ls.scratchpadBytes != 0 {
+		t.Errorf("scratchpadBytes changed on clear of missing key: got %d", ls.scratchpadBytes)
+	}
+}
+
+func TestScratchpad_TurnExitEviction(t *testing.T) {
+	ls1 := newLoopState(chat.AgentConstraints{}, nil, false)
+	_ = ls1.scratchpadWrite("k", "turn1")
+
+	// Simulate new turn: new loopState.
+	ls2 := newLoopState(chat.AgentConstraints{}, nil, false)
+	_, ok := ls2.scratchpadRead("k")
+	if ok {
+		t.Fatal("scratchpad from prior turn must not leak into new loopState")
 	}
 }

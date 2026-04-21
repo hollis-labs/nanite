@@ -35,8 +35,7 @@ core:
     export: ProposalCard
 
   - type: question-form
-    component: components/chat/envelopes/QuestionForm
-    export: QuestionForm
+    # backend-only — InterviewCard renders via EnvelopeRenderer fallback path
 
   # Work system (todo/plan)
   - type: todo-list

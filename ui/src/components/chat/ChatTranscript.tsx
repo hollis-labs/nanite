@@ -320,6 +320,8 @@ export function ChatTranscript({
     userHasScrolled,
   ]);
 
+  const userMessageCount = messages.filter((m) => m.role === "user").length;
+
   if (messages.length === 0 && !isStreaming) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -420,7 +422,7 @@ export function ChatTranscript({
             data-plugin-envelope-id={item.id}
             data-plugin-id={item.pluginId}
           >
-            <EnvelopeRenderer envelope={item.envelope} {...(onSendMessage && { onSendMessage })} />
+            <EnvelopeRenderer envelope={item.envelope} {...(onSendMessage && { onSendMessage })} userMessageCount={userMessageCount} />
           </div>
         ))}
 

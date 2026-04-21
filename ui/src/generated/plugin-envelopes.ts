@@ -16,7 +16,7 @@ export interface EnvelopeRegistryEntry {
 
 // --- CORE ENVELOPES (generated from config/envelopes.yaml) ---
 const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
-  // Backend-only types (no frontend component): session-task, message-request, message-reply, message-notification, message-handoff
+  // Backend-only types (no frontend component): question-form, session-task, message-request, message-reply, message-notification, message-handoff
   "document-viewer": {
     component: lazy(() =>
       import("@/components/chat/envelopes/DocumentViewerCard").then((m) => ({
@@ -53,14 +53,6 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     component: lazy(() =>
       import("@/components/chat/envelopes/ProposalCard").then((m) => ({
         default: m.ProposalCard,
-      })),
-    ),
-    source: "core",
-  },
-  "question-form": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/QuestionForm").then((m) => ({
-        default: m.QuestionForm,
       })),
     ),
     source: "core",

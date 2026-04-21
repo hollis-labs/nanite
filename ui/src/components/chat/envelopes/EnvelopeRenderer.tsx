@@ -18,7 +18,7 @@ import type { Envelope } from "@/lib/types";
 import { ApprovalCard } from "./ApprovalCard";
 import { PluginLoadErrorCard } from "./PluginLoadErrorCard";
 import { ProposalCard } from "./ProposalCard";
-import { QuestionForm } from "./QuestionForm";
+import { InterviewCard } from "./InterviewCard";
 
 /**
  * The shape cards produce — EnvelopeRenderer injects `v`, `kind`, `id`
@@ -69,12 +69,14 @@ interface EnvelopeRendererProps {
    * POSTs to `/api/envelopes/{id}/respond` via `submitEnvelopeResponse`.
    */
   onEnvelopeResponse?: (response: ResponseV1) => Promise<void>;
+  userMessageCount?: number;
 }
 
 export function EnvelopeRenderer({
   envelope,
   onSendMessage,
   onEnvelopeResponse,
+  userMessageCount,
 }: EnvelopeRendererProps) {
   const { data: settings } = useSettings();
   const recoverMode = settings?.recover_mode ?? false;
@@ -162,10 +164,10 @@ export function EnvelopeRenderer({
       ))}
 
       {envelope.questions && envelope.questions.length > 0 && (
-        <QuestionForm
-          questions={envelope.questions}
+        <InterviewCard
+          envelope={envelope}
           {...(envelope.id ? { onRespond } : {})}
-          {...(onSendMessage ? { onSubmit: onSendMessage } : {})}
+          userMessageCount={userMessageCount}
         />
       )}
 

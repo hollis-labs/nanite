@@ -27,6 +27,9 @@ func (s *Store) UpsertHandoffStash(stash HandoffStash) error {
 	if stash.SessionID == "" {
 		return fmt.Errorf("upsert handoff stash: session_id is required")
 	}
+	if stash.CreatedAt == "" {
+		return fmt.Errorf("upsert handoff stash: created_at is required")
+	}
 	if stash.Payload == "" {
 		stash.Payload = "{}"
 	}

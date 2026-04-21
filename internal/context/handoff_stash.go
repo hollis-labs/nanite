@@ -22,7 +22,7 @@ type StashWriter interface {
 
 // BuildPayloadFromScratchpad extracts HandoffStashPayload fields from a
 // scratchpad snapshot using well-known string-slice keys. Missing or
-// wrongly-typed keys produce nil slices — the stash is always written.
+// wrongly-typed keys produce empty slices — the stash is always written.
 func BuildPayloadFromScratchpad(scratchpad map[string]any) HandoffStashPayload {
 	return HandoffStashPayload{
 		DecisionsLocked: stringsFromScratchpad(scratchpad, "decisions_locked"),
@@ -36,11 +36,11 @@ func BuildPayloadFromScratchpad(scratchpad map[string]any) HandoffStashPayload {
 func stringsFromScratchpad(scratchpad map[string]any, key string) []string {
 	v, ok := scratchpad[key]
 	if !ok {
-		return nil
+		return []string{}
 	}
 	raw, ok := v.([]any)
 	if !ok {
-		return nil
+		return []string{}
 	}
 	out := make([]string, 0, len(raw))
 	for _, item := range raw {

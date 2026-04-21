@@ -2,8 +2,11 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -162,5 +165,73 @@ func TestIsScratchpadTool(t *testing.T) {
 	}
 	if isScratchpadTool("nanite_create_skill") {
 		t.Error("isScratchpadTool(nanite_create_skill) = true, want false")
+	}
+}
+
+func TestHandleScratchpadTool_ChannelEvents(t *testing.T) {
+	ls := newTestLoopState()
+	ch := make(chan chat.StreamEvent, 10)
+
+	tu := provider.ToolUseBlock{
+		ID:    "test-id",
+		Name:  "nanite_scratchpad_write",
+		Input: map[string]any{"key": "k", "value": "v"},
+	}
+
+	result := handleScratchpadTool(tu, ls, ch, nil, time.Now())
+	close(ch)
+
+	var events []chat.StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (tool_call + tool_result), got %d", len(events))
+	}
+	if events[0].Type != "tool_call" {
+		t.Errorf("first event type = %q, want tool_call", events[0].Type)
+	}
+	if events[1].Type != "tool_result" {
+		t.Errorf("second event type = %q, want tool_result", events[1].Type)
+	}
+	if result.isError {
+		t.Errorf("expected no error, got isError=true, output=%q", result.rawOutput)
+	}
+	if result.ref.ID != "test-id" {
+		t.Errorf("expected ref.ID=test-id, got %q", result.ref.ID)
+	}
+}
+
+func TestHandleScratchpadTool_SummaryTruncation(t *testing.T) {
+	ls := newTestLoopState()
+	// Store a value large enough that the JSON read response exceeds 500 chars.
+	bigVal := strings.Repeat("x", 600)
+	if err := ls.scratchpadWrite("big", bigVal); err != nil {
+		t.Fatalf("setup write failed: %v", err)
+	}
+
+	ch := make(chan chat.StreamEvent, 10)
+	tu := provider.ToolUseBlock{
+		ID:    "read-id",
+		Name:  "nanite_scratchpad_read",
+		Input: map[string]any{"key": "big"},
+	}
+
+	handleScratchpadTool(tu, ls, ch, nil, time.Now())
+	close(ch)
+
+	var toolResultEvent *chat.StreamEvent
+	for e := range ch {
+		if e.Type == "tool_result" {
+			ec := e
+			toolResultEvent = &ec
+		}
+	}
+	if toolResultEvent == nil {
+		t.Fatal("no tool_result event emitted")
+	}
+	if len(toolResultEvent.Summary) > 520 {
+		t.Errorf("summary not truncated: len=%d", len(toolResultEvent.Summary))
 	}
 }

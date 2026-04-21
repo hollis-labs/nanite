@@ -51,8 +51,13 @@ func handleScratchpadTool(
 		isError = true
 	}
 
-	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: resultText}
+	summary := resultText
+	if len(summary) > 500 {
+		summary = summary[:500] + "... (truncated)"
+	}
+	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary}
 
+	duration := time.Since(start)
 	return toolExecResult{
 		resultBlock: provider.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: resultText, IsError: isError,
@@ -60,7 +65,7 @@ func handleScratchpadTool(
 		ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name},
 		isError:   isError,
 		rawOutput: resultText,
-		duration:  time.Since(start),
+		duration:  duration,
 	}
 }
 

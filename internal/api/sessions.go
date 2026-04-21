@@ -320,6 +320,10 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		Summarizer:           summarizer,
 		Mode:                 mode,
 		ConversationMessages: result.Messages,
+		// P7 HandoffStash: no loopState in HTTP path; empty scratchpad snapshot.
+		SessionID:          sessionID,
+		StashWriter:        service.NewStashWriter(a.Services.Store),
+		ScratchpadSnapshot: map[string]any{},
 	}
 
 	tokensBefore := result.Window.UsedTokens()

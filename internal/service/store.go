@@ -232,6 +232,11 @@ type ProviderStore interface {
 	HasProviderAPIKey(id string) (bool, error)
 }
 
+// HandoffStashStore covers session handoff stash persistence (P7, CW-20260420-0024).
+type HandoffStashStore interface {
+	UpsertHandoffStash(stash store.HandoffStash) error
+}
+
 // Store is the composite interface satisfied by *store.Store.
 // Services that need the full surface (e.g. the Container constructor) use this.
 type Store interface {
@@ -253,6 +258,7 @@ type Store interface {
 	ProviderStore
 	TodoStore
 	PlanStore
+	HandoffStashStore
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

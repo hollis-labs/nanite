@@ -553,5 +553,89 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"run_id"},
 			},
 		},
+		// --- Scratchpad tools (P4 Scratchpad, CW-20260419-0025) ---
+		{
+			Name: "nanite_scratchpad_write",
+			Description: `Write a value to the per-turn scratchpad under a named key.
+
+**When to use:** When you want to stash interim findings, running totals, or
+partial results mid-turn so you can recall them later in the same generation
+without re-deriving from the transcript. Use it when you'd otherwise re-run a
+tool call to look up a value you already fetched, or when you need to accumulate
+state across multiple tool calls.
+
+**When NOT to use:** Do NOT use as long-term memory — that is Vanta
+(nanite_memory_write / memory_recall). Do NOT use to pass data to another agent
+— that is peer_query. Do NOT use across sessions — the scratchpad clears on
+turn exit. This is NOT a replacement for the think tool: think is for reasoning
+within one LLM call; scratchpad_write is for persisting a value you want to
+retrieve later in the same turn.
+
+**Output shape:** {"stored": true} on success. On a size violation, returns an
+error string describing the byte count so you can decide to truncate or omit.`,
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"key": map[string]any{
+						"type":        "string",
+						"description": "Case-sensitive key (agent-chosen, e.g. 'summary', 'file_count', 'running_total')",
+					},
+					"value": map[string]any{
+						"description": "JSON-serializable value (string, number, boolean, object, or array). Max 8 KiB per value; 64 KiB total per turn.",
+					},
+				},
+				"required": []string{"key", "value"},
+			},
+		},
+		{
+			Name: "nanite_scratchpad_read",
+			Description: `Read values from the per-turn scratchpad.
+
+**When to use:** After calling nanite_scratchpad_write earlier in this turn, to
+retrieve what you stashed. Call with a specific key to read one entry, or omit
+the key to read all current entries.
+
+**When NOT to use:** Do not use to read data from previous turns or other
+sessions — the scratchpad is cleared on turn exit and is per-generation only.
+For cross-session data use Vanta (memory_recall). For data from other agents
+use peer_query.
+
+**Output shape:** {"entries": {key: value, ...}} — a map of matching entries.
+Empty map when no entries match (key not found, or scratchpad is empty).`,
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"key": map[string]any{
+						"type":        "string",
+						"description": "Key to read. Omit to read all scratchpad entries.",
+					},
+				},
+			},
+		},
+		{
+			Name: "nanite_scratchpad_clear",
+			Description: `Delete a key from the per-turn scratchpad.
+
+**When to use:** When a stashed value is no longer needed mid-turn and you want
+to free space for other writes (the turn total is capped at 64 KiB), or when
+you want to reset a running total before recomputing it.
+
+**When NOT to use:** Rarely needed — the entire scratchpad is automatically
+cleared on turn exit. Only call this if you need the byte budget freed within
+the current turn for subsequent writes.
+
+**Output shape:** {"cleared": true} if the key existed and was removed;
+{"cleared": false} if the key was not found (idempotent, not an error).`,
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"key": map[string]any{
+						"type":        "string",
+						"description": "Key to delete from the scratchpad.",
+					},
+				},
+				"required": []string{"key"},
+			},
+		},
 	}
 }

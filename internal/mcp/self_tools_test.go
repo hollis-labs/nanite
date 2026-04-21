@@ -372,6 +372,41 @@ func TestSelfToolsTransport_PlanCreate_ErrorsWithoutSessionID(t *testing.T) {
 	}
 }
 
+func TestSelfToolDefinitions_ScratchpadToolsPresent(t *testing.T) {
+	defs := selfToolDefinitions()
+	names := make(map[string]bool, len(defs))
+	for _, d := range defs {
+		names[d.Name] = true
+	}
+	for _, want := range []string{
+		"nanite_scratchpad_write",
+		"nanite_scratchpad_read",
+		"nanite_scratchpad_clear",
+	} {
+		if !names[want] {
+			t.Errorf("tool %q missing from selfToolDefinitions()", want)
+		}
+	}
+}
+
+func TestScratchpadToolDescriptions_RequiredSections(t *testing.T) {
+	defs := selfToolDefinitions()
+	for _, d := range defs {
+		switch d.Name {
+		case "nanite_scratchpad_write", "nanite_scratchpad_read", "nanite_scratchpad_clear":
+			if !strings.Contains(d.Description, "When to use") {
+				t.Errorf("%s description missing 'When to use' section", d.Name)
+			}
+			if !strings.Contains(d.Description, "When NOT to use") {
+				t.Errorf("%s description missing 'When NOT to use' section", d.Name)
+			}
+			if !strings.Contains(d.Description, "Output shape") {
+				t.Errorf("%s description missing 'Output shape' section", d.Name)
+			}
+		}
+	}
+}
+
 // TestSelfToolsTransport_PlanCRUD exercises the full plan lifecycle via the
 // self-service tools (create → list → get → delete).
 func TestSelfToolsTransport_PlanCRUD(t *testing.T) {

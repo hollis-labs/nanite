@@ -107,3 +107,27 @@ func TestHandoffStash_GetLatestNotFound(t *testing.T) {
 		t.Errorf("expected ErrHandoffStashNotFound, got %v", err)
 	}
 }
+
+func TestHandoffStash_Upsert_EmptyID(t *testing.T) {
+	s := newTestStore(t)
+	err := s.UpsertHandoffStash(HandoffStash{
+		ID: "", SessionID: "sess-x",
+		Payload:   "{}",
+		CreatedAt: "2026-04-20T00:00:00Z",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty ID, got nil")
+	}
+}
+
+func TestHandoffStash_Upsert_EmptySessionID(t *testing.T) {
+	s := newTestStore(t)
+	err := s.UpsertHandoffStash(HandoffStash{
+		ID: "some-id", SessionID: "",
+		Payload:   "{}",
+		CreatedAt: "2026-04-20T00:00:00Z",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty SessionID, got nil")
+	}
+}

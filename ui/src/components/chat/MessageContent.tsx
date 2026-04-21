@@ -212,16 +212,27 @@ export function MessageContent({ content, role }: { content: string; role: 'user
     },
   }), [])
 
-  // Strip envelope blocks from content so they don't render as raw JSON
-  // (during streaming, envelopes haven't been extracted yet).
-  const displayContent = useMemo(() =>
-    content
+  // Strip envelope blocks from content so they don't render as raw JSON.
+  // Two passes:
+  //   1. Remove complete (closed) fences — these are extracted as cards.
+  //   2. Detect any remaining open fence (streaming, not yet closed) and strip
+  //      from its start to end-of-string. Signal hasPendingEnvelope so a loading
+  //      placeholder renders instead of the partial JSON.
+  const { displayContent, hasPendingEnvelope } = useMemo(() => {
+    let text = content
       .replace(/```(?:volon-envelope|nanite-envelope|fragments-envelope)\s*\n[\s\S]*?```/g, '')
       .replace(/<!--TICKET_DATA:[\s\S]*?:TICKET_DATA-->/g, '')
       .replace(/<!--ENVELOPE_DATA:[\s\S]*?:ENVELOPE_DATA-->/g, '')
-      .trim(),
-    [content]
-  )
+
+    // After stripping closed fences, any remaining fence open-tag is incomplete.
+    const openFence = /```(?:volon-envelope|nanite-envelope|fragments-envelope)/.exec(text)
+    const hasPendingEnvelope = openFence !== null
+    if (openFence) {
+      text = text.slice(0, openFence.index)
+    }
+
+    return { displayContent: text.trim(), hasPendingEnvelope }
+  }, [content])
 
   if (role === 'user') {
     return (
@@ -236,6 +247,12 @@ export function MessageContent({ content, role }: { content: string; role: 'user
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {displayContent}
       </ReactMarkdown>
+      {hasPendingEnvelope && (
+        <div className="rounded-md border border-border-subtle bg-bg-elevated px-3 py-2.5 mt-2 flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/50 animate-pulse" />
+          <span className="text-xs text-fg-muted">Preparing card…</span>
+        </div>
+      )}
     </div>
   )
 }

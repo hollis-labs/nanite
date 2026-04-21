@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/go-providers/provider"
+
+	"github.com/hollis-labs/nanite/internal/chat"
 )
 
 // isScratchpadTool reports whether name is one of the P4 scratchpad tools.

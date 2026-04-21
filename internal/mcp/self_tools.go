@@ -565,7 +565,7 @@ tool call to look up a value you already fetched, or when you need to accumulate
 state across multiple tool calls.
 
 **When NOT to use:** Do NOT use as long-term memory — that is Vanta
-(nanite_memory_write / memory_recall). Do NOT use to pass data to another agent
+(nanite_memory_save / nanite_memory_recall). Do NOT use to pass data to another agent
 — that is peer_query. Do NOT use across sessions — the scratchpad clears on
 turn exit. This is NOT a replacement for the think tool: think is for reasoning
 within one LLM call; scratchpad_write is for persisting a value you want to
@@ -597,7 +597,7 @@ the key to read all current entries.
 
 **When NOT to use:** Do not use to read data from previous turns or other
 sessions — the scratchpad is cleared on turn exit and is per-generation only.
-For cross-session data use Vanta (memory_recall). For data from other agents
+For cross-session data use Vanta (nanite_memory_recall). For data from other agents
 use peer_query.
 
 **Output shape:** {"entries": {key: value, ...}} — a map of matching entries.

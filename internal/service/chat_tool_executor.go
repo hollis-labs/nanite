@@ -531,7 +531,15 @@ func (s *chatServiceImpl) postProcessToolResults(
 		}
 
 		// Detect stuck loops (modifies result text).
-		resultText := s.detectStuckLoop(tu.Name, r.rawOutput, ls.lastToolResults, ls.toolRepeatCount, ls.blockedTools)
+		// Scratchpad tools are exempt: nanite_scratchpad_read legitimately returns
+		// the same value on repeated reads (the scratchpad contents haven't changed),
+		// and blocking it would deny the agent its own working memory.
+		var resultText string
+		if isScratchpadTool(tu.Name) {
+			resultText = r.rawOutput
+		} else {
+			resultText = s.detectStuckLoop(tu.Name, r.rawOutput, ls.lastToolResults, ls.toolRepeatCount, ls.blockedTools)
+		}
 
 		// Cache-and-pointer: route through ResultCache before truncation.
 		// If the result exceeds the soft threshold, the cache returns a
@@ -539,7 +547,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// that case — the cache already sized the LLM-visible view and
 		// truncate.Output's 4K cap would drop the pointer footer.
 		wasCached := false
-		if s.resultCache != nil && !r.isError {
+		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) {
 			visible, cached, err := s.resultCache.StoreResult(sessionID, tu.ID, tu.Name, resultText)
 			if err != nil {
 				slog.Warn("chat-service: result cache store error", "tool", tu.Name, "err", err)
@@ -552,7 +560,9 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// Truncate for LLM context (handles results not caught by the cache).
 		// Skip when the cache already produced the LLM-visible view.
 		var tr truncate.Result
-		if wasCached {
+		if wasCached || isScratchpadTool(tu.Name) {
+			// Scratchpad results are bounded by the 64 KiB turn cap enforced in
+			// loopState.scratchpadWrite — no caching or disk truncation needed.
 			tr = truncate.Result{Content: resultText}
 		} else {
 			canDelegate := s.orchestrator != nil && s.orchestrator.HasDecomposer()

@@ -73,6 +73,7 @@ type Envelope struct {
 	Kind      string         `json:"kind"`
 	Version   int            `json:"version"`
 	Type      string         `json:"type"`                // standard, nanite, custom
+	ID        string         `json:"id,omitempty"`        // set by backend after CreateEnvelopeInstance
 	Title     string         `json:"title,omitempty"`
 	Subtitle  string         `json:"subtitle,omitempty"`
 	Proposals []Proposal     `json:"proposals,omitempty"`

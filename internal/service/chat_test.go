@@ -115,6 +115,14 @@ type minimalStore struct {
 	stubTodoStore
 	stubPlanStore
 	stubHandoffStashStore
+	stubEnvelopeStore
+}
+
+type stubEnvelopeStore struct{}
+
+func (stubEnvelopeStore) CreateEnvelopeInstance(inst *store.EnvelopeInstance) error { return nil }
+func (stubEnvelopeStore) GetEnvelopeInstance(id string) (*store.EnvelopeInstance, error) {
+	return nil, fmt.Errorf("not found")
 }
 
 type stubHandoffStashStore struct{}

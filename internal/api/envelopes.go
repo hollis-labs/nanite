@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -167,67 +168,127 @@ func (a *API) handleEnvelopeRespond(w http.ResponseWriter, r *http.Request) {
 }
 
 // injectEnvelopePriorResponses post-processes messages returned from the store,
+// injectEnvelopePriorResponses post-processes messages returned from the store,
 // injecting a "prior_response" key into the envelope JSON of any message whose
 // envelope was already responded to. The lookup map is keyed by envelope ID.
-// Messages without an envelope or with an envelope missing an "id" field are
-// returned unchanged.
+// Handles both single-object and JSON-array Envelope fields.
 func injectEnvelopePriorResponses(messages []store.Message, lookup map[string]*store.EnvelopeInstance) []store.Message {
 	for i, msg := range messages {
 		if msg.Envelope == "" {
 			continue
 		}
-		var env map[string]any
-		if err := json.Unmarshal([]byte(msg.Envelope), &env); err != nil {
-			continue
+
+		raw := json.RawMessage(msg.Envelope)
+
+		// Detect array vs single-object format.
+		trimmed := bytes.TrimLeft(raw, " \t\r\n")
+		if len(trimmed) > 0 && trimmed[0] == '[' {
+			// Array of envelopes — inject into each element that has a responded id.
+			var arr []map[string]any
+			if err := json.Unmarshal(raw, &arr); err != nil {
+				continue
+			}
+			changed := false
+			for j, env := range arr {
+				id, _ := env["id"].(string)
+				if id == "" {
+					continue
+				}
+				inst, ok := lookup[id]
+				if !ok || inst.ResponseJSON == "" {
+					continue
+				}
+				var resp any
+				if err := json.Unmarshal([]byte(inst.ResponseJSON), &resp); err != nil {
+					continue
+				}
+				arr[j]["prior_response"] = resp
+				changed = true
+			}
+			if changed {
+				enriched, err := json.Marshal(arr)
+				if err == nil {
+					messages[i].Envelope = string(enriched)
+				}
+			}
+		} else {
+			// Single-object envelope.
+			var env map[string]any
+			if err := json.Unmarshal(raw, &env); err != nil {
+				continue
+			}
+			id, _ := env["id"].(string)
+			if id == "" {
+				continue
+			}
+			inst, ok := lookup[id]
+			if !ok || inst.ResponseJSON == "" {
+				continue
+			}
+			var resp any
+			if err := json.Unmarshal([]byte(inst.ResponseJSON), &resp); err != nil {
+				continue
+			}
+			env["prior_response"] = resp
+			enriched, err := json.Marshal(env)
+			if err != nil {
+				continue
+			}
+			messages[i].Envelope = string(enriched)
 		}
-		id, _ := env["id"].(string)
-		if id == "" {
-			continue
-		}
-		inst, ok := lookup[id]
-		if !ok || inst.ResponseJSON == "" {
-			continue
-		}
-		var resp any
-		if err := json.Unmarshal([]byte(inst.ResponseJSON), &resp); err != nil {
-			continue
-		}
-		env["prior_response"] = resp
-		enriched, err := json.Marshal(env)
-		if err != nil {
-			continue
-		}
-		messages[i].Envelope = string(enriched)
 	}
 	return messages
 }
 
 // buildEnvelopeLookup fetches EnvelopeInstances for all envelope IDs found in
 // the given messages and returns them keyed by envelope ID.
+// Handles both single-object and JSON-array Envelope fields.
 func buildEnvelopeLookup(s *store.Store, messages []store.Message) map[string]*store.EnvelopeInstance {
 	lookup := make(map[string]*store.EnvelopeInstance)
+
+	fetchID := func(id string) {
+		if id == "" || lookup[id] != nil {
+			return
+		}
+		inst, err := s.GetEnvelopeInstance(id)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				slog.Warn("buildEnvelopeLookup: GetEnvelopeInstance failed",
+					"envelope_id", id, "err", err)
+			}
+			return
+		}
+		lookup[id] = inst
+	}
+
 	for _, msg := range messages {
 		if msg.Envelope == "" {
 			continue
 		}
-		var env struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal([]byte(msg.Envelope), &env); err != nil || env.ID == "" {
+		raw := json.RawMessage(msg.Envelope)
+		trimmed := bytes.TrimLeft(raw, " \t\r\n")
+		if len(trimmed) == 0 {
 			continue
 		}
-		if _, seen := lookup[env.ID]; seen {
-			continue
-		}
-		inst, err := s.GetEnvelopeInstance(env.ID)
-		if err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				slog.Warn("buildEnvelopeLookup: GetEnvelopeInstance failed",
-					"envelope_id", env.ID, "err", err)
+		if trimmed[0] == '[' {
+			var arr []struct {
+				ID string `json:"id"`
 			}
-			continue
+			if err := json.Unmarshal(raw, &arr); err != nil {
+				continue
+			}
+			for _, e := range arr {
+				fetchID(e.ID)
+			}
+		} else {
+			var env struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(raw, &env); err != nil {
+				continue
+			}
+			fetchID(env.ID)
 		}
-		lookup[env.ID] = inst
 	}
 	return lookup
 }

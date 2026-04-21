@@ -239,6 +239,12 @@ type HandoffStashStore interface {
 
 // Store is the composite interface satisfied by *store.Store.
 // Services that need the full surface (e.g. the Container constructor) use this.
+// EnvelopeStore covers persistence for envelope instances emitted during a chat turn.
+type EnvelopeStore interface {
+	CreateEnvelopeInstance(inst *store.EnvelopeInstance) error
+	GetEnvelopeInstance(id string) (*store.EnvelopeInstance, error)
+}
+
 type Store interface {
 	SessionReader
 	SessionWriter
@@ -259,6 +265,7 @@ type Store interface {
 	TodoStore
 	PlanStore
 	HandoffStashStore
+	EnvelopeStore
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

@@ -282,6 +282,10 @@ func (s *chatServiceImpl) preCheckTools(
 		if toolInfo, ok := s.tools.GetToolMeta(tu.Name); ok {
 			plan.concurrent = toolInfo.IsConcurrencySafe
 		}
+		// Scratchpad tools access loopState directly with no mutex; always serial.
+		if isScratchpadTool(tu.Name) {
+			plan.concurrent = false
+		}
 		plans = append(plans, plan)
 	}
 

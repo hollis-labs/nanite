@@ -336,7 +336,7 @@ func (s *chatServiceImpl) executeToolBatch(
 			ipc := ip
 			safego.Go(ctx, "service.chat.executeSingleTool.concurrent", func() {
 				defer wg.Done()
-				result := s.executeSingleTool(ctx, ipc.plan.tu, agentID, sessionID, ch, &mu)
+				result := s.executeSingleTool(ctx, ipc.plan.tu, ls, agentID, sessionID, ch, &mu)
 				results[ipc.planIdx] = result
 			})
 		}
@@ -345,7 +345,7 @@ func (s *chatServiceImpl) executeToolBatch(
 
 	// Execute serial tools one at a time.
 	for _, ip := range serial {
-		result := s.executeSingleTool(ctx, ip.plan.tu, agentID, sessionID, ch, nil)
+		result := s.executeSingleTool(ctx, ip.plan.tu, ls, agentID, sessionID, ch, nil)
 		results[ip.planIdx] = result
 	}
 
@@ -357,6 +357,7 @@ func (s *chatServiceImpl) executeToolBatch(
 func (s *chatServiceImpl) executeSingleTool(
 	ctx context.Context,
 	tu provider.ToolUseBlock,
+	ls *loopState,
 	agentID string,
 	sessionID string,
 	ch chan chat.StreamEvent,
@@ -367,6 +368,11 @@ func (s *chatServiceImpl) executeSingleTool(
 	// Handle result-cache meta-tools locally (no MCP routing).
 	if tu.Name == "fetch_tool_result" || tu.Name == "search_tool_result" {
 		return s.handleResultCacheMetaTool(tu, sessionID, ch, mu, start)
+	}
+
+	// Handle P4 scratchpad tools locally (pure loopState access — no MCP routing).
+	if isScratchpadTool(tu.Name) {
+		return handleScratchpadTool(tu, ls, ch, mu, start)
 	}
 
 	// Broadcast tool pending.

@@ -383,6 +383,7 @@ export function ChatTranscript({
                 isBookmarked={bookmarkedMessageIds.has(msg.id)}
                 onToggleBookmark={handleToggleBookmark}
                 {...(onSendMessage && { onSendMessage })}
+                userMessageCount={userMessageCount}
               />
             </div>
           );

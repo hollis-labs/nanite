@@ -97,9 +97,10 @@ interface ChatMessageProps {
   onSendMessage?: (content: string) => void
   agentName?: string
   isMultiAgent?: boolean
+  userMessageCount?: number
 }
 
-export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, onSendMessage, agentName, isMultiAgent = false }: ChatMessageProps) {
+export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, onSendMessage, agentName, isMultiAgent = false, userMessageCount }: ChatMessageProps) {
   const [hovered, setHovered] = useState(false)
   const activeMode = useChatStore((s) => s.activeMode)
   const messageHeaderSlots = usePluginSlots('message-header')
@@ -276,7 +277,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             elements (checkboxes, buttons) aren't swallowed by ContextMenuTrigger */}
         {envelope && !isUser && (
           <div className="mt-3" onPointerDownCapture={(e) => e.stopPropagation()}>
-            <EnvelopeRenderer envelope={envelope} onSendMessage={onSendMessage} />
+            <EnvelopeRenderer envelope={envelope} onSendMessage={onSendMessage} userMessageCount={userMessageCount} />
           </div>
         )}
 

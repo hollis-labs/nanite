@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -180,6 +181,11 @@ type loopState struct {
 	// request can't loop back into the branch forever. Full progress-aware
 	// guard design is tracked in CW-20260419-0018 (kept open for the deep fix).
 	compactRecoverableAttempts int
+
+	// P4 Scratchpad — per-turn writable key/value buffer (CW-20260419-0025).
+	// Evicted automatically: loopState is created fresh per generateResponse call.
+	scratchpad      map[string]any
+	scratchpadBytes int
 }
 
 // maxCompactRecoverableAttempts caps the number of synchronous compaction
@@ -187,6 +193,12 @@ type loopState struct {
 // "second compaction would obviously help" failure mode (UAT c21) without
 // allowing runaway retry loops on a conversation that's truly too large.
 const maxCompactRecoverableAttempts = 2
+
+// P4 Scratchpad size caps (CW-20260419-0025, D2).
+const (
+	scratchpadMaxValueBytes = 8 * 1024  // 8 KiB per value
+	scratchpadMaxTotalBytes = 64 * 1024 // 64 KiB total per turn
+)
 
 // newLoopState creates a loopState with resolved limits from agent constraints.
 func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode bool) *loopState {
@@ -200,6 +212,7 @@ func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode b
 		lastActivity:         time.Now(),
 		debugMode:            debugMode,
 		retryBudget:          -1,
+		scratchpad:           make(map[string]any),
 	}
 
 	// Populate loadedTools from initial tool set.
@@ -434,6 +447,70 @@ func (ls *loopState) SetClassification(tier classify.ScopeTier, pattern classify
 // touchActivity updates the last activity timestamp.
 func (ls *loopState) touchActivity() {
 	ls.lastActivity = time.Now()
+}
+
+// scratchpadWrite upserts key→value in the per-turn scratchpad.
+// Returns an error if value exceeds the per-value cap or the write would push
+// the total over the turn cap. The caller (tool handler) converts the error to
+// an IsError tool result so the LLM can decide how to recover.
+func (ls *loopState) scratchpadWrite(key string, value any) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("value is not JSON-serializable: %w", err)
+	}
+	newValueBytes := len(encoded)
+	if newValueBytes > scratchpadMaxValueBytes {
+		return fmt.Errorf("value too large: %d bytes exceeds per-value limit of %d bytes", newValueBytes, scratchpadMaxValueBytes)
+	}
+
+	// Subtract the old entry's byte contribution (upsert adjusts the counter).
+	oldBytes := 0
+	if old, ok := ls.scratchpad[key]; ok {
+		if oldEncoded, encErr := json.Marshal(old); encErr == nil {
+			oldBytes = len(oldEncoded)
+		}
+	}
+	newTotal := ls.scratchpadBytes - oldBytes + newValueBytes
+	if newTotal > scratchpadMaxTotalBytes {
+		return fmt.Errorf("scratchpad total size exceeded: write would reach %d bytes (limit %d bytes)", newTotal, scratchpadMaxTotalBytes)
+	}
+
+	ls.scratchpad[key] = value
+	ls.scratchpadBytes = newTotal
+	return nil
+}
+
+// scratchpadRead returns the entries map for a single key (ok=false if missing)
+// or all entries when key is empty (ok always true).
+func (ls *loopState) scratchpadRead(key string) (map[string]any, bool) {
+	if key != "" {
+		v, ok := ls.scratchpad[key]
+		if !ok {
+			return nil, false
+		}
+		return map[string]any{key: v}, true
+	}
+	result := make(map[string]any, len(ls.scratchpad))
+	for k, v := range ls.scratchpad {
+		result[k] = v
+	}
+	return result, true
+}
+
+// scratchpadClear deletes a key. Returns true if the key existed.
+func (ls *loopState) scratchpadClear(key string) bool {
+	v, ok := ls.scratchpad[key]
+	if !ok {
+		return false
+	}
+	if encoded, encErr := json.Marshal(v); encErr == nil {
+		ls.scratchpadBytes -= len(encoded)
+		if ls.scratchpadBytes < 0 {
+			ls.scratchpadBytes = 0
+		}
+	}
+	delete(ls.scratchpad, key)
+	return true
 }
 
 // continueWith logs a continuation site and optionally captures a snapshot.

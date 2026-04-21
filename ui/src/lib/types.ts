@@ -503,7 +503,7 @@ export interface Question {
   required: boolean;
   default?: string;
   description?: string; // paragraph shown in card display
-  displayStyle?: "compact" | "card"; // defaults to "compact"
+  display_style?: "compact" | "card"; // defaults to "compact"
 }
 
 export interface EnvelopeApprovalRequest {

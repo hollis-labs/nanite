@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/classify"
 )
 
 // ContinueSite identifies why the chat loop continues for another iteration.
@@ -148,6 +149,14 @@ type loopState struct {
 
 	// Activity tracking.
 	lastActivity time.Time
+
+	// Pre-loop classification from P3 (CW-20260420-0013). Set once by
+	// generateResponse before the chat loop runs; read by downstream
+	// consumers (budgets, strategy loop, playbook, background-job) via
+	// Classification(). Zero values (TierInvalid, PatternInvalid) indicate
+	// the classifier has not yet run for this generation.
+	scopeTier        classify.ScopeTier
+	executionPattern classify.ExecutionPattern
 
 	// Debug snapshots.
 	debugMode bool
@@ -399,6 +408,27 @@ func isMetaTool(name string) bool {
 		return true
 	}
 	return false
+}
+
+// Classification returns the pre-loop (ScopeTier, ExecutionPattern) pair
+// for this generation. Returns (TierInvalid, PatternInvalid) if Classify
+// has not been called yet.
+//
+// Consumers feeding these values into metrics, budget math, or dispatch
+// logic MUST check ScopeTier.IsValid() and ExecutionPattern.IsValid()
+// before trusting them. The invalid-sentinel strings exist specifically to
+// surface "classifier not run" as a detectable condition; letting them
+// reach a log or budget computation unchecked is a bug. See the
+// internal/classify package doc for the full consumer contract.
+func (ls *loopState) Classification() (classify.ScopeTier, classify.ExecutionPattern) {
+	return ls.scopeTier, ls.executionPattern
+}
+
+// SetClassification stores the pre-loop classification. Called by
+// generateResponse once per generation, before the loop body runs.
+func (ls *loopState) SetClassification(tier classify.ScopeTier, pattern classify.ExecutionPattern) {
+	ls.scopeTier = tier
+	ls.executionPattern = pattern
 }
 
 // touchActivity updates the last activity timestamp.

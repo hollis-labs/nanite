@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
@@ -328,7 +329,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 	// Debug mode: per-agent setting or global developer_mode.
 	debugMode := isAgentDebugEnabled(agent.Settings) || s.isGlobalDebugMode()
+
+	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
+	// generation; downstream consumers read via loopState.Classification().
 	ls := newLoopState(constraints, toolNames, debugMode)
+	// P3 (CW-20260420-0013): pre-loop classification. Downstream consumers
+	// read via loopState.Classification().
+	classifyAndAttach(ls, sessionID, userContent, toolNames)
 
 	// Load per-tool cap from UserSettings.
 	if us, err := s.store.GetUserSettings(); err == nil && us.ToolPerTurnCap > 0 {
@@ -1419,6 +1426,41 @@ func BuildSummarizer(registry *provider.Registry, settings *store.UserSettings) 
 // same classification heuristic as the chat hot path.
 func ClassifyCompactionMode(agent *store.AgentProfile) string {
 	return classifyModeFromAgentTags(agent)
+}
+
+// classifyFn is the package-level indirection for classify.Classify.
+// Tests override this to record inputs or force outputs without spinning
+// up the full classifier path. Production code path stays direct.
+var classifyFn = classify.Classify
+
+// classifyAndAttach runs the P3 pre-loop classifier for a generation,
+// logs the result, and attaches it to the loop state. Extracted from
+// generateResponse so TestClassifyAndAttach_AttachesClassification can
+// exercise the wire itself rather than reconstructing it (CW-20260420-0013).
+func classifyAndAttach(ls *loopState, sessionID, userContent string, toolNames []string) {
+	intent := buildIntentSignals(userContent, toolNames, false /* attachments currently not tracked in pre-loop intent signals */)
+	scopeTier, executionPattern := classifyFn(intent)
+	slog.Info("chat-service: pre-loop classification",
+		"session_id", sessionID,
+		"scope_tier", scopeTier.String(),
+		"execution_pattern", executionPattern.String(),
+		"message_token_est", intent.MessageTokenEst,
+		"tools_available", intent.ToolsAvailable,
+	)
+	ls.SetClassification(scopeTier, executionPattern)
+}
+
+// buildIntentSignals assembles the pre-loop signal struct consumed by
+// classify.Classify. Pulled out as a helper for unit-testability; the
+// full generation wires this plus the Classify call at the pre-loop
+// boundary of generateResponse (CW-20260420-0013, P3).
+func buildIntentSignals(userContent string, tools []string, hasAttachments bool) classify.IntentSignals {
+	return classify.IntentSignals{
+		Message:         userContent,
+		MessageTokenEst: ctxpkg.DefaultEstimator{}.Estimate(userContent), // floor-of-1 for non-empty strings matters: classifyTier branches require est>0
+		HasAttachments:  hasAttachments,
+		ToolsAvailable:  len(tools),
+	}
 }
 
 // classifyModeFromAgentTags maps agent tags to a CompactionPipeline mode.

@@ -376,13 +376,13 @@ func TestDetectStuckLoop(t *testing.T) {
 		t.Errorf("first call: got %q, want 'result1'", result)
 	}
 
-	// Second identical call — warning appended (count=1).
+	// Second identical call — note appended (count=1).
 	result = impl.detectStuckLoop("tool_a", "result1", last, counts, blocked)
-	if !contains(result, "WARNING") {
-		t.Error("second call: expected WARNING in result")
+	if !contains(result, "same result") {
+		t.Error("second call: expected repeat warning in result")
 	}
 
-	// Note: lastResults now contains the modified (WARNING-appended) text,
+	// Note: lastResults now contains the modified (note-appended) text,
 	// so passing "result1" again won't match. The stuck loop detector
 	// correctly resets since the stored result differs. This matches the
 	// original engine behaviour: a real stuck loop sends the *same* raw
@@ -397,8 +397,8 @@ func TestDetectStuckLoop(t *testing.T) {
 	if !blocked["tool_b"] {
 		t.Error("expected tool_b to be blocked after 3 identical results")
 	}
-	if !contains(result, "BLOCKED") {
-		t.Error("expected BLOCKED in result text")
+	if !contains(result, "holding") {
+		t.Error("expected block message in result text")
 	}
 }
 

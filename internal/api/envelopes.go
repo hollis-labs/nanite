@@ -221,7 +221,11 @@ func buildEnvelopeLookup(s *store.Store, messages []store.Message) map[string]*s
 		}
 		inst, err := s.GetEnvelopeInstance(env.ID)
 		if err != nil {
-			continue // not found or error — skip silently
+			if !errors.Is(err, sql.ErrNoRows) {
+				slog.Warn("buildEnvelopeLookup: GetEnvelopeInstance failed",
+					"envelope_id", env.ID, "err", err)
+			}
+			continue
 		}
 		lookup[env.ID] = inst
 	}

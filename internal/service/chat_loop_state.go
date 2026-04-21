@@ -520,6 +520,17 @@ func (ls *loopState) scratchpadClear(key string) bool {
 	return true
 }
 
+// scratchpadSnapshot returns a shallow copy of the scratchpad for use in
+// compaction handoff stash payloads (P7, CW-20260420-0024). Callers must not
+// mutate the returned map after the snapshot is handed to the pipeline.
+func (ls *loopState) scratchpadSnapshot() map[string]any {
+	snap := make(map[string]any, len(ls.scratchpad))
+	for k, v := range ls.scratchpad {
+		snap[k] = v
+	}
+	return snap
+}
+
 // continueWith logs a continuation site and optionally captures a snapshot.
 func (ls *loopState) continueWith(site ContinueSite, reason string) {
 	ls.lastSite = site

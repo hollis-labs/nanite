@@ -114,7 +114,12 @@ type minimalStore struct {
 	stubProviderStore
 	stubTodoStore
 	stubPlanStore
+	stubHandoffStashStore
 }
+
+type stubHandoffStashStore struct{}
+
+func (stubHandoffStashStore) UpsertHandoffStash(store.HandoffStash) error { return nil }
 
 // Stubs to satisfy the Store composite interface for tests.
 type stubSessionStore struct{}

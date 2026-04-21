@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/hollis-labs/go-providers/provider"
 )
 
@@ -30,6 +31,7 @@ type CompactionResult struct {
 	Mode            string // compaction mode used
 	StagesApplied   []string
 	RawMessages     []provider.ChatMessage // original messages (for plugin extraction)
+	HandoffStashID  string                 // P7: stash_id written pre-compaction; empty if StashWriter nil
 }
 
 // Summarizer makes a simple non-streaming LLM call. Implemented by the
@@ -43,13 +45,19 @@ type Summarizer interface {
 // it made progress (reduced tokens). Stages run in order until the budget is
 // satisfied or all stages are exhausted.
 type CompactionPipeline struct {
-	Window    *ContextWindow
-	Estimator TokenEstimator
+	Window     *ContextWindow
+	Estimator  TokenEstimator
 	Summarizer Summarizer
 	Mode       string // compaction mode (code, plan, research, general)
 
 	// ConversationMessages is the current message list. Stages may modify it.
 	ConversationMessages []provider.ChatMessage
+
+	// P7 HandoffStash — optional pre-compaction stash write (CW-20260420-0024).
+	// If StashWriter is nil the stash step is skipped (backwards-compatible).
+	SessionID          string
+	StashWriter        StashWriter
+	ScratchpadSnapshot map[string]any
 }
 
 // Stage is a single compaction action. Returns true if it made progress.
@@ -99,6 +107,20 @@ func (p *CompactionPipeline) RunForce(ctx context.Context) (*CompactionResult, e
 
 func (p *CompactionPipeline) runStages(ctx context.Context, recheckBetweenStages bool) (*CompactionResult, error) {
 	result := &CompactionResult{Mode: p.Mode}
+
+	// P7 HandoffStash: write stash before any summarization stage (D2, CW-20260420-0024).
+	if p.StashWriter != nil && p.SessionID != "" {
+		stashID := uuid.New().String()
+		payload := BuildPayloadFromScratchpad(p.ScratchpadSnapshot)
+		if err := p.StashWriter.WriteHandoffStash(ctx, p.SessionID, stashID, payload); err != nil {
+			slog.Warn("compaction: handoff stash write failed (non-fatal)",
+				"session_id", p.SessionID, "err", err)
+		} else {
+			result.HandoffStashID = stashID
+			slog.Info("compaction: handoff stash written",
+				"session_id", p.SessionID, "stash_id", stashID)
+		}
+	}
 
 	for _, ns := range DefaultStages() {
 		p.refreshConversationSlot()

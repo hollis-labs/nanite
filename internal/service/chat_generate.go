@@ -492,7 +492,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					recoveryReason = "rate_budget_exceeded at stream start"
 				}
 				ls.continueWith(ContinueRecovery, recoveryReason)
-				newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind)
+				scratchSnap := ls.scratchpadSnapshot()
+				newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind, scratchSnap)
 				if ok {
 					// Recovery produced stages — end the span cleanly (this
 					// wasn't a provider failure from the user's perspective),
@@ -686,7 +687,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableAttempts < maxCompactRecoverableAttempts {
 					ls.compactRecoverableAttempts++
 					ls.continueWith(ContinueRecovery, "context_overflow mid-stream")
-					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error, compactTriggerContextOverflow); ok {
+					midSnap := ls.scratchpadSnapshot()
+					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error, compactTriggerContextOverflow, midSnap); ok {
 						// Mirror the stream-start recovery path: strip_tool_blocks
 						// drops tool-definition context, so post-compaction the
 						// LLM has to re-request tools. Reset the discovery-call
@@ -1100,6 +1102,7 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	ch chan chat.StreamEvent,
 	triggerMsg string,
 	triggerKind string,
+	scratchpadSnapshot map[string]any,
 ) ([]provider.ChatMessage, []provider.ToolDefinition, bool) {
 	if triggerKind == "" {
 		triggerKind = compactTriggerContextOverflow
@@ -1126,6 +1129,10 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 		Summarizer:           summarizer,
 		Mode:                 classifyModeFromAgentTags(agent),
 		ConversationMessages: chatMessages,
+		// P7 HandoffStash: snapshot scratchpad state pre-compaction.
+		SessionID:          sessionID,
+		StashWriter:        storeStashWriter{s: s.store},
+		ScratchpadSnapshot: scratchpadSnapshot,
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -1348,6 +1355,10 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 		Summarizer:           summarizer,
 		Mode:                 classifyModeFromAgentTags(agent),
 		ConversationMessages: chatMessages,
+		// P7 HandoffStash: pre-loop compaction has no scratchpad yet.
+		SessionID:          sessionID,
+		StashWriter:        storeStashWriter{s: s.store},
+		ScratchpadSnapshot: map[string]any{},
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -1389,6 +1400,31 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 // buildSummarizer is the chat-service-bound form of BuildSummarizer.
 func (s *chatServiceImpl) buildSummarizer(settings *store.UserSettings) ctxpkg.Summarizer {
 	return BuildSummarizer(s.providers, settings)
+}
+
+// storeStashWriter bridges HandoffStashStore to ctxpkg.StashWriter (P7, CW-20260420-0024).
+type storeStashWriter struct {
+	s HandoffStashStore
+}
+
+func (w storeStashWriter) WriteHandoffStash(ctx context.Context, sessionID, stashID string, payload ctxpkg.HandoffStashPayload) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal handoff stash payload: %w", err)
+	}
+	return w.s.UpsertHandoffStash(store.HandoffStash{
+		ID:        stashID,
+		SessionID: sessionID,
+		Payload:   string(data),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// NewStashWriter returns a ctxpkg.StashWriter backed by the given store.
+// Exported so api and other packages can share the same bridge without
+// importing the unexported storeStashWriter directly.
+func NewStashWriter(s HandoffStashStore) ctxpkg.StashWriter {
+	return storeStashWriter{s: s}
 }
 
 // BuildSummarizer resolves the provider+model used to summarize compacted

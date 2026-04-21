@@ -1,7 +1,7 @@
 -- CW-20260420-0024 — handoff_stashes: pre-compaction structured session-state blob (P7 HandoffStash)
 --
 -- Stores JSON payloads (decisions_locked, open_questions, active_file_refs,
--- active_ticket_ids, should_reread) keyed by session; retrieved post-compaction
+-- active_ticket_ids, should_reread) keyed by session — retrieved post-compaction
 -- via stash_id.
 --
 -- ON DELETE CASCADE evicts stashes when the parent session is removed.

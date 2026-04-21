@@ -51,8 +51,15 @@ func (s *MuxProxy) ListAvailableLaunches(ctx context.Context) ([]muxproxy.Launch
 	if err != nil {
 		return nil, err
 	}
+	// Filter to claude-stream launches only. The POC cannot dispatch
+	// claude-code or other provider kinds, so hiding them from the LLM
+	// prevents it from picking unusable launches and clogging the
+	// daemon with failed launch sessions.
 	out := make([]muxproxy.LaunchSummary, 0, len(launches))
 	for _, l := range launches {
+		if l.Provider != "claude-stream" {
+			continue
+		}
 		out = append(out, muxproxy.LaunchSummary{
 			ID:       l.ID,
 			Project:  l.Project,
@@ -71,6 +78,12 @@ func (s *MuxProxy) LaunchSubordinate(ctx context.Context, launchID, nickname str
 		return muxproxy.LaunchResult{}, err
 	}
 	if resp.ProviderID != "claude-stream" {
+		// Clean up the orphaned session — without this, every bad
+		// launch leaves stale state on muxd and eventually clogs the
+		// daemon.
+		if resp.ID != "" {
+			_ = s.client.StopSession(ctx, resp.ID)
+		}
 		return muxproxy.LaunchResult{}, fmt.Errorf("%w: got provider_id=%q", ErrUnsupportedProvider, resp.ProviderID)
 	}
 	chatSessionID := mcp.SessionIDFromContext(ctx)

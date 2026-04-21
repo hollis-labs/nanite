@@ -166,6 +166,68 @@ func (a *API) handleEnvelopeRespond(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, out)
 }
 
+// injectEnvelopePriorResponses post-processes messages returned from the store,
+// injecting a "prior_response" key into the envelope JSON of any message whose
+// envelope was already responded to. The lookup map is keyed by envelope ID.
+// Messages without an envelope or with an envelope missing an "id" field are
+// returned unchanged.
+func injectEnvelopePriorResponses(messages []store.Message, lookup map[string]*store.EnvelopeInstance) []store.Message {
+	for i, msg := range messages {
+		if msg.Envelope == "" {
+			continue
+		}
+		var env map[string]any
+		if err := json.Unmarshal([]byte(msg.Envelope), &env); err != nil {
+			continue
+		}
+		id, _ := env["id"].(string)
+		if id == "" {
+			continue
+		}
+		inst, ok := lookup[id]
+		if !ok || inst.ResponseJSON == "" {
+			continue
+		}
+		var resp any
+		if err := json.Unmarshal([]byte(inst.ResponseJSON), &resp); err != nil {
+			continue
+		}
+		env["prior_response"] = resp
+		enriched, err := json.Marshal(env)
+		if err != nil {
+			continue
+		}
+		messages[i].Envelope = string(enriched)
+	}
+	return messages
+}
+
+// buildEnvelopeLookup fetches EnvelopeInstances for all envelope IDs found in
+// the given messages and returns them keyed by envelope ID.
+func buildEnvelopeLookup(s *store.Store, messages []store.Message) map[string]*store.EnvelopeInstance {
+	lookup := make(map[string]*store.EnvelopeInstance)
+	for _, msg := range messages {
+		if msg.Envelope == "" {
+			continue
+		}
+		var env struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(msg.Envelope), &env); err != nil || env.ID == "" {
+			continue
+		}
+		if _, seen := lookup[env.ID]; seen {
+			continue
+		}
+		inst, err := s.GetEnvelopeInstance(env.ID)
+		if err != nil {
+			continue // not found or error — skip silently
+		}
+		lookup[env.ID] = inst
+	}
+	return lookup
+}
+
 // extractSessionID pulls an optional session_id from the raw JSON body so
 // session-scope enforcement doesn't require the ResponseV1 schema to grow a
 // new field.

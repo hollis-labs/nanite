@@ -120,6 +120,8 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	lookup := buildEnvelopeLookup(a.Services.Store, messages)
+	messages = injectEnvelopePriorResponses(messages, lookup)
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"session":  sess,
@@ -418,6 +420,8 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		lookup := buildEnvelopeLookup(a.Services.Store, page.Messages)
+		page.Messages = injectEnvelopePriorResponses(page.Messages, lookup)
 		a.jsonResp(w, http.StatusOK, page)
 		return
 	}
@@ -435,5 +439,7 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	lookup := buildEnvelopeLookup(a.Services.Store, page.Messages)
+	page.Messages = injectEnvelopePriorResponses(page.Messages, lookup)
 	a.jsonResp(w, http.StatusOK, page)
 }

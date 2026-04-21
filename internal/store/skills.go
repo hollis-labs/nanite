@@ -20,6 +20,7 @@ type Skill struct {
 	IsBuiltin    bool   `json:"is_builtin"`
 	Settings     string `json:"settings"`
 	Icon         string `json:"icon"`
+	Prompt       string `json:"prompt,omitempty"` // markdown body; set for file-based skills, empty for DB-only
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
 }

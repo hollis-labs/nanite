@@ -69,6 +69,7 @@ func (d *Definition) ToStoreSkill() *store.Skill {
 		settings["source_ref"] = d.SourceRef
 	}
 	sk.Settings = marshalJSONOr(settings, "{}")
+	sk.Prompt = d.Prompt
 
 	return sk
 }

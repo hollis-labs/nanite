@@ -162,6 +162,22 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           const result = await api.executeCommand(cmd.name, activeSessionId, '')
           if (result.action === 'message') {
             reloadMessages?.()
+          } else if (result.action === 'skill') {
+            // result.content = "slug args..." — fetch the skill definition and send
+            // its prompt as the user message so the agent gets the full instructions.
+            const parts = (result.content ?? '').trim().split(/\s+/)
+            const slug = parts[0]
+            const args = parts.slice(1).join(' ')
+            try {
+              const skill = await api.getSkill(`file-${slug}`)
+              if (skill?.prompt) {
+                const msg = args ? `${skill.prompt}\n\nArgs: ${args}` : skill.prompt
+                onSend(msg)
+              }
+            } catch {
+              // Skill not found or no prompt — fall back to sending the slug as text
+              if (result.content) onSend(result.content)
+            }
           }
         } catch (err) {
           console.error('Command execution failed:', err)

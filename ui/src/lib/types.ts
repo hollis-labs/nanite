@@ -993,6 +993,7 @@ export interface Skill {
   input_schema: string;
   is_builtin: boolean;
   settings: string;
+  prompt?: string;   // markdown body; present for file-based skills
   created_at: string;
   updated_at: string;
 }

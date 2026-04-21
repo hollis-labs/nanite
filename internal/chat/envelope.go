@@ -73,6 +73,8 @@ type Envelope struct {
 	Kind      string         `json:"kind"`
 	Version   int            `json:"version"`
 	Type      string         `json:"type"`                // standard, nanite, custom
+	Title     string         `json:"title,omitempty"`
+	Subtitle  string         `json:"subtitle,omitempty"`
 	Proposals []Proposal     `json:"proposals,omitempty"`
 	Questions []Question     `json:"questions,omitempty"`
 	Status    *Status        `json:"status,omitempty"`
@@ -88,11 +90,13 @@ type Proposal struct {
 
 // Question represents an interactive question within an envelope.
 type Question struct {
-	Prompt   string   `json:"prompt"`
-	Type     string   `json:"type"`              // text, textarea, select, radio, checkbox
-	Options  []string `json:"options,omitempty"`
-	Required bool     `json:"required"`
-	Default  string   `json:"default,omitempty"`
+	Prompt       string   `json:"prompt"`
+	Type         string   `json:"type"`              // text, textarea, select, radio, checkbox
+	Options      []string `json:"options,omitempty"`
+	Required     bool     `json:"required"`
+	Default      string   `json:"default,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	DisplayStyle string   `json:"display_style,omitempty"`
 }
 
 // Status represents a progress status within an envelope.

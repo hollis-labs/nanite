@@ -523,3 +523,63 @@ func TestSummarySystemPrompt_modes(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactionPipeline_E2E_StashRoundTrip(t *testing.T) {
+	// Build a tiny window that forces compaction.
+	cw := NewContextWindow(500, nil) // budget = 400 tokens
+	cw.SetContent(SlotSystem, strings.Repeat("x", 40))
+	msgs := makeMessages(10, 50) // 10 msgs × 50 tokens = 500 tokens → over budget
+	cw.SetContent(SlotConversation, serializeMessages(msgs, DefaultEstimator{}))
+
+	writer := &mockStashWriter{}
+	scratchpad := map[string]any{
+		"decisions_locked":  []any{"use new table", "structured JSON only"},
+		"open_questions":    []any{"what migration number is P8?"},
+		"active_file_refs":  []any{"internal/context/compaction.go", "internal/store/handoff_stashes.go"},
+		"active_ticket_ids": []any{"CW-20260420-0024"},
+		"should_reread":     []any{"planning/agent-platform/2026-04-19-p7-handoffstash-plan.md"},
+	}
+
+	p := &CompactionPipeline{
+		Window:               cw,
+		Estimator:            DefaultEstimator{},
+		Summarizer:           &mockSummarizer{},
+		Mode:                 CompactionModeCode,
+		ConversationMessages: msgs,
+		SessionID:            "e2e-sess-001",
+		StashWriter:          writer,
+		ScratchpadSnapshot:   scratchpad,
+	}
+
+	cr, err := p.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if cr.HandoffStashID == "" {
+		t.Fatal("CompactionResult.HandoffStashID must not be empty after stash write")
+	}
+	if len(writer.calls) != 1 {
+		t.Fatalf("expected 1 stash write, got %d", len(writer.calls))
+	}
+	if writer.calls[0].stashID != cr.HandoffStashID {
+		t.Errorf("stash_id mismatch: result=%q written=%q", cr.HandoffStashID, writer.calls[0].stashID)
+	}
+
+	p7 := writer.calls[0].payload
+	if len(p7.DecisionsLocked) != 2 {
+		t.Errorf("decisions_locked count: got %d, want 2", len(p7.DecisionsLocked))
+	}
+	if len(p7.ActiveFileRefs) != 2 {
+		t.Errorf("active_file_refs count: got %d, want 2", len(p7.ActiveFileRefs))
+	}
+	if len(p7.ActiveTicketIDs) != 1 || p7.ActiveTicketIDs[0] != "CW-20260420-0024" {
+		t.Errorf("active_ticket_ids: %v", p7.ActiveTicketIDs)
+	}
+	if len(p7.ShouldReread) != 1 {
+		t.Errorf("should_reread count: got %d, want 1", len(p7.ShouldReread))
+	}
+	if len(cr.StagesApplied) == 0 {
+		t.Error("expected at least one compaction stage applied alongside stash write")
+	}
+}

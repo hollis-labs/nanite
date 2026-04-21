@@ -2,21 +2,35 @@ package muxproxy
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
 	agentmux "github.com/hollis-labs/go-agentmux-client"
 )
 
-// fakeStream satisfies the minimal surface the Manager consumes from
-// the agent-mux client: StreamEvents-shaped output via injected channels.
+// fakeStream satisfies the streamSource interface. For the POC we
+// exercise the attach path: AttachSession writes a scripted NDJSON
+// payload to the writer then returns.
 type fakeStream struct {
-	events chan agentmux.StreamEvent
-	errs   chan error
+	attachData map[string]string // sessionID → NDJSON body (newline-delimited JSON lines)
 }
 
-func (f *fakeStream) StreamEvents(ctx context.Context, _ agentmux.StreamEventsOptions) (<-chan agentmux.StreamEvent, <-chan error) {
-	return f.events, f.errs
+// StreamEvents is required by the streamSource interface but not
+// exercised at runtime anymore — claudestream events ride attach.
+func (f *fakeStream) StreamEvents(_ context.Context, _ agentmux.StreamEventsOptions) (<-chan agentmux.StreamEvent, <-chan error) {
+	events := make(chan agentmux.StreamEvent)
+	errs := make(chan error, 1)
+	close(events)
+	close(errs)
+	return events, errs
+}
+
+func (f *fakeStream) AttachSession(_ context.Context, sessionID string, w io.Writer, _ int64) error {
+	if body, ok := f.attachData[sessionID]; ok {
+		_, _ = io.WriteString(w, body)
+	}
+	return nil
 }
 
 // fakePublisher records PublishSubEvent calls.
@@ -34,50 +48,85 @@ func (fp *fakePublisher) PublishSubEvent(sessionID string, evt SubEvent) {
 }
 
 func TestManager_RegisterAndFanout(t *testing.T) {
-	f := &fakeStream{
-		events: make(chan agentmux.StreamEvent, 4),
-		errs:   make(chan error, 1),
-	}
+	// Scripted subordinate stream: one assistant-text event, then
+	// a result event that produces {KindUsage, KindDone}.
+	f := &fakeStream{attachData: map[string]string{
+		"sess-A": `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n" +
+			`{"type":"result","subtype":"success","is_error":false,"result":"hi","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":1}}` + "\n",
+	}}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	fp := &fakePublisher{}
 	m := NewManagerWithStream(f)
 	m.SetPublisher(fp)
-	ch := m.Register("chat-1", "sess-A", "Alice")
-
 	go m.Run(ctx)
 
-	payload := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}`
-	f.events <- agentmux.StreamEvent{SessionID: "sess-A", PayloadJSON: payload}
+	ch := m.Register("chat-1", "sess-A", "Alice")
 
+	// Expect the delta to arrive on the waiter channel.
 	select {
 	case ev := <-ch:
 		if ev.Text != "hi" {
 			t.Fatalf("want text=hi, got %q", ev.Text)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("waiter channel did not receive event")
+		t.Fatal("waiter channel did not receive delta")
 	}
 
-	// Give dispatch a moment to call the publisher.
-	time.Sleep(20 * time.Millisecond)
+	// Drain remaining events (Usage + Done) from the waiter to avoid
+	// the fanout goroutine dropping them on a full buffer.
+	drained := 0
+	for drained < 3 {
+		select {
+		case <-ch:
+			drained++
+		case <-time.After(500 * time.Millisecond):
+			drained = 3 // give up; some may have been dropped
+		}
+	}
+
+	// Give dispatch a moment to call the publisher for each event.
+	time.Sleep(50 * time.Millisecond)
 
 	if len(fp.published) == 0 {
 		t.Fatal("publisher received no events")
 	}
-	got := fp.published[0]
-	if got.sessionID != "chat-1" {
-		t.Fatalf("want sessionID=chat-1, got %q", got.sessionID)
+
+	// Find the delta.
+	var foundDelta bool
+	for _, pe := range fp.published {
+		if pe.sessionID != "chat-1" {
+			t.Fatalf("want sessionID=chat-1, got %q", pe.sessionID)
+		}
+		if pe.evt.Type == "subordinate_delta" && pe.evt.Content == "hi" && pe.evt.AgentID == "Alice" {
+			foundDelta = true
+		}
 	}
-	if got.evt.Type != "subordinate_delta" {
-		t.Fatalf("want type=subordinate_delta, got %q", got.evt.Type)
+	if !foundDelta {
+		t.Fatalf("no subordinate_delta found in %+v", fp.published)
 	}
-	if got.evt.Content != "hi" {
-		t.Fatalf("want content=hi, got %q", got.evt.Content)
-	}
-	if got.evt.AgentID != "Alice" {
-		t.Fatalf("want agent_id=Alice, got %q", got.evt.AgentID)
+}
+
+func TestManager_IgnoresUnregisteredSessions(t *testing.T) {
+	f := &fakeStream{attachData: map[string]string{
+		"sess-A": `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ignore me"}]}}` + "\n",
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fp := &fakePublisher{}
+	m := NewManagerWithStream(f)
+	m.SetPublisher(fp)
+	go m.Run(ctx)
+
+	// Do NOT Register sess-A. Manager should never attach an
+	// orphan session.
+	time.Sleep(100 * time.Millisecond)
+
+	if len(fp.published) != 0 {
+		t.Fatalf("publisher received event for unregistered session: %+v", fp.published)
 	}
 }
 
@@ -110,28 +159,5 @@ func TestManager_StopAll(t *testing.T) {
 	}
 	if mgr.Nickname("sess-A") != "" || mgr.Nickname("sess-C") != "" {
 		t.Fatal("all nicknames should be cleared")
-	}
-}
-
-func TestManager_IgnoresUnregisteredSessions(t *testing.T) {
-	f := &fakeStream{
-		events: make(chan agentmux.StreamEvent, 2),
-		errs:   make(chan error, 1),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	fp := &fakePublisher{}
-	m := NewManagerWithStream(f)
-	m.SetPublisher(fp)
-	go m.Run(ctx)
-
-	payload := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ignore me"}]}}`
-	f.events <- agentmux.StreamEvent{SessionID: "not-ours", PayloadJSON: payload}
-
-	time.Sleep(100 * time.Millisecond)
-
-	if len(fp.published) != 0 {
-		t.Fatalf("publisher received event for unregistered session: %+v", fp.published)
 	}
 }

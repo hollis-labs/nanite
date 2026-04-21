@@ -1,3 +1,5 @@
+import type { ResponseV1 } from "@/lib/envelope-response";
+
 export interface Workspace {
   id: string;
   name: string;
@@ -471,6 +473,9 @@ export interface Envelope {
   version: number;
   type: string;
   id?: string;
+  title?: string; // agent-defined card title
+  subtitle?: string; // agent-defined subheading
+  prior_response?: ResponseV1; // set by backend if already answered
   proposals?: Proposal[];
   questions?: Question[];
   approval?: EnvelopeApprovalRequest;
@@ -494,9 +499,11 @@ export interface SchemaField {
 export interface Question {
   prompt: string;
   type: "text" | "textarea" | "select" | "radio" | "checkbox";
-  options?: string[];
+  options?: (string | { value: string; label: string; description?: string })[];
   required: boolean;
   default?: string;
+  description?: string; // paragraph shown in card display
+  displayStyle?: "compact" | "card"; // defaults to "compact"
 }
 
 export interface EnvelopeApprovalRequest {

@@ -235,3 +235,83 @@ func TestHandleScratchpadTool_SummaryTruncation(t *testing.T) {
 		t.Errorf("summary not truncated: len=%d", len(toolResultEvent.Summary))
 	}
 }
+
+// TestScratchpad_E2E exercises the full write → read → clear → turn-exit-clears
+// sequence required by CW-20260419-0025 acceptance criteria.
+func TestScratchpad_E2E(t *testing.T) {
+	ls := newTestLoopState()
+
+	// 1. Write three keys.
+	for _, tc := range []struct {
+		key string
+		val any
+	}{
+		{"count", 42.0},
+		{"label", "ingestion-run"},
+		{"tags", []any{"alpha", "beta"}},
+	} {
+		result, isErr := callScratchpadWrite(map[string]any{"key": tc.key, "value": tc.val}, ls)
+		if isErr {
+			t.Fatalf("write %q: unexpected error: %s", tc.key, result)
+		}
+	}
+
+	// 2. Read specific key.
+	result, isErr := callScratchpadRead(map[string]any{"key": "count"}, ls)
+	if isErr {
+		t.Fatalf("read count: unexpected error: %s", result)
+	}
+	var readOut map[string]any
+	if err := json.Unmarshal([]byte(result), &readOut); err != nil {
+		t.Fatalf("read output not valid JSON: %v", err)
+	}
+	entries, _ := readOut["entries"].(map[string]any)
+	if entries["count"] != 42.0 {
+		t.Errorf("expected count=42, got %v", entries["count"])
+	}
+
+	// 3. Read all keys — expect 3.
+	allResult, isErr := callScratchpadRead(map[string]any{}, ls)
+	if isErr {
+		t.Fatalf("read all: unexpected error: %s", allResult)
+	}
+	var allOut map[string]any
+	_ = json.Unmarshal([]byte(allResult), &allOut)
+	allEntries, _ := allOut["entries"].(map[string]any)
+	if len(allEntries) != 3 {
+		t.Errorf("expected 3 entries, got %d: %v", len(allEntries), allEntries)
+	}
+
+	// 4. Clear one key.
+	clearResult, isErr := callScratchpadClear(map[string]any{"key": "label"}, ls)
+	if isErr {
+		t.Fatalf("clear label: unexpected error: %s", clearResult)
+	}
+	var clearOut map[string]any
+	_ = json.Unmarshal([]byte(clearResult), &clearOut)
+	if clearOut["cleared"] != true {
+		t.Errorf("expected cleared=true, got %v", clearOut["cleared"])
+	}
+
+	// 5. Read all after clear — expect 2.
+	afterResult, _ := callScratchpadRead(map[string]any{}, ls)
+	var afterOut map[string]any
+	_ = json.Unmarshal([]byte(afterResult), &afterOut)
+	afterEntries, _ := afterOut["entries"].(map[string]any)
+	if len(afterEntries) != 2 {
+		t.Errorf("expected 2 entries after clear, got %d: %v", len(afterEntries), afterEntries)
+	}
+	if _, hasLabel := afterEntries["label"]; hasLabel {
+		t.Error("cleared key 'label' still readable")
+	}
+
+	// 6. Simulate turn exit: new loopState starts empty.
+	ls2 := newTestLoopState()
+	newResult, _ := callScratchpadRead(map[string]any{}, ls2)
+	var newOut map[string]any
+	_ = json.Unmarshal([]byte(newResult), &newOut)
+	newEntries, _ := newOut["entries"].(map[string]any)
+	if len(newEntries) != 0 {
+		t.Errorf("new loopState must start with empty scratchpad, got %v", newEntries)
+	}
+}

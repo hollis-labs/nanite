@@ -34,7 +34,7 @@ description: Run tests
 Run the tests.
 `)
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: root})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -70,7 +70,7 @@ description: Agentrc linter
 Agentrc version.
 `)
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: root})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -101,6 +101,7 @@ Deploy it.
 	defs, err := Discover(DiscoverOptions{
 		WorkingDir: root,
 		PluginsDir: pluginsDir,
+		HomeDir:    root,
 	})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -116,7 +117,7 @@ Deploy it.
 func TestDiscover_MissingDirsOK(t *testing.T) {
 	root := t.TempDir()
 	// No skill directories exist — should return empty, no error.
-	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: root})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}

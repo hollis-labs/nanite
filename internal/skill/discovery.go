@@ -14,6 +14,11 @@ type DiscoverOptions struct {
 
 	// PluginsDir is the root plugins directory for plugin-provided skills.
 	PluginsDir string
+
+	// HomeDir overrides os.UserHomeDir() for user-level skill discovery.
+	// When empty, os.UserHomeDir() is used. Set in tests to isolate from
+	// the real home directory.
+	HomeDir string
 }
 
 // Discover scans all 4 locations in priority order and returns parsed Definitions.
@@ -39,7 +44,11 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 	}
 
 	// Priority 2: ~/.nanite/skills/ (user).
-	if home, err := os.UserHomeDir(); err == nil {
+	home := opts.HomeDir
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home != "" {
 		for _, def := range discoverDir(filepath.Join(home, ".nanite", "skills"), "user") {
 			add(def)
 		}

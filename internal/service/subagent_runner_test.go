@@ -350,3 +350,83 @@ func (m *messageFailingStore) CreateMessage(msg *store.Message) error {
 	}
 	return m.recordingSessionStore.CreateMessage(msg)
 }
+
+// TestChatRunner_ProviderOverride_UsesRunProvider verifies that when
+// run.Provider is non-empty it takes precedence over the agent profile's
+// DefaultProvider in the child session, enabling per-spawn budget-aware
+// provider routing.
+func TestChatRunner_ProviderOverride_UsesRunProvider(t *testing.T) {
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "delta", Content: "done"},
+		{Type: "stream_end"},
+	}}
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"worker": {ID: "ag-worker", DefaultProvider: "anthropic", DefaultModel: "claude-haiku"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-override", Role: "worker", ParentSessionID: "sess-parent",
+		Prompt: "do heavy work", Provider: "pty-claude",
+	}
+	_, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.created) == 0 {
+		t.Fatal("no child session created")
+	}
+	child := st.created[0]
+	if child.Provider != "pty-claude" {
+		t.Errorf("child session Provider = %q, want %q (override)", child.Provider, "pty-claude")
+	}
+}
+
+// TestChatRunner_ProviderOverride_FallsBackToAgentDefault verifies that
+// when run.Provider is empty the child session uses the agent profile's
+// DefaultProvider unchanged — the override is strictly opt-in.
+func TestChatRunner_ProviderOverride_FallsBackToAgentDefault(t *testing.T) {
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "delta", Content: "done"},
+		{Type: "stream_end"},
+	}}
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"worker": {ID: "ag-worker", DefaultProvider: "anthropic", DefaultModel: "claude-haiku"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-default", Role: "worker", ParentSessionID: "sess-parent",
+		Prompt: "lightweight task",
+		// Provider intentionally empty — should fall back to agent default.
+	}
+	_, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.created) == 0 {
+		t.Fatal("no child session created")
+	}
+	child := st.created[0]
+	if child.Provider != "anthropic" {
+		t.Errorf("child session Provider = %q, want %q (agent default)", child.Provider, "anthropic")
+	}
+}

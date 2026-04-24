@@ -209,3 +209,56 @@ func TestParseClaudeStreamLine_InvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
+
+// TestParseClaudeAssistant_ToolOnlyProducesNoDeltas verifies that a Claude
+// assistant message containing only tool_use blocks emits tool_use events but
+// zero delta events. This documents the parser behaviour that the PTY/subprocess
+// bridge relies on when applying the tool-only silence detection: if seenDelta
+// remains 0 after the stream closes, the bridge emits a visible error instead
+// of leaving the user with an empty assistant row.
+func TestParseClaudeAssistant_ToolOnlyProducesNoDeltas(t *testing.T) {
+	line := []byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_abc","name":"Bash","input":{"command":"ls /tmp"}}]}}`)
+	events, err := parseClaudeStreamLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event (tool_use), got %d", len(events))
+	}
+	if events[0].Type != "tool_use" {
+		t.Errorf("expected type=tool_use, got %s", events[0].Type)
+	}
+	// No delta events — this is what triggers the bridge's error injection.
+	for _, ev := range events {
+		if ev.Type == "delta" {
+			t.Errorf("unexpected delta event in tool-only message")
+		}
+	}
+}
+
+// TestParseClaudeAssistant_MixedBlocksProducesDelta verifies that a Claude
+// assistant message with both text and tool_use blocks emits at least one
+// delta event — the bridge will NOT emit a tool-proxy error in this case.
+func TestParseClaudeAssistant_MixedBlocksProducesDelta(t *testing.T) {
+	line := []byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me check that."},{"type":"tool_use","id":"tu_xyz","name":"Read","input":{"file_path":"/tmp/x"}}]}}`)
+	events, err := parseClaudeStreamLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	hasDelta := false
+	hasToolUse := false
+	for _, ev := range events {
+		switch ev.Type {
+		case "delta":
+			hasDelta = true
+		case "tool_use":
+			hasToolUse = true
+		}
+	}
+	if !hasDelta {
+		t.Error("expected at least one delta event for mixed-block message")
+	}
+	if !hasToolUse {
+		t.Error("expected at least one tool_use event for mixed-block message")
+	}
+}

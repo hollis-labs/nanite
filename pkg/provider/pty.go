@@ -83,6 +83,24 @@ func (p *PTYBridge) Capabilities() ProviderCapabilities {
 	}
 }
 
+// ptyToolOnlyError is the error message emitted when the CLI stream closes with
+// tool_use blocks but zero text content. The nested CLI requested tools that
+// Nanite's PTY adapter cannot forward to the tool broker.
+const ptyToolOnlyError = "PTY provider cannot forward tool calls — the nested CLI requested tools that cannot be proxied. Retry with an API provider for tool-heavy tasks."
+
+// toolOnlyErrorEvent returns a StreamEvent signalling an unforwardable tool-use
+// condition, or nil when the stream produced text content alongside tool calls.
+// toolUseCount is the number of tool_use events seen; deltaCount is the number
+// of delta (text) events seen. When the CLI emits tool_use blocks with no text
+// the user would otherwise see a silent empty assistant row.
+func toolOnlyErrorEvent(toolUseCount, deltaCount int) *StreamEvent {
+	if toolUseCount > 0 && deltaCount == 0 {
+		ev := StreamEvent{Type: "error", Error: ptyToolOnlyError}
+		return &ev
+	}
+	return nil
+}
+
 // streamCLI spawns the Claude CLI in a PTY and streams parsed events.
 func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages []ChatMessage) (<-chan StreamEvent, error) {
 	// Extract the last user message as the prompt.
@@ -133,6 +151,9 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		// Set 1MB buffer for large tool results.
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
+		// Track tool_use and delta events to detect tool-only streams.
+		var toolUseCount, deltaCount int
+
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -161,6 +182,12 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 			}
 
 			for _, ev := range events {
+				switch ev.Type {
+				case "tool_use":
+					toolUseCount++
+				case "delta":
+					deltaCount++
+				}
 				ch <- ev
 			}
 		}
@@ -179,6 +206,16 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 				// Only log if not a context cancellation.
 				slog.Info("pty: process exited", "err", err)
 			}
+		}
+
+		// Emit an error when the CLI requested tools but produced no text.
+		// The PTY adapter has no broker passthrough (deferred post-beta), so the
+		// user would otherwise see a silent empty assistant row. Surface a clear
+		// failure instead.
+		if errEv := toolOnlyErrorEvent(toolUseCount, deltaCount); errEv != nil {
+			slog.Warn("pty: tool-only stream — emitting error; broker passthrough not yet supported",
+				"adapter", p.adapter.Name(), "tool_use_count", toolUseCount)
+			ch <- *errEv
 		}
 
 		// Notify process tracker that process has exited.

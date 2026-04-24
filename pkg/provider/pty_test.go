@@ -130,3 +130,67 @@ func TestCLISessionIDContext(t *testing.T) {
 		t.Error("expected empty string to return ok=false")
 	}
 }
+
+// TestToolOnlyErrorEvent covers the gate logic used by the streamCLI read loop
+// to detect CLI responses that consist entirely of tool_use blocks with no text
+// content (a condition the PTY adapter cannot handle without broker passthrough).
+func TestToolOnlyErrorEvent(t *testing.T) {
+	tests := []struct {
+		name         string
+		toolUseCount int
+		deltaCount   int
+		wantError    bool
+	}{
+		{
+			name:         "tool_use only — should emit error",
+			toolUseCount: 1,
+			deltaCount:   0,
+			wantError:    true,
+		},
+		{
+			name:         "multiple tool_use no text — should emit error",
+			toolUseCount: 3,
+			deltaCount:   0,
+			wantError:    true,
+		},
+		{
+			name:         "pure text response — no error",
+			toolUseCount: 0,
+			deltaCount:   5,
+			wantError:    false,
+		},
+		{
+			name:         "mixed text and tool_use — no error (text was produced)",
+			toolUseCount: 2,
+			deltaCount:   1,
+			wantError:    false,
+		},
+		{
+			name:         "empty stream — no error",
+			toolUseCount: 0,
+			deltaCount:   0,
+			wantError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := toolOnlyErrorEvent(tt.toolUseCount, tt.deltaCount)
+			if tt.wantError {
+				if ev == nil {
+					t.Fatal("expected non-nil error event, got nil")
+				}
+				if ev.Type != "error" {
+					t.Errorf("expected event type=error, got %q", ev.Type)
+				}
+				if ev.Error != ptyToolOnlyError {
+					t.Errorf("expected ptyToolOnlyError message, got %q", ev.Error)
+				}
+			} else {
+				if ev != nil {
+					t.Errorf("expected nil error event, got %+v", ev)
+				}
+			}
+		})
+	}
+}

@@ -119,11 +119,16 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 	// We verify that by: (a) registering a builtin and confirming it appears
 	// under permissive policy, and (b) confirming the code path is present by
 	// inspecting the filtered slice's size matches the policy outcome.
+	//
+	// Note: dev_* tools are gated behind developer_mode; we use non-dev
+	// builtins here to keep the test focused on permission filtering, not the
+	// dev-mode gate. See devmode_gate_test.go for dev-mode gate coverage.
 
 	tb := New(nil, nil, DefaultConfig())
-	tb.Builtins.RegisterBuiltins("dev", []provider.ToolDefinition{
-		{Name: "dev_bash", Description: "Shell execution"},
-		{Name: "dev_read", Description: "Read files"},
+	// DeveloperModeFunc is left nil → dev tools would be absent; these are not dev tools.
+	tb.Builtins.RegisterBuiltins("self", []provider.ToolDefinition{
+		{Name: "nanite_todo_create", Description: "Create a todo"},
+		{Name: "nanite_plan_create", Description: "Create a plan"},
 	})
 
 	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive")
@@ -136,7 +141,7 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 	for _, d := range res.Tools {
 		names[d.Name] = true
 	}
-	if !names["dev_bash"] || !names["dev_read"] {
+	if !names["nanite_todo_create"] || !names["nanite_plan_create"] {
 		t.Errorf("expected both builtins under permissive policy, got: %v", names)
 	}
 }

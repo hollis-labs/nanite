@@ -246,7 +246,9 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	}
 
 	// Ungated path — existing behavior preserved exactly.
-	run.Status = StatusRunning // MVP: skip requested/approved
+	// Auto-approve only when the gate predicate above is false
+	// (that is, approval is not required and mode is not interactive).
+	run.Status = StatusRunning
 	run.StartedAt = run.CreatedAt
 	if err := svc.insertRun(ctx, run); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)

@@ -211,11 +211,14 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		// Emit an error when the CLI requested tools but produced no text.
 		// The PTY adapter has no broker passthrough (deferred post-beta), so the
 		// user would otherwise see a silent empty assistant row. Surface a clear
-		// failure instead.
-		if errEv := toolOnlyErrorEvent(toolUseCount, deltaCount); errEv != nil {
-			slog.Warn("pty: tool-only stream — emitting error; broker passthrough not yet supported",
-				"adapter", p.adapter.Name(), "tool_use_count", toolUseCount)
-			ch <- *errEv
+		// failure instead. Skip when ctx is already cancelled — the caller will
+		// see a cancellation error and a misleading tool-call message would be noise.
+		if ctx.Err() == nil {
+			if errEv := toolOnlyErrorEvent(toolUseCount, deltaCount); errEv != nil {
+				slog.Warn("pty: tool-only stream — emitting error; broker passthrough not yet supported",
+					"adapter", p.adapter.Name(), "tool_use_count", toolUseCount, "delta_count", deltaCount)
+				ch <- *errEv
+			}
 		}
 
 		// Notify process tracker that process has exited.

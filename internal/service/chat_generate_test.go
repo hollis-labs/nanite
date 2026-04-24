@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-toolbroker/broker"
+	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -173,5 +175,190 @@ func TestOverrideBlockReachesPrefix_EndToEnd(t *testing.T) {
 	overrideIdx := strings.Index(prefix, "Tool Overrides")
 	if overrideIdx < nativeIdx {
 		t.Errorf("expected Tool Overrides to appear AFTER Native Tool Usage; native=%d override=%d", nativeIdx, overrideIdx)
+	}
+}
+
+// --- early-stopping-generate tests ---
+
+// mockStreamProvider is a minimal provider.Provider that emits a fixed sequence
+// of StreamEvents and records whether StreamChat was called with tools.
+type mockStreamProvider struct {
+	events       []provider.StreamEvent
+	gotTools     []provider.ToolDefinition
+	lastMessages []provider.ChatMessage
+	callCount    int
+}
+
+func (m *mockStreamProvider) StreamChat(_ context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+	m.callCount++
+	m.gotTools = req.Tools
+	m.lastMessages = req.Messages
+	ch := make(chan provider.StreamEvent, len(m.events)+1)
+	for _, ev := range m.events {
+		ch <- ev
+	}
+	close(ch)
+	return ch, nil
+}
+
+func (m *mockStreamProvider) Complete(_ context.Context, _ provider.ChatRequest) (string, error) {
+	return "", nil
+}
+
+func (m *mockStreamProvider) Capabilities() provider.ProviderCapabilities {
+	return provider.ProviderCapabilities{}
+}
+
+// TestEarlyStopSynthesisPrompt verifies the constant value matches the spec.
+func TestEarlyStopSynthesisPrompt(t *testing.T) {
+	const want = "You've reached the maximum number of steps. Provide your best answer now based on the work you've done so far."
+	if earlyStopSynthesisPrompt != want {
+		t.Errorf("earlyStopSynthesisPrompt mismatch:\ngot:  %s\nwant: %s", earlyStopSynthesisPrompt, want)
+	}
+}
+
+// TestEarlyStopSynthesis_StreamsDeltasToChannel verifies that earlyStopSynthesis
+// forwards delta events from the provider into the channel and accumulates
+// them in fullContent.
+func TestEarlyStopSynthesis_StreamsDeltasToChannel(t *testing.T) {
+	prov := &mockStreamProvider{
+		events: []provider.StreamEvent{
+			{Type: "delta", Content: "Here is "},
+			{Type: "delta", Content: "my best answer."},
+			{Type: "done"},
+		},
+	}
+
+	svc := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 16)
+	var fullContent strings.Builder
+
+	svc.earlyStopSynthesis(
+		context.Background(),
+		prov,
+		"test-model",
+		"system prompt",
+		nil, // slotResult — nil is safe; slotBlocksFor handles nil
+		nil, // chatMessages
+		ch,
+		&fullContent,
+	)
+
+	close(ch)
+
+	// Collect events from channel.
+	var got []string
+	for ev := range ch {
+		if ev.Type == "delta" {
+			got = append(got, ev.Content)
+		}
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 delta events, got %d: %v", len(got), got)
+	}
+	if got[0] != "Here is " || got[1] != "my best answer." {
+		t.Errorf("unexpected delta content: %v", got)
+	}
+	if fullContent.String() != "Here is my best answer." {
+		t.Errorf("fullContent mismatch: %q", fullContent.String())
+	}
+}
+
+// TestEarlyStopSynthesis_NoToolsForwarded verifies that the synthesis call
+// sends an empty tools slice so the model cannot call tools and recurse.
+func TestEarlyStopSynthesis_NoToolsForwarded(t *testing.T) {
+	prov := &mockStreamProvider{
+		events: []provider.StreamEvent{{Type: "done"}},
+	}
+
+	svc := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 8)
+	var fullContent strings.Builder
+
+	svc.earlyStopSynthesis(
+		context.Background(),
+		prov,
+		"test-model",
+		"",
+		nil,
+		[]provider.ChatMessage{{Role: "user", Content: "prior message"}},
+		ch,
+		&fullContent,
+	)
+	close(ch)
+
+	if len(prov.gotTools) != 0 {
+		t.Errorf("synthesis call should not forward tools; got %d tools", len(prov.gotTools))
+	}
+}
+
+// TestEarlyStopSynthesis_PromptInjected verifies that the synthesis prompt is
+// injected as the final user message so the LLM receives it.
+func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
+	prov := &mockStreamProvider{
+		events: []provider.StreamEvent{{Type: "done"}},
+	}
+
+	svc := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 8)
+	var fullContent strings.Builder
+
+	prior := []provider.ChatMessage{
+		{Role: "user", Content: "prior message"},
+		{Role: "assistant", Content: "prior response"},
+	}
+
+	svc.earlyStopSynthesis(
+		context.Background(),
+		prov,
+		"test-model",
+		"",
+		nil,
+		prior,
+		ch,
+		&fullContent,
+	)
+	close(ch)
+
+	if prov.callCount != 1 {
+		t.Errorf("expected 1 StreamChat call, got %d", prov.callCount)
+	}
+	if len(prov.lastMessages) == 0 {
+		t.Fatal("no messages passed to StreamChat")
+	}
+	last := prov.lastMessages[len(prov.lastMessages)-1]
+	if last.Role != "user" || last.Content != earlyStopSynthesisPrompt {
+		t.Errorf("last message should be user turn with synthesis prompt; got role=%q content=%q",
+			last.Role, last.Content)
+	}
+}
+
+// TestEarlyStopSynthesis_FiringCodes verifies the logic that determines for
+// which TerminationCode the early-stop synthesis fires.
+func TestEarlyStopSynthesis_FiringCodes(t *testing.T) {
+	synthCodes := []TerminationCode{
+		TerminationMaxTurns,
+		TerminationRunawayToolFailures,
+	}
+	noSynthCodes := []TerminationCode{
+		TerminationHardCeiling,
+		TerminationIdleTimeout,
+		TerminationRetryBudgetExhausted,
+	}
+
+	fires := func(code TerminationCode) bool {
+		return code == TerminationMaxTurns || code == TerminationRunawayToolFailures
+	}
+
+	for _, code := range synthCodes {
+		if !fires(code) {
+			t.Errorf("expected synthesis to fire for %s", code)
+		}
+	}
+	for _, code := range noSynthCodes {
+		if fires(code) {
+			t.Errorf("expected synthesis NOT to fire for %s", code)
+		}
 	}
 }

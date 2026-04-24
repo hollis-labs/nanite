@@ -358,6 +358,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// Check layered iteration limits.
 		if stop, code, reason := ls.shouldStop(); stop {
 			slog.Warn("chat-loop stopped", "reason", reason, "code", code, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
+
+			// Early-stopping-generate: when the loop hits its iteration ceiling
+			// (max_turns or runaway tool failures), make one final no-tools LLM
+			// call to synthesize a best-effort answer from the work done so far.
+			// Synthesis deltas land in the stream before the terminated envelope
+			// so the user sees a coherent response rather than an abrupt cutoff.
+			if code == TerminationMaxTurns || code == TerminationRunawayToolFailures {
+				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent)
+			}
+
 			// CW-20260417-0485: emit a typed `chat-loop-terminated` envelope
 			// BEFORE the fallback status event so the FE (CW-20260418-0008)
 			// can render a terminal pause card. Any FE that doesn't yet
@@ -1952,4 +1962,72 @@ func (s *chatServiceImpl) isGlobalDebugMode() bool {
 		return false
 	}
 	return settings.DeveloperMode
+}
+
+// earlyStopSynthesisPrompt is the user-turn prompt injected when the chat loop
+// hits its iteration ceiling (max_turns or runaway_fail_cap). The final LLM
+// call is made without tools so the model cannot recurse further.
+const earlyStopSynthesisPrompt = "You've reached the maximum number of steps. Provide your best answer now based on the work you've done so far."
+
+// earlyStopSynthesis makes one final, no-tools completion call to the provider
+// when the chat loop hits max_iter or runaway_fail_cap. The response is
+// streamed as delta events into ch and accumulated in fullContent.
+//
+// Errors from the synthesis call are logged and silently swallowed — the
+// loop will still break cleanly regardless of whether synthesis succeeds.
+// This preserves existing break semantics: the caller always exits the loop
+// after invoking this helper.
+func (s *chatServiceImpl) earlyStopSynthesis(
+	ctx context.Context,
+	prov provider.Provider,
+	model string,
+	systemPrompt string,
+	slotResult *SlotAssemblyResult,
+	chatMessages []provider.ChatMessage,
+	ch chan<- chat.StreamEvent,
+	fullContent *strings.Builder,
+) {
+	// Truncate to the most recent messages to avoid sending a near-limit history
+	// to the synthesis call. Near max_turns the context may already be at the
+	// ceiling; a fresh synthesis call with the full slice would fail for the
+	// same reason the loop stopped. Keeping the last 20 messages preserves
+	// enough context for a coherent summary while staying well within limits.
+	const synthHistoryCap = 20
+	base := chatMessages
+	if len(base) > synthHistoryCap {
+		base = base[len(base)-synthHistoryCap:]
+	}
+
+	// Append the synthesis prompt as a user message so the LLM has the
+	// instruction in-context without modifying the shared chatMessages slice.
+	synthMessages := make([]provider.ChatMessage, len(base)+1)
+	copy(synthMessages, base)
+	synthMessages[len(base)] = provider.ChatMessage{
+		Role:    "user",
+		Content: earlyStopSynthesisPrompt,
+	}
+
+	synthCh, err := prov.StreamChat(ctx, provider.ChatRequest{
+		SystemPrompt: systemPrompt,
+		SlotBlocks:   slotBlocksFor(slotResult),
+		Messages:     synthMessages,
+		Model:        model,
+		// Tools intentionally omitted — synthesis must not recurse.
+	})
+	if err != nil {
+		slog.Warn("chat-service: early-stop synthesis call failed", "err", err, "model", model)
+		return
+	}
+
+	for evt := range synthCh {
+		switch evt.Type {
+		case "delta":
+			fullContent.WriteString(evt.Content)
+			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
+		case "error":
+			slog.Warn("chat-service: early-stop synthesis stream error", "err", evt.Error)
+		}
+		// usage / done / status events are intentionally discarded — the
+		// main-loop token accounting has already closed.
+	}
 }

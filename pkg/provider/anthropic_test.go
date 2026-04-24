@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,54 @@ func TestMarshalMessagesCacheControl(t *testing.T) {
 	if _, ok := assistant["content"].(string); !ok {
 		t.Errorf("assistant message should have plain string content, got %T", assistant["content"])
 	}
+}
+
+// TestAnthropicTaskBudget verifies the task_budget constant is set to the
+// expected default (64 K tokens) and that the combined beta header string
+// includes both the prompt-caching and task-budgets beta identifiers.
+func TestAnthropicTaskBudget(t *testing.T) {
+	t.Run("task_budget_tokens constant is 64000", func(t *testing.T) {
+		if anthropicTaskBudgetTokens != 64_000 {
+			t.Errorf("expected anthropicTaskBudgetTokens=64000, got %d", anthropicTaskBudgetTokens)
+		}
+	})
+
+	t.Run("task_budget param marshals correctly", func(t *testing.T) {
+		budget := map[string]any{
+			"type":  "tokens",
+			"total": anthropicTaskBudgetTokens,
+		}
+		data, err := json.Marshal(budget)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		if got["type"] != "tokens" {
+			t.Errorf("expected type=tokens, got %v", got["type"])
+		}
+		// JSON numbers unmarshal as float64.
+		total, ok := got["total"].(float64)
+		if !ok {
+			t.Fatalf("expected numeric total, got %T", got["total"])
+		}
+		if int(total) != 64_000 {
+			t.Errorf("expected total=64000, got %v", total)
+		}
+	})
+
+	t.Run("beta header string contains both required betas", func(t *testing.T) {
+		// Assert against the production constant so a change to AnthropicBetaHeaders
+		// in anthropic.go will break this test, not silently pass.
+		if !strings.Contains(AnthropicBetaHeaders, "prompt-caching-2024-07-31") {
+			t.Error("AnthropicBetaHeaders missing prompt-caching-2024-07-31")
+		}
+		if !strings.Contains(AnthropicBetaHeaders, "task-budgets-2026-03-13") {
+			t.Error("AnthropicBetaHeaders missing task-budgets-2026-03-13")
+		}
+	})
 }
 
 func TestAnthropicRequestJSON(t *testing.T) {

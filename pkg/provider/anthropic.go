@@ -28,6 +28,19 @@ import (
 // We cap what we forward into APIError.Message ourselves.
 const maxAnthropicErrBody = 1 << 20 // 1 MiB
 
+// anthropicTaskBudgetTokens is the default advisory token budget sent to
+// Anthropic via output_config.task_budget (beta: task-budgets-2026-03-13).
+// This advises Anthropic's pacing — it is NOT a hard cap and does not replace
+// MaxTokens or maxTurns. Budget scope is per-request; it resets each call.
+// 64 K is a sensible starting floor that covers most single-turn workloads
+// without artificially constraining longer agentic runs.
+const anthropicTaskBudgetTokens = 64_000
+
+// AnthropicBetaHeaders is the combined "anthropic-beta" header value sent on
+// every Anthropic streaming request. Exported so tests can assert against the
+// production value rather than duplicating the string.
+const AnthropicBetaHeaders = "prompt-caching-2024-07-31,task-budgets-2026-03-13"
+
 // Anthropic implements the Provider and CacheableProvider interfaces for the
 // Anthropic Messages API. The underlying transport is the official
 // anthropic-sdk-go client; this type adapts its types to nanite's Provider
@@ -453,11 +466,16 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 	var stream *anthropicStreamHandle
 	var lastErr error
 	for attempt := 0; attempt <= a.Retry.MaxRetries; attempt++ {
-		// Use option.WithHeader for cache-control header if needed (prompt caching).
-		// The beta header is no longer required for the stable prompt-caching feature,
-		// but we send it for compatibility with older model versions.
+		// Beta headers: prompt-caching (stable but sent for model compat) +
+		// task-budgets (advisory pacing, Anthropic-provider-only).
+		// task_budget is injected into output_config via WithJSONSet because
+		// the v1.35.0 SDK does not yet expose a typed field for it.
 		s := a.client.Messages.NewStreaming(ctx, params,
-			option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"),
+			option.WithHeader("anthropic-beta", AnthropicBetaHeaders),
+			option.WithJSONSet("output_config.task_budget", map[string]any{
+				"type":  "tokens",
+				"total": anthropicTaskBudgetTokens,
+			}),
 		)
 
 		// The SDK defers HTTP work until Next() is called. Peek the first event

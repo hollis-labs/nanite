@@ -213,6 +213,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 			"role":            run.Role,
 			"prompt":          run.Prompt,
 			"mode":            run.Mode,
+			"provider":        run.Provider,
 			"parent_agent_id": run.ParentAgentID,
 			"timeout_seconds": run.TimeoutSeconds,
 			"inputs_json":     run.InputsJSON,

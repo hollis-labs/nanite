@@ -156,16 +156,25 @@ func (r *ChatRunner) resolveRole(slug string) (*store.AgentProfile, error) {
 // the parent session. The child session is bound to the agent via
 // EnsureSessionAgent so generateResponse's ResolveForSession lookup
 // (chat_generate.go:88) finds the row.
+//
+// Provider resolution order:
+//  1. run.Provider (from SpawnRequest.Provider) when non-empty — caller override
+//  2. agent.DefaultProvider — agent profile default
 func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, agent *store.AgentProfile) (string, error) {
 	parent, err := r.store.GetSession(run.ParentSessionID)
 	if err != nil {
 		return "", fmt.Errorf("get parent session: %w", err)
 	}
+	// Prefer the per-spawn provider override; fall back to agent profile default.
+	provider := run.Provider
+	if provider == "" {
+		provider = agent.DefaultProvider
+	}
 	childID := uuid.New().String()
 	if err := r.store.CreateSession(&store.Session{
 		ID:          childID,
 		WorkspaceID: parent.WorkspaceID,
-		Provider:    agent.DefaultProvider,
+		Provider:    provider,
 		Model:       agent.DefaultModel,
 		Title:       fmt.Sprintf("subagent: %s — %s", run.Role, truncatePrompt(run.Prompt, 60)),
 	}); err != nil {

@@ -865,3 +865,54 @@ func TestReject_NotPending(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotPending", err)
 	}
 }
+
+// TestSpawn_ProviderOverride_PropagatesIntoRun verifies that
+// SpawnRequest.Provider is copied to the persisted Run row and visible
+// via Status. Empty string (no override) also round-trips cleanly.
+func TestSpawn_ProviderOverride_PropagatesIntoRun(t *testing.T) {
+	db, _ := newTestDB(t)
+	poster := &stubPoster{}
+	svc := NewService(db, EchoRunner{}, poster, nil, stubSettings{})
+
+	// Non-empty override.
+	id, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-prov",
+		ParentAgentID:   "agent-primary",
+		Role:            "role-worker",
+		Prompt:          "do the thing",
+		Mode:            ModeSync,
+		Provider:        "pty-claude",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	run, err := svc.Status(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if run.Provider != "pty-claude" {
+		t.Errorf("Run.Provider = %q, want %q", run.Provider, "pty-claude")
+	}
+
+	// Empty override (no provider in SpawnRequest).
+	id2, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-prov",
+		ParentAgentID:   "agent-primary",
+		Role:            "role-worker",
+		Prompt:          "lightweight task",
+		Mode:            ModeSync,
+		// Provider intentionally omitted
+	})
+	if err != nil {
+		t.Fatalf("Spawn (no provider): %v", err)
+	}
+
+	run2, err := svc.Status(context.Background(), id2)
+	if err != nil {
+		t.Fatalf("Status (no provider): %v", err)
+	}
+	if run2.Provider != "" {
+		t.Errorf("Run.Provider = %q, want empty (no override)", run2.Provider)
+	}
+}

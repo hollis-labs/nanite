@@ -527,6 +527,7 @@ func selfToolDefinitions() []Tool {
 					"mode":              map[string]any{"type": "string", "enum": []string{"sync", "async", "api"}, "description": "sync blocks; async returns immediately and replies via inbox; api returns immediately and replies via chat."},
 					"inputs_json":       map[string]any{"type": "string", "description": "JSON blob of caller-specified inputs passed to the subagent."},
 					"timeout_seconds":   map[string]any{"type": "integer", "description": "Wall-time cap for the subagent runner. 0 uses default (300)."},
+					"provider":          map[string]any{"type": "string", "description": "Optional provider override for the child session (e.g. 'pty-claude', 'anthropic', 'openai'). Empty uses the agent profile's default provider. Enables budget-aware routing without modifying agent profiles."},
 				},
 				"required": []string{"parent_session_id", "parent_agent_id", "role", "prompt"},
 			},

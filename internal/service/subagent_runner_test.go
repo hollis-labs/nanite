@@ -350,3 +350,77 @@ func (m *messageFailingStore) CreateMessage(msg *store.Message) error {
 	}
 	return m.recordingSessionStore.CreateMessage(msg)
 }
+
+// TestChatRunner_ProviderOverride_UsesFallbackWhenEmpty verifies that
+// when run.Provider is empty, createChildSession uses agent.DefaultProvider.
+func TestChatRunner_ProviderOverride_UsesFallbackWhenEmpty(t *testing.T) {
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "delta", Content: "done"},
+		{Type: "stream_end"},
+	}}
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"role-a": {ID: "ag-a", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-empty-prov", Role: "role-a", ParentSessionID: "sess-p", Prompt: "go",
+		// Provider intentionally empty — should fall back to agent default
+	}
+	_, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.created) != 1 {
+		t.Fatalf("expected 1 child session created, got %d", len(st.created))
+	}
+	if st.created[0].Provider != "anthropic" {
+		t.Errorf("child session Provider = %q, want %q (agent default)", st.created[0].Provider, "anthropic")
+	}
+}
+
+// TestChatRunner_ProviderOverride_UsesOverrideWhenSet verifies that a
+// non-empty run.Provider is used in preference to agent.DefaultProvider.
+func TestChatRunner_ProviderOverride_UsesOverrideWhenSet(t *testing.T) {
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "delta", Content: "done"},
+		{Type: "stream_end"},
+	}}
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"role-a": {ID: "ag-a", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-override", Role: "role-a", ParentSessionID: "sess-p", Prompt: "go",
+		Provider: "pty-claude", // override: heavy-execution worker
+	}
+	_, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.created) != 1 {
+		t.Fatalf("expected 1 child session created, got %d", len(st.created))
+	}
+	if st.created[0].Provider != "pty-claude" {
+		t.Errorf("child session Provider = %q, want %q (override)", st.created[0].Provider, "pty-claude")
+	}
+}

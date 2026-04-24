@@ -77,6 +77,11 @@ type SpawnRequest struct {
 	// TimeoutSeconds caps the runner's wall time. Zero means use
 	// the default (300).
 	TimeoutSeconds int
+	// Provider overrides the child agent profile's DefaultProvider
+	// when non-empty. Empty means "use agent profile default".
+	// Enables budget-aware routing (e.g. pty-claude for heavy tasks,
+	// anthropic for lightweight ones) without changing the agent profile.
+	Provider string
 }
 
 // Run represents a single spawn lifecycle row persisted in
@@ -104,6 +109,11 @@ type Run struct {
 	ApprovedBy         string `json:"approved_by"`
 	RejectedAt         string `json:"rejected_at"`
 	RejectionReason    string `json:"rejection_reason"`
+
+	// Phase B — per-spawn provider override.
+	// Empty string means the child session used the agent profile's
+	// DefaultProvider. Non-empty is the override that was applied.
+	Provider string `json:"provider,omitempty"`
 }
 
 // Result is the output a Runner returns on successful completion.

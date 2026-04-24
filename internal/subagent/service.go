@@ -180,6 +180,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		Mode:            mode,
 		InputsJSON:      inputs,
 		TimeoutSeconds:  timeout,
+		Provider:        req.Provider,
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
@@ -212,6 +213,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 			"role":            run.Role,
 			"prompt":          run.Prompt,
 			"mode":            run.Mode,
+			"provider":        run.Provider,
 			"parent_agent_id": run.ParentAgentID,
 			"timeout_seconds": run.TimeoutSeconds,
 			"inputs_json":     run.InputsJSON,
@@ -593,14 +595,16 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 		                            timeout_seconds, created_at, started_at, completed_at,
 		                            parent_agent_id, envelope_instance_id,
 		                            approved_at, approved_by,
-		                            rejected_at, rejection_reason)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                            rejected_at, rejection_reason,
+		                            provider)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.ParentSessionID, r.ChildSessionID, r.Role, r.Prompt,
 		r.Mode, r.Status, r.InputsJSON, r.ResultJSON, r.Error,
 		r.TimeoutSeconds, r.CreatedAt, r.StartedAt, r.CompletedAt,
 		r.ParentAgentID, r.EnvelopeInstanceID,
 		r.ApprovedAt, r.ApprovedBy,
 		r.RejectedAt, r.RejectionReason,
+		r.Provider,
 	)
 	return err
 }
@@ -651,7 +655,7 @@ const selectSQL = `SELECT id, parent_session_id, child_session_id, role, prompt,
 	mode, status, inputs_json, result_json, error,
 	timeout_seconds, created_at, started_at, completed_at,
 	parent_agent_id, envelope_instance_id, approved_at, approved_by,
-	rejected_at, rejection_reason
+	rejected_at, rejection_reason, provider
 	FROM subagent_runs`
 
 func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
@@ -663,6 +667,7 @@ func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 		&r.ParentAgentID, &r.EnvelopeInstanceID,
 		&r.ApprovedAt, &r.ApprovedBy,
 		&r.RejectedAt, &r.RejectionReason,
+		&r.Provider,
 	); err != nil {
 		return nil, err
 	}

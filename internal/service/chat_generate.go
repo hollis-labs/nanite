@@ -1987,11 +1987,22 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 	ch chan<- chat.StreamEvent,
 	fullContent *strings.Builder,
 ) {
+	// Truncate to the most recent messages to avoid sending a near-limit history
+	// to the synthesis call. Near max_turns the context may already be at the
+	// ceiling; a fresh synthesis call with the full slice would fail for the
+	// same reason the loop stopped. Keeping the last 20 messages preserves
+	// enough context for a coherent summary while staying well within limits.
+	const synthHistoryCap = 20
+	base := chatMessages
+	if len(base) > synthHistoryCap {
+		base = base[len(base)-synthHistoryCap:]
+	}
+
 	// Append the synthesis prompt as a user message so the LLM has the
 	// instruction in-context without modifying the shared chatMessages slice.
-	synthMessages := make([]provider.ChatMessage, len(chatMessages)+1)
-	copy(synthMessages, chatMessages)
-	synthMessages[len(chatMessages)] = provider.ChatMessage{
+	synthMessages := make([]provider.ChatMessage, len(base)+1)
+	copy(synthMessages, base)
+	synthMessages[len(base)] = provider.ChatMessage{
 		Role:    "user",
 		Content: earlyStopSynthesisPrompt,
 	}

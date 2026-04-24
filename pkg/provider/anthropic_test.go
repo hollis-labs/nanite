@@ -165,14 +165,13 @@ func TestAnthropicTaskBudget(t *testing.T) {
 	})
 
 	t.Run("beta header string contains both required betas", func(t *testing.T) {
-		// The beta header value used in streamChatInternal must include both
-		// prompt-caching (compat) and task-budgets (new observability).
-		const betaHeader = "prompt-caching-2024-07-31,task-budgets-2026-03-13"
-		if !strings.Contains(betaHeader, "prompt-caching-2024-07-31") {
-			t.Error("beta header missing prompt-caching-2024-07-31")
+		// Assert against the production constant so a change to AnthropicBetaHeaders
+		// in anthropic.go will break this test, not silently pass.
+		if !strings.Contains(AnthropicBetaHeaders, "prompt-caching-2024-07-31") {
+			t.Error("AnthropicBetaHeaders missing prompt-caching-2024-07-31")
 		}
-		if !strings.Contains(betaHeader, "task-budgets-2026-03-13") {
-			t.Error("beta header missing task-budgets-2026-03-13")
+		if !strings.Contains(AnthropicBetaHeaders, "task-budgets-2026-03-13") {
+			t.Error("AnthropicBetaHeaders missing task-budgets-2026-03-13")
 		}
 	})
 }

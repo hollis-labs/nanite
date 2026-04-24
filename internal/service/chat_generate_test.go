@@ -183,14 +183,16 @@ func TestOverrideBlockReachesPrefix_EndToEnd(t *testing.T) {
 // mockStreamProvider is a minimal provider.Provider that emits a fixed sequence
 // of StreamEvents and records whether StreamChat was called with tools.
 type mockStreamProvider struct {
-	events    []provider.StreamEvent
-	gotTools  []provider.ToolDefinition
-	callCount int
+	events       []provider.StreamEvent
+	gotTools     []provider.ToolDefinition
+	lastMessages []provider.ChatMessage
+	callCount    int
 }
 
 func (m *mockStreamProvider) StreamChat(_ context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
 	m.callCount++
 	m.gotTools = req.Tools
+	m.lastMessages = req.Messages
 	ch := make(chan provider.StreamEvent, len(m.events)+1)
 	for _, ev := range m.events {
 		ch <- ev
@@ -294,9 +296,6 @@ func TestEarlyStopSynthesis_NoToolsForwarded(t *testing.T) {
 // TestEarlyStopSynthesis_PromptInjected verifies that the synthesis prompt is
 // injected as the final user message so the LLM receives it.
 func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
-	// We can't directly inspect messages sent to StreamChat without a custom
-	// mock; instead we verify that earlyStopSynthesis calls the provider
-	// exactly once (i.e., it does make a call).
 	prov := &mockStreamProvider{
 		events: []provider.StreamEvent{{Type: "done"}},
 	}
@@ -305,13 +304,18 @@ func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 8)
 	var fullContent strings.Builder
 
+	prior := []provider.ChatMessage{
+		{Role: "user", Content: "prior message"},
+		{Role: "assistant", Content: "prior response"},
+	}
+
 	svc.earlyStopSynthesis(
 		context.Background(),
 		prov,
 		"test-model",
 		"",
 		nil,
-		nil,
+		prior,
 		ch,
 		&fullContent,
 	)
@@ -319,6 +323,14 @@ func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
 
 	if prov.callCount != 1 {
 		t.Errorf("expected 1 StreamChat call, got %d", prov.callCount)
+	}
+	if len(prov.lastMessages) == 0 {
+		t.Fatal("no messages passed to StreamChat")
+	}
+	last := prov.lastMessages[len(prov.lastMessages)-1]
+	if last.Role != "user" || last.Content != earlyStopSynthesisPrompt {
+		t.Errorf("last message should be user turn with synthesis prompt; got role=%q content=%q",
+			last.Role, last.Content)
 	}
 }
 

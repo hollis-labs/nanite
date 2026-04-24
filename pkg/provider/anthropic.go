@@ -36,6 +36,11 @@ const maxAnthropicErrBody = 1 << 20 // 1 MiB
 // without artificially constraining longer agentic runs.
 const anthropicTaskBudgetTokens = 64_000
 
+// AnthropicBetaHeaders is the combined "anthropic-beta" header value sent on
+// every Anthropic streaming request. Exported so tests can assert against the
+// production value rather than duplicating the string.
+const AnthropicBetaHeaders = "prompt-caching-2024-07-31,task-budgets-2026-03-13"
+
 // Anthropic implements the Provider and CacheableProvider interfaces for the
 // Anthropic Messages API. The underlying transport is the official
 // anthropic-sdk-go client; this type adapts its types to nanite's Provider
@@ -466,7 +471,7 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		// task_budget is injected into output_config via WithJSONSet because
 		// the v1.35.0 SDK does not yet expose a typed field for it.
 		s := a.client.Messages.NewStreaming(ctx, params,
-			option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31,task-budgets-2026-03-13"),
+			option.WithHeader("anthropic-beta", AnthropicBetaHeaders),
 			option.WithJSONSet("output_config.task_budget", map[string]any{
 				"type":  "tokens",
 				"total": anthropicTaskBudgetTokens,

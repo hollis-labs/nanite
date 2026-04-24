@@ -1273,6 +1273,7 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 		Mode:            strArg(args, "mode", "sync"),
 		InputsJSON:      strArg(args, "inputs_json", ""),
 		TimeoutSeconds:  intArg(args, "timeout_seconds", 0),
+		Provider:        strArg(args, "provider", ""),
 	}
 	id, err := st.Subagent.Spawn(ctx, req)
 	if err != nil {

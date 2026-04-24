@@ -180,7 +180,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 				"adapter", s.adapter.Name(), "tool_use_count", seenToolUse)
 			ch <- StreamEvent{
 				Type:  "error",
-				Error: "PTY provider cannot forward tool calls — the nested CLI requested tools that cannot be proxied. Retry with an API provider for tool-heavy tasks.",
+				Error: "CLI bridge cannot forward tool calls — the nested CLI requested tools that cannot be proxied. Retry with an API provider for tool-heavy tasks.",
 			}
 		}
 

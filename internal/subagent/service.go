@@ -244,7 +244,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	}
 
 	// Ungated path — existing behavior preserved exactly.
-	run.Status = StatusRunning // MVP: skip requested/approved
+	run.Status = StatusRunning // Auto-approve for dev beta: subagents are gated behind developer_mode; interactive approval (ModeInteractive) is deferred post-beta per CW-20260424-0005.
 	run.StartedAt = run.CreatedAt
 	if err := svc.insertRun(ctx, run); err != nil {
 		return "", fmt.Errorf("insert run: %w", err)

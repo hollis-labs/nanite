@@ -117,6 +117,10 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
+		// Track tool_use and text-delta events to detect the tool-only
+		// response case: CLI requested tools the subprocess bridge cannot forward.
+		var seenToolUse, seenDelta int
+
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -147,6 +151,12 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 			}
 
 			for _, ev := range events {
+				switch ev.Type {
+				case "tool_use":
+					seenToolUse++
+				case "delta":
+					seenDelta++
+				}
 				ch <- ev
 			}
 		}
@@ -158,6 +168,19 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		if err := cmd.Wait(); err != nil {
 			if ctx.Err() == nil {
 				slog.Info("subprocess: process exited", "adapter", s.adapter.Name(), "err", err)
+			}
+		}
+
+		// Detect tool-only response: the nested CLI requested tools that
+		// Nanite's subprocess bridge has no path to forward. Without this
+		// check, the stream closes silently and the user sees an empty row.
+		// Emit a visible error so the UI can surface a clear failure message.
+		if seenToolUse > 0 && seenDelta == 0 && ctx.Err() == nil {
+			slog.Warn("subprocess: tool-only response — CLI requested tools the subprocess bridge cannot forward",
+				"adapter", s.adapter.Name(), "tool_use_count", seenToolUse)
+			ch <- StreamEvent{
+				Type:  "error",
+				Error: "CLI bridge cannot forward tool calls — the nested CLI requested tools that cannot be proxied. Retry with an API provider for tool-heavy tasks.",
 			}
 		}
 

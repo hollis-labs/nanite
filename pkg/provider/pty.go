@@ -86,7 +86,7 @@ func (p *PTYBridge) Capabilities() ProviderCapabilities {
 // ptyToolOnlyError is the error message emitted when the CLI stream closes with
 // tool_use blocks but zero text content. The nested CLI requested tools that
 // Nanite's PTY adapter cannot forward to the tool broker.
-const ptyToolOnlyError = "PTY provider cannot forward tool calls — the nested CLI requested tools that cannot be proxied. Retry with an API provider for tool-heavy tasks."
+const ptyToolOnlyError = "CLI bridge cannot forward tool calls — the nested CLI requested tools that cannot be proxied. Retry with an API provider for tool-heavy tasks."
 
 // toolOnlyErrorEvent returns a StreamEvent signalling an unforwardable tool-use
 // condition, or nil when the stream produced text content alongside tool calls.
@@ -209,7 +209,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		}
 
 		// Emit an error when the CLI requested tools but produced no text.
-		// The PTY adapter has no broker passthrough (deferred post-beta), so the
+		// The PTY bridge has no broker passthrough (deferred post-beta), so the
 		// user would otherwise see a silent empty assistant row. Surface a clear
 		// failure instead. Skip when ctx is already cancelled — the caller will
 		// see a cancellation error and a misleading tool-call message would be noise.

@@ -144,6 +144,130 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 }
 
+// TestSubprocessBridge_ToolOnlyResponse_EmitsError verifies that when the CLI
+// produces only tool_use events (and no text deltas), the subprocess bridge
+// emits an error event before closing the channel — instead of silently closing
+// with zero content. This is the fix for the PTY tool-call passthrough gap:
+// the nested CLI requested tools that Nanite's bridge cannot forward.
+func TestSubprocessBridge_ToolOnlyResponse_EmitsError(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "tool-only-cli.sh")
+	// Script outputs an assistant message with only tool_use blocks and a
+	// successful result — no text content at all.
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo '{"type":"system","subtype":"init","cwd":"/tmp","session_id":"sess-tool"}'
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"ls"}}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"","stop_reason":"end_turn"}'
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
+	ch, err := bridge.StreamChat(context.Background(), "", []ChatMessage{
+		{Role: "user", Content: "list files"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	// Must have at least one error event.
+	var errorEvents []StreamEvent
+	for _, ev := range events {
+		if ev.Type == "error" {
+			errorEvents = append(errorEvents, ev)
+		}
+	}
+	if len(errorEvents) == 0 {
+		t.Errorf("expected at least one error event for tool-only response, got none; all events: %v", events)
+	}
+	// Error message must mention tool forwarding.
+	if len(errorEvents) > 0 && !strings.Contains(errorEvents[0].Error, "tool calls") {
+		t.Errorf("expected error about tool calls, got: %q", errorEvents[0].Error)
+	}
+}
+
+// TestSubprocessBridge_MixedResponse_NoSpuriousError verifies that a response
+// with both text and tool_use blocks does NOT trigger the tool-proxy error.
+// (The CLI processed its own tools and returned a textual reply — that's fine.)
+func TestSubprocessBridge_MixedResponse_NoSpuriousError(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "mixed-cli.sh")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here is the result:"},{"type":"tool_use","id":"tu_2","name":"Read","input":{"file_path":"/tmp/x"}}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"Here is the result:","stop_reason":"end_turn"}'
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
+	ch, err := bridge.StreamChat(context.Background(), "", []ChatMessage{
+		{Role: "user", Content: "read a file"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	// Must have a delta event (text content).
+	hasDelta := false
+	for _, ev := range events {
+		if ev.Type == "delta" {
+			hasDelta = true
+		}
+	}
+	if !hasDelta {
+		t.Error("expected at least one delta event for mixed response")
+	}
+
+	// Must NOT have a spurious tool-proxy error event.
+	for _, ev := range events {
+		if ev.Type == "error" && strings.Contains(ev.Error, "tool calls") {
+			t.Errorf("spurious tool-proxy error emitted for mixed-content response: %q", ev.Error)
+		}
+	}
+}
+
+// TestSubprocessBridge_PureTextResponse_NoError verifies that a pure text
+// response does not trigger the tool-proxy error event.
+func TestSubprocessBridge_PureTextResponse_NoError(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "text-cli.sh")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Just a plain text reply."}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"Just a plain text reply.","stop_reason":"end_turn"}'
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
+	ch, err := bridge.StreamChat(context.Background(), "", []ChatMessage{
+		{Role: "user", Content: "hello"},
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	for _, ev := range events {
+		if ev.Type == "error" {
+			t.Errorf("unexpected error event for pure-text response: %q", ev.Error)
+		}
+	}
+}
+
 func TestSubprocessBridge_ContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "slow-cli.sh")

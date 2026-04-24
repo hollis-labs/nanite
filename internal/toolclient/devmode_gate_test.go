@@ -163,10 +163,13 @@ func TestSelectToolsAsProvider_MCPDevToolsExcludedWhenDevModeOff(t *testing.T) {
 	}}, mcp.TierBuiltin); err != nil {
 		t.Fatalf("AddServer general: %v", err)
 	}
-	_ = mgr.DiscoverTools(context.Background())
-
 	tb := New(mgr, nil, DefaultConfig())
 	tb.DeveloperModeFunc = func() bool { return false }
+	mgr.Broker = tb.LocalBroker
+
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
 
 	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1")
 	if err != nil {
@@ -174,6 +177,9 @@ func TestSelectToolsAsProvider_MCPDevToolsExcludedWhenDevModeOff(t *testing.T) {
 	}
 
 	names := toolNames(res.Tools)
+	if !names["mcp__general__web_fetch"] {
+		t.Error("mcp__general__web_fetch must appear in selection to prove MCP tools were registered")
+	}
 	if names["mcp__dev__dev_bash"] {
 		t.Error("mcp__dev__dev_bash must NOT appear in selection when developer_mode=false")
 	}

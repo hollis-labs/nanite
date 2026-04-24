@@ -1,5 +1,6 @@
 import { Check } from 'lucide-react'
 import { useToggleTodo, useTodos } from '@/hooks/useTodos'
+import { Envelope, EnvelopeHeader } from './primitives/Envelope'
 
 interface TodoListCardData {
   scope: string
@@ -18,42 +19,58 @@ export function TodoListCard({ data }: TodoListCardProps) {
   })
   const toggleTodo = useToggleTodo()
 
+  const completed = todos.filter((t) => t.status === 'done').length
+
   return (
-    <div className="rounded-sm border border-border-subtle bg-bg-elevated/60 overflow-hidden my-2">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
-        <span className="text-sm font-semibold text-fg">{data.title || 'Todos'}</span>
-        <span className="text-[10px] text-fg-muted">{todos.length} items</span>
-      </div>
-      <div className="px-3 py-1.5 space-y-1">
-        {todos.map((todo) => {
-          const isDone = todo.status === 'done'
-          return (
-            <div key={todo.id} className="flex items-center gap-2 py-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  if (isDone) {
-                    toggleTodo.uncheck(todo.id)
-                  } else {
-                    toggleTodo.check(todo.id)
-                  }
-                }}
-                className={`w-3 h-3 rounded-sm border-2 flex items-center justify-center shrink-0 transition-colors ${
-                  isDone ? 'bg-primary border-primary' : 'border-primary'
-                }`}
-              >
-                {isDone && <Check className="w-2 h-2 text-white" />}
-              </button>
-              <span className={`text-xs ${isDone ? 'text-fg-muted line-through' : 'text-fg'}`}>
-                {todo.title}
-              </span>
-            </div>
-          )
-        })}
-        {todos.length === 0 && (
-          <span className="text-xs text-fg-faint">No todos</span>
+    <Envelope>
+      <EnvelopeHeader
+        label={data.title || 'Todos'}
+        meta={
+          todos.length > 0 ? (
+            <span className="font-mono">
+              {completed}/{todos.length}
+            </span>
+          ) : undefined
+        }
+      />
+
+      <div className="px-4 py-2.5">
+        {todos.length === 0 ? (
+          <span className="text-[13px] text-fg-faint">No todos</span>
+        ) : (
+          <ul className="space-y-0.5">
+            {todos.map((todo) => {
+              const isDone = todo.status === 'done'
+              return (
+                <li key={todo.id} className="flex items-center gap-2.5 rounded-[6px] px-2 py-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isDone) toggleTodo.uncheck(todo.id)
+                      else toggleTodo.check(todo.id)
+                    }}
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] transition-colors ${
+                      isDone
+                        ? 'bg-success text-success-fg'
+                        : 'border border-border hover:border-primary'
+                    }`}
+                    aria-label={isDone ? 'Mark incomplete' : 'Mark complete'}
+                  >
+                    {isDone && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+                  </button>
+                  <span
+                    className={`flex-1 text-[13px] leading-snug ${
+                      isDone ? 'text-fg-muted line-through' : 'text-fg'
+                    }`}
+                  >
+                    {todo.title}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
         )}
       </div>
-    </div>
+    </Envelope>
   )
 }

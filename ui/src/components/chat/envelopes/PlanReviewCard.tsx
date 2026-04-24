@@ -1,16 +1,19 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Check, ListChecks } from 'lucide-react'
 import { api } from '@/lib/api'
+import { Button } from '@/components/ui/button'
 import { useApprovePlan, useRejectPlan, useTogglePlanStep } from '@/hooks/usePlans'
-import type { PlanStatus } from '@/lib/types'
-import { PlanStepItem } from '@/components/work/PlanStepItem'
+import type { PlanStatus, PlanStep } from '@/lib/types'
+import { Envelope, EnvelopeHeader, EnvelopeBody, EnvelopeFooter } from './primitives/Envelope'
+import { StatusPill, type StatusTone } from './primitives/StatusPill'
 
-const STATUS_STYLE: Record<PlanStatus, string> = {
-  proposed: 'text-warning bg-warning/10',
-  approved: 'text-success bg-success/10',
-  in_progress: 'text-info bg-info/10',
-  complete: 'text-fg-muted bg-surface',
-  abandoned: 'text-fg-faint bg-surface/50',
+const STATUS_TONE: Record<PlanStatus, StatusTone> = {
+  proposed: 'warning',
+  approved: 'success',
+  in_progress: 'info',
+  complete: 'neutral',
+  abandoned: 'neutral',
 }
 
 interface PlanReviewCardData {
@@ -23,9 +26,70 @@ interface PlanReviewCardData {
 
 interface PlanReviewCardProps {
   data: PlanReviewCardData
+  onSendMessage?: (content: string) => void
 }
 
-export function PlanReviewCard({ data }: PlanReviewCardProps) {
+function StepRow({
+  step,
+  onCheck,
+  onUncheck,
+}: {
+  step: PlanStep
+  onCheck: (stepId: string) => void
+  onUncheck: (stepId: string, reason?: string) => void
+}) {
+  const isDone = step.status === 'done'
+  const isActive = step.status === 'in_progress'
+  const isSkipped = step.status === 'skipped'
+
+  return (
+    <div
+      className={`flex items-center gap-2.5 rounded-[6px] px-2 py-1.5 ${
+        isActive ? 'bg-primary-muted/80' : 'bg-transparent'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          if (isDone) onUncheck(step.id)
+          else if (!isSkipped) onCheck(step.id)
+        }}
+        disabled={isSkipped}
+        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] transition-colors ${
+          isDone
+            ? 'bg-success text-success-fg'
+            : isActive
+              ? 'border border-primary text-primary'
+              : isSkipped
+                ? 'border border-border-subtle opacity-40'
+                : 'border border-border-subtle text-transparent hover:border-primary'
+        }`}
+        aria-label={isDone ? 'Mark incomplete' : 'Mark complete'}
+      >
+        {isDone && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+        {isActive && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+      </button>
+
+      <span
+        className={`min-w-0 flex-1 text-[13px] ${
+          isDone
+            ? 'text-fg-muted line-through'
+            : isSkipped
+              ? 'text-fg-faint line-through'
+              : isActive
+                ? 'font-medium text-fg'
+                : 'text-fg-secondary'
+        }`}
+      >
+        {step.title}
+      </span>
+
+      {isActive && <StatusPill tone="primary">In progress</StatusPill>}
+    </div>
+  )
+}
+
+export function PlanReviewCard({ data, onSendMessage }: PlanReviewCardProps) {
   const { data: plan } = useQuery({
     queryKey: ['plans', data.plan_id],
     queryFn: () => api.getPlan(data.plan_id),
@@ -37,10 +101,13 @@ export function PlanReviewCard({ data }: PlanReviewCardProps) {
   const [acted, setActed] = useState(false)
 
   const currentStatus = plan?.status ?? data.status
-  const steps = plan?.steps ?? data.steps.map((s) => ({ ...s, status: 'pending' as const, depends_on: [] as string[] }))
+  const steps =
+    plan?.steps ??
+    data.steps.map((s) => ({ ...s, status: 'pending' as const, depends_on: [] as string[] }))
   const doneCount = steps.filter((s) => s.status === 'done').length
   const totalCount = steps.length
   const progressPct = totalCount > 0 ? (doneCount / totalCount) * 100 : 0
+  const canAct = !acted && currentStatus === 'proposed'
 
   const handleApprove = () => {
     approvePlan.mutate(
@@ -55,61 +122,84 @@ export function PlanReviewCard({ data }: PlanReviewCardProps) {
   }
 
   return (
-    <div className="rounded-sm border border-border-subtle bg-bg-elevated/60 overflow-hidden my-2">
-      <div className="px-3 py-2">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-sm font-semibold text-fg">{plan?.title ?? data.title}</span>
-          <span className={`text-[9px] px-1.5 py-0.5 rounded ${STATUS_STYLE[currentStatus]}`}>
-            {currentStatus}
-          </span>
+    <Envelope className="my-2">
+      <EnvelopeHeader
+        icon={ListChecks}
+        label="Plan review"
+        tone={currentStatus === 'proposed' ? 'warning' : currentStatus === 'approved' ? 'success' : 'neutral'}
+        meta={totalCount > 0 ? `${doneCount}/${totalCount} complete` : undefined}
+      />
+
+      <EnvelopeBody>
+        <div className="mb-1 flex items-start justify-between gap-3">
+          <h3 className="text-[15px] font-semibold leading-snug text-fg">
+            {plan?.title ?? data.title}
+          </h3>
+          <StatusPill tone={STATUS_TONE[currentStatus]}>
+            {currentStatus.replace('_', ' ')}
+          </StatusPill>
         </div>
+
         {(plan?.description || data.description) && (
-          <p className="text-[11px] text-fg-muted mb-2">{plan?.description || data.description}</p>
+          <p className="mb-3.5 text-[13px] leading-relaxed text-fg-secondary">
+            {plan?.description || data.description}
+          </p>
         )}
 
-        <div className="border-l-2 border-border-subtle pl-2 ml-1 mb-2 space-y-0.5">
-          {steps.map((step) => (
-            <PlanStepItem
-              key={step.id}
-              step={{ ...step, status: step.status || 'pending' }}
-              onCheck={(stepId) => toggleStep.check(data.plan_id, stepId)}
-              onUncheck={(stepId, reason) => toggleStep.uncheck(data.plan_id, stepId, reason)}
-            />
-          ))}
-        </div>
+        {totalCount > 0 && (
+          <div className="mb-3.5 space-y-0.5">
+            {steps.map((step) => (
+              <StepRow
+                key={step.id}
+                step={{ ...step, status: step.status || 'pending' }}
+                onCheck={(stepId) => toggleStep.check(data.plan_id, stepId)}
+                onUncheck={(stepId, reason) =>
+                  toggleStep.uncheck(data.plan_id, stepId, reason)
+                }
+              />
+            ))}
+          </div>
+        )}
 
         {totalCount > 0 && (
-          <div className="flex items-center gap-1.5 mb-2">
-            <div className="flex-1 h-1 bg-surface rounded-full overflow-hidden">
+          <div className="flex items-center gap-2.5">
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-surface">
               <div
-                className="h-full bg-primary rounded-full transition-all duration-300"
+                className="h-full rounded-full bg-success transition-all duration-300"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <span className="text-[9px] text-fg-muted">{doneCount}/{totalCount}</span>
+            <span className="font-mono text-[10px] text-fg-muted">
+              {Math.round(progressPct)}%
+            </span>
           </div>
         )}
+      </EnvelopeBody>
 
-        {!acted && currentStatus === 'proposed' && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleApprove}
-              disabled={approvePlan.isPending}
-              className="px-3 py-1 bg-primary text-white text-[11px] rounded hover:bg-primary/80 transition-colors disabled:opacity-50"
+      {canAct && (
+        <EnvelopeFooter className="gap-2.5">
+          <Button
+            size="sm"
+            onClick={handleApprove}
+            disabled={approvePlan.isPending}
+          >
+            Approve plan
+          </Button>
+          {onSendMessage && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onSendMessage(`Please revise the proposed plan "${plan?.title ?? data.title}".`)}
             >
-              Approve
-            </button>
-            <button
-              type="button"
-              onClick={handleReject}
-              className="px-3 py-1 bg-surface text-fg-muted text-[11px] rounded hover:bg-surface-hover transition-colors"
-            >
-              Reject
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+              Request changes
+            </Button>
+          )}
+          <div className="flex-1" />
+          <Button size="sm" variant="ghost" onClick={handleReject}>
+            Reject
+          </Button>
+        </EnvelopeFooter>
+      )}
+    </Envelope>
   )
 }

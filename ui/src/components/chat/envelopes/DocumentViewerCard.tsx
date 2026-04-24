@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { FileText, ExternalLink, Download, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MessageContent } from '../MessageContent'
+import { Envelope, EnvelopeHeader } from './primitives/Envelope'
 
 interface DocumentViewerData {
   title: string
@@ -50,40 +51,42 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
   }, [data.sections])
 
   return (
-    <div className="animate-in fade-in duration-300 space-y-2">
-      {/* Header */}
-      <div className="rounded-sm border border-primary/20 bg-bg-elevated/50 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary shrink-0" />
-            <span className="text-sm font-medium text-fg">{data.title}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            {data.download_enabled && data.download_filename && (
+    <div className="animate-in fade-in duration-300">
+      <Envelope>
+        <EnvelopeHeader
+          icon={FileText}
+          label="Document"
+          tone="info"
+          meta={<span className="normal-case font-sans text-fg">{data.title}</span>}
+          action={
+            <div className="flex items-center gap-1">
+              {data.download_enabled && data.download_filename && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleDownload}
+                  className="h-7 w-7 p-0 text-fg-secondary hover:text-fg"
+                  aria-label="Download"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={handleDownload}
-                className="h-7 px-2 text-fg-secondary hover:text-fg"
+                onClick={handleOpenNewTab}
+                className="h-7 w-7 p-0 text-fg-secondary hover:text-fg"
+                aria-label="Open in new tab"
               >
-                <Download className="h-3.5 w-3.5" />
+                <ExternalLink className="h-3.5 w-3.5" />
               </Button>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={handleOpenNewTab}
-              className="h-7 px-2 text-fg-secondary hover:text-fg"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
+            </div>
+          }
+        />
 
-        {/* Section nav */}
         {sectionLinks && (
-          <div className="flex items-center gap-1 px-4 py-2 border-b border-border/50 bg-bg-elevated/30 overflow-x-auto">
-            {sectionLinks.map(section => (
+          <div className="flex items-center gap-1 overflow-x-auto border-b border-border-subtle bg-surface px-3 py-1.5">
+            {sectionLinks.map((section) => (
               <button
                 key={section}
                 type="button"
@@ -91,7 +94,7 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
                   const el = document.getElementById(`doc-section-${section}`)
                   el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                 }}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-fg-secondary hover:text-fg hover:bg-surface whitespace-nowrap transition-colors"
+                className="flex shrink-0 items-center gap-1 rounded-[4px] px-2 py-1 text-[12px] text-fg-secondary transition-colors hover:bg-surface-hover hover:text-fg"
               >
                 <ChevronRight className="h-3 w-3" />
                 {section}
@@ -100,9 +103,8 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
           </div>
         )}
 
-        {/* Content */}
         {expanded && (
-          <div className="max-h-[500px] overflow-y-auto chat-scroll">
+          <div className="chat-scroll max-h-[500px] overflow-y-auto">
             <div className="px-4 py-3">
               {isHTML ? (
                 <div
@@ -115,7 +117,7 @@ export function DocumentViewerCard({ data }: DocumentViewerCardProps) {
             </div>
           </div>
         )}
-      </div>
+      </Envelope>
     </div>
   )
 }

@@ -129,6 +129,29 @@ func TestHTTPServerTimeouts_ReadHeader(t *testing.T) {
 	}
 }
 
+func TestSetSPACacheHeaders(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "root html", path: "", want: "no-cache"},
+		{name: "index html", path: "index.html", want: "no-cache"},
+		{name: "spa route fallback", path: "chat/session-1", want: "no-cache"},
+		{name: "hashed asset", path: "assets/index-CHntKhwO.css", want: "public, max-age=31536000, immutable"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			setSPACacheHeaders(rr, tc.path)
+			if got := rr.Header().Get("Cache-Control"); got != tc.want {
+				t.Fatalf("Cache-Control(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestBodyLimitMiddleware asserts that a POST body exceeding the configured
 // cap is rejected with 413, and that a body at the cap succeeds with 200.
 func TestBodyLimitMiddleware(t *testing.T) {

@@ -71,6 +71,11 @@ type SpawnRequest struct {
 	// Mode controls execution + result-delivery semantics. See Mode
 	// constants.
 	Mode string
+	// Provider overrides the LLM provider for this spawn (e.g.
+	// "anthropic", "pty-claude"). Empty string means use the agent
+	// profile's DefaultProvider. Enables budget-aware per-spawn
+	// routing by the coordinator (Phase B, CW-20260424-0001).
+	Provider string
 	// InputsJSON carries caller-specified inputs as a JSON blob
 	// (opaque to the subagent subsystem; passed to the runner).
 	InputsJSON string
@@ -89,13 +94,17 @@ type Run struct {
 	Prompt          string `json:"prompt"`
 	Mode            string `json:"mode"`
 	Status          string `json:"status"`
-	InputsJSON      string `json:"inputs_json"`
-	ResultJSON      string `json:"result_json"`
-	Error           string `json:"error"`
-	TimeoutSeconds  int    `json:"timeout_seconds"`
-	CreatedAt       string `json:"created_at"`
-	StartedAt       string `json:"started_at"`
-	CompletedAt     string `json:"completed_at"`
+	// Provider is the per-spawn LLM provider override. Empty string
+	// means "use the agent profile default". Persisted so Status
+	// and audit consumers can reconstruct the routing decision.
+	Provider       string `json:"provider"`
+	InputsJSON     string `json:"inputs_json"`
+	ResultJSON     string `json:"result_json"`
+	Error          string `json:"error"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+	CreatedAt      string `json:"created_at"`
+	StartedAt      string `json:"started_at"`
+	CompletedAt    string `json:"completed_at"`
 
 	// G-4 additions.
 	ParentAgentID      string `json:"parent_agent_id"`

@@ -525,6 +525,7 @@ func selfToolDefinitions() []Tool {
 					"role":              map[string]any{"type": "string", "description": "Role slug (e.g. 'file-backend') the subagent is booted with."},
 					"prompt":            map[string]any{"type": "string", "description": "Initial prompt for the subagent."},
 					"mode":              map[string]any{"type": "string", "enum": []string{"sync", "async", "api"}, "description": "sync blocks; async returns immediately and replies via inbox; api returns immediately and replies via chat."},
+					"provider":          map[string]any{"type": "string", "description": "Optional LLM provider override for this spawn (e.g. 'anthropic', 'pty-claude'). Omit or leave empty to use the agent profile default. Enables budget-aware routing by the coordinator."},
 					"inputs_json":       map[string]any{"type": "string", "description": "JSON blob of caller-specified inputs passed to the subagent."},
 					"timeout_seconds":   map[string]any{"type": "integer", "description": "Wall-time cap for the subagent runner. 0 uses default (300)."},
 				},

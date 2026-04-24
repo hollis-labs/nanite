@@ -1271,6 +1271,7 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 		Role:            strArg(args, "role", ""),
 		Prompt:          strArg(args, "prompt", ""),
 		Mode:            strArg(args, "mode", "sync"),
+		Provider:        strArg(args, "provider", ""),
 		InputsJSON:      strArg(args, "inputs_json", ""),
 		TimeoutSeconds:  intArg(args, "timeout_seconds", 0),
 	}

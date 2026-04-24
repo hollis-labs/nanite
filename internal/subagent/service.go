@@ -178,6 +178,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		Role:            req.Role,
 		Prompt:          req.Prompt,
 		Mode:            mode,
+		Provider:        req.Provider,
 		InputsJSON:      inputs,
 		TimeoutSeconds:  timeout,
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
@@ -589,14 +590,14 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 	_, err := svc.db.ExecContext(ctx,
 		`INSERT INTO subagent_runs (id, parent_session_id, child_session_id, role, prompt,
-		                            mode, status, inputs_json, result_json, error,
+		                            mode, provider, status, inputs_json, result_json, error,
 		                            timeout_seconds, created_at, started_at, completed_at,
 		                            parent_agent_id, envelope_instance_id,
 		                            approved_at, approved_by,
 		                            rejected_at, rejection_reason)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.ParentSessionID, r.ChildSessionID, r.Role, r.Prompt,
-		r.Mode, r.Status, r.InputsJSON, r.ResultJSON, r.Error,
+		r.Mode, r.Provider, r.Status, r.InputsJSON, r.ResultJSON, r.Error,
 		r.TimeoutSeconds, r.CreatedAt, r.StartedAt, r.CompletedAt,
 		r.ParentAgentID, r.EnvelopeInstanceID,
 		r.ApprovedAt, r.ApprovedBy,
@@ -648,7 +649,7 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
 
 // selectSQL is the canonical SELECT clause for subagent_runs rows.
 const selectSQL = `SELECT id, parent_session_id, child_session_id, role, prompt,
-	mode, status, inputs_json, result_json, error,
+	mode, provider, status, inputs_json, result_json, error,
 	timeout_seconds, created_at, started_at, completed_at,
 	parent_agent_id, envelope_instance_id, approved_at, approved_by,
 	rejected_at, rejection_reason
@@ -658,7 +659,7 @@ func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 	var r Run
 	if err := row.Scan(
 		&r.ID, &r.ParentSessionID, &r.ChildSessionID, &r.Role, &r.Prompt,
-		&r.Mode, &r.Status, &r.InputsJSON, &r.ResultJSON, &r.Error,
+		&r.Mode, &r.Provider, &r.Status, &r.InputsJSON, &r.ResultJSON, &r.Error,
 		&r.TimeoutSeconds, &r.CreatedAt, &r.StartedAt, &r.CompletedAt,
 		&r.ParentAgentID, &r.EnvelopeInstanceID,
 		&r.ApprovedAt, &r.ApprovedBy,

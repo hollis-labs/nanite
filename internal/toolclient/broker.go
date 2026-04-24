@@ -40,6 +40,13 @@ type ToolClient struct {
 	Builtins           *BuiltinToolRegistry
 	PermissionResolver PermissionResolver
 
+	// DeveloperModeFunc, when non-nil, overrides the default developer_mode
+	// lookup (which reads user_settings from Store). Used in tests to inject
+	// a known value without a real SQLite database.
+	// In production this is nil and developerModeEnabled() falls back to
+	// the Store read.
+	DeveloperModeFunc func() bool
+
 	// enricher backs the per-turn override block composition. Set by New when
 	// a store is available; nil-safe via the storeEnricher's own fallback.
 	// Kept unexported — callers work with broker.Enricher through the
@@ -140,17 +147,73 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 	return tools, nil
 }
 
+// DevServerName is the MCP server name for developer tools (dev_bash, dev_read,
+// dev_write, dev_edit, dev_glob, dev_grep). Tools from this server are gated
+// behind developer_mode — see isDevTool and the gate logic in
+// SelectToolsAsProvider / CallTool.
+const DevServerName = "dev"
+
+// isDevTool reports whether a tool name belongs to the dev server. It matches
+// both the bare form ("dev_bash") and the MCP-prefixed form
+// ("mcp__dev__dev_bash"). This is the canonical check used at both
+// selection-time and execution-time to enforce the developer_mode gate.
+func isDevTool(toolName string) bool {
+	// Prefixed form: mcp__dev__*
+	if strings.HasPrefix(toolName, "mcp__"+DevServerName+"__") {
+		return true
+	}
+	// Bare form: dev_* (tools resolved without the mcp__ prefix by the builtin
+	// registry or when the LLM omits the prefix).
+	if strings.HasPrefix(toolName, DevServerName+"_") {
+		return true
+	}
+	return false
+}
+
+// developerModeEnabled reports whether developer_mode is active for this
+// ToolClient instance.
+//
+// Resolution order:
+//  1. DeveloperModeFunc (non-nil) — used by tests to inject a known value
+//     without a real SQLite database.
+//  2. Store.GetUserSettings() — production path; reads from user_settings.
+//
+// Fails closed: returns false on any store error so that non-developer users
+// never accidentally gain access to dev tools.
+func (tb *ToolClient) developerModeEnabled() bool {
+	if tb.DeveloperModeFunc != nil {
+		return tb.DeveloperModeFunc()
+	}
+	if tb.Store == nil {
+		return false
+	}
+	us, err := tb.Store.GetUserSettings()
+	if err != nil {
+		slog.Warn("toolclient: could not read user_settings for developer_mode check; defaulting to false", "err", err)
+		return false
+	}
+	return us.DeveloperMode
+}
+
 // SelectToolsAsProvider returns selected tools converted to provider.ToolDefinition format,
 // together with the per-turn override block composed from per-tool Hints for
 // the FINAL tool set (post permission filtering). Built-in tools are always
 // prepended and do not count against selection limits. Enrichment compose
 // runs after permission filtering so the override block never mentions a
 // tool the LLM won't actually see.
+//
+// Dev-tool gate: tools from the "dev" server (dev_bash, dev_read, dev_write,
+// dev_edit, dev_glob, dev_grep) are stripped from the returned set when
+// developer_mode is false in user_settings. This prevents the LLM from ever
+// seeing or requesting those tools in non-developer sessions.
 func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (*SelectResult, error) {
 	tools, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
 		return nil, err
 	}
+
+	// Read developer_mode once for this selection pass.
+	devMode := tb.developerModeEnabled()
 
 	// Start with built-in tools — always available regardless of MCP status.
 	// Builtins must pass the same permission check as MCP tools; a blanket
@@ -162,6 +225,10 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		builtins := tb.Builtins.GetBuiltins()
 		defs = make([]provider.ToolDefinition, 0, len(builtins)+len(tools))
 		for _, bt := range builtins {
+			// Dev-tool gate: skip dev tools when developer_mode is off.
+			if !devMode && isDevTool(bt.Name) {
+				continue
+			}
 			if !tb.CheckPermission(agentID, bt.Name) {
 				continue
 			}
@@ -176,6 +243,10 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		name := t.Name
 		if t.Server != "" {
 			name = fmt.Sprintf("mcp__%s__%s", t.Server, t.Name)
+		}
+		// Dev-tool gate: skip dev tools when developer_mode is off.
+		if !devMode && isDevTool(name) {
+			continue
 		}
 		if !tb.CheckPermission(agentID, name) {
 			continue
@@ -219,7 +290,20 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 // the bare-name fallback path that resolves via MCPManager.ResolveToolServer
 // — an agent with deny_list: ["mcp__dev__*"] could still invoke "dev_bash"
 // by omitting the prefix. Structured deny errors are returned for both.
+//
+// Dev-tool gate: if the tool resolves to the "dev" server (dev_bash, dev_read,
+// dev_write, dev_edit, dev_glob, dev_grep) and developer_mode is false in
+// user_settings, execution is denied regardless of the agent's permission
+// policy. This is the execution-time backstop that complements the
+// selection-time filter in SelectToolsAsProvider.
 func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
+	// Dev-tool gate (execution-time backstop). Applied before the permission
+	// check so a misconfigured allow-list cannot re-enable dev tools when
+	// developer_mode is off.
+	if isDevTool(toolName) && !tb.developerModeEnabled() {
+		return "", fmt.Errorf("permission denied: tool %q requires developer_mode to be enabled", toolName)
+	}
+
 	// Check permissions against the caller-supplied name first.
 	if !tb.CheckPermission(agentID, toolName) {
 		return "", fmt.Errorf("permission denied: tool %q not permitted for agent %q", toolName, agentID)

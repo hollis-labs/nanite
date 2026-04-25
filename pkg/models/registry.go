@@ -434,6 +434,81 @@ var (
 	byInternalID   map[string]*Model
 )
 
+// catalogMu guards catalogOverlay. Separate from the registry maps (which are
+// written once during build and then read-only) so catalog syncs don't block
+// normal lookups any longer than a pointer swap.
+var (
+	catalogMu      sync.RWMutex
+	catalogOverlay map[string]Model // modelID → enriched Model; nil until first sync
+)
+
+// CatalogInput carries the per-model data extracted from an external catalog
+// (e.g. models.dev). Only non-zero values are applied; zero means "use registry
+// default." This keeps pkg/models free of any direct catalog dependency.
+type CatalogInput struct {
+	ContextWindows  map[string]int     // modelID → context window (tokens)
+	MaxOutputTokens map[string]int     // modelID → max output tokens
+	InputPricing    map[string]float64 // modelID → USD per million input tokens
+	OutputPricing   map[string]float64 // modelID → USD per million output tokens
+}
+
+// SyncFromCatalog atomically replaces the catalog overlay with fresh data from
+// input. Every call to Pricing, MaxOutputFor, ContextWindowFor, and ByModelID
+// will prefer overlay values over the static registry after this returns.
+//
+// The overlay is built by merging the static registry with catalog data so that
+// capability flags, provider bindings, and other fields not present in the
+// catalog are always available.
+//
+// Models present in the catalog but absent from the static registry are added
+// as overlay-only entries (partial records — pricing/window data only).
+//
+// SyncFromCatalog is safe for concurrent use and idempotent.
+func SyncFromCatalog(input CatalogInput) {
+	ensureBuilt()
+
+	// Collect the union of all model IDs present in the input.
+	seen := make(map[string]struct{})
+	for id := range input.ContextWindows {
+		seen[id] = struct{}{}
+	}
+	for id := range input.MaxOutputTokens {
+		seen[id] = struct{}{}
+	}
+	for id := range input.InputPricing {
+		seen[id] = struct{}{}
+	}
+	for id := range input.OutputPricing {
+		seen[id] = struct{}{}
+	}
+
+	overlay := make(map[string]Model, len(seen))
+	for modelID := range seen {
+		// Start from the static registry so capability flags are preserved.
+		base := Model{ModelID: modelID}
+		if known, ok := byModelID[modelID]; ok {
+			base = *known
+		}
+		if v := input.ContextWindows[modelID]; v > 0 {
+			base.ContextWindow = v
+		}
+		if v := input.MaxOutputTokens[modelID]; v > 0 {
+			base.MaxOutput = v
+		}
+		if v := input.InputPricing[modelID]; v > 0 {
+			base.InputPricePerM = v
+		}
+		if v := input.OutputPricing[modelID]; v > 0 {
+			base.OutputPricePerM = v
+		}
+		overlay[modelID] = base
+	}
+
+	catalogMu.Lock()
+	catalogOverlay = overlay
+	catalogMu.Unlock()
+}
+
 func build() {
 	byModelID = make(map[string]*Model, len(allModels))
 	byInternalID = make(map[string]*Model)
@@ -476,8 +551,16 @@ func All() []Model {
 // AllSeeded returns chat models intended for seed.go. Pointer-stable.
 func AllSeeded() []Model { return All() }
 
-// ByModelID looks up a model by its wire-level ID.
+// ByModelID looks up a model by its wire-level ID. The catalog overlay is
+// checked first so updated pricing and limits take precedence over static data.
 func ByModelID(id string) (Model, bool) {
+	catalogMu.RLock()
+	if m, ok := catalogOverlay[id]; ok {
+		catalogMu.RUnlock()
+		return m, true
+	}
+	catalogMu.RUnlock()
+
 	ensureBuilt()
 	m, ok := byModelID[id]
 	if !ok {

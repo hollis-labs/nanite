@@ -223,6 +223,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		selection = &ToolSelection{}
 	}
 	tools := selection.Tools
+	normalizeToolInputSchemas(tools)
 
 	// Build the dynamic per-turn system prefix from tool selection. This text
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks
@@ -279,7 +280,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Assemble context (slot-based) ---
-	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, ch)
+	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, providerName, model, ch)
 	if err != nil {
 		return
 	}
@@ -1285,9 +1286,10 @@ func (s *chatServiceImpl) assembleTurnContext(
 	workspace *store.Workspace,
 	tools []provider.ToolDefinition,
 	extraSystemPrefix string,
+	providerName, model string,
 	ch chan chat.StreamEvent,
 ) (*SlotAssemblyResult, error) {
-	windowSize := s.contextWindowSize()
+	windowSize := s.contextWindowSize(providerName, model)
 	result, err := s.context.AssembleSlots(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, windowSize)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
@@ -1349,18 +1351,21 @@ func slotBlocksFor(result *SlotAssemblyResult) []provider.SlotBlock {
 	return out
 }
 
-// contextWindowSize returns the user-configured slot budget source — the
-// provider context window in tokens. Falls back to the slot package default
-// when unset or unavailable.
-func (s *chatServiceImpl) contextWindowSize() int {
-	if s.store == nil {
-		return 0
+// contextWindowSize returns the token budget for the context window.
+// Priority: user_settings override → models.dev catalog → DefaultContextWindowSize.
+func (s *chatServiceImpl) contextWindowSize(providerName, model string) int {
+	if s.store != nil {
+		settings, err := s.store.GetUserSettings()
+		if err == nil && settings != nil && settings.ContextWindowTokens > 0 {
+			return settings.ContextWindowTokens
+		}
 	}
-	settings, err := s.store.GetUserSettings()
-	if err != nil || settings == nil || settings.ContextWindowTokens <= 0 {
-		return 0
+	if s.modelCatalog != nil && providerName != "" && model != "" {
+		if m, ok := s.modelCatalog.Get(providerName, model); ok && m.Limit.ContextWindow > 0 {
+			return m.Limit.ContextWindow
+		}
 	}
-	return settings.ContextWindowTokens
+	return 0
 }
 
 // enforceBudgetOrCompact is the pre-loop budget gate. When the conversation
@@ -2029,5 +2034,46 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 		}
 		// usage / done / status events are intentionally discarded — the
 		// main-loop token accounting has already closed.
+	}
+}
+
+// normalizeToolInputSchemas ensures every object-type node in each tool's
+// InputSchema has "additionalProperties": false, which the Anthropic API
+// requires. It modifies the underlying maps in-place (idempotent).
+func normalizeToolInputSchemas(tools []provider.ToolDefinition) {
+	for i := range tools {
+		normalizeSchemaNode(tools[i].InputSchema)
+	}
+}
+
+func normalizeSchemaNode(node map[string]any) {
+	if node == nil {
+		return
+	}
+	if typ, _ := node["type"].(string); typ == "object" {
+		if _, ok := node["additionalProperties"]; !ok {
+			node["additionalProperties"] = false
+		}
+	}
+	if props, ok := node["properties"].(map[string]any); ok {
+		for _, v := range props {
+			if child, ok := v.(map[string]any); ok {
+				normalizeSchemaNode(child)
+			}
+		}
+	}
+	for _, key := range []string{"items", "not"} {
+		if child, ok := node[key].(map[string]any); ok {
+			normalizeSchemaNode(child)
+		}
+	}
+	for _, key := range []string{"anyOf", "allOf", "oneOf"} {
+		if arr, ok := node[key].([]any); ok {
+			for _, elem := range arr {
+				if child, ok := elem.(map[string]any); ok {
+					normalizeSchemaNode(child)
+				}
+			}
+		}
 	}
 }

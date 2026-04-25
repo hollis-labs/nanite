@@ -436,9 +436,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	permissions := permission.NewEngine(permission.ModeDefault, nil)
 
 	// Model catalog — fetches pricing and context-window data from models.dev.
-	// StartRefresher checks staleness on boot and re-fetches every 24h.
+	// After each successful fetch the OnRefresh hook pushes the data into the
+	// pkg/models overlay so all callers of Pricing/MaxOutputFor/ContextWindowFor
+	// automatically see live values without threading the catalog through the stack.
 	catalogCtx, stopCatalog := context.WithCancel(context.Background())
-	modelCatalog := modelsdev.New()
+	modelCatalog := modelsdev.New(modelsdev.WithOnRefresh(syncCatalogToRegistry))
+	// Sync from disk cache immediately (warm cache path) so the registry is
+	// enriched before accepting traffic even when no network fetch is needed.
+	syncCatalogToRegistry(modelCatalog)
 	modelCatalog.StartRefresher(catalogCtx)
 
 	chatSvc := NewChatService(ChatServiceConfig{
@@ -705,4 +710,39 @@ func buildResultCache(s *store.Store) *tool.ResultCache {
 		cfg.CacheTTLSeconds = us.ToolResultCacheTTLSeconds
 	}
 	return tool.NewResultCache(s.DB, cfg)
+}
+
+// syncCatalogToRegistry builds a CatalogInput from the models.dev client and
+// pushes it into the pkg/models overlay so all callers of Pricing,
+// MaxOutputFor, and ContextWindowFor see live values without the catalog being
+// threaded through the call stack.
+func syncCatalogToRegistry(c *modelsdev.Client) {
+	refs := c.List()
+	if len(refs) == 0 {
+		return
+	}
+	input := models.CatalogInput{
+		ContextWindows:  make(map[string]int, len(refs)),
+		MaxOutputTokens: make(map[string]int, len(refs)),
+		InputPricing:    make(map[string]float64, len(refs)),
+		OutputPricing:   make(map[string]float64, len(refs)),
+	}
+	for _, ref := range refs {
+		if ref.ID == "" {
+			continue
+		}
+		if ref.Limit.ContextWindow > 0 {
+			input.ContextWindows[ref.ID] = ref.Limit.ContextWindow
+		}
+		if ref.Limit.MaxOutputTokens > 0 {
+			input.MaxOutputTokens[ref.ID] = ref.Limit.MaxOutputTokens
+		}
+		if ref.Cost.Input > 0 {
+			input.InputPricing[ref.ID] = ref.Cost.Input
+		}
+		if ref.Cost.Output > 0 {
+			input.OutputPricing[ref.ID] = ref.Cost.Output
+		}
+	}
+	models.SyncFromCatalog(input)
 }

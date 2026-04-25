@@ -249,18 +249,18 @@ export function PluginManager() {
     <div className="space-y-4">
       {/* Tab bar */}
       <div className="flex items-center gap-2">
-        <div className="inline-flex items-center bg-surface/50 rounded-lg p-0.5">
+        <div className="inline-flex items-center bg-surface rounded-lg p-0.5">
           <button
             onClick={() => setActiveTab("installed")}
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
               activeTab === "installed"
                 ? "bg-bg-elevated text-fg shadow-sm"
-                : "text-fg-muted hover:text-fg-secondary"
+                : "text-fg hover:text-fg"
             }`}
           >
             Installed
             {plugins.length > 0 && (
-              <span className="ml-1.5 text-[10px] text-fg-faint">
+              <span className="ml-1.5 text-[10px] text-fg-secondary">
                 {plugins.filter((p) => p.installed).length}
               </span>
             )}
@@ -270,7 +270,7 @@ export function PluginManager() {
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
               activeTab === "catalog"
                 ? "bg-bg-elevated text-fg shadow-sm"
-                : "text-fg-muted hover:text-fg-secondary"
+                : "text-fg hover:text-fg"
             }`}
           >
             <Globe className="w-3 h-3" />
@@ -330,7 +330,7 @@ export function PluginManager() {
               {Array.from({ length: 4 }).map((_, i) => (
                 <div
                   key={i}
-                  className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+                  className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden"
                 >
                   <div className="px-3.5 py-3 flex items-center gap-2.5">
                     <Skeleton className="size-9 rounded-lg" />
@@ -339,7 +339,7 @@ export function PluginManager() {
                       <Skeleton className="h-2.5 w-1/3" />
                     </div>
                   </div>
-                  <div className="border-t border-border/50 px-3.5 py-2">
+                  <div className="border-t border-border-subtle px-3.5 py-2">
                     <Skeleton className="h-2.5 w-3/4" />
                   </div>
                 </div>
@@ -369,17 +369,23 @@ export function PluginManager() {
                 const isActive = plugin.status === "active";
                 const isDisabled = plugin.status === "disabled";
                 const isAvailable = plugin.status === "available";
+                const accentColor = isActive
+                  ? 'var(--color-status-ok)'
+                  : isDisabled
+                    ? 'var(--color-fg-faint)'
+                    : 'var(--color-border)';
                 return (
                   <ContextMenu key={plugin.name}>
                     <ContextMenuTrigger asChild>
                       <div
-                        className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
+                        className={`rounded-xl border overflow-hidden transition-all cursor-pointer group border-l-2 ${
                           isActive
-                            ? "border-border-subtle bg-white dark:bg-bg-elevated/60"
+                            ? "border-border-subtle bg-bg-elevated hover:border-border"
                             : isDisabled
-                              ? "border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-55"
-                              : "border-border bg-white dark:bg-bg/30 opacity-45"
+                              ? "border-border-subtle bg-bg-elevated opacity-60"
+                              : "border-border bg-bg/30 opacity-45"
                         }`}
+                        style={{ borderLeftColor: accentColor }}
                         onClick={() => {
                           if (isActive || isDisabled) setDetailPlugin(plugin);
                         }}
@@ -387,9 +393,9 @@ export function PluginManager() {
                         {/* Header */}
                         <div className="flex items-center gap-2.5 px-3.5 py-3">
                           <span
-                            className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
+                            className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 transition-colors ${
                               isActive
-                                ? "bg-surface-hover text-fg-secondary"
+                                ? "bg-surface text-fg-secondary group-hover:text-fg"
                                 : "bg-surface text-fg-muted"
                             }`}
                           >
@@ -403,7 +409,7 @@ export function PluginManager() {
                                 {plugin.display_name || plugin.name}
                               </span>
                               {isActive && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+                                <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />
                               )}
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5">
@@ -492,7 +498,7 @@ export function PluginManager() {
                               <button
                                 onClick={() => installMutation.mutate(plugin.name)}
                                 disabled={isActionPending(plugin.name)}
-                                className="px-2 py-1 text-[11px] font-medium text-white bg-primary hover:bg-primary-hover rounded-md transition-colors disabled:opacity-40"
+                                className="px-2 py-1 text-[11px] font-medium text-brand-fg bg-brand hover:bg-brand-hover rounded-md transition-colors disabled:opacity-40"
                               >
                                 {isActionPending(plugin.name) ? (
                                   <Loader2 className="w-3 h-3 animate-spin" />
@@ -505,7 +511,7 @@ export function PluginManager() {
                         </div>
 
                         {/* Detail footer */}
-                        <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                        <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
                           <p className="text-[11px] text-fg-muted line-clamp-2">
                             {plugin.short_desc || plugin.description || "No description"}
                           </p>

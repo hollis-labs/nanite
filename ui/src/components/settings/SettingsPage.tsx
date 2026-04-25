@@ -210,7 +210,7 @@ export default function SettingsPage() {
           <div className="py-3 px-2">
             {allGroups.map((group, gi) => (
               <div key={group.label} className={gi > 0 ? "mt-3.5" : ""}>
-                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-fg-faint px-2.5 py-1.5">
+                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-fg-secondary px-2.5 py-1.5">
                   {group.label}
                 </div>
                 {group.items.map((item) => {
@@ -223,12 +223,12 @@ export default function SettingsPage() {
                       className={`mb-px w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-[6px] text-[13px] transition-colors ${
                         isActive
                           ? "bg-surface text-fg font-medium"
-                          : "text-fg-secondary hover:bg-surface hover:text-fg"
+                          : "text-fg hover:bg-surface"
                       }`}
                     >
                       <Icon
                         style={{ width: 14, height: 14 }}
-                        className={`shrink-0 ${isActive ? "text-primary" : "text-fg-muted"}`}
+                        className={`shrink-0 ${isActive ? "text-brand" : "text-fg-secondary"}`}
                       />
                       {item.label}
                     </button>
@@ -259,7 +259,7 @@ export default function SettingsPage() {
         <ScrollArea className="flex-1">
           <div
             key={`${activeSection}-${sectionKey}`}
-            className="max-w-[720px] px-7 pt-7 pb-16"
+            className="px-7 pt-7 pb-16 max-w-5xl"
           >
             {renderActiveSection()}
           </div>

@@ -39,7 +39,7 @@ export interface PluginDetailViewProps {
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden">
       {children}
     </div>
   );
@@ -167,7 +167,7 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-fg truncate">{plugin.name}</h2>
-              {isActive && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+              {isActive && <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />}
               <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">
                 {plugin.type}
               </span>
@@ -300,7 +300,7 @@ export function PluginDetailView({ plugin, onBack }: PluginDetailViewProps) {
                   </div>
                   {/* Show descriptions in a detail footer */}
                   {items.some((i) => i.description) && (
-                    <div className="border-t border-border/50 px-4 py-2.5 bg-bg-elevated/40 space-y-1">
+                    <div className="border-t border-border-subtle px-4 py-2.5 bg-bg/40 space-y-1">
                       {items
                         .filter((i) => i.description)
                         .map((item) => (

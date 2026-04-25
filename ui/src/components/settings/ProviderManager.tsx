@@ -396,10 +396,10 @@ function ProviderCard({
   })
 
   return (
-    <div className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
+    <div className={`rounded-xl border overflow-hidden transition-all border-l-2 ${
       isActive
-        ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
-        : 'border-border bg-white dark:bg-bg/30 opacity-45'
+        ? 'border-border-subtle bg-bg-elevated hover:border-border border-l-status-ok'
+        : 'border-border bg-bg/30 opacity-45 border-l-fg-faint'
     }`}>
       {/* Header: Icon · Name · Status dot · Toggle */}
       <div className="flex items-center gap-2.5 px-3.5 py-3">
@@ -409,7 +409,7 @@ function ProviderCard({
             <span className={`text-sm font-semibold truncate ${isActive ? 'text-fg' : 'text-fg-muted'}`}>
               {provider.name}
             </span>
-            {isActive && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+            {isActive && <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />}
             {!canActivate && <AlertTriangle className="w-3 h-3 text-warning shrink-0" />}
           </div>
         </div>
@@ -431,7 +431,7 @@ function ProviderCard({
       </div>
 
       {/* Detail footer */}
-      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center gap-3">
+      <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex items-center gap-3">
         {/* Field 1: Key / Path / Host */}
         {!isCLI && !isOllama && (
           <div className="flex items-center gap-1.5 min-w-0">
@@ -496,7 +496,7 @@ function ProviderCardSkeleton() {
         <div className="flex-1" />
         <div className="w-9 h-5 bg-surface rounded-full" />
       </div>
-      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center gap-3">
+      <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex items-center gap-3">
         <div className="h-3 bg-surface rounded w-16" />
         <div className="h-3 bg-surface rounded w-40" />
       </div>

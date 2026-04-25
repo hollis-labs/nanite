@@ -355,7 +355,7 @@ function IdentityStep({
 
         {/* Can Execute toggle */}
         <div
-          className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-bg-elevated/60 border border-border-subtle cursor-pointer hover:bg-surface/40 transition-colors"
+          className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-bg-elevated border border-border-subtle cursor-pointer hover:bg-surface/40 transition-colors"
           onClick={() => onCanExecuteChange(!canExecute)}
         >
           <div>
@@ -445,7 +445,7 @@ function InstructionsStep({
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden">
       {children}
     </div>
   );

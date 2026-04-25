@@ -221,7 +221,7 @@ export function WorkspaceProjectManager() {
                               {ws.name}
                             </span>
                             {isActive && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />
                             )}
                           </div>
                           {ws.description && (
@@ -331,7 +331,7 @@ export function WorkspaceProjectManager() {
                             {project.name}
                           </span>
                           {isActive && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />
                           )}
                         </div>
                         {project.description && (

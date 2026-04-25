@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   ArrowUpCircle,
-  CheckCircle2,
   Download,
   Globe,
   Loader2,
@@ -264,7 +263,7 @@ export function CatalogBrowser({
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
-              className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+              className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden"
             >
               <div className="px-3.5 py-3 flex items-center gap-2.5">
                 <Skeleton className="size-9 rounded-lg" />
@@ -273,7 +272,7 @@ export function CatalogBrowser({
                   <Skeleton className="h-2.5 w-1/3" />
                 </div>
               </div>
-              <div className="border-t border-border/50 px-3.5 py-2">
+              <div className="border-t border-border-subtle px-3.5 py-2">
                 <Skeleton className="h-2.5 w-3/4" />
               </div>
             </div>
@@ -373,26 +372,26 @@ function CatalogEntryCard({
   return (
     <div
       ref={rowRef}
-      className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
+      className={`rounded-xl border overflow-hidden transition-all border-l-2 ${
         highlight ? "ring-2 ring-amber-500/60 " : ""
       }${
         isInstalled
-          ? "border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-70"
-          : "border-border-subtle bg-white dark:bg-bg-elevated/60"
+          ? "border-border-subtle bg-bg-elevated opacity-70 border-l-status-ok"
+          : "border-border-subtle bg-bg-elevated border-l-fg-faint"
       }`}
     >
       {/* Header */}
       <div className="flex items-center gap-2.5 px-3.5 py-3">
-        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 bg-surface-hover text-fg-secondary">
+        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 bg-surface text-fg-secondary">
           <Package className="w-4 h-4" />
         </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-fg truncate">{entry.name}</span>
             {isInstalled && !hasUpdate && (
-              <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+              <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />
             )}
-            {hasUpdate && <ArrowUpCircle className="w-3.5 h-3.5 text-warning shrink-0" />}
+            {hasUpdate && <ArrowUpCircle className="w-3.5 h-3.5 text-status-warn shrink-0" />}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="text-[11px] text-fg-muted">v{entry.version}</span>
@@ -423,7 +422,7 @@ function CatalogEntryCard({
             <button
               onClick={onInstall}
               disabled={installing}
-              className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-white bg-primary hover:bg-primary-hover rounded-md transition-colors disabled:opacity-40"
+              className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-brand-fg bg-brand hover:bg-brand-hover rounded-md transition-colors disabled:opacity-40"
             >
               {installing ? (
                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -437,7 +436,7 @@ function CatalogEntryCard({
       </div>
 
       {/* Detail footer */}
-      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+      <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
         <p className="text-[11px] text-fg-muted line-clamp-2">
           {entry.description || "No description"}
         </p>

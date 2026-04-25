@@ -19,7 +19,7 @@ function Card({
   className?: string
 }) {
   return (
-    <div className={`rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden ${className}`}>
+    <div className={`rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden ${className}`}>
       <div className="px-4 py-2.5 border-b border-border/50">
         <h4 className="text-[11px] uppercase tracking-wider text-fg-muted font-medium">{title}</h4>
       </div>

@@ -1,7 +1,5 @@
-interface SourceBadgeProps {
-  source: string
-  className?: string
-}
+import type { StatusTone } from '@/components/chat/envelopes/primitives/StatusPill'
+import { StatusPill } from '@/components/chat/envelopes/primitives/StatusPill'
 
 export const SOURCE_LABELS: Record<string, string> = {
   seed: 'system',
@@ -15,14 +13,30 @@ export const SOURCE_LABELS: Record<string, string> = {
   db: 'custom',
 }
 
+const SOURCE_TONE: Record<string, StatusTone> = {
+  seed:    'neutral',
+  builtin: 'success',
+  agentrc: 'info',
+  plugin:  'primary',
+  project: 'warning',
+  user:    'neutral',
+  api:     'neutral',
+  claude:  'brand',
+  db:      'neutral',
+}
+
+interface SourceBadgeProps {
+  source: string
+  className?: string
+}
+
 export function SourceBadge({ source, className = '' }: SourceBadgeProps) {
   if (!source) return null
   const label = SOURCE_LABELS[source] ?? source
+  const tone = SOURCE_TONE[source] ?? 'neutral'
   return (
-    <span
-      className={`text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none shrink-0 ${className}`}
-    >
+    <StatusPill tone={tone} className={className}>
       {label}
-    </span>
+    </StatusPill>
   )
 }

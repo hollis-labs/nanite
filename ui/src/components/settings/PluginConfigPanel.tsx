@@ -180,7 +180,7 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: Pl
       {isLoading && (
         <div className="space-y-4">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm p-4">
+            <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated p-4">
               <div className="flex items-baseline gap-2 mb-2">
                 <Skeleton className="h-4 w-28" />
                 <Skeleton className="h-4 w-12" />
@@ -193,7 +193,7 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: Pl
       )}
 
       {!isLoading && schema.length === 0 && (
-        <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm p-6 text-center">
+        <div className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm p-6 text-center">
           <p className="text-sm text-fg-secondary">This plugin has no configurable settings.</p>
         </div>
       )}
@@ -203,7 +203,7 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: Pl
           {schema.map((field) => (
             <div
               key={field.key}
-              className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm p-4"
+              className="rounded-xl border border-border-subtle bg-bg-elevated p-4"
             >
               {field.type !== 'bool' && (
                 <div className="flex items-baseline gap-2 mb-2">

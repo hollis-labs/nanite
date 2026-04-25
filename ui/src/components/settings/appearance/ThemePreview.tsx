@@ -7,7 +7,7 @@ import { Bot, Check, Folder, Terminal, AlertTriangle, X, Puzzle } from 'lucide-r
  */
 export function ThemePreview() {
   return (
-    <div className="rounded-lg border border-border-subtle bg-bg-elevated/40 p-4 space-y-3">
+    <div className="rounded-lg border border-border-subtle bg-bg/40 p-4 space-y-3">
       <div className="text-[10px] text-fg-muted uppercase tracking-wider">Live preview</div>
 
       {/* Typography scale */}

@@ -166,16 +166,16 @@ export function WidgetManager() {
                 onDragStart={() => handleDragStart(idx)}
                 onDragOver={(e) => handleDragOver(e, idx)}
                 onDragEnd={handleDragEnd}
-                className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
+                className={`rounded-xl border overflow-hidden transition-all cursor-grab active:cursor-grabbing border-l-2 ${
                   visible
-                    ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
-                    : 'border-border bg-white dark:bg-bg/30 opacity-45'
-                } ${dragIdx === idx ? 'ring-1 ring-primary/30 shadow-md' : ''}`}
+                    ? 'border-border-subtle bg-bg-elevated border-l-status-ok'
+                    : 'border-border bg-bg/30 opacity-45 border-l-fg-faint'
+                } ${dragIdx === idx ? 'ring-1 ring-brand/30' : ''}`}
               >
                 {/* Header */}
                 <div className="flex items-center gap-2.5 px-3.5 py-3">
                   <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                    visible ? 'bg-surface-hover text-fg-secondary' : 'bg-surface text-fg-muted'
+                    visible ? 'bg-surface text-fg-secondary' : 'bg-surface text-fg-muted'
                   }`}>
                     <GripVertical className="w-4 h-4" />
                   </span>
@@ -188,7 +188,7 @@ export function WidgetManager() {
                       >
                         {meta?.name ?? id}
                       </button>
-                      {visible && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                      {visible && <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />}
                     </div>
                     {meta?.plugin_id && (
                       <span className="text-[11px] text-fg-muted truncate block mt-0.5">{meta.plugin_id}</span>
@@ -220,7 +220,7 @@ export function WidgetManager() {
 
                 {/* Detail footer */}
                 {meta?.description && (
-                  <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                  <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
                     <p className="text-[11px] text-fg-muted line-clamp-2">{meta.description}</p>
                   </div>
                 )}

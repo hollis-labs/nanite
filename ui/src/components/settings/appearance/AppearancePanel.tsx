@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Copy, Download, Palette, RotateCcw, Save, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTheme } from '@/hooks/useTheme'
 import { applyTheme } from '@/lib/theme/apply'
 import type { Theme, TokenKey } from '@/lib/theme/types'
@@ -32,8 +33,6 @@ export function AppearancePanel() {
     return currentMode
   }, [currentMode])
 
-  // Draft state — what the editor is currently showing.
-  // Initialized from the active theme; reset when the active theme changes.
   const [draft, setDraft] = useState<Theme>(activeTheme)
   const [editorMode, setEditorMode] = useState<Mode>(resolvedMode)
 
@@ -60,15 +59,12 @@ export function AppearancePanel() {
       },
     }
     setDraft(next)
-    // Live-apply the draft so the user sees changes instantly
     applyTheme(next)
   }
 
   const handleSave = () => {
     if (isBuiltin) {
-      // Duplicate first — can't edit built-ins
       const copy = duplicateTheme(draft, `${draft.name} (custom)`)
-      // Copy user edits across both modes from the current draft
       copy.tokens = {
         dark: { ...draft.tokens.dark },
         light: { ...draft.tokens.light },
@@ -137,88 +133,119 @@ export function AppearancePanel() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div>
         <div className="flex items-center gap-2 mb-1">
-          <Palette className="w-4 h-4 text-primary" />
+          <Palette className="w-4 h-4 text-brand" />
           <h3 className="text-sm font-semibold text-fg">Appearance</h3>
         </div>
         <p className="text-xs text-fg-muted">
-          Customize colors, typography, and themes. Changes apply immediately and persist to your account.
+          Customize colors, typography, and themes. Changes apply immediately.
         </p>
       </div>
 
-      {/* Theme picker */}
-      <section>
-        <div className="text-xs font-semibold text-fg uppercase tracking-wider mb-2">Themes</div>
-        <div className="grid grid-cols-2 gap-2">
-          {allThemes.map((theme) => {
-            const isActive = theme.id === activeThemeId
-            return (
-              <button
-                key={theme.id}
-                type="button"
-                onClick={() => setActiveTheme(theme.id)}
-                className={`text-left rounded-md border p-3 transition-colors ${
-                  isActive
-                    ? 'border-primary bg-primary-muted'
-                    : 'border-border-subtle hover:border-border hover:bg-surface'
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium text-fg">{theme.name}</span>
-                  {theme.builtin && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-surface text-fg-muted uppercase tracking-wider">Built-in</span>
-                  )}
-                  {isActive && <Check className="w-3.5 h-3.5 text-primary ml-auto" />}
-                </div>
-                {theme.description && <p className="text-[11px] text-fg-muted">{theme.description}</p>}
-                {/* Color chips preview */}
-                <div className="flex items-center gap-1 mt-2">
-                  {(['brand', 'primary', 'danger', 'success', 'warning', 'info'] as const).map((k) => (
-                    <div
-                      key={k}
-                      className="w-4 h-4 rounded border border-border-subtle/50"
-                      style={{ backgroundColor: theme.tokens.dark[k] }}
-                      title={k}
-                    />
-                  ))}
-                </div>
-              </button>
-            )
-          })}
-        </div>
-        {customThemes.length === 0 && (
-          <p className="text-[11px] text-fg-muted mt-2">
-            Customize the active theme below, then click <strong>Save</strong> to create your own.
-          </p>
-        )}
-      </section>
+      <Tabs defaultValue="themes">
+        <TabsList variant="line" className="w-full justify-start border-b border-border">
+          <TabsTrigger value="themes" className="gap-1.5 text-xs">
+            <Palette className="w-3.5 h-3.5" /> Themes
+            <span className="text-[10px] text-fg-faint">({allThemes.length})</span>
+          </TabsTrigger>
+          <TabsTrigger value="edit" className="gap-1.5 text-xs">
+            Edit
+            {isDirty && !isBuiltin && (
+              <span className="ml-1 text-[10px] text-warning">●</span>
+            )}
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Editor controls */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="text-xs font-semibold text-fg uppercase tracking-wider">Editing</div>
-            <div className="text-sm text-fg mt-0.5">
-              {draft.name}
-              {isBuiltin && (
-                <span className="ml-2 text-[10px] text-fg-muted">(save to create a custom copy)</span>
-              )}
-              {isDirty && !isBuiltin && (
-                <span className="ml-2 text-[10px] text-warning">● unsaved</span>
-              )}
-            </div>
+        {/* ── Themes Tab ──────────────────────────────────────── */}
+        <TabsContent value="themes" className="pt-5 space-y-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {allThemes.map((theme) => {
+              const isActive = theme.id === activeThemeId
+              return (
+                <button
+                  key={theme.id}
+                  type="button"
+                  onClick={() => setActiveTheme(theme.id)}
+                  className={`text-left rounded-lg border p-3 transition-all ${
+                    isActive
+                      ? 'border-brand bg-brand-muted'
+                      : 'border-border-subtle hover:border-border hover:bg-surface'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-sm font-medium text-fg leading-tight">{theme.name}</span>
+                    {isActive && <Check className="w-3.5 h-3.5 text-brand ml-auto shrink-0" />}
+                  </div>
+                  {theme.builtin ? (
+                    <span className="inline-flex items-center gap-1 rounded-[4px] border border-border-subtle px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide bg-surface text-fg-secondary">
+                      built-in
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-[4px] border border-border-subtle px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide bg-surface text-brand">
+                      custom
+                    </span>
+                  )}
+                  {theme.description && (
+                    <p className="text-[11px] text-fg-muted mt-1.5 line-clamp-2">{theme.description}</p>
+                  )}
+                  {/* Color swatches */}
+                  <div className="flex items-center gap-1 mt-2">
+                    {(['brand', 'primary', 'danger', 'success', 'warning', 'info'] as const).map((k) => (
+                      <div
+                        key={k}
+                        className="w-3.5 h-3.5 rounded-sm border border-border-subtle/50"
+                        style={{ backgroundColor: theme.tokens.dark[k] }}
+                        title={k}
+                      />
+                    ))}
+                  </div>
+                </button>
+              )
+            })}
           </div>
-          <div className="flex items-center gap-1">
-            {/* Mode switcher — controls which set we're editing */}
-            <div className="flex bg-surface rounded-md p-0.5 mr-2">
+
+          {customThemes.length === 0 && (
+            <p className="text-[11px] text-fg-muted">
+              Switch to the <strong className="text-fg">Edit</strong> tab to customize the active theme and save your own copy.
+            </p>
+          )}
+
+          {/* Import */}
+          <div className="flex items-center gap-2 pt-1">
+            <label className="inline-flex items-center h-8 px-3 text-xs font-medium rounded-md border border-border-subtle bg-transparent shadow-sm hover:bg-surface hover:text-fg cursor-pointer text-fg-secondary transition-colors">
+              <Upload className="w-3.5 h-3.5 mr-1.5" />
+              Import JSON
+              <input type="file" accept="application/json,.json" onChange={handleImport} className="hidden" />
+            </label>
+          </div>
+        </TabsContent>
+
+        {/* ── Edit Tab ────────────────────────────────────────── */}
+        <TabsContent value="edit" className="pt-5 space-y-5">
+          {/* Editing context + controls */}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-xs font-semibold text-fg-secondary uppercase tracking-wider mb-0.5">Editing</div>
+              <div className="text-sm text-fg">
+                {draft.name}
+                {isBuiltin && (
+                  <span className="ml-2 text-[10px] text-fg-muted">(save to create a custom copy)</span>
+                )}
+                {isDirty && !isBuiltin && (
+                  <span className="ml-2 text-[10px] text-warning">● unsaved</span>
+                )}
+              </div>
+            </div>
+            {/* Mode switcher */}
+            <div className="flex bg-surface rounded-md p-0.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setEditorMode('dark')}
-                className={`text-[11px] px-2 py-0.5 rounded ${
-                  editorMode === 'dark' ? 'bg-bg-elevated text-fg shadow-sm' : 'text-fg-muted'
+                className={`text-[11px] px-2.5 py-1 rounded transition-colors ${
+                  editorMode === 'dark' ? 'bg-bg-elevated text-fg shadow-sm' : 'text-fg-muted hover:text-fg'
                 }`}
               >
                 Dark
@@ -226,69 +253,63 @@ export function AppearancePanel() {
               <button
                 type="button"
                 onClick={() => setEditorMode('light')}
-                className={`text-[11px] px-2 py-0.5 rounded ${
-                  editorMode === 'light' ? 'bg-bg-elevated text-fg shadow-sm' : 'text-fg-muted'
+                className={`text-[11px] px-2.5 py-1 rounded transition-colors ${
+                  editorMode === 'light' ? 'bg-bg-elevated text-fg shadow-sm' : 'text-fg-muted hover:text-fg'
                 }`}
               >
                 Light
               </button>
             </div>
-            <Button variant="ghost" size="sm" onClick={toggleGlobalTheme} title="Toggle app dark/light">
+          </div>
+
+          {/* Action bar */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="default" size="sm" onClick={handleSave} disabled={!isDirty && !isBuiltin}>
+              <Save className="w-3.5 h-3.5 mr-1.5" />
+              {isBuiltin ? 'Save as copy' : 'Save'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleReset} disabled={!isDirty}>
+              <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+              Revert
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleDuplicate}>
+              <Copy className="w-3.5 h-3.5 mr-1.5" />
+              Duplicate
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Export
+            </Button>
+            {!isBuiltin && (
+              <Button variant="destructive" size="sm" onClick={handleDelete}>
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                Delete
+              </Button>
+            )}
+            <div className="flex-1" />
+            <Button variant="ghost" size="sm" onClick={toggleGlobalTheme} className="text-fg-muted hover:text-fg">
               Preview {resolvedMode === 'dark' ? 'light' : 'dark'}
             </Button>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <Button variant="default" size="sm" onClick={handleSave} disabled={!isDirty && !isBuiltin}>
-            <Save className="w-3.5 h-3.5 mr-1.5" />
-            {isBuiltin ? 'Save as copy' : 'Save'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleReset} disabled={!isDirty}>
-            <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-            Revert
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleDuplicate}>
-            <Copy className="w-3.5 h-3.5 mr-1.5" />
-            Duplicate
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="w-3.5 h-3.5 mr-1.5" />
-            Export JSON
-          </Button>
-          <label className="inline-flex items-center h-8 px-3 text-xs font-medium rounded-md border border-border-subtle bg-transparent shadow-sm hover:bg-surface hover:text-fg cursor-pointer">
-            <Upload className="w-3.5 h-3.5 mr-1.5" />
-            Import
-            <input type="file" accept="application/json,.json" onChange={handleImport} className="hidden" />
-          </label>
-          {!isBuiltin && (
-            <Button variant="destructive" size="sm" onClick={handleDelete}>
-              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-              Delete
+            <Button variant="ghost" size="sm" onClick={handleResetToDefault} className="text-fg-muted hover:text-fg">
+              Reset to default
             </Button>
-          )}
-          <div className="flex-1" />
-          <Button variant="ghost" size="sm" onClick={handleResetToDefault}>
-            Reset to Concrete &amp; Signal
-          </Button>
-        </div>
-      </section>
+          </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-6">
-        {/* Token editor */}
-        <section>
-          <TokenEditor
-            values={draft.tokens[editorMode]}
-            onChange={handleTokenChange}
-            readOnly={isBuiltin}
-          />
-        </section>
-
-        {/* Preview pane (sticky on wide screens) */}
-        <section className="lg:sticky lg:top-0 self-start">
-          <ThemePreview />
-        </section>
-      </div>
+          {/* Editor + Preview */}
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
+            <section>
+              <TokenEditor
+                values={draft.tokens[editorMode]}
+                onChange={handleTokenChange}
+                readOnly={isBuiltin}
+              />
+            </section>
+            <section className="lg:sticky lg:top-0 self-start">
+              <ThemePreview />
+            </section>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

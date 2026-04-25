@@ -151,7 +151,7 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg">
-      <NavRail />
+      {currentPage !== 'chat' && <NavRail />}
       {currentPage === 'chat' && <LeftSidebar />}
       {currentPage === 'chat' ? (
         <ChatMain onEditorReady={handleEditorReady} />

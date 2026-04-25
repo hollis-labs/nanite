@@ -1,4 +1,7 @@
 import { AlertOctagon, Clock, RotateCcw, Shield, Zap } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Envelope, EnvelopeBody, EnvelopeFooter, EnvelopeHeader, EnvelopeSection } from "./primitives/Envelope"
+import { StatusPill } from "./primitives/StatusPill"
 
 interface ChatLoopTerminatedData {
   reason: string
@@ -64,11 +67,6 @@ export function ChatLoopTerminatedCard({ data, onSendMessage }: ChatLoopTerminat
     tone: "warning" as const,
   }
   const Icon = info.icon
-  const toneColor =
-    info.tone === "danger"
-      ? "border-danger/30 bg-danger/5"
-      : "border-warning/30 bg-warning/5"
-  const accentColor = info.tone === "danger" ? "text-danger" : "text-warning"
 
   const formattedTime = (() => {
     try {
@@ -96,78 +94,55 @@ export function ChatLoopTerminatedCard({ data, onSendMessage }: ChatLoopTerminat
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className={`rounded-sm border ${toneColor} overflow-hidden max-w-lg`}>
-        <div className="p-4 flex flex-col gap-3">
-          <div className="flex items-start gap-3">
-            <div className={`shrink-0 mt-0.5 ${accentColor}`}>
-              <Icon className="h-5 w-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`text-xs font-semibold ${accentColor}`}>
-                  {info.label}
-                </span>
-                <span className="text-[10px] text-fg-faint ml-auto font-mono">
-                  {formattedTime}
-                </span>
-              </div>
-              <p className="text-sm text-fg-secondary leading-snug">
-                {data.reason}
-              </p>
-              <p className="text-xs text-fg-muted mt-2 leading-snug">
-                {info.hint}
-              </p>
-            </div>
-          </div>
+      <Envelope accent={info.tone} className="max-w-lg">
+        <EnvelopeHeader
+          icon={Icon}
+          label="Loop terminated"
+          tone={info.tone}
+          meta={formattedTime}
+          action={<StatusPill tone={info.tone}>{info.label}</StatusPill>}
+        />
 
-          <div className="flex items-center gap-3 text-[11px] text-fg-muted font-mono border-t border-border-subtle/50 pt-2">
-            <span>iter {data.iteration}</span>
-            {data.consecutive_failures > 0 && (
-              <span>{data.consecutive_failures} consecutive failures</span>
-            )}
-            {data.last_tool && (
-              <span className="truncate" title={data.last_tool}>
-                last tool: {data.last_tool}
-              </span>
-            )}
-          </div>
-
-          {data.last_error && (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-fg-muted hover:text-fg-secondary">
-                Last error
-              </summary>
-              <pre className="mt-1 p-2 rounded bg-bg/50 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap break-words">
-                {data.last_error}
-              </pre>
-            </details>
-          )}
-
-          {onSendMessage && (
-            <div className="flex gap-2 pt-1">
-              {data.code === "max_turns" && (
-                <button
-                  type="button"
-                  onClick={handleContinue}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-surface hover:bg-surface-hover border border-border-subtle transition-colors"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Continue
-                </button>
+        <EnvelopeBody title={data.reason} description={info.hint}>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-fg-muted">
+              <span>iter {data.iteration}</span>
+              {data.consecutive_failures > 0 && (
+                <span>{data.consecutive_failures} consecutive failures</span>
               )}
-              {(data.code === "max_turns" || data.code === "hard_ceiling") && (
-                <button
-                  type="button"
-                  onClick={handleRetryScoped}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-surface hover:bg-surface-hover border border-border-subtle transition-colors"
-                >
-                  Retry with narrower scope
-                </button>
+              {data.last_tool && (
+                <span className="truncate" title={data.last_tool}>
+                  last tool: {data.last_tool}
+                </span>
               )}
             </div>
-          )}
-        </div>
-      </div>
+
+            {data.last_error && (
+              <EnvelopeSection label="Last error">
+                <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-[6px] border border-border-subtle bg-surface px-3 py-2 font-mono text-[11px] text-fg">
+                  {data.last_error}
+                </pre>
+              </EnvelopeSection>
+            )}
+          </div>
+        </EnvelopeBody>
+
+        {onSendMessage && (
+          <EnvelopeFooter>
+            {data.code === "max_turns" && (
+              <Button size="sm" variant="outline" onClick={handleContinue}>
+                <RotateCcw className="h-3.5 w-3.5" />
+                Continue
+              </Button>
+            )}
+            {(data.code === "max_turns" || data.code === "hard_ceiling") && (
+              <Button size="sm" variant="outline" onClick={handleRetryScoped}>
+                Retry with narrower scope
+              </Button>
+            )}
+          </EnvelopeFooter>
+        )}
+      </Envelope>
     </div>
   )
 }

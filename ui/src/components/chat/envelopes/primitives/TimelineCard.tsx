@@ -1,3 +1,6 @@
+import { Clock } from 'lucide-react'
+import { Envelope, EnvelopeHeader, EnvelopeBody } from './Envelope'
+
 interface TimelineEvent {
   timestamp: string
   label: string
@@ -33,38 +36,46 @@ function formatTimestamp(iso: string): string {
 
 export function TimelineCard({ data }: TimelineCardProps) {
   return (
-    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
-      {data.title && (
-        <h4 className="text-sm font-medium text-fg mb-3">{data.title}</h4>
-      )}
-      <div className="relative">
-        {data.events.map((event, i) => {
-          const status = event.status || 'pending'
-          const dotColor = STATUS_DOT[status] ?? STATUS_DOT.pending
-          const isLast = i === data.events.length - 1
+    <Envelope>
+      <EnvelopeHeader
+        icon={Clock}
+        label="Timeline"
+        meta={`${data.events.length} event${data.events.length === 1 ? '' : 's'}`}
+      />
+      <EnvelopeBody title={data.title}>
+        <div className="relative">
+          {data.events.map((event, i) => {
+            const status = event.status || 'pending'
+            const dotColor = STATUS_DOT[status] ?? STATUS_DOT.pending
+            const isLast = i === data.events.length - 1
 
-          return (
-            <div key={`event-${i}`} className="relative flex gap-3 pb-4 last:pb-0">
-              {/* Vertical line */}
-              {!isLast && (
-                <div className="absolute left-[5px] top-3 bottom-0 w-px bg-border" />
-              )}
-              {/* Dot */}
-              <div className={`w-[11px] h-[11px] rounded-full mt-1 shrink-0 ${dotColor} ring-2 ring-bg-elevated/50`} />
-              {/* Content */}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-medium text-fg">{event.label}</span>
-                  <span className="text-[11px] text-fg-muted">{formatTimestamp(event.timestamp)}</span>
-                </div>
-                {event.description && (
-                  <p className="text-xs text-fg-secondary mt-0.5">{event.description}</p>
+            return (
+              <div key={`event-${i}`} className="relative flex gap-3 pb-4 last:pb-0">
+                {/* Vertical rail */}
+                {!isLast && (
+                  <div className="absolute bottom-0 left-[5px] top-3 w-px bg-border-subtle" />
                 )}
+                {/* Dot */}
+                <div
+                  className={`mt-1 h-[11px] w-[11px] shrink-0 rounded-full ring-2 ring-bg-elevated ${dotColor}`}
+                />
+                {/* Content */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[13px] font-medium text-fg">{event.label}</span>
+                    <span className="font-mono text-[11px] text-fg-muted">
+                      {formatTimestamp(event.timestamp)}
+                    </span>
+                  </div>
+                  {event.description && (
+                    <p className="mt-0.5 text-[12px] text-fg-secondary">{event.description}</p>
+                  )}
+                </div>
               </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
+            )
+          })}
+        </div>
+      </EnvelopeBody>
+    </Envelope>
   )
 }

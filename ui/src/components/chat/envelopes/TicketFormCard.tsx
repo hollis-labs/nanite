@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Ticket, Loader2, CheckCircle, AlertCircle, Download, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { buildTicketDataMarker, buildTicketMessage } from './ticket-utils'
+import { Envelope, EnvelopeHeader, EnvelopeFooter } from './primitives/Envelope'
+import { StatusPill, type StatusTone } from './primitives/StatusPill'
 
 interface TicketFormData {
   prefilled?: {
@@ -20,6 +22,16 @@ interface TicketFormCardProps {
 }
 
 type FormState = 'idle' | 'submitting' | 'success' | 'error'
+
+const PRIORITY_TONE: Record<string, StatusTone> = {
+  low: 'success',
+  medium: 'warning',
+  high: 'danger',
+  critical: 'danger',
+}
+
+const INPUT_CLS =
+  'w-full rounded-[6px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[13px] text-fg outline-none transition-colors placeholder:text-fg-faint focus:border-primary disabled:opacity-50'
 
 export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
   const [title, setTitle] = useState(data.prefilled?.title || '')
@@ -57,7 +69,7 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
         throw new Error(body || `HTTP ${res.status}`)
       }
 
-      const result = await res.json() as Record<string, unknown>
+      const result = (await res.json()) as Record<string, unknown>
       setFormState('success')
       setTicketId((result['ticket_id'] || result['id'] || '') as string)
       setTicketResult(result)
@@ -67,8 +79,12 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
         const rt = (result['routing'] || 'auto') as string
         const msg = buildTicketMessage(tid, title.trim(), category, priority, rt)
         const marker = buildTicketDataMarker({
-          id: tid, title: title.trim(), description: description.trim(),
-          category, priority, routing: rt,
+          id: tid,
+          title: title.trim(),
+          description: description.trim(),
+          category,
+          priority,
+          routing: rt,
         })
         onSendMessage(msg + marker)
       }
@@ -81,182 +97,192 @@ export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
   if (formState === 'success' && ticketResult) {
     const routing = (ticketResult['routing'] || 'IT Service Desk — Triage') as string
     return (
-      <div className="rounded-sm border border-success/30 bg-bg-elevated/50 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between bg-success/5 px-4 py-3 border-b border-success/20">
-          <div className="flex items-center gap-2">
-            <CheckCircle className="h-4 w-4 text-success" />
-            <span className="text-sm font-medium text-fg">{ticketId}</span>
-            <span className="text-sm text-fg-secondary">&mdash;</span>
-            <span className="text-sm text-fg-secondary truncate">{title}</span>
-          </div>
-          <span className="inline-block rounded-full bg-success/15 border border-success/25 px-2 py-0.5 text-xs text-success">
-            open
-          </span>
-        </div>
+      <Envelope accent="success">
+        <EnvelopeHeader
+          icon={CheckCircle}
+          label="Ticket created"
+          tone="success"
+          meta={<span className="font-mono">{ticketId}</span>}
+          action={<StatusPill tone="success">open</StatusPill>}
+        />
 
-        <div className="px-4 py-3 space-y-3">
-          {/* Details grid */}
+        <div className="space-y-3 px-4 py-3">
+          <h3 className="text-[14px] font-semibold leading-snug text-fg">{title}</h3>
+
           <div className="grid grid-cols-3 gap-3">
-            <div>
-              <span className="block text-xs font-medium text-fg-secondary mb-0.5">Category</span>
-              <span className="text-sm text-fg capitalize">{category}</span>
-            </div>
-            <div>
-              <span className="block text-xs font-medium text-fg-secondary mb-0.5">Priority</span>
-              <span className="text-sm text-fg capitalize">{priority}</span>
-            </div>
-            <div>
-              <span className="block text-xs font-medium text-fg-secondary mb-0.5">Routing</span>
-              <span className="text-sm text-fg">{routing}</span>
-            </div>
+            <Field label="Category">
+              <span className="capitalize">{category}</span>
+            </Field>
+            <Field label="Priority">
+              <StatusPill tone={PRIORITY_TONE[priority] ?? 'warning'}>{priority}</StatusPill>
+            </Field>
+            <Field label="Routing">
+              <span className="text-[13px]">{routing}</span>
+            </Field>
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-3 pt-1">
-            <Button
-              size="sm"
-              className="bg-surface hover:bg-surface-hover text-fg text-xs px-3 py-1 h-7"
-              onClick={() => window.open(`/api/plugins/ui/support-ticket-download?ticket_id=${encodeURIComponent(ticketId)}`, '_blank')}
-            >
-              <Download className="mr-1.5 h-3 w-3" />
-              Download Ticket
-            </Button>
-          </div>
-
-          {/* Production note */}
-          <div className="flex items-start gap-2 rounded-md border border-border-subtle bg-surface/50 px-3 py-2">
+          <div className="flex items-start gap-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2">
             <Info className="mt-0.5 h-3 w-3 shrink-0 text-fg-muted" />
-            <span className="text-xs text-fg-muted">
-              In production, this ticket would be automatically created in BMC Helix ITSM and routed to {routing}
+            <span className="text-[11px] leading-relaxed text-fg-muted">
+              In production, this ticket would be automatically created in BMC Helix ITSM and routed
+              to {routing}
             </span>
           </div>
         </div>
-      </div>
+
+        <EnvelopeFooter>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              window.open(
+                `/api/plugins/ui/support-ticket-download?ticket_id=${encodeURIComponent(ticketId)}`,
+                '_blank',
+              )
+            }
+          >
+            <Download className="h-3 w-3" />
+            Download ticket
+          </Button>
+        </EnvelopeFooter>
+      </Envelope>
     )
   }
 
-  const inputCls =
-    'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary placeholder:text-fg-faint'
-
   return (
-    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
-      {/* Header */}
-      <div className="mb-4 flex items-center gap-2">
-        <Ticket className="h-4 w-4 text-fg-secondary" />
-        <h4 className="text-sm font-medium text-fg">Create Support Ticket</h4>
-      </div>
+    <Envelope>
+      <form onSubmit={handleSubmit}>
+        <EnvelopeHeader icon={Ticket} label="Create support ticket" />
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {/* Issue Summary */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-secondary">
-            Issue Summary <span className="text-danger">*</span>
-          </label>
+        <div className="space-y-3 px-4 py-3">
+        <FieldGroup label="Issue summary" required>
           <input
             type="text"
-            className={inputCls}
+            className={INPUT_CLS}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Brief summary of the issue"
             required
           />
-        </div>
+        </FieldGroup>
 
-        {/* Category */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-secondary">
-            Category <span className="text-danger">*</span>
-          </label>
+        <FieldGroup label="Category" required>
           <select
-            className={inputCls}
+            className={INPUT_CLS}
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             required
           >
-            <option value="">Select category...</option>
+            <option value="">Select category…</option>
             {data.categories.map((cat) => (
               <option key={cat} value={cat}>
                 {cat.charAt(0).toUpperCase() + cat.slice(1)}
               </option>
             ))}
           </select>
-        </div>
+        </FieldGroup>
 
-        {/* Priority */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-secondary">Priority</label>
-          <div className="flex gap-3">
-            {(['low', 'medium', 'high', 'critical'] as const).map((p) => (
-              <label key={p} className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="radio"
-                  name="priority"
-                  value={p}
-                  checked={priority === p}
-                  onChange={() => setPriority(p)}
-                  className="accent-accent"
-                />
-                <span className="text-xs text-fg-secondary capitalize">{p}</span>
-              </label>
-            ))}
+        <FieldGroup label="Priority">
+          <div className="flex flex-wrap gap-2">
+            {(['low', 'medium', 'high', 'critical'] as const).map((p) => {
+              const active = priority === p
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPriority(p)}
+                  className={`rounded-[4px] border px-2.5 py-1 text-[12px] capitalize transition-colors ${
+                    active
+                      ? 'border-primary bg-primary/10 text-fg'
+                      : 'border-border-subtle bg-surface text-fg-secondary hover:border-border'
+                  }`}
+                >
+                  {p}
+                </button>
+              )
+            })}
           </div>
-        </div>
+        </FieldGroup>
 
-        {/* Description */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-secondary">
-            Description <span className="text-danger">*</span>
-          </label>
+        <FieldGroup label="Description" required>
           <textarea
-            className={`${inputCls} min-h-[80px] resize-y`}
+            className={`${INPUT_CLS} min-h-[80px] resize-y`}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Describe the issue in detail"
             rows={3}
             required
           />
-        </div>
+        </FieldGroup>
 
-        {/* Steps Already Tried */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-fg-secondary">
-            Steps Already Tried
-          </label>
+        <FieldGroup label="Steps already tried">
           <textarea
-            className={`${inputCls} min-h-[60px] resize-y`}
+            className={`${INPUT_CLS} min-h-[60px] resize-y`}
             value={stepsTried}
             onChange={(e) => setStepsTried(e.target.value)}
             placeholder="What have you already tried?"
             rows={2}
           />
-        </div>
+        </FieldGroup>
 
-        {/* Error message */}
         {formState === 'error' && (
-          <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger/5 px-3 py-2">
+          <div className="flex items-center gap-2 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-2">
             <AlertCircle className="h-4 w-4 shrink-0 text-danger" />
-            <span className="text-xs text-danger">{errorMsg}</span>
+            <span className="text-[12px] text-danger">{errorMsg}</span>
           </div>
         )}
+        </div>
 
-        {/* Submit */}
-        <Button
-          type="submit"
-          size="sm"
-          className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-8"
-          disabled={formState === 'submitting' || !title.trim() || !category || !description.trim()}
-        >
-          {formState === 'submitting' ? (
-            <>
-              <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-              Creating...
-            </>
-          ) : (
-            'Create Ticket'
-          )}
-        </Button>
+        <EnvelopeFooter>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={
+              formState === 'submitting' || !title.trim() || !category || !description.trim()
+            }
+          >
+            {formState === 'submitting' ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Creating…
+              </>
+            ) : (
+              'Create ticket'
+            )}
+          </Button>
+        </EnvelopeFooter>
       </form>
+    </Envelope>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+        {label}
+      </div>
+      <div className="text-[13px] text-fg">{children}</div>
+    </div>
+  )
+}
+
+function FieldGroup({
+  label,
+  required,
+  children,
+}: {
+  label: string
+  required?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <label className="mb-1 block font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+        {label}
+        {required && <span className="ml-0.5 text-danger">*</span>}
+      </label>
+      {children}
     </div>
   )
 }

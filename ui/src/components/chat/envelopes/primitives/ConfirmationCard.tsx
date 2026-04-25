@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Envelope, EnvelopeHeader, EnvelopeFooter } from './Envelope'
+import { StatusPill } from './StatusPill'
 
 interface ConfirmationCardData {
   title: string
@@ -13,12 +15,6 @@ interface ConfirmationCardData {
 interface ConfirmationCardProps {
   data: ConfirmationCardData
   onSendMessage?: (content: string) => void
-}
-
-const RISK_BUTTON_STYLES: Record<string, string> = {
-  low:    'bg-success hover:bg-success/80 text-white',
-  medium: 'bg-warning hover:bg-warning/80 text-white',
-  high:   'bg-danger hover:bg-danger/80 text-white',
 }
 
 export function ConfirmationCard({ data, onSendMessage }: ConfirmationCardProps) {
@@ -40,50 +36,57 @@ export function ConfirmationCard({ data, onSendMessage }: ConfirmationCardProps)
 
   if (decision === 'confirmed') {
     return (
-      <div className="rounded-sm border border-success/30 bg-success/5 p-4">
-        <div className="flex items-center gap-2">
-          <CheckCircle className="w-4 h-4 text-success" />
-          <span className="text-sm text-success">Confirmed: {data.title}</span>
+      <Envelope accent="success" muted>
+        <div className="flex items-center gap-2 px-4 py-2.5">
+          <CheckCircle className="h-4 w-4 text-success" />
+          <span className="text-[13px] text-fg">Confirmed: {data.title}</span>
         </div>
-      </div>
+      </Envelope>
     )
   }
 
   if (decision === 'cancelled') {
     return (
-      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
-        <div className="flex items-center gap-2">
-          <XCircle className="w-4 h-4 text-fg-muted" />
-          <span className="text-sm text-fg-muted">Cancelled: {data.title}</span>
+      <Envelope muted>
+        <div className="flex items-center gap-2 px-4 py-2.5 text-fg-muted">
+          <XCircle className="h-4 w-4" />
+          <span className="text-[13px]">Cancelled: {data.title}</span>
         </div>
-      </div>
+      </Envelope>
     )
   }
 
+  const headerTone = risk === 'high' ? 'danger' : risk === 'medium' ? 'warning' : 'neutral'
+  const pillTone = risk === 'high' ? 'danger' : risk === 'medium' ? 'warning' : 'info'
+
   return (
-    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
-      <div className="flex items-center gap-2 mb-2">
-        {risk === 'high' && <AlertTriangle className="w-4 h-4 text-danger shrink-0" />}
-        <h4 className="text-sm font-medium text-fg">{data.title}</h4>
+    <Envelope accent={risk === 'high' ? 'danger' : risk === 'medium' ? 'warning' : undefined}>
+      <EnvelopeHeader
+        icon={risk === 'high' ? AlertTriangle : undefined}
+        label="Confirm action"
+        tone={headerTone}
+        action={<StatusPill tone={pillTone}>{risk} risk</StatusPill>}
+      />
+
+      <div className="px-4 py-3">
+        <h4 className="mb-1.5 text-[14px] font-semibold leading-snug text-fg">
+          {data.title}
+        </h4>
+        <p className="text-[13px] leading-relaxed text-fg-secondary">{data.message}</p>
       </div>
-      <p className="text-sm text-fg-secondary mb-4">{data.message}</p>
-      <div className="flex items-center gap-2">
+
+      <EnvelopeFooter>
         <Button
           size="sm"
-          className={`text-xs px-3 py-1 h-7 ${RISK_BUTTON_STYLES[risk]}`}
+          variant={risk === 'high' ? 'destructive' : 'default'}
           onClick={handleConfirm}
         >
           {confirmLabel}
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-xs px-3 py-1 h-7"
-          onClick={handleCancel}
-        >
+        <Button size="sm" variant="ghost" onClick={handleCancel}>
           {cancelLabel}
         </Button>
-      </div>
-    </div>
+      </EnvelopeFooter>
+    </Envelope>
   )
 }

@@ -1,3 +1,6 @@
+import { GitCompare } from 'lucide-react'
+import { Envelope, EnvelopeHeader } from './Envelope'
+
 interface DiffCardData {
   title?: string
   before: { label: string; content: string }
@@ -12,36 +15,34 @@ interface DiffCardProps {
 export function DiffCard({ data }: DiffCardProps) {
   const isCode = data.format === 'code'
   const contentClass = isCode
-    ? 'font-mono text-xs whitespace-pre-wrap bg-surface/50 p-3 rounded-sm'
-    : 'text-sm whitespace-pre-wrap p-3'
+    ? 'whitespace-pre-wrap p-3 font-mono text-[12px] leading-relaxed text-fg-secondary'
+    : 'whitespace-pre-wrap p-3 text-[13px] leading-relaxed text-fg-secondary'
 
   return (
-    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 overflow-hidden">
-      {data.title && (
-        <div className="px-4 py-3 border-b border-border">
-          <h4 className="text-sm font-medium text-fg">{data.title}</h4>
-        </div>
-      )}
-      <div className="grid grid-cols-2 divide-x divide-border">
+    <Envelope>
+      <EnvelopeHeader icon={GitCompare} label={data.title || 'Diff'} />
+      <div className="grid grid-cols-2 divide-x divide-border-subtle">
         {/* Before */}
         <div>
-          <div className="px-3 py-2 border-b border-border/50 bg-danger/5">
-            <span className="text-xs font-medium text-danger">{data.before.label}</span>
+          <div className="flex items-center gap-2 border-b border-border-subtle bg-danger/5 px-3 py-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-danger" />
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-danger">
+              {data.before.label}
+            </span>
           </div>
-          <div className={`${contentClass} text-fg-secondary`}>
-            {data.before.content}
-          </div>
+          <div className={contentClass}>{data.before.content}</div>
         </div>
         {/* After */}
         <div>
-          <div className="px-3 py-2 border-b border-border/50 bg-success/5">
-            <span className="text-xs font-medium text-success">{data.after.label}</span>
+          <div className="flex items-center gap-2 border-b border-border-subtle bg-success/5 px-3 py-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-success">
+              {data.after.label}
+            </span>
           </div>
-          <div className={`${contentClass} text-fg-secondary`}>
-            {data.after.content}
-          </div>
+          <div className={contentClass}>{data.after.content}</div>
         </div>
       </div>
-    </div>
+    </Envelope>
   )
 }

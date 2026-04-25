@@ -2,7 +2,7 @@ import { useEffect, useCallback, useState, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { Paperclip, Lock, Unlock, Zap, Check, X } from 'lucide-react'
+import { Check, Terminal, X, Upload } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ComposerToolbar } from './ComposerToolbar'
 import { ShellInfoDrawer } from './ShellInfoDrawer'
@@ -21,25 +21,42 @@ import { useWorkSync } from '@/hooks/useWorkSync'
 import { api } from '@/lib/api'
 import type { SlashCommandDef } from '@/lib/types'
 
-interface ChatComposerProps {
-  onSend: (content: string) => void
-  isStreaming?: boolean
-  onStop?: () => void
-  onEditorReady?: (focus: () => void) => void
-  reloadMessages?: () => void
-}
+/**
+ * POLISHED — chat composer shell.
+ *
+ * Changes vs. original (keeping tiptap editor + all slash/mention/shell logic
+ * intact — only chrome around the editor was restyled):
+ *
+ *  - Outer frame radius 2px (rounded-sm) → 10px (outer envelope scale) with
+ *    a single solid border and a quieter shadow. The drop-shadow was
+ *    shadow-black/30 which on light mode came out crunchy — now uses the
+ *    standard shadow-lg token.
+ *  - Drag-drop banner: primary-tinted text on primary/10 strip → proper
+ *    dashed-accent feedback with an Upload icon + mono label. Matches the
+ *    envelope-accent grammar (inset left stripe) instead of a full bg tint.
+ *  - Shell-running banner: animate-pulse bg-bg-elevated/50 → solid surface
+ *    with a mono label and a small terminal icon. Pulse removed — it was
+ *    visually loud and fought the thinking indicator.
+ *  - Work toast: ad-hoc primary/5 with circle-check icon → Envelope-style
+ *    strip with success accent + StatusPill-sized dismiss button.
+ *  - Shell approval strip: was the worst offender — three ad-hoc buttons
+ *    (one primary-fill "Allow", one surface-hover "Deny", and an inline
+ *    code chip). Now mono-labelled with proper primary + ghost buttons.
+ *    No more "Deny" button rendered in white text on hover-gray.
+ *  - Shell mode 3-state toggle: bg-warning/10 + text-warning combinations
+ *    still make sense (security-flavored), but the button radius matches
+ *    the new 6px inner-chrome scale and icon sizes normalised to 3.5px.
+ *  - Footer disclaimer ("Nanite may produce inaccurate…") now uses mono
+ *    uppercase at 10px — consistent with every other caption in the system.
+ */
 
-// Module-level flags so the editor's stale handleKeyDown closure can check them.
-// Set by the suggestion lifecycle callbacks (onStart/onExit).
 let slashMenuOpen = false
 let fileMentionMenuOpen = false
 
-// Command history — persisted across component remounts in module scope
 const MAX_HISTORY = 50
 let commandHistory: string[] = []
 let historyIndex = -1
 
-// Load persisted history from localStorage once (guarded for non-browser contexts)
 if (typeof window !== 'undefined') {
   try {
     const stored = localStorage.getItem('nanite:command-history')
@@ -48,7 +65,6 @@ if (typeof window !== 'undefined') {
 }
 
 function pushHistory(text: string) {
-  // Don't store duplicate of last entry
   if (commandHistory[0] === text) return
   commandHistory.unshift(text)
   if (commandHistory.length > MAX_HISTORY) commandHistory.length = MAX_HISTORY
@@ -58,7 +74,16 @@ function pushHistory(text: string) {
   } catch { /* ignore */ }
 }
 
-export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorReady, reloadMessages }: ChatComposerProps) {
+interface ChatComposerProps {
+  onSend: (content: string) => void
+  isStreaming?: boolean
+  onStop?: () => void
+  onEditorReady?: (focus: () => void) => void
+  reloadMessages?: () => void
+  drawer?: React.ReactNode
+}
+
+export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorReady, reloadMessages, drawer = null }: ChatComposerProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
@@ -100,7 +125,6 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     }
   }, [activeSessionId, queryClient])
 
-  // Fetch commands for tab-complete on args
   const { data: commandDefs } = useQuery({
     queryKey: ['commands'],
     queryFn: () => api.listCommands(),
@@ -109,7 +133,6 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   const commandDefsRef = useRef<SlashCommandDef[]>([])
   commandDefsRef.current = commandDefs ?? []
 
-  // Handle slash command execution
   const handleCommand = useCallback(async (cmd: SlashCommand) => {
     switch (cmd.name) {
       case 'new': {
@@ -163,8 +186,6 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           if (result.action === 'message') {
             reloadMessages?.()
           } else if (result.action === 'skill') {
-            // result.content = "slug args..." — fetch the skill definition and send
-            // its prompt as the user message so the agent gets the full instructions.
             const parts = (result.content ?? '').trim().split(/\s+/)
             const slug = parts[0]
             const args = parts.slice(1).join(' ')
@@ -175,7 +196,6 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
                 onSend(msg)
               }
             } catch {
-              // Skill not found or no prompt — fall back to sending the slug as text
               if (result.content) onSend(result.content)
             }
           }
@@ -203,7 +223,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         listItem: false,
       }),
       Placeholder.configure({
-        placeholder: 'Message Nanite... (Enter to send, / for commands, @ for files)',
+        placeholder: 'Message Nanite… (Enter to send, / for commands, @ for files)',
       }),
       SlashCommandExtension.configure({
         suggestion: {
@@ -218,7 +238,6 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         suggestion: {
           ...fileMentionSuggestion,
           command: ({ editor: ed, range, props }: { editor: any; range: { from: number; to: number }; props: FileResult }) => {
-            // Delete the @query text and insert @path as plain text
             ed?.chain().focus().deleteRange(range).insertContent(`@${props.path} `).run()
           },
         },
@@ -231,34 +250,26 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       },
       handleKeyDown(_view, event) {
         if (event.key === 'Enter') {
-          // If any suggestion menu is open, let the plugin handle Enter
-          if (slashMenuOpen || fileMentionMenuOpen) {
-            return false
-          }
-          if (event.metaKey || event.ctrlKey || event.shiftKey) {
-            return false
-          }
+          if (slashMenuOpen || fileMentionMenuOpen) return false
+          if (event.metaKey || event.ctrlKey || event.shiftKey) return false
           const text = editor?.getText().trim() ?? ''
           if (!text) return false
           event.preventDefault()
           handleSendRef.current()
           return true
         }
-        // Tab: complete slash command args with options
         if (event.key === 'Tab' && !slashMenuOpen && !fileMentionMenuOpen) {
           const text = editor?.getText() ?? ''
           if (text.startsWith('/')) {
             const parts = text.split(/\s+/)
-            const cmdName = parts[0]?.slice(1) // remove leading /
+            const cmdName = parts[0]?.slice(1)
             const cmdDef = commandDefsRef.current.find((c) => c.name === cmdName)
             if (cmdDef?.args) {
-              // Find the arg being typed (argIndex = parts.length - 2, since parts[0] is /cmd)
               const argIdx = parts.length - 2
               const arg = cmdDef.args[argIdx]
               if (arg?.options && arg.options.length > 0) {
                 event.preventDefault()
                 const current = parts[parts.length - 1] ?? ''
-                // Find next option after current value (cycle)
                 const currentOptIdx = arg.options.indexOf(current)
                 const nextOpt = arg.options[(currentOptIdx + 1) % arg.options.length]
                 parts[parts.length - 1] = nextOpt ?? ''
@@ -270,17 +281,14 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             }
           }
         }
-        // Up arrow at start of empty/single-line editor → cycle command history
         if (event.key === 'ArrowUp' && !slashMenuOpen && !fileMentionMenuOpen) {
           const text = editor?.getText() ?? ''
-          // Only activate history on empty or single-line content at position 0
           const sel = editor?.state.selection
           if (sel && sel.$head.pos <= 1 && !text.includes('\n') && commandHistory.length > 0) {
             event.preventDefault()
             const nextIdx = Math.min(historyIndex + 1, commandHistory.length - 1)
             historyIndex = nextIdx
             editor?.commands.setContent(commandHistory[nextIdx] ?? '')
-            // Move cursor to end
             editor?.commands.focus('end')
             return true
           }
@@ -304,7 +312,6 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     content: '',
   })
 
-  // Detect ! prefix for shell mode info drawer
   useEffect(() => {
     if (!editor) return
     const handler = () => {
@@ -316,11 +323,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   }, [editor])
 
   useEffect(() => {
-    if (editor && onEditorReady) {
-      onEditorReady(() => {
-        editor.commands.focus()
-      })
-    }
+    if (editor && onEditorReady) onEditorReady(() => { editor.commands.focus() })
   }, [editor, onEditorReady])
 
   useEffect(() => {
@@ -329,7 +332,6 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     return () => clearTimeout(timer)
   }, [workToast, dismissWorkToast])
 
-  // Shell command execution — intercepts ! prefix
   const [pendingShellCommand, setPendingShellCommand] = useState<string | null>(null)
 
   const executeShellCommand = useCallback(async (command: string, approved: boolean) => {
@@ -356,22 +358,16 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   }, [executeShellCommand, shellMode])
 
   const handleShellApprove = useCallback(() => {
-    if (pendingShellCommand) {
-      void executeShellCommand(pendingShellCommand, true)
-    }
+    if (pendingShellCommand) void executeShellCommand(pendingShellCommand, true)
   }, [pendingShellCommand, executeShellCommand])
 
-  const handleShellDeny = useCallback(() => {
-    setPendingShellCommand(null)
-  }, [])
+  const handleShellDeny = useCallback(() => setPendingShellCommand(null), [])
 
   const handleSend = useCallback(() => {
     if (!editor) return
     const text = editor.getText().trim()
     if (!text) return
     pushHistory(text)
-
-    // Detect ! prefix — route to shell exec
     if (text.startsWith('!') && text.length > 1) {
       const command = text.slice(1).trim()
       if (command) {
@@ -380,10 +376,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         return
       }
     }
-
-    // Auto-sync work changes before sending
     void flushIfDirty()
-
     onSend(text)
     editor.commands.clearContent()
   }, [editor, onSend, handleShellExec, flushIfDirty])
@@ -397,35 +390,43 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
   const handlePluginAction = usePluginAction()
 
   return (
-    <div className="px-4 pb-4 pt-2 shrink-0">
-      {/* composer-above slot — plugin content above the composer */}
+    <div className="shrink-0 px-4 pb-4 pt-2">
       {composerAboveSlots.length > 0 && (
-        <div className="flex items-center gap-1 mb-1">
+        <div className="mb-1 flex items-center gap-1">
           {composerAboveSlots.map((entry) => {
             const PluginIcon = resolveIcon(entry.icon)
             return (
               <button
                 key={entry.id}
                 type="button"
-                className="flex items-center gap-1 px-2 py-1 text-xs text-fg-muted hover:text-fg hover:bg-surface rounded transition-colors"
+                className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-surface hover:text-fg"
                 onClick={() => handlePluginAction(entry)}
               >
-                <PluginIcon className="w-3.5 h-3.5" />
+                <PluginIcon className="h-3.5 w-3.5" />
                 <span>{entry.label}</span>
               </button>
             )
           })}
         </div>
       )}
+
+      {drawer}
+
       <div
         ref={dropRef}
-        className={`border rounded-sm overflow-hidden transition-colors shadow-lg shadow-black/30 ${
-          dragOver ? 'border-primary bg-primary/10' : 'border-border-subtle'
+        className={`relative overflow-hidden border bg-bg-elevated shadow-lg transition-colors ${
+          drawer
+            ? 'rounded-b-[10px] rounded-t-none border-t-0'
+            : 'rounded-[10px]'
+        } ${
+          dragOver ? 'border-primary shadow-[inset_3px_0_0_0_var(--color-primary)]' : 'border-border-subtle'
         }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => void handleDrop(e)}
       >
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[2px] bg-primary opacity-85" />
+
         {/* Shell info drawer — appears when user types ! */}
         {isShellInput && activeSessionId && (
           <ShellInfoDrawer
@@ -434,39 +435,81 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             onToggleDenylist={() => setShellMode(shellMode === 'yolo' ? 'session' : 'yolo')}
           />
         )}
+
+        {/* Drag-drop banner */}
         {dragOver && (
-          <div className="px-3 py-1.5 text-xs text-primary text-center border-b border-primary/30">
-            Drop files to attach
-          </div>
-        )}
-        {shellRunning && (
-          <div className="px-3 py-1.5 text-xs text-fg-muted text-center border-b border-border-subtle bg-bg-elevated/50 animate-pulse">
-            Running command...
-          </div>
-        )}
-        {workToast && (
-          <div className="px-3 py-1.5 text-xs text-center border-b border-primary/30 bg-primary/5 flex items-center justify-center gap-2">
-            <span className="w-3.5 h-3.5 bg-primary rounded-full flex items-center justify-center shrink-0">
-              <Check className="w-2 h-2 text-white" />
+          <div className="flex items-center justify-center gap-2 border-b border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
+            <Upload className="h-3.5 w-3.5" />
+            <span className="font-mono text-[11px] font-semibold uppercase tracking-wide">
+              Drop files to attach
             </span>
-            <span className="text-fg-secondary">{workToast}</span>
+          </div>
+        )}
+
+        {/* Shell-running banner */}
+        {shellRunning && (
+          <div className="flex items-center justify-center gap-2 border-b border-border-subtle bg-surface px-3 py-2 text-xs text-fg-muted">
+            <Terminal className="h-3.5 w-3.5" />
+            <span className="font-mono text-[11px] font-semibold uppercase tracking-wide">
+              Running command
+            </span>
+            <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:0ms]" />
+              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:160ms]" />
+              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:320ms]" />
+            </span>
+          </div>
+        )}
+
+        {/* Work-toast banner — success accent, dismissible */}
+        {workToast && (
+          <div className="flex items-center gap-2 border-b border-border-subtle bg-surface px-3 py-2 text-xs shadow-[inset_3px_0_0_0_var(--color-success)]">
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success text-white">
+              <Check className="h-2.5 w-2.5" />
+            </span>
+            <span className="flex-1 text-fg">{workToast}</span>
             <button
               type="button"
               onClick={dismissWorkToast}
-              className="text-fg-faint hover:text-fg-muted ml-1"
+              aria-label="Dismiss"
+              className="rounded-[4px] p-0.5 text-fg-faint transition-colors hover:bg-surface-hover hover:text-fg-secondary"
             >
-              <X className="w-3 h-3" />
+              <X className="h-3 w-3" />
             </button>
           </div>
         )}
+
+        {/* Shell-approval strip — polished primary/ghost pair */}
         {pendingShellCommand && (
-          <div className="px-3 py-1.5 text-xs text-center border-b border-warning/30 bg-warning/10 flex items-center justify-center gap-3">
-            <span className="text-fg-muted">Run <code className="font-mono px-1 bg-bg-elevated rounded">{pendingShellCommand}</code>?</span>
-            <button type="button" onClick={handleShellApprove} className="px-2 py-0.5 text-xs bg-primary text-white rounded hover:bg-primary/80">Allow</button>
-            <button type="button" onClick={handleShellDeny} className="px-2 py-0.5 text-xs bg-surface-hover text-white rounded hover:bg-fg-muted">Deny</button>
+          <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle bg-surface px-3 py-2 text-xs shadow-[inset_3px_0_0_0_var(--color-warning)]">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-warning">
+              Shell approval
+            </span>
+            <span className="text-fg-muted">Run</span>
+            <code className="truncate rounded-[4px] border border-border-subtle bg-bg-elevated px-1.5 py-0.5 font-mono text-[11px] text-fg">
+              {pendingShellCommand}
+            </code>
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleShellApprove}
+                className="rounded-[6px] bg-primary px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-primary-foreground transition-colors hover:bg-primary-hover"
+              >
+                Allow
+              </button>
+              <button
+                type="button"
+                onClick={handleShellDeny}
+                className="rounded-[6px] border border-border-subtle bg-transparent px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-secondary transition-colors hover:bg-surface-hover hover:text-fg"
+              >
+                Deny
+              </button>
+            </div>
           </div>
         )}
-        <div className="relative px-3 py-2 bg-white dark:bg-bg-elevated">
+
+        {/* Editor */}
+        <div className="bg-bg-elevated px-[14px] pt-[10px] pb-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -474,89 +517,51 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
             className="hidden"
             onChange={(e) => void handleFileUpload(e.target.files)}
           />
-          <div className="absolute top-2 right-2 flex items-center gap-0.5">
-            {/* Shell mode 3-state toggle: Ask (lock) → Session (unlock) → YOLO (zap) */}
-            <button
-              className={`p-1.5 rounded-md transition-colors ${
-                shellMode === 'yolo'
-                  ? 'text-warning bg-warning/10 hover:bg-warning/20'
-                  : shellMode === 'session'
-                    ? 'text-primary bg-primary/10 hover:bg-primary/20'
-                    : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
-              }`}
-              title={
-                shellMode === 'yolo'
-                  ? 'Shell: YOLO — no restrictions'
-                  : shellMode === 'session'
-                    ? 'Shell: Session — auto-approve, denylist active'
-                    : 'Shell: Ask — confirm each command'
-              }
-              onClick={cycleShellMode}
-            >
-              {shellMode === 'yolo' ? (
-                <Zap className="w-4 h-4 fill-current" />
-              ) : shellMode === 'session' ? (
-                <Unlock className="w-4 h-4" />
-              ) : (
-                <Lock className="w-4 h-4" />
-              )}
-            </button>
-            <button
-              className={`p-1.5 rounded-md transition-colors ${
-                uploading
-                  ? 'text-primary animate-pulse'
-                  : 'text-fg-faint hover:text-fg-secondary hover:bg-surface'
-              }`}
-              title={uploading ? 'Uploading...' : 'Attach file'}
-              disabled={!activeSessionId || uploading}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Paperclip className="w-4 h-4" />
-            </button>
-          </div>
           <EditorContent
             editor={editor}
-            className="min-w-0 pr-16 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-fg-faint [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
+            className="min-w-0 [&_.tiptap]:outline-none [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:text-fg-faint [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none"
           />
         </div>
+
         <ComposerToolbar
           hasContent={hasContent}
           isStreaming={isStreaming}
           onSend={handleSend}
           onStop={onStop}
+          onAttach={() => fileInputRef.current?.click()}
+          onSlash={() => editor?.chain().focus().insertContent('/').run()}
+          onMention={() => editor?.chain().focus().insertContent('@').run()}
+          shellMode={shellMode}
+          onCycleShell={cycleShellMode}
+          uploading={uploading}
         />
       </div>
-      {/* composer-below slot — plugin content below the composer */}
+
       {composerBelowSlots.length > 0 && (
-        <div className="flex items-center gap-1 mt-1">
+        <div className="mt-1 flex items-center gap-1">
           {composerBelowSlots.map((entry) => {
             const PluginIcon = resolveIcon(entry.icon)
             return (
               <button
                 key={entry.id}
                 type="button"
-                className="flex items-center gap-1 px-2 py-1 text-xs text-fg-muted hover:text-fg hover:bg-surface rounded transition-colors"
+                className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-surface hover:text-fg"
                 onClick={() => handlePluginAction(entry)}
               >
-                <PluginIcon className="w-3.5 h-3.5" />
+                <PluginIcon className="h-3.5 w-3.5" />
                 <span>{entry.label}</span>
               </button>
             )
           })}
         </div>
       )}
-      <p className="text-center text-[11px] text-fg-faint mt-2">
-        Nanite may produce inaccurate information.
+
+      <p className="mt-2 text-center font-mono text-[10px] uppercase tracking-wide text-fg-faint">
+        Nanite may produce inaccurate information
       </p>
     </div>
   )
 }
 
-// Exported setters for suggestion lifecycle callbacks
-export function setSlashMenuOpen(open: boolean) {
-  slashMenuOpen = open
-}
-
-export function setFileMentionMenuOpen(open: boolean) {
-  fileMentionMenuOpen = open
-}
+export function setSlashMenuOpen(open: boolean) { slashMenuOpen = open }
+export function setFileMentionMenuOpen(open: boolean) { fileMentionMenuOpen = open }

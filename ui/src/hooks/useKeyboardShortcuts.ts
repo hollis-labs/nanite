@@ -84,6 +84,8 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const toggleLeftSidebar = useLayoutStore((s) => s.toggleLeftSidebar)
   const toggleRightRail = useLayoutStore((s) => s.toggleRightRail)
   const toggleArtifactsDrawer = useLayoutStore((s) => s.toggleArtifactsDrawer)
+  const toggleToolDrawer = useLayoutStore((s) => s.toggleToolDrawer)
+  const toggleHeaderChips = useLayoutStore((s) => s.toggleHeaderChips)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
@@ -206,6 +208,15 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
       } else if (matchesBinding(e, bindings.toggle_artifacts)) {
         e.preventDefault()
         toggleArtifactsDrawer()
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('toggle-layout-menu'))
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't' && !e.shiftKey) {
+        e.preventDefault()
+        toggleToolDrawer()
+      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault()
+        toggleHeaderChips()
       } else {
         // Check custom action keybindings
         if (actionBindings && activeSessionId) {
@@ -240,6 +251,8 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     toggleLeftSidebar,
     toggleRightRail,
     toggleArtifactsDrawer,
+    toggleToolDrawer,
+    toggleHeaderChips,
     focusComposer,
     handleNewSession,
     handleBookmarkLast,

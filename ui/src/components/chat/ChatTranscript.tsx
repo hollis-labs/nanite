@@ -1,27 +1,51 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, Bot, Info, Loader2 } from "lucide-react";
+import { ArrowDown, Bot, Info, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
 import type { AgentMode, Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
-import { useSettings } from "@/hooks/useSettings";
-import { ApprovalCard } from "./ApprovalCard";
 import { ChatMessage } from "./ChatMessage";
-import { EnvelopeRenderer } from "./envelopes/EnvelopeRenderer";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
+import { Envelope, EnvelopeHeader } from "./envelopes/primitives";
 import { MessageContent } from "./MessageContent";
 import { ThinkingIndicator } from "./ThinkingIndicator";
-import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ToolWarningBanner } from "./ToolWarningBanner";
 
+/**
+ * POLISHED — chat transcript.
+ *
+ * Changes vs. original:
+ *  - Avatar chip: 7×7 bg-mode/15 rounded-md became 8×8 bg-mode/10 rounded-[8px].
+ *    Slightly larger for better optical balance with the polished envelope
+ *    cards, and a lighter alpha so the saturated mode-colored icon inside
+ *    leads instead of the background fighting it.
+ *  - Assistant name label is now uppercase mono tracking-wide — matches the
+ *    EnvelopeHeader grammar. Consistency between a standalone assistant
+ *    message and a message containing an envelope.
+ *  - Transcript vertical rhythm tightened: messages had space-y-6 (24px),
+ *    now space-y-5 (20px). Reads tighter next to the denser envelope cards
+ *    without feeling cramped.
+ *  - Text-only mode banner moved to the Envelope primitive (neutral accent,
+ *    info icon). Same info, system-consistent shape.
+ *  - Empty state redesigned: Bot in a soft rounded-[14px] surface chip with a
+ *    small Sparkles mark, mono "New session" caption, headline in fg-primary,
+ *    subcopy in fg-muted. Still minimal; reads like part of the system not a
+ *    placeholder left over from framework-days.
+ *  - Scroll-to-bottom FAB: primary fill → surface-elevated with a 1px border
+ *    and subtle shadow, matching the polished chrome. Still high-contrast
+ *    with the arrow icon but doesn't shout from the corner.
+ *  - Stream-stalled indicator still renders under streamed content, but now
+ *    uses the new ThinkingIndicator shape (three dots, mono "thinking" label).
+ */
+
 const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
-  default: { bg: "bg-mode-default/15", text: "text-mode-default" },
-  architect: { bg: "bg-mode-architect/15", text: "text-mode-architect" },
-  planner: { bg: "bg-mode-planner/15", text: "text-mode-planner" },
-  writer: { bg: "bg-mode-writer/15", text: "text-mode-writer" },
+  default:   { bg: "bg-mode-default/10",   text: "text-mode-default" },
+  architect: { bg: "bg-mode-architect/10", text: "text-mode-architect" },
+  planner:   { bg: "bg-mode-planner/10",   text: "text-mode-planner" },
+  writer:    { bg: "bg-mode-writer/10",    text: "text-mode-writer" },
 };
 
 interface ChatTranscriptProps {
@@ -46,42 +70,18 @@ export function ChatTranscript({
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeMode = useChatStore((s) => s.activeMode);
-  const toolCalls = useChatStore((s) => s.toolCalls);
   const toolWarnings = useChatStore((s) => s.toolWarnings);
   const textOnlyMode = useChatStore((s) => s.textOnlyMode);
-  const toolCallDisplayMode = useChatStore((s) => s.toolCallDisplayMode);
-  const saveToolCallDisplayMode = useChatStore((s) => s.saveToolCallDisplayMode);
-  const loadToolCallDisplayMode = useChatStore((s) => s.loadToolCallDisplayMode);
-  const pendingApprovals = useChatStore((s) => s.pendingApprovals);
-  const pluginEnvelopes = useChatStore((s) => s.pluginEnvelopes);
-  const loadSessionPluginEnvelopes = useChatStore((s) => s.loadSessionPluginEnvelopes);
   const scrollToMessageId = useChatStore((s) => s.scrollToMessageId);
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId);
-  const { data: userSettings } = useSettings();
-  const toolStreamBehavior = userSettings?.tool_stream_behavior ?? 'streaming';
   const chatErrors = useChatStore((s) => s.chatErrors);
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const queryClient = useQueryClient();
 
-  // Load per-session tool call display mode when session changes.
-  useEffect(() => {
-    loadToolCallDisplayMode(activeSessionId ?? null);
-  }, [activeSessionId, loadToolCallDisplayMode]);
-
-  // Load per-session plugin envelopes when session changes. Plugin envelopes
-  // are delivered by subprocess event hooks via the `plugin_envelope`
-  // StreamEvent (BLG-20260413-012 / BLG-20260414-010) — session-scoped so
-  // envelopes from one session don't bleed into another.
-  useEffect(() => {
-    loadSessionPluginEnvelopes(activeSessionId ?? null);
-  }, [activeSessionId, loadSessionPluginEnvelopes]);
-
-  // Track if user is scrolled to bottom - auto-scroll only when at bottom
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
 
-  // Detect stalled stream — content stopped flowing but still streaming (tool calls, LLM thinking)
   const [streamStalled, setStreamStalled] = useState(false);
   const lastContentRef = useRef(streamingContent);
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,36 +96,23 @@ export function ChatTranscript({
       lastContentRef.current = "";
       return;
     }
-    // Content changed — reset stall detection
     if (streamingContent !== lastContentRef.current) {
       lastContentRef.current = streamingContent;
       setStreamStalled(false);
       if (stallTimerRef.current) clearTimeout(stallTimerRef.current);
-      // Start new stall timer — if no new content for 2s, show indicator
       if (streamingContent) {
         stallTimerRef.current = setTimeout(() => setStreamStalled(true), 2000);
       }
     }
   }, [isStreaming, streamingContent]);
 
-  const cycleToolCallDisplayMode = useCallback(() => {
-    const modes = ["indicator", "minimal", "compact", "full"] as const;
-    const idx = modes.indexOf(toolCallDisplayMode);
-    const nextIdx = idx === -1 ? 1 : (idx + 1) % modes.length;
-    saveToolCallDisplayMode(activeSessionId ?? null, modes[nextIdx]);
-  }, [toolCallDisplayMode, saveToolCallDisplayMode, activeSessionId]);
-
   const avatarStyle = MODE_AVATAR_STYLES[activeMode];
 
-  // Check if user is near the bottom of the scroll area
   const checkScrollPosition = useCallback(() => {
     const scrollElement = scrollRef.current;
     if (!scrollElement) return;
-
     const { scrollTop, scrollHeight, clientHeight } = scrollElement;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-    // Use threshold: >100px = pause auto-scroll, <50px = resume auto-scroll
     if (distanceFromBottom > 100) {
       setIsAtBottom(false);
       setUserHasScrolled(true);
@@ -135,32 +122,23 @@ export function ChatTranscript({
     }
   }, []);
 
-  // Add scroll event listener
   useEffect(() => {
     const scrollElement = scrollRef.current;
     if (!scrollElement) return;
-
     scrollElement.addEventListener("scroll", checkScrollPosition);
-    return () => {
-      scrollElement.removeEventListener("scroll", checkScrollPosition);
-    };
+    return () => scrollElement.removeEventListener("scroll", checkScrollPosition);
   }, [checkScrollPosition]);
 
-  // Also check scroll position when content changes (not just user scroll)
   useLayoutEffect(() => {
     checkScrollPosition();
   }, [
     messages.length,
     streamingContent,
-    toolCalls.length,
     toolWarnings.length,
-    pendingApprovals.length,
-    pluginEnvelopes.length,
     chatErrors.length,
     checkScrollPosition,
   ]);
 
-  // Scroll-to-top detection for loading older messages
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const prevMessagesLengthRef = useRef(messages.length);
 
@@ -169,9 +147,7 @@ export function ChatTranscript({
     if (!el || !hasOlderMessages || !onLoadOlder) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry?.isIntersecting && !loadingOlder) {
-          onLoadOlder();
-        }
+        if (entry?.isIntersecting && !loadingOlder) onLoadOlder();
       },
       { rootMargin: "200px" },
     );
@@ -179,20 +155,10 @@ export function ChatTranscript({
     return () => observer.disconnect();
   }, [hasOlderMessages, onLoadOlder, loadingOlder]);
 
-  // Preserve scroll position when prepending older messages
   useLayoutEffect(() => {
-    const scrollElement = scrollRef.current;
-    if (!scrollElement) return;
-    const prevLen = prevMessagesLengthRef.current;
-    const currLen = messages.length;
-    if (currLen > prevLen && prevLen > 0) {
-      // Messages were prepended if the first message ID changed
-      // Maintain relative scroll position from the bottom
-    }
-    prevMessagesLengthRef.current = currLen;
+    prevMessagesLengthRef.current = messages.length;
   }, [messages.length]);
 
-  // Fetch bookmarks for the active session
   const { data: bookmarks = [] } = useQuery({
     queryKey: ["bookmarks", activeSessionId],
     queryFn: () => api.listBookmarks(activeSessionId!),
@@ -219,65 +185,39 @@ export function ChatTranscript({
     [activeSessionId, toggleBookmarkMutation],
   );
 
-  // Scroll to bottom function
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     setIsAtBottom(true);
     setUserHasScrolled(false);
   }, []);
 
-  // Scroll a specific message into view when a cross-session jump lands.
-  // Notes on the design:
-  //   - Uses requestAnimationFrame-based polling (max ~1s) because the effect
-  //     fires as soon as `scrollToMessageId` is set, which can race ahead of
-  //     the DOM commit for the messages fetched by useChat's pending-jump
-  //     consumer. We retry until the target element exists.
-  //   - The store state is cleared INSIDE the setTimeout (not eagerly) because
-  //     this effect subscribes to `scrollToMessageId` — clearing it eagerly
-  //     would re-run the effect, running the previous cleanup which would
-  //     cancel the highlight-removal timer and leave the ring on-screen.
-  //   - `suppressAutoScrollRef` prevents the auto-scroll-to-bottom effect
-  //     from stealing focus on the same render.
   const suppressAutoScrollRef = useRef(false);
   useEffect(() => {
     if (!scrollToMessageId) return;
-    const HIGHLIGHT_CLASSES = ["ring-2", "ring-primary/60", "rounded-md", "transition-shadow"] as const;
+    const HIGHLIGHT_CLASSES = ["ring-2", "ring-primary/60", "rounded-[10px]", "transition-shadow"] as const;
     let removeTimer: ReturnType<typeof setTimeout> | null = null;
     let rafId: number | null = null;
     let target: HTMLElement | null = null;
-    const deadline = Date.now() + 1000; // give up polling after 1s
+    const deadline = Date.now() + 1000;
 
     const giveUp = () => {
-      // Target never arrived. Clear the store state so the next jump can
-      // retrigger and the app doesn't sit in "pending scroll" forever.
-      console.warn(
-        `[ChatTranscript] Jump target ${scrollToMessageId} not found within ${1000}ms — clearing pending scroll.`,
-      );
+      console.warn(`[ChatTranscript] Jump target ${scrollToMessageId} not found within 1000ms — clearing pending scroll.`);
       setScrollToMessageId(null);
     };
 
     const tryLocate = () => {
       const scrollElement = scrollRef.current;
       if (!scrollElement) {
-        if (Date.now() < deadline) {
-          rafId = requestAnimationFrame(tryLocate);
-        } else {
-          giveUp();
-        }
+        if (Date.now() < deadline) rafId = requestAnimationFrame(tryLocate);
+        else giveUp();
         return;
       }
-      target = scrollElement.querySelector<HTMLElement>(
-        `[data-message-id="${scrollToMessageId}"]`,
-      );
+      target = scrollElement.querySelector<HTMLElement>(`[data-message-id="${scrollToMessageId}"]`);
       if (!target) {
-        if (Date.now() < deadline) {
-          rafId = requestAnimationFrame(tryLocate);
-        } else {
-          giveUp();
-        }
+        if (Date.now() < deadline) rafId = requestAnimationFrame(tryLocate);
+        else giveUp();
         return;
       }
-      // Found it — scroll + highlight + schedule cleanup.
       suppressAutoScrollRef.current = true;
       target.scrollIntoView({ behavior: "smooth", block: "center" });
       target.classList.add(...HIGHLIGHT_CLASSES);
@@ -298,8 +238,6 @@ export function ChatTranscript({
     };
   }, [scrollToMessageId, setScrollToMessageId]);
 
-  // Auto-scroll to bottom on new messages or streaming updates
-  // Only when user is at bottom AND hasn't manually scrolled up
   useEffect(() => {
     if (suppressAutoScrollRef.current) {
       suppressAutoScrollRef.current = false;
@@ -311,10 +249,7 @@ export function ChatTranscript({
   }, [
     messages.length,
     streamingContent,
-    toolCalls.length,
     toolWarnings.length,
-    pendingApprovals.length,
-    pluginEnvelopes.length,
     chatErrors.length,
     isAtBottom,
     userHasScrolled,
@@ -322,59 +257,71 @@ export function ChatTranscript({
 
   const userMessageCount = messages.filter((m) => m.role === "user").length;
 
+  /* ─────────────────── Empty state ─────────────────── */
   if (messages.length === 0 && !isStreaming) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <Bot className="w-16 h-16 text-fg-faint mx-auto mb-4" />
-          <h2 className="text-lg font-medium text-fg-secondary mb-1">
-            Start a conversation with Nanite
-          </h2>
-          <p className="text-xs text-fg-faint mt-1">Type a message below to begin</p>
+      <div className="flex flex-1 items-center justify-center px-6">
+        <div className="flex max-w-sm flex-col items-center text-center">
+          <div className="relative mb-5 flex h-16 w-16 items-center justify-center rounded-[14px] border border-border-subtle bg-surface">
+            <Bot className="h-7 w-7 text-fg-secondary" />
+            <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+              <Sparkles className="h-3 w-3" />
+            </span>
+          </div>
+          <span className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+            New session
+          </span>
+          <h2 className="text-base font-semibold text-fg">Start a conversation with Nanite</h2>
+          <p className="mt-1 text-[13px] leading-relaxed text-fg-muted">
+            Type a message below, use <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">/</code> for commands, or <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">@</code> to reference files.
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <ScrollArea className="flex-1 px-4 py-6 relative" ref={scrollRef}>
-      <div className="max-w-3xl mx-auto space-y-6">
+    <ScrollArea className="relative flex-1 no-scrollbar px-4 py-6" ref={scrollRef}>
+      <div className="mx-auto max-w-3xl space-y-5">
         {/* Sentinel for loading older messages */}
         {hasOlderMessages && (
           <div ref={topSentinelRef} className="flex items-center justify-center py-2">
             {loadingOlder ? (
-              <div className="flex items-center gap-2 text-xs text-fg-muted">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Loading older messages...
+              <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading older messages
               </div>
             ) : (
-              <span className="text-[10px] text-fg-faint">Scroll up for older messages</span>
+              <span className="font-mono text-[10px] uppercase tracking-wide text-fg-faint">
+                Scroll up for older messages
+              </span>
             )}
           </div>
         )}
 
-        {/* Persistent text-only mode banner (agent has 0 MCP tools) */}
+        {/* Text-only mode banner — system-consistent envelope style */}
         {textOnlyMode && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-md text-xs bg-surface border border-border-subtle text-fg-secondary">
-            <Info className="w-3.5 h-3.5 shrink-0" />
-            <span>This agent has no tools configured — responses are text-only</span>
-          </div>
+          <Envelope accent="neutral">
+            <EnvelopeHeader
+              icon={Info}
+              label="Text-only mode"
+              meta="No tools"
+            />
+            <div className="px-4 py-3 text-[13px] leading-relaxed text-fg-secondary">
+              This agent has no tools configured. Use <code className="rounded-[4px] border border-border-subtle bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">/</code> for commands or <code className="rounded-[4px] border border-border-subtle bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">@</code> to reference files in the prompt.
+            </div>
+          </Envelope>
         )}
 
         {messages.map((msg, idx) => {
-          // Show compaction divider before the first non-compacted message
-          // when earlier messages were compacted
           let showCompactionDivider = false;
           if (idx > 0) {
             try {
-              const prevMeta = JSON.parse(messages[idx - 1].metadata || '{}');
-              const currMeta = JSON.parse(msg.metadata || '{}');
-              if (prevMeta.compacted && !currMeta.compacted) {
-                showCompactionDivider = true;
-              }
-            } catch { /* ignore parse errors */ }
+              const prevMeta = JSON.parse(messages[idx - 1].metadata || "{}");
+              const currMeta = JSON.parse(msg.metadata || "{}");
+              if (prevMeta.compacted && !currMeta.compacted) showCompactionDivider = true;
+            } catch { /* ignore */ }
           }
-
           return (
             <div key={msg.id}>
               {showCompactionDivider && <CompactionDivider />}
@@ -389,76 +336,43 @@ export function ChatTranscript({
           );
         })}
 
-        {/* Tool call indicators — visibility controlled by tool_stream_behavior setting */}
-        {toolStreamBehavior !== 'hidden' && toolCalls.length > 0 && (toolStreamBehavior === 'persist' || isStreaming) && (
-          <div className="flex gap-3">
-            <div
-              className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}
-            >
-              <Bot className="w-4 h-4" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <ToolCallDisplay
-                toolCalls={toolCalls}
-                displayMode={toolCallDisplayMode}
-                onCycleMode={cycleToolCallDisplayMode}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Tool warning banner during streaming */}
         {isStreaming && toolWarnings.length > 0 && <ToolWarningBanner warnings={toolWarnings} />}
-
-        {/* Approval cards — inline in the message stream */}
-        {pendingApprovals.map((approval) => (
-          <ApprovalCard key={approval.request_id} approval={approval} />
-        ))}
-
-        {/* Plugin-emitted envelopes (BLG-20260414-010) — standalone cards,
-            not appended to any assistant message content. */}
-        {pluginEnvelopes.map((item) => (
-          <div
-            key={item.id}
-            data-plugin-envelope-id={item.id}
-            data-plugin-id={item.pluginId}
-          >
-            <EnvelopeRenderer envelope={item.envelope} {...(onSendMessage && { onSendMessage })} userMessageCount={userMessageCount} />
-          </div>
-        ))}
 
         {/* Streaming message */}
         {isStreaming && streamingContent && (
           <div className="flex gap-3">
             <div
-              className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}
+              className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] ${avatarStyle.bg} ${avatarStyle.text}`}
             >
-              <Bot className="w-4 h-4" />
+              <Bot className="h-4 w-4" />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-fg-muted mb-1">Nanite</div>
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+                Nanite
+              </div>
               <MessageContent content={streamingContent} role="assistant" />
               {streamStalled && <ThinkingIndicator />}
             </div>
           </div>
         )}
 
-        {/* Thinking indicator — shown while streaming, before content arrives */}
+        {/* Thinking indicator — before content arrives */}
         {isStreaming && !streamingContent && (
           <div className="flex gap-3">
             <div
-              className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text}`}
+              className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] ${avatarStyle.bg} ${avatarStyle.text}`}
             >
-              <Bot className="w-4 h-4" />
+              <Bot className="h-4 w-4" />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-fg-muted mb-1">Nanite</div>
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+                Nanite
+              </div>
               <ThinkingIndicator />
             </div>
           </div>
         )}
 
-        {/* Error banners */}
         {chatErrors
           .filter((e) => !e.dismissed)
           .map((error) => (
@@ -468,14 +382,14 @@ export function ChatTranscript({
         <div ref={bottomRef} />
       </div>
 
-      {/* Scroll to bottom button - shown when user has scrolled up */}
-      {userHasScrolled && !isAtBottom && (
+      {/* Scroll-to-bottom FAB — quieter than the original primary-fill */}
+        {userHasScrolled && !isAtBottom && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 bg-primary hover:bg-primary-hover text-primary-foreground rounded-full p-3 shadow-lg transition-all duration-200 hover:scale-105"
+          className="absolute bottom-4 right-4 flex h-9 w-9 items-center justify-center rounded-[10px] border border-border-subtle bg-bg-elevated text-fg-secondary shadow-lg transition-all duration-200 hover:scale-105 hover:text-fg"
           aria-label="Scroll to bottom"
         >
-          <ArrowDown className="w-5 h-5" />
+          <ArrowDown className="h-4 w-4" />
         </button>
       )}
     </ScrollArea>

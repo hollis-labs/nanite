@@ -4,20 +4,31 @@ import { persist } from 'zustand/middleware'
 type ToolDrawerState = 'closed' | 'compact' | 'expanded'
 type Theme = 'dark' | 'light' | 'system'
 type RightRailTab = 'widgets' | 'inbox' | 'artifacts' | (string & {})
+export type LayoutPreset = 'focus' | 'default' | 'workspace' | 'reading'
 
 interface LayoutState {
   leftSidebarOpen: boolean
   rightRailOpen: boolean
   rightRailTab: RightRailTab
   taskThreadOpen: boolean
+  toolDrawerEnabled: boolean
   toolDrawerState: ToolDrawerState
+  leftRailWorkspaceVisible: boolean
+  leftRailNewChatVisible: boolean
+  leftRailSearchVisible: boolean
   toolDrawerHeight: number
+  headerChipsVisible: boolean
   currentPage: string
   theme: Theme
   toggleLeftSidebar: () => void
   toggleRightRail: () => void
   toggleArtifactsDrawer: () => void
   toggleTaskThread: () => void
+  toggleToolDrawer: () => void
+  toggleHeaderChips: () => void
+  toggleLeftRailWorkspace: () => void
+  toggleLeftRailNewChat: () => void
+  toggleLeftRailSearch: () => void
   setLeftSidebar: (open: boolean) => void
   setRightRail: (open: boolean) => void
   setRightRailTab: (tab: RightRailTab) => void
@@ -25,6 +36,8 @@ interface LayoutState {
   setTaskThread: (open: boolean) => void
   setToolDrawerState: (state: ToolDrawerState) => void
   setToolDrawerHeight: (height: number) => void
+  setHeaderChipsVisible: (visible: boolean) => void
+  applyLayoutPreset: (preset: LayoutPreset) => void
   setCurrentPage: (page: string) => void
   toggleTheme: () => void
   setTheme: (theme: Theme) => void
@@ -53,14 +66,29 @@ export const useLayoutStore = create<LayoutState>()(
       rightRailOpen: true,
       rightRailTab: 'widgets' as RightRailTab,
       taskThreadOpen: true,
+      toolDrawerEnabled: true,
       toolDrawerState: 'closed' as ToolDrawerState,
+      leftRailWorkspaceVisible: true,
+      leftRailNewChatVisible: true,
+      leftRailSearchVisible: true,
       toolDrawerHeight: 240,
+      headerChipsVisible: true,
       currentPage: 'chat',
       theme: 'dark' as Theme,
       toggleLeftSidebar: () =>
         set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),
       toggleRightRail: () =>
         set((state) => ({ rightRailOpen: !state.rightRailOpen })),
+      toggleToolDrawer: () =>
+        set((state) => ({ toolDrawerEnabled: !state.toolDrawerEnabled })),
+      toggleHeaderChips: () =>
+        set((state) => ({ headerChipsVisible: !state.headerChipsVisible })),
+      toggleLeftRailWorkspace: () =>
+        set((state) => ({ leftRailWorkspaceVisible: !state.leftRailWorkspaceVisible })),
+      toggleLeftRailNewChat: () =>
+        set((state) => ({ leftRailNewChatVisible: !state.leftRailNewChatVisible })),
+      toggleLeftRailSearch: () =>
+        set((state) => ({ leftRailSearchVisible: !state.leftRailSearchVisible })),
       toggleArtifactsDrawer: () =>
         set((state) => {
           if (state.rightRailOpen && state.rightRailTab === 'artifacts') {
@@ -83,6 +111,16 @@ export const useLayoutStore = create<LayoutState>()(
       setTaskThread: (open) => set({ taskThreadOpen: open }),
       setToolDrawerState: (state) => set({ toolDrawerState: state }),
       setToolDrawerHeight: (height) => set({ toolDrawerHeight: Math.max(100, Math.min(600, height)) }),
+      setHeaderChipsVisible: (visible) => set({ headerChipsVisible: visible }),
+      applyLayoutPreset: (preset) => {
+        const presets: Record<LayoutPreset, Partial<LayoutState>> = {
+          focus:     { leftSidebarOpen: false, rightRailOpen: false, toolDrawerEnabled: false, headerChipsVisible: false },
+          default:   { leftSidebarOpen: true,  rightRailOpen: false, toolDrawerEnabled: true,  headerChipsVisible: true  },
+          workspace: { leftSidebarOpen: true,  rightRailOpen: true,  toolDrawerEnabled: true,  headerChipsVisible: true  },
+          reading:   { leftSidebarOpen: false, rightRailOpen: false, toolDrawerEnabled: false, headerChipsVisible: true  },
+        }
+        set(presets[preset] as Partial<LayoutState>)
+      },
       setCurrentPage: (page) => set({ currentPage: page }),
       toggleTheme: () =>
         set((state) => {

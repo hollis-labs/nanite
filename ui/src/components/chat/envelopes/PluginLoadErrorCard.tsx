@@ -1,31 +1,44 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Envelope, EnvelopeBody, EnvelopeFooter, EnvelopeHeader } from './primitives/Envelope'
+import { StatusPill } from './primitives/StatusPill'
 
 interface PluginLoadErrorCardProps {
-  pluginId: string
+  pluginId?: string
   reason: string
   onRetry?: () => void
+  title?: string
+  retryLabel?: string
 }
 
-export function PluginLoadErrorCard({ pluginId, reason, onRetry }: PluginLoadErrorCardProps) {
+export function PluginLoadErrorCard({
+  pluginId,
+  reason,
+  onRetry,
+  title,
+  retryLabel = 'Retry',
+}: PluginLoadErrorCardProps) {
+  const resolvedTitle = title ?? (pluginId ? `Plugin failed to load: ${pluginId}` : 'Envelope failed to render')
+
   return (
-    <div className="rounded-sm border border-danger/50 bg-danger/10 p-3">
-      <div className="flex items-center gap-2 mb-1">
-        <AlertTriangle className="w-3.5 h-3.5 text-danger shrink-0" />
-        <span className="text-xs font-medium text-danger">
-          Plugin failed to load: {pluginId}
-        </span>
-      </div>
-      <p className="text-[11px] text-danger/70 leading-relaxed">{reason}</p>
+    <Envelope accent="danger">
+      <EnvelopeHeader
+        icon={AlertTriangle}
+        label="Load error"
+        tone="danger"
+        action={<StatusPill tone="danger">Unavailable</StatusPill>}
+      />
+      <EnvelopeBody title={resolvedTitle}>
+        <p className="text-[13px] leading-relaxed text-fg-secondary">{reason}</p>
+      </EnvelopeBody>
       {onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-2 inline-flex items-center gap-1.5 rounded-sm border border-danger/40 px-2 py-1 text-[11px] font-medium text-danger hover:bg-danger/20"
-        >
-          <RefreshCw className="w-3 h-3" />
-          Retry
-        </button>
+        <EnvelopeFooter>
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            <RefreshCw className="h-3 w-3" />
+            {retryLabel}
+          </Button>
+        </EnvelopeFooter>
       )}
-    </div>
+    </Envelope>
   )
 }

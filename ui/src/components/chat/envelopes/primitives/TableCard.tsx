@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ArrowUp, ArrowDown } from 'lucide-react'
+import { ArrowUp, ArrowDown, Table as TableIcon } from 'lucide-react'
+import { Envelope, EnvelopeHeader } from './Envelope'
 
 interface TableColumn {
   key: string
@@ -48,20 +49,20 @@ export function TableCard({ data }: TableCardProps) {
   }
 
   return (
-    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 overflow-hidden">
-      {data.title && (
-        <div className="px-4 py-3 border-b border-border">
-          <h4 className="text-sm font-medium text-fg">{data.title}</h4>
-        </div>
-      )}
+    <Envelope>
+      <EnvelopeHeader
+        icon={TableIcon}
+        label={data.title || 'Table'}
+        meta={`${data.rows.length} row${data.rows.length === 1 ? '' : 's'}`}
+      />
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[13px]">
           <thead>
-            <tr className="border-b border-border/50">
+            <tr className="border-b border-border-subtle">
               {data.columns.map((col) => (
                 <th
                   key={col.key}
-                  className="px-4 py-2 text-left text-xs font-medium text-fg-muted"
+                  className="px-4 py-2 text-left font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted"
                   aria-sort={
                     col.sortable
                       ? sortKey === col.key
@@ -73,20 +74,18 @@ export function TableCard({ data }: TableCardProps) {
                   {col.sortable ? (
                     <button
                       type="button"
-                      className="inline-flex w-full items-center gap-1 text-left select-none hover:text-fg-secondary"
+                      className="inline-flex w-full select-none items-center gap-1 text-left hover:text-fg-secondary"
                       onClick={() => handleSort(col.key)}
                     >
                       <span>{col.label}</span>
                       {sortKey === col.key && (
                         sortAsc
-                          ? <ArrowUp className="w-3 h-3" />
-                          : <ArrowDown className="w-3 h-3" />
+                          ? <ArrowUp className="h-3 w-3" />
+                          : <ArrowDown className="h-3 w-3" />
                       )}
                     </button>
                   ) : (
-                    <span className="inline-flex items-center gap-1">
-                      {col.label}
-                    </span>
+                    <span>{col.label}</span>
                   )}
                 </th>
               ))}
@@ -94,7 +93,10 @@ export function TableCard({ data }: TableCardProps) {
           </thead>
           <tbody>
             {sortedRows.map((row, ri) => (
-              <tr key={`row-${ri}`} className="border-b border-border/30 last:border-0">
+              <tr
+                key={`row-${ri}`}
+                className="border-b border-border-subtle last:border-0"
+              >
                 {data.columns.map((col) => (
                   <td key={col.key} className="px-4 py-2 text-fg-secondary">
                     {String(row[col.key] ?? '')}
@@ -106,10 +108,10 @@ export function TableCard({ data }: TableCardProps) {
         </table>
       </div>
       {data.caption && (
-        <div className="px-4 py-2 border-t border-border/50">
-          <p className="text-xs text-fg-muted">{data.caption}</p>
+        <div className="border-t border-border-subtle px-4 py-2">
+          <p className="text-[11px] text-fg-muted">{data.caption}</p>
         </div>
       )}
-    </div>
+    </Envelope>
   )
 }

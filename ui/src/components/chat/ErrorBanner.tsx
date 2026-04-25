@@ -1,33 +1,18 @@
-import { useState } from 'react'
-import { AlertTriangle, AlertCircle, XCircle, X, ChevronDown } from 'lucide-react'
 import type { ChatError, ChatErrorCode } from '@/lib/types'
+import type { LucideIcon } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ChevronDown, X, XCircle } from 'lucide-react'
+import { useState } from 'react'
 import { ErrorDetailModal } from './ErrorDetailModal'
+import { Envelope, EnvelopeHeader } from './envelopes/primitives'
 
-const ERROR_STYLES: Record<ChatErrorCode, { bg: string; border: string; icon: string; IconComponent: typeof AlertTriangle }> = {
-  rate_limit: {
-    bg: 'bg-warning/10',
-    border: 'border-warning/30',
-    icon: 'text-warning',
-    IconComponent: AlertTriangle,
-  },
-  tool_error: {
-    bg: 'bg-danger/10',
-    border: 'border-danger/30',
-    icon: 'text-danger',
-    IconComponent: XCircle,
-  },
-  provider_error: {
-    bg: 'bg-danger/10',
-    border: 'border-danger/30',
-    icon: 'text-danger',
-    IconComponent: AlertCircle,
-  },
-  internal_error: {
-    bg: 'bg-warning/10',
-    border: 'border-warning/30',
-    icon: 'text-warning',
-    IconComponent: AlertCircle,
-  },
+const ERROR_CONFIG: Record<
+  ChatErrorCode,
+  { tone: 'danger' | 'warning'; icon: LucideIcon; label: string }
+> = {
+  rate_limit:     { tone: 'warning', icon: AlertTriangle, label: 'Rate limit' },
+  tool_error:     { tone: 'danger',  icon: XCircle,       label: 'Tool error' },
+  provider_error: { tone: 'danger',  icon: AlertCircle,   label: 'Provider error' },
+  internal_error: { tone: 'warning', icon: AlertCircle,   label: 'Internal error' },
 }
 
 interface ErrorBannerProps {
@@ -39,34 +24,43 @@ export function ErrorBanner({ error, onDismiss }: ErrorBannerProps) {
   const [showModal, setShowModal] = useState(false)
 
   if (error.dismissed) return null
+  // tool_error is already shown inline in the ToolCallDrawer as a failed tool call
+  if (error.code === 'tool_error') return null
 
-  const style = ERROR_STYLES[error.code] || ERROR_STYLES.internal_error
-  const { IconComponent } = style
+  const config = ERROR_CONFIG[error.code] || ERROR_CONFIG.internal_error
 
   return (
     <>
-      <div
-        className={`flex items-start gap-2 px-3 py-2 rounded-md border text-sm ${style.bg} ${style.border}`}
-      >
-        <IconComponent className={`w-4 h-4 shrink-0 mt-0.5 ${style.icon}`} />
-        <div className="flex-1 min-w-0">
-          <p className="text-fg text-xs leading-relaxed">{error.message}</p>
-          <button
-            onClick={() => setShowModal(true)}
-            className="inline-flex items-center gap-1 text-xs text-fg-secondary hover:text-fg mt-1 transition-colors"
-          >
-            <ChevronDown className="w-3 h-3" />
-            View Details
-          </button>
+      <Envelope accent={config.tone}>
+        <EnvelopeHeader
+          icon={config.icon}
+          label={config.label}
+          tone={config.tone}
+          action={
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setShowModal(true)}
+                className="inline-flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted transition-colors hover:bg-surface hover:text-fg-secondary"
+              >
+                <ChevronDown className="h-3 w-3" />
+                Details
+              </button>
+              <button
+                type="button"
+                onClick={() => onDismiss(error.id)}
+                className="rounded-[4px] p-1 text-fg-faint transition-colors hover:bg-surface hover:text-fg-secondary"
+                aria-label="Dismiss error"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          }
+        />
+        <div className="px-4 py-3">
+          <p className="text-[13px] leading-relaxed text-fg">{error.message}</p>
         </div>
-        <button
-          onClick={() => onDismiss(error.id)}
-          className="text-fg-muted hover:text-fg-secondary shrink-0 transition-colors"
-          aria-label="Dismiss error"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      </Envelope>
 
       {showModal && (
         <ErrorDetailModal error={error} onClose={() => setShowModal(false)} />

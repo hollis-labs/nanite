@@ -1,4 +1,4 @@
-import * as React from 'react'
+import type * as React from 'react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -26,12 +26,12 @@ export type StatusTone =
 
 const TONE_CLASS: Record<StatusTone, string> = {
   neutral: 'bg-surface text-fg-secondary',
-  primary: 'bg-primary/15 text-primary',
-  success: 'bg-success/15 text-success',
-  warning: 'bg-warning/15 text-warning',
-  danger:  'bg-danger/15 text-danger',
-  info:    'bg-info/15 text-info',
-  brand:   'bg-brand/15 text-brand',
+  primary: 'bg-surface text-primary',
+  success: 'bg-surface text-success',
+  warning: 'bg-surface text-warning',
+  danger:  'bg-surface text-danger',
+  info:    'bg-surface text-info',
+  brand:   'bg-surface text-brand',
 }
 
 interface StatusPillProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -53,7 +53,7 @@ export function StatusPill({
       data-slot="status-pill"
       data-tone={tone}
       className={cn(
-        'inline-flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase leading-[1.4] tracking-wide',
+        'inline-flex items-center gap-1 rounded-[4px] border border-border-subtle px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase leading-[1.4] tracking-wide',
         solid ? toneToSolid(tone) : TONE_CLASS[tone],
         className,
       )}
@@ -72,6 +72,6 @@ function toneToSolid(tone: StatusTone) {
     case 'info':    return 'bg-info text-white'
     case 'primary': return 'bg-primary text-primary-foreground'
     case 'brand':   return 'bg-brand text-brand-fg'
-    default:        return 'bg-fg-muted text-bg'
+    default:        return 'border-fg-muted bg-fg-muted text-bg'
   }
 }

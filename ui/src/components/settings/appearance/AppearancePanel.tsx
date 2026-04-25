@@ -130,7 +130,7 @@ export function AppearancePanel() {
   }
 
   const handleResetToDefault = () => {
-    if (!window.confirm('Discard current edits and reset to Nanite Default?')) return
+    if (!window.confirm('Discard current edits and reset to Concrete & Signal?')) return
     const fresh: Theme = { ...NANITE_DEFAULT, tokens: { dark: { ...NANITE_DEFAULT.tokens.dark }, light: { ...NANITE_DEFAULT.tokens.light } } }
     setDraft(fresh)
     applyTheme(fresh)
@@ -162,8 +162,8 @@ export function AppearancePanel() {
                 onClick={() => setActiveTheme(theme.id)}
                 className={`text-left rounded-md border p-3 transition-colors ${
                   isActive
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border-subtle hover:border-border hover:bg-surface/30'
+                    ? 'border-primary bg-primary-muted'
+                    : 'border-border-subtle hover:border-border hover:bg-surface'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
@@ -213,7 +213,7 @@ export function AppearancePanel() {
           </div>
           <div className="flex items-center gap-1">
             {/* Mode switcher — controls which set we're editing */}
-            <div className="flex bg-surface/50 rounded-md p-0.5 mr-2">
+            <div className="flex bg-surface rounded-md p-0.5 mr-2">
               <button
                 type="button"
                 onClick={() => setEditorMode('dark')}
@@ -269,7 +269,7 @@ export function AppearancePanel() {
           )}
           <div className="flex-1" />
           <Button variant="ghost" size="sm" onClick={handleResetToDefault}>
-            Reset to Nanite Default
+            Reset to Concrete &amp; Signal
           </Button>
         </div>
       </section>

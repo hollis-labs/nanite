@@ -2,10 +2,15 @@ import { useState } from 'react'
 import { Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { Proposal } from '@/lib/types'
+import { Envelope, EnvelopeHeader, EnvelopeFooter } from './primitives/Envelope'
+import { StatusPill } from './primitives/StatusPill'
 
 interface ProposalCardProps {
   proposal: Proposal
 }
+
+const FIELD_INPUT =
+  'w-full rounded-[6px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[13px] text-fg outline-none transition-colors focus:border-primary disabled:cursor-not-allowed disabled:opacity-50'
 
 export function ProposalCard({ proposal }: ProposalCardProps) {
   const [state, setState] = useState<'pending' | 'applied' | 'dismissed'>('pending')
@@ -23,36 +28,35 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
 
   if (state === 'dismissed') {
     return (
-      <div className="rounded-sm border border-border bg-bg-elevated/30 p-3 opacity-50">
-        <div className="flex items-center gap-2 text-xs text-fg-muted">
-          <X className="w-3.5 h-3.5" />
-          <span>Dismissed: {proposal.type}</span>
+      <Envelope muted>
+        <div className="flex items-center gap-2 px-4 py-2.5 text-fg-muted">
+          <X className="h-3.5 w-3.5" />
+          <span className="text-[13px]">Dismissed: {proposal.type}</span>
         </div>
-      </div>
+      </Envelope>
     )
   }
 
   const isApplied = state === 'applied'
 
   return (
-    <div className={`rounded-sm border p-4 ${
-      isApplied
-        ? 'border-success/30 bg-success/5'
-        : 'border-border-subtle bg-bg-elevated/50'
-    }`}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="text-sm font-medium text-fg">{proposal.type}</h4>
-        {isApplied && (
-          <div className="flex items-center gap-1 text-success text-xs">
-            <Check className="w-3.5 h-3.5" />
-            <span>Applied</span>
-          </div>
-        )}
-      </div>
+    <Envelope accent={isApplied ? 'success' : undefined}>
+      <EnvelopeHeader
+        label="Proposal"
+        meta={<span className="font-mono normal-case">{proposal.type}</span>}
+        action={
+          isApplied ? (
+            <StatusPill tone="success">
+              <Check className="h-3 w-3" />
+              Applied
+            </StatusPill>
+          ) : (
+            <StatusPill tone="info">Review</StatusPill>
+          )
+        }
+      />
 
-      {/* Fields */}
-      <div className="space-y-3">
+      <div className="space-y-3 px-4 py-3">
         {Object.entries(fields).map(([key, value]) => {
           const schema = proposal.schema?.[key]
           const fieldType = schema?.type || 'text'
@@ -60,9 +64,9 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
 
           return (
             <div key={key}>
-              <label className="block text-xs font-medium text-fg-secondary mb-1">
+              <label className="mb-1 block font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
                 {label}
-                {schema?.required && <span className="text-danger ml-0.5">*</span>}
+                {schema?.required && <span className="ml-0.5 text-danger">*</span>}
               </label>
               {fieldType === 'textarea' ? (
                 <textarea
@@ -70,17 +74,19 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
                   rows={3}
-                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed resize-none"
+                  className={`${FIELD_INPUT} resize-none`}
                 />
               ) : fieldType === 'select' && schema?.options ? (
                 <select
                   value={String(value ?? '')}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
-                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={FIELD_INPUT}
                 >
                   {schema.options.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
                   ))}
                 </select>
               ) : (
@@ -89,7 +95,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
                   value={String(value ?? '')}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
                   disabled={isApplied}
-                  className="w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={FIELD_INPUT}
                 />
               )}
             </div>
@@ -97,26 +103,17 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
         })}
       </div>
 
-      {/* Actions */}
       {!isApplied && (
-        <div className="flex items-center gap-2 mt-4">
-          <Button
-            size="sm"
-            className="bg-success hover:bg-success/80 text-white text-xs px-3 py-1 h-7"
-            onClick={handleApply}
-          >
+        <EnvelopeFooter>
+          <Button size="sm" onClick={handleApply}>
+            <Check className="h-3 w-3" />
             Apply
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-fg-secondary hover:text-fg text-xs px-3 py-1 h-7"
-            onClick={handleDismiss}
-          >
+          <Button variant="ghost" size="sm" onClick={handleDismiss}>
             Dismiss
           </Button>
-        </div>
+        </EnvelopeFooter>
       )}
-    </div>
+    </Envelope>
   )
 }

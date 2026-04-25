@@ -1,5 +1,6 @@
-import { ChevronRight } from 'lucide-react'
+import { List, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Envelope, EnvelopeHeader, EnvelopeBody } from './Envelope'
 
 interface ListItem {
   label: string
@@ -21,36 +22,40 @@ interface ListCardProps {
 
 export function ListCard({ data, onSendMessage }: ListCardProps) {
   return (
-    <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
-      {data.title && (
-        <h4 className="text-sm font-medium text-fg mb-3">{data.title}</h4>
-      )}
-      <div className="space-y-2">
-        {data.items.map((item, i) => (
-          <div key={`item-${i}`} className="flex items-start gap-3">
-            <span className="text-xs text-fg-muted mt-0.5 w-5 shrink-0 text-right font-mono">
-              {data.ordered ? `${i + 1}.` : '\u2022'}
-            </span>
-            <div className="flex-1 min-w-0">
-              <span className="text-sm text-fg">{item.label}</span>
-              {item.description && (
-                <p className="text-xs text-fg-muted mt-0.5">{item.description}</p>
+    <Envelope>
+      <EnvelopeHeader
+        icon={List}
+        label={data.ordered ? 'Ordered list' : 'List'}
+        meta={`${data.items.length} item${data.items.length === 1 ? '' : 's'}`}
+      />
+      <EnvelopeBody title={data.title}>
+        <div className="space-y-2">
+          {data.items.map((item, i) => (
+            <div key={`item-${i}`} className="flex items-start gap-3">
+              <span className="mt-0.5 w-5 shrink-0 text-right font-mono text-[11px] text-fg-muted">
+                {data.ordered ? `${i + 1}.` : '\u2022'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <span className="text-[13px] text-fg">{item.label}</span>
+                {item.description && (
+                  <p className="mt-0.5 text-[12px] text-fg-muted">{item.description}</p>
+                )}
+              </div>
+              {item.action && onSendMessage && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 shrink-0 px-2 text-xs"
+                  onClick={() => onSendMessage(item.action!.type)}
+                >
+                  {item.action.label}
+                  <ChevronRight className="ml-1 h-3 w-3" />
+                </Button>
               )}
             </div>
-            {item.action && onSendMessage && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-xs h-6 px-2 shrink-0"
-                onClick={() => onSendMessage(item.action!.type)}
-              >
-                <ChevronRight className="mr-1 h-3 w-3" />
-                {item.action.label}
-              </Button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+          ))}
+        </div>
+      </EnvelopeBody>
+    </Envelope>
   )
 }

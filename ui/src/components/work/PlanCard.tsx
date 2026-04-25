@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { Plan, PlanStatus } from '@/lib/types'
 import { PlanStepItem } from './PlanStepItem'
+import { AddItemInput } from './AddItemInput'
 
 const STATUS_STYLE: Record<PlanStatus, string> = {
   proposed: 'text-warning bg-warning/10',
@@ -15,9 +16,10 @@ interface PlanCardProps {
   plan: Plan
   onStepCheck: (planId: string, stepId: string) => void
   onStepUncheck: (planId: string, stepId: string, reason?: string) => void
+  onAddStep?: (planId: string, title: string) => void
 }
 
-export function PlanCard({ plan, onStepCheck, onStepUncheck }: PlanCardProps) {
+export function PlanCard({ plan, onStepCheck, onStepUncheck, onAddStep }: PlanCardProps) {
   const [expanded, setExpanded] = useState(true)
   const doneCount = plan.steps.filter((s) => s.status === 'done').length
   const totalCount = plan.steps.length
@@ -52,6 +54,14 @@ export function PlanCard({ plan, onStepCheck, onStepUncheck }: PlanCardProps) {
                 onUncheck={(stepId, reason) => onStepUncheck(plan.id, stepId, reason)}
               />
             ))}
+            {onAddStep && (
+              <div className="pt-0.5">
+                <AddItemInput
+                  placeholder="Add step..."
+                  onAdd={(title) => onAddStep(plan.id, title)}
+                />
+              </div>
+            )}
           </div>
 
           {totalCount > 0 && (

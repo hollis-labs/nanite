@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { MessageSquare, ArrowRight, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { buildTicketDataMarker, buildTicketMessage } from './ticket-utils'
+import { Envelope, EnvelopeBody, EnvelopeFooter, EnvelopeHeader, EnvelopeSection } from './primitives/Envelope'
+import { StatusPill } from './primitives/StatusPill'
 
 interface TicketInitFlowProps {
   onSendMessage?: (content: string) => void
@@ -126,136 +128,155 @@ export function TicketInitFlow({ onSendMessage, query, kbCategory }: TicketInitF
     }
   }
 
-  const inputCls = 'w-full bg-surface border border-border-subtle rounded-md px-2.5 py-1.5 text-sm text-fg outline-none focus:border-primary placeholder:text-fg-faint'
+  const inputCls = 'w-full rounded-[6px] border border-border-subtle bg-surface px-2.5 py-1.5 text-sm text-fg outline-none transition-colors focus:border-primary placeholder:text-fg-faint'
 
   // Step 1: Brief description
   if (step === 'describe') {
     return (
-      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <MessageSquare className="h-4 w-4 text-fg-secondary" />
-          <span className="text-sm font-medium text-fg">Open a Support Ticket</span>
-        </div>
-        <p className="text-xs text-fg-secondary mb-3">
-          Briefly describe your issue and we'll prepare a ticket for you to review.
-        </p>
-        <textarea
-          className={`${inputCls} min-h-[60px] resize-y mb-3`}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="What's the issue you're experiencing?"
-          rows={2}
-          autoFocus
+      <Envelope>
+        <EnvelopeHeader
+          icon={MessageSquare}
+          label="Support ticket"
+          action={<StatusPill tone="info">Draft</StatusPill>}
         />
-        <Button
-          size="sm"
-          className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-7"
-          onClick={handleDescribe}
-          disabled={!description.trim()}
+        <EnvelopeBody
+          title="Open a support ticket"
+          description="Briefly describe your issue and we'll prepare a ticket for you to review."
         >
-          <ArrowRight className="mr-1.5 h-3 w-3" />
-          Prepare Ticket
-        </Button>
-      </div>
+          <textarea
+            className={`${inputCls} min-h-[60px] resize-y`}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What's the issue you're experiencing?"
+            rows={2}
+            autoFocus
+          />
+        </EnvelopeBody>
+        <EnvelopeFooter>
+          <Button
+            size="sm"
+            className="bg-primary hover:bg-primary-hover text-white"
+            onClick={handleDescribe}
+            disabled={!description.trim()}
+          >
+            <ArrowRight className="h-3 w-3" />
+            Prepare ticket
+          </Button>
+        </EnvelopeFooter>
+      </Envelope>
     )
   }
 
   // Step 2: Review & edit prefilled form
   if (step === 'form' || step === 'error') {
     return (
-      <div className="rounded-sm border border-border-subtle bg-bg-elevated/50 p-4">
-        <div className="flex items-center gap-2 mb-4">
-          <MessageSquare className="h-4 w-4 text-fg-secondary" />
-          <span className="text-sm font-medium text-fg">Review & Submit Ticket</span>
-        </div>
+      <Envelope>
+        <EnvelopeHeader
+          icon={MessageSquare}
+          label="Support ticket"
+          action={<StatusPill tone={step === 'error' ? 'danger' : 'warning'}>{step === 'error' ? 'Retry required' : 'Review'}</StatusPill>}
+        />
 
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-fg-secondary">
-              Issue Summary <span className="text-danger">*</span>
-            </label>
-            <input type="text" className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
+        <EnvelopeBody title="Review and submit ticket">
+          <div className="space-y-4">
+            <EnvelopeSection label="Issue summary">
+              <input type="text" className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
+            </EnvelopeSection>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-fg-secondary">
-                Category <span className="text-danger">*</span>
-              </label>
-              <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option value="">Select...</option>
-                {CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <EnvelopeSection label="Category">
+                <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
+                  <option value="">Select...</option>
+                  {CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
+                  ))}
+                </select>
+              </EnvelopeSection>
+
+              <EnvelopeSection label="Priority">
+                <div className="flex flex-wrap gap-3 pt-1">
+                  {(['low', 'medium', 'high'] as const).map((p) => (
+                    <label key={p} className="flex cursor-pointer items-center gap-1.5">
+                      <input type="radio" name="ticket-priority" value={p} checked={priority === p}
+                        onChange={() => setPriority(p)} className="accent-accent" />
+                      <span className="text-xs capitalize text-fg-secondary">{p}</span>
+                    </label>
+                  ))}
+                </div>
+              </EnvelopeSection>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-fg-secondary">Priority</label>
-              <div className="flex gap-3 pt-1.5">
-                {(['low', 'medium', 'high'] as const).map((p) => (
-                  <label key={p} className="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" name="ticket-priority" value={p} checked={priority === p}
-                      onChange={() => setPriority(p)} className="accent-accent" />
-                    <span className="text-xs text-fg-secondary capitalize">{p}</span>
-                  </label>
-                ))}
+
+            <EnvelopeSection label="Description">
+              <textarea className={`${inputCls} min-h-[80px] resize-y`} value={fullDescription}
+                onChange={(e) => setFullDescription(e.target.value)} rows={3} />
+            </EnvelopeSection>
+
+            <EnvelopeSection label="Steps already tried">
+              <textarea className={`${inputCls} min-h-[50px] resize-y`} value={stepsTried}
+                onChange={(e) => setStepsTried(e.target.value)} rows={2}
+                placeholder="What have you already tried?" />
+            </EnvelopeSection>
+
+            {step === 'error' && (
+              <div className="flex items-center gap-2 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-danger" />
+                <span className="text-xs text-danger">{errorMsg}</span>
               </div>
-            </div>
+            )}
           </div>
+        </EnvelopeBody>
 
-          <div>
-            <label className="mb-1 block text-xs font-medium text-fg-secondary">
-              Description <span className="text-danger">*</span>
-            </label>
-            <textarea className={`${inputCls} min-h-[80px] resize-y`} value={fullDescription}
-              onChange={(e) => setFullDescription(e.target.value)} rows={3} />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-fg-secondary">Steps Already Tried</label>
-            <textarea className={`${inputCls} min-h-[50px] resize-y`} value={stepsTried}
-              onChange={(e) => setStepsTried(e.target.value)} rows={2}
-              placeholder="What have you already tried?" />
-          </div>
-
-          {step === 'error' && (
-            <div className="flex items-center gap-2 rounded-md border border-danger/30 bg-danger/5 px-3 py-2">
-              <AlertCircle className="h-4 w-4 shrink-0 text-danger" />
-              <span className="text-xs text-danger">{errorMsg}</span>
-            </div>
-          )}
-
-          <Button size="sm" className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-8"
+        <EnvelopeFooter>
+          <Button
+            size="sm"
+            className="bg-primary hover:bg-primary-hover text-white"
             onClick={() => void handleSubmit()}
-            disabled={!title.trim() || !category || !fullDescription.trim()}>
-            Submit Ticket
+            disabled={!title.trim() || !category || !fullDescription.trim()}
+          >
+            Submit ticket
           </Button>
-        </div>
-      </div>
+        </EnvelopeFooter>
+      </Envelope>
     )
   }
 
   // Step 2.5: Submitting
   if (step === 'submitting') {
     return (
-      <div className="rounded-sm border border-primary/30 bg-primary/10 p-4">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          <span className="text-sm text-primary-hover">Submitting ticket...</span>
-        </div>
-      </div>
+      <Envelope accent="primary">
+        <EnvelopeHeader
+          icon={Loader2}
+          label="Support ticket"
+          tone="primary"
+          action={<StatusPill tone="info">Submitting</StatusPill>}
+        />
+        <EnvelopeBody>
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            <span className="text-sm text-fg">Submitting ticket...</span>
+          </div>
+        </EnvelopeBody>
+      </Envelope>
     )
   }
 
   // Step 3: Simple confirmation (the rich card is injected by the system after the agent responds)
   return (
-    <div className="rounded-sm border border-success/30 bg-success/5 p-3">
-      <div className="flex items-center gap-2">
-        <CheckCircle className="h-4 w-4 text-success" />
-        <span className="text-sm text-success">
-          Ticket submitted{ticketId ? ` — ${ticketId}` : ''}
-        </span>
-      </div>
-    </div>
+    <Envelope accent="success" muted>
+      <EnvelopeHeader
+        icon={CheckCircle}
+        label="Support ticket"
+        tone="success"
+        action={<StatusPill tone="success">Submitted</StatusPill>}
+      />
+      <EnvelopeBody>
+        <div className="flex items-center gap-2">
+          <CheckCircle className="h-4 w-4 text-success" />
+          <span className="text-sm text-fg">
+            Ticket submitted{ticketId ? ` — ${ticketId}` : ''}
+          </span>
+        </div>
+      </EnvelopeBody>
+    </Envelope>
   )
 }

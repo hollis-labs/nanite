@@ -3,14 +3,19 @@ import {
   Archive,
   ArchiveRestore,
   EyeOff,
-  Loader2,
   MessageSquare,
   Pin,
   PinOff,
-  Plus,
   Trash2,
+  User,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  LeftRail,
+  LeftRailFooter,
+  LeftRailSectionHeader,
+  LeftRailSessionRow,
+} from "@/components/chat/LeftRail";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,10 +41,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
+import { updateSettingsHash } from "@/hooks/useHashRoute";
 import { useSettings } from "@/hooks/useSettings";
+import { useNavigationStore } from "@/stores/useNavigationStore";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
 import { usePluginAction } from "@/hooks/usePluginAction";
 import { resolveIcon } from "@/lib/icons";
@@ -71,10 +77,17 @@ function sortByActivity(a: Session, b: Session): number {
 
 export function LeftSidebar() {
   const open = useLayoutStore((s) => s.leftSidebarOpen);
+  const showWorkspace = useLayoutStore((s) => s.leftRailWorkspaceVisible);
+  const showNewChat = useLayoutStore((s) => s.leftRailNewChatVisible);
+  const showSearch = useLayoutStore((s) => s.leftRailSearchVisible);
+  const theme = useLayoutStore((s) => s.theme);
+  const toggleTheme = useLayoutStore((s) => s.toggleTheme);
+  const setCurrentPage = useLayoutStore((s) => s.setCurrentPage);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
+  const navPush = useNavigationStore((s) => s.push);
   const queryClient = useQueryClient();
   const activeStreams = useChatStore((s) => s.activeStreams);
   const pendingTools = useChatStore((s) => s.pendingTools);
@@ -226,158 +239,189 @@ export function LeftSidebar() {
     return () => observer.disconnect();
   }, [hasMore]);
 
-  return (
-    <aside
-      className={`h-full bg-bg border-r border-border flex flex-col transition-all duration-200 ease-in-out overflow-hidden ${
-        open ? "w-68" : "w-0"
-      }`}
-    >
-      <div className="min-w-68 flex flex-col h-full">
-        {/* Header — project dropdown + actions */}
-        <div className="flex items-center gap-1 px-2 h-12 border-b border-border shrink-0">
-          <div className="flex-1 min-w-0">
-            {activeWorkspaceId ? (
-              <ScopeSelector workspaceId={activeWorkspaceId} />
-            ) : (
-              <span className="text-sm font-semibold text-fg px-2">Chats</span>
-            )}
-          </div>
-          <div className="flex items-center gap-0.5 shrink-0">
-            {archivedCount > 0 && (
-              <Tooltip content={showArchived ? "Hide archived" : `Show archived (${archivedCount})`} side="bottom">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="w-7 h-7 text-fg-secondary hover:text-fg"
-                  onClick={() => setShowArchived((v) => !v)}
-                >
-                  {showArchived ? (
-                    <EyeOff className="w-3.5 h-3.5" />
-                  ) : (
-                    <Archive className="w-3.5 h-3.5" />
-                  )}
-                </Button>
-              </Tooltip>
-            )}
-            <Tooltip content="New chat" side="bottom">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-7 h-7 text-fg-secondary hover:text-fg"
-                onClick={() => createMutation.mutate()}
-                disabled={!activeWorkspaceId || createMutation.isPending}
-              >
-                {createMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Plus className="w-4 h-4" />
-                )}
-              </Button>
-            </Tooltip>
-          </div>
-        </div>
+  const displayName =
+    (userSettings?.ext_settings?.display_name as string) ||
+    (userSettings?.ext_settings?.email as string) ||
+    "Profile";
+  const avatarUrl = (userSettings?.ext_settings?.avatar_url as string) || "";
+  const darkMode =
+    theme === "dark" ||
+    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
-        {/* Chat list */}
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="px-2 py-2">
-            {isLoading && (
-              <div className="flex flex-col gap-1 px-2">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-2 px-2 py-1">
-                    <Skeleton className="w-3.5 h-3.5 rounded" />
-                    <Skeleton className="h-3 w-3/4 flex-1" />
+  const openSearch = () => {
+    window.dispatchEvent(new CustomEvent("open-search"));
+  };
+
+  const openProfile = () => {
+    setCurrentPage("settings");
+    updateSettingsHash("profile");
+    navPush({ view: "settings/profile", label: "Profile" });
+  };
+
+  const openSettings = () => {
+    setCurrentPage("settings");
+    window.location.hash = "#settings";
+  };
+
+  return (
+    <>
+      <LeftRail
+        open={open}
+        workspaceHeader={
+          activeWorkspaceId ? (
+            <ScopeSelector workspaceId={activeWorkspaceId} />
+          ) : (
+            <div className="flex h-full items-center px-1 text-[13px] font-semibold text-fg">
+              Chats
+            </div>
+          )
+        }
+        onNewChat={() => createMutation.mutate()}
+        onSearch={openSearch}
+        showWorkspace={showWorkspace}
+        showNewChat={showNewChat}
+        showSearch={showSearch}
+        newChatDisabled={!activeWorkspaceId || createMutation.isPending}
+        newChatPending={createMutation.isPending}
+        emptyState={
+          isLoading ? (
+            <div className="px-3 py-3">
+              <div className="flex flex-col gap-2">
+                {Array.from({ length: 7 }).map((_, index) => (
+                  <div key={index} className="flex items-center gap-2 px-1">
+                    <Skeleton className="h-2.5 w-8 rounded-sm" />
+                    <Skeleton className="h-3 w-full rounded-sm" />
                   </div>
                 ))}
               </div>
-            )}
-
-            {!isLoading && filteredSessions.length === 0 && (
-              <Empty className="py-8">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <MessageSquare />
-                  </EmptyMedia>
-                  <EmptyTitle className="text-sm">No chats yet</EmptyTitle>
-                  <EmptyDescription className="text-xs">
-                    Click + to start a conversation
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            )}
-
-            {/* Pinned */}
-            {pinned.length > 0 && (
-              <>
-                <ZoneHeader icon={<Pin className="w-3 h-3" />} label="Pinned" />
-                {pinned.map((session: Session) => (
-                  <ChatItem
-                    key={session.id}
-                    session={session}
-                    isActive={session.id === activeSessionId}
-                    onClick={() => setActiveSession(session.id)}
-                    onTogglePin={() =>
-                      pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })
-                    }
-                    statusIndicator={getPresenceIndicator(
-                      session.id,
-                      activeStreams,
-                      pendingTools,
-                      cliActiveSessions,
-                    )}
-                    onDelete={() => setDeleteConfirmId(session.id)}
-                    onArchive={() =>
-                      archiveMutation.mutate({
-                        id: session.id,
-                        archived: session.status !== "archived",
-                      })
-                    }
+            </div>
+          ) : filteredSessions.length === 0 ? (
+            <Empty className="px-4 py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <MessageSquare />
+                </EmptyMedia>
+                <EmptyTitle className="text-sm">No chats yet</EmptyTitle>
+                <EmptyDescription className="text-xs">
+                  Use New chat to start a conversation.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <>
+              {pinned.length > 0 && (
+                <>
+                  <LeftRailSectionHeader icon="pinned" label="Pinned" count={pinned.length} />
+                  {pinned.map((session: Session) => (
+                    <ChatItem
+                      key={session.id}
+                      session={session}
+                      isActive={session.id === activeSessionId}
+                      onClick={() => setActiveSession(session.id)}
+                      onTogglePin={() =>
+                        pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })
+                      }
+                      statusIndicator={getPresenceIndicator(
+                        session.id,
+                        activeStreams,
+                        pendingTools,
+                        cliActiveSessions,
+                      )}
+                      onDelete={() => setDeleteConfirmId(session.id)}
+                      onArchive={() =>
+                        archiveMutation.mutate({
+                          id: session.id,
+                          archived: session.status !== "archived",
+                        })
+                      }
+                    />
+                  ))}
+                </>
+              )}
+              {visibleUnpinned.length > 0 && (
+                <>
+                  <LeftRailSectionHeader
+                    icon="recent"
+                    label="Recent"
+                    count={filteredSessions.length - pinned.length}
                   />
-                ))}
-              </>
-            )}
-
-            {/* Recent */}
-            {visibleUnpinned.length > 0 && (
-              <>
-                {pinned.length > 0 && <ZoneHeader label="Recent" />}
-                {visibleUnpinned.map((session: Session) => (
-                  <ChatItem
-                    key={session.id}
-                    session={session}
-                    isActive={session.id === activeSessionId}
-                    onClick={() => setActiveSession(session.id)}
-                    onTogglePin={() =>
-                      pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })
-                    }
-                    statusIndicator={getPresenceIndicator(
-                      session.id,
-                      activeStreams,
-                      pendingTools,
-                      cliActiveSessions,
+                  {visibleUnpinned.map((session: Session) => (
+                    <ChatItem
+                      key={session.id}
+                      session={session}
+                      isActive={session.id === activeSessionId}
+                      onClick={() => setActiveSession(session.id)}
+                      onTogglePin={() =>
+                        pinMutation.mutate({ id: session.id, pinned: !session.is_pinned })
+                      }
+                      statusIndicator={getPresenceIndicator(
+                        session.id,
+                        activeStreams,
+                        pendingTools,
+                        cliActiveSessions,
+                      )}
+                      onDelete={() => setDeleteConfirmId(session.id)}
+                      onArchive={() =>
+                        archiveMutation.mutate({
+                          id: session.id,
+                          archived: session.status !== "archived",
+                        })
+                      }
+                    />
+                  ))}
+                </>
+              )}
+              {hasMore && (
+                <div ref={sentinelRef} className="px-3 pt-3">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-fg-faint">
+                    Loading more...
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        }
+        footer={
+          <LeftRailFooter
+            avatar={
+              avatarUrl ? (
+                <img src={avatarUrl} alt="" className="size-5 rounded-[4px] object-cover" />
+              ) : (
+                <span className="flex size-5 items-center justify-center rounded-[4px] bg-surface text-fg-secondary">
+                  <User className="size-3" />
+                </span>
+              )
+            }
+            name={displayName}
+            onProfile={openProfile}
+            onThemeToggle={toggleTheme}
+            onSettings={openSettings}
+            archiveToggle={
+              archivedCount > 0 ? (
+                <Tooltip
+                  content={showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
+                  side="top"
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 rounded-md text-fg-muted hover:bg-surface hover:text-fg"
+                    onClick={() => setShowArchived((value) => !value)}
+                  >
+                    {showArchived ? (
+                      <EyeOff className="size-3.5" />
+                    ) : (
+                      <Archive className="size-3.5" />
                     )}
-                    onDelete={() => setDeleteConfirmId(session.id)}
-                    onArchive={() =>
-                      archiveMutation.mutate({
-                        id: session.id,
-                        archived: session.status !== "archived",
-                      })
-                    }
-                  />
-                ))}
-              </>
-            )}
+                  </Button>
+                </Tooltip>
+              ) : undefined
+            }
+            darkMode={darkMode}
+          />
+        }
+      />
 
-            {/* Sentinel for infinite scroll */}
-            {hasMore && (
-              <div ref={sentinelRef} className="flex items-center justify-center py-3">
-                <span className="text-[10px] text-fg-faint">Loading more...</span>
-              </div>
-            )}
-          </div>
-        </ScrollArea>
-      </div>
-
-      {/* Delete confirmation */}
       <AlertDialog
         open={!!deleteConfirmId}
         onOpenChange={(open) => {
@@ -403,7 +447,7 @@ export function LeftSidebar() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </aside>
+    </>
   );
 }
 
@@ -445,15 +489,6 @@ function getPresenceIndicator(
   return undefined;
 }
 
-function ZoneHeader({ label, icon }: { label: string; icon?: ReactNode }) {
-  return (
-    <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-fg-muted uppercase tracking-wider flex items-center gap-1">
-      {icon}
-      {label}
-    </div>
-  );
-}
-
 function ChatItem({
   session,
   isActive,
@@ -471,7 +506,6 @@ function ChatItem({
   onDelete?: () => void;
   onArchive?: () => void;
 }) {
-  const [hovered, setHovered] = useState(false);
   const displayTitle = session.custom_name || session.title || `Chat ${session.short_code}`;
   const isArchived = session.status === "archived";
   const sidebarSlots = usePluginSlots("session-sidebar");
@@ -481,69 +515,42 @@ function ChatItem({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <button
-          onClick={onClick}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-          className={`relative w-full flex items-start gap-1.5 px-2 py-1 rounded-md text-left transition-colors group ${
-            isActive
-              ? "bg-surface/60 text-fg"
-              : "text-fg-secondary hover:bg-surface/40 hover:text-fg"
-          } ${isArchived ? "opacity-50" : ""}`}
-        >
-          {/* Session icon + presence */}
-          <div className="relative shrink-0 mt-[5px]">
-            {statusIndicator && (
-              <div className="absolute -top-1 -left-1 z-10">{statusIndicator}</div>
-            )}
-            <div className="w-2.5 h-2.5 rounded-[2px] bg-fg-faint/40 border border-fg-faint/60" />
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1">
-              <span className="text-[13px] font-medium truncate flex-1 leading-snug">{displayTitle}</span>
-              {session.is_pinned && <Pin className="w-3 h-3 text-fg-faint shrink-0" />}
-              <span className={`text-[11px] text-fg-faint shrink-0 ${hovered ? "invisible" : ""}`}>
-                {formatRelativeTime(session.last_activity)}
-              </span>
-              <span
-                role="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTogglePin();
-                }}
-                className={`absolute right-2 p-0.5 rounded text-fg-muted hover:text-fg hover:bg-surface-hover transition-colors ${hovered ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-                aria-label={session.is_pinned ? "Unpin" : "Pin"}
-              >
-                {session.is_pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
-              </span>
-            </div>
-            <span className="block mt-px text-[11px] text-fg-faint font-mono leading-none">#{session.short_code}</span>
-            {/* session-sidebar slot — plugin badges */}
-            {sidebarSlots.length > 0 && (
-              <div className="flex items-center gap-0.5 mt-0.5">
-                {sidebarSlots.map((entry) => {
-                  const PluginIcon = resolveIcon(entry.icon);
-                  return (
-                    <button
-                      type="button"
-                      key={entry.id}
-                      className="appearance-none border-0 cursor-pointer inline-flex items-center gap-0.5 px-1 py-px text-[10px] text-fg-faint hover:text-fg-muted rounded bg-surface-hover/40 transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handlePluginAction(entry);
-                      }}
-                      title={entry.label}
-                    >
-                      <PluginIcon className="w-2.5 h-2.5" />
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </button>
+        <div>
+          <LeftRailSessionRow
+            title={displayTitle}
+            shortCode={session.short_code}
+            timeLabel={formatRelativeTime(session.last_activity)}
+            active={isActive}
+            archived={isArchived}
+            statusIndicator={statusIndicator}
+            onClick={onClick}
+            onTogglePin={onTogglePin}
+            pinned={session.is_pinned}
+            pluginBadges={
+              sidebarSlots.length > 0 ? (
+                <>
+                  {sidebarSlots.map((entry) => {
+                    const PluginIcon = resolveIcon(entry.icon);
+                    return (
+                      <button
+                        type="button"
+                        key={entry.id}
+                        className="inline-flex size-4 items-center justify-center rounded-[4px] text-fg-faint transition-colors hover:bg-surface hover:text-fg-muted"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handlePluginAction(entry);
+                        }}
+                        title={entry.label}
+                      >
+                        <PluginIcon className="size-2.5" />
+                      </button>
+                    );
+                  })}
+                </>
+              ) : undefined
+            }
+          />
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onTogglePin} className="gap-2 text-xs">

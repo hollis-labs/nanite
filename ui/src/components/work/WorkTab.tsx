@@ -6,7 +6,7 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/
 import { useAppStore } from '@/stores/useAppStore'
 import { useWorkStore } from '@/stores/useWorkStore'
 import { useTodos, useCreateTodo, useToggleTodo, useUpdateTodo } from '@/hooks/useTodos'
-import { usePlans, useTogglePlanStep } from '@/hooks/usePlans'
+import { usePlans, useCreatePlan, useUpdatePlan, useTogglePlanStep } from '@/hooks/usePlans'
 import { useWorkSync } from '@/hooks/useWorkSync'
 import { TodoList } from './TodoList'
 import { PlanCard } from './PlanCard'
@@ -32,6 +32,8 @@ export function WorkTab() {
   })
 
   const createTodo = useCreateTodo()
+  const createPlan = useCreatePlan()
+  const updatePlan = useUpdatePlan()
   const toggleTodo = useToggleTodo()
   const updateTodo = useUpdateTodo()
   const togglePlanStep = useTogglePlanStep()
@@ -81,8 +83,31 @@ export function WorkTab() {
     [scope, scopeId, createTodo],
   )
 
+  const handleAddPlan = useCallback(
+    (title: string) => {
+      if (!scopeId) return
+      createPlan.mutate({ title, scope, scope_id: scopeId ?? undefined })
+    },
+    [scope, scopeId, createPlan],
+  )
+
+  const handleAddPlanStep = useCallback(
+    (planId: string, title: string) => {
+      const plan = plans.find((p) => p.id === planId)
+      if (!plan) return
+      const newStep = {
+        id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        title,
+        status: 'pending' as const,
+        depends_on: [],
+      }
+      updatePlan.mutate({ id: planId, updates: { steps: [...plan.steps, newStep] } })
+    },
+    [plans, updatePlan],
+  )
+
   const isLoading = todosLoading || plansLoading
-  const isEmpty = !isLoading && todos.length === 0 && plans.length === 0
+  const isEmpty = !isLoading && !!scopeId && todos.length === 0 && plans.length === 0
 
   const activeTodos = sortedTodos.filter((t) => t.status !== 'done')
   const doneTodos = sortedTodos.filter((t) => t.status === 'done')
@@ -141,7 +166,7 @@ export function WorkTab() {
         )}
 
         {/* Todos section */}
-        {!isLoading && (todos.length > 0 || !!scopeId) && (
+        {!isLoading && (
           <div>
             <button
               type="button"
@@ -181,7 +206,7 @@ export function WorkTab() {
         )}
 
         {/* Plans section */}
-        {!isLoading && (plans.length > 0 || !!scopeId) && (
+        {!isLoading && (
           <div>
             <button
               type="button"
@@ -208,8 +233,14 @@ export function WorkTab() {
                     plan={plan}
                     onStepCheck={togglePlanStep.check}
                     onStepUncheck={togglePlanStep.uncheck}
+                    onAddStep={handleAddPlanStep}
                   />
                 ))}
+                <AddItemInput
+                  placeholder="Add plan..."
+                  onAdd={handleAddPlan}
+                  disabled={!scopeId}
+                />
               </div>
             )}
           </div>

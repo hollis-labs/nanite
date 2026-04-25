@@ -1,449 +1,462 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { X, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { type Answer, ResponseStatus } from "@/lib/envelope-response";
-import type { Envelope, Question } from "@/lib/types";
-import type { EnvelopeResponder } from "./EnvelopeRenderer";
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { X, Check } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { type Answer, ResponseStatus } from '@/lib/envelope-response'
+import type { Envelope as EnvelopeType, Question } from '@/lib/types'
+import type { EnvelopeResponder } from './EnvelopeRenderer'
+import { Envelope, EnvelopeHeader, EnvelopeFooter } from './primitives/Envelope'
+import { StatusPill } from './primitives/StatusPill'
 
-// Normalize an option value: string | {value, label, description?} → {value, label, description?}
 function normalizeOption(raw: unknown): { value: string; label: string; description?: string } {
-  if (typeof raw === "string") return { value: raw, label: raw };
-  if (raw && typeof raw === "object" && "value" in raw) {
-    const o = raw as { value: string; label?: string; description?: string };
-    return { value: o.value, label: o.label ?? o.value, description: o.description };
+  if (typeof raw === 'string') return { value: raw, label: raw }
+  if (raw && typeof raw === 'object' && 'value' in raw) {
+    const o = raw as { value: string; label?: string; description?: string }
+    return { value: o.value, label: o.label ?? o.value, description: o.description }
   }
-  return { value: String(raw), label: String(raw) };
+  return { value: String(raw), label: String(raw) }
 }
 
 interface InterviewCardProps {
-  envelope: Envelope;
-  onRespond?: EnvelopeResponder;
-  userMessageCount?: number;
+  envelope: EnvelopeType
+  onRespond?: EnvelopeResponder
+  userMessageCount?: number
 }
 
 export function InterviewCard({ envelope, onRespond, userMessageCount }: InterviewCardProps) {
-  const questions = useMemo(() => envelope.questions ?? [], [envelope.questions]);
-  const alreadyAnswered = envelope.prior_response != null;
+  const questions = useMemo(() => envelope.questions ?? [], [envelope.questions])
+  const alreadyAnswered = envelope.prior_response != null
 
   const [answers, setAnswers] = useState<Record<number, string | string[]>>(() => {
-    const initial: Record<number, string | string[]> = {};
+    const initial: Record<number, string | string[]> = {}
     questions.forEach((q, i) => {
-      if (q.type === "checkbox") {
-        initial[i] = q.default ? [q.default] : [];
-      } else {
-        initial[i] = q.default ?? "";
-      }
-    });
-    return initial;
-  });
-  const [errors, setErrors] = useState<Record<number, string>>({});
-  const [dismissed, setDismissed] = useState(false);
-  const [submitted, setSubmitted] = useState(alreadyAnswered);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+      if (q.type === 'checkbox') initial[i] = q.default ? [q.default] : []
+      else initial[i] = q.default ?? ''
+    })
+    return initial
+  })
+  const [errors, setErrors] = useState<Record<number, string>>({})
+  const [dismissed, setDismissed] = useState(false)
+  const [submitted, setSubmitted] = useState(alreadyAnswered)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const mountCountRef = useRef(userMessageCount);
+  const mountCountRef = useRef(userMessageCount)
   useEffect(() => {
     if (userMessageCount !== undefined && mountCountRef.current !== undefined) {
-      if (userMessageCount > mountCountRef.current && !submitted) {
-        setDismissed(true);
-      }
+      if (userMessageCount > mountCountRef.current && !submitted) setDismissed(true)
     }
-  }, [userMessageCount, submitted]);
+  }, [userMessageCount, submitted])
 
   const validate = useCallback((): boolean => {
-    const next: Record<number, string> = {};
+    const next: Record<number, string> = {}
     questions.forEach((q, i) => {
-      if (!q.required) return;
-      const val = answers[i];
-      const empty = Array.isArray(val) ? val.length === 0 : !val;
-      if (empty) next[i] = "Required";
-    });
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  }, [questions, answers]);
+      if (!q.required) return
+      const val = answers[i]
+      const empty = Array.isArray(val) ? val.length === 0 : !val
+      if (empty) next[i] = 'Required'
+    })
+    setErrors(next)
+    return Object.keys(next).length === 0
+  }, [questions, answers])
 
   const buildAnswers = useCallback(
     (overrideWithDefaults = false, markAccepted = false): Answer[] =>
       questions.map((q, i) => {
         const val = overrideWithDefaults
-          ? (answers[i] !== undefined && answers[i] !== "" ? answers[i] : (q.default ?? ""))
-          : (answers[i] ?? "");
+          ? answers[i] !== undefined && answers[i] !== ''
+            ? answers[i]
+            : q.default ?? ''
+          : answers[i] ?? ''
         return {
           questionId: `q-${i}`,
           value: val,
           ...(markAccepted ? { acceptedSuggestion: true } : {}),
-        };
+        }
       }),
     [questions, answers],
-  );
+  )
 
   const handleSubmit = useCallback(async () => {
-    if (!validate()) return;
-    setSubmitError(null);
-    const typed = buildAnswers();
-    setSubmitted(true);
-    if (!onRespond) return;
+    if (!validate()) return
+    setSubmitError(null)
+    const typed = buildAnswers()
+    setSubmitted(true)
+    if (!onRespond) return
     try {
-      await onRespond({ status: ResponseStatus.Submitted, answers: typed });
+      await onRespond({ status: ResponseStatus.Submitted, answers: typed })
     } catch (err) {
-      setSubmitted(false);
-      setSubmitError(err instanceof Error ? err.message : "Failed to submit");
+      setSubmitted(false)
+      setSubmitError(err instanceof Error ? err.message : 'Failed to submit')
     }
-  }, [validate, buildAnswers, onRespond]);
+  }, [validate, buildAnswers, onRespond])
 
   const handleAcceptSuggested = useCallback(async () => {
-    setSubmitError(null);
-    const typed = buildAnswers(true, true);
-    setSubmitted(true);
-    if (!onRespond) return;
+    setSubmitError(null)
+    const typed = buildAnswers(true, true)
+    setSubmitted(true)
+    if (!onRespond) return
     try {
-      await onRespond({ status: ResponseStatus.Submitted, answers: typed });
+      await onRespond({ status: ResponseStatus.Submitted, answers: typed })
     } catch (err) {
-      setSubmitted(false);
-      setSubmitError(err instanceof Error ? err.message : "Failed to submit");
+      setSubmitted(false)
+      setSubmitError(err instanceof Error ? err.message : 'Failed to submit')
     }
-  }, [buildAnswers, onRespond]);
+  }, [buildAnswers, onRespond])
 
-  const hasDefaults = questions.some((q) => q.default != null && q.default !== "");
+  const hasDefaults = questions.some((q) => q.default != null && q.default !== '')
   const allRequiredHaveDefaults = questions
     .filter((q) => q.required)
-    .every((q) => q.default != null && q.default !== "");
+    .every((q) => q.default != null && q.default !== '')
 
-  if (dismissed) return null;
+  if (dismissed) return null
 
   if (submitted) {
     return (
-      <div className="rounded-sm border border-success/30 bg-success/5 p-3">
-        <p className="text-xs text-success">Answers submitted</p>
-      </div>
-    );
+      <Envelope accent="success" muted>
+        <div className="flex items-center gap-2 px-4 py-2.5">
+          <Check className="h-4 w-4 text-success" />
+          <span className="text-[13px] text-fg">Answers submitted</span>
+        </div>
+      </Envelope>
+    )
   }
 
   return (
-    <div className="rounded-md border border-border-subtle bg-bg-elevated">
-      {(envelope.title || envelope.subtitle) ? (
-        <div className="flex items-start justify-between px-3 pt-3 pb-2 border-b border-border-subtle/50">
-          <div className="flex-1 min-w-0 pr-2">
-            {envelope.title && (
-              <p className="text-sm font-semibold text-fg leading-snug">{envelope.title}</p>
-            )}
-            {envelope.subtitle && (
-              <p className="text-xs text-fg-muted mt-0.5 leading-relaxed">{envelope.subtitle}</p>
-            )}
-          </div>
+    <Envelope>
+      <EnvelopeHeader
+        label={envelope.title || 'Interview'}
+        meta={envelope.subtitle ? <span className="normal-case">{envelope.subtitle}</span> : undefined}
+        action={
           <button
             type="button"
             onClick={() => setDismissed(true)}
-            className="p-0.5 text-fg-faint hover:text-fg-muted transition-colors shrink-0"
+            className="rounded-[4px] p-1 text-fg-faint transition-colors hover:bg-surface-hover hover:text-fg-muted"
             aria-label="Dismiss"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="h-3.5 w-3.5" />
           </button>
-        </div>
-      ) : (
-        <div className="flex justify-end px-2 pt-2">
-          <button
-            type="button"
-            onClick={() => setDismissed(true)}
-            className="p-0.5 text-fg-faint hover:text-fg-muted transition-colors"
-            aria-label="Dismiss"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
+        }
+      />
 
-      <div className="px-3 py-3 space-y-4">
+      <div className="space-y-4 px-4 py-3">
         {questions.map((q, i) => (
           <QuestionInput
             key={i}
             question={q}
-            answer={answers[i] ?? ""}
+            answer={answers[i] ?? ''}
             error={errors[i]}
             onChange={(val) => {
-              setAnswers((a) => ({ ...a, [i]: val }));
-              if (errors[i]) setErrors((e) => { const n = { ...e }; delete n[i]; return n; });
+              setAnswers((a) => ({ ...a, [i]: val }))
+              if (errors[i]) {
+                setErrors((e) => {
+                  const n = { ...e }
+                  delete n[i]
+                  return n
+                })
+              }
             }}
           />
         ))}
+
+        {submitError && (
+          <p className="text-[12px] text-danger" role="alert">
+            {submitError}
+          </p>
+        )}
       </div>
 
-      <div className="px-3 pb-3">
-        {submitError && (
-          <p className="text-xs text-danger mb-2" role="alert">{submitError}</p>
-        )}
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            {hasDefaults && allRequiredHaveDefaults && (
-              <button
-                type="button"
-                onClick={() => void handleAcceptSuggested()}
-                className="text-xs text-fg-muted hover:text-fg transition-colors"
-              >
-                Accept suggested
-              </button>
-            )}
-          </div>
+      <EnvelopeFooter>
+        <Button size="sm" onClick={() => void handleSubmit()}>
+          Submit
+        </Button>
+        {hasDefaults && allRequiredHaveDefaults && (
           <Button
             size="sm"
-            className="bg-primary hover:bg-primary-hover text-white text-xs px-4 py-1 h-7"
-            onClick={() => void handleSubmit()}
+            variant="ghost"
+            onClick={() => void handleAcceptSuggested()}
           >
-            Submit
+            Accept suggested
           </Button>
-        </div>
-      </div>
-    </div>
-  );
+        )}
+      </EnvelopeFooter>
+    </Envelope>
+  )
 }
 
 interface QuestionInputProps {
-  question: Question;
-  answer: string | string[];
-  error?: string;
-  onChange: (val: string | string[]) => void;
+  question: Question
+  answer: string | string[]
+  error?: string
+  onChange: (val: string | string[]) => void
 }
 
+const FIELD_INPUT =
+  'w-full rounded-[6px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[13px] text-fg outline-none transition-colors placeholder:text-fg-faint focus:border-primary'
+
 function QuestionInput({ question, answer, error, onChange }: QuestionInputProps) {
-  const isCard = question.display_style === "card";
+  const isCard = question.display_style === 'card'
 
   return (
     <div>
-      <label className="block text-xs font-medium text-fg-secondary mb-1">
+      <label className="mb-1 block font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
         {question.prompt}
-        {question.required && <span className="text-danger ml-0.5">*</span>}
+        {question.required && <span className="ml-0.5 text-danger">*</span>}
       </label>
 
       {question.description && (
-        <p className="text-xs text-fg-muted mb-2 leading-relaxed">{question.description}</p>
+        <p className="mb-2 text-[12px] leading-relaxed text-fg-muted">{question.description}</p>
       )}
 
-      {question.type === "text" && (
+      {question.type === 'text' && (
         <input
           type="text"
-          value={String(answer ?? "")}
+          value={String(answer ?? '')}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-bg border border-border rounded px-2 py-1 text-[11px] text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
+          className={FIELD_INPUT}
         />
       )}
 
-      {question.type === "textarea" && (
+      {question.type === 'textarea' && (
         <textarea
-          value={String(answer ?? "")}
+          value={String(answer ?? '')}
           onChange={(e) => onChange(e.target.value)}
           rows={3}
-          className="w-full bg-bg border border-border rounded px-2 py-1 text-[11px] text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+          className={`${FIELD_INPUT} resize-none`}
         />
       )}
 
-      {question.type === "select" && question.options && (
+      {question.type === 'select' && question.options && (
         <select
-          value={String(answer ?? "")}
+          value={String(answer ?? '')}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-bg border border-border rounded px-2 py-1 text-[11px] text-fg focus:outline-none focus:ring-1 focus:ring-primary"
+          className={FIELD_INPUT}
         >
           <option value="">Select…</option>
           {question.options.map((raw) => {
-            const opt = normalizeOption(raw);
-            return <option key={opt.value} value={opt.value}>{opt.label}</option>;
+            const opt = normalizeOption(raw)
+            return (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            )
           })}
         </select>
       )}
 
-      {question.type === "radio" && question.options && (
-        isCard
-          ? <CardOptions
-              options={question.options}
-              selected={String(answer ?? "")}
-              defaultValue={question.default}
-              multi={false}
-              onChange={(v) => onChange(v as string)}
-            />
-          : <CompactRadioOptions
-              options={question.options}
-              selected={String(answer ?? "")}
-              defaultValue={question.default}
-              onChange={(v) => onChange(v)}
-            />
-      )}
+      {question.type === 'radio' &&
+        question.options &&
+        (isCard ? (
+          <CardOptions
+            options={question.options}
+            selected={String(answer ?? '')}
+            defaultValue={question.default}
+            multi={false}
+            onChange={(v) => onChange(v as string)}
+          />
+        ) : (
+          <CompactRadioOptions
+            options={question.options}
+            selected={String(answer ?? '')}
+            defaultValue={question.default}
+            onChange={(v) => onChange(v)}
+          />
+        ))}
 
-      {question.type === "checkbox" && question.options && (
-        isCard
-          ? <CardOptions
-              options={question.options}
-              selected={Array.isArray(answer) ? answer : []}
-              defaultValue={question.default}
-              multi={true}
-              onChange={(v) => onChange(v as string[])}
-            />
-          : <CompactCheckboxOptions
-              options={question.options}
-              selected={Array.isArray(answer) ? answer : []}
-              defaultValue={question.default}
-              onChange={(v) => onChange(v)}
-            />
-      )}
+      {question.type === 'checkbox' &&
+        question.options &&
+        (isCard ? (
+          <CardOptions
+            options={question.options}
+            selected={Array.isArray(answer) ? answer : []}
+            defaultValue={question.default}
+            multi={true}
+            onChange={(v) => onChange(v as string[])}
+          />
+        ) : (
+          <CompactCheckboxOptions
+            options={question.options}
+            selected={Array.isArray(answer) ? answer : []}
+            defaultValue={question.default}
+            onChange={(v) => onChange(v)}
+          />
+        ))}
 
-      {error && <p className="text-xs text-danger mt-1">{error}</p>}
+      {error && <p className="mt-1 text-[12px] text-danger">{error}</p>}
     </div>
-  );
+  )
 }
 
-interface CompactRadioOptionsProps {
-  options: Question["options"];
-  selected: string;
-  defaultValue?: string;
-  onChange: (v: string) => void;
-}
-
-function CompactRadioOptions({ options = [], selected, defaultValue, onChange }: CompactRadioOptionsProps) {
+function CompactRadioOptions({
+  options = [],
+  selected,
+  defaultValue,
+  onChange,
+}: {
+  options: Question['options']
+  selected: string
+  defaultValue?: string
+  onChange: (v: string) => void
+}) {
   return (
     <div className="space-y-1.5">
       {options.map((raw) => {
-        const opt = normalizeOption(raw);
-        const isSelected = selected === opt.value;
-        const isDefault = defaultValue === opt.value;
+        const opt = normalizeOption(raw)
+        const isSelected = selected === opt.value
+        const isDefault = defaultValue === opt.value
         return (
           <button
             key={opt.value}
             type="button"
             onClick={() => onChange(opt.value)}
-            className="flex items-center gap-2 w-full text-left group"
+            className="group flex w-full items-center gap-2 text-left"
           >
-            <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-              isSelected ? "border-primary bg-primary" : "border-border-subtle group-hover:border-primary/60"
-            }`}>
-              {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+            <span
+              className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+                isSelected
+                  ? 'border-primary bg-primary'
+                  : 'border-border-subtle group-hover:border-primary/60'
+              }`}
+            >
+              {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-primary-foreground" />}
             </span>
-            <span className={`text-xs flex-1 ${isSelected ? "text-fg" : "text-fg-secondary"}`}>
+            <span className={`flex-1 text-[13px] ${isSelected ? 'text-fg' : 'text-fg-secondary'}`}>
               {opt.label}
             </span>
-            {isDefault && !isSelected && (
-              <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">Suggested</span>
-            )}
+            {isDefault && !isSelected && <StatusPill tone="info">Suggested</StatusPill>}
           </button>
-        );
+        )
       })}
     </div>
-  );
+  )
 }
 
-interface CompactCheckboxOptionsProps {
-  options: Question["options"];
-  selected: string[];
-  defaultValue?: string;
-  onChange: (v: string[]) => void;
-}
-
-function CompactCheckboxOptions({ options = [], selected, defaultValue, onChange }: CompactCheckboxOptionsProps) {
+function CompactCheckboxOptions({
+  options = [],
+  selected,
+  defaultValue,
+  onChange,
+}: {
+  options: Question['options']
+  selected: string[]
+  defaultValue?: string
+  onChange: (v: string[]) => void
+}) {
   return (
     <div className="space-y-1.5">
       {options.map((raw) => {
-        const opt = normalizeOption(raw);
-        const isSelected = selected.includes(opt.value);
-        const isDefault = defaultValue === opt.value;
+        const opt = normalizeOption(raw)
+        const isSelected = selected.includes(opt.value)
+        const isDefault = defaultValue === opt.value
         return (
           <button
             key={opt.value}
             type="button"
             onClick={() => {
               onChange(
-                isSelected
-                  ? selected.filter((v) => v !== opt.value)
-                  : [...selected, opt.value],
-              );
+                isSelected ? selected.filter((v) => v !== opt.value) : [...selected, opt.value],
+              )
             }}
-            className="flex items-center gap-2 w-full text-left group"
+            className="group flex w-full items-center gap-2 text-left"
           >
-            <span className={`w-3.5 h-3.5 rounded-sm border-2 flex items-center justify-center shrink-0 transition-colors ${
-              isSelected ? "border-primary bg-primary" : "border-border-subtle group-hover:border-primary/60"
-            }`}>
-              {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+            <span
+              className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] border-2 transition-colors ${
+                isSelected
+                  ? 'border-primary bg-primary'
+                  : 'border-border-subtle group-hover:border-primary/60'
+              }`}
+            >
+              {isSelected && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
             </span>
-            <span className={`text-xs flex-1 ${isSelected ? "text-fg" : "text-fg-secondary"}`}>
+            <span className={`flex-1 text-[13px] ${isSelected ? 'text-fg' : 'text-fg-secondary'}`}>
               {opt.label}
             </span>
-            {isDefault && !isSelected && (
-              <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">Suggested</span>
-            )}
+            {isDefault && !isSelected && <StatusPill tone="info">Suggested</StatusPill>}
           </button>
-        );
+        )
       })}
     </div>
-  );
+  )
 }
 
-interface CardOptionsProps {
-  options: Question["options"];
-  selected: string | string[];
-  defaultValue?: string;
-  multi: boolean;
-  onChange: (v: string | string[]) => void;
-}
-
-function CardOptions({ options = [], selected, defaultValue, multi, onChange }: CardOptionsProps) {
-  const selectedArr = Array.isArray(selected) ? selected : [selected];
-
+function CardOptions({
+  options = [],
+  selected,
+  defaultValue,
+  multi,
+  onChange,
+}: {
+  options: Question['options']
+  selected: string | string[]
+  defaultValue?: string
+  multi: boolean
+  onChange: (v: string | string[]) => void
+}) {
+  const selectedArr = Array.isArray(selected) ? selected : [selected]
   return (
     <div className="space-y-2">
       {options.map((raw) => {
-        const opt = normalizeOption(raw);
-        const isSelected = selectedArr.includes(opt.value);
-        const isDefault = defaultValue === opt.value;
+        const opt = normalizeOption(raw)
+        const isSelected = selectedArr.includes(opt.value)
+        const isDefault = defaultValue === opt.value
 
         const handleClick = () => {
           if (multi) {
             const arr = selectedArr.includes(opt.value)
               ? selectedArr.filter((v) => v !== opt.value)
-              : [...selectedArr, opt.value];
-            onChange(arr);
+              : [...selectedArr, opt.value]
+            onChange(arr)
           } else {
-            onChange(opt.value);
+            onChange(opt.value)
           }
-        };
+        }
 
         return (
           <button
             key={opt.value}
             type="button"
             onClick={handleClick}
-            className={`w-full text-left rounded-md border-2 px-3 py-2.5 transition-colors ${
+            className={`w-full rounded-[6px] border-2 px-3 py-2.5 text-left transition-colors ${
               isSelected
-                ? "border-primary bg-primary/5"
-                : "border-border-subtle hover:border-primary/40"
+                ? 'border-primary bg-primary/5'
+                : 'border-border-subtle hover:border-primary/40'
             }`}
           >
             <div className="flex items-start justify-between gap-2">
-              <span className={`text-xs font-medium ${isSelected ? "text-fg" : "text-fg-secondary"}`}>
+              <span
+                className={`text-[13px] font-medium ${
+                  isSelected ? 'text-fg' : 'text-fg-secondary'
+                }`}
+              >
                 {opt.label}
               </span>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {isDefault && !isSelected && (
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">
-                    Suggested
-                  </span>
-                )}
+              <div className="flex shrink-0 items-center gap-1.5">
+                {isDefault && !isSelected && <StatusPill tone="info">Suggested</StatusPill>}
                 {multi ? (
-                  <span className={`w-3.5 h-3.5 rounded-sm border-2 flex items-center justify-center transition-colors ${
-                    isSelected ? "border-primary bg-primary" : "border-border-subtle"
-                  }`}>
-                    {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                  <span
+                    className={`flex h-3.5 w-3.5 items-center justify-center rounded-[4px] border-2 transition-colors ${
+                      isSelected ? 'border-primary bg-primary' : 'border-border-subtle'
+                    }`}
+                  >
+                    {isSelected && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
                   </span>
                 ) : (
-                  <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                    isSelected ? "border-primary bg-primary" : "border-border-subtle"
-                  }`}>
-                    {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  <span
+                    className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 transition-colors ${
+                      isSelected ? 'border-primary bg-primary' : 'border-border-subtle'
+                    }`}
+                  >
+                    {isSelected && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary-foreground" />
+                    )}
                   </span>
                 )}
               </div>
             </div>
             {opt.description && (
-              <p className="text-[11px] text-fg-muted mt-1 leading-relaxed">{opt.description}</p>
+              <p className="mt-1 text-[12px] leading-relaxed text-fg-muted">{opt.description}</p>
             )}
           </button>
-        );
+        )
       })}
     </div>
-  );
+  )
 }

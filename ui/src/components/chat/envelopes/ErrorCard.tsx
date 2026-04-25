@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { AlertTriangle, Copy, Check } from 'lucide-react'
+import { Envelope } from './primitives/Envelope'
+import { StatusPill, type StatusTone } from './primitives/StatusPill'
 
 interface ErrorReportData {
   code: string
@@ -14,15 +16,13 @@ interface ErrorCardProps {
   onSendMessage?: (content: string) => void
 }
 
-const CODE_LABELS: Record<string, { label: string; color: string }> = {
-  rate_limit: { label: 'RATE_LIMIT', color: 'bg-warning/20 text-warning border-warning/30' },
-  tool_error: { label: 'TOOL_ERROR', color: 'bg-warning/20 text-warning border-warning/30' },
-  provider_error: { label: 'PROVIDER_ERROR', color: 'bg-danger/20 text-danger border-danger/30' },
-  internal_error: { label: 'INTERNAL_ERROR', color: 'bg-danger/20 text-danger border-danger/30' },
+const CODE_TONE: Record<string, StatusTone> = {
+  rate_limit: 'warning',
+  tool_error: 'warning',
+  provider_error: 'danger',
+  internal_error: 'danger',
 }
 
-// Giphy API search URL builder. Uses the GIPHY_API_KEY env var via the backend,
-// but for the frontend card we use the public beta key for search previews.
 const GIPHY_BETA_KEY = 'dc6zaTOxFJmzC'
 
 export function ErrorCard({ data }: ErrorCardProps) {
@@ -30,43 +30,44 @@ export function ErrorCard({ data }: ErrorCardProps) {
   const [gifLoaded, setGifLoaded] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const codeInfo = CODE_LABELS[data.code] ?? {
-    label: data.code.toUpperCase(),
-    color: 'bg-bg-elevated text-fg-secondary border-border-subtle',
-  }
+  const tone = CODE_TONE[data.code] ?? 'neutral'
+  const codeLabel = data.code.toUpperCase().replace(/_/g, ' ')
+  const accent = tone === 'danger' ? 'danger' : tone === 'warning' ? 'warning' : undefined
 
-  // Fetch a giphy image based on the query
   useEffect(() => {
     if (!data.giphy_query) return
     const controller = new AbortController()
-
     void (async () => {
       try {
         const url = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_BETA_KEY}&q=${encodeURIComponent(data.giphy_query)}&limit=5&rating=g`
         const resp = await fetch(url, { signal: controller.signal })
         if (!resp.ok) return
-        const json = await resp.json() as { data: Array<{ images: { fixed_width: { url: string } } }> }
+        const json = (await resp.json()) as {
+          data: Array<{ images: { fixed_width: { url: string } } }>
+        }
         if (json.data && json.data.length > 0) {
-          // Pick a random one from the top 5 results
           const idx = Math.floor(Math.random() * Math.min(json.data.length, 5))
           setGifUrl(json.data[idx].images.fixed_width.url)
         }
       } catch {
-        // Giphy fetch failed — card still works without the gif
+        // noop
       }
     })()
-
     return () => controller.abort()
   }, [data.giphy_query])
 
   const handleCopy = () => {
-    const errorPayload = JSON.stringify({
-      code: data.code,
-      message: data.message,
-      details: data.details,
-      timestamp: data.timestamp,
-    }, null, 2)
-    void navigator.clipboard.writeText(errorPayload).then(() => {
+    const payload = JSON.stringify(
+      {
+        code: data.code,
+        message: data.message,
+        details: data.details,
+        timestamp: data.timestamp,
+      },
+      null,
+      2,
+    )
+    void navigator.clipboard.writeText(payload).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
@@ -86,63 +87,56 @@ export function ErrorCard({ data }: ErrorCardProps) {
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="rounded-sm border border-danger/30 bg-bg-elevated/80 overflow-hidden max-w-lg">
+      <Envelope accent={accent} className="max-w-lg">
         <div className="flex">
-          {/* Left side: Giphy image (30%) */}
-          <div className="w-[30%] shrink-0 bg-bg/50 flex items-center justify-center p-2">
+          <div className="flex w-[30%] shrink-0 items-center justify-center border-r border-border-subtle bg-surface p-2">
             {gifUrl ? (
               <div className="relative w-full">
                 {!gifLoaded && (
-                  <div className="w-full aspect-square rounded-md bg-surface animate-pulse flex items-center justify-center">
+                  <div className="flex aspect-square w-full animate-pulse items-center justify-center rounded-[6px] bg-surface">
                     <AlertTriangle className="h-6 w-6 text-fg-faint" />
                   </div>
                 )}
                 <img
                   src={gifUrl}
                   alt={data.giphy_query}
-                  className={`w-full rounded-md transition-opacity duration-300 ${gifLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'}`}
+                  className={`w-full rounded-[6px] transition-opacity duration-300 ${
+                    gifLoaded ? 'opacity-100' : 'absolute inset-0 opacity-0'
+                  }`}
                   onLoad={() => setGifLoaded(true)}
                 />
-                <span className="block text-[8px] text-fg-faint text-center mt-1 uppercase tracking-wider">
-                  GIPHY
+                <span className="mt-1 block text-center font-mono text-[9px] uppercase tracking-wider text-fg-faint">
+                  Giphy
                 </span>
               </div>
             ) : (
-              <div className="w-full aspect-square rounded-md bg-surface/50 flex items-center justify-center">
+              <div className="flex aspect-square w-full items-center justify-center rounded-[6px] bg-surface/50">
                 <AlertTriangle className="h-8 w-8 text-danger/40" />
               </div>
             )}
           </div>
 
-          {/* Right side: Error info (70%) */}
-          <div className="flex-1 p-3 flex flex-col gap-2 min-w-0">
-            {/* Error code badge */}
+          <div className="flex min-w-0 flex-1 flex-col gap-2 p-4">
             <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${codeInfo.color}`}>
-                {codeInfo.label}
-              </span>
-              <span className="text-[10px] text-fg-faint ml-auto">
-                {formattedTime}
-              </span>
+              <StatusPill tone={tone}>{codeLabel}</StatusPill>
+              <span className="ml-auto font-mono text-[11px] text-fg-muted">{formattedTime}</span>
             </div>
 
-            {/* Error message */}
-            <p className="text-sm text-fg-secondary leading-snug">
-              {data.message}
-            </p>
+            <p className="text-[13px] leading-snug text-fg">{data.message}</p>
 
-            {/* Details preview (if present) */}
             {data.details && data.details.raw != null && (
-              <p className="text-xs text-fg-muted font-mono truncate" title={String(data.details.raw)}>
+              <p
+                className="truncate font-mono text-[11px] text-fg-muted"
+                title={String(data.details.raw)}
+              >
                 {String(data.details.raw).slice(0, 120)}
               </p>
             )}
 
-            {/* Copy button */}
             <button
               type="button"
               onClick={handleCopy}
-              className="flex items-center gap-1.5 text-xs text-fg-secondary hover:text-fg transition-colors self-start mt-1 px-2 py-1 rounded bg-surface/50 hover:bg-surface border border-border-subtle/50"
+              className="mt-1 flex items-center gap-1.5 self-start rounded-[4px] border border-border-subtle bg-surface px-2 py-1 text-[11px] text-fg-secondary transition-colors hover:border-border hover:text-fg"
             >
               {copied ? (
                 <>
@@ -152,13 +146,13 @@ export function ErrorCard({ data }: ErrorCardProps) {
               ) : (
                 <>
                   <Copy className="h-3 w-3" />
-                  <span>Copy Error</span>
+                  <span>Copy error</span>
                 </>
               )}
             </button>
           </div>
         </div>
-      </div>
+      </Envelope>
     </div>
   )
 }

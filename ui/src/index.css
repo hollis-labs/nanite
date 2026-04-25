@@ -1,9 +1,13 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
+@source "./**/*.{ts,tsx}";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono-family);
+
   /* Zinc palette — used as raw values where needed */
   --color-zinc-50: #fafafa;
   --color-zinc-100: #f4f4f5;
@@ -25,6 +29,7 @@
   --color-surface-active: var(--c-surface-active);
   --color-border: var(--c-border);
   --color-border-subtle: var(--c-border-subtle);
+  --color-divider: var(--c-divider);
   --color-fg: var(--c-fg);
   --color-fg-secondary: var(--c-fg-secondary);
   --color-fg-muted: var(--c-fg-muted);
@@ -121,52 +126,52 @@
 
 /* ─── Dark theme (default) ─── */
 :root {
-  --c-bg: #09090b;
-  --c-bg-elevated: #18181b;
-  --c-surface: #27272a;
-  --c-surface-hover: #3f3f46;
-  --c-surface-active: #52525b;
-  --c-border: #27272a;
-  --c-border-subtle: #3f3f46;
-  --c-fg: #f4f4f5;
-  --c-fg-secondary: #a1a1aa;
-  --c-fg-muted: #71717a;
-  --c-fg-faint: #52525b;
+  --font-ui: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
-  /* Brand — fire-engine red #e11d2e */
-  --c-brand: #e11d2e;
-  --c-brand-hover: #f43f5e;
-  --c-brand-active: #be123c;
-  --c-brand-muted: rgba(225, 29, 46, 0.15);
+  --c-bg: #0c0d0e;
+  --c-bg-elevated: #16181a;
+  --c-surface: #25282c;
+  --c-surface-hover: #34383d;
+  --c-surface-active: #4a5058;
+  --c-border: #25282c;
+  --c-border-subtle: #1d1f22;
+  --c-divider: rgba(255, 255, 255, 0.06);
+  --c-fg: #e8eaed;
+  --c-fg-secondary: #98a0a8;
+  --c-fg-muted: #6c747c;
+  --c-fg-faint: #4a5058;
+
+  /* Direction C — Concrete & Signal */
+  --c-brand: #d4202e;
+  --c-brand-hover: #e13a46;
+  --c-brand-active: #b61b28;
+  --c-brand-muted: rgba(212, 32, 46, 0.14);
   --c-brand-fg: #ffffff;
 
-  /* Primary — sky-500 */
-  --c-primary: #0ea5e9;
-  --c-primary-hover: #38bdf8;
-  --c-primary-active: #0284c7;
-  --c-primary-muted: rgba(14, 165, 233, 0.15);
-  --c-primary-fg: #ffffff;
+  /* Primary collapses toward ink/fg in Direction C */
+  --c-primary: #e8eaed;
+  --c-primary-hover: #ffffff;
+  --c-primary-active: #cfd4d8;
+  --c-primary-muted: rgba(232, 234, 237, 0.1);
+  --c-primary-fg: #0c0d0e;
 
-  /* Danger — red-700 #b91c1c (darker than brand) */
-  --c-danger: #b91c1c;
-  --c-danger-hover: #dc2626;
-  --c-danger-muted: rgba(185, 28, 28, 0.15);
+  --c-danger: #d4202e;
+  --c-danger-hover: #e13a46;
+  --c-danger-muted: rgba(212, 32, 46, 0.14);
   --c-danger-fg: #ffffff;
 
-  /* Info — blue (was old "success") */
-  --c-info: #3b82f6;
-  --c-info-muted: rgba(59, 130, 246, 0.15);
+  --c-info: #98a0a8;
+  --c-info-muted: rgba(152, 160, 168, 0.1);
 
-  /* Success — emerald-500 (real green) */
-  --c-success: #10b981;
-  --c-success-muted: rgba(16, 185, 129, 0.15);
+  --c-success: #c0c4c8;
+  --c-success-muted: rgba(192, 196, 200, 0.1);
   --c-success-fg: #ffffff;
 
-  /* Warning — amber-500 */
-  --c-warning: #f59e0b;
-  --c-warning-muted: rgba(245, 158, 11, 0.15);
+  --c-warning: #d4202e;
+  --c-warning-muted: rgba(212, 32, 46, 0.12);
 
-  /* Selection — neutral hover/focus (replaces shadcn's "accent") */
+  /* Selection stays restrained and neutral */
   --c-selection: rgba(255, 255, 255, 0.08);
   --c-selection-fg: var(--c-fg);
 
@@ -180,64 +185,59 @@
   --c-status-warn: #b09060;
   --c-status-danger: #c07070;
 
-  /* Composer — always dark */
-  --c-composer: #18181b;
-  --c-composer-bar: #111113;
-  --c-composer-border: #27272a;
-  --c-composer-border-focus: #3f3f46;
-  --c-composer-fg: #f4f4f5;
-  --c-composer-fg-secondary: #a1a1aa;
-  --c-composer-fg-muted: #52525b;
-  --c-composer-hover: #27272a;
-  --c-composer-active: #3f3f46;
+  /* Composer stays dark in both themes */
+  --c-composer: #16181a;
+  --c-composer-bar: #131416;
+  --c-composer-border: #25282c;
+  --c-composer-border-focus: #34383d;
+  --c-composer-fg: #e8eaed;
+  --c-composer-fg-secondary: #98a0a8;
+  --c-composer-fg-muted: #6c747c;
+  --c-composer-hover: #25282c;
+  --c-composer-active: #34383d;
 }
 
 /* ─── Light theme ─── */
 .light {
-  --c-bg: #ffffff;
-  --c-bg-elevated: #f4f4f5;
-  --c-surface: #e4e4e7;
-  --c-surface-hover: #d4d4d8;
-  --c-surface-active: #a1a1aa;
-  --c-border: #e4e4e7;
-  --c-border-subtle: #d4d4d8;
-  --c-fg: #09090b;
-  --c-fg-secondary: #3f3f46;
-  --c-fg-muted: #71717a;
-  --c-fg-faint: #a1a1aa;
+  --c-bg: #f4f5f6;
+  --c-bg-elevated: #ffffff;
+  --c-surface: #dde0e3;
+  --c-surface-hover: #d0d4d8;
+  --c-surface-active: #c2c7cc;
+  --c-border: #d0d4d8;
+  --c-border-subtle: #e2e5e8;
+  --c-divider: rgba(0, 0, 0, 0.07);
+  --c-fg: #18191b;
+  --c-fg-secondary: #4a5058;
+  --c-fg-muted: #6c747c;
+  --c-fg-faint: #98a0a8;
 
-  /* Brand — same hue, slightly deeper for light mode contrast */
-  --c-brand: #e11d2e;
-  --c-brand-hover: #be123c;
-  --c-brand-active: #9f1239;
-  --c-brand-muted: rgba(225, 29, 46, 0.10);
+  --c-brand: #c81828;
+  --c-brand-hover: #b01422;
+  --c-brand-active: #97111d;
+  --c-brand-muted: rgba(200, 24, 40, 0.07);
   --c-brand-fg: #ffffff;
 
-  /* Primary — sky-600 for better light-mode contrast */
-  --c-primary: #0284c7;
-  --c-primary-hover: #0369a1;
-  --c-primary-active: #075985;
-  --c-primary-muted: rgba(2, 132, 199, 0.10);
+  --c-primary: #18191b;
+  --c-primary-hover: #000000;
+  --c-primary-active: #2a2c30;
+  --c-primary-muted: rgba(24, 25, 27, 0.07);
   --c-primary-fg: #ffffff;
 
-  /* Danger — red-700 */
-  --c-danger: #b91c1c;
-  --c-danger-hover: #991b1b;
-  --c-danger-muted: rgba(185, 28, 28, 0.10);
+  --c-danger: #c81828;
+  --c-danger-hover: #b01422;
+  --c-danger-muted: rgba(200, 24, 40, 0.08);
   --c-danger-fg: #ffffff;
 
-  /* Info — blue-600 */
-  --c-info: #2563eb;
-  --c-info-muted: rgba(37, 99, 235, 0.10);
+  --c-info: #4a5058;
+  --c-info-muted: rgba(74, 80, 88, 0.07);
 
-  /* Success — emerald-600 for light mode */
-  --c-success: #059669;
-  --c-success-muted: rgba(5, 150, 105, 0.10);
+  --c-success: #4a5058;
+  --c-success-muted: rgba(74, 80, 88, 0.08);
   --c-success-fg: #ffffff;
 
-  /* Warning — amber-600 */
-  --c-warning: #d97706;
-  --c-warning-muted: rgba(217, 119, 6, 0.10);
+  --c-warning: #c81828;
+  --c-warning-muted: rgba(200, 24, 40, 0.07);
 
   /* Selection — neutral hover/focus */
   --c-selection: rgba(0, 0, 0, 0.06);
@@ -254,15 +254,15 @@
   --c-status-danger: #a05050;
 
   /* Composer — always dark (same as :root) */
-  --c-composer: #18181b;
-  --c-composer-bar: #111113;
-  --c-composer-border: #27272a;
-  --c-composer-border-focus: #3f3f46;
-  --c-composer-fg: #f4f4f5;
-  --c-composer-fg-secondary: #a1a1aa;
-  --c-composer-fg-muted: #52525b;
-  --c-composer-hover: #27272a;
-  --c-composer-active: #3f3f46;
+  --c-composer: #16181a;
+  --c-composer-bar: #131416;
+  --c-composer-border: #25282c;
+  --c-composer-border-focus: #34383d;
+  --c-composer-fg: #e8eaed;
+  --c-composer-fg-secondary: #98a0a8;
+  --c-composer-fg-muted: #6c747c;
+  --c-composer-hover: #25282c;
+  --c-composer-active: #34383d;
 }
 
 html, body, #root {
@@ -273,11 +273,19 @@ html, body, #root {
 }
 
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: var(--c-bg);
   color: var(--c-fg);
+}
+
+.font-sans {
+  font-family: var(--font-ui);
+}
+
+.font-mono {
+  font-family: var(--font-mono-family);
 }
 
 /* Custom scrollbar for chat transcript and scroll areas */
@@ -312,6 +320,15 @@ body {
 }
 .light .chat-scroll {
   scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+/* Hide scrollbar while keeping scroll functionality — must come after chat-scroll rules */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Themed horizontal scroll for compact fields (provider cards, etc.) */

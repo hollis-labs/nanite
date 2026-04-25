@@ -1,5 +1,4 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
 import { Component, type ReactNode, Suspense, useCallback, useSyncExternalStore } from "react";
 import { getEnvelopeComponent } from "@/generated/plugin-envelopes";
 import { useSettings } from "@/hooks/useSettings";
@@ -16,6 +15,7 @@ import {
 } from "@/lib/plugin-loader";
 import type { Envelope } from "@/lib/types";
 import { ApprovalCard } from "./ApprovalCard";
+import { Envelope as EnvelopeShell, EnvelopeBody, EnvelopeHeader } from "./primitives/Envelope";
 import { PluginLoadErrorCard } from "./PluginLoadErrorCard";
 import { ProposalCard } from "./ProposalCard";
 import { InterviewCard } from "./InterviewCard";
@@ -42,15 +42,10 @@ class EnvelopeErrorBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div className="rounded-sm border border-danger/50 bg-danger/10 p-3">
-          <div className="flex items-center gap-2 mb-1">
-            <AlertTriangle className="w-3.5 h-3.5 text-danger shrink-0" />
-            <span className="text-xs font-medium text-danger">
-              Envelope failed: {this.props.type}
-            </span>
-          </div>
-          <p className="text-[11px] text-danger/70 leading-relaxed">{this.state.error.message}</p>
-        </div>
+        <PluginLoadErrorCard
+          title={`Envelope failed: ${this.props.type}`}
+          reason={this.state.error.message}
+        />
       );
     }
     return this.props.children;
@@ -116,23 +111,83 @@ export function EnvelopeRenderer({
     [envelope.id, envelope.type, onEnvelopeResponse],
   );
 
+  const renderLegacyFallback = () => {
+    const hasLegacyContent =
+      (envelope.proposals?.length ?? 0) > 0 ||
+      (envelope.questions?.length ?? 0) > 0 ||
+      envelope.approval != null;
+
+    if (!hasLegacyContent) {
+      return null;
+    }
+
+    return (
+      <div className="space-y-3">
+        {envelope.proposals?.map((proposal, i) => (
+          <ProposalCard key={`proposal-${i}`} proposal={proposal} />
+        ))}
+
+        {envelope.questions && envelope.questions.length > 0 && (
+          <InterviewCard
+            envelope={envelope}
+            {...(envelope.id ? { onRespond } : {})}
+            userMessageCount={userMessageCount}
+          />
+        )}
+
+        {envelope.approval && (
+          <ApprovalCard approval={envelope.approval} {...(envelope.id ? { onRespond } : {})} />
+        )}
+      </div>
+    );
+  };
+
+  const renderUnreachableFallback = () => (
+    <EnvelopeShell muted>
+      <EnvelopeHeader label="Unsupported envelope" meta={<span>{envelope.type}</span>} />
+      <EnvelopeBody
+        title="No render path is registered for this envelope."
+        description="The envelope payload arrived, but no matching component or legacy fallback handled it."
+      />
+    </EnvelopeShell>
+  );
+
   // Single registry lookup — checks build-time first, then dynamic fallback.
   // Recover mode restricts to core-only entries.
-  const PluginComponent = getEnvelopeComponent(envelope.type, recoverMode);
-  if (PluginComponent && envelope.data) {
-    return (
-      <EnvelopeErrorBoundary type={envelope.type}>
-        <Suspense
-          fallback={<div className="animate-pulse p-4 text-sm text-fg-secondary">Loading...</div>}
-        >
-          <PluginComponent
-            data={envelope.data}
-            {...(onSendMessage ? { onSendMessage } : {})}
-            {...(envelope.id ? { onRespond } : {})}
-          />
-        </Suspense>
-      </EnvelopeErrorBoundary>
-    );
+  const registryEntry = getEnvelopeComponent(envelope.type, recoverMode);
+  if (registryEntry) {
+    const PluginComponent = registryEntry.component;
+    const componentProps =
+      registryEntry.props === "approval"
+        ? envelope.data || envelope.approval
+          ? { approval: envelope.data ?? envelope.approval }
+          : null
+        : registryEntry.props === "proposal"
+          ? envelope.data || envelope.proposals?.[0]
+            ? { proposal: envelope.data ?? envelope.proposals?.[0] }
+            : null
+          : registryEntry.props === "envelope"
+            ? { envelope }
+            : envelope.data
+              ? { data: envelope.data }
+              : null;
+
+    if (componentProps) {
+      return (
+        <EnvelopeErrorBoundary type={envelope.type}>
+          <Suspense
+            fallback={<div className="animate-pulse p-4 text-sm text-fg-secondary">Loading...</div>}
+          >
+            <PluginComponent
+              {...componentProps}
+              {...(onSendMessage ? { onSendMessage } : {})}
+              {...(envelope.id ? { onRespond } : {})}
+              {...(registryEntry.props === "envelope" ? { userMessageCount } : {})}
+            />
+          </Suspense>
+        </EnvelopeErrorBoundary>
+      );
+    }
   }
 
   // No component resolved. If the type belongs to a plugin whose bundle
@@ -156,24 +211,5 @@ export function EnvelopeRenderer({
     }
   }
 
-  // Default envelope rendering — proposals, questions, approval
-  return (
-    <div className="space-y-3">
-      {envelope.proposals?.map((proposal, i) => (
-        <ProposalCard key={`proposal-${i}`} proposal={proposal} />
-      ))}
-
-      {envelope.questions && envelope.questions.length > 0 && (
-        <InterviewCard
-          envelope={envelope}
-          {...(envelope.id ? { onRespond } : {})}
-          userMessageCount={userMessageCount}
-        />
-      )}
-
-      {envelope.approval && (
-        <ApprovalCard approval={envelope.approval} {...(envelope.id ? { onRespond } : {})} />
-      )}
-    </div>
-  );
+  return renderLegacyFallback() ?? renderUnreachableFallback();
 }

@@ -22,21 +22,21 @@ function formatCost(usd: number): string {
 }
 
 function getPctColor(pct: number): string {
-  if (pct < 50) return 'text-status-ok'
-  if (pct < 75) return 'text-status-warn'
-  return 'text-status-danger'
+  if (pct < 50) return 'text-success'
+  if (pct < 75) return 'text-warning'
+  return 'text-danger'
 }
 
 function getBarColor(pct: number): string {
-  if (pct < 50) return 'bg-status-ok'
-  if (pct < 75) return 'bg-status-warn'
-  return 'bg-status-danger'
+  if (pct < 50) return 'bg-success'
+  if (pct < 75) return 'bg-warning'
+  return 'bg-danger'
 }
 
 function getBadgeColor(pct: number): string {
-  if (pct < 50) return 'bg-status-ok/15 text-status-ok border-status-ok/30'
-  if (pct < 75) return 'bg-status-warn/15 text-status-warn border-status-warn/30'
-  return 'bg-status-danger/15 text-status-danger border-status-danger/30'
+  if (pct < 50) return 'bg-success-muted text-success border-transparent'
+  if (pct < 75) return 'bg-warning-muted text-warning border-transparent'
+  return 'bg-danger-muted text-danger border-transparent'
 }
 
 // ---------------------------------------------------------------------------
@@ -94,10 +94,10 @@ function AccordionSection({
   const pct = totalCeiling > 0 ? (tokens / totalCeiling) * 100 : 0
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
+    <div className="border border-border-subtle rounded-[8px] overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 w-full px-3 py-2.5 hover:bg-surface/50 transition-colors text-left"
+        className="flex items-center gap-2 w-full px-3 py-2.5 hover:bg-surface transition-colors text-left"
       >
         {open ? (
           <ChevronDown className="w-3.5 h-3.5 text-fg-muted shrink-0" />
@@ -111,7 +111,7 @@ function AccordionSection({
         </span>
       </button>
       {open && (
-        <div className="px-3 pb-3 pt-1 border-t border-border/50">
+        <div className="px-3 pb-3 pt-1 border-t border-divider">
           {children}
         </div>
       )}
@@ -126,13 +126,13 @@ function AccordionSection({
 function MessageRow({ msg }: { msg: MessageTokenDetail }) {
   const roleColors: Record<string, string> = {
     user: 'text-info',
-    assistant: 'text-primary',
-    system: 'text-status-warn',
+    assistant: 'text-brand',
+    system: 'text-warning',
     tool: 'text-success',
   }
 
   return (
-    <div className="flex items-start gap-2 py-1.5 border-b border-border/50 last:border-b-0">
+    <div className="flex items-start gap-2 py-1.5 border-b border-divider last:border-b-0">
       <span className={`text-xs font-mono w-16 shrink-0 pt-0.5 ${roleColors[msg.role] ?? 'text-fg-secondary'}`}>
         {msg.role}
       </span>
@@ -153,7 +153,7 @@ function MessageRow({ msg }: { msg: MessageTokenDetail }) {
 
 function ToolRow({ tool }: { tool: ToolTokenDetail }) {
   return (
-    <div className="flex items-center gap-2 py-1.5 border-b border-border/50 last:border-b-0">
+    <div className="flex items-center gap-2 py-1.5 border-b border-divider last:border-b-0">
       <span className="text-xs text-fg-secondary flex-1 font-mono truncate">
         {tool.name}
       </span>
@@ -189,8 +189,8 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
   return (
     <Dialog open={open} onOpenChange={() => onClose()}>
       <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col">
-        <DialogHeader className="px-4 py-3 border-b border-border">
-          <DialogTitle className="text-sm">Context Inspector</DialogTitle>
+        <DialogHeader className="px-4 pt-4 pb-3">
+          <DialogTitle>Context Inspector</DialogTitle>
           <DialogDescription className="sr-only">Token usage breakdown for this session</DialogDescription>
         </DialogHeader>
 
@@ -216,9 +216,9 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
                     {formatTokens(breakdown.total)} / {formatTokens(breakdown.ceiling)} ({Math.round(pct)}%)
                   </span>
                 </div>
-                <div className="w-full bg-surface rounded-full h-2">
+                <div className="w-full bg-surface rounded-[3px] h-[4px]">
                   <div
-                    className={`${getBarColor(pct)} h-2 rounded-full transition-all duration-500`}
+                    className={`${getBarColor(pct)} h-full rounded-[3px] transition-[width] duration-500`}
                     style={{ width: `${Math.max(pct, 1)}%` }}
                   />
                 </div>
@@ -227,7 +227,7 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
               {/* System Prompt */}
               <AccordionSection
                 title="System Prompt"
-                icon={<Cpu className="w-3.5 h-3.5 text-status-warn" />}
+                icon={<Cpu className="w-3.5 h-3.5 text-warning" />}
                 tokens={breakdown.system_prompt_tokens}
                 totalCeiling={breakdown.ceiling}
               >
@@ -239,7 +239,7 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
                           {breakdown.system_prompt_preview}
                         </pre>
                       </div>
-                      <div className="flex items-center justify-between pt-1 border-t border-border/50">
+                      <div className="flex items-center justify-between pt-1 border-t border-divider">
                         <span className="text-xs text-fg-muted">
                           {breakdown.system_prompt_tokens} tokens
                           {breakdown.system_prompt_preview.endsWith('...') && ' (preview truncated)'}
@@ -300,7 +300,7 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
               </AccordionSection>
 
               {/* Summary */}
-              <div className="border border-border rounded-lg px-3 py-2.5 space-y-1.5">
+              <div className="border border-border-subtle rounded-[8px] px-3 py-2.5 space-y-1.5">
                 <div className="flex items-center gap-2 mb-1">
                   <BarChart3 className="w-3.5 h-3.5 text-fg-secondary" />
                   <span className="text-sm font-medium text-fg">Summary</span>
@@ -315,8 +315,8 @@ export function ContextInspectorModal({ sessionId, open, onClose }: ContextInspe
                   <span className="text-fg-muted">Tool calls</span>
                   <span className="text-fg-secondary text-right font-mono">{formatTokens(breakdown.tool_tokens_total)}</span>
 
-                  <span className="text-fg-muted font-medium pt-1 border-t border-border">Total</span>
-                  <span className={`text-right font-mono font-medium pt-1 border-t border-border ${getPctColor(pct)}`}>
+                  <span className="text-fg-muted font-medium pt-1 border-t border-divider">Total</span>
+                  <span className={`text-right font-mono font-medium pt-1 border-t border-divider ${getPctColor(pct)}`}>
                     {formatTokens(breakdown.total)}
                   </span>
 

@@ -1,35 +1,37 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, LayoutGrid, ListTodo, GitBranch, Mail, Moon, Package, Building2, Plus, Search, Sun } from 'lucide-react'
+import {
+  Building2, ChevronDown, Eye, EyeOff,
+  GitBranch, LayoutGrid, ListTodo, Mail, Moon,
+  Package, Plus, Search, Sun,
+} from 'lucide-react'
 import { useLayoutStore, type LayoutPreset } from '@/stores/useLayoutStore'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { resolveIcon } from '@/lib/icons'
 import { useTheme } from '@/hooks/useTheme'
 import { BUILTIN_THEMES } from '@/lib/theme/defaults'
 
-// ── SVG icon helpers (match design reference paths exactly) ──────────────────
+// ── SVG wireframe icons ────────────────────────────────────────────────────
 
-function LMIcon({ children, size = 14, style }: { children: React.ReactNode; size?: number; style?: React.CSSProperties }) {
+function WireIcon({ children, size = 13 }: { children: React.ReactNode; size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       {children}
     </svg>
   )
 }
 
-const Icons = {
-  layout:    (p: { size?: number }) => <LMIcon size={p.size}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M3 12h6"/></LMIcon>,
-  focus:     (p: { size?: number }) => <LMIcon size={p.size}><rect x="6" y="4" width="12" height="16" rx="2"/></LMIcon>,
-  default:   (p: { size?: number }) => <LMIcon size={p.size}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></LMIcon>,
-  workspace: (p: { size?: number }) => <LMIcon size={p.size}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18"/></LMIcon>,
-  reading:   (p: { size?: number }) => <LMIcon size={p.size}><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></LMIcon>,
-  panelL:    (p: { size?: number }) => <LMIcon size={p.size}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></LMIcon>,
-  panelR:    (p: { size?: number }) => <LMIcon size={p.size}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></LMIcon>,
-  drawer:    (p: { size?: number }) => <LMIcon size={p.size}><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 12h18"/></LMIcon>,
-  chips:     (p: { size?: number }) => <LMIcon size={p.size}><rect x="3" y="9" width="6" height="6" rx="1"/><rect x="11" y="9" width="6" height="6" rx="1"/><rect x="19" y="9" width="2" height="6" rx="1"/></LMIcon>,
+const WI = {
+  focus:    () => <WireIcon><rect x="6" y="4" width="12" height="16" rx="2"/></WireIcon>,
+  default:  () => <WireIcon><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></WireIcon>,
+  full:     () => <WireIcon><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18"/></WireIcon>,
+  reading:  () => <WireIcon><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></WireIcon>,
+  drawer:   () => <WireIcon size={11}><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 12h18"/></WireIcon>,
+  layout:   () => <WireIcon size={13}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M3 12h6"/></WireIcon>,
 }
 
-// ── Sub-components ───────────────────────────────────────────────────────────
+// ── Kbd badge ──────────────────────────────────────────────────────────────
 
 function LMKbd({ children }: { children: React.ReactNode }) {
   return (
@@ -39,69 +41,76 @@ function LMKbd({ children }: { children: React.ReactNode }) {
   )
 }
 
-function LMToggle({ on }: { on: boolean }) {
+// ── Eye toggle button ──────────────────────────────────────────────────────
+
+function EyeBtn({ on, onClick, size = 11 }: { on: boolean; onClick?: () => void; size?: number }) {
+  const Icon = on ? Eye : EyeOff
   return (
-    <div className={`relative h-[14px] w-6 shrink-0 rounded-full transition-colors duration-120 ${on ? 'bg-primary' : 'bg-surface'}`}>
-      <div className={`absolute top-px h-3 w-3 rounded-full transition-all duration-120 ${on ? 'left-[11px] bg-primary-fg' : 'left-px bg-fg-muted'}`} />
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick?.() }}
+      className="flex items-center justify-center w-[18px] h-[18px] rounded-[3px] transition-colors text-fg-muted hover:bg-surface hover:text-fg"
+    >
+      <Icon style={{ width: size, height: size }} />
+    </button>
+  )
+}
+
+// ── Left rail feature row ─────────────────────────────────────────────────
+
+function LeftRailRow({
+  icon: Icon, label, on, onToggle, railOn,
+}: {
+  icon: React.ElementType; label: string; on: boolean; onToggle: () => void; railOn: boolean
+}) {
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-1.5 py-[3.5px] rounded-[4px] transition-all ${
+        on ? 'border border-border-subtle bg-surface' : 'border border-transparent'
+      } ${!railOn ? 'opacity-30' : on ? '' : 'opacity-55'}`}
+    >
+      <Icon size={10} className="text-fg-muted shrink-0" />
+      <span className={`flex-1 text-[9.5px] truncate leading-none ${on ? 'text-fg' : 'text-fg-muted'}`}>
+        {label}
+      </span>
+      <EyeBtn on={on} onClick={railOn ? onToggle : undefined} size={10} />
     </div>
   )
 }
 
-function LMRow({
-  icon: Ic,
-  label,
-  kbd,
-  on,
-  onClick,
+// ── Right rail layer row ──────────────────────────────────────────────────
+
+function RightLayerRow({
+  icon: Icon, label, active, onSelect, railOn,
 }: {
-  icon: (p: { size?: number }) => React.ReactNode
-  label: string
-  kbd: string
-  on: boolean
-  onClick: () => void
+  icon: React.ElementType; label: string; active: boolean; onSelect: () => void; railOn: boolean
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-left transition-colors hover:bg-surface"
+      onClick={railOn ? onSelect : undefined}
+      className={`flex w-full items-center gap-1.5 px-1.5 py-[3.5px] rounded-[4px] border transition-all text-left ${
+        active && railOn ? 'border-primary bg-primary-muted' : 'border-transparent'
+      } ${!railOn ? 'opacity-30 cursor-default' : 'cursor-pointer'}`}
     >
-      <span className="shrink-0 text-fg-muted"><Ic size={14} /></span>
-      <span className="flex-1 text-[12px] text-fg">{label}</span>
-      <LMKbd>{kbd}</LMKbd>
-      <LMToggle on={on} />
+      <Icon size={10} className={active && railOn ? 'text-primary' : 'text-fg-muted'} />
+      <span className={`flex-1 text-[9.5px] truncate ${active && railOn ? 'text-primary font-semibold' : 'text-fg-secondary'}`}>
+        {label}
+      </span>
+      {active && railOn && (
+        <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+      )}
     </button>
   )
 }
 
-function LMPreset({
-  icon: Ic,
-  label,
-  active,
-  onClick,
-}: {
-  icon: (p: { size?: number }) => React.ReactNode
-  label: string
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex flex-1 flex-col items-center gap-1.5 rounded-[6px] border px-1 py-2.5 transition-all duration-120 ${
-        active
-          ? 'border-primary bg-primary-muted text-primary'
-          : 'border-border-subtle bg-transparent text-fg-secondary hover:border-border hover:bg-surface'
-      }`}
-    >
-      <Ic size={16} />
-      <span className="font-mono text-[9px] font-semibold uppercase tracking-wide">{label}</span>
-    </button>
-  )
-}
+// ── Theme + mode dropdown ─────────────────────────────────────────────────
 
-// ── Theme dropdown ───────────────────────────────────────────────────────────
+function getThemeCode(themeId: string): string {
+  if (themeId === 'nanite-default') return 'C'
+  const match = themeId.match(/direction-([a-f])/i)
+  return match ? match[1].toUpperCase() : '?'
+}
 
 function ThemeDropdown() {
   const [open, setOpen] = useState(false)
@@ -111,10 +120,10 @@ function ThemeDropdown() {
   const setTheme = useLayoutStore((s) => s.setTheme)
 
   const activeBuiltin = BUILTIN_THEMES.find((t) => t.id === activeThemeId) ?? BUILTIN_THEMES[0]
-  // Swatch preview uses light tokens regardless of current mode
   const swatchBg = activeBuiltin.tokens.light['bg-elevated'] ?? '#ffffff'
   const swatchAccent = activeBuiltin.tokens.light['primary'] ?? '#000000'
   const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const code = getThemeCode(activeThemeId)
 
   useEffect(() => {
     if (!open) return
@@ -130,28 +139,24 @@ function ThemeDropdown() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 rounded-[5px] border px-1.5 py-1 transition-colors ${
+        className={`flex items-center gap-1.5 rounded-[6px] border px-2 py-1.5 transition-colors ${
           open ? 'border-border bg-surface' : 'border-border-subtle hover:border-border hover:bg-surface'
         }`}
       >
-        {/* Mini swatch */}
         <div
-          className="relative overflow-hidden rounded-[3px]"
-          style={{ width: 14, height: 14, background: swatchBg, border: '1px solid rgba(0,0,0,0.10)' }}
+          className="relative overflow-hidden rounded-[3px] shrink-0"
+          style={{ width: 14, height: 14, background: swatchBg, border: '1px solid rgba(0,0,0,0.12)' }}
         >
-          <div
-            className="absolute bottom-[1px] inset-x-[1px] h-[3px] rounded-[1px]"
-            style={{ background: swatchAccent }}
-          />
+          <div className="absolute bottom-[1px] inset-x-[1px] h-[3px] rounded-[1px]" style={{ background: swatchAccent }} />
         </div>
-        <span className="font-mono text-[10px] font-semibold text-fg-secondary">
-          {activeBuiltin.name.split(' ')[0]}·{isDark ? 'D' : 'L'}
+        <span className="font-mono text-[11px] font-semibold text-fg-secondary">
+          {code}·{isDark ? 'D' : 'L'}
         </span>
-        <ChevronDown className="h-[9px] w-[9px] text-fg-faint" />
+        <ChevronDown className="h-[10px] w-[10px] text-fg-faint" />
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-1.5 z-10 w-[220px] rounded-[8px] border border-border bg-bg-elevated p-2 shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
+        <div className="absolute top-full right-0 mt-1.5 z-10 w-[220px] rounded-[8px] border border-border bg-bg-elevated p-2 shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
           {/* Light / Dark toggle */}
           <div className="mb-2 flex rounded-[5px] border border-border-subtle bg-surface p-[2px]">
             {(['light', 'dark'] as const).map((m) => (
@@ -195,7 +200,7 @@ function ThemeDropdown() {
                     <div className="absolute left-[2px] top-[6px] h-[6px] w-[6px] rounded-full" style={{ background: brand }} />
                   </div>
                   <span className={`font-mono text-[9px] font-semibold ${isActive ? 'text-primary' : 'text-fg-muted'}`}>
-                    {t.name.split(' ')[0]}
+                    {getThemeCode(t.id)}
                   </span>
                 </button>
               )
@@ -207,7 +212,24 @@ function ThemeDropdown() {
   )
 }
 
-// ── Main component ───────────────────────────────────────────────────────────
+// ── Data ───────────────────────────────────────────────────────────────────
+
+const PRESETS: { id: LayoutPreset; icon: () => React.ReactNode; label: string; left: boolean; right: boolean; drawer: boolean; chips: boolean }[] = [
+  { id: 'focus',     icon: WI.focus,   label: 'Focus',   left: false, right: false, drawer: false, chips: false },
+  { id: 'default',   icon: WI.default, label: 'Default', left: true,  right: false, drawer: false, chips: true },
+  { id: 'workspace', icon: WI.full,    label: 'Full',    left: true,  right: true,  drawer: true,  chips: true },
+  { id: 'reading',   icon: WI.reading, label: 'Reading', left: false, right: false, drawer: false, chips: true },
+]
+
+const CORE_RAIL_TABS = [
+  { id: 'widgets',   Icon: LayoutGrid, label: 'Widgets' },
+  { id: 'inbox',     Icon: Mail,       label: 'Inbox' },
+  { id: 'work',      Icon: ListTodo,   label: 'Work' },
+  { id: 'workflows', Icon: GitBranch,  label: 'Workflows' },
+  { id: 'artifacts', Icon: Package,    label: 'Artifacts' },
+] as const
+
+// ── Main component ─────────────────────────────────────────────────────────
 
 interface LayoutMenuProps {
   open: boolean
@@ -215,49 +237,32 @@ interface LayoutMenuProps {
   anchorRef: React.RefObject<HTMLElement | null>
 }
 
-const CORE_RAIL_TABS = [
-  { id: 'widgets',   Icon: LayoutGrid, label: 'Widgets' },
-  { id: 'work',      Icon: ListTodo,   label: 'Work' },
-  { id: 'workflows', Icon: GitBranch,  label: 'Workflows' },
-  { id: 'inbox',     Icon: Mail,       label: 'Inbox' },
-  { id: 'artifacts', Icon: Package,    label: 'Artifacts' },
-] as const
-
-const PRESETS: { id: LayoutPreset; icon: (p: { size?: number }) => React.ReactNode; label: string; left: boolean; right: boolean; drawer: boolean; chips: boolean }[] = [
-  { id: 'focus',     icon: Icons.focus,     label: 'Focus',     left: false, right: false, drawer: false, chips: false },
-  { id: 'default',   icon: Icons.default,   label: 'Default',   left: true,  right: false, drawer: false, chips: true  },
-  { id: 'workspace', icon: Icons.workspace, label: 'Workspace', left: true,  right: true,  drawer: true,  chips: true  },
-  { id: 'reading',   icon: Icons.reading,   label: 'Reading',   left: false, right: false, drawer: false, chips: true  },
-]
-
 export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
-  const leftOpen        = useLayoutStore((s) => s.leftSidebarOpen)
-  const rightOpen       = useLayoutStore((s) => s.rightRailOpen)
+  const leftOpen          = useLayoutStore((s) => s.leftSidebarOpen)
+  const rightOpen         = useLayoutStore((s) => s.rightRailOpen)
   const toolDrawerEnabled = useLayoutStore((s) => s.toolDrawerEnabled)
-  const chipsVisible    = useLayoutStore((s) => s.headerChipsVisible)
-  const activeRailTab   = useLayoutStore((s) => s.rightRailTab)
-  const workspaceVisible   = useLayoutStore((s) => s.leftRailWorkspaceVisible)
-  const newChatVisible     = useLayoutStore((s) => s.leftRailNewChatVisible)
-  const searchVisible      = useLayoutStore((s) => s.leftRailSearchVisible)
-  const toggleWorkspace    = useLayoutStore((s) => s.toggleLeftRailWorkspace)
-  const toggleNewChat      = useLayoutStore((s) => s.toggleLeftRailNewChat)
-  const toggleSearchField  = useLayoutStore((s) => s.toggleLeftRailSearch)
-  const toggleLeft         = useLayoutStore((s) => s.toggleLeftSidebar)
-  const toggleRight     = useLayoutStore((s) => s.toggleRightRail)
-  const toggleDrawer    = useLayoutStore((s) => s.toggleToolDrawer)
-  const toggleChips     = useLayoutStore((s) => s.toggleHeaderChips)
-  const applyPreset     = useLayoutStore((s) => s.applyLayoutPreset)
-  const setRightRail    = useLayoutStore((s) => s.setRightRail)
-  const setRailTab      = useLayoutStore((s) => s.setRightRailTab)
-  const pluginTabs      = usePluginSlots('right-rail-tab')
+  const chipsVisible      = useLayoutStore((s) => s.headerChipsVisible)
+  const activeRailTab     = useLayoutStore((s) => s.rightRailTab)
+  const workspaceVisible  = useLayoutStore((s) => s.leftRailWorkspaceVisible)
+  const newChatVisible    = useLayoutStore((s) => s.leftRailNewChatVisible)
+  const searchVisible     = useLayoutStore((s) => s.leftRailSearchVisible)
+  const toggleWorkspace   = useLayoutStore((s) => s.toggleLeftRailWorkspace)
+  const toggleNewChat     = useLayoutStore((s) => s.toggleLeftRailNewChat)
+  const toggleSearchField = useLayoutStore((s) => s.toggleLeftRailSearch)
+  const toggleLeft        = useLayoutStore((s) => s.toggleLeftSidebar)
+  const toggleRight       = useLayoutStore((s) => s.toggleRightRail)
+  const toggleDrawer      = useLayoutStore((s) => s.toggleToolDrawer)
+  const toggleChips       = useLayoutStore((s) => s.toggleHeaderChips)
+  const applyPreset       = useLayoutStore((s) => s.applyLayoutPreset)
+  const setRightRail      = useLayoutStore((s) => s.setRightRail)
+  const setRailTab        = useLayoutStore((s) => s.setRightRailTab)
+  const pluginTabs        = usePluginSlots('right-rail-tab')
 
-  const drawerOn = toolDrawerEnabled
   const activePreset = PRESETS.find((p) =>
     p.left === leftOpen && p.right === rightOpen &&
-    p.drawer === drawerOn && p.chips === chipsVisible
+    p.drawer === toolDrawerEnabled && p.chips === chipsVisible
   )?.id
 
-  // Fixed position — computed from the anchor button's bounding rect
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
   useEffect(() => {
     if (!open || !anchorRef.current) return
@@ -285,40 +290,27 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
     ...pluginTabs.map((e) => ({ id: e.id, Icon: resolveIcon(e.icon), label: e.label })),
   ]
 
-  const leftRailFeatures = [
-    { id: 'workspace', Icon: Building2, label: 'Workspace header', on: workspaceVisible, toggle: toggleWorkspace },
-    { id: 'newchat',   Icon: Plus,      label: 'New chat button',  on: newChatVisible,   toggle: toggleNewChat },
-    { id: 'search',    Icon: Search,    label: 'Search field',     on: searchVisible,    toggle: toggleSearchField },
+  const leftColWidth = leftOpen ? 138 : 18
+  const rightColWidth = rightOpen ? 126 : 18
+
+  const leftFeatures = [
+    { id: 'workspace', Icon: Building2, label: 'Workspace',     on: workspaceVisible, toggle: toggleWorkspace },
+    { id: 'newchat',   Icon: Plus,      label: 'New chat',      on: newChatVisible,   toggle: toggleNewChat },
+    { id: 'search',    Icon: Search,    label: 'Search',        on: searchVisible,    toggle: toggleSearchField },
   ]
 
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[9999] flex overflow-hidden rounded-[10px] border border-border bg-bg-elevated shadow-[0_12px_40px_rgba(0,0,0,0.35)]"
-      style={{ left: pos.left, bottom: pos.bottom }}
+      className="fixed z-[9999]"
+      style={{ left: pos.left, bottom: pos.bottom, width: 460 }}
     >
-      {/* ── Left strip — left rail feature toggles ── */}
-      <div className="flex flex-col border-r border-divider">
-        {leftRailFeatures.map(({ id, Icon, label, on, toggle }) => (
-          <button
-            key={id}
-            type="button"
-            title={label}
-            onClick={toggle}
-            className={`flex h-9 w-9 items-center justify-center transition-colors ${
-              on ? 'text-primary bg-primary-muted' : 'text-fg-muted hover:bg-surface hover:text-fg'
-            }`}
-          >
-            <Icon className="h-[15px] w-[15px]" />
-          </button>
-        ))}
-      </div>
-
       {/* ── Main panel ── */}
-      <div className="w-[280px]">
+      <div className="rounded-[12px] border border-border bg-bg-elevated shadow-[0_16px_48px_rgba(15,17,22,0.18)] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-divider px-3 py-2.5">
           <div className="flex items-center gap-2">
+            <WI.layout />
             <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-fg-muted">
               Layout
             </span>
@@ -327,45 +319,180 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
           <ThemeDropdown />
         </div>
 
-        {/* Toggle rows */}
-        <div className="p-1.5">
-          <LMRow icon={Icons.panelL} label="Left rail"    kbd="⌘B"   on={leftOpen}     onClick={toggleLeft} />
-          <LMRow icon={Icons.panelR} label="Right rail"   kbd="⌘/"   on={rightOpen}    onClick={toggleRight} />
-          <LMRow icon={Icons.drawer} label="Tool drawer"  kbd="⌘T"   on={drawerOn}     onClick={toggleDrawer} />
-          <LMRow icon={Icons.chips}  label="Header chips" kbd="⌘⇧H"  on={chipsVisible} onClick={toggleChips} />
-        </div>
+        {/* 3-column body */}
+        <div
+          className="bg-bg overflow-hidden"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${leftColWidth}px 1fr ${rightColWidth}px`,
+            minHeight: 240,
+            transition: 'grid-template-columns 200ms',
+          }}
+        >
+          {/* ─── Left rail column ─── */}
+          <div
+            className="border-r border-divider flex flex-col transition-all"
+            style={{
+              background: leftOpen ? 'var(--c-bg)' : 'var(--c-surface)',
+              padding: leftOpen ? '8px 6px' : 0,
+              alignItems: leftOpen ? 'stretch' : 'center',
+              justifyContent: leftOpen ? 'flex-start' : 'center',
+              gap: leftOpen ? 4 : 0,
+            }}
+          >
+            {leftOpen ? (
+              <>
+                <div className="flex items-center justify-between px-1.5 pb-1.5">
+                  <span className="font-mono text-[8.5px] font-semibold uppercase tracking-[0.05em] text-fg-faint">
+                    Left Rail
+                  </span>
+                  <EyeBtn on={true} onClick={toggleLeft} size={11} />
+                </div>
+                {leftFeatures.map(({ id, Icon, label, on, toggle }) => (
+                  <LeftRailRow
+                    key={id}
+                    icon={Icon}
+                    label={label}
+                    on={on}
+                    onToggle={toggle}
+                    railOn={leftOpen}
+                  />
+                ))}
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleLeft}
+                className="flex items-center justify-center w-full h-full text-fg-muted hover:text-fg transition-colors"
+              >
+                <EyeOff size={11} />
+              </button>
+            )}
+          </div>
 
-        {/* Presets */}
-        <div className="flex gap-1.5 border-t border-divider bg-surface p-2">
-          {PRESETS.map((p) => (
-            <LMPreset
-              key={p.id}
-              icon={p.icon}
-              label={p.label}
-              active={activePreset === p.id}
-              onClick={() => applyPreset(p.id)}
-            />
-          ))}
+          {/* ─── Center wireframe ─── */}
+          <div className="flex flex-col gap-2 p-2.5 min-w-0">
+            {/* Header strip */}
+            <div className="flex items-center gap-1.5 rounded-[5px] border border-divider bg-bg-elevated px-2 py-1.5 min-h-[26px]">
+              <div className="w-3.5 h-3.5 rounded-[3px] bg-brand shrink-0" />
+              <span className="text-[9px] font-medium text-fg-secondary">Nanite</span>
+              <div className="w-px h-2.5 bg-divider" />
+              {chipsVisible ? (
+                <>
+                  <div className="h-3 px-1.5 rounded-[3px] bg-surface flex items-center font-mono text-[8px] text-fg-muted">claude</div>
+                  <div className="h-3 px-1.5 rounded-[3px] bg-surface flex items-center font-mono text-[8px] text-fg-muted">153t</div>
+                  <div className="h-3 px-1.5 rounded-[3px] bg-warning-muted flex items-center font-mono text-[8px] text-warning">arch</div>
+                </>
+              ) : (
+                <span className="font-mono text-[8px] text-fg-faint uppercase tracking-wide opacity-60">chips hidden</span>
+              )}
+              <div className="flex-1" />
+              <EyeBtn on={chipsVisible} onClick={toggleChips} size={10} />
+            </div>
+
+            {/* Tool drawer */}
+            {toolDrawerEnabled ? (
+              <div className="flex items-center gap-1.5 rounded-[5px] border border-divider bg-bg-elevated px-2 py-1.5">
+                <WI.drawer />
+                <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.04em] text-fg-muted flex-1">
+                  Tool Drawer
+                </span>
+                <div className="flex-1 h-px bg-divider mx-1" />
+                <EyeBtn on={true} onClick={toggleDrawer} size={10} />
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 rounded-[5px] border border-dashed border-border-subtle px-2 py-1.5 opacity-60">
+                <WI.drawer />
+                <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.04em] text-fg-faint flex-1">
+                  Drawer hidden
+                </span>
+                <EyeBtn on={false} onClick={toggleDrawer} size={10} />
+              </div>
+            )}
+
+            {/* Conversation skeleton */}
+            <div className="flex-1 flex flex-col gap-1.5 py-1 min-h-[40px]">
+              <div className="h-[5px] rounded-[2px] bg-surface" style={{ width: '70%' }} />
+              <div className="h-[5px] rounded-[2px] bg-surface" style={{ width: '55%' }} />
+              <div className="h-[5px] rounded-[2px] bg-surface mt-1" style={{ width: '62%' }} />
+            </div>
+
+            {/* Composer skeleton */}
+            <div className="rounded-[5px] border border-divider bg-bg-elevated px-2 py-2">
+              <div className="h-[5px] rounded-[2px] bg-surface mb-2" style={{ width: '70%' }} />
+              <div className="flex items-center justify-between">
+                <div className="w-3 h-3 rounded-[3px] bg-surface" />
+                <div className="w-4 h-3 rounded-[3px] bg-primary" />
+              </div>
+            </div>
+          </div>
+
+          {/* ─── Right rail column ─── */}
+          <div
+            className="border-l border-divider flex flex-col transition-all"
+            style={{
+              background: rightOpen ? 'var(--c-bg)' : 'var(--c-surface)',
+              padding: rightOpen ? '8px 6px' : 0,
+              alignItems: rightOpen ? 'stretch' : 'center',
+              justifyContent: rightOpen ? 'flex-start' : 'center',
+              gap: rightOpen ? 2 : 0,
+            }}
+          >
+            {rightOpen ? (
+              <>
+                <div className="flex items-center justify-between px-1.5 pb-1">
+                  <span className="font-mono text-[8.5px] font-semibold uppercase tracking-[0.05em] text-fg-faint">
+                    Right Rail
+                  </span>
+                  <EyeBtn on={true} onClick={toggleRight} size={11} />
+                </div>
+                <div className="px-1.5 pb-2 text-[8px] italic text-fg-faint leading-tight">
+                  Pick which rail is shown
+                </div>
+                {allRailTabs.map(({ id, Icon, label }) => (
+                  <RightLayerRow
+                    key={id}
+                    icon={Icon}
+                    label={label}
+                    active={activeRailTab === id}
+                    onSelect={() => { setRightRail(true); setRailTab(id) }}
+                    railOn={rightOpen}
+                  />
+                ))}
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleRight}
+                className="flex items-center justify-center w-full h-full text-fg-muted hover:text-fg transition-colors"
+              >
+                <EyeOff size={11} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Right-side tab strip ── */}
-      <div className="flex flex-col border-l border-divider">
-        {allRailTabs.map(({ id, Icon, label }) => {
-          const isActive = activeRailTab === id
+      {/* ── Presets footer — sits below the main panel ── */}
+      <div className="mx-auto flex gap-1.5 rounded-b-[10px] border border-t-0 border-border bg-bg-elevated px-2 py-2 shadow-[0_12px_28px_rgba(15,17,22,0.06)]"
+        style={{ width: '92%' }}>
+        {PRESETS.map((p) => {
+          const isActive = activePreset === p.id
           return (
             <button
-              key={id}
+              key={p.id}
               type="button"
-              title={label}
-              onClick={() => { setRightRail(true); setRailTab(id) }}
-              className={`flex h-9 w-9 items-center justify-center transition-colors ${
+              onClick={() => applyPreset(p.id)}
+              className={`flex flex-1 flex-col items-center gap-1 rounded-[5px] border px-1 py-1.5 transition-colors ${
                 isActive
-                  ? 'text-primary bg-primary-muted'
-                  : 'text-fg-muted hover:bg-surface hover:text-fg'
+                  ? 'border-primary bg-primary-muted text-primary'
+                  : 'border-border-subtle text-fg-secondary hover:border-border hover:bg-surface'
               }`}
             >
-              <Icon className="h-[15px] w-[15px]" />
+              <p.icon />
+              <span className="font-mono text-[8.5px] font-semibold uppercase tracking-[0.04em]">
+                {p.label}
+              </span>
             </button>
           )
         })}
@@ -375,9 +502,7 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
   )
 }
 
-// ── Trigger button (rendered in ComposerToolbar) ─────────────────────────────
-
-import { forwardRef } from 'react'
+// ── Trigger button ─────────────────────────────────────────────────────────
 
 export const LayoutMenuTrigger = forwardRef<HTMLButtonElement, { open: boolean; onClick: () => void }>(
   function LayoutMenuTrigger({ open, onClick }, ref) {
@@ -393,7 +518,7 @@ export const LayoutMenuTrigger = forwardRef<HTMLButtonElement, { open: boolean; 
             : 'bg-transparent text-fg-muted hover:bg-surface hover:text-fg'
         }`}
       >
-        <Icons.layout size={13} />
+        <WI.layout />
       </button>
     )
   }

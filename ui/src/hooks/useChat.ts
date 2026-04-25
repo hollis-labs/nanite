@@ -69,15 +69,6 @@ function persistErrorState(sessionId: string, state: PersistedErrorState) {
   }
 }
 
-function loadPersistedErrorState(sessionId: string): PersistedErrorState | null {
-  try {
-    const raw = localStorage.getItem(storageKey(sessionId));
-    if (!raw) return null;
-    return JSON.parse(raw) as PersistedErrorState;
-  } catch {
-    return null;
-  }
-}
 
 function clearPersistedErrorState(sessionId: string) {
   try {
@@ -199,23 +190,8 @@ export function useChat(sessionId: string | null) {
         setPaginationState({ total: lastPage.total, oldestOffset: lastOffset });
       }
 
-      // Restore persisted error state (errors not saved by backend).
-      const persisted = loadPersistedErrorState(sessionId);
-      if (persisted) {
-        if (persisted.errorMessage) {
-          const exists = backendMessages.some((m) => m.id === persisted.errorMessage!.id);
-          if (!exists) {
-            backendMessages.push(persisted.errorMessage);
-          }
-        }
-        for (const err of persisted.errors) {
-          store().addChatError(err);
-        }
-        for (const tc of persisted.toolCalls) {
-          store().addToolCall(tc);
-        }
-      }
-
+      // Clear any leftover banner errors from the previous session.
+      store().clearChatErrors();
       setMessages(backendMessages);
     } catch (err) {
       console.error("Failed to load messages:", err);
@@ -336,6 +312,7 @@ export function useChat(sessionId: string | null) {
       store().clearToolCalls();
       store().clearToolWarnings();
       store().clearPendingApprovals();
+      store().clearChatErrors();
       clearPersistedErrorState(sessionId);
       console.log("[useChat] streaming=true, sending message...");
 
@@ -517,6 +494,7 @@ export function useChat(sessionId: string | null) {
           };
           setMessages((prev) => [...prev, assistantMsg]);
           store().clearStream();
+          store().clearChatErrors();
           clearPersistedErrorState(sessionId);
           es.close();
           eventSourceRef.current = null;

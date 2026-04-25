@@ -1,4 +1,4 @@
-import { MessageSquare, Search, Plus, Settings, User, Sun, Moon, LayoutGrid } from 'lucide-react'
+import { MessageSquare, Search, Plus, Settings, User, LayoutGrid } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
@@ -27,8 +27,6 @@ export function NavRail() {
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const currentPage = useLayoutStore((s) => s.currentPage)
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
-  const theme = useLayoutStore((s) => s.theme)
-  const toggleTheme = useLayoutStore((s) => s.toggleTheme)
   const queryClient = useQueryClient()
   const navPush = useNavigationStore((s) => s.push)
   const { data: userSettings } = useSettings()
@@ -149,16 +147,6 @@ export function NavRail() {
         })}
       </div>
       <div className="mt-auto flex flex-col items-center gap-1">
-        <Tooltip content={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'Light mode' : 'Dark mode'} side="right">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-10 h-10 rounded-lg text-fg-secondary hover:text-fg"
-            onClick={toggleTheme}
-          >
-            {theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </Button>
-        </Tooltip>
         <Tooltip content="Profile" side="right">
           <Button
             variant="ghost"

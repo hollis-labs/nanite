@@ -1,6 +1,6 @@
 import { Info } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { Widget } from './Widget'
+import { Widget, WidgetRow } from './Widget'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 
@@ -39,14 +39,12 @@ export function SessionInfoWidget() {
     enabled: !!activeSessionId,
   })
 
-  // Fetch projects to resolve project name
   const { data: projects = [] } = useQuery({
     queryKey: ['projects', activeWorkspaceId],
     queryFn: () => api.listProjects(activeWorkspaceId!),
     enabled: !!activeWorkspaceId,
   })
 
-  // Fetch session agents for primary agent name
   const { data: sessionAgents = [] } = useQuery({
     queryKey: ['session-agents', activeSessionId],
     queryFn: () => api.listSessionAgents(activeSessionId!),
@@ -55,16 +53,16 @@ export function SessionInfoWidget() {
 
   if (!activeSessionId) {
     return (
-      <Widget id="session-info" title="Session Info" icon={Info}>
-        <p className="text-xs text-fg-muted italic">No session selected</p>
+      <Widget id="session-info" title="Session" icon={Info} defaultOpen={false}>
+        <p className="text-[12px] text-fg-faint italic">No session selected</p>
       </Widget>
     )
   }
 
   if (!session) {
     return (
-      <Widget id="session-info" title="Session Info" icon={Info}>
-        <div className="space-y-1.5">
+      <Widget id="session-info" title="Session" icon={Info} defaultOpen={false}>
+        <div className="flex flex-col gap-1.5">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="flex justify-between">
               <div className="h-3 w-16 rounded bg-surface animate-pulse" />
@@ -79,31 +77,25 @@ export function SessionInfoWidget() {
   const projectName = session.project_id
     ? projects.find((p) => p.id === session.project_id)?.name
     : null
-
-  const primaryAgent = sessionAgents.find(
-    (a) => a.role === 'primary'
-  )
+  const primaryAgent = sessionAgents.find((a) => a.role === 'primary')
 
   const rows: { label: string; value: string }[] = [
-    { label: 'Title', value: session.custom_name || session.title || 'Untitled' },
-    { label: 'Short Code', value: `#${session.short_code}` },
+    { label: 'Title',         value: session.custom_name || session.title || 'Untitled' },
+    { label: 'Short Code',    value: `#${session.short_code}` },
     ...(projectName ? [{ label: 'Project', value: projectName }] : []),
     ...(primaryAgent ? [{ label: 'Agent', value: primaryAgent.name }] : []),
-    { label: 'Provider', value: session.provider || '-' },
-    { label: 'Model', value: session.model || '-' },
-    { label: 'Messages', value: String(session.message_count) },
-    { label: 'Created', value: formatDate(session.created_at) },
+    { label: 'Provider',      value: session.provider || '—' },
+    { label: 'Model',         value: session.model || '—' },
+    { label: 'Messages',      value: String(session.message_count) },
+    { label: 'Created',       value: formatDate(session.created_at) },
     { label: 'Last Activity', value: formatRelativeTime(session.last_activity) },
   ]
 
   return (
-    <Widget id="session-info" title="Session Info" icon={Info}>
-      <div className="space-y-1.5">
+    <Widget id="session-info" title="Session" icon={Info} defaultOpen={false}>
+      <div className="flex flex-col gap-1.5">
         {rows.map(({ label, value }) => (
-          <div key={label} className="flex justify-between text-xs gap-2">
-            <span className="text-fg-muted shrink-0">{label}</span>
-            <span className="text-fg-secondary truncate text-right font-mono text-[11px]">{value}</span>
-          </div>
+          <WidgetRow key={label} label={label} mono>{value}</WidgetRow>
         ))}
       </div>
     </Widget>

@@ -2,8 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"sync"
 
 	goplugin "github.com/hollis-labs/plugin-sdk"
@@ -72,17 +75,18 @@ type RegistryResponse struct {
 // the route registration so tests that spin up multiple hosts don't share
 // cached state across them.
 type registryCache struct {
-	mu      sync.Mutex
-	version uint64
-	payload []byte // serialized JSON
-	present bool
+	mu         sync.Mutex
+	version    uint64
+	payload    []byte // serialized JSON
+	present    bool
+	pluginsDir string
 }
 
 // registerPluginsRegistryRoute wires GET /api/plugins/registry onto mux.
 // Split out of RegisterPluginManagementRoutes so the aggregation/cache code
 // lives in its own file per plan §B.7.
 func registerPluginsRegistryRoute(mux *http.ServeMux, host *naniteplugin.Host, pluginsDir string) {
-	cache := &registryCache{}
+	cache := &registryCache{pluginsDir: pluginsDir}
 	mux.HandleFunc("GET /api/plugins/registry", func(w http.ResponseWriter, r *http.Request) {
 		payload, err := cache.serve(host)
 		if err != nil {
@@ -112,7 +116,7 @@ func (c *registryCache) serve(host *naniteplugin.Host) ([]byte, error) {
 	}
 	c.mu.Unlock()
 
-	resp := buildRegistryResponse(host)
+	resp := buildRegistryResponse(host, c.pluginsDir)
 	buf, err := json.Marshal(resp)
 	if err != nil {
 		return nil, err
@@ -140,7 +144,7 @@ func (c *registryCache) serve(host *naniteplugin.Host) ([]byte, error) {
 // in-memory registries. Extracted so tests can call it directly without a
 // live HTTP handler. Never returns nil maps — the frontend relies on the
 // four top-level keys always being present.
-func buildRegistryResponse(host *naniteplugin.Host) RegistryResponse {
+func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) RegistryResponse {
 	resp := RegistryResponse{
 		Envelopes: make(map[string]RegistryEnvelopeEntry),
 		Widgets:   make(map[string]RegistryWidgetEntry),
@@ -218,9 +222,19 @@ func buildRegistryResponse(host *naniteplugin.Host) RegistryResponse {
 			entry.StylesheetURL = buildUIURL(pluginID, ui.BundleDir, ui.Stylesheet)
 		}
 		entry.ReactVersion = ui.ReactVersion
-		// BundleHash stays empty until the manifest schema gains a field. See
-		// backlog: "v1 manifest needs ui.bundle_hash / release.bundle_sha256
-		// for the B.7 registry endpoint".
+		// Compute BundleHash from the bundle file's mtime so the frontend gets
+		// a cache-buster whenever the bundle is rebuilt. Uses mtime rather than
+		// a content hash to avoid reading large files on every registry recompute.
+		if pluginsDir != "" && ui.Entry != "" {
+			rel := path.Join(ui.BundleDir, ui.Entry)
+			if len(rel) >= 3 && rel[:3] == "ui/" {
+				rel = rel[3:]
+			}
+			bundlePath := filepath.Join(pluginsDir, pluginID, "ui", rel)
+			if fi, err := os.Stat(bundlePath); err == nil {
+				entry.BundleHash = fmt.Sprintf("%d", fi.ModTime().UnixMilli())
+			}
+		}
 		resp.Plugins[pluginID] = entry
 	}
 	return resp

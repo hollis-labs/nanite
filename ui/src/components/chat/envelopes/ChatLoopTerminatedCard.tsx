@@ -104,7 +104,7 @@ export function ChatLoopTerminatedCard({ data, onSendMessage }: ChatLoopTerminat
         />
 
         <EnvelopeBody title={data.reason} description={info.hint}>
-          <div className="space-y-3">
+          <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-fg-muted">
               <span>iter {data.iteration}</span>
               {data.consecutive_failures > 0 && (

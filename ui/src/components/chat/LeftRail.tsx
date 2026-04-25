@@ -91,7 +91,7 @@ export function LeftRail({
                   onClick={onNewChat}
                   disabled={newChatDisabled}
                   className={cn(
-                    "flex h-8 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-[12px] font-semibold text-primary-foreground transition-colors",
+                    "flex h-8 w-full items-center justify-center gap-2 rounded-[6px] bg-primary px-3 text-[12px] font-semibold text-primary-foreground transition-colors",
                     "disabled:cursor-not-allowed disabled:opacity-60",
                     !newChatDisabled && "hover:bg-primary-hover",
                   )}
@@ -112,7 +112,7 @@ export function LeftRail({
                 <button
                   type="button"
                   onClick={onSearch}
-                  className="flex h-8 w-full items-center gap-2 rounded-md border border-border-subtle bg-bg-elevated px-3 text-left transition-colors hover:bg-surface"
+                  className="flex h-8 w-full items-center gap-2 rounded-[6px] border border-border-subtle bg-bg-elevated px-3 text-left transition-colors hover:bg-surface"
                 >
                   <Search className="size-3.5 text-fg-muted" strokeWidth={2} />
                   <span className="flex-1 truncate text-[12px] text-fg-faint">Search chats</span>
@@ -240,7 +240,7 @@ export function LeftRailFooter({
       <button
         type="button"
         onClick={onProfile}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-0.5 py-0.5 text-left transition-colors hover:bg-surface"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-0.5 py-0.5 text-left transition-colors hover:bg-surface"
       >
         {avatar}
         <span className="truncate text-[12px] text-fg-secondary">{name}</span>
@@ -274,7 +274,7 @@ function FooterIconButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="flex size-6 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-surface hover:text-fg"
+      className="flex size-6 items-center justify-center rounded-[6px] text-fg-muted transition-colors hover:bg-surface hover:text-fg"
     >
       {children}
     </button>

@@ -15,6 +15,7 @@ import { useChatStore } from '@/stores/useChatStore'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { usePluginAction } from '@/hooks/usePluginAction'
 import { resolveIcon } from '@/lib/icons'
+import { useSettings } from '@/hooks/useSettings'
 
 // normalizeEnvelope fixes known agent schema drift for question-form envelopes:
 //   - questions/title/subtitle nested in data → promoted to top level
@@ -136,6 +137,9 @@ interface ChatMessageProps {
 export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, onSendMessage, agentName, isMultiAgent = false, userMessageCount }: ChatMessageProps) {
   const [hovered, setHovered] = useState(false)
   const activeMode = useChatStore((s) => s.activeMode)
+  const { data: settings } = useSettings()
+  const userAvatarUrl = (settings?.ext_settings?.avatar_url as string) || ''
+  const userDisplayName = (settings?.ext_settings?.display_name as string) || ''
   const messageHeaderSlots = usePluginSlots('message-header')
   const messageActionSlots = usePluginSlots('message-actions')
   const contextMenuSlots = usePluginSlots('context-menu:message')
@@ -220,7 +224,7 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
       >
         <div className="flex justify-end mb-1">
           <span className="text-xs text-fg-faint">
-            You{hovered && ` · ${formatRelativeTime(message.created_at)}`}
+            {userDisplayName || 'You'}{hovered && ` · ${formatRelativeTime(message.created_at)}`}
           </span>
         </div>
         <ShellMessage content={displayText} meta={shellMeta} />
@@ -237,20 +241,28 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
     >
       {/* Avatar */}
       <div
-        className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${avatarStyle.bg} ${avatarStyle.text} ${
+        className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 overflow-hidden ${avatarStyle.bg} ${avatarStyle.text} ${
           isMultiAgent && !isUser && message.agent_id
             ? `ring-2 ${AGENT_COLORS[agentColorIndex(message.agent_id)].border}`
             : ''
         }`}
       >
-        {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+        {isUser ? (
+          userAvatarUrl ? (
+            <img src={userAvatarUrl} alt={userDisplayName || 'You'} className="w-full h-full object-cover" />
+          ) : (
+            <User className="w-4 h-4" />
+          )
+        ) : (
+          <Bot className="w-4 h-4" />
+        )}
       </div>
 
       {/* Content */}
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-col items-end' : ''}`}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-medium text-fg-muted">
-            {isUser ? 'You' : (agentName || 'Nanite')}
+            {isUser ? (userDisplayName || 'You') : (agentName || 'Nanite')}
           </span>
           {isMultiAgent && !isUser && message.agent_id && (
             <span className={`text-xs px-1.5 py-0.5 rounded-full ${AGENT_COLORS[agentColorIndex(message.agent_id)].badge}`}>

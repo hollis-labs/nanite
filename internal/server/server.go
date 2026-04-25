@@ -445,7 +445,16 @@ func (s *Server) handleGetUIComponents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	components := s.pluginHost.GetUIComponentsWithOwners()
+	all := s.pluginHost.GetUIComponentsWithOwners()
+	// Exclude components that are pure server-side handlers (Handler != nil).
+	// These are backend-only API routes with no corresponding React component
+	// and should not appear in the right rail widget list.
+	components := make([]naniteplugin.UIComponentWithOwner, 0, len(all))
+	for _, c := range all {
+		if c.Handler == nil {
+			components = append(components, c)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"components": components,

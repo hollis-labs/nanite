@@ -1,13 +1,12 @@
 import { Coins } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { Widget } from './Widget'
+import { Widget, WidgetRow } from './Widget'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 10_000) return `${(n / 1000).toFixed(1)}k`
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
   return String(n)
 }
@@ -17,27 +16,6 @@ function formatCost(usd: number): string {
   if (usd < 0.001) return `$${usd.toFixed(4)}`
   if (usd < 0.01) return `$${usd.toFixed(3)}`
   return `$${usd.toFixed(2)}`
-}
-
-function TokenRow({
-  label,
-  value,
-  colorClass,
-}: {
-  label: string
-  value: string
-  colorClass: string
-}) {
-  return (
-    <div className="flex justify-between items-center text-xs">
-      <span className="text-fg-muted">{label}</span>
-      <span
-        className={`${colorClass} font-mono tabular-nums transition-all duration-300`}
-      >
-        {value}
-      </span>
-    </div>
-  )
 }
 
 export function TokenUsageWidget() {
@@ -69,74 +47,48 @@ export function TokenUsageWidget() {
   const globalCost = globalUsage?.total_cost ?? 0
 
   return (
-    <Widget id="token-usage" title="Token Usage" icon={Coins}>
-      <div className="space-y-2">
-        {/* Session usage */}
+    <Widget id="token-usage" title="Token Usage" icon={Coins} accent="text-info">
+      <div className="flex flex-col gap-1.5">
         {activeSessionId ? (
           <>
-            <TokenRow
-              label="Input"
-              value={formatTokens(input)}
-              colorClass="text-info"
-            />
+            <WidgetRow label="Input">
+              <span className="font-mono text-[11px] text-info">{formatTokens(input)}</span>
+            </WidgetRow>
             {toolInput > 0 && (
               <>
-                <TokenRow
-                  label="  Content"
-                  value={formatTokens(contentInput)}
-                  colorClass="text-info"
-                />
-                <TokenRow
-                  label="  Tools"
-                  value={formatTokens(toolInput)}
-                  colorClass="text-purple-400"
-                />
+                <WidgetRow label="  Content">
+                  <span className="font-mono text-[11px] text-info opacity-85">{formatTokens(contentInput)}</span>
+                </WidgetRow>
+                <WidgetRow label="  Tools">
+                  <span className="font-mono text-[11px] text-primary">{formatTokens(toolInput)}</span>
+                </WidgetRow>
               </>
             )}
-            <TokenRow
-              label="Output"
-              value={formatTokens(output)}
-              colorClass="text-success"
-            />
+            <WidgetRow label="Output">
+              <span className="font-mono text-[11px] text-success">{formatTokens(output)}</span>
+            </WidgetRow>
 
-            <div className="border-t border-border pt-1.5 mt-1.5">
-              <TokenRow
-                label="Total"
-                value={formatTokens(total)}
-                colorClass="text-fg-secondary"
-              />
-              <TokenRow
-                label="Cost"
-                value={formatCost(cost)}
-                colorClass="text-status-warn"
-              />
-              <TokenRow
-                label="Messages"
-                value={String(messages)}
-                colorClass="text-fg-secondary"
-              />
-            </div>
+            <div className="h-px bg-divider my-1.5" />
+
+            <WidgetRow label="Total" mono>{formatTokens(total)}</WidgetRow>
+            <WidgetRow label="Cost">
+              <span className="font-mono text-[11px] text-warning">{formatCost(cost)}</span>
+            </WidgetRow>
+            <WidgetRow label="Messages" mono>{String(messages)}</WidgetRow>
           </>
         ) : (
-          <p className="text-xs text-fg-faint italic">No active session</p>
+          <p className="text-[12px] text-fg-faint italic">No active session</p>
         )}
 
-        {/* Cumulative usage */}
         {globalTotal > 0 && (
-          <div className="border-t border-border pt-1.5 mt-1.5">
-            <p className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
+          <div className="pt-2 mt-0.5 border-t border-divider">
+            <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.04em] text-fg-faint mb-1.5">
               Cumulative
-            </p>
-            <TokenRow
-              label="All sessions"
-              value={formatTokens(globalTotal)}
-              colorClass="text-fg-secondary"
-            />
-            <TokenRow
-              label="Total cost"
-              value={formatCost(globalCost)}
-              colorClass="text-status-warn/70"
-            />
+            </div>
+            <WidgetRow label="All sessions" mono>{formatTokens(globalTotal)}</WidgetRow>
+            <WidgetRow label="Total cost">
+              <span className="font-mono text-[11px] text-warning opacity-70">{formatCost(globalCost)}</span>
+            </WidgetRow>
           </div>
         )}
       </div>

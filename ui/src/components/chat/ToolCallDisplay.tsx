@@ -25,7 +25,7 @@ function ModeToggle({ mode, onCycle }: { mode: ToolCallDisplayMode; onCycle: () 
   return (
     <button
       onClick={onCycle}
-      className="text-fg-muted hover:text-fg-secondary text-xs font-mono px-1 rounded hover:bg-surface-hover/50 transition-colors"
+      className="text-fg-muted hover:text-fg-secondary text-xs font-mono px-1 rounded hover:bg-surface transition-colors"
       title={`Tool display: ${labels[mode]} (click to cycle)`}
     >
       {icons[mode]}

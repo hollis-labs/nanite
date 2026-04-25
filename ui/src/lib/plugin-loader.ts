@@ -355,12 +355,20 @@ function loadPluginBundle(
     // This asymmetry with envelopes is tracked: the registry should
     // eventually carry an explicit `export` field so IDs can contain
     // hyphens without breaking lookup.
+    // Fallback: try PascalCase(widget.name) when the direct name lookup fails
+    // (e.g. "mux-activity-widget" → "MuxActivityWidget"). Bundles targeting
+    // ES2020 can't use string-named exports, so PascalCase is the only viable
+    // convention for kebab-case widget IDs.
     for (const [id, widget] of Object.entries(data.widgets)) {
       if (widget.plugin_id !== pluginId) continue
-      const comp = mod[widget.name]
+      const pascalName = widget.name
+        .split('-')
+        .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join('')
+      const comp = mod[widget.name] ?? mod[pascalName]
       if (!isComponentLike(comp)) {
         console.warn(
-          `[plugin-loader] Plugin "${pluginId}" bundle is missing named export "${widget.name}" for widget "${id}" — skipping`,
+          `[plugin-loader] Plugin "${pluginId}" bundle is missing named export "${widget.name}" (or "${pascalName}") for widget "${id}" — skipping`,
         )
         continue
       }

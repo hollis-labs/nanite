@@ -101,7 +101,7 @@ export function EnvelopeHeader({
     <div
       data-slot="envelope-header"
       className={cn(
-        'flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-2.5',
+        'flex items-center justify-between gap-3 px-4 py-2.5',
         className,
       )}
     >
@@ -172,7 +172,7 @@ export function EnvelopeFooter({ className, children, ...rest }: EnvelopeFooterP
     <div
       data-slot="envelope-footer"
       className={cn(
-        'flex items-center gap-2 border-t border-border-subtle px-4 py-2.5',
+        'flex items-center gap-2 px-4 py-2.5',
         className,
       )}
       {...rest}

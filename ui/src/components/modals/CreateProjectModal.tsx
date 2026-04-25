@@ -45,27 +45,27 @@ export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreatePr
         {/* Form */}
         <div className="px-5 py-4 space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-fg-secondary">Name</label>
+            <label className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted">Name</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Project name"
               autoFocus
-              className="w-full rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full rounded-[7px] border border-border-subtle bg-surface px-3 py-[7px] text-[13px] text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary"
               onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
               disabled={createMutation.isPending}
             />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-fg-secondary">Description <span className="text-fg-faint font-normal">(optional)</span></label>
+            <label className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted">Description <span className="text-fg-faint font-normal normal-case tracking-normal">(optional)</span></label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What is this project about?"
               rows={3}
-              className="w-full rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              className="w-full rounded-[7px] border border-border-subtle bg-surface px-3 py-[7px] text-[13px] text-fg placeholder:text-fg-faint focus:outline-none focus:ring-1 focus:ring-primary resize-none"
               disabled={createMutation.isPending}
             />
           </div>
@@ -77,7 +77,7 @@ export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreatePr
           )}
         </div>
 
-        <DialogFooter className="px-5 py-3 border-t border-border">
+        <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose} disabled={createMutation.isPending}>
             Cancel
           </Button>

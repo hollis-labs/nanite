@@ -147,7 +147,7 @@ export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
             )}
           </div>
 
-          <DialogFooter className="px-5 py-3 border-t border-border">
+          <DialogFooter>
             <Button
               variant="secondary"
               size="sm"

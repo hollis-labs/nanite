@@ -405,7 +405,7 @@ export function LeftSidebar() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="size-6 rounded-md text-fg-muted hover:bg-surface hover:text-fg"
+                    className="size-6 rounded-[6px] text-fg-muted hover:bg-surface hover:text-fg"
                     onClick={() => setShowArchived((value) => !value)}
                   >
                     {showArchived ? (

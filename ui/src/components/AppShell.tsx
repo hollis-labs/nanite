@@ -14,6 +14,11 @@ import { useAppStore } from '@/stores/useAppStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { api } from '@/lib/api'
 import SettingsPage from './settings/SettingsPage'
+import { lazy } from 'react'
+
+const ComponentGalleryPage = import.meta.env.DEV
+  ? lazy(() => import('./ComponentGalleryPage').then((m) => ({ default: m.ComponentGalleryPage })))
+  : null
 import { MemoryModal } from './memory/MemoryModal'
 import { useToolRefresh } from '@/hooks/useToolRefresh'
 import { usePresence } from '@/hooks/usePresence'
@@ -147,7 +152,7 @@ export function AppShell() {
     )
   }
 
-  const isPluginPage = currentPage !== 'chat' && currentPage !== 'settings'
+  const isPluginPage = currentPage !== 'chat' && currentPage !== 'settings' && currentPage !== 'gallery'
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg">
@@ -157,6 +162,10 @@ export function AppShell() {
         <ChatMain onEditorReady={handleEditorReady} />
       ) : currentPage === 'settings' ? (
         <SettingsPage />
+      ) : currentPage === 'gallery' && ComponentGalleryPage ? (
+        <Suspense fallback={<div className="flex-1 flex items-center justify-center text-fg-muted text-sm">Loading gallery...</div>}>
+          <ComponentGalleryPage />
+        </Suspense>
       ) : isPluginPage ? (
         renderPluginPage()
       ) : null}

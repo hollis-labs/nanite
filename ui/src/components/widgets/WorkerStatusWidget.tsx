@@ -42,7 +42,7 @@ export function WorkerStatusWidget() {
           {active.map((worker) => (
             <div
               key={worker.id}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-surface/30"
+              className="flex items-center gap-2 px-2 py-1.5 rounded-[6px] bg-surface"
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[worker.status]}`} />
               <div className="flex-1 min-w-0">

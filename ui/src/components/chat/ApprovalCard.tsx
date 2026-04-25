@@ -74,7 +74,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
   if (approval.resolved) {
     const isAllowed = approval.resolved.decision === 'allow'
     return (
-      <div className="flex items-center gap-2 text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted">
+      <div className="flex items-center gap-2 text-[10px] px-1.5 py-0.5 rounded-[6px] bg-bg-elevated border border-border-subtle text-fg-muted">
         {isAllowed ? (
           <ShieldCheck className="w-3.5 h-3.5 text-success shrink-0" />
         ) : (
@@ -96,7 +96,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
   const timerColor = urgency ? 'text-primary' : 'text-fg-muted'
 
   return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-[10px] border border-border-subtle bg-bg-elevated overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
         <div className="w-8 h-8 rounded-lg bg-warning/15 flex items-center justify-center shrink-0">
@@ -121,7 +121,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
 
       {/* Input summary */}
       {inputSummary && (
-        <div className="px-3.5 py-2 border-t border-border/30 bg-surface/20">
+        <div className="px-3.5 py-2 border-t border-divider bg-surface">
           <pre className="text-[10px] text-fg-muted font-mono leading-relaxed whitespace-pre-wrap break-all max-h-20 overflow-y-auto">
             {inputSummary}
           </pre>
@@ -129,7 +129,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-1.5 px-3.5 py-2 border-t border-border/50 bg-bg-elevated/40">
+      <div className="flex items-center gap-1.5 px-3.5 py-2 border-t border-divider bg-surface">
         <Button
           variant="default"
           size="sm"

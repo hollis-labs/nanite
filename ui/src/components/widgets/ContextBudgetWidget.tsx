@@ -1,13 +1,19 @@
 import { useState } from 'react'
 import { Gauge, Info } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { Widget } from './Widget'
+import { Widget, WidgetRow, Bar, pctTone } from './Widget'
 import { useAppStore } from '@/stores/useAppStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { api } from '@/lib/api'
 import { ContextInspectorModal } from './ContextInspectorModal'
 
 const BREAKDOWN_STALE = 30_000
+
+const PCT_TEXT: Record<string, string> = {
+  success: 'text-success',
+  warning: 'text-warning',
+  danger:  'text-danger',
+}
 
 function formatTokens(n: number): string {
   if (n >= 1000) return `${Math.round(n / 1000)}K`
@@ -17,18 +23,6 @@ function formatTokens(n: number): string {
 function formatCost(usd: number): string {
   if (usd < 0.01) return '<$0.01'
   return `$${usd.toFixed(2)}`
-}
-
-function getBarColor(pct: number): string {
-  if (pct < 50) return 'bg-status-ok'
-  if (pct < 75) return 'bg-status-warn'
-  return 'bg-status-danger'
-}
-
-function getBarTextColor(pct: number): string {
-  if (pct < 50) return 'text-status-ok'
-  if (pct < 75) return 'text-status-warn'
-  return 'text-status-danger'
 }
 
 export function ContextBudgetWidget() {
@@ -51,7 +45,6 @@ export function ContextBudgetWidget() {
     refetchInterval: isStreaming ? 10000 : 60000,
   })
 
-  // Context window fill (current snapshot — what's in the window right now)
   const ctxTotal = breakdown?.total ?? 0
   const ctxCeiling = breakdown?.ceiling ?? 1
   const ctxPct = Math.min((ctxTotal / ctxCeiling) * 100, 100)
@@ -60,7 +53,6 @@ export function ContextBudgetWidget() {
   const toolTokens = breakdown?.tool_tokens_total ?? 0
   const toolsAvailable = breakdown?.tools_available ?? 0
 
-  // Cumulative token usage (grows over session lifetime)
   const totalTokens = usage?.total_tokens ?? 0
   const inputTokens = usage?.input_tokens ?? 0
   const outputTokens = usage?.output_tokens ?? 0
@@ -70,93 +62,67 @@ export function ContextBudgetWidget() {
   const cacheRead = usage?.cache_read_tokens ?? 0
   const tokenPct = ctxCeiling > 1 ? (totalTokens / ctxCeiling) * 100 : 0
 
+  const ctxTone = pctTone(ctxPct)
+  const tokenTone = pctTone(tokenPct)
+
   return (
     <>
-      <Widget id="context" title="Context" icon={Gauge}>
-        <div className="space-y-2">
-          {/* Context Window bar */}
-          <div className="flex justify-between text-xs text-fg-secondary">
-            <span className="flex items-center gap-1">
-              Context Window
-              {activeSessionId && (
-                <button
-                  onClick={() => setInspectorOpen(true)}
-                  className="p-0.5 rounded hover:bg-surface-hover transition-colors"
-                  title="View context breakdown"
-                >
-                  <Info className="w-3 h-3 text-fg-muted hover:text-fg-secondary" />
-                </button>
-              )}
-            </span>
-            <span className={getBarTextColor(ctxPct)}>
-              {formatTokens(ctxTotal)} / {formatTokens(ctxCeiling)}
-            </span>
-          </div>
-          <div className="w-full bg-surface rounded-full h-1.5">
-            <div
-              className={`${getBarColor(ctxPct)} h-1.5 rounded-full transition-all duration-500`}
-              style={{ width: `${Math.max(ctxPct, 1)}%` }}
-            />
-          </div>
-          <div className="flex justify-between text-xs text-fg-faint">
-            <span>{Math.round(ctxPct)}% filled</span>
-          </div>
-
-          {/* Token Usage bar */}
-          <div className="flex justify-between text-xs text-fg-secondary pt-1">
-            <span>Token Usage</span>
-            <span className={getBarTextColor(tokenPct)}>
-              {formatTokens(totalTokens)} / {formatTokens(ctxCeiling)}
-            </span>
-          </div>
-          <div className="w-full bg-surface rounded-full h-1.5">
-            <div
-              className={`${getBarColor(tokenPct)} h-1.5 rounded-full transition-all duration-500`}
-              style={{ width: `${Math.min(Math.max(tokenPct, 1), 100)}%` }}
-            />
-          </div>
-          <div className="flex justify-between text-xs text-fg-faint">
-            <span>{Math.round(tokenPct)}% used</span>
-            <span>{formatCost(cost)}</span>
+      <Widget
+        id="context"
+        title="Context"
+        icon={Gauge}
+        accent="text-info"
+        meta={`${Math.round(ctxPct)}%`}
+      >
+        <div className="flex flex-col gap-3">
+          {/* Context window bar */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-[12px] text-fg-muted">
+              <span className="inline-flex items-center gap-1">
+                Window
+                {activeSessionId && (
+                  <button
+                    onClick={() => setInspectorOpen(true)}
+                    className="p-0.5 rounded hover:bg-surface transition-colors"
+                    title="Inspect breakdown"
+                  >
+                    <Info className="w-[11px] h-[11px] text-fg-faint hover:text-fg-muted" />
+                  </button>
+                )}
+              </span>
+              <span className={`font-mono text-[11px] ${PCT_TEXT[ctxTone]}`}>
+                {formatTokens(ctxTotal)} / {formatTokens(ctxCeiling)}
+              </span>
+            </div>
+            <Bar pct={ctxPct} tone={ctxTone} />
           </div>
 
-          {/* Stats breakdown */}
+          {/* Token usage bar */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-[12px] text-fg-muted">
+              <span>Tokens used</span>
+              <span className={`font-mono text-[11px] ${PCT_TEXT[tokenTone]}`}>
+                {formatTokens(totalTokens)} · {formatCost(cost)}
+              </span>
+            </div>
+            <Bar pct={tokenPct} tone={tokenTone} />
+          </div>
+
+          {/* Breakdown */}
           {(totalTokens > 0 || ctxTotal > 0) && (
-            <div className="space-y-0.5 pt-1 border-t border-border">
-              <div className="flex justify-between text-xs">
-                <span className="text-fg-muted">Input</span>
-                <span className="text-fg-secondary">{formatTokens(inputTokens)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-fg-muted">Output</span>
-                <span className="text-fg-secondary">{formatTokens(outputTokens)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-fg-muted">Messages</span>
-                <span className="text-fg-secondary">{messageCount}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-fg-muted">System Prompt</span>
-                <span className="text-fg-secondary">{formatTokens(systemPromptTokens)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-fg-muted">Tool Calls ({toolCallCount})</span>
-                <span className="text-fg-secondary">{formatTokens(toolTokens)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-fg-muted">Tools Available</span>
-                <span className="text-fg-secondary">{toolsAvailable}</span>
-              </div>
+            <div className="flex flex-col gap-1.5 pt-2 border-t border-divider">
+              <WidgetRow label="Input" mono>{formatTokens(inputTokens)}</WidgetRow>
+              <WidgetRow label="Output" mono>{formatTokens(outputTokens)}</WidgetRow>
+              <WidgetRow label="Messages" mono>{String(messageCount)}</WidgetRow>
+              <WidgetRow label="System prompt" mono>{formatTokens(systemPromptTokens)}</WidgetRow>
+              <WidgetRow label={`Tool calls (${toolCallCount})`} mono>{formatTokens(toolTokens)}</WidgetRow>
+              <WidgetRow label="Tools available" mono>{String(toolsAvailable)}</WidgetRow>
               {(cacheCreation > 0 || cacheRead > 0) && (
                 <>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-fg-muted">Cache Write</span>
-                    <span className="text-fg-secondary">{formatTokens(cacheCreation)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-fg-muted">Cache Read</span>
-                    <span className="text-success">{formatTokens(cacheRead)}</span>
-                  </div>
+                  <WidgetRow label="Cache write" mono>{formatTokens(cacheCreation)}</WidgetRow>
+                  <WidgetRow label="Cache read">
+                    <span className="font-mono text-[11px] text-success">{formatTokens(cacheRead)}</span>
+                  </WidgetRow>
                 </>
               )}
             </div>

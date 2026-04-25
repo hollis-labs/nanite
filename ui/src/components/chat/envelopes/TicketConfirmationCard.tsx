@@ -60,7 +60,7 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
         action={<StatusPill tone="success">{ticket.status}</StatusPill>}
       />
 
-      <div className="px-4 py-3 space-y-3">
+      <div className="px-4 py-3 space-y-2">
         <h3 className="text-[14px] font-semibold leading-snug text-fg">
           {ticket.title}
         </h3>
@@ -79,7 +79,7 @@ export function TicketConfirmationCard({ data }: TicketConfirmationCardProps) {
           <p className="text-[13px] leading-relaxed text-fg-secondary">{ticket.description}</p>
         </DetailField>
 
-        <div className="flex items-center gap-3 border-t border-border-subtle pt-3 font-mono text-[11px] text-fg-muted">
+        <div className="flex items-center gap-3 font-mono text-[11px] text-fg-muted">
           <span>Requester: {ticket.requester || 'You'}</span>
           <span>·</span>
           <span>{new Date(ticket.created_at).toLocaleString()}</span>

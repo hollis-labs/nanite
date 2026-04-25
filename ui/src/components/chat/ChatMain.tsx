@@ -56,90 +56,96 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           loadingOlder={loadingOlder}
         />
         {sessionTakeover && (
-          <div className="mx-4 mb-2 rounded-lg border border-info/30 bg-info/15 p-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-info mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-info">
-                  This session is now active in another tab
-                </p>
-                <p className="text-xs text-info/70 mt-1">
-                  The streaming connection was moved to a newer tab. Reload this page to reconnect
-                  here.
-                </p>
-                <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={() => window.location.reload()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-info/15 text-info hover:bg-info/30 transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Reconnect
-                  </button>
+          <div className="max-w-3xl w-full mx-auto px-4 mb-2">
+            <div className="rounded-[8px] border border-info-muted bg-info-muted p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-info mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-info">
+                    This session is now active in another tab
+                  </p>
+                  <p className="text-xs text-fg-muted mt-1">
+                    The streaming connection was moved to a newer tab. Reload this page to reconnect
+                    here.
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => window.location.reload()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-surface text-fg-secondary hover:bg-surface-hover transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Reconnect
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         )}
         {streamStalled && !circuitOpen && !sessionTakeover && (
-          <div className="mx-4 mb-2 rounded-lg border border-warning/30 bg-warning/10 p-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-warning">
-                  Connection appears stalled
-                </p>
-                <p className="text-xs text-warning/70 mt-1">
-                  No activity from the server in the last minute. The stream may be stuck.
-                  Click reconnect to retry this turn with a fresh connection.
-                </p>
-                <div className="flex gap-2 mt-3">
-                  <button
-                    type="button"
-                    onClick={() => void reconnectStalledStream()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-warning/20 text-warning hover:bg-warning/30 transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Reconnect
-                  </button>
+          <div className="max-w-3xl w-full mx-auto px-4 mb-2">
+            <div className="rounded-[8px] border border-warning-muted bg-warning-muted p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-warning">
+                    Connection appears stalled
+                  </p>
+                  <p className="text-xs text-fg-muted mt-1">
+                    No activity from the server in the last minute. The stream may be stuck.
+                    Click reconnect to retry this turn with a fresh connection.
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => void reconnectStalledStream()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-surface text-fg-secondary hover:bg-surface-hover transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Reconnect
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         )}
         {circuitOpen && (
-          <div className="mx-4 mb-2 rounded-lg border border-warning/30 bg-warning/10 p-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-warning">
-                  Provider rate limited after multiple retries
-                </p>
-                <p className="text-xs text-warning/70 mt-1">
-                  The API provider has been returning rate limit errors. You can retry or dismiss to
-                  keep the partial response.
-                </p>
-                <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={() => void retryStream()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-warning/20 text-warning hover:bg-warning/30 transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Retry
-                  </button>
-                  <button
-                    onClick={dismissCircuit}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-surface/50 text-fg-secondary hover:bg-surface-hover transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    Dismiss
-                  </button>
+          <div className="max-w-3xl w-full mx-auto px-4 mb-2">
+            <div className="rounded-[8px] border border-warning-muted bg-warning-muted p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-warning">
+                    Provider rate limited after multiple retries
+                  </p>
+                  <p className="text-xs text-fg-muted mt-1">
+                    The API provider has been returning rate limit errors. You can retry or dismiss to
+                    keep the partial response.
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => void retryStream()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-surface text-fg-secondary hover:bg-surface-hover transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Retry
+                    </button>
+                    <button
+                      onClick={dismissCircuit}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-surface text-fg-secondary hover:bg-surface-hover transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Dismiss
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         )}
         {statusMessage && (
-          <div className="px-4 py-1.5 text-xs text-warning bg-warning/10 border-t border-warning/30 animate-pulse">
+          <div className="max-w-3xl w-full mx-auto px-4 py-1.5 text-xs text-warning animate-pulse">
             {statusMessage}
           </div>
         )}
@@ -214,7 +220,7 @@ function WelcomeScreen() {
           <button
             key={card.action}
             onClick={() => handleAction(card.action)}
-            className="group text-left p-4 rounded-lg border border-border bg-bg-elevated/50 hover:border-border-subtle hover:bg-bg-elevated transition-all"
+            className="group text-left p-4 rounded-[10px] border border-border-subtle bg-bg-elevated hover:border-border hover:bg-surface transition-all"
           >
             <card.icon className="w-5 h-5 text-primary mb-3 group-hover:text-primary-hover transition-colors" />
             <h3 className="text-sm font-medium text-fg mb-1">{card.title}</h3>

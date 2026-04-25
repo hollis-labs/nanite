@@ -1,6 +1,6 @@
 import { Activity } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { Widget } from './Widget'
+import { Widget, WidgetRow } from './Widget'
 import { api } from '@/lib/api'
 
 function formatDuration(ms: number): string {
@@ -13,15 +13,6 @@ function formatCost(usd: number): string {
   if (usd === 0) return '$0.00'
   if (usd < 0.01) return `$${usd.toFixed(4)}`
   return `$${usd.toFixed(2)}`
-}
-
-function MetricRow({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="flex justify-between items-center text-xs">
-      <span className="text-fg-muted">{label}</span>
-      <span className={`${color} font-mono tabular-nums`}>{value}</span>
-    </div>
-  )
 }
 
 export function ObservabilityWidget() {
@@ -41,24 +32,28 @@ export function ObservabilityWidget() {
   const last = executions[0]
 
   return (
-    <Widget id="observability" title="Observability" icon={Activity}>
-      <div className="space-y-1.5">
+    <Widget id="observability" title="Observability" icon={Activity} defaultOpen={false}>
+      <div className="flex flex-col gap-1.5">
         {last ? (
           <>
-            <MetricRow label="Last exec" value={`${formatDuration(last.duration_ms)} · ${last.model}`} color="text-fg-secondary" />
-            <MetricRow label="Avg duration" value={formatDuration(avgDuration)} color="text-info" />
-            <MetricRow label={`Cost (last ${total})`} value={formatCost(totalCost)} color="text-status-warn" />
-            {errorCount > 0 && (
-              <MetricRow label="Errors" value={String(errorCount)} color="text-status-danger" />
-            )}
+            <WidgetRow label="Last exec" mono>{formatDuration(last.duration_ms)} · {last.model}</WidgetRow>
+            <WidgetRow label="Avg duration">
+              <span className="font-mono text-[11px] text-info">{formatDuration(avgDuration)}</span>
+            </WidgetRow>
+            <WidgetRow label={`Cost (last ${total})`}>
+              <span className="font-mono text-[11px] text-warning">{formatCost(totalCost)}</span>
+            </WidgetRow>
+            <WidgetRow label="Errors">
+              <span className={`font-mono text-[11px] ${errorCount > 0 ? 'text-danger' : 'text-fg-muted'}`}>
+                {errorCount}
+              </span>
+            </WidgetRow>
           </>
         ) : (
-          <p className="text-xs text-fg-faint italic">No executions yet</p>
+          <p className="text-[12px] text-fg-faint italic">No executions yet</p>
         )}
-        <div className="pt-1 border-t border-border">
-          <p className="text-[10px] text-fg-faint">
-            Settings → Observability for full dashboard
-          </p>
+        <div className="pt-1.5 mt-0.5 border-t border-divider">
+          <p className="text-[10px] text-fg-faint">Settings → Observability for full dashboard</p>
         </div>
       </div>
     </Widget>

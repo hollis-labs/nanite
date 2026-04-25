@@ -115,7 +115,7 @@ ui:
 		t.Fatal("LoadDiscovered loaded no plugins")
 	}
 
-	resp := buildRegistryResponse(host)
+	resp := buildRegistryResponse(host, "")
 
 	env, ok := resp.Envelopes["synth-card"]
 	if !ok {

@@ -36,8 +36,8 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
   return (
     <Dialog open={true} onOpenChange={() => onClose()}>
       <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
-        <DialogHeader className="px-4 py-3 border-b border-border">
-          <DialogTitle className="text-sm">Error Details</DialogTitle>
+        <DialogHeader className="px-4 pt-4 pb-3">
+          <DialogTitle>Error Details</DialogTitle>
           <DialogDescription className="sr-only">Detailed error information</DialogDescription>
         </DialogHeader>
 
@@ -45,7 +45,7 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
           {/* Error Code */}
           <div>
-            <dt className="text-xs font-medium text-fg-muted uppercase tracking-wider mb-1">
+            <dt className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1">
               Error Code
             </dt>
             <dd className="text-sm text-fg">
@@ -60,7 +60,7 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
 
           {/* Message */}
           <div>
-            <dt className="text-xs font-medium text-fg-muted uppercase tracking-wider mb-1">
+            <dt className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1">
               Message
             </dt>
             <dd className="text-sm text-fg">{error.message}</dd>
@@ -68,7 +68,7 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
 
           {/* Timestamp */}
           <div>
-            <dt className="text-xs font-medium text-fg-muted uppercase tracking-wider mb-1">
+            <dt className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1">
               Timestamp
             </dt>
             <dd className="text-sm text-fg-secondary font-mono text-xs">
@@ -79,11 +79,11 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
           {/* Details */}
           {error.details && Object.keys(error.details).length > 0 && (
             <div>
-              <dt className="text-xs font-medium text-fg-muted uppercase tracking-wider mb-1">
+              <dt className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1">
                 Raw Details
               </dt>
               <dd>
-                <pre className="text-xs text-fg-secondary bg-surface/80 rounded-md p-3 overflow-x-auto font-mono whitespace-pre-wrap break-all">
+                <pre className="text-xs text-fg-secondary bg-surface rounded-[6px] p-3 overflow-x-auto font-mono whitespace-pre-wrap break-all">
                   {JSON.stringify(error.details, null, 2)}
                 </pre>
               </dd>
@@ -91,7 +91,7 @@ export function ErrorDetailModal({ error, onClose }: ErrorDetailModalProps) {
           )}
         </div>
 
-        <DialogFooter className="px-4 py-3 border-t border-border">
+        <DialogFooter className="px-4">
           <Button variant="outline" size="sm" onClick={handleCopy} className="gap-1.5">
             {copied ? (
               <>

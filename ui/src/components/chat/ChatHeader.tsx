@@ -141,7 +141,8 @@ export function ChatHeader() {
   if (toolCount > 0) metaParts.push(`${toolCount} tools`)
 
   return (
-    <header className="flex h-[52px] shrink-0 items-center justify-between border-b border-divider px-[18px]">
+    <header className="flex h-[52px] shrink-0 border-b border-divider">
+      <div className="max-w-3xl w-full mx-auto flex items-center justify-between px-[18px]">
       {/* ── Left ── */}
       <div className="flex items-center gap-3">
         {/* Agent info block */}
@@ -294,6 +295,7 @@ export function ChatHeader() {
           )}
         </div>
 
+      </div>
       </div>
 
       {rosterOpen && activeSessionId && (

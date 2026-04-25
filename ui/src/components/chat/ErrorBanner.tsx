@@ -24,8 +24,6 @@ export function ErrorBanner({ error, onDismiss }: ErrorBannerProps) {
   const [showModal, setShowModal] = useState(false)
 
   if (error.dismissed) return null
-  // tool_error is already shown inline in the ToolCallDrawer as a failed tool call
-  if (error.code === 'tool_error') return null
 
   const config = ERROR_CONFIG[error.code] || ERROR_CONFIG.internal_error
 

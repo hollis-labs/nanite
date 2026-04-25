@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { LayoutGrid, ListTodo, GitBranch, Mail, Package, Building2, Plus, Search } from 'lucide-react'
+import { ChevronDown, LayoutGrid, ListTodo, GitBranch, Mail, Moon, Package, Building2, Plus, Search, Sun } from 'lucide-react'
 import { useLayoutStore, type LayoutPreset } from '@/stores/useLayoutStore'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { resolveIcon } from '@/lib/icons'
+import { useTheme } from '@/hooks/useTheme'
+import { BUILTIN_THEMES } from '@/lib/theme/defaults'
 
 // ── SVG icon helpers (match design reference paths exactly) ──────────────────
 
@@ -96,6 +98,112 @@ function LMPreset({
       <Ic size={16} />
       <span className="font-mono text-[9px] font-semibold uppercase tracking-wide">{label}</span>
     </button>
+  )
+}
+
+// ── Theme dropdown ───────────────────────────────────────────────────────────
+
+function ThemeDropdown() {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const { activeThemeId, setActiveTheme } = useTheme()
+  const theme = useLayoutStore((s) => s.theme)
+  const setTheme = useLayoutStore((s) => s.setTheme)
+
+  const activeBuiltin = BUILTIN_THEMES.find((t) => t.id === activeThemeId) ?? BUILTIN_THEMES[0]
+  // Swatch preview uses light tokens regardless of current mode
+  const swatchBg = activeBuiltin.tokens.light['bg-elevated'] ?? '#ffffff'
+  const swatchAccent = activeBuiltin.tokens.light['primary'] ?? '#000000'
+  const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 rounded-[5px] border px-1.5 py-1 transition-colors ${
+          open ? 'border-border bg-surface' : 'border-border-subtle hover:border-border hover:bg-surface'
+        }`}
+      >
+        {/* Mini swatch */}
+        <div
+          className="relative overflow-hidden rounded-[3px]"
+          style={{ width: 14, height: 14, background: swatchBg, border: '1px solid rgba(0,0,0,0.10)' }}
+        >
+          <div
+            className="absolute bottom-[1px] inset-x-[1px] h-[3px] rounded-[1px]"
+            style={{ background: swatchAccent }}
+          />
+        </div>
+        <span className="font-mono text-[10px] font-semibold text-fg-secondary">
+          {activeBuiltin.name.split(' ')[0]}·{isDark ? 'D' : 'L'}
+        </span>
+        <ChevronDown className="h-[9px] w-[9px] text-fg-faint" />
+      </button>
+
+      {open && (
+        <div className="absolute bottom-full right-0 mb-1.5 z-10 w-[220px] rounded-[8px] border border-border bg-bg-elevated p-2 shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
+          {/* Light / Dark toggle */}
+          <div className="mb-2 flex rounded-[5px] border border-border-subtle bg-surface p-[2px]">
+            {(['light', 'dark'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setTheme(m)}
+                className={`flex flex-1 items-center justify-center gap-1 rounded-[3px] py-1 text-[10px] font-medium capitalize transition-colors ${
+                  (m === 'dark') === isDark
+                    ? 'bg-bg-elevated text-fg shadow-sm'
+                    : 'text-fg-muted hover:text-fg-secondary'
+                }`}
+              >
+                {m === 'light' ? <Sun className="h-[9px] w-[9px]" /> : <Moon className="h-[9px] w-[9px]" />}
+                {m}
+              </button>
+            ))}
+          </div>
+
+          {/* Theme palette grid */}
+          <div className="grid grid-cols-3 gap-1.5">
+            {BUILTIN_THEMES.map((t) => {
+              const bg = t.tokens.light['bg-elevated'] ?? '#ffffff'
+              const accent = t.tokens.light['primary'] ?? '#000000'
+              const brand = t.tokens.light['brand'] ?? accent
+              const isActive = t.id === activeThemeId
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => { setActiveTheme(t.id); setOpen(false) }}
+                  className={`flex flex-col items-center gap-1 rounded-[5px] border p-1.5 transition-colors ${
+                    isActive ? 'border-primary bg-primary-muted' : 'border-transparent hover:border-border-subtle hover:bg-surface'
+                  }`}
+                >
+                  <div
+                    className="relative overflow-hidden rounded-[4px]"
+                    style={{ width: 26, height: 26, background: bg, border: '1px solid rgba(0,0,0,0.08)' }}
+                  >
+                    <div className="absolute bottom-[2px] inset-x-[2px] h-[3px] rounded-[1px]" style={{ background: accent }} />
+                    <div className="absolute left-[2px] top-[6px] h-[6px] w-[6px] rounded-full" style={{ background: brand }} />
+                  </div>
+                  <span className={`font-mono text-[9px] font-semibold ${isActive ? 'text-primary' : 'text-fg-muted'}`}>
+                    {t.name.split(' ')[0]}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -210,10 +318,13 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
       <div className="w-[280px]">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-divider px-3 py-2.5">
-          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-fg-muted">
-            Layout
-          </span>
-          <LMKbd>⌘\</LMKbd>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-fg-muted">
+              Layout
+            </span>
+            <LMKbd>⌘\</LMKbd>
+          </div>
+          <ThemeDropdown />
         </div>
 
         {/* Toggle rows */}

@@ -4,7 +4,8 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { usePermissionMode } from '@/hooks/usePermissionMode'
 import { useSettings, useSettingsMutation, useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
-import type { PermissionMode, ToolCallDisplayMode, ToolStreamBehavior } from '@/lib/types'
+import type { PermissionMode, ToolCallDisplayMode } from '@/lib/types'
+import { SCard, SRow, SToggle, SSelect } from './primitives'
 
 const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; description: string }[] = [
   { value: 'default', label: 'Default', description: 'Prompt for destructive/write operations' },
@@ -20,12 +21,6 @@ const TOOL_DISPLAY_OPTIONS: { value: ToolCallDisplayMode; label: string }[] = [
   { value: 'full', label: 'Full' },
 ]
 
-const TOOL_STREAM_OPTIONS: { value: ToolStreamBehavior; label: string }[] = [
-  { value: 'streaming', label: 'While Running' },
-  { value: 'persist', label: 'Always' },
-  { value: 'hidden', label: 'Hidden' },
-]
-
 const DRAWER_RETENTION_OPTIONS: { value: string; label: string }[] = [
   { value: '5', label: '5 minutes' },
   { value: '15', label: '15 minutes' },
@@ -33,117 +28,6 @@ const DRAWER_RETENTION_OPTIONS: { value: string; label: string }[] = [
   { value: '60', label: '1 hour' },
   { value: '-1', label: 'Until refresh' },
 ]
-
-// --- Shared components ---
-
-function SettingsCard({
-  title,
-  description,
-  children,
-}: {
-  title: string
-  description?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-border/50">
-        <h3 className="text-sm font-semibold text-fg">{title}</h3>
-        {description && (
-          <p className="text-[11px] text-fg-muted mt-0.5">{description}</p>
-        )}
-      </div>
-      <div className="px-4 py-2">{children}</div>
-    </div>
-  )
-}
-
-function SettingsRow({
-  label,
-  description,
-  children,
-}: {
-  label: string
-  description?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2.5">
-      <div className="min-w-0">
-        <div className="text-sm text-fg">{label}</div>
-        {description && (
-          <div className="text-[11px] text-fg-muted mt-0.5">{description}</div>
-        )}
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  )
-}
-
-function SettingsSelect({
-  value,
-  options,
-  onChange,
-  disabled,
-  allowNone = true,
-}: {
-  value: string
-  options: { value: string; label: string }[]
-  onChange: (value: string) => void
-  disabled?: boolean
-  allowNone?: boolean
-}) {
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className="appearance-none w-48 bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-      >
-        {allowNone && <option value="">None</option>}
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-fg-faint pointer-events-none" />
-    </div>
-  )
-}
-
-function Toggle({
-  checked,
-  onChange,
-  variant = 'default',
-}: {
-  checked: boolean
-  onChange: (checked: boolean) => void
-  variant?: 'default' | 'warning'
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative shrink-0 inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-        checked
-          ? variant === 'warning'
-            ? 'bg-warning'
-            : 'bg-toggle-on'
-          : 'bg-surface-hover'
-      }`}
-    >
-      <span
-        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-          checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
-        }`}
-      />
-    </button>
-  )
-}
 
 // --- Fallback Chain ---
 
@@ -169,13 +53,8 @@ function FallbackChain({
     [providers],
   )
 
-  const handleDragStart = useCallback((idx: number) => {
-    dragItem.current = idx
-  }, [])
-
-  const handleDragEnter = useCallback((idx: number) => {
-    dragOverItem.current = idx
-  }, [])
+  const handleDragStart = useCallback((idx: number) => { dragItem.current = idx }, [])
+  const handleDragEnter = useCallback((idx: number) => { dragOverItem.current = idx }, [])
 
   const handleDragEnd = useCallback(() => {
     if (dragItem.current === null || dragOverItem.current === null) return
@@ -210,7 +89,7 @@ function FallbackChain({
   const available = providers.filter((p) => !items.includes(p.value))
 
   return (
-    <div className="space-y-1.5">
+    <div className="p-4 space-y-1.5">
       {items.length === 0 && (
         <div className="text-[11px] text-fg-faint py-3">No providers in fallback chain. Add one below.</div>
       )}
@@ -222,7 +101,7 @@ function FallbackChain({
           onDragEnter={() => handleDragEnter(idx)}
           onDragEnd={handleDragEnd}
           onDragOver={(e) => e.preventDefault()}
-          className="flex items-center gap-2 px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-sm text-fg cursor-grab active:cursor-grabbing hover:shadow-sm transition-all"
+          className="flex items-center gap-2 px-3 py-2 bg-surface border border-border-subtle rounded-[6px] text-[13px] text-fg cursor-grab active:cursor-grabbing hover:shadow-sm transition-all"
         >
           <GripVertical className="w-3.5 h-3.5 text-fg-faint shrink-0" />
           <span className="text-[11px] text-fg-muted tabular-nums w-5">{idx + 1}.</span>
@@ -238,12 +117,9 @@ function FallbackChain({
       {available.length > 0 && (
         <div className="relative">
           <select
-            onChange={(e) => {
-              handleAdd(e.target.value)
-              e.target.value = ''
-            }}
+            onChange={(e) => { handleAdd(e.target.value); e.target.value = '' }}
             defaultValue=""
-            className="appearance-none w-full bg-bg-elevated border border-border-subtle rounded-lg pl-3 pr-8 py-1.5 text-sm text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
+            className="appearance-none w-full bg-surface border border-border-subtle rounded-[6px] pl-3 pr-8 py-[7px] text-[13px] text-fg-muted focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer"
           >
             <option value="" disabled>Add provider...</option>
             {available.map((p) => (
@@ -284,9 +160,7 @@ export function PreferencesPanel() {
 
   const providerOptions = useMemo(() => {
     if (!providers) return []
-    return providers
-      .filter((p) => p.is_enabled)
-      .map((p) => ({ value: p.provider_type, label: p.name }))
+    return providers.filter((p) => p.is_enabled).map((p) => ({ value: p.provider_type, label: p.name }))
   }, [providers])
 
   const modelOptionsForProvider = useMemo(() => {
@@ -307,7 +181,7 @@ export function PreferencesPanel() {
     if (!agents) return []
     return agents
       .filter((a) => a.status !== 'disabled')
-      .map((a) => ({ value: a.id, label: a.source ? `${a.name} \u00b7 ${a.source}` : a.name }))
+      .map((a) => ({ value: a.id, label: a.source ? `${a.name} · ${a.source}` : a.name }))
   }, [agents])
 
   const handleChange = (key: string, value: string) => {
@@ -315,10 +189,10 @@ export function PreferencesPanel() {
   }
 
   return (
-    <div className="space-y-3">
-      <SettingsCard title="Session Defaults" description="Defaults applied when creating new chat sessions">
-        <SettingsRow label="Provider" description="Provider for new sessions">
-          <SettingsSelect
+    <div className="space-y-0">
+      <SCard title="Session Defaults" description="Defaults applied when creating new chat sessions">
+        <SRow label="Provider" description="Provider for new sessions">
+          <SSelect
             value={settings?.default_provider ?? ''}
             options={providerOptions}
             onChange={(v) => {
@@ -326,44 +200,47 @@ export function PreferencesPanel() {
                 ? { default_provider: v, default_model: '' }
                 : { default_provider: v })
             }}
+            allowNone
           />
-        </SettingsRow>
-        <SettingsRow label="Model" description="Model for new sessions">
-          <SettingsSelect
+        </SRow>
+        <SRow label="Model" description="Model for new sessions">
+          <SSelect
             value={settings?.default_model ?? ''}
             options={modelOptionsForProvider}
             onChange={(v) => handleChange('default_model', v)}
+            allowNone
           />
-        </SettingsRow>
-        <SettingsRow label="Agent" description="Agent profile for new sessions">
-          <SettingsSelect
+        </SRow>
+        <SRow label="Agent" description="Agent profile for new sessions">
+          <SSelect
             value={settings?.default_agent ?? ''}
             options={agentOptions}
             onChange={(v) => handleChange('default_agent', v)}
+            allowNone
           />
-        </SettingsRow>
-      </SettingsCard>
+        </SRow>
+      </SCard>
 
-      <SettingsCard title="Permission Mode" description="Controls how tool execution permissions are handled">
-        <SettingsRow label="Mode" description="Determines which tool calls require approval">
-          <SettingsSelect
+      <SCard title="Permission Mode" description="Controls how tool execution permissions are handled">
+        <SRow label="Mode" description="Determines which tool calls require approval">
+          <SSelect
             value={permissionMode}
             options={PERMISSION_MODE_OPTIONS}
             onChange={(v) => setPermissionMode(v as PermissionMode)}
           />
-        </SettingsRow>
+        </SRow>
         {permissionMode !== 'default' && (
-          <div className="pb-2">
-            <p className="text-[10px] text-fg-muted">
+          <div className="px-4 py-2.5 border-b border-border-subtle [&:last-child]:border-b-0">
+            <p className="text-[11px] text-fg-muted">
               {PERMISSION_MODE_OPTIONS.find((o) => o.value === permissionMode)?.description}
             </p>
           </div>
         )}
-      </SettingsCard>
+      </SCard>
 
-      <SettingsCard title="Utility Model" description="Used for auto-title, auto-tags, and summarization">
-        <SettingsRow label="Provider">
-          <SettingsSelect
+      <SCard title="Utility Model" description="Used for auto-title, auto-tags, and summarization">
+        <SRow label="Provider">
+          <SSelect
             value={settings?.utility_provider ?? ''}
             options={providerOptions}
             onChange={(v) => {
@@ -371,66 +248,59 @@ export function PreferencesPanel() {
                 ? { utility_provider: v, utility_model: '' }
                 : { utility_provider: v })
             }}
+            allowNone
           />
-        </SettingsRow>
-        <SettingsRow label="Model">
-          <SettingsSelect
+        </SRow>
+        <SRow label="Model">
+          <SSelect
             value={settings?.utility_model ?? ''}
             options={utilityModelOptions}
             onChange={(v) => handleChange('utility_model', v)}
+            allowNone
           />
-        </SettingsRow>
-      </SettingsCard>
+        </SRow>
+      </SCard>
 
-      <SettingsCard title="Display">
-        <SettingsRow label="Tool Call Style" description="How tool calls appear in chat">
-          <SettingsSelect
+      <SCard title="Display">
+        <SRow label="Tool Call Style" description="How tool calls appear in chat">
+          <SSelect
             value={settings?.tool_call_display_mode ?? 'minimal'}
             options={TOOL_DISPLAY_OPTIONS}
             onChange={(v) => handleChange('tool_call_display_mode', v)}
           />
-        </SettingsRow>
-        <SettingsRow label="Tool Call Visibility" description="When tool calls are visible in the chat stream">
-          <SettingsSelect
-            value={settings?.tool_stream_behavior ?? 'streaming'}
-            options={TOOL_STREAM_OPTIONS}
-            onChange={(v) => handleChange('tool_stream_behavior', v)}
-            allowNone={false}
-          />
-        </SettingsRow>
-        <SettingsRow label="Drawer Retention" description="How long tool call history stays in the drawer">
-          <SettingsSelect
+        </SRow>
+        <SRow label="Drawer Retention" description="How long tool call history stays in the drawer">
+          <SSelect
             value={String(settings?.tool_drawer_retention ?? 15)}
             options={DRAWER_RETENTION_OPTIONS}
             onChange={(v) => mutation.mutate({ tool_drawer_retention: Number(v) })}
-            allowNone={false}
           />
-        </SettingsRow>
-      </SettingsCard>
+        </SRow>
+      </SCard>
 
-      <SettingsCard title="Provider Fallback Chain" description="When a provider is unavailable, Nanite tries the next one. Drag to reorder.">
+      <SCard title="Provider Fallback Chain" description="When a provider is unavailable, Nanite tries the next one. Drag to reorder.">
         <FallbackChain
           chain={settings?.provider_fallback_chain ?? []}
           providers={providerOptions}
           onChange={(chain) => mutation.mutate({ provider_fallback_chain: chain })}
         />
-      </SettingsCard>
+      </SCard>
 
-      <SettingsCard title="Advanced">
-        <SettingsRow label="Developer Mode" description="Allow plugins to register custom React components">
-          <Toggle
+      <SCard title="Advanced">
+        <SRow label="Developer Mode" description="Allow plugins to register custom React components">
+          <SToggle
             checked={settings?.developer_mode ?? false}
             onChange={(v) => mutation.mutate({ developer_mode: v })}
           />
-        </SettingsRow>
-        <SettingsRow label="Recover Mode" description="Disable all plugin UI overrides">
-          <Toggle
+        </SRow>
+        <SRow label="Recover Mode" description="Disable all plugin UI overrides">
+          <SToggle
             checked={settings?.recover_mode ?? false}
             onChange={(v) => mutation.mutate({ recover_mode: v })}
             variant="warning"
           />
-        </SettingsRow>
-      </SettingsCard>
+        </SRow>
+      </SCard>
     </div>
   )
 }

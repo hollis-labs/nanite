@@ -168,7 +168,7 @@ export function WorkspaceProjectManager() {
             {Array.from({ length: 2 }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+                className="rounded-[10px] border border-border-subtle bg-bg-elevated overflow-hidden"
               >
                 <div className="px-3.5 py-3 flex items-center gap-2.5">
                   <Skeleton className="size-9 rounded-lg" />
@@ -203,7 +203,7 @@ export function WorkspaceProjectManager() {
                       className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
                         isActive
                           ? "border-primary/30 bg-primary/5"
-                          : "border-border-subtle bg-white dark:bg-bg-elevated/60"
+                          : "border-border-subtle bg-bg-elevated"
                       }`}
                       onClick={() => setActiveWorkspace(ws.id)}
                     >
@@ -279,7 +279,7 @@ export function WorkspaceProjectManager() {
               {Array.from({ length: 2 }).map((_, i) => (
                 <div
                   key={i}
-                  className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+                  className="rounded-[10px] border border-border-subtle bg-bg-elevated overflow-hidden"
                 >
                   <div className="px-3.5 py-3 flex items-center gap-2.5">
                     <Skeleton className="size-9 rounded-lg" />
@@ -313,7 +313,7 @@ export function WorkspaceProjectManager() {
                     className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
                       isActive
                         ? "border-primary/30 bg-primary/5"
-                        : "border-border-subtle bg-white dark:bg-bg-elevated/60"
+                        : "border-border-subtle bg-bg-elevated"
                     }`}
                     onClick={() => setActiveProject(isActive ? "" : project.id)}
                   >
@@ -342,7 +342,7 @@ export function WorkspaceProjectManager() {
                       </div>
                     </div>
                     {project.repo_path && (
-                      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                      <div className="border-t border-divider px-3.5 py-2 bg-surface">
                         <span className="text-[11px] text-fg-muted font-mono truncate block">
                           {project.repo_path}
                         </span>
@@ -373,24 +373,24 @@ export function WorkspaceProjectManager() {
             className="space-y-4"
           >
             <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-1.5">Name</label>
+              <label className="block font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1.5">Name</label>
               <input
                 name="name"
                 type="text"
                 required
                 autoFocus
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                className="w-full px-3 py-[7px] bg-surface border border-border-subtle rounded-[7px] text-[13px] text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 placeholder="My Workspace"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-1.5">
+              <label className="block font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1.5">
                 Description
               </label>
               <input
                 name="description"
                 type="text"
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                className="w-full px-3 py-[7px] bg-surface border border-border-subtle rounded-[7px] text-[13px] text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 placeholder="Optional description"
               />
             </div>
@@ -430,29 +430,29 @@ export function WorkspaceProjectManager() {
               className="space-y-4"
             >
               <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-1.5">Name</label>
+                <label className="block font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1.5">Name</label>
                 <input
                   name="name"
                   type="text"
                   required
                   autoFocus
                   defaultValue={editingWorkspace.name}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  className="w-full px-3 py-[7px] bg-surface border border-border-subtle rounded-[7px] text-[13px] text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-fg-secondary mb-1.5">
+                <label className="block font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1.5">
                   Description
                 </label>
                 <input
                   name="description"
                   type="text"
                   defaultValue={editingWorkspace.description}
-                  className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  className="w-full px-3 py-[7px] bg-surface border border-border-subtle rounded-[7px] text-[13px] text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 />
               </div>
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-fg-secondary">Icon</label>
+                <label className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted">Icon</label>
                 <IconPicker
                   value={editingWorkspace.icon || ""}
                   onChange={(iconName) => {
@@ -500,24 +500,24 @@ export function WorkspaceProjectManager() {
             className="space-y-4"
           >
             <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-1.5">Name</label>
+              <label className="block font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1.5">Name</label>
               <input
                 name="name"
                 type="text"
                 required
                 autoFocus
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                className="w-full px-3 py-[7px] bg-surface border border-border-subtle rounded-[7px] text-[13px] text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 placeholder="My Project"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-fg-secondary mb-1.5">
+              <label className="block font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted mb-1.5">
                 Description
               </label>
               <input
                 name="description"
                 type="text"
-                className="w-full px-3 py-2 bg-bg-elevated border border-border-subtle rounded-lg text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                className="w-full px-3 py-[7px] bg-surface border border-border-subtle rounded-[7px] text-[13px] text-fg focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
                 placeholder="Optional description"
               />
             </div>

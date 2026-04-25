@@ -3,6 +3,7 @@ import {
   Bot,
   Brain,
   Building2,
+  ChevronRight,
   Cpu,
   FileText,
   Keyboard,
@@ -47,41 +48,85 @@ import { WidgetManager } from "./WidgetManager";
 import { WorkspaceProjectManager } from "./WorkspaceProjectManager";
 import { ProfilePanel } from "./ProfilePanel";
 
-const CORE_SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
-  { id: "profile", label: "Profile", icon: User },
-  { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "providers", label: "Providers", icon: Cpu },
-  { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
-  { id: "actions", label: "Actions", icon: Zap },
-  { id: "workspaces", label: "Workspaces", icon: Building2 },
-  { id: "agents", label: "Agents", icon: Bot },
-  { id: "skills", label: "Skills", icon: Sparkles },
-  { id: "prompts", label: "Prompts", icon: FileText },
-  { id: "tools", label: "Tools", icon: Wrench },
-  { id: "plugins", label: "Plugins", icon: Puzzle },
-  { id: "widgets", label: "Widgets", icon: LayoutGrid },
-  { id: "memory", label: "Memory", icon: Brain },
-  { id: "observability", label: "Observability", icon: Activity },
+interface NavItem {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "You",
+    items: [
+      { id: "profile", label: "Profile", icon: User },
+      { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
+      { id: "appearance", label: "Appearance", icon: Palette },
+      { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
+    ],
+  },
+  {
+    label: "AI",
+    items: [
+      { id: "providers", label: "Providers", icon: Cpu },
+      { id: "agents", label: "Agents", icon: Bot },
+      { id: "skills", label: "Skills", icon: Sparkles },
+      { id: "prompts", label: "Prompts", icon: FileText },
+      { id: "memory", label: "Memory", icon: Brain },
+    ],
+  },
+  {
+    label: "Workspace",
+    items: [
+      { id: "workspaces", label: "Workspaces", icon: Building2 },
+      { id: "actions", label: "Actions", icon: Zap },
+    ],
+  },
+  {
+    label: "Extensions",
+    items: [
+      { id: "tools", label: "Tools", icon: Wrench },
+      { id: "plugins", label: "Plugins", icon: Puzzle },
+      { id: "widgets", label: "Widgets", icon: LayoutGrid },
+    ],
+  },
+  {
+    label: "System",
+    items: [{ id: "observability", label: "Observability", icon: Activity }],
+  },
 ];
+
+function findItemInGroups(
+  id: string,
+  groups: NavGroup[],
+): { item: NavItem; group: NavGroup } | undefined {
+  for (const group of groups) {
+    const item = group.items.find((i) => i.id === id);
+    if (item) return { item, group };
+  }
+  return undefined;
+}
 
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<string>(
     () => getInitialSettingsSection() ?? "profile",
   );
-  // Bump key to force remount when clicking the same section (resets sub-views)
   const [sectionKey, setSectionKey] = useState(0);
   const pluginTabs = usePluginSlots("settings-tab");
 
-  // Merge core + plugin tabs
-  const sections: { id: string; label: string; icon: LucideIcon }[] = [
-    ...CORE_SECTIONS,
-    ...pluginTabs.map((entry) => ({
-      id: entry.id,
-      label: entry.label,
-      icon: resolveIcon(entry.icon),
-    })),
-  ];
+  const pluginItems: NavItem[] = pluginTabs.map((entry) => ({
+    id: entry.id,
+    label: entry.label,
+    icon: resolveIcon(entry.icon),
+  }));
+
+  const allGroups: NavGroup[] = pluginItems.length
+    ? [...NAV_GROUPS, { label: "Plugins", items: pluginItems }]
+    : NAV_GROUPS;
 
   useEffect(() => {
     setSettingsSectionCallback((section) => setActiveSection(section));
@@ -136,7 +181,6 @@ export default function SettingsPage() {
       case "observability":
         return <ObservabilityDashboard />;
       default: {
-        // Check for plugin-registered settings tab component
         const pluginEntry = pluginTabs.find((e) => e.id === activeSection);
         if (pluginEntry?.component) {
           const PluginComponent = getSlotComponent(pluginEntry.component);
@@ -153,46 +197,70 @@ export default function SettingsPage() {
     }
   };
 
-  const active = sections.find((s) => s.id === activeSection) ?? sections[0];
+  const activeMatch = findItemInGroups(activeSection, allGroups);
 
   return (
     <div className="flex-1 flex h-full bg-bg">
       {/* Sidebar nav */}
       <nav className="w-52 shrink-0 border-r border-border flex flex-col">
-        <div className="px-5 h-12 flex items-center border-b border-border shrink-0">
-          <h1 className="text-sm font-semibold text-fg">Settings</h1>
+        <div className="h-[52px] px-[18px] flex items-center border-b border-border-subtle shrink-0">
+          <h1 className="text-[13px] font-semibold text-fg">Settings</h1>
         </div>
         <ScrollArea className="flex-1">
-          <div className="py-2 px-2">
-            {sections.map((section) => {
-              const Icon = section.icon;
-              const isActive = activeSection === section.id;
-              return (
-                <button
-                  key={section.id}
-                  onClick={() => handleSectionChange(section.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
-                    isActive
-                      ? "bg-surface text-fg"
-                      : "text-fg-secondary hover:text-fg hover:bg-surface/50"
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
-                  {section.label}
-                </button>
-              );
-            })}
+          <div className="py-3 px-2">
+            {allGroups.map((group, gi) => (
+              <div key={group.label} className={gi > 0 ? "mt-3.5" : ""}>
+                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-fg-faint px-2.5 py-1.5">
+                  {group.label}
+                </div>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeSection === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleSectionChange(item.id)}
+                      className={`mb-px w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-[6px] text-[13px] transition-colors ${
+                        isActive
+                          ? "bg-surface text-fg font-medium"
+                          : "text-fg-secondary hover:bg-surface hover:text-fg"
+                      }`}
+                    >
+                      <Icon
+                        style={{ width: 14, height: 14 }}
+                        className={`shrink-0 ${isActive ? "text-primary" : "text-fg-muted"}`}
+                      />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </ScrollArea>
       </nav>
 
       {/* Content area */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="px-6 h-12 flex items-center border-b border-border shrink-0">
-          <h2 className="text-sm font-semibold text-fg">{active.label}</h2>
+        {/* Breadcrumb header */}
+        <div className="h-[52px] px-7 flex items-center gap-1.5 border-b border-border-subtle shrink-0">
+          {activeMatch ? (
+            <>
+              <span className="font-mono text-[12px] text-fg-faint uppercase tracking-[0.04em]">
+                {activeMatch.group.label}
+              </span>
+              <ChevronRight style={{ width: 11, height: 11 }} className="text-fg-faint shrink-0" />
+              <span className="text-[13px] text-fg font-medium">{activeMatch.item.label}</span>
+            </>
+          ) : (
+            <span className="text-[13px] text-fg font-medium">{activeSection}</span>
+          )}
         </div>
         <ScrollArea className="flex-1">
-          <div key={`${activeSection}-${sectionKey}`} className="p-6 max-w-4xl">
+          <div
+            key={`${activeSection}-${sectionKey}`}
+            className="max-w-[720px] px-7 pt-7 pb-16"
+          >
             {renderActiveSection()}
           </div>
         </ScrollArea>

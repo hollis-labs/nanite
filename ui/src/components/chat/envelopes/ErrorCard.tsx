@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { AlertTriangle, Copy, Check } from 'lucide-react'
+import { AlertTriangle, Copy, Check, Info } from 'lucide-react'
 import { Envelope } from './primitives/Envelope'
 import { StatusPill, type StatusTone } from './primitives/StatusPill'
+import { ErrorDetailModal } from '@/components/chat/ErrorDetailModal'
+import type { ChatError } from '@/lib/types'
 
 interface ErrorReportData {
   code: string
@@ -30,6 +32,7 @@ export function ErrorCard({ data }: ErrorCardProps) {
   const [gifLoaded, setGifLoaded] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  const [showDetails, setShowDetails] = useState(false)
   const tone = CODE_TONE[data.code] ?? 'neutral'
   const codeLabel = data.code.toUpperCase().replace(/_/g, ' ')
   const accent = tone === 'danger' ? 'danger' : tone === 'warning' ? 'warning' : undefined
@@ -110,8 +113,8 @@ export function ErrorCard({ data }: ErrorCardProps) {
                 </span>
               </div>
             ) : (
-              <div className="flex aspect-square w-full items-center justify-center rounded-[6px] bg-surface/50">
-                <AlertTriangle className="h-8 w-8 text-danger/40" />
+              <div className="flex aspect-square w-full items-center justify-center rounded-[6px] bg-surface">
+                <AlertTriangle className="h-8 w-8 text-danger" />
               </div>
             )}
           </div>
@@ -133,26 +136,42 @@ export function ErrorCard({ data }: ErrorCardProps) {
               </p>
             )}
 
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="mt-1 flex items-center gap-1.5 self-start rounded-[4px] border border-border-subtle bg-surface px-2 py-1 text-[11px] text-fg-secondary transition-colors hover:border-border hover:text-fg"
-            >
-              {copied ? (
-                <>
-                  <Check className="h-3 w-3 text-success" />
-                  <span className="text-success">Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3 w-3" />
-                  <span>Copy error</span>
-                </>
-              )}
-            </button>
+            <div className="mt-1 flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="flex items-center gap-1.5 self-start rounded-[4px] border border-border-subtle bg-surface px-2 py-1 text-[11px] text-fg-secondary transition-colors hover:border-border hover:text-fg"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3 w-3 text-success" />
+                    <span className="text-success">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" />
+                    <span>Copy error</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDetails(true)}
+                className="flex items-center gap-1.5 self-start rounded-[4px] border border-border-subtle bg-surface px-2 py-1 text-[11px] text-fg-secondary transition-colors hover:border-border hover:text-fg"
+              >
+                <Info className="h-3 w-3" />
+                <span>Details</span>
+              </button>
+            </div>
           </div>
         </div>
       </Envelope>
+      {showDetails && (
+        <ErrorDetailModal
+          error={data as unknown as ChatError}
+          onClose={() => setShowDetails(false)}
+        />
+      )}
     </div>
   )
 }

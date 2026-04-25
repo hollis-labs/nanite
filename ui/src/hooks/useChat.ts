@@ -44,39 +44,6 @@ function makeChatError(
   };
 }
 
-// --- Error persistence helpers (survive page refresh) ---
-
-interface PersistedErrorState {
-  errors: ChatError[];
-  toolCalls: Array<{
-    id: string;
-    tool: string;
-    status: "running" | "done" | "error";
-    summary?: string;
-  }>;
-  errorMessage?: Message;
-}
-
-function storageKey(sessionId: string) {
-  return `nanite:errorState:${sessionId}`;
-}
-
-function persistErrorState(sessionId: string, state: PersistedErrorState) {
-  try {
-    localStorage.setItem(storageKey(sessionId), JSON.stringify(state));
-  } catch {
-    /* quota exceeded — not critical */
-  }
-}
-
-
-function clearPersistedErrorState(sessionId: string) {
-  try {
-    localStorage.removeItem(storageKey(sessionId));
-  } catch {
-    /* ignore */
-  }
-}
 
 export function useChat(sessionId: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -240,6 +207,9 @@ export function useChat(sessionId: string | null) {
     const skipLoad = queuedJump && queuedJump.sessionId === sessionId && !!sessionId;
     if (!skipLoad) {
       void loadMessages();
+    } else {
+      // Fast-path: loadMessages was skipped, so clear errors here instead.
+      store().clearChatErrors();
     }
     // Session-switch side effects — always run regardless of jump state.
     const settings = queryClient.getQueryData<UserSettings>(['settings'])
@@ -313,7 +283,6 @@ export function useChat(sessionId: string | null) {
       store().clearToolWarnings();
       store().clearPendingApprovals();
       store().clearChatErrors();
-      clearPersistedErrorState(sessionId);
       console.log("[useChat] streaming=true, sending message...");
 
       try {
@@ -495,7 +464,6 @@ export function useChat(sessionId: string | null) {
           setMessages((prev) => [...prev, assistantMsg]);
           store().clearStream();
           store().clearChatErrors();
-          clearPersistedErrorState(sessionId);
           es.close();
           eventSourceRef.current = null;
 
@@ -543,14 +511,6 @@ export function useChat(sessionId: string | null) {
           if (errorMsg) {
             setMessages((prev) => [...prev, errorMsg]);
           }
-
-          // Persist error state so it survives page refresh.
-          const { chatErrors, toolCalls } = useChatStore.getState();
-          persistErrorState(sessionId, {
-            errors: chatErrors,
-            toolCalls,
-            errorMessage: errorMsg,
-          });
 
           store().clearStream();
           es.close();

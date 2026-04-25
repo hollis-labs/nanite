@@ -1,5 +1,6 @@
 # Go
 /nanite
+go.work.sum
 /cmd/nanite/nanite
 *.exe
 *.test

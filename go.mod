@@ -16,7 +16,7 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.35.0
 	github.com/google/jsonschema-go v0.4.2
-	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
+	github.com/hollis-labs/go-modelsdev v0.1.0
 	github.com/hollis-labs/go-otel v0.0.2
 	github.com/hollis-labs/go-providers v0.2.1
 	github.com/hollis-labs/go-toolbroker v0.1.0
@@ -84,5 +84,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/hollis-labs/go-modelsdev => ../go-modelsdev

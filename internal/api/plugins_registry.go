@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	goplugin "github.com/hollis-labs/plugin-sdk"
@@ -230,9 +231,12 @@ func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) RegistryR
 			if len(rel) >= 3 && rel[:3] == "ui/" {
 				rel = rel[3:]
 			}
-			bundlePath := filepath.Join(pluginsDir, pluginID, "ui", rel)
-			if fi, err := os.Stat(bundlePath); err == nil {
-				entry.BundleHash = fmt.Sprintf("%d", fi.ModTime().UnixMilli())
+			pluginUIDir := filepath.Clean(filepath.Join(pluginsDir, pluginID, "ui"))
+			bundlePath := filepath.Clean(filepath.Join(pluginUIDir, rel))
+			if strings.HasPrefix(bundlePath, pluginUIDir+string(filepath.Separator)) {
+				if fi, err := os.Stat(bundlePath); err == nil {
+					entry.BundleHash = fmt.Sprintf("%d", fi.ModTime().UnixMilli())
+				}
 			}
 		}
 		resp.Plugins[pluginID] = entry

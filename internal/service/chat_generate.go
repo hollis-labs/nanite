@@ -222,8 +222,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}
 	}
-	tools := selection.Tools
-	normalizeToolInputSchemas(tools)
+	tools := normalizeToolInputSchemas(selection.Tools)
 
 	// Build the dynamic per-turn system prefix from tool selection. This text
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks
@@ -2037,13 +2036,51 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 	}
 }
 
-// normalizeToolInputSchemas ensures every object-type node in each tool's
-// InputSchema has "additionalProperties": false, which the Anthropic API
-// requires. It modifies the underlying maps in-place (idempotent).
-func normalizeToolInputSchemas(tools []provider.ToolDefinition) {
-	for i := range tools {
-		normalizeSchemaNode(tools[i].InputSchema)
+// normalizeToolInputSchemas returns a new slice where each tool's InputSchema
+// has been deep-copied and normalized (every object-type node gets
+// "additionalProperties": false). Operates on copies so shared registry maps
+// are never mutated across concurrent chat turns.
+func normalizeToolInputSchemas(tools []provider.ToolDefinition) []provider.ToolDefinition {
+	out := make([]provider.ToolDefinition, len(tools))
+	for i, t := range tools {
+		t.InputSchema = deepCopySchemaMap(t.InputSchema)
+		normalizeSchemaNode(t.InputSchema)
+		out[i] = t
 	}
+	return out
+}
+
+func deepCopySchemaMap(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for k, v := range src {
+		switch val := v.(type) {
+		case map[string]any:
+			dst[k] = deepCopySchemaMap(val)
+		case []any:
+			dst[k] = deepCopySchemaSlice(val)
+		default:
+			dst[k] = v
+		}
+	}
+	return dst
+}
+
+func deepCopySchemaSlice(src []any) []any {
+	dst := make([]any, len(src))
+	for i, v := range src {
+		switch val := v.(type) {
+		case map[string]any:
+			dst[i] = deepCopySchemaMap(val)
+		case []any:
+			dst[i] = deepCopySchemaSlice(val)
+		default:
+			dst[i] = v
+		}
+	}
+	return dst
 }
 
 func normalizeSchemaNode(node map[string]any) {

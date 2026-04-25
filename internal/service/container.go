@@ -11,6 +11,7 @@ import (
 
 	conduit "github.com/hollis-labs/vanta-conduit"
 
+	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
@@ -110,6 +111,9 @@ type Container struct {
 
 	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
 	AdapterRegistry *agent.AdapterRegistry
+
+	// stopModelCatalog cancels the model catalog background refresher.
+	stopModelCatalog context.CancelFunc
 }
 
 // ContainerConfig holds all the external dependencies needed to construct
@@ -431,6 +435,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Permission engine with default mode. Rules loaded from project/user config at runtime.
 	permissions := permission.NewEngine(permission.ModeDefault, nil)
 
+	// Model catalog — fetches pricing and context-window data from models.dev.
+	// StartRefresher checks staleness on boot and re-fetches every 24h.
+	catalogCtx, stopCatalog := context.WithCancel(context.Background())
+	modelCatalog := modelsdev.New()
+	modelCatalog.StartRefresher(catalogCtx)
+
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:        sessions,
 		Agents:          agents,
@@ -453,6 +463,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		EmbeddingStatus:   embeddingStatus,
 		EmbeddingProvider: embeddingProviderID,
 		ResultCache:       buildResultCache(cfg.Store),
+		ModelCatalog:      modelCatalog,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed
@@ -593,6 +604,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		RunStore:            runStore,
 		WorkflowBroadcaster: workflowBroadcaster,
 		AppConfig:           cfg.AppConfig,
+		stopModelCatalog:    stopCatalog,
 	}, nil
 }
 
@@ -631,6 +643,10 @@ func (c *Container) Shutdown() {
 			}()
 			fn()
 		}()
+	}
+
+	if c.stopModelCatalog != nil {
+		c.stopModelCatalog()
 	}
 
 	if c.Workers != nil {

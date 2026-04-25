@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/worker"
@@ -98,6 +99,11 @@ type ChatServiceConfig struct {
 
 	// ResultCache for the cache-and-pointer pattern (S4a) — nil-safe.
 	ResultCache *tool.ResultCache
+
+	// ModelCatalog provides per-model context window and pricing data from
+	// models.dev. Nil-safe: when absent the service falls back to user_settings
+	// and then the hardcoded DefaultContextWindowSize.
+	ModelCatalog *modelsdev.Client
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -137,7 +143,8 @@ type chatServiceImpl struct {
 	// argValidator caches compiled JSON Schemas for tool InputSchema validation.
 	argValidator *argValidator
 	// resultCache stores large tool results for the cache-and-pointer pattern.
-	resultCache *tool.ResultCache
+	resultCache  *tool.ResultCache
+	modelCatalog *modelsdev.Client
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -195,6 +202,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		embeddingWarnedSessions: make(map[string]struct{}),
 		argValidator:            newArgValidator(),
 		resultCache:             cfg.ResultCache,
+		modelCatalog:            cfg.ModelCatalog,
 		lifecycle:               lifecycle.NewManager("service.chat"),
 		activeGen:               make(map[string]*inFlightGen),
 	}

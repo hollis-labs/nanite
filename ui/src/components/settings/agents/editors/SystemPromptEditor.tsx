@@ -100,7 +100,7 @@ export function SystemPromptEditor({ value, onChange }: SystemPromptEditorProps)
       {value ? (
         <div
           onClick={startEditing}
-          className="cursor-text rounded-lg bg-bg-elevated/60 border border-border-subtle px-3 py-2.5 max-h-48 overflow-y-auto hover:border-border transition-colors"
+          className="cursor-text rounded-lg bg-bg-elevated border border-border-subtle px-3 py-2.5 max-h-48 overflow-y-auto hover:border-border transition-colors"
         >
           <pre className="text-xs text-fg-secondary font-mono whitespace-pre-wrap leading-relaxed">
             {value}

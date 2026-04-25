@@ -674,7 +674,7 @@ export function AgentDetailView({
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden">
       {children}
     </div>
   );
@@ -721,7 +721,7 @@ function PickerList<T extends { id: string }>({
   onClose: () => void;
 }) {
   return (
-    <div className="mt-2 rounded-lg border border-border-subtle bg-bg-elevated/40 overflow-hidden">
+    <div className="mt-2 rounded-lg border border-border-subtle bg-bg/40 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle">
         <span className="text-[11px] font-medium text-fg-secondary">{title}</span>
         <Button variant="ghost" size="icon" className="w-5 h-5" onClick={onClose}>

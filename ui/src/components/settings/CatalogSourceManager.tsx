@@ -101,7 +101,7 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
       {isLoading && (
         <div className="space-y-3">
           {Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm p-3.5">
+            <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm p-3.5">
               <Skeleton className="h-3.5 w-1/3 mb-2" />
               <Skeleton className="h-2.5 w-2/3" />
             </div>
@@ -141,8 +141,8 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
               key={source.id}
               className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
                 source.enabled
-                  ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
-                  : 'border-border-subtle bg-white dark:bg-bg-elevated/60 opacity-55'
+                  ? 'border-border-subtle bg-bg-elevated'
+                  : 'border-border-subtle bg-bg-elevated opacity-55'
               }`}
             >
               {/* Header */}
@@ -155,7 +155,7 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-fg truncate">{source.name}</span>
-                    {source.enabled && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                    {source.enabled && <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />}
                     <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">
                       {source.type}
                     </span>
@@ -190,7 +190,7 @@ export function CatalogSourceManager({ onBack }: CatalogSourceManagerProps) {
               </div>
 
               {/* Detail footer */}
-              <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+              <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Shield className="w-3 h-3 text-fg-faint" />
@@ -256,7 +256,7 @@ function AddSourceForm({ onDone, onCancel }: { onDone: () => void; onCancel: () 
   })
 
   return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden">
       <div className="px-3.5 py-3 space-y-3">
         <div>
           <label className="text-[11px] font-medium text-fg-secondary block mb-1">Name</label>
@@ -291,7 +291,7 @@ function AddSourceForm({ onDone, onCancel }: { onDone: () => void; onCancel: () 
           <span className="text-[10px] text-fg-faint ml-2">Higher wins on conflict</span>
         </div>
       </div>
-      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center justify-end gap-2">
+      <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex items-center justify-end gap-2">
         {addMutation.isError && (
           <p className="text-[11px] text-danger mr-auto">
             {(addMutation.error as Error)?.message}

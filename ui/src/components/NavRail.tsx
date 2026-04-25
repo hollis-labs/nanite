@@ -56,7 +56,7 @@ export function NavRail() {
       <Tooltip content="Home" side="right">
         <button
           onClick={handleGoHome}
-          className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary text-white hover:bg-primary/90 transition-colors mb-3 leading-none"
+          className="w-10 h-10 rounded-lg flex items-center justify-center bg-brand text-brand-fg hover:bg-brand-hover transition-colors mb-3 leading-none"
           style={{ fontSize: '34px', fontWeight: 900, fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif' }}
         >
           N
@@ -78,8 +78,8 @@ export function NavRail() {
                 size="icon"
                 className={`w-10 h-10 rounded-lg ${
                   isActive
-                    ? 'bg-surface text-primary'
-                    : 'text-fg-secondary hover:text-fg'
+                    ? 'bg-surface text-fg'
+                    : 'text-fg-secondary hover:bg-surface hover:text-fg'
                 }`}
                 onClick={() => {
                   if (id === 'new') {
@@ -132,8 +132,8 @@ export function NavRail() {
                 size="icon"
                 className={`w-10 h-10 rounded-lg ${
                   isActive
-                    ? 'bg-surface text-primary'
-                    : 'text-fg-secondary hover:text-fg'
+                    ? 'bg-surface text-fg'
+                    : 'text-fg-secondary hover:bg-surface hover:text-fg'
                 }`}
                 onClick={() => {
                   setCurrentPage(entry.id as any)

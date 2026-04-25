@@ -386,7 +386,7 @@ export function PromptDetailView({
                 <span className="text-[11px] font-medium text-fg-muted block mb-1.5">
                   Rendered Prompt
                 </span>
-                <pre className="text-xs text-fg-secondary bg-bg-elevated/60 border border-border-subtle rounded-lg p-3 overflow-x-auto max-h-80 overflow-y-auto font-mono whitespace-pre-wrap leading-relaxed">
+                <pre className="text-xs text-fg-secondary bg-bg-elevated border border-border-subtle rounded-lg p-3 overflow-x-auto max-h-80 overflow-y-auto font-mono whitespace-pre-wrap leading-relaxed">
                   {renderedPreview}
                 </pre>
               </div>
@@ -552,7 +552,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
 
       {/* Add form */}
       {showAddForm && (
-        <div className="mt-2 rounded-lg border border-border-subtle bg-bg-elevated/40 p-3 space-y-2.5">
+        <div className="mt-2 rounded-lg border border-border-subtle bg-bg/40 p-3 space-y-2.5">
           <span className="text-[11px] font-medium text-fg-secondary">New Variable</span>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
@@ -658,7 +658,7 @@ function VariablesList({ value, onChange, readOnly }: VariablesListProps) {
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden">
       {children}
     </div>
   );

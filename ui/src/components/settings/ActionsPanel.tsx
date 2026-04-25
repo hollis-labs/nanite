@@ -98,7 +98,7 @@ function ActionForm({
   const valid = form.name.trim() !== "" && form.command.trim() !== "";
 
   return (
-    <div className="rounded-xl border border-primary/40 bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-primary/40 bg-bg-elevated overflow-hidden">
       <div className="px-4 py-3 border-b border-border/50 flex items-center justify-between">
         <span className="text-sm font-medium text-fg">
           {initial.name ? "Edit Action" : "New Action"}
@@ -248,7 +248,7 @@ function ActionForm({
       </div>
 
       {/* Footer */}
-      <div className="border-t border-border/50 px-4 py-2.5 flex items-center justify-end gap-2 bg-bg-elevated/40">
+      <div className="border-t border-border-subtle px-4 py-2.5 flex items-center justify-end gap-2 bg-bg/40">
         <Button
           variant="ghost"
           size="sm"
@@ -288,7 +288,7 @@ function ActionCard({
 
   return (
     <div
-      className={`rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden ${
+      className={`rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden ${
         !action.enabled ? "opacity-45" : ""
       }`}
     >
@@ -300,7 +300,7 @@ function ActionCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-fg truncate">{action.name}</span>
-            {action.enabled && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+            {action.enabled && <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />}
           </div>
           {action.description && (
             <div className="text-[11px] text-fg-muted mt-0.5 truncate">{action.description}</div>
@@ -339,7 +339,7 @@ function ActionCard({
       </div>
 
       {/* Detail footer */}
-      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center gap-3 flex-wrap">
+      <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex items-center gap-3 flex-wrap">
         {action.keybinding && (
           <KbdGroup>
             {formatKeys(action.keybinding).map((k, i) => (
@@ -488,7 +488,7 @@ export function ActionsPanel() {
           {[1, 2].map((i) => (
             <div
               key={i}
-              className="rounded-xl border border-border-subtle bg-bg-elevated/60 h-24 animate-pulse"
+              className="rounded-xl border border-border-subtle bg-bg-elevated h-24 animate-pulse"
             />
           ))}
         </div>

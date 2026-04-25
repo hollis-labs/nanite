@@ -74,8 +74,8 @@ export function MemoryPanel() {
 
   return (
     <div className="space-y-4 p-4">
-      <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-border/50 flex items-center justify-between gap-4">
+      <div className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden">
+        <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between gap-4">
           <div>
             <h3 className="text-sm font-semibold text-fg">Memory Embeddings</h3>
             <p className="text-[11px] text-fg-muted mt-0.5">

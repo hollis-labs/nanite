@@ -17,32 +17,46 @@ export function PanelHeader({ title, description }: { title: string; description
 
 // --- SCard ---
 
+type SCardAccent = 'brand' | 'success' | 'warning' | 'danger' | 'info' | 'primary'
+
+const SCARD_ACCENT_CLASSES = {
+  brand:   'border-l-2 border-l-brand',
+  success: 'border-l-2 border-l-status-ok',
+  warning: 'border-l-2 border-l-status-warn',
+  danger:  'border-l-2 border-l-status-danger',
+  info:    'border-l-2 border-l-fg-secondary',
+  primary: 'border-l-2 border-l-fg',
+} satisfies Record<SCardAccent, string>
+
 export function SCard({
   title,
   meta,
   description,
   children,
   className,
+  accent,
 }: {
   title: string
   meta?: string
   description?: string
   children: React.ReactNode
   className?: string
+  accent?: SCardAccent
 }) {
   return (
     <div
       className={cn(
         "bg-bg-elevated border border-border-subtle rounded-[10px] overflow-hidden mb-4",
+        accent && SCARD_ACCENT_CLASSES[accent],
         className,
       )}
     >
       <div className="px-4 py-3 border-b border-border-subtle">
-        <div className="flex items-center">
-          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-muted">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-fg-secondary">
             {title}
           </span>
-          {meta && <span className="font-mono text-[11px] text-fg-faint ml-auto">{meta}</span>}
+          {meta && <span className="font-mono text-[11px] text-fg-muted ml-auto">{meta}</span>}
         </div>
         {description && <p className="text-xs text-fg-muted mt-1">{description}</p>}
       </div>

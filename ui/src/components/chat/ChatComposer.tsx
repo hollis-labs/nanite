@@ -4,6 +4,8 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Check, Terminal, X, Upload } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { StatusPill } from './envelopes/primitives/StatusPill'
+import { useSettings } from '@/hooks/useSettings'
 import { ComposerToolbar } from './ComposerToolbar'
 import { ShellInfoDrawer } from './ShellInfoDrawer'
 import { SlashCommandExtension, type SlashCommand } from './extensions/SlashCommandExtension'
@@ -385,6 +387,9 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
 
   const hasContent = editor ? editor.getText().trim().length > 0 : false
 
+  const { data: settings } = useSettings()
+  const developerMode = settings?.developer_mode ?? false
+
   const composerAboveSlots = usePluginSlots('composer-above')
   const composerBelowSlots = usePluginSlots('composer-below')
   const handlePluginAction = usePluginAction()
@@ -426,6 +431,16 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         onDrop={(e) => void handleDrop(e)}
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[2px] bg-primary opacity-85" />
+
+        {/* DEV mode indicator — floating top-right when developer_mode=true */}
+        {developerMode && (
+          <div className="pointer-events-none select-none absolute top-2 right-3 z-[2]">
+            <StatusPill tone="danger">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-danger animate-pulse shrink-0" />
+              DEV
+            </StatusPill>
+          </div>
+        )}
 
         {/* Shell info drawer — appears when user types ! */}
         {isShellInput && activeSessionId && (

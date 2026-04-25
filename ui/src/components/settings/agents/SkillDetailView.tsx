@@ -1,7 +1,7 @@
 import {
   ChevronLeft,
   Code2,
-  Eye,
+  Settings,
   Loader2,
   Plus,
   Server,
@@ -19,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DynamicIcon, IconPicker } from "@/components/ui/icon-picker";
 import type { Skill, ToolBinding } from "@/lib/types";
 
@@ -204,15 +205,7 @@ function ToolBindingsList({
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
-      {children}
-    </div>
-  );
-}
-
-function CardHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-fg">
+    <div className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden">
       {children}
     </div>
   );
@@ -335,6 +328,7 @@ export function SkillDetailView({
   }));
 
   const schema = parseInputSchema(skill.input_schema);
+  const bindings = parseToolBindings(skill.tool_bindings);
 
   // ─── Render ─────────────────────────────────────────────────────
 
@@ -346,7 +340,7 @@ export function SkillDetailView({
           <ChevronLeft className="w-4 h-4" />
         </Button>
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="size-12 rounded-sm bg-surface flex items-center justify-center shrink-0">
+          <div className="size-12 rounded-lg bg-surface border border-border-subtle flex items-center justify-center shrink-0">
             <DynamicIcon
               name={skill.icon}
               className="w-6 h-6 text-fg-secondary"
@@ -354,16 +348,19 @@ export function SkillDetailView({
             />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-semibold text-fg truncate">{skill.name}</h2>
-              {skill.is_builtin && (
-                <span
-                  className="w-2 h-2 rounded-full bg-success shrink-0"
-                  title="Built-in skill"
-                />
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-lg font-semibold text-fg truncate">{skill.name}</h2>
+              {skill.is_builtin ? (
+                <span className="inline-flex items-center gap-1 rounded-[4px] border border-border-subtle px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase leading-[1.4] tracking-wide bg-surface text-status-ok">
+                  built-in
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-[4px] border border-border-subtle px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase leading-[1.4] tracking-wide bg-surface text-brand">
+                  custom
+                </span>
               )}
             </div>
-            <p className="text-xs text-fg-muted font-mono truncate">{skill.slug}</p>
+            <p className="text-xs text-fg-muted font-mono truncate mt-0.5">{skill.slug}</p>
           </div>
         </div>
         {!skill.is_builtin && (
@@ -378,68 +375,79 @@ export function SkillDetailView({
         )}
       </div>
 
-      {/* Two-column cards */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Left: Details */}
-        <Card>
-          <CardHeader>
-            <Eye className="w-4 h-4" />
-            <span>Details</span>
-          </CardHeader>
-          <div className="px-4 pb-4 space-y-0.5">
-            {editableRow("name", "Name", skill.name)}
-            {editableRow("slug", "Slug", skill.slug)}
-            {editableRow("category", "Category", skill.category, {
-              type: "select",
-              selectOptions: categoryOptions,
-            })}
-            {editableRow("description", "Description", skill.description)}
-            {!skill.is_builtin && (
-              <div className="flex items-center gap-3 py-1.5">
-                <span className="text-xs text-fg-muted w-28 shrink-0">Icon</span>
-                <IconPicker
-                  value={skill.icon || ""}
-                  onChange={(iconName) => onUpdate("icon", iconName)}
-                />
+      {/* Tabs */}
+      <Tabs defaultValue="details">
+        <TabsList variant="line" className="w-full justify-start border-b border-border">
+          <TabsTrigger value="details" className="gap-1.5 text-xs">
+            <Settings className="w-3.5 h-3.5" /> Details
+          </TabsTrigger>
+          <TabsTrigger value="bindings" className="gap-1.5 text-xs">
+            <Wrench className="w-3.5 h-3.5" /> Tool Bindings
+            {bindings.length > 0 && (
+              <span className="text-[10px] text-fg-faint">({bindings.length})</span>
+            )}
+          </TabsTrigger>
+          {schema && (
+            <TabsTrigger value="schema" className="gap-1.5 text-xs">
+              <Code2 className="w-3.5 h-3.5" /> Schema
+            </TabsTrigger>
+          )}
+        </TabsList>
+
+        {/* Details Tab */}
+        <TabsContent value="details" className="pt-4">
+          <Card>
+            <div className="px-4 pb-4 space-y-0.5 pt-2">
+              {editableRow("name", "Name", skill.name)}
+              {editableRow("slug", "Slug", skill.slug)}
+              {editableRow("category", "Category", skill.category, {
+                type: "select",
+                selectOptions: categoryOptions,
+              })}
+              {editableRow("description", "Description", skill.description)}
+              {!skill.is_builtin && (
+                <div className="flex items-center gap-3 py-1.5">
+                  <span className="text-xs text-fg-muted w-28 shrink-0">Icon</span>
+                  <IconPicker
+                    value={skill.icon || ""}
+                    onChange={(iconName) => onUpdate("icon", iconName)}
+                  />
+                </div>
+              )}
+              <MetaRow label="Type" value={skill.is_builtin ? "Built-in" : "Custom"} />
+              {skill.created_at && (
+                <MetaRow label="Created" value={formatDate(skill.created_at)} />
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* Tool Bindings Tab */}
+        <TabsContent value="bindings" className="pt-4">
+          <Card>
+            <div className="px-4 py-4">
+              <ToolBindingsList
+                value={skill.tool_bindings}
+                onChange={(json) => onUpdate("tool_bindings", json)}
+                readOnly={skill.is_builtin}
+              />
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* Schema Tab */}
+        {schema && (
+          <TabsContent value="schema" className="pt-4">
+            <Card>
+              <div className="px-4 pb-4 pt-4">
+                <pre className="text-xs text-fg-secondary overflow-x-auto font-mono bg-bg/40 rounded-lg p-3 border border-border-subtle">
+                  {JSON.stringify(schema, null, 2)}
+                </pre>
               </div>
-            )}
-            <MetaRow label="Type" value={skill.is_builtin ? "Built-in" : "Custom"} />
-            {skill.created_at && (
-              <MetaRow label="Created" value={formatDate(skill.created_at)} />
-            )}
-          </div>
-        </Card>
-
-        {/* Right: Tool Bindings */}
-        <Card>
-          <CardHeader>
-            <Wrench className="w-4 h-4" />
-            <span>Tool Bindings ({parseToolBindings(skill.tool_bindings).length})</span>
-          </CardHeader>
-          <div className="px-4 pb-4">
-            <ToolBindingsList
-              value={skill.tool_bindings}
-              onChange={(json) => onUpdate("tool_bindings", json)}
-              readOnly={skill.is_builtin}
-            />
-          </div>
-        </Card>
-      </div>
-
-      {/* Input Schema (full width, conditional) */}
-      {schema && (
-        <Card>
-          <CardHeader>
-            <Code2 className="w-4 h-4" />
-            <span>Input Schema</span>
-          </CardHeader>
-          <div className="px-4 pb-4">
-            <pre className="text-xs text-fg-secondary overflow-x-auto font-mono bg-bg-elevated/40 rounded-lg p-3 border border-border-subtle">
-              {JSON.stringify(schema, null, 2)}
-            </pre>
-          </div>
-        </Card>
-      )}
+            </Card>
+          </TabsContent>
+        )}
+      </Tabs>
 
       {/* Delete confirmation dialog */}
       {!skill.is_builtin && (

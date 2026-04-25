@@ -484,7 +484,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
           {serversLoading && (
             <>
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden">
                   <div className="px-3.5 py-3 flex items-center gap-2.5">
                     <Skeleton className="size-9 rounded-lg" />
                     <div className="flex flex-col gap-1.5 flex-1">
@@ -492,7 +492,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                       <Skeleton className="h-2.5 w-1/3" />
                     </div>
                   </div>
-                  <div className="border-t border-border/50 px-3.5 py-2">
+                  <div className="border-t border-border-subtle px-3.5 py-2">
                     <Skeleton className="h-2.5 w-3/4" />
                   </div>
                 </div>
@@ -518,10 +518,10 @@ export function ToolDashboard({}: ToolDashboardProps) {
             return (
               <div
                 key={server.name}
-                className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md ${
+                className={`rounded-xl border overflow-hidden transition-all cursor-pointer border-l-2 group ${
                   server.connected
-                    ? 'border-border-subtle bg-white dark:bg-bg-elevated/60'
-                    : 'border-border bg-white dark:bg-bg/30 opacity-45'
+                    ? 'border-border-subtle bg-bg-elevated hover:border-border border-l-status-ok'
+                    : 'border-border bg-bg/30 opacity-45 border-l-fg-faint'
                 }`}
                 onClick={() => {
                   setFilterServer(server.name)
@@ -530,20 +530,20 @@ export function ToolDashboard({}: ToolDashboardProps) {
               >
                 {/* Header */}
                 <div className="flex items-center gap-2.5 px-3.5 py-3">
-                  <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${
-                    server.connected ? 'bg-surface-hover text-fg-secondary' : 'bg-surface text-fg-muted'
+                  <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 transition-colors ${
+                    server.connected ? 'bg-surface text-fg-secondary group-hover:text-fg' : 'bg-surface text-fg-muted'
                   }`}>
                     <Server className="w-4 h-4" />
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-fg truncate">{server.name}</span>
-                      {server.connected && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                      {server.connected && <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />}
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className="text-[11px] text-fg-muted">{server.tool_count} tools</span>
                       {!isManaged && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">built-in</span>
+                        <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-surface border border-border-subtle text-fg-secondary uppercase tracking-wide leading-none">built-in</span>
                       )}
                     </div>
                   </div>
@@ -566,7 +566,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 </div>
 
                 {/* Detail footer */}
-                <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex items-center gap-3">
+                <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex items-center gap-3">
                   <span className="text-[11px] text-fg-muted capitalize">
                     {cfg?.transport_type?.toUpperCase() ?? 'Built-in'}
                   </span>
@@ -595,7 +595,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
           {toolsLoading && (
             <>
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden">
+                <div key={i} className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden">
                   <div className="px-3.5 py-3 flex items-center gap-2.5">
                     <Skeleton className="size-9 rounded-lg" />
                     <div className="flex flex-col gap-1.5 flex-1">
@@ -603,7 +603,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                       <Skeleton className="h-2.5 w-1/3" />
                     </div>
                   </div>
-                  <div className="border-t border-border/50 px-3.5 py-2">
+                  <div className="border-t border-border-subtle px-3.5 py-2">
                     <Skeleton className="h-2.5 w-3/4" />
                   </div>
                 </div>
@@ -642,7 +642,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
             return (
               <div
                 key={tool.name}
-                className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md"
+                className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden transition-all cursor-pointer hover:shadow-md"
                 onClick={() => setSelectedTool(tool)}
               >
                 {/* Header */}
@@ -659,7 +659,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                 </div>
 
                 {/* Detail footer */}
-                <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
                   <p className="text-[11px] text-fg-muted line-clamp-2">
                     {tool.description || 'No description'}
                   </p>
@@ -729,7 +729,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
                         return (
                           <div
                             key={tool.name}
-                            className="flex items-center gap-3 px-3.5 py-2.5 bg-bg-elevated/60 hover:bg-bg-elevated transition-colors"
+                            className="flex items-center gap-3 px-3.5 py-2.5 bg-bg-elevated hover:bg-bg-elevated transition-colors"
                           >
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
@@ -857,7 +857,7 @@ export function ToolDashboard({}: ToolDashboardProps) {
 
               <div>
                 <h4 className="text-sm font-medium text-fg-secondary mb-2">Input Schema</h4>
-                <div className="bg-white dark:bg-bg-elevated/60 rounded-xl border border-border-subtle shadow-sm p-4 overflow-auto">
+                <div className="bg-bg-elevated rounded-xl border border-border-subtle shadow-sm p-4 overflow-auto">
                   <pre className="text-sm text-fg-secondary font-mono whitespace-pre-wrap">
                     {selectedTool.input_schema ?
                       JSON.stringify(selectedTool.input_schema, null, 2) :

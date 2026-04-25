@@ -298,15 +298,15 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
         {/* Filters */}
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {["all", ...Object.keys(sourceCounts)].map((s) => (
               <button
                 key={s}
                 onClick={() => setSourceFilter(s)}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                   sourceFilter === s
-                    ? "bg-primary text-white"
-                    : "bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover"
+                    ? "bg-brand text-brand-fg"
+                    : "bg-surface text-fg hover:bg-surface-hover"
                 }`}
               >
                 {s === "all" ? "All" : (SOURCE_LABELS[s] ?? s)}
@@ -332,7 +332,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
             {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+                className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden"
               >
                 <div className="px-3.5 py-3 flex items-center gap-2.5">
                   <Skeleton className="size-9 rounded-lg" />
@@ -341,7 +341,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                     <Skeleton className="h-2.5 w-1/3" />
                   </div>
                 </div>
-                <div className="border-t border-border/50 px-3.5 py-2">
+                <div className="border-t border-border-subtle px-3.5 py-2">
                   <Skeleton className="h-2.5 w-3/4" />
                 </div>
               </div>
@@ -369,22 +369,30 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
           <div className="grid gap-3 grid-cols-2">
             {filteredAgents.map((agent) => {
               const isActive = agent.status !== "disabled";
+              const accentColor = !isActive
+                ? 'var(--color-fg-faint)'
+                : agent.source === 'agentrc' || agent.source === 'builtin'
+                  ? 'var(--color-status-ok)'
+                  : agent.source === 'plugin'
+                    ? 'var(--color-brand)'
+                    : 'var(--color-fg-faint)';
               return (
                 <ContextMenu key={agent.id}>
                   <ContextMenuTrigger asChild>
                     <div
-                      className={`rounded-xl border shadow-sm overflow-hidden transition-all cursor-pointer ${
+                      className={`rounded-xl border overflow-hidden transition-all cursor-pointer group border-l-2 ${
                         isActive
-                          ? "border-border-subtle bg-white dark:bg-bg-elevated/60 hover:shadow-md"
-                          : "border-border bg-white dark:bg-bg/30 opacity-45"
+                          ? "border-border-subtle bg-bg-elevated hover:border-border"
+                          : "border-border bg-bg/30 opacity-50"
                       }`}
+                      style={{ borderLeftColor: accentColor }}
                       onClick={() => setSelectedAgent(agent.id)}
                     >
                       {/* Header: Icon · Name · Status dot */}
                       <div className="flex items-center gap-2.5 px-3.5 py-3">
                         <span
-                          className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-sm shrink-0 ${
-                            isActive ? "bg-surface-hover text-fg-secondary" : "bg-surface text-fg-muted"
+                          className={`inline-flex items-center justify-center w-9 h-9 rounded-lg text-sm shrink-0 transition-colors ${
+                            isActive ? "bg-surface text-fg-secondary group-hover:text-fg" : "bg-surface text-fg-muted"
                           }`}
                         >
                           {agent.icon ? (
@@ -412,7 +420,7 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
                       </div>
 
                       {/* Detail footer */}
-                      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40 flex flex-col gap-1.5">
+                      <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex flex-col gap-1.5">
                         {agent.description && (
                           <p className="text-[11px] text-fg-muted line-clamp-2">
                             {agent.description}

@@ -180,8 +180,8 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               onClick={() => setSourceFilter(s)}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                 sourceFilter === s
-                  ? "bg-primary text-white"
-                  : "bg-surface text-fg-secondary hover:text-fg hover:bg-surface-hover"
+                  ? "bg-brand text-brand-fg"
+                  : "bg-surface text-fg hover:bg-surface-hover"
               }`}
             >
               {s === "all" ? "All" : (SOURCE_LABELS[s] ?? s)}
@@ -197,7 +197,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
             {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-xl border border-border-subtle bg-bg-elevated/60 shadow-sm overflow-hidden"
+                className="rounded-xl border border-border-subtle bg-bg-elevated shadow-sm overflow-hidden"
               >
                 <div className="px-3.5 py-3 flex items-center gap-2.5">
                   <Skeleton className="size-9 rounded-lg" />
@@ -206,7 +206,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                     <Skeleton className="h-2.5 w-1/3" />
                   </div>
                 </div>
-                <div className="border-t border-border/50 px-3.5 py-2">
+                <div className="border-t border-border-subtle px-3.5 py-2">
                   <Skeleton className="h-2.5 w-3/4" />
                 </div>
               </div>
@@ -239,12 +239,12 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                 <ContextMenu key={skill.id}>
                   <ContextMenuTrigger asChild>
                     <div
-                      className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden transition-all cursor-pointer hover:shadow-md"
+                      className={`rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden transition-all cursor-pointer hover:border-border hover:shadow-sm group border-l-2 ${skill.is_builtin ? "border-l-status-ok" : "border-l-brand"}`}
                       onClick={() => setSelectedSkill(skill.id)}
                     >
                       {/* Header */}
                       <div className="flex items-center gap-2.5 px-3.5 py-3">
-                        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-surface-hover text-fg-secondary shrink-0">
+                        <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-surface text-fg-secondary shrink-0 group-hover:text-fg transition-colors">
                           <DynamicIcon name={skill.icon} className="w-4 h-4" fallback={Wrench} />
                         </span>
                         <div className="flex-1 min-w-0">
@@ -252,9 +252,6 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                             <span className="text-sm font-semibold text-fg truncate">
                               {skill.name}
                             </span>
-                            {skill.is_builtin && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
-                            )}
                           </div>
                           <div className="flex items-center gap-1.5 mt-0.5">
                             <span className="text-[11px] text-fg-muted font-mono truncate">
@@ -266,9 +263,9 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                       </div>
 
                       {/* Detail footer */}
-                      <div className="border-t border-border/50 px-3.5 py-2 bg-bg-elevated/40">
+                      <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">
+                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border-subtle text-fg-secondary leading-none uppercase tracking-wide">
                             {skill.category}
                           </span>
                           {toolCount > 0 && (

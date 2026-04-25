@@ -25,7 +25,7 @@ export interface WidgetDetailViewProps {
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border-subtle bg-white dark:bg-bg-elevated/60 shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden">
       {children}
     </div>
   );
@@ -83,7 +83,7 @@ export function WidgetDetailView({
                 {widget.name}
               </h2>
               {visible && (
-                <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+                <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" />
               )}
               <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg-elevated border border-border-subtle text-fg-muted leading-none">
                 {isCore ? "core" : "plugin"}
@@ -160,7 +160,7 @@ export function WidgetDetailView({
             <span>Props</span>
           </CardHeader>
           <div className="px-4 pb-4">
-            <pre className="text-xs text-fg-secondary overflow-x-auto font-mono bg-bg-elevated/40 rounded-lg p-3 border border-border-subtle">
+            <pre className="text-xs text-fg-secondary overflow-x-auto font-mono bg-bg/40 rounded-lg p-3 border border-border-subtle">
               {JSON.stringify(widget.props, null, 2)}
             </pre>
           </div>

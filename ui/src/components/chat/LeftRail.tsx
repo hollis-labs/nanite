@@ -1,13 +1,11 @@
 import {
   Bookmark,
   Clock3,
-  Moon,
   Pin,
   PinOff,
   Plus,
   Search,
   Settings,
-  Sun,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -49,10 +47,8 @@ interface LeftRailFooterProps {
   avatar: ReactNode;
   name: string;
   onProfile: () => void;
-  onThemeToggle: () => void;
   onSettings: () => void;
   archiveToggle?: ReactNode;
-  darkMode: boolean;
 }
 
 export function LeftRail({
@@ -230,10 +226,8 @@ export function LeftRailFooter({
   avatar,
   name,
   onProfile,
-  onThemeToggle,
   onSettings,
   archiveToggle,
-  darkMode,
 }: LeftRailFooterProps) {
   return (
     <div className="flex items-center gap-2 px-2.5 py-2">
@@ -247,10 +241,6 @@ export function LeftRailFooter({
       </button>
 
       {archiveToggle}
-
-      <FooterIconButton onClick={onThemeToggle} label={darkMode ? "Light mode" : "Dark mode"}>
-        {darkMode ? <Sun className="size-3.5" strokeWidth={2} /> : <Moon className="size-3.5" strokeWidth={2} />}
-      </FooterIconButton>
 
       <FooterIconButton onClick={onSettings} label="Settings">
         <Settings className="size-3.5" strokeWidth={2} />

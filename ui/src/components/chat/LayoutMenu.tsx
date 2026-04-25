@@ -106,11 +106,6 @@ function RightLayerRow({
 
 // ── Theme + mode dropdown ─────────────────────────────────────────────────
 
-function getThemeCode(themeId: string): string {
-  if (themeId === 'nanite-default') return 'C'
-  const match = themeId.match(/direction-([a-f])/i)
-  return match ? match[1].toUpperCase() : '?'
-}
 
 function ThemeDropdown() {
   const [open, setOpen] = useState(false)
@@ -123,7 +118,6 @@ function ThemeDropdown() {
   const swatchBg = activeBuiltin.tokens.light['bg-elevated'] ?? '#ffffff'
   const swatchAccent = activeBuiltin.tokens.light['primary'] ?? '#000000'
   const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  const code = getThemeCode(activeThemeId)
 
   useEffect(() => {
     if (!open) return
@@ -139,69 +133,93 @@ function ThemeDropdown() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 rounded-[6px] border px-2 py-1.5 transition-colors ${
+        className={`flex items-center gap-2 rounded-[6px] border px-2.5 py-1.5 transition-colors min-w-[140px] ${
           open ? 'border-border bg-surface' : 'border-border-subtle hover:border-border hover:bg-surface'
         }`}
       >
         <div
           className="relative overflow-hidden rounded-[3px] shrink-0"
-          style={{ width: 14, height: 14, background: swatchBg, border: '1px solid rgba(0,0,0,0.12)' }}
+          style={{ width: 16, height: 16, background: swatchBg, border: '1px solid rgba(0,0,0,0.12)' }}
         >
-          <div className="absolute bottom-[1px] inset-x-[1px] h-[3px] rounded-[1px]" style={{ background: swatchAccent }} />
+          <div className="absolute bottom-[1px] inset-x-[1px] h-[4px] rounded-[1px]" style={{ background: swatchAccent }} />
         </div>
-        <span className="font-mono text-[11px] font-semibold text-fg-secondary">
-          {code}·{isDark ? 'D' : 'L'}
+        <span className="font-mono text-[11px] font-semibold text-fg-secondary flex-1 text-left truncate">
+          {activeBuiltin.name.split(' ')[0]}·{isDark ? 'D' : 'L'}
         </span>
-        <ChevronDown className="h-[10px] w-[10px] text-fg-faint" />
+        <ChevronDown className="h-[10px] w-[10px] text-fg-faint shrink-0" />
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 mt-1.5 z-10 w-[220px] rounded-[8px] border border-border bg-bg-elevated p-2 shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
+        <div className="absolute top-full right-0 mt-1.5 z-10 w-[320px] rounded-[10px] border border-border bg-bg-elevated p-3 shadow-[0_8px_32px_rgba(0,0,0,0.16)]">
           {/* Light / Dark toggle */}
-          <div className="mb-2 flex rounded-[5px] border border-border-subtle bg-surface p-[2px]">
+          <div className="mb-3 flex rounded-[6px] border border-border-subtle bg-surface p-[3px]">
             {(['light', 'dark'] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setTheme(m)}
-                className={`flex flex-1 items-center justify-center gap-1 rounded-[3px] py-1 text-[10px] font-medium capitalize transition-colors ${
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-[4px] py-1.5 text-[11px] font-medium capitalize transition-colors ${
                   (m === 'dark') === isDark
                     ? 'bg-bg-elevated text-fg shadow-sm'
                     : 'text-fg-muted hover:text-fg-secondary'
                 }`}
               >
-                {m === 'light' ? <Sun className="h-[9px] w-[9px]" /> : <Moon className="h-[9px] w-[9px]" />}
+                {m === 'light' ? <Sun className="h-3 w-3" /> : <Moon className="h-3 w-3" />}
                 {m}
               </button>
             ))}
           </div>
 
-          {/* Theme palette grid */}
-          <div className="grid grid-cols-3 gap-1.5">
+          {/* Theme palette grid — 2 cols, palette-dot design, full name */}
+          <div className="grid grid-cols-2 gap-2">
             {BUILTIN_THEMES.map((t) => {
-              const bg = t.tokens.light['bg-elevated'] ?? '#ffffff'
-              const accent = t.tokens.light['primary'] ?? '#000000'
-              const brand = t.tokens.light['brand'] ?? accent
+              const bg      = isDark ? (t.tokens.dark['bg-elevated']  ?? '#111') : (t.tokens.light['bg-elevated']  ?? '#fff')
+              const surface = isDark ? (t.tokens.dark['surface']      ?? '#222') : (t.tokens.light['surface']      ?? '#eee')
+              const brand   = isDark ? (t.tokens.dark['brand']        ?? '#888') : (t.tokens.light['brand']        ?? '#888')
+              const primary = isDark ? (t.tokens.dark['primary']      ?? '#fff') : (t.tokens.light['primary']      ?? '#000')
+              const fg2     = isDark ? (t.tokens.dark['fg-secondary'] ?? '#aaa') : (t.tokens.light['fg-secondary'] ?? '#555')
               const isActive = t.id === activeThemeId
               return (
                 <button
                   key={t.id}
                   type="button"
                   onClick={() => { setActiveTheme(t.id); setOpen(false) }}
-                  className={`flex flex-col items-center gap-1 rounded-[5px] border p-1.5 transition-colors ${
-                    isActive ? 'border-primary bg-primary-muted' : 'border-transparent hover:border-border-subtle hover:bg-surface'
+                  className={`flex items-center gap-2.5 rounded-[7px] border px-2.5 py-2 text-left transition-colors ${
+                    isActive ? 'border-primary bg-primary-muted' : 'border-border-subtle hover:border-border hover:bg-surface'
                   }`}
                 >
+                  {/* Mini UI card preview */}
                   <div
-                    className="relative overflow-hidden rounded-[4px]"
-                    style={{ width: 26, height: 26, background: bg, border: '1px solid rgba(0,0,0,0.08)' }}
+                    className="shrink-0 rounded-[5px] overflow-hidden flex flex-col gap-[3px] p-[5px]"
+                    style={{ width: 48, height: 40, background: bg, border: '1px solid rgba(0,0,0,0.10)' }}
                   >
-                    <div className="absolute bottom-[2px] inset-x-[2px] h-[3px] rounded-[1px]" style={{ background: accent }} />
-                    <div className="absolute left-[2px] top-[6px] h-[6px] w-[6px] rounded-full" style={{ background: brand }} />
+                    {/* Header strip */}
+                    <div className="flex items-center gap-[3px]">
+                      <div className="w-[8px] h-[8px] rounded-[2px]" style={{ background: brand }} />
+                      <div className="h-[4px] rounded-[2px] flex-1" style={{ background: surface }} />
+                    </div>
+                    {/* Content lines */}
+                    <div className="h-[3px] rounded-[2px]" style={{ background: surface, width: '80%' }} />
+                    <div className="h-[3px] rounded-[2px]" style={{ background: surface, width: '60%' }} />
+                    {/* Composer */}
+                    <div className="mt-auto flex items-center gap-[3px]">
+                      <div className="h-[5px] rounded-[2px] flex-1" style={{ background: surface }} />
+                      <div className="w-[8px] h-[5px] rounded-[2px]" style={{ background: primary }} />
+                    </div>
                   </div>
-                  <span className={`font-mono text-[9px] font-semibold ${isActive ? 'text-primary' : 'text-fg-muted'}`}>
-                    {getThemeCode(t.id)}
-                  </span>
+
+                  {/* Name + color dots */}
+                  <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                    <span className={`text-[11px] font-medium leading-tight ${isActive ? 'text-primary' : 'text-fg'}`}>
+                      {t.name.split(' ')[0]}
+                    </span>
+                    {/* Color palette dots */}
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: brand }} title="Brand" />
+                      <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: primary }} title="Primary" />
+                      <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: fg2 }} title="Secondary" />
+                    </div>
+                  </div>
                 </button>
               )
             })}
@@ -290,8 +308,8 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
     ...pluginTabs.map((e) => ({ id: e.id, Icon: resolveIcon(e.icon), label: e.label })),
   ]
 
-  const leftColWidth = leftOpen ? 138 : 18
-  const rightColWidth = rightOpen ? 126 : 18
+  const leftColWidth = leftOpen ? 168 : 18
+  const rightColWidth = rightOpen ? 152 : 18
 
   const leftFeatures = [
     { id: 'workspace', Icon: Building2, label: 'Workspace',     on: workspaceVisible, toggle: toggleWorkspace },
@@ -303,7 +321,7 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
     <div
       ref={menuRef}
       className="fixed z-[9999]"
-      style={{ left: pos.left, bottom: pos.bottom, width: 460 }}
+      style={{ left: pos.left, bottom: pos.bottom, width: 580 }}
     >
       {/* ── Main panel ── */}
       <div className="rounded-[12px] border border-border bg-bg-elevated shadow-[0_16px_48px_rgba(15,17,22,0.18)] overflow-hidden">
@@ -379,9 +397,8 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
               <div className="w-px h-2.5 bg-divider" />
               {chipsVisible ? (
                 <>
-                  <div className="h-3 px-1.5 rounded-[3px] bg-surface flex items-center font-mono text-[8px] text-fg-muted">claude</div>
-                  <div className="h-3 px-1.5 rounded-[3px] bg-surface flex items-center font-mono text-[8px] text-fg-muted">153t</div>
-                  <div className="h-3 px-1.5 rounded-[3px] bg-warning-muted flex items-center font-mono text-[8px] text-warning">arch</div>
+                  <div className="h-3 px-1.5 rounded-[3px] bg-surface flex items-center font-mono text-[8px] text-fg-muted shrink-0">claude</div>
+                  <div className="h-3 px-1.5 rounded-[3px] bg-surface flex items-center font-mono text-[8px] text-fg-muted shrink-0">153t</div>
                 </>
               ) : (
                 <span className="font-mono text-[8px] text-fg-faint uppercase tracking-wide opacity-60">chips hidden</span>

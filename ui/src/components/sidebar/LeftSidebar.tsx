@@ -80,8 +80,6 @@ export function LeftSidebar() {
   const showWorkspace = useLayoutStore((s) => s.leftRailWorkspaceVisible);
   const showNewChat = useLayoutStore((s) => s.leftRailNewChatVisible);
   const showSearch = useLayoutStore((s) => s.leftRailSearchVisible);
-  const theme = useLayoutStore((s) => s.theme);
-  const toggleTheme = useLayoutStore((s) => s.toggleTheme);
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
@@ -244,10 +242,6 @@ export function LeftSidebar() {
     (userSettings?.ext_settings?.email as string) ||
     "Profile";
   const avatarUrl = (userSettings?.ext_settings?.avatar_url as string) || "";
-  const darkMode =
-    theme === "dark" ||
-    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-
   const openSearch = () => {
     window.dispatchEvent(new CustomEvent("open-search"));
   };
@@ -394,7 +388,6 @@ export function LeftSidebar() {
             }
             name={displayName}
             onProfile={openProfile}
-            onThemeToggle={toggleTheme}
             onSettings={openSettings}
             archiveToggle={
               archivedCount > 0 ? (
@@ -417,7 +410,6 @@ export function LeftSidebar() {
                 </Tooltip>
               ) : undefined
             }
-            darkMode={darkMode}
           />
         }
       />

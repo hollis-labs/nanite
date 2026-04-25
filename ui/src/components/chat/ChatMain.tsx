@@ -149,13 +149,15 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
             {statusMessage}
           </div>
         )}
-        <ChatComposer
-          onSend={sendMessage}
-          isStreaming={isStreaming}
-          onStop={stopStreaming}
-          onEditorReady={onEditorReady}
-          reloadMessages={loadMessages}
-        />
+        <div className="max-w-3xl w-full mx-auto px-4 pb-4 shrink-0">
+          <ChatComposer
+            onSend={sendMessage}
+            isStreaming={isStreaming}
+            onStop={stopStreaming}
+            onEditorReady={onEditorReady}
+            reloadMessages={loadMessages}
+          />
+        </div>
       </main>
       {isTaskSession && taskId && (
         <TaskThreadPanel taskId={taskId} open={taskThreadOpen} onToggle={toggleTaskThread} />

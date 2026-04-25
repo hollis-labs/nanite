@@ -36,6 +36,14 @@ const (
 	EventMessageReceived = "message_received"
 	EventMessageAcked    = "message_acked"
 	EventMessageResolved = "message_resolved"
+
+	// PTY / CLI turn lifecycle events. Written by the chat-service layer
+	// (not the messaging layer) for PTY-provider sessions. These allow
+	// nanite_diagnose_session to reconstruct what happened in a PTY turn
+	// without having to grep logs.
+	EventPTYTurnStart    = "pty_turn_start"
+	EventPTYTurnComplete = "pty_turn_complete"
+	EventPTYTurnFailed   = "pty_turn_failed"
 )
 
 // SessionEvent is a single row in session_events, surfaced for
@@ -104,6 +112,30 @@ func (svc *Service) writeMessageEvent(ctx context.Context, sessionID, eventType 
 func (svc *Service) writeSendEvents(ctx context.Context, m *Message) {
 	svc.writeMessageEvent(ctx, m.FromSessionID, EventMessageSent, m)
 	svc.writeMessageEvent(ctx, m.ToSessionID, EventMessageReceived, m)
+}
+
+// WriteSessionEvent inserts a single session_events row with an arbitrary
+// event type and payload. This is the public entry point for non-messaging
+// producers (e.g., the chat-service PTY turn lifecycle emitter). Callers
+// must supply a non-empty sessionID and eventType. payloadJSON may be empty,
+// in which case "{}" is stored. Failures are logged but never returned — same
+// fire-and-forget contract as writeMessageEvent.
+func (svc *Service) WriteSessionEvent(ctx context.Context, sessionID, eventType, channel, payloadJSON string) {
+	if svc.db == nil || sessionID == "" || eventType == "" {
+		return
+	}
+	if payloadJSON == "" {
+		payloadJSON = "{}"
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := svc.db.ExecContext(ctx,
+		`INSERT INTO session_events (id, session_id, event_type, channel, envelope_pointer_json, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), sessionID, eventType, channel, payloadJSON, now,
+	); err != nil {
+		slog.Warn("messaging: write session event (external)", "err", err,
+			"session_id", sessionID, "event_type", eventType)
+	}
 }
 
 // SessionEvents returns the recent event rows for a session in

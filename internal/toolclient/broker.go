@@ -83,6 +83,15 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 	}
 }
 
+// strictTrue is a pointer to true used as the default Strict value for
+// broker-registered tools. Strict mode causes Anthropic to validate tool
+// inputs against the declared schema at call time, surfacing malformed calls
+// early rather than wasting retry turns.
+//
+// Opt-out: pass a *bool pointing to false in provider.ToolDefinition.Strict
+// when registering a builtin that is intentionally schema-loose (rare).
+var strictTrue = func() *bool { v := true; return &v }()
+
 // RegisterTools registers tool definitions with the underlying broker.
 func (tb *ToolClient) RegisterTools(tools []broker.ToolDefinition) {
 	tb.LocalBroker.RegisterTools(tools)
@@ -239,6 +248,10 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	}
 
 	// Append broker-selected MCP tools, filtered by agent permissions.
+	// Strict defaults to true for all broker-registered tools so malformed
+	// tool calls fail at the provider boundary instead of wasting retry turns.
+	// Tools that require a permissive schema (rare) can opt out by setting
+	// Strict: pointer-to-false in their ToolDefinition before registration.
 	for _, t := range tools {
 		name := t.Name
 		if t.Server != "" {
@@ -255,6 +268,7 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 			Name:        name,
 			Description: t.Description,
 			InputSchema: t.InputSchema,
+			Strict:      strictTrue, // default-on; nil in ToolDefinition also means strict
 		})
 	}
 

@@ -174,3 +174,50 @@ func TestService_SessionEvents_LimitCap(t *testing.T) {
 		t.Errorf("len=%d, want 500 (cap)", len(events))
 	}
 }
+
+// TestService_WriteSessionEvent covers the public WriteSessionEvent path:
+// an external caller (e.g. chat-service PTY turn lifecycle) can insert a
+// session_events row directly without going through the messaging send path.
+func TestService_WriteSessionEvent(t *testing.T) {
+	svc, _, _ := newTestService(t, "file-backend")
+	ctx := context.Background()
+
+	// Write a pty_turn_start event directly.
+	svc.WriteSessionEvent(ctx, "sess-pty", EventPTYTurnStart, "pty", `{"message_id":"msg-1","provider":"pty"}`)
+
+	events, err := svc.SessionEvents(ctx, "sess-pty", 0)
+	if err != nil {
+		t.Fatalf("SessionEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("len=%d, want 1", len(events))
+	}
+	if events[0].EventType != EventPTYTurnStart {
+		t.Errorf("event_type = %q, want %q", events[0].EventType, EventPTYTurnStart)
+	}
+	if events[0].Channel != "pty" {
+		t.Errorf("channel = %q, want %q", events[0].Channel, "pty")
+	}
+
+	// Write a pty_turn_complete event and confirm chronological order.
+	svc.WriteSessionEvent(ctx, "sess-pty", EventPTYTurnComplete, "pty", `{"message_id":"msg-1","provider":"pty","duration_ms":1234}`)
+
+	events, err = svc.SessionEvents(ctx, "sess-pty", 0)
+	if err != nil {
+		t.Fatalf("SessionEvents after complete: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("len=%d, want 2", len(events))
+	}
+	if events[1].EventType != EventPTYTurnComplete {
+		t.Errorf("second event_type = %q, want %q", events[1].EventType, EventPTYTurnComplete)
+	}
+}
+
+// TestService_WriteSessionEvent_NilDB verifies the nil-safe guard on WriteSessionEvent.
+func TestService_WriteSessionEvent_NilDB(t *testing.T) {
+	// A service with a nil db must not panic.
+	svc := &Service{db: nil}
+	svc.WriteSessionEvent(context.Background(), "sess-1", EventPTYTurnStart, "pty", "")
+	// No panic = pass.
+}

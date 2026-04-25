@@ -29,6 +29,9 @@ func RequestToolsMetaTool() provider.ToolDefinition {
 					"description": "Describe what you want to do — the broker will find the most relevant tools",
 				},
 			},
+			// additionalProperties: false is required for strict-mode compatibility.
+			// Anthropic rejects strict:true tools whose schemas allow unknown fields.
+			"additionalProperties": false,
 		},
 	}
 }
@@ -132,6 +135,8 @@ func FetchToolResultMetaTool() provider.ToolDefinition {
 				},
 			},
 			"required": []any{"id"},
+			// additionalProperties: false required for strict-mode compatibility.
+			"additionalProperties": false,
 		},
 	}
 }
@@ -160,6 +165,8 @@ func SearchToolResultMetaTool() provider.ToolDefinition {
 				},
 			},
 			"required": []any{"id", "pattern"},
+			// additionalProperties: false required for strict-mode compatibility.
+			"additionalProperties": false,
 		},
 	}
 }

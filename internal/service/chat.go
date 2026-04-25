@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/filter"
@@ -81,6 +82,10 @@ type ChatServiceConfig struct {
 	PluginHost   PluginEventSink // for pre-hooks
 	ProcessTracker *chat.ProcessTracker
 
+	// SessionEventWriter writes lifecycle rows to session_events for
+	// diagnostic reconstruction. nil = PTY observability disabled.
+	SessionEventWriter SessionEventWriter
+
 	// Utility provider/model for autoTitle/autoTags.
 	UtilityProvider string
 	UtilityModel    string
@@ -104,6 +109,15 @@ type ChatServiceConfig struct {
 	// models.dev. Nil-safe: when absent the service falls back to user_settings
 	// and then the hardcoded DefaultContextWindowSize.
 	ModelCatalog *modelsdev.Client
+
+	// DBPath is the path to the SQLite database file. Passed into
+	// sandbox.Populate so spawned CLI MCP servers receive a non-empty --db flag.
+	DBPath string
+
+	// AdapterRegistry holds registered CLIAgentAdapters used by sandbox.Populate
+	// to write CLAUDE.md and .mcp.json on each chat turn. nil = sandbox file
+	// writes are skipped.
+	AdapterRegistry *agent.AdapterRegistry
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -117,14 +131,15 @@ type chatServiceImpl struct {
 	providers *provider.Registry
 	store     Store
 
-	orchestrator   *chat.Orchestrator
-	appConfig      *config.AppConfig
-	outputFilter   *filter.Chain
-	commands       *chat.CommandRegistry
-	pluginHost     PluginEventSink
-	processTracker *chat.ProcessTracker
-	tasks          task.Service
-	workers        *worker.Manager
+	orchestrator        *chat.Orchestrator
+	appConfig           *config.AppConfig
+	outputFilter        *filter.Chain
+	commands            *chat.CommandRegistry
+	pluginHost          PluginEventSink
+	processTracker      *chat.ProcessTracker
+	tasks               task.Service
+	workers             *worker.Manager
+	sessionEventWriter  SessionEventWriter
 
 	utilityProvider string
 	utilityModel    string
@@ -145,6 +160,11 @@ type chatServiceImpl struct {
 	// resultCache stores large tool results for the cache-and-pointer pattern.
 	resultCache  *tool.ResultCache
 	modelCatalog *modelsdev.Client
+
+	// dbPath is the SQLite database path forwarded to sandbox.Populate.
+	dbPath string
+	// adapterRegistry is forwarded to sandbox.Populate on each CLI chat turn.
+	adapterRegistry *agent.AdapterRegistry
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -193,18 +213,21 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		commands:       cfg.Commands,
 		pluginHost:     cfg.PluginHost,
 		processTracker: cfg.ProcessTracker,
-		tasks:          cfg.Tasks,
-		utilityProvider: up,
-		utilityModel:    um,
-		permissions:    cfg.Permissions,
+		tasks:               cfg.Tasks,
+		utilityProvider:     up,
+		utilityModel:        um,
+		permissions:         cfg.Permissions,
 		embeddingStatus:         cfg.EmbeddingStatus,
 		embeddingProvider:       cfg.EmbeddingProvider,
 		embeddingWarnedSessions: make(map[string]struct{}),
 		argValidator:            newArgValidator(),
 		resultCache:             cfg.ResultCache,
 		modelCatalog:            cfg.ModelCatalog,
+		dbPath:                  cfg.DBPath,
+		adapterRegistry:         cfg.AdapterRegistry,
 		lifecycle:               lifecycle.NewManager("service.chat"),
 		activeGen:               make(map[string]*inFlightGen),
+		sessionEventWriter:  cfg.SessionEventWriter,
 	}
 }
 

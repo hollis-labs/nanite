@@ -20,7 +20,7 @@ function Card({
 }) {
   return (
     <div className={`rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden ${className}`}>
-      <div className="px-4 py-2.5 border-b border-border/50">
+      <div className="px-4 py-2.5 border-b border-border-subtle">
         <h4 className="text-[11px] uppercase tracking-wider text-fg-muted font-medium">{title}</h4>
       </div>
       <div className="p-4">{children}</div>

@@ -17,6 +17,17 @@ export function PanelHeader({ title, description }: { title: string; description
 
 // --- SCard ---
 
+type SCardAccent = 'brand' | 'success' | 'warning' | 'danger' | 'info' | 'primary'
+
+const SCARD_ACCENT_CLASSES = {
+  brand:   'border-l-2 border-l-brand',
+  success: 'border-l-2 border-l-status-ok',
+  warning: 'border-l-2 border-l-status-warn',
+  danger:  'border-l-2 border-l-status-danger',
+  info:    'border-l-2 border-l-fg-secondary',
+  primary: 'border-l-2 border-l-fg',
+} satisfies Record<SCardAccent, string>
+
 export function SCard({
   title,
   meta,
@@ -30,21 +41,13 @@ export function SCard({
   description?: string
   children: React.ReactNode
   className?: string
-  accent?: 'brand' | 'success' | 'warning' | 'danger' | 'info' | 'primary'
+  accent?: SCardAccent
 }) {
-  const accentStyles: Record<string, string> = {
-    brand:   'border-l-2 border-l-brand',
-    success: 'border-l-2 border-l-status-ok',
-    warning: 'border-l-2 border-l-status-warn',
-    danger:  'border-l-2 border-l-status-danger',
-    info:    'border-l-2 border-l-fg-secondary',
-    primary: 'border-l-2 border-l-fg',
-  }
   return (
     <div
       className={cn(
         "bg-bg-elevated border border-border-subtle rounded-[10px] overflow-hidden mb-4",
-        accent && accentStyles[accent],
+        accent && SCARD_ACCENT_CLASSES[accent],
         className,
       )}
     >

@@ -328,6 +328,7 @@ export function SkillDetailView({
   }));
 
   const schema = parseInputSchema(skill.input_schema);
+  const bindings = parseToolBindings(skill.tool_bindings);
 
   // ─── Render ─────────────────────────────────────────────────────
 
@@ -382,8 +383,8 @@ export function SkillDetailView({
           </TabsTrigger>
           <TabsTrigger value="bindings" className="gap-1.5 text-xs">
             <Wrench className="w-3.5 h-3.5" /> Tool Bindings
-            {parseToolBindings(skill.tool_bindings).length > 0 && (
-              <span className="text-[10px] text-fg-faint">({parseToolBindings(skill.tool_bindings).length})</span>
+            {bindings.length > 0 && (
+              <span className="text-[10px] text-fg-faint">({bindings.length})</span>
             )}
           </TabsTrigger>
           {schema && (

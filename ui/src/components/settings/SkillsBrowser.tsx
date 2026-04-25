@@ -239,8 +239,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                 <ContextMenu key={skill.id}>
                   <ContextMenuTrigger asChild>
                     <div
-                      className="rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden transition-all cursor-pointer hover:border-border hover:shadow-sm group border-l-2 border-l-status-ok"
-                      style={!skill.is_builtin ? { borderLeftColor: 'var(--color-brand)' } : undefined}
+                      className={`rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden transition-all cursor-pointer hover:border-border hover:shadow-sm group border-l-2 ${skill.is_builtin ? "border-l-status-ok" : "border-l-brand"}`}
                       onClick={() => setSelectedSkill(skill.id)}
                     >
                       {/* Header */}

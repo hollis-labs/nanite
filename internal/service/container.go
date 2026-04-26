@@ -24,11 +24,16 @@ import (
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
-	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/plugin"
+	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
+	adaptercodex "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex"
+	adaptergemini "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini"
+	nanitenative "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
+	adapteropencode "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/tool/stash"
@@ -147,6 +152,16 @@ type ContainerConfig struct {
 	MaxCLIProcesses int
 }
 
+func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
+	reg := agent.NewAdapterRegistry()
+	reg.Register(adapterclaude.New().Adapter())
+	reg.Register(adaptercodex.New().Adapter())
+	reg.Register(adaptergemini.New().Adapter())
+	reg.Register(adapteropencode.New().Adapter())
+	reg.Register(nanitenative.New().Adapter())
+	return reg
+}
+
 // NewContainer wires all services together and returns a ready Container.
 func NewContainer(cfg ContainerConfig) (*Container, error) {
 	if cfg.Store == nil {
@@ -178,7 +193,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Adapter registry — adapters self-register via plugin loading.
 	// For now, the registry is created and passed through; adapter plugins
 	// will be wired when the plugin host supports adapter registration.
-	adapterRegistry := agent.NewAdapterRegistry()
+	adapterRegistry := newRuntimeAdapterRegistry()
 
 	// Discover file-based agent definitions from all priority locations.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
@@ -350,7 +365,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// SSE stream. Nil-safe — when no stream is attached the broadcast
 	// drops silently, which is the intended MVP behavior.
 	messagingSvc.SetNotificationSink(&messagingStreamSink{streams: streams})
-
 
 	contextClient := chat.NewContextClient(cfg.Store)
 

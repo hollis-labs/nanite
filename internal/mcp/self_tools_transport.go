@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1279,7 +1282,202 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 	if err != nil {
 		return errorResult(fmt.Sprintf("spawn subagent: %v", err)), nil
 	}
+	if req.Mode == "" || req.Mode == subagent.ModeSync {
+		if summary, ok := st.syncSubagentSummary(ctx, id); ok {
+			return textResult(summary), nil
+		}
+	}
 	return textResult(fmt.Sprintf("spawned: %s", id)), nil
+}
+
+func (st *SelfToolsTransport) syncSubagentSummary(ctx context.Context, runID string) (string, bool) {
+	run, err := st.Subagent.Status(ctx, runID)
+	if err != nil || run == nil || run.ChildSessionID == "" {
+		return "", false
+	}
+	msgs, err := st.Store.ListMessages(run.ChildSessionID, 20)
+	if err != nil {
+		return "", false
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "assistant" || msgs[i].Content == "" {
+			continue
+		}
+		if text := extractStoredAssistantText(msgs[i].Content); text != "" {
+			if literal, ok := extractLiteralSubagentOutput(run.Prompt, text); ok {
+				return literal, true
+			}
+			return text, true
+		}
+		return msgs[i].Content, true
+	}
+	return "", false
+}
+
+func extractStoredAssistantText(content string) string {
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return ""
+	}
+	return payload.Text
+}
+
+func extractLiteralSubagentOutput(prompt, text string) (string, bool) {
+	if !looksLikeLiteralContentPrompt(prompt) {
+		return "", false
+	}
+	block, ok := extractSingleFencedCodeBlock(text)
+	if ok {
+		return formatLiteralFileReadReply(prompt, block)
+	}
+	list, ok := extractLeadingNumberedList(text)
+	if !ok {
+		return "", false
+	}
+	return formatLiteralFileReadReply(prompt, list)
+}
+
+func looksLikeLiteralContentPrompt(prompt string) bool {
+	p := strings.ToLower(prompt)
+	if !strings.Contains(p, "/") {
+		return false
+	}
+	if !strings.Contains(p, "read") {
+		return false
+	}
+	return strings.Contains(p, "line") || strings.Contains(p, "return the content")
+}
+
+func extractSingleFencedCodeBlock(text string) (string, bool) {
+	start := strings.Index(text, "```")
+	if start < 0 {
+		return "", false
+	}
+	endRel := strings.Index(text[start+3:], "```")
+	if endRel < 0 {
+		return "", false
+	}
+	end := start + 3 + endRel + 3
+	if strings.Contains(text[end:], "```") {
+		return "", false
+	}
+	return strings.TrimSpace(text[start:end]), true
+}
+
+func extractLeadingNumberedList(text string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	var out []string
+	collecting := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if collecting {
+				break
+			}
+			continue
+		}
+		if isNumberedListLine(trimmed) {
+			collecting = true
+			out = append(out, trimmed)
+			continue
+		}
+		if collecting {
+			break
+		}
+	}
+	if len(out) < 2 {
+		return "", false
+	}
+	return strings.Join(out, "\n"), true
+}
+
+func isNumberedListLine(line string) bool {
+	if len(line) < 3 || line[1] != '.' || line[2] != ' ' {
+		return false
+	}
+	return line[0] >= '0' && line[0] <= '9'
+}
+
+func formatLiteralFileReadReply(prompt, literal string) (string, bool) {
+	lines, ok := normalizeLiteralLines(literal)
+	if !ok || len(lines) == 0 {
+		return "", false
+	}
+	pathLabel := "requested file"
+	if path := extractPromptPath(prompt); path != "" {
+		pathLabel = filepath.Base(path)
+	}
+	var b strings.Builder
+	if n, ok := extractRequestedLineCount(prompt); ok {
+		fmt.Fprintf(&b, "First %d lines of `%s`:\n\n", n, pathLabel)
+	} else {
+		fmt.Fprintf(&b, "Requested content from `%s`:\n\n", pathLabel)
+	}
+	for i, line := range lines {
+		rendered := "(blank line)"
+		if strings.TrimSpace(line) != "" {
+			rendered = fmt.Sprintf("`%s`", line)
+		}
+		fmt.Fprintf(&b, "%d. %s", i+1, rendered)
+		if i < len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String(), true
+}
+
+func normalizeLiteralLines(literal string) ([]string, bool) {
+	literal = strings.TrimSpace(literal)
+	if strings.HasPrefix(literal, "```") {
+		body := literal[3:]
+		if idx := strings.IndexByte(body, '\n'); idx >= 0 {
+			body = body[idx+1:]
+		}
+		if end := strings.LastIndex(body, "```"); end >= 0 {
+			body = body[:end]
+		}
+		body = strings.TrimRight(body, "\n")
+		return strings.Split(body, "\n"), true
+	}
+	lines := strings.Split(literal, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !isNumberedListLine(trimmed) {
+			return nil, false
+		}
+		item := strings.TrimSpace(trimmed[3:])
+		switch item {
+		case "(empty line)", "(blank line)":
+			out = append(out, "")
+		default:
+			out = append(out, strings.Trim(item, "`"))
+		}
+	}
+	return out, len(out) > 0
+}
+
+var (
+	promptPathPattern      = regexp.MustCompile(`/[^\s` + "`" + `]+`)
+	promptFirstLinesPattern = regexp.MustCompile(`(?i)first\s+(\d+)\s+lines?`)
+)
+
+func extractPromptPath(prompt string) string {
+	return promptPathPattern.FindString(prompt)
+}
+
+func extractRequestedLineCount(prompt string) (int, bool) {
+	m := promptFirstLinesPattern.FindStringSubmatch(prompt)
+	if len(m) != 2 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 func (st *SelfToolsTransport) callSubagentStatus(ctx context.Context, args map[string]any) (*ToolResult, error) {

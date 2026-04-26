@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -56,6 +56,47 @@ func TestExtraSystemPrefix_NoToolsWarning(t *testing.T) {
 	without := composeExtraSystemPrefix("", composeConfig{noTools: false})
 	if strings.Contains(without, "no tools available in this session") {
 		t.Errorf("did not expect no-tools warning when noTools=false, got:\n%s", without)
+	}
+}
+
+func TestHasUsableTools(t *testing.T) {
+	if hasUsableTools(nil) {
+		t.Fatal("nil tool slice should not count as usable tools")
+	}
+	if hasUsableTools([]provider.ToolDefinition{}) {
+		t.Fatal("empty tool slice should not count as usable tools")
+	}
+	if !hasUsableTools([]provider.ToolDefinition{{Name: "dev_read"}}) {
+		t.Fatal("built-in tools must count as usable tools")
+	}
+	if !hasUsableTools([]provider.ToolDefinition{{Name: "mcp__conduit__lookup"}}) {
+		t.Fatal("MCP tools must count as usable tools")
+	}
+}
+
+func TestAdjustToolStrictnessForProvider_AnthropicSonnet20250514(t *testing.T) {
+	trueVal := true
+	tools := []provider.ToolDefinition{
+		{Name: "a", Strict: &trueVal},
+		{Name: "b"},
+	}
+	adjustToolStrictnessForProvider("anthropic", "claude-sonnet-4-20250514", tools)
+	for _, tool := range tools {
+		if tool.Strict == nil {
+			t.Fatalf("tool %q strict unexpectedly nil", tool.Name)
+		}
+		if *tool.Strict {
+			t.Fatalf("tool %q strict should be disabled for this model", tool.Name)
+		}
+	}
+}
+
+func TestAdjustToolStrictnessForProvider_OtherModelsUnchanged(t *testing.T) {
+	trueVal := true
+	tools := []provider.ToolDefinition{{Name: "a", Strict: &trueVal}}
+	adjustToolStrictnessForProvider("anthropic", "claude-sonnet-4-5", tools)
+	if tools[0].Strict == nil || !*tools[0].Strict {
+		t.Fatal("strict should remain enabled for unaffected models")
 	}
 }
 

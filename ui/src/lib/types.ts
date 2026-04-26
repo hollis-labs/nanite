@@ -138,6 +138,7 @@ export interface StreamEvent {
   type:
     | "stream_start"
     | "delta"
+    | "replace_content"
     | "stream_end"
     | "error"
     | "tool_call"

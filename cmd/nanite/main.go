@@ -455,12 +455,21 @@ func initProviders(devMode bool) *provider.Registry {
 			slog.Info("subprocess provider registered", "name", subName, "path", path)
 		}
 	}
-	// Backwards-compat alias: "pty" → Claude adapter (if available).
+	registerLegacyPTYAlias(registry)
+
+	return registry
+}
+
+func registerLegacyPTYAlias(registry *provider.Registry) {
+	// Backwards-compat alias: "pty" should mirror the registered Claude PTY
+	// provider so it inherits the same adapter wrapping and sandbox flags.
+	if claudePTY, ok := registry.Get("pty-claude"); ok {
+		registry.Register("pty", claudePTY)
+		return
+	}
 	if ptyBridge := provider.NewPTYBridge(); ptyBridge != nil {
 		registry.Register("pty", ptyBridge)
 	}
-
-	return registry
 }
 
 // initMCP sets up the MCP manager with built-in and user-configured servers,

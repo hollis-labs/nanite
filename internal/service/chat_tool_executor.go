@@ -594,6 +594,9 @@ func (s *chatServiceImpl) postProcessToolResults(
 		resultBlocks = append(resultBlocks, provider.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: tr.Content, IsError: r.isError,
 		})
+		if shouldDirectReturnSubagentLiteral(plans, tu.Name, tr.Content, r.isError) {
+			ls.directReturn = tr.Content
+		}
 
 		tcStatus := "success"
 		if r.isError {
@@ -607,6 +610,20 @@ func (s *chatServiceImpl) postProcessToolResults(
 	}
 
 	return resultBlocks, refs
+}
+
+func shouldDirectReturnSubagentLiteral(plans []toolPlan, toolName, content string, isError bool) bool {
+	if isError || len(plans) != 1 || toolName != "nanite_spawn_subagent" {
+		return false
+	}
+	content = strings.TrimSpace(content)
+	if strings.HasPrefix(content, "```") && strings.Count(content, "```") >= 2 {
+		return true
+	}
+	if strings.HasPrefix(content, "1. ") {
+		return true
+	}
+	return strings.HasPrefix(content, "First ") || strings.HasPrefix(content, "Requested content from ")
 }
 
 // toolCallDetail extracts a short human-readable label from a tool's input.

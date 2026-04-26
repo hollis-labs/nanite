@@ -160,6 +160,9 @@ func (r *ChatRunner) resolveRole(slug string) (*store.AgentProfile, error) {
 // Provider resolution order:
 //  1. run.Provider (from SpawnRequest.Provider) when non-empty — caller override
 //  2. agent.DefaultProvider — agent profile default
+//  3. parent.Provider — inherit the parent session's provider so a subagent
+//     spawned from an HTTP/provider-backed session does not silently fall back
+//     to the user's global default (for example pty).
 func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, agent *store.AgentProfile) (string, error) {
 	parent, err := r.store.GetSession(run.ParentSessionID)
 	if err != nil {
@@ -169,6 +172,9 @@ func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 	provider := run.Provider
 	if provider == "" {
 		provider = agent.DefaultProvider
+	}
+	if provider == "" {
+		provider = parent.Provider
 	}
 	childID := uuid.New().String()
 	if err := r.store.CreateSession(&store.Session{

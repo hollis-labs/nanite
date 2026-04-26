@@ -15,12 +15,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -71,6 +71,29 @@ func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
 		b.WriteString(overrideBlock)
 	}
 	return b.String()
+}
+
+// hasUsableTools reports whether the turn exposes any tools to the LLM.
+// Built-in tools (for example dev_* and self-service tools) count — the
+// "no tools" warning should only fire when the final selection is empty.
+func hasUsableTools(tools []provider.ToolDefinition) bool {
+	return len(tools) > 0
+}
+
+// adjustToolStrictnessForProvider disables strict tool schemas for provider/model
+// combinations that reject the "strict" field outright. Keep the broker-level
+// default strict-on behavior intact; this is a last-mile compatibility shim.
+func adjustToolStrictnessForProvider(providerName, model string, tools []provider.ToolDefinition) {
+	if providerName != "anthropic" {
+		return
+	}
+	if model != "claude-sonnet-4-20250514" {
+		return
+	}
+	strictFalse := false
+	for i := range tools {
+		tools[i].Strict = &strictFalse
+	}
 }
 
 // generateResponseTimeout is the maximum wall-clock time a single
@@ -248,6 +271,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 	tools := selection.Tools
 	normalizeToolInputSchemas(tools)
+	adjustToolStrictnessForProvider(providerName, model, tools)
 
 	// Build the dynamic per-turn system prefix from tool selection. This text
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks
@@ -258,10 +282,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// warning event (side-effect, stays here) and pass the flag to the pure
 	// composeExtraSystemPrefix helper.
 	noTools := false
-	if !selection.Progressive && countMCPTools(tools) == 0 {
+	if !selection.Progressive && !hasUsableTools(tools) {
 		noTools = true
 		warningPayload := chat.ToolWarningPayload{
-			Error: "This agent has no MCP tools configured. Responses will be text-only.",
+			Error: "This agent has no tools configured. Responses will be text-only.",
 			Level: "critical",
 		}
 		warningJSON, _ := json.Marshal(warningPayload)
@@ -866,6 +890,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		newBlocks, newRefs := s.postProcessToolResults(ctx, plans, execResults, ls, ch, sessionID, agentID, assistantMsgID)
 		resultBlocks = append(resultBlocks, newBlocks...)
 		ls.toolCallRefs = append(ls.toolCallRefs, newRefs...)
+		if ls.directReturn != "" {
+			fullContent.Reset()
+			fullContent.WriteString(ls.directReturn)
+			ch <- chat.StreamEvent{Type: "replace_content", Content: ls.directReturn}
+			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "done:direct_return=subagent_literal", len(ls.toolCallRefs), ch)
+			break
+		}
 
 		// Append tool results as user message.
 		chatMessages = append(chatMessages, provider.ChatMessage{
@@ -1076,7 +1107,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		SessionID: sessionID, MessageID: assistantMsgID,
 		Provider: providerName, Adapter: adapterType, Model: model,
 		AgentID: agent.ID, AgentSlug: agent.Slug, Mode: mode.Slug,
-		DurationMs: time.Since(startTime).Milliseconds(),
+		DurationMs:      time.Since(startTime).Milliseconds(),
 		ContextMessages: len(chatMessages), ToolIterations: ls.iteration,
 		ToolCalls: len(ls.toolCallRefs),
 	}

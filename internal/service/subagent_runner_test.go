@@ -388,6 +388,43 @@ func TestChatRunner_ProviderOverride_UsesFallbackWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestChatRunner_ProviderOverride_InheritsParentWhenNoOverrideOrAgentDefault
+// verifies that the child session inherits the parent provider when both the
+// spawn request and the agent profile leave the provider empty.
+func TestChatRunner_ProviderOverride_InheritsParentWhenNoOverrideOrAgentDefault(t *testing.T) {
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "delta", Content: "done"},
+		{Type: "stream_end"},
+	}}
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1", Provider: "anthropic"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"role-a": {ID: "ag-a", DefaultProvider: "", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-inherit-parent", Role: "role-a", ParentSessionID: "sess-p", Prompt: "go",
+	}
+	_, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.created) != 1 {
+		t.Fatalf("expected 1 child session created, got %d", len(st.created))
+	}
+	if st.created[0].Provider != "anthropic" {
+		t.Errorf("child session Provider = %q, want %q (parent provider)", st.created[0].Provider, "anthropic")
+	}
+}
+
 // TestChatRunner_ProviderOverride_UsesOverrideWhenSet verifies that a
 // non-empty run.Provider is used in preference to agent.DefaultProvider.
 func TestChatRunner_ProviderOverride_UsesOverrideWhenSet(t *testing.T) {

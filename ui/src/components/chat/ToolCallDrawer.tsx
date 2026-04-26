@@ -74,6 +74,12 @@ export function ToolCallDrawer() {
       cancelHideTimer()
       setVisible(true)
       // Do NOT auto-expand body; user decides
+    } else if (!isStreaming && !isOpen) {
+      // Once the turn is finished, don't leave a collapsed "ghost" drawer
+      // under the transcript. Retention is only useful if the user actually
+      // opened the drawer to inspect tool details.
+      cancelHideTimer()
+      setVisible(false)
     } else if (justEnabled) {
       // User manually turned it on — show header bar, start 30s timer
       cancelHideTimer()

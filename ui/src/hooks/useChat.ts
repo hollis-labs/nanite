@@ -17,6 +17,7 @@ const STALL_CHECK_INTERVAL_MS = 5_000;
 /** SSE event type constants — single source of truth for stream event names */
 const SSE = {
   DELTA: "delta",
+  REPLACE_CONTENT: "replace_content",
   TOOL_CALL: "tool_call",
   TOOL_RESULT: "tool_result",
   TOOL_WARNING: "tool_warning",
@@ -341,6 +342,17 @@ export function useChat(sessionId: string | null) {
           }
         });
 
+        es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
+          touchStreamEvent();
+          recordEventId(e.data as string);
+          const data: StreamEvent = JSON.parse(e.data as string);
+          if (data.content != null) {
+            accumulated = data.content;
+            store().replaceStreamContent(data.content);
+            store().setStatusMessage(null);
+          }
+        });
+
         es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
           touchStreamEvent();
           recordEventId(e.data as string);
@@ -629,6 +641,16 @@ export function useChat(sessionId: string | null) {
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content) {
           store().appendStreamContent(data.content);
+          store().setStatusMessage(null);
+        }
+      });
+
+      es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
+        touchStreamEvent();
+        recordEventId(e.data as string);
+        const data: StreamEvent = JSON.parse(e.data as string);
+        if (data.content != null) {
+          store().replaceStreamContent(data.content);
           store().setStatusMessage(null);
         }
       });

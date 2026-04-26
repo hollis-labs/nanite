@@ -9,6 +9,7 @@ interface ChatState {
   setStreaming: (streaming: boolean) => void
   setStreamingSessionId: (id: string | null) => void
   appendStreamContent: (content: string) => void
+  replaceStreamContent: (content: string) => void
   clearStream: () => void
 
   // Status messages (transient, e.g. retry notifications)
@@ -107,6 +108,7 @@ export const useChatStore = create<ChatState>((set) => ({
   setStreamingSessionId: (id) => set({ streamingSessionId: id }),
   appendStreamContent: (content) =>
     set((state) => ({ streamingContent: state.streamingContent + content })),
+  replaceStreamContent: (content) => set({ streamingContent: content }),
   clearStream: () => set({ streamingContent: '', isStreaming: false, streamingSessionId: null, statusMessage: null, streamStalled: false }),
 
   // Status messages

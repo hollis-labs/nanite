@@ -129,6 +129,7 @@ type loopState struct {
 	toolCallRefs     []chat.ToolCallRef
 	pendingEnvelopes []string
 	wasTruncated     bool
+	directReturn     string
 
 	// Iteration control.
 	iteration           int

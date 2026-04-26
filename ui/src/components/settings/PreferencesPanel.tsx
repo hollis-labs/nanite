@@ -1,4 +1,5 @@
 import { useMemo, useEffect, useState, useCallback, useRef } from 'react'
+import { AVATAR_SPRITE_SET_EVENT } from '@/components/chat/AgentAvatar'
 import { GripVertical, X, ChevronDown } from 'lucide-react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { usePermissionMode } from '@/hooks/usePermissionMode'
@@ -184,6 +185,15 @@ export function PreferencesPanel() {
       .map((a) => ({ value: a.id, label: a.source ? `${a.name} · ${a.source}` : a.name }))
   }, [agents])
 
+  const [avatarSpriteSet, setAvatarSpriteSet] = useState<string>(
+    () => localStorage.getItem('nanite:avatarSpriteSet') ?? 'set-b',
+  )
+  const handleAvatarSpriteSet = (value: string) => {
+    localStorage.setItem('nanite:avatarSpriteSet', value)
+    setAvatarSpriteSet(value)
+    window.dispatchEvent(new Event(AVATAR_SPRITE_SET_EVENT))
+  }
+
   const handleChange = (key: string, value: string) => {
     mutation.mutate({ [key]: value })
   }
@@ -287,6 +297,16 @@ export function PreferencesPanel() {
       </SCard>
 
       <SCard title="Advanced">
+        <SRow label="Agent Avatar" description="Sprite set used for the agent avatar in the chat header">
+          <SSelect
+            value={avatarSpriteSet}
+            onChange={handleAvatarSpriteSet}
+            options={[
+              { value: 'set-b', label: 'Robot (smooth)' },
+              { value: 'set-alt', label: 'Pixel bot' },
+            ]}
+          />
+        </SRow>
         <SRow label="Developer Mode" description="Allow plugins to register custom React components">
           <SToggle
             checked={settings?.developer_mode ?? false}

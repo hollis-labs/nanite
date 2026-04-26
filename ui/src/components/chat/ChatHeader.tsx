@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Bot, ChevronDown, Copy, GitFork, MoreHorizontal, Users } from 'lucide-react'
+import { AgentAvatar } from './AgentAvatar'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { resolveIcon } from '@/lib/icons'
 import { SourceBadge } from '@/components/agents/SourceBadge'
@@ -147,10 +148,8 @@ export function ChatHeader() {
       <div className="flex items-center gap-3">
         {/* Agent info block */}
         <div className="flex items-center gap-2.5">
-          {/* Brand chip */}
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-brand font-mono text-[13px] font-bold leading-none text-brand-fg">
-            {activeAgentName.charAt(0).toUpperCase()}
-          </div>
+          {/* Agent avatar — sprite + SSE-reactive glow */}
+          <AgentAvatar />
 
           {/* Two-row block */}
           <div className="flex min-w-0 flex-col gap-[2px]">

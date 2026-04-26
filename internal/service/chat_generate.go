@@ -264,7 +264,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// --- Tool selection via ToolService (must precede slot assembly so the
 	// Tools slot and the dynamic system prefix can be derived from the result). ---
-	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID)
+	// Thread the per-model context window so the tool token budget is computed
+	// from the actual model window (e.g. 1M for Gemini) rather than the
+	// hardcoded 200K default. contextWindowSize returns 0 on miss, which causes
+	// the broker to fall back to DefaultContextWindowTokens (CW-20260426-0032).
+	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID, s.contextWindowSize(providerName, model))
 	if err != nil {
 		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}

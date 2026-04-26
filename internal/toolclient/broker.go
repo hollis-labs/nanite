@@ -97,10 +97,15 @@ func isWildcardIntent(intent string) bool {
 	return intent == "" || intent == "*"
 }
 
-// SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools.
+// SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools,
+// together with the per-tool override block from the broker enricher.
 // Optionally scoped by workspace and agent for rule overrides.
 // If intent is "*" or empty, logs a warning and returns a minimal fallback set.
-func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]broker.ToolDefinition, error) {
+//
+// windowSize is the per-session context window in tokens (from models.dev /
+// user settings). When windowSize <= 0 the broker falls back to
+// DefaultContextWindowTokens so behaviour on unknown models is preserved.
+func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) ([]broker.ToolDefinition, string, error) {
 	// Reject wildcard intent — fall back to a minimal safe set.
 	if isWildcardIntent(intent) {
 		slog.Warn("toolclient: wildcard/empty intent received — returning fallback set",
@@ -116,7 +121,7 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 
 	result, err := tb.LocalBroker.SelectTools(ctx, intent, hints)
 	if err != nil {
-		return nil, fmt.Errorf("select tools: %w", err)
+		return nil, "", fmt.Errorf("select tools: %w", err)
 	}
 
 	tools := result.Tools
@@ -124,12 +129,17 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 		tools = tools[:MaxSelectedTools]
 	}
 
-	// Apply token budget pruning.
+	// Apply token budget pruning using the per-session context window.
+	// windowSize <= 0 means the model is unknown — fall back to the static
+	// default so behaviour on unknown models is preserved (never a hard failure).
 	budgetPct := tb.Config.ToolTokenBudgetPct
 	if budgetPct <= 0 {
 		budgetPct = DefaultToolTokenBudgetPct
 	}
-	ctxWindow := tb.Config.ContextWindowTokens
+	ctxWindow := windowSize
+	if ctxWindow <= 0 {
+		ctxWindow = tb.Config.ContextWindowTokens
+	}
 	if ctxWindow <= 0 {
 		ctxWindow = DefaultContextWindowTokens
 	}
@@ -145,9 +155,10 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 	slog.Info("toolclient: selected tools for intent",
 		"selected", len(tools), "total", result.Total, "intent", intent,
 		"workspace", workspaceID, "agent", agentID,
-		"tool_tokens", EstimateToolTokens(tools), "budget", tokenBudget)
+		"tool_tokens", EstimateToolTokens(tools), "budget", tokenBudget,
+		"ctx_window", ctxWindow)
 
-	return tools, nil
+	return tools, result.OverrideBlock, nil
 }
 
 // DevServerName is the MCP server name for developer tools (dev_bash, dev_read,
@@ -205,12 +216,16 @@ func (tb *ToolClient) developerModeEnabled() bool {
 // runs after permission filtering so the override block never mentions a
 // tool the LLM won't actually see.
 //
+// windowSize is the per-session context window in tokens (from models.dev /
+// user settings). Pass 0 when the model is unknown — SelectTools will fall
+// back to DefaultContextWindowTokens so behaviour is preserved.
+//
 // Dev-tool gate: tools from the "dev" server (dev_bash, dev_read, dev_write,
 // dev_edit, dev_glob, dev_grep) are stripped from the returned set when
 // developer_mode is false in user_settings. This prevents the LLM from ever
 // seeing or requesting those tools in non-developer sessions.
-func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (*SelectResult, error) {
-	tools, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID)
+func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) (*SelectResult, error) {
+	tools, overrideBlock, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID, windowSize)
 	if err != nil {
 		return nil, err
 	}
@@ -266,22 +281,9 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		})
 	}
 
-	// Obtain the override block from the broker's SelectResult. The broker
-	// composes it automatically when an enricher is wired via WithEnricher;
-	// we call SelectTools again (cheap in-process call on the already-loaded
-	// rule set) purely to retrieve the OverrideBlock. Apply the same wildcard
-	// normalisation that SelectTools uses so the intent matches rules identically.
-	// Enrichment is cosmetic — an error there never fails selection (the broker
-	// swallows it via slog).
-	brokerIntent := intent
-	if isWildcardIntent(brokerIntent) {
-		brokerIntent = "general"
-	}
-	var overrideBlock string
-	if brokerResult, err := tb.LocalBroker.SelectTools(ctx, brokerIntent, hints); err == nil {
-		overrideBlock = brokerResult.OverrideBlock
-	}
-
+	// overrideBlock was returned by SelectTools (from the broker's SelectResult
+	// composed via the WithEnricher option). No second LocalBroker.SelectTools
+	// call needed — the D1 redundant-call pattern is eliminated here.
 	return &SelectResult{Tools: defs, OverrideBlock: overrideBlock}, nil
 }
 

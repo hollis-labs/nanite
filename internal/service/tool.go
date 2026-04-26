@@ -35,7 +35,11 @@ type ToolService interface {
 	// SelectForAgent returns the tool set for an agent, applying intent
 	// extraction, permission filtering, allowlist filtering, and progressive
 	// discovery when the tool count exceeds the threshold.
-	SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string) (*ToolSelection, error)
+	//
+	// windowSize is the per-session context window in tokens (from models.dev /
+	// user settings). Pass 0 when the model is unknown — the broker falls back
+	// to DefaultContextWindowTokens so behaviour is preserved.
+	SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string, windowSize int) (*ToolSelection, error)
 
 	// Execute runs a tool call, routing through ToolClient (with permission
 	// checks) when available, falling back to direct MCPManager execution.
@@ -101,7 +105,7 @@ func (s *toolServiceImpl) SetDecisionLogger(dl BrokerDecisionLogger) {
 }
 
 // SelectForAgent implements ToolService.
-func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string) (*ToolSelection, error) {
+func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string, windowSize int) (*ToolSelection, error) {
 	intent, hints := extractIntent(userMessage)
 	slog.Debug("service/tool: extracted intent", "intent", intent, "hints", hints)
 
@@ -111,7 +115,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	seen := map[string]bool{} // dedup: Anthropic API rejects duplicate tool names
 
 	if s.toolClient != nil {
-		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
+		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID, windowSize)
 		if err != nil {
 			slog.Warn("service/tool: broker selection failed — falling back to MCP manager", "err", err)
 		} else {

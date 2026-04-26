@@ -50,7 +50,7 @@ func (s *stubAgentService) ListModes(_ context.Context, _ string) ([]store.Agent
 
 type stubToolService struct{}
 
-func (s *stubToolService) SelectForAgent(_ context.Context, _, _, _, _ string) (*ToolSelection, error) {
+func (s *stubToolService) SelectForAgent(_ context.Context, _, _, _, _ string, _ int) (*ToolSelection, error) {
 	return &ToolSelection{}, nil
 }
 func (s *stubToolService) Execute(_ context.Context, _, _ string, _ map[string]any) (*ToolResult, error) {

@@ -131,7 +131,7 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 		{Name: "nanite_plan_create", Description: "Create a plan"},
 	})
 
-	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive")
+	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive", 0)
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}

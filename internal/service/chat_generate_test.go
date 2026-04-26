@@ -170,7 +170,7 @@ func TestOverrideBlockReachesPrefix_EndToEnd(t *testing.T) {
 
 	// 5. Call the production selection path. A permissive/unknown agent ID
 	// defaults to permit, so the tool clears CheckPermission.
-	res, err := tc.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-e2e")
+	res, err := tc.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-e2e", 0)
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}

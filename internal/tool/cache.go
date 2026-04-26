@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/oklog/ulid/v2"
 )
@@ -115,7 +116,11 @@ func (c *ResultCache) StoreResult(sessionID, toolCallID, toolName, body string) 
 	}
 
 	// Build truncated view + pointer.
-	truncated := body[:c.softTruncBytes]
+	// truncateAtBoundary walks back from the soft threshold to find the
+	// nearest line boundary (\n), then further back to a valid UTF-8 rune
+	// start so the LLM-visible preview is never mid-line or mid-character.
+	cutAt := truncateAtBoundary(body, c.softTruncBytes)
+	truncated := body[:cutAt]
 	var footer string
 	if storeBody.Valid {
 		footer = fmt.Sprintf(
@@ -268,6 +273,38 @@ func (c *ResultCache) Purge() (int, error) {
 		slog.Info("tool-cache: purged expired entries", "count", n)
 	}
 	return int(n), nil
+}
+
+// truncateAtBoundary returns the largest cut point ≤ maxBytes that lands on
+// a line boundary (\n) and a valid UTF-8 rune start. This prevents the
+// LLM-visible truncation preview from ending mid-line or mid-character
+// (CW-20260426-0011). Preference order:
+//  1. Line boundary — walk back from maxBytes to the nearest preceding \n.
+//  2. UTF-8 boundary — walk back further if the \n position splits a
+//     multi-byte sequence (shouldn't happen in practice but guarded anyway).
+//
+// If no \n exists before maxBytes the cut falls back to the UTF-8-safe byte
+// position at maxBytes (no line boundary available, still safe for the codec).
+// If maxBytes ≥ len(s) the full string length is returned unchanged.
+func truncateAtBoundary(s string, maxBytes int) int {
+	if maxBytes >= len(s) {
+		return len(s)
+	}
+	if maxBytes <= 0 {
+		return 0
+	}
+
+	// Walk back to the nearest preceding newline.
+	cut := maxBytes
+	if nl := strings.LastIndexByte(s[:cut], '\n'); nl >= 0 {
+		cut = nl // cut just before the \n so the last visible line is complete
+	}
+
+	// Ensure we're at a valid UTF-8 rune start (no mid-sequence split).
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return cut
 }
 
 func newULID() string {

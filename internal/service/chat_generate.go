@@ -460,10 +460,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 
 		// Token budget enforcement.
+		// Thread the per-model context window into EnforceTokenBudget so that
+		// models with larger windows (e.g. Gemini 1M) are not over-pruned by the
+		// hardcoded 200K default. contextWindowSize returns 0 on miss, which
+		// causes EnforceTokenBudget to fall back to DefaultContextWindow * HardCeilingPct.
+		// (CW-20260426-0031)
 		preBudgetMsgCount := len(chatMessages)
 		preBudgetToolCount := len(tools)
 		var budgetErr error
-		chatMessages, tools, breakdown, budgetErr = chat.EnforceTokenBudget(systemPrompt, chatMessages, tools, 0)
+		var budgetCeiling int
+		if ws := s.contextWindowSize(providerName, model); ws > 0 {
+			budgetCeiling = int(float64(ws) * chat.HardCeilingPct)
+		}
+		chatMessages, tools, breakdown, budgetErr = chat.EnforceTokenBudget(systemPrompt, chatMessages, tools, budgetCeiling)
 		if budgetErr != nil {
 			slog.Warn("chat-service: token budget enforcement refused", "err", budgetErr)
 			if s.events != nil {

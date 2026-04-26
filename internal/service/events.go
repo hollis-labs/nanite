@@ -29,6 +29,14 @@ type EventEmitter interface {
 	EmitPostCompact(ctx context.Context, sessionID string, tokensSaved int, stagesApplied []string)
 }
 
+// SessionEventWriter is the narrow interface for writing lifecycle events
+// directly into the session_events table. Satisfied by *messaging.Service
+// (WriteSessionEvent). Optional in ChatServiceConfig — nil-safe at all
+// call sites.
+type SessionEventWriter interface {
+	WriteSessionEvent(ctx context.Context, sessionID, eventType, channel, payloadJSON string)
+}
+
 // PluginEventSink is the subset of plugin.Host used for event emission.
 // Matches the existing chat.PluginEventEmitter interface so the concrete
 // plugin host satisfies it without changes.

@@ -134,13 +134,18 @@ func TestStreamManager_DeliverSessionEnvelopes_ClosedChannelRecovers(t *testing.
 // stream itself is not torn down.
 func TestStreamManager_DeliverSessionEnvelopes_SlowConsumerDrops(t *testing.T) {
 	sm := NewStreamManager()
-	ch := sm.CreateStream("msg-1", "sess-1")
-	defer sm.CloseStream("msg-1")
 
-	// Fill the buffered channel (capacity 128).
+	// Directly inject a stream with a pre-filled produce channel and no pump
+	// goroutine. CreateStream starts a pump that drains produce immediately,
+	// making it impossible to hold the channel full through the delivery call.
+	ch := make(chan chat.StreamEvent, 128)
 	for i := 0; i < cap(ch); i++ {
 		ch <- chat.StreamEvent{Type: "delta", Content: "x"}
 	}
+	ms := &messageStream{messageID: "msg-1", sessionID: "sess-1", produce: ch, nextID: 1}
+	sm.streams.Store("msg-1", ms)
+	ss := &sessionStreams{ids: map[string]struct{}{"msg-1": {}}}
+	sm.sessionToMsgs.Store("sess-1", ss)
 
 	env := sdkplugin.EnvelopeOut{Type: "oembed-card", Data: map[string]interface{}{}}
 	ok := sm.DeliverSessionEnvelopes("sess-1", "oembed", []sdkplugin.EnvelopeOut{env})

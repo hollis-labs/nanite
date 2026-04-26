@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
@@ -131,16 +132,40 @@ func pathErrorResult(userPath string, err error) *ToolResult {
 	return errorResult(fmt.Sprintf("path %q: %v", userPath, err))
 }
 
-// ListTools returns the three dev tools.
+// allowedDirsSummary returns a comma-separated list of configured allowed
+// directories, or the string "configured allowed directories" when none are
+// set (e.g. during early construction before paths are provided). This is
+// used in LLM-facing tool descriptions so they reflect the actual workspace
+// rather than hardcoded workstation paths.
+func (d *DevToolsTransport) allowedDirsSummary() string {
+	if len(d.AllowedPaths) == 0 {
+		return "configured allowed directories"
+	}
+	return strings.Join(d.AllowedPaths, ", ")
+}
+
+// exampleRootPath returns the first allowed path as an example base, or a
+// neutral placeholder when no paths are configured yet.
+func (d *DevToolsTransport) exampleRootPath() string {
+	if len(d.AllowedPaths) > 0 {
+		return d.AllowedPaths[0]
+	}
+	return "/path/to/project"
+}
+
+// ListTools returns the dev tools with descriptions derived from the
+// configured AllowedPaths so LLM-facing content reflects the actual workspace.
 func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
+	exRoot := d.exampleRootPath()
+	allowedDirs := d.allowedDirsSummary()
 	return []Tool{
 		{
 			Name:        "dev_read",
-			Description: "Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Allowed directories: ~/Projects-apps, ~/Projects. Example: dev_read(path=\"/Users/chris/Projects-apps/mentat/docs/README.md\")",
+			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Allowed directories: %s. Example: dev_read(path=%q)", allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": "Absolute file path (must start with /). Example: /Users/chris/Projects-apps/mentat/README.md"},
+					"path":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute file path (must start with /). Example: %s", filepath.Join(exRoot, "README.md"))},
 					"offset": map[string]any{"type": "integer", "description": "Start line (1-based, default 1)"},
 					"limit":  map[string]any{"type": "integer", "description": "Number of lines to return (default 200)"},
 				},
@@ -149,12 +174,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_grep",
-			Description: "Search file contents matching a regex pattern within a directory. Returns matches with surrounding context lines. Both pattern and directory are required. Directory must be an absolute path. Example: dev_grep(pattern=\"func main\", directory=\"/Users/chris/Projects-apps/mentat\")",
+			Description: fmt.Sprintf("Search file contents matching a regex pattern within a directory. Returns matches with surrounding context lines. Both pattern and directory are required. Directory must be an absolute path. Example: dev_grep(pattern=\"func main\", directory=%q)", exRoot),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"pattern":   map[string]any{"type": "string", "description": "Regex pattern to search for. Example: TODO|FIXME"},
-					"directory": map[string]any{"type": "string", "description": "Absolute directory path to search in. Example: /Users/chris/Projects-apps/mentat"},
+					"directory": map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in. Example: %s", exRoot)},
 					"glob":      map[string]any{"type": "string", "description": "File glob filter (e.g. *.go, *.ts). Default: all files"},
 					"context":   map[string]any{"type": "integer", "description": "Lines of context around matches (default 2)"},
 				},
@@ -163,7 +188,7 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_write",
-			Description: "Write content to a file. Creates parent directories if needed. Overwrites existing content. Path must be absolute. Example: dev_write(path=\"/Users/chris/Projects-apps/mentat/notes.md\", content=\"# Notes\\nContent here\")",
+			Description: fmt.Sprintf("Write content to a file. Creates parent directories if needed. Overwrites existing content. Path must be absolute. Example: dev_write(path=%q, content=\"# Notes\\nContent here\")", filepath.Join(exRoot, "notes.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -175,12 +200,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_glob",
-			Description: "Find files matching a glob pattern within a directory. The 'pattern' and 'directory' are SEPARATE parameters — do NOT combine them. Pattern is relative to directory. Supports ** for recursive matching. Results sorted by modification time (newest first). Example: dev_glob(pattern=\"**/*.md\", directory=\"/Users/chris/Projects-apps/mentat/docs\")",
+			Description: fmt.Sprintf("Find files matching a glob pattern within a directory. The 'pattern' and 'directory' are SEPARATE parameters — do NOT combine them. Pattern is relative to directory. Supports ** for recursive matching. Results sorted by modification time (newest first). Example: dev_glob(pattern=\"**/*.md\", directory=%q)", filepath.Join(exRoot, "docs")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"pattern":     map[string]any{"type": "string", "description": "Glob pattern RELATIVE to directory. Examples: **/*.md, *.go, src/**/*.ts. Do NOT include the directory path in the pattern."},
-					"directory":   map[string]any{"type": "string", "description": "Absolute directory path to search in. Must start with /. Example: /Users/chris/Projects-apps/mentat"},
+					"directory":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in. Must start with /. Example: %s", exRoot)},
 					"max_results": map[string]any{"type": "integer", "description": "Maximum results to return (default 50)"},
 				},
 				"required": []string{"pattern", "directory"},
@@ -188,7 +213,7 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_edit",
-			Description: "Edit a file by finding and replacing a string. The old_string must appear in the file. If replace_all is false (default), old_string must appear exactly once. Path must be absolute. Example: dev_edit(path=\"/Users/chris/Projects-apps/mentat/config.yaml\", old_string=\"port: 8080\", new_string=\"port: 9090\")",
+			Description: fmt.Sprintf("Edit a file by finding and replacing a string. The old_string must appear in the file. If replace_all is false (default), old_string must appear exactly once. Path must be absolute. Example: dev_edit(path=%q, old_string=\"port: 8080\", new_string=\"port: 9090\")", filepath.Join(exRoot, "config.yaml")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -202,7 +227,7 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_bash",
-			Description: "Execute a shell command and return stdout + stderr. Use for git, ls, find, build commands, etc. Working directory must be absolute and in allowed paths. Example: dev_bash(command=\"git log --oneline -5\", working_dir=\"/Users/chris/Projects-apps/mentat\")",
+			Description: fmt.Sprintf("Execute a shell command and return stdout + stderr. Use for git, ls, find, build commands, etc. Working directory must be absolute and in allowed paths. Example: dev_bash(command=\"git log --oneline -5\", working_dir=%q)", exRoot),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -214,6 +239,22 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 			},
 		},
 	}, nil
+}
+
+// DevToolProviderDefinitions returns all dev tool definitions as
+// provider.ToolDefinition, suitable for registering as builtins so
+// they appear in every session's tool list regardless of broker selection.
+func DevToolProviderDefinitions() []provider.ToolDefinition {
+	tools, _ := (&DevToolsTransport{}).ListTools(context.Background())
+	defs := make([]provider.ToolDefinition, len(tools))
+	for i, t := range tools {
+		defs[i] = provider.ToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		}
+	}
+	return defs
 }
 
 // Tunable bounds for dev tools. These are package constants so tests and

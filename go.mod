@@ -54,6 +54,11 @@ require (
 // Phase 0 Wave 1 adopted libs (canonical for new code going forward):
 require go.uber.org/goleak v1.3.0
 
+// CW-20260420-0007: strict tool use default-on — local go-providers with Strict field.
+// Requires ../go-providers sibling checkout. CI checks out both repos via go.work.
+// Remove once a tagged release includes the Strict field and go.sum is updated.
+replace github.com/hollis-labs/go-providers => ../go-providers
+
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect

@@ -191,7 +191,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		if err != nil {
 			return "", fmt.Errorf("load settings: %w", err)
 		}
-		gate = us.SubagentApprovalRequired || mode == ModeInteractive
+		gate = (us.SubagentApprovalRequired && !us.DeveloperMode) || mode == ModeInteractive
 	} else {
 		// Nil settings = tests that don't care about gating; fall through to
 		// ungated unless mode explicitly requests interactive approval.
@@ -260,13 +260,11 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 
 	switch mode {
 	case ModeSync:
-		// Blocking: caller holds until the runner returns. The
-		// parent's next turn can then reason over the reply. We
-		// derive the runner ctx from the caller's ctx (so caller
-		// cancellation propagates) but ALSO register the derived
-		// CancelFunc so a Cancel(runID) from another goroutine
-		// unblocks the in-flight runner.
-		execCtx, execCancel := context.WithCancel(ctx)
+		// Blocking: caller holds until the runner returns. Use a
+		// background-derived ctx so the caller's short tool-call
+		// timeout (30s) doesn't cancel the child runner — same
+		// pattern as async mode. Cancel(runID) is still wired.
+		execCtx, execCancel := context.WithCancel(context.Background())
 		svc.cancelMu.Lock()
 		svc.cancelers[run.ID] = execCancel
 		svc.cancelMu.Unlock()

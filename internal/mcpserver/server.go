@@ -15,17 +15,21 @@ import (
 )
 
 // Server is a Nanite MCP server that exposes self-service tools
-// (skills, agents, workflows, envelope helpers) to external processes
-// like Claude CLI via the MCP stdio protocol.
+// (skills, agents, workflows, envelope helpers) and developer filesystem
+// tools to external processes like Claude CLI via the MCP stdio protocol.
 type Server struct {
 	self      *condmcp.SelfToolsTransport
+	dev       *condmcp.DevToolsTransport
 	sessionID string
 }
 
-// New creates a Nanite MCP server backed by the given store.
-func New(s *store.Store, sessionID string) *Server {
+// New creates a Nanite MCP server backed by the given store. allowedPaths
+// controls which filesystem paths dev tools (dev_read, dev_grep, etc.) may
+// access — use the same roots the main server is configured with.
+func New(s *store.Store, sessionID string, allowedPaths []string) *Server {
 	return &Server{
 		self:      condmcp.NewSelfToolsTransport(s),
+		dev:       condmcp.NewDevToolsTransport(allowedPaths),
 		sessionID: sessionID,
 	}
 }
@@ -42,20 +46,29 @@ func (s *Server) Run(ctx context.Context) error {
 	return srv.Run(ctx, &mcp.StdioTransport{})
 }
 
-// registerTools adds all self-service tool definitions to the MCP server.
+// registerTools adds self-service and developer tool definitions to the MCP server.
 func (s *Server) registerTools(srv *mcp.Server) {
-	tools, err := s.self.ListTools(context.Background())
+	s.registerTransportTools(srv, "self", s.self)
+	s.registerTransportTools(srv, "dev", s.dev)
+}
+
+type toolTransport interface {
+	ListTools(ctx context.Context) ([]condmcp.Tool, error)
+	CallTool(ctx context.Context, name string, args map[string]any) (*condmcp.ToolResult, error)
+}
+
+func (s *Server) registerTransportTools(srv *mcp.Server, label string, t toolTransport) {
+	tools, err := t.ListTools(context.Background())
 	if err != nil {
-		slog.Error("mcpserver: failed to list tools", "err", err)
+		slog.Error("mcpserver: failed to list tools", "transport", label, "err", err)
 		return
 	}
-
-	for _, t := range tools {
-		tool := buildMCPTool(t)
-		name := t.Name
-		srv.AddTool(tool, s.makeHandler(name))
+	for _, td := range tools {
+		tool := buildMCPTool(td)
+		name := td.Name
+		srv.AddTool(tool, s.makeTransportHandler(t, name))
 	}
-	slog.Info("mcpserver: registered tools", "count", len(tools))
+	slog.Info("mcpserver: registered tools", "transport", label, "count", len(tools))
 }
 
 // buildMCPTool converts a Nanite Tool definition to an official SDK Tool.
@@ -80,8 +93,13 @@ func buildMCPTool(t condmcp.Tool) *mcp.Tool {
 	return tool
 }
 
-// makeHandler returns a tool handler that delegates to SelfToolsTransport.
+// makeHandler returns a tool handler that delegates to the self transport.
 func (s *Server) makeHandler(name string) mcp.ToolHandler {
+	return s.makeTransportHandler(s.self, name)
+}
+
+// makeTransportHandler returns a tool handler that delegates to the given transport.
+func (s *Server) makeTransportHandler(t toolTransport, name string) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := map[string]any{}
 		if len(req.Params.Arguments) > 0 {
@@ -89,7 +107,7 @@ func (s *Server) makeHandler(name string) mcp.ToolHandler {
 				return newErrorResult(err), nil
 			}
 		}
-		result, err := s.self.CallTool(ctx, name, args)
+		result, err := t.CallTool(ctx, name, args)
 		if err != nil {
 			return newErrorResult(err), nil
 		}

@@ -458,3 +458,72 @@ func namesOf(tools []provider.ToolDefinition) []string {
 	}
 	return names
 }
+
+// --- Strict tool use tests (CW-20260420-0007) ---
+
+func TestSelectToolsAsProvider_BrokerToolsDefaultStrict(t *testing.T) {
+	cfg := DefaultConfig()
+	tb := New(nil, nil, cfg)
+
+	// Register tools directly with the LocalBroker so SelectToolsAsProvider
+	// returns them. SelectToolsAsProvider converts broker.ToolDefinition →
+	// provider.ToolDefinition and must set Strict: strictTrue on each result.
+	brokerTools := []broker.ToolDefinition{
+		{Name: "volon_task_create", Server: "volon", Description: "Create a task in the backlog"},
+		{Name: "conduit_context_view", Server: "conduit", Description: "View a context packet"},
+	}
+	tb.RegisterTools(brokerTools)
+
+	result, err := tb.SelectToolsAsProvider(context.Background(), "task backlog", nil, "", "")
+	if err != nil {
+		t.Fatalf("SelectToolsAsProvider error: %v", err)
+	}
+	if len(result.Tools) == 0 {
+		t.Fatal("expected at least one tool in result — broker did not select any tools")
+	}
+
+	// All broker-registered tools in the result must have Strict set to *true.
+	for _, d := range result.Tools {
+		if d.Strict == nil {
+			t.Errorf("tool %q: Strict is nil, want *true (strict default-on)", d.Name)
+			continue
+		}
+		if !*d.Strict {
+			t.Errorf("tool %q: Strict is false, want true (strict default-on)", d.Name)
+		}
+	}
+}
+
+func TestMetaTools_HaveAdditionalPropertiesFalse(t *testing.T) {
+	cases := []struct {
+		name string
+		def  provider.ToolDefinition
+	}{
+		{"request_tools", RequestToolsMetaTool()},
+		{"fetch_tool_result", FetchToolResultMetaTool()},
+		{"search_tool_result", SearchToolResultMetaTool()},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ap, ok := tc.def.InputSchema["additionalProperties"]
+			if !ok {
+				t.Errorf("%s: InputSchema missing additionalProperties (required for strict-mode)", tc.name)
+				return
+			}
+			if ap != false {
+				t.Errorf("%s: additionalProperties = %v, want false", tc.name, ap)
+			}
+		})
+	}
+}
+
+func TestStrictTrue_IsConstant(t *testing.T) {
+	// strictTrue must be a pointer to true, not nil or false.
+	if strictTrue == nil {
+		t.Fatal("strictTrue is nil")
+	}
+	if !*strictTrue {
+		t.Fatal("strictTrue points to false")
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -83,12 +84,12 @@ const nativeToolGuide = `
 ## Native Tool Usage
 
 Parameter shape:
-- **All paths must be absolute** (start with /Users/). Never use ~ or relative paths.
-- **dev_glob** takes TWO separate params: pattern (relative glob like **/*.md) and directory (absolute path like /Users/chrispian/Projects-apps/my-project). Do NOT put the full path in the pattern.
+- **All paths must be absolute** (start with /). Never use ~ or relative paths.
+- **dev_glob** takes TWO separate params: pattern (relative glob like **/*.md) and directory (absolute path to the project root). Do NOT put the full path in the pattern.
 - **dev_grep** takes TWO separate params: pattern (regex) and directory (absolute path). Same rule — keep them separate.
 - **dev_read/dev_write/dev_edit**: path must be absolute.
 - **web_fetch**: many news/social sites block automated requests. Works best with APIs, docs sites, and raw content URLs.
-- **Allowed directories**: /Users/chrispian/Projects-apps, /Users/chrispian/Projects. Files outside these paths will be rejected.
+- **Allowed directories**: configured per workspace. Files outside the configured allowed paths will be rejected.
 
 Workflow:
 - **Discover before read.** Use dev_glob or dev_grep first if you aren't already sure the path exists. Running dev_read on a speculative path wastes a tool call.
@@ -115,6 +116,29 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		attribute.String("nanite.message.id", assistantMsgID),
 	)
 	defer span.End()
+
+	// CW-20260420-0032: PTY observability — track whether a pty_turn_start
+	// was emitted so the deferred closer can emit the matching terminal event
+	// (pty_turn_complete or pty_turn_failed). ptyTurnStarted is set to true
+	// once we emit pty_turn_start; ptyTurnSucceeded is set to true only when
+	// we reach the stream_end path. The defer emits pty_turn_failed for all
+	// other exits (early return, context cancellation, error).
+	var ptyTurnStarted bool
+	var ptyTurnSucceeded bool
+	var ptyProviderName string
+	defer func() {
+		if !ptyTurnStarted || s.sessionEventWriter == nil {
+			return
+		}
+		eventType := messaging.EventPTYTurnFailed
+		if ptyTurnSucceeded {
+			eventType = messaging.EventPTYTurnComplete
+		}
+		payload := fmt.Sprintf(`{"message_id":%q,"provider":%q,"duration_ms":%d}`,
+			assistantMsgID, ptyProviderName, time.Since(startTime).Milliseconds())
+		s.sessionEventWriter.WriteSessionEvent(
+			context.Background(), sessionID, eventType, ptyProviderName, payload)
+	}()
 
 	// CW-20260418-0043 diagnostic — track iteration reached for the defer log.
 	var diagCurrentIter = -1
@@ -313,6 +337,23 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	if s.events != nil {
 		s.events.EmitSessionStart(ctx, sessionID, agent.ID, model, mode.Slug)
 	}
+
+	// CW-20260420-0032: PTY observability — emit pty_turn_start so
+	// nanite_diagnose_session can reconstruct what happened. The deferred
+	// closer emits pty_turn_complete or pty_turn_failed when the function
+	// returns. Only emitted for PTY-provider sessions; API-path sessions
+	// already have sufficient observability via event_log + execution_metrics.
+	if chat.IsPTYProvider(providerName) && s.sessionEventWriter != nil {
+		ptyTurnStarted = true
+		ptyProviderName = providerName
+		startPayload := fmt.Sprintf(`{"message_id":%q,"provider":%q,"agent_id":%q,"model":%q}`,
+			assistantMsgID, providerName, agent.ID, model)
+		startCtx, startCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer startCancel()
+		s.sessionEventWriter.WriteSessionEvent(
+			startCtx, sessionID, messaging.EventPTYTurnStart, providerName, startPayload)
+	}
+
 	// Emit agent.loaded plugin event (fire-and-forget).
 	if s.pluginHost != nil {
 		safego.Go(ctx, "service.chat.emit.agent-loaded", func() {
@@ -1059,6 +1100,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		slog.Warn("chat-service: failed to record execution metrics", "err", err)
 	}
 
+	// CW-20260420-0032: mark the PTY turn as successful so the deferred
+	// closer emits pty_turn_complete instead of pty_turn_failed.
+	ptyTurnSucceeded = true
+
 	// Stream end.
 	ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: finalUsage, AgentID: agent.ID, Envelope: envelopeJSON}
 
@@ -1702,7 +1747,8 @@ func (s *chatServiceImpl) setupCLIContext(ctx context.Context, sessionID string,
 	} else {
 		if err := sandbox.Populate(sbDir, agent, mode, sandbox.PopulateOpts{
 			SessionID: sessionID,
-			DBPath:    "", // Store interface doesn't expose DBPath; will be wired in container
+			DBPath:    s.dbPath,
+			Adapters:  s.adapterRegistry,
 		}); err != nil {
 			slog.Warn("chat-service: sandbox populate error", "err", err)
 		}

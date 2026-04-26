@@ -27,6 +27,21 @@ const execWaitDelay = 2 * time.Second
 // grace window.
 const execGroupKillGrace = 250 * time.Millisecond
 
+// groupKillBackstop sleeps for execWaitDelay+execGroupKillGrace then sends a
+// group-wide SIGKILL if the process group still exists. It is a named function
+// (not an anonymous closure) so that goleak tests can filter it by name via
+// IgnoreAnyFunction — the goroutine outlives the cancelled command by design
+// and is not a real leak.
+func groupKillBackstop(pid int) {
+	time.Sleep(execWaitDelay + execGroupKillGrace)
+	// Probe: signal 0 returns nil if any process in the group still exists.
+	// ESRCH means the whole group is gone — nothing to kill.
+	if err := syscall.Kill(-pid, 0); err != nil {
+		return
+	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+}
+
 // setProcessGroupKill configures cmd so the child starts in a fresh
 // process group and the whole group is signalled on context cancel.
 //
@@ -69,13 +84,7 @@ func setProcessGroupKill(cmd *exec.Cmd) {
 		// WaitDelay escalation only SIGKILLs the direct child, so a
 		// grandchild holding inherited fds would otherwise survive.
 		safego.Go(context.Background(), "sandbox.exec.group-kill", func() {
-			time.Sleep(execWaitDelay + execGroupKillGrace)
-			// Probe: signal 0 returns nil if any process in the group
-			// still exists. ESRCH means the whole group is gone.
-			if err := syscall.Kill(-pid, 0); err != nil {
-				return
-			}
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			groupKillBackstop(pid)
 		})
 
 		// Return nil so exec.CommandContext does NOT treat the Cancel

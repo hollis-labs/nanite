@@ -432,8 +432,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	orchestrator := chat.NewOrchestrator(cfg.Providers, cfg.MCP)
 
-	// Permission engine with default mode. Rules loaded from project/user config at runtime.
+	// Permission engine. Yolo mode when developer_mode=1 so dev-mode sessions
+	// never hit approval prompts.
 	permissions := permission.NewEngine(permission.ModeDefault, nil)
+	if us, err := cfg.Store.GetUserSettings(); err == nil && us.DeveloperMode {
+		permissions.SetMode(permission.ModeYolo)
+	}
 
 	// Model catalog — fetches pricing and context-window data from models.dev.
 	// After each successful fetch the OnRefresh hook pushes the data into the
@@ -447,28 +451,31 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	modelCatalog.StartRefresher(catalogCtx)
 
 	chatSvc := NewChatService(ChatServiceConfig{
-		Sessions:        sessions,
-		Agents:          agents,
-		Tools:           tools,
-		Streams:         streams,
-		Context:         ctxService,
-		Events:          events,
-		Providers:       cfg.Providers,
-		Store:           cfg.Store,
-		Orchestrator:    orchestrator,
-		AppConfig:       cfg.AppConfig,
-		OutputFilter:    cfg.OutputFilter,
-		Commands:        commands,
-		PluginHost:      pluginSink,
-		ProcessTracker:  processTracker,
-		UtilityProvider:   cfg.UtilityProvider,
-		UtilityModel:      cfg.UtilityModel,
-		Permissions:       permissions,
-		Tasks:             tasks,
-		EmbeddingStatus:   embeddingStatus,
-		EmbeddingProvider: embeddingProviderID,
-		ResultCache:       buildResultCache(cfg.Store),
-		ModelCatalog:      modelCatalog,
+		Sessions:           sessions,
+		Agents:             agents,
+		Tools:              tools,
+		Streams:            streams,
+		Context:            ctxService,
+		Events:             events,
+		Providers:          cfg.Providers,
+		Store:              cfg.Store,
+		Orchestrator:       orchestrator,
+		AppConfig:          cfg.AppConfig,
+		OutputFilter:       cfg.OutputFilter,
+		Commands:           commands,
+		PluginHost:         pluginSink,
+		ProcessTracker:     processTracker,
+		UtilityProvider:    cfg.UtilityProvider,
+		UtilityModel:       cfg.UtilityModel,
+		Permissions:        permissions,
+		Tasks:              tasks,
+		EmbeddingStatus:    embeddingStatus,
+		EmbeddingProvider:  embeddingProviderID,
+		ResultCache:        buildResultCache(cfg.Store),
+		ModelCatalog:       modelCatalog,
+		SessionEventWriter: messagingSvc,
+		DBPath:             cfg.Store.DBPath(),
+		AdapterRegistry:    adapterRegistry,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed

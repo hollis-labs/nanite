@@ -1173,6 +1173,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 const (
 	compactTriggerContextOverflow = "context_overflow"
 	compactTriggerRateBudget      = "rate_budget_exceeded"
+	compactTriggerBudgetGate      = "budget_gate" // pre-loop budget ceiling (enforceBudgetOrCompact)
 )
 
 // recoverFromContextOverflow runs the CompactionPipeline synchronously.
@@ -1247,6 +1248,9 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	}
 
 	tokensBefore := result.Window.UsedTokens()
+	if s.events != nil {
+		s.events.EmitPreCompact(ctx, sessionID, len(chatMessages), triggerKind)
+	}
 
 	// CW-20260418-0099 bugfix: Run() short-circuits when Window.NeedsCompaction()
 	// is false — and NeedsCompaction evaluates against the MODEL's context
@@ -1294,6 +1298,9 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	}); emitErr != nil {
 		slog.Warn("chat-service: slot_changed emit failed during compact-recoverable recovery",
 			"err", emitErr, "trigger_kind", triggerKind)
+	}
+	if s.events != nil {
+		s.events.EmitPostCompact(ctx, sessionID, tokensBefore-tokensAfter, cr.StagesApplied)
 	}
 
 	slog.Info("chat-service: compact-recoverable recovery ran",
@@ -1477,6 +1484,9 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	}
 
 	tokensBefore := result.Window.UsedTokens()
+	if s.events != nil {
+		s.events.EmitPreCompact(ctx, sessionID, len(chatMessages), compactTriggerBudgetGate)
+	}
 	cr, err := pipeline.Run(ctx)
 	if err != nil {
 		slog.Warn("chat-service: compaction pipeline failed; ceiling enforcer will catch", "err", err, "session_id", sessionID)
@@ -1501,6 +1511,9 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 		TokensAfter:  tokensAfter,
 	}); emitErr != nil {
 		slog.Warn("chat-service: slot_changed emit failed", "err", emitErr)
+	}
+	if s.events != nil {
+		s.events.EmitPostCompact(ctx, sessionID, tokensBefore-tokensAfter, cr.StagesApplied)
 	}
 	if s.pluginHost != nil {
 		stages := append([]string(nil), cr.StagesApplied...)

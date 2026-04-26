@@ -239,6 +239,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// cfg.Store satisfies messaging.AgentRegistrar via its CreateAgent
 	// method — enables T6 auto-register-on-first-send.
 	messagingSvc := messaging.NewService(msgStore, cfg.Store.DB, agents, cfg.Store)
+	// Wire the session_events writer into the composite emitter so
+	// EmitPreCompact / EmitPostCompact persist context_pre_compact /
+	// context_post_compact rows for P8 part C (CW-20260426-0002).
+	events.WithSessionWriter(messagingSvc)
 	slog.Info("service container: messaging service enabled")
 
 	// Discover file-based skill definitions from all 5 priority locations.

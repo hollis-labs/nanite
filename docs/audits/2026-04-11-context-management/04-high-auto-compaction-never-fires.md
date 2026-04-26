@@ -1,3 +1,8 @@
+> **SUPERSEDED 2026-04-26 (CW-20260426-0002).** This finding is no longer accurate.
+> See `docs/audits/2026-04-26-foundation/02-a2-compaction-fires.md` for the
+> current state — `CompactionPipeline` was wired into the chat-generate hot
+> path through three call sites between 2026-04-11 and HEAD.
+
 # [High] Auto-compaction never fires — NeedsCompaction is computed but never acted on
 
 **Scope:** context-management

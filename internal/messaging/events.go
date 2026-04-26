@@ -44,6 +44,12 @@ const (
 	EventPTYTurnStart    = "pty_turn_start"
 	EventPTYTurnComplete = "pty_turn_complete"
 	EventPTYTurnFailed   = "pty_turn_failed"
+
+	// Compaction lifecycle events (P8 part C seam, CW-20260426-0002).
+	// Written at every production compaction call site so the session_events
+	// table carries a queryable record of when and why compaction ran.
+	EventContextPreCompact  = "context_pre_compact"
+	EventContextPostCompact = "context_post_compact"
 )
 
 // SessionEvent is a single row in session_events, surfaced for

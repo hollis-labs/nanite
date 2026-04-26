@@ -329,6 +329,9 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tokensBefore := result.Window.UsedTokens()
+	if a.Services.Events != nil {
+		a.Services.Events.EmitPreCompact(ctx, sessionID, len(result.Messages), "manual")
+	}
 	cr, err := pipeline.RunForce(ctx)
 	if err != nil {
 		slog.Warn("api: compaction pipeline failed", "session_id", sessionID, "err", err)
@@ -360,6 +363,9 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	if err := a.Services.Store.UpdateSessionCompaction(sessionID, summary); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if a.Services.Events != nil {
+		a.Services.Events.EmitPostCompact(ctx, sessionID, tokensSaved, stages)
 	}
 
 	if a.Services.Streams != nil {

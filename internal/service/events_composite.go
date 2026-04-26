@@ -2,23 +2,35 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/safego"
 )
 
-// CompositeEmitter fans out events to ActivityEmitter (Engine GUI) and
-// PluginEventSink (plugin hooks). Both sinks are nil-safe — a nil sub-emitter
-// is silently skipped. All emissions run in goroutines so the caller never blocks.
+// CompositeEmitter fans out events to ActivityEmitter (Engine GUI),
+// PluginEventSink (plugin hooks), and SessionEventWriter (session_events table).
+// All sinks are nil-safe — a nil sub-emitter is silently skipped. All emissions
+// run in goroutines so the caller never blocks.
 type CompositeEmitter struct {
-	activity *chat.ActivityEmitter
-	plugin   PluginEventSink
+	activity      *chat.ActivityEmitter
+	plugin        PluginEventSink
+	sessionWriter SessionEventWriter
 }
 
-// NewCompositeEmitter creates a composite emitter. Either argument may be nil.
+// NewCompositeEmitter creates a composite emitter. Any argument may be nil.
 func NewCompositeEmitter(activity *chat.ActivityEmitter, plugin PluginEventSink) *CompositeEmitter {
 	return &CompositeEmitter{activity: activity, plugin: plugin}
+}
+
+// WithSessionWriter attaches a SessionEventWriter so compaction events are
+// persisted to session_events. Called once at container build time.
+func (c *CompositeEmitter) WithSessionWriter(w SessionEventWriter) *CompositeEmitter {
+	c.sessionWriter = w
+	return c
 }
 
 // Compile-time verification.
@@ -163,6 +175,16 @@ func (c *CompositeEmitter) EmitPreCompact(ctx context.Context, sessionID string,
 			})
 		})
 	}
+	// Persist a context_pre_compact row so P8 part C (CW-20260420-0027) has
+	// a queryable seam. channel = trigger_kind; payload carries message_count
+	// and trigger_kind so the row is self-contained for consumers.
+	if c.sessionWriter != nil {
+		payload := fmt.Sprintf(`{"message_count":%d,"trigger_kind":%q}`, messageCount, reason)
+		safego.Go(ctx, "service.events.session.pre-compact", func() {
+			c.sessionWriter.WriteSessionEvent(ctx, sessionID,
+				messaging.EventContextPreCompact, reason, payload)
+		})
+	}
 }
 
 func (c *CompositeEmitter) EmitPostCompact(ctx context.Context, sessionID string, tokensSaved int, stagesApplied []string) {
@@ -170,6 +192,25 @@ func (c *CompositeEmitter) EmitPostCompact(ctx context.Context, sessionID string
 	if c.plugin != nil {
 		safego.Go(ctx, "service.events.plugin.context-compacted", func() {
 			c.plugin.EmitContextCompacted(sessionID, tokensSaved, stagesApplied)
+		})
+	}
+	// Persist a context_post_compact row for P8 part C (CW-20260420-0027).
+	// stages_applied is a JSON array; tokens_saved and the channel are
+	// included so a single row query is sufficient for P8 consumption.
+	if c.sessionWriter != nil {
+		stagesJSON := `[]`
+		if len(stagesApplied) > 0 {
+			quoted := make([]string, len(stagesApplied))
+			for i, s := range stagesApplied {
+				quoted[i] = fmt.Sprintf("%q", s)
+			}
+			stagesJSON = "[" + strings.Join(quoted, ",") + "]"
+		}
+		payload := fmt.Sprintf(`{"tokens_saved":%d,"stages_applied":%s}`,
+			tokensSaved, stagesJSON)
+		safego.Go(ctx, "service.events.session.post-compact", func() {
+			c.sessionWriter.WriteSessionEvent(ctx, sessionID,
+				messaging.EventContextPostCompact, "compaction", payload)
 		})
 	}
 }

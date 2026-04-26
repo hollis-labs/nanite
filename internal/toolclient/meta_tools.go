@@ -14,8 +14,12 @@ import (
 // tools by name or by intent description.
 func RequestToolsMetaTool() provider.ToolDefinition {
 	return provider.ToolDefinition{
-		Name:        "request_tools",
-		Description: "Request tools by name or by describing what you want to do (intent). Returns full tool schemas that you can then call.",
+		Name: "request_tools",
+		Description: "Load additional tool schemas into context by name or by intent description, then call them.\n\n" +
+			"**When to use:** When you need a tool that is not currently in your context window (progressive discovery). Call with tool_names for exact lookups, or intent for semantic search when you're not sure of the exact name.\n\n" +
+			"**When NOT to use:** Do not call this if the tool you want is already available in your context — calling request_tools for tools already loaded is a no-op and wastes a round-trip. Do not use intent search for tools you know by name.\n\n" +
+			"**Output shape:** Summary line (\"Loaded N tool(s): name1, name2\") followed by a JSON array of {name, description, input_schema} objects. You can call any returned tool immediately after.\n\n" +
+			"**Chaining:** This tool loads schemas; immediately follow with the actual tool call once the schema is returned.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -116,22 +120,26 @@ func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]provider.ToolD
 // meta-tool. The LLM uses this to retrieve slices of cached large tool results.
 func FetchToolResultMetaTool() provider.ToolDefinition {
 	return provider.ToolDefinition{
-		Name:        "fetch_tool_result",
-		Description: "Retrieve a slice of a cached tool result by ID. Use when a previous tool result was truncated and you need more content.",
+		Name: "fetch_tool_result",
+		Description: "Retrieve a byte slice of a cached large tool result that was truncated in context.\n\n" +
+			"**When to use:** When a previous tool result showed a truncation notice with a `tool_result://<ULID>` pointer at the footer, call this with that ULID to read more of the content. Useful for paging through large file listings, long API responses, or any tool output that exceeded the context cap.\n\n" +
+			"**When NOT to use:** Do NOT pass a file path as the id — this tool reads from the in-memory result cache, not the filesystem. Do NOT guess an id; the id MUST come verbatim from a `tool_result://<ULID>` footer in the current session. Do NOT use `cache://` or any other URI scheme — the id is a bare ULID string (e.g. \"01HZ3G9MXKQ7D5FVWNTJ4BSEP6\").\n\n" +
+			"**Output shape:** Raw bytes from the cached result, returned as text. If offset + length exceeds the cache size, only available bytes are returned. Returns an error if the ULID is not found in the cache.\n\n" +
+			"**Chaining:** Pair with search_tool_result when you want to find a specific pattern instead of reading sequentially.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"id": map[string]any{
 					"type":        "string",
-					"description": "The cached result ID (from the truncation pointer)",
+					"description": "The cached result ULID, taken verbatim from a `tool_result://<ULID>` footer in this session. NOT a file path, NOT a cache:// URI — a bare ULID string only.",
 				},
 				"offset": map[string]any{
 					"type":        "integer",
-					"description": "Byte offset to start reading from (default: 0)",
+					"description": "Byte offset to start reading from (default: 0). Use to page through large results.",
 				},
 				"length": map[string]any{
 					"type":        "integer",
-					"description": "Number of bytes to read (default: 65536)",
+					"description": "Number of bytes to read (default: 65536). Capped at the cache ceiling for the originating MCP trust tier.",
 				},
 			},
 			"required": []any{"id"},
@@ -146,22 +154,26 @@ func FetchToolResultMetaTool() provider.ToolDefinition {
 // large tool results.
 func SearchToolResultMetaTool() provider.ToolDefinition {
 	return provider.ToolDefinition{
-		Name:        "search_tool_result",
-		Description: "Search a cached tool result by regex pattern. Returns matching lines with surrounding context (like grep -C 2).",
+		Name: "search_tool_result",
+		Description: "Regex-search a cached large tool result and return matching lines with context (like grep -C 2).\n\n" +
+			"**When to use:** When a previous tool result was truncated and you need to find a specific pattern (function name, error string, field key) without reading the entire cache sequentially. More efficient than fetch_tool_result + manual scanning for targeted lookups.\n\n" +
+			"**When NOT to use:** Do NOT pass a file path as the id — this tool searches the in-memory result cache, not the filesystem. The id MUST be a bare ULID from a `tool_result://<ULID>` footer in this session. Do NOT use for full-text grep of source files — use dev_grep for filesystem searches.\n\n" +
+			"**Output shape:** Up to max_matches blocks, each showing the matching line with 2 lines of surrounding context (configurable). Returns \"no matches\" if the pattern is not found. Returns an error if the ULID is not found in the cache.\n\n" +
+			"**Chaining:** Use fetch_tool_result after search to read the surrounding region at a known offset. Use dev_grep for filesystem search instead.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"id": map[string]any{
 					"type":        "string",
-					"description": "The cached result ID (from the truncation pointer)",
+					"description": "The cached result ULID, taken verbatim from a `tool_result://<ULID>` footer in this session. NOT a file path — a bare ULID string only.",
 				},
 				"pattern": map[string]any{
 					"type":        "string",
-					"description": "Regex pattern to search for",
+					"description": "RE2 regex pattern to search for. Case-sensitive by default. Use (?i) prefix for case-insensitive.",
 				},
 				"max_matches": map[string]any{
 					"type":        "integer",
-					"description": "Maximum number of matches to return (default: 20)",
+					"description": "Maximum number of match blocks to return (default: 20). Each block includes the matching line plus 2 lines of context.",
 				},
 			},
 			"required": []any{"id", "pattern"},

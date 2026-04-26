@@ -432,8 +432,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	orchestrator := chat.NewOrchestrator(cfg.Providers, cfg.MCP)
 
-	// Permission engine with default mode. Rules loaded from project/user config at runtime.
+	// Permission engine. Yolo mode when developer_mode=1 so dev-mode sessions
+	// never hit approval prompts.
 	permissions := permission.NewEngine(permission.ModeDefault, nil)
+	if us, err := cfg.Store.GetUserSettings(); err == nil && us.DeveloperMode {
+		permissions.SetMode(permission.ModeYolo)
+	}
 
 	// Model catalog — fetches pricing and context-window data from models.dev.
 	// After each successful fetch the OnRefresh hook pushes the data into the

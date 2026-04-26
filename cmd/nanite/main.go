@@ -490,6 +490,10 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 		tb.LocalBroker = mcpManager.Broker
 		slog.Info("toolclient: sharing MCPManager broker", "tool_summaries", len(mcpManager.Broker.AllTools()))
 	}
+	devToolDefs := mcp.DevToolProviderDefinitions()
+	tb.Builtins.RegisterBuiltins("dev", devToolDefs)
+	slog.Info("registered dev built-in tools", "count", len(devToolDefs))
+
 	selfToolDefs := mcp.SelfToolProviderDefinitions()
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	slog.Info("registered self-service built-in tools", "count", len(selfToolDefs))
@@ -723,7 +727,12 @@ func cmdMCPServe(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	srv := mcpserver.New(s, *sessionID)
+	homeDir, _ := os.UserHomeDir()
+	allowedPaths := []string{
+		filepath.Join(homeDir, "Projects-apps"),
+		filepath.Join(homeDir, "Projects"),
+	}
+	srv := mcpserver.New(s, *sessionID, allowedPaths)
 	if err := srv.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "%s mcp: %v\n", brand.BinaryName, err)
 		os.Exit(1)

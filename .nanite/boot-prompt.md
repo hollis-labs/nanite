@@ -4,6 +4,8 @@
 
 ## Current state
 
+- **Phase D beta gate** in progress (CW-20260424-0007). See `handoff-phase-d-beta-gate-2026-04-25.md`.
+- Scenario 3 ✓. Scenarios 1 (subagent dev tools) and 2 (PTY file access) still failing.
 - **Phase 3 — Core Features** in progress. Phase 2 (plugin system) closed 2026-04-14.
 - **`main` tip:** `1f3d7eb` — S4a merged (PR #50).
 - **Completed sessions:** S5 (envelope), S2a (memory), S3a (context pipeline), S4a (tool broker).

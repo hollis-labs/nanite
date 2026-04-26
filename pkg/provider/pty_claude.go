@@ -18,6 +18,7 @@ func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []s
 		"-p", prompt,
 		"--output-format", "stream-json",
 		"--verbose",
+		"--dangerously-skip-permissions",
 	}
 	if cliSessionID != "" {
 		args = append([]string{"--resume", cliSessionID}, args...)

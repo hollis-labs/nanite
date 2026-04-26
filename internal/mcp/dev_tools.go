@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
@@ -238,6 +239,22 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 			},
 		},
 	}, nil
+}
+
+// DevToolProviderDefinitions returns all dev tool definitions as
+// provider.ToolDefinition, suitable for registering as builtins so
+// they appear in every session's tool list regardless of broker selection.
+func DevToolProviderDefinitions() []provider.ToolDefinition {
+	tools, _ := (&DevToolsTransport{}).ListTools(context.Background())
+	defs := make([]provider.ToolDefinition, len(tools))
+	for i, t := range tools {
+		defs[i] = provider.ToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		}
+	}
+	return defs
 }
 
 // Tunable bounds for dev tools. These are package constants so tests and

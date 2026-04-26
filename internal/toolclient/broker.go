@@ -46,18 +46,12 @@ type ToolClient struct {
 	// In production this is nil and developerModeEnabled() falls back to
 	// the Store read.
 	DeveloperModeFunc func() bool
-
-	// enricher backs the per-turn override block composition. Set by New when
-	// a store is available; nil-safe via the storeEnricher's own fallback.
-	// Kept unexported — callers work with broker.Enricher through the
-	// SelectToolsAsProvider result.
-	enricher broker.Enricher
 }
 
 // SelectResult is the return shape of ToolClient.SelectToolsAsProvider. It
 // carries both the provider-shaped tool definitions for the LLM and the
-// markdown override block composed from per-tool Hints (go-toolbroker
-// broker.ComposeOverrideBlock), ready to append to the system prompt.
+// markdown override block composed from per-tool Hints (via the broker's
+// WithEnricher option), ready to append to the system prompt.
 type SelectResult struct {
 	Tools         []provider.ToolDefinition
 	OverrideBlock string
@@ -71,7 +65,8 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 		cfg = DefaultConfig()
 	}
 
-	lb := broker.NewLocalBroker(nil, cfg.Rules)
+	enr := NewStoreEnricher(s)
+	lb := broker.NewLocalBroker(nil, cfg.Rules, broker.WithEnricher(enr))
 
 	return &ToolClient{
 		LocalBroker: lb,
@@ -79,7 +74,6 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 		Store:       s,
 		Config:      cfg,
 		Builtins:    NewBuiltinToolRegistry(),
-		enricher:    NewStoreEnricher(s),
 	}
 }
 
@@ -272,23 +266,20 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		})
 	}
 
-	// Compose override block from the FINAL selection (post-permission,
-	// post-prune). Nil enricher or no-enriched-tools both yield empty block.
-	// Enrichment is cosmetic — a compose error never fails selection; it is
-	// logged and the block ships empty. ComposeOverrideBlock itself returns
-	// ("", nil) on nil enricher, so the guard below is for log clarity only.
+	// Obtain the override block from the broker's SelectResult. The broker
+	// composes it automatically when an enricher is wired via WithEnricher;
+	// we call SelectTools again (cheap in-process call on the already-loaded
+	// rule set) purely to retrieve the OverrideBlock. Apply the same wildcard
+	// normalisation that SelectTools uses so the intent matches rules identically.
+	// Enrichment is cosmetic — an error there never fails selection (the broker
+	// swallows it via slog).
+	brokerIntent := intent
+	if isWildcardIntent(brokerIntent) {
+		brokerIntent = "general"
+	}
 	var overrideBlock string
-	if tb.enricher != nil && len(defs) > 0 {
-		names := make([]string, len(defs))
-		for i, d := range defs {
-			names[i] = d.Name
-		}
-		block, err := broker.ComposeOverrideBlock(ctx, names, tb.enricher)
-		if err != nil {
-			slog.Warn("toolclient: compose override block failed", "err", err)
-		} else {
-			overrideBlock = block
-		}
+	if brokerResult, err := tb.LocalBroker.SelectTools(ctx, brokerIntent, hints); err == nil {
+		overrideBlock = brokerResult.OverrideBlock
 	}
 
 	return &SelectResult{Tools: defs, OverrideBlock: overrideBlock}, nil

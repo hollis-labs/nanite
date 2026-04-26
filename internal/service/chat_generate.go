@@ -348,8 +348,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ptyProviderName = providerName
 		startPayload := fmt.Sprintf(`{"message_id":%q,"provider":%q,"agent_id":%q,"model":%q}`,
 			assistantMsgID, providerName, agent.ID, model)
+		startCtx, startCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer startCancel()
 		s.sessionEventWriter.WriteSessionEvent(
-			ctx, sessionID, messaging.EventPTYTurnStart, providerName, startPayload)
+			startCtx, sessionID, messaging.EventPTYTurnStart, providerName, startPayload)
 	}
 
 	// Emit agent.loaded plugin event (fire-and-forget).

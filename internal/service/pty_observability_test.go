@@ -41,18 +41,8 @@ func (c *captureSessionEventWriter) events() []capturedSessionEvent {
 	return out
 }
 
-// TestSessionEventWriter_InterfaceSatisfied verifies that *messaging.Service
-// satisfies the SessionEventWriter interface at compile time. This catches
-// signature drift immediately rather than at container wire-up.
-func TestSessionEventWriter_InterfaceSatisfied(t *testing.T) {
-	// Build a messaging.Service backed by a nil DB (we won't call it, just
-	// assert assignability).
-	var w SessionEventWriter = (*messaging.Service)(nil)
-	if w == nil {
-		// Unreachable — type-assert to silence "declared but not used".
-		t.Fatal("interface assignment failed")
-	}
-}
+// Compile-time assertion: *messaging.Service must satisfy SessionEventWriter.
+var _ SessionEventWriter = (*messaging.Service)(nil)
 
 // TestCaptureSessionEventWriter_RecordsWrites is a sanity check for the test
 // double itself. Validates that captureSessionEventWriter records calls

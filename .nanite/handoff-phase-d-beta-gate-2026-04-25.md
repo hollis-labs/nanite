@@ -15,9 +15,9 @@ Three smoke scenarios for Phase D beta gate. Scenario 3 ✓ passes. Scenarios 1 
 
 ### What was fixed this session
 
-1. **Spawn return type** — `Spawn()` now returns `(string, string, error)` (runID, summary, error). Previously returned `(string, error)` so summary was lost.
-2. **Sync timeout** — sync subagent run now uses `context.Background()` as exec ctx so 30s `messageCallTimeout` doesn't cancel the child runner before it completes.
-3. **Dev tools as builtins** — added `DevToolProviderDefinitions()` to `internal/mcp/dev_tools.go` and registered dev tools (`dev_read`, `dev_grep`, `dev_bash`, `dev_glob`, `dev_edit`, `dev_write`) as builtins in `initMCP()` in `main.go`. This was intended to make dev tools appear in ALL sessions regardless of broker selection.
+1. **Sync timeout** — sync subagent run now uses `context.Background()` as exec ctx so 30s `messageCallTimeout` doesn't cancel the child runner before it completes. `Spawn()` still returns `(string, error)` — the subagent summary is delivered via a reply message posted to the parent session's chat channel by `execute()`.
+2. **Dev tools as builtins** — see item 3 below (renumbered).
+3. **Dev tools as builtins** — added `DevToolProviderDefinitions()` to `internal/mcp/dev_tools.go` and registered dev tools (`dev_read`, `dev_grep`, `dev_bash`, `dev_glob`, `dev_edit`, `dev_write`) as builtins in `initMCP()` in `main.go`. Bare names bypass the progressive discovery threshold and appear in all sessions regardless of broker selection.
 
 ### Why it still fails
 

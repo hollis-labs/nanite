@@ -183,7 +183,7 @@ func cmdServe(args []string) {
 	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
 
 	// Set up provider registry (API keys, Ollama, CLI adapters).
-	registry := initProviders()
+	registry := initProviders(envelopeValidatorDevMode)
 
 	slog.Info("app config loaded",
 		"cli_active_throttle_seconds", appCfg.Presence.CLIActiveThrottleSeconds,
@@ -356,7 +356,15 @@ func cmdServe(args []string) {
 
 // initProviders creates the provider registry with all available API providers,
 // Ollama (local, no key required), and CLI adapters (PTY + subprocess).
-func initProviders() *provider.Registry {
+// skipPermsAdapter wraps a CLIAdapter and appends --dangerously-skip-permissions
+// to BuildArgs. Used when developer_mode is enabled.
+type skipPermsAdapter struct{ provider.CLIAdapter }
+
+func (a skipPermsAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	return append(a.CLIAdapter.BuildArgs(prompt, systemPrompt, cliSessionID), "--dangerously-skip-permissions")
+}
+
+func initProviders(devMode bool) *provider.Registry {
 	registry := provider.NewRegistry()
 
 	resolveKey := func(providerID string) string {
@@ -422,8 +430,12 @@ func initProviders() *provider.Registry {
 	slog.Info("provider registered", "provider", "ollama", "host", "http://localhost:11434")
 
 	// Register CLI adapters — PTY (unix) and subprocess (all platforms).
+	var claudeAdapter provider.CLIAdapter = provider.NewClaudeAdapter()
+	if devMode {
+		claudeAdapter = skipPermsAdapter{claudeAdapter}
+	}
 	cliAdapters := []provider.CLIAdapter{
-		provider.NewClaudeAdapter(),
+		claudeAdapter,
 		provider.NewCodexAdapter(),
 		provider.NewGeminiAdapter(),
 		provider.NewCopilotAdapter(),

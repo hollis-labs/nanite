@@ -55,7 +55,8 @@ require (
 require go.uber.org/goleak v1.3.0
 
 // CW-20260420-0007: strict tool use default-on — local go-providers with Strict field.
-// Remove once v0.2.2+ is published and the go.sum entry is updated.
+// Requires ../go-providers sibling checkout. CI checks out both repos via go.work.
+// Remove once a tagged release includes the Strict field and go.sum is updated.
 replace github.com/hollis-labs/go-providers => ../go-providers
 
 require (

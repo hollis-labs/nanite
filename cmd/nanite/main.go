@@ -304,6 +304,21 @@ func cmdServe(args []string) {
 		// dispatch.DefaultEnvelopeWrapper when unset.
 	}
 
+	// CW-20260426-0006 (J8 v1): wire panel-control surface.
+	//   - PanelSignalSink — push panel_signal SSE events on the originating session.
+	//   - PanelLookup — enumerate plugin-registered panels for the access check.
+	//   - TrustResolver — H1 gate for plugin-shipped panels (built-ins skip the gate).
+	selfTools.PanelSignalSink = container.Streams
+	selfTools.PanelLookup = func() []string {
+		entries := pluginHost.GetPanels()
+		ids := make([]string, len(entries))
+		for i, e := range entries {
+			ids[i] = e.ID
+		}
+		return ids
+	}
+	selfTools.TrustResolver = s
+
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {
 		if err := container.Tasks.Restore(context.Background()); err != nil {

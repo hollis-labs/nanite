@@ -98,6 +98,13 @@ var ChatToolSurface = []string{
 	"nanite_execute_task",
 	// Conversation search (P8B, CW-20260420-0026).
 	"nanite_chat_search",
+	// Panel control (J8 v1, CW-20260426-0006). The Chat agent can open and
+	// close known UI drawers as a visibility-only signal — these tools never
+	// mutate workspace data and are gated for plugin-shipped panels via H1
+	// trust resolution at handler time.
+	"nanite_panel_open",
+	"nanite_panel_close",
+	"nanite_signal_mode",
 }
 
 // chatSurfaceMetaToolExceptions are always allowed on the Chat surface:

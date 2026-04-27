@@ -848,6 +848,62 @@ the current turn for subsequent writes.
 				"required": []string{"query"},
 			},
 		},
+		// --- Panel control (J8 v1, CW-20260426-0006) ---
+		{
+			Name: "nanite_panel_open",
+			Description: "Open a UI drawer/panel by stable ID so its content is visible to the user.\n\n" +
+				"**When to use:** When the conversation enters a state where a particular surface is helpful — e.g. asking the user to triage todos opens `work`, picking a workflow opens `workflows`, surfacing a long document for reference opens `bottom_chat_drawer`.\n\n" +
+				"**When NOT to use:** Do NOT call this just because content is being emitted into a drawer — envelopes can carry a `target` field that auto-routes and opens the drawer declaratively. Use the explicit tool only when you want to bring a drawer up WITHOUT (or before) emitting envelope content.\n\n" +
+				"**v1 catalog:** `bottom_chat_drawer`, `work`, `workflows`. Plugin-shipped panel IDs are also accepted but require `trusted` H1 tier on the calling agent profile; untrusted callers receive an `untrusted` error.\n\n" +
+				"**Dismiss policy:** if the user has dismissed this panel since the last conversational trigger, this call is a NO-OP — the agent does not fight the user for visibility. The tool returns `{opened: true|false, reason}` so the agent can verify.\n\n" +
+				"**Output shape:** `{opened: bool, panel_id: string, reason?: string}` — `reason` is set when `opened=false` (`user_dismissed`, `unknown_panel`, `untrusted`).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"panel_id": map[string]any{
+						"type":        "string",
+						"description": "Stable panel ID. v1 built-ins: bottom_chat_drawer, work, workflows. Plugin panel IDs accepted from trusted callers.",
+					},
+				},
+				"required": []string{"panel_id"},
+			},
+		},
+		{
+			Name: "nanite_panel_close",
+			Description: "Close a UI drawer/panel by stable ID.\n\n" +
+				"**When to use:** Sparingly — closing surfaces hides information from the user. Reasonable case: a workflow finished and you want to clear the workflow drawer so the user's attention returns to chat.\n\n" +
+				"**When NOT to use:** Do not close a drawer the user opened manually (`user_opened` state). The dispatcher enforces this: a close on a user-opened drawer is a NO-OP.\n\n" +
+				"**v1 catalog:** `bottom_chat_drawer`, `work`, `workflows`. Plugin-shipped panel IDs are accepted but require `trusted` H1 tier.\n\n" +
+				"**Output shape:** `{closed: bool, panel_id: string, reason?: string}`. `reason` is `user_opened`, `unknown_panel`, or `untrusted` on no-ops.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"panel_id": map[string]any{
+						"type":        "string",
+						"description": "Stable panel ID to close. v1 built-ins: bottom_chat_drawer, work, workflows.",
+					},
+				},
+				"required": []string{"panel_id"},
+			},
+		},
+		{
+			Name: "nanite_signal_mode",
+			Description: "Signal a workspace mode/status to the FE so it can open the corresponding preset of panels.\n\n" +
+				"**When to use:** When the conversation enters a recognized state where multiple drawers should come up together — e.g. switching into planning surfaces both `work` and `workflows`. Cleaner than calling `nanite_panel_open` per drawer.\n\n" +
+				"**v1 vocabulary:** `planning` → opens [work, workflows]. The map is intentionally tiny in v1; emitting an unknown mode is a NO-OP on the FE (no error). The vocabulary is documented at ui/src/lib/panel-modes.ts.\n\n" +
+				"**Dismiss policy:** the same 4-state dismiss machine that gates `nanite_panel_open` applies — if the user has dismissed `work`, the planning preset will NOT re-open it until a new conversational trigger fires.\n\n" +
+				"**Output shape:** `{signaled: true, mode: string}` on success. Unknown modes still return `signaled: true` (the FE silently ignores them) — the contract is that emission always succeeds; preset interpretation lives in the FE.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"mode": map[string]any{
+						"type":        "string",
+						"description": "Mode name. v1: planning. Map is FE-defined and extensible.",
+					},
+				},
+				"required": []string{"mode"},
+			},
+		},
 		// --- executeTask dispatch primitive (CW-20260421-0010, B3) ---
 		{
 			Name: "nanite_execute_task",

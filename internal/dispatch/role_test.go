@@ -31,6 +31,10 @@ func TestEnforceChatSurface_FiltersToStaticAllowList(t *testing.T) {
 		{Name: "nanite_execute_task"},
 		// Allowed (chat_search, P8B).
 		{Name: "nanite_chat_search"},
+		// Allowed (panel control, J8 v1, CW-20260426-0006).
+		{Name: "nanite_panel_open"},
+		{Name: "nanite_panel_close"},
+		{Name: "nanite_signal_mode"},
 		// Meta-tools — always allowed.
 		{Name: "fetch_tool_result"},
 		{Name: "search_tool_result"},
@@ -71,6 +75,9 @@ func TestEnforceChatSurface_FiltersToStaticAllowList(t *testing.T) {
 		"nanite_show_document":    true,
 		"nanite_execute_task":     true,
 		"nanite_chat_search":      true,
+		"nanite_panel_open":       true,
+		"nanite_panel_close":      true,
+		"nanite_signal_mode":      true,
 		"fetch_tool_result":       true,
 		"search_tool_result":      true,
 		"request_tools":           true,

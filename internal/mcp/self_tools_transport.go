@@ -35,6 +35,31 @@ type WorkBroadcaster interface {
 	BroadcastWorkChanged()
 }
 
+// PanelSignalSink is the narrow surface the panel-control tools use to push
+// panel_signal stream events onto the originating chat session. The signature
+// is a (sessionID, type, jsonPayload) triple rather than a chat.StreamEvent —
+// the service layer adapts these arguments into a chat.StreamEvent so the mcp
+// package stays free of the chat import (avoids the chat → toolclient → mcp
+// import cycle). J8 v1 — CW-20260426-0006.
+type PanelSignalSink interface {
+	BroadcastPanelSignal(sessionID, signalType, jsonPayload string) int
+}
+
+// PanelLookup returns the IDs of plugin-shipped panels currently registered
+// with the host. nanite_panel_open / nanite_panel_close use this to validate
+// a panel_id outside the V1BuiltinPanelIDs set before applying H1 trust
+// gating. Wired from main.go via a closure over plugin.Host.GetPanels — using
+// a closure (rather than an interface) avoids importing the plugin package
+// from internal/mcp (which would create a cycle through plugin → mcp →
+// service → ...). J8 v1 — CW-20260426-0006.
+type PanelLookup func() []string
+
+// PanelTrustResolver mirrors dispatch.TrustResolver narrowly so the panel
+// handlers can resolve H1 trust without importing dispatch directly into the
+// transport. *store.Store already satisfies dispatch.TrustResolver; main.go
+// adapts the same value through this interface.
+type PanelTrustResolver = dispatch.TrustResolver
+
 // TodoStoreInterface is the subset of store.Store needed by todo/plan MCP tools.
 // Defined here to avoid circular imports with the service package. Uses raw
 // store methods instead of the service layer's update structs.
@@ -127,6 +152,28 @@ type SelfToolsTransport struct {
 	// kind=directive) issue an elicitation/create request before proceeding.
 	// Nil-safe: tools auto-approve when Elicitation is not wired.
 	Elicitation ElicitationService
+
+	// PanelSignalSink fans panel_open/panel_close/mode signals (J8 v1) onto the
+	// originating chat session's stream. Nil-safe — when unwired, panel tools
+	// still return their {opened: true} confirmation but the FE receives no
+	// out-of-band signal. *service.StreamManager satisfies this.
+	// CW-20260426-0006.
+	PanelSignalSink PanelSignalSink
+
+	// PanelLookup returns the IDs of plugin-shipped panels currently
+	// registered with the plugin host. Used by callPanelOpen/callPanelClose
+	// to validate panel IDs outside the V1 built-in set before applying H1
+	// trust gating. Nil-safe — when unwired, only V1 built-in panel IDs are
+	// addressable and plugin-shipped panel IDs return {reason: "unknown_panel"}.
+	// CW-20260426-0006.
+	PanelLookup PanelLookup
+
+	// TrustResolver is the H1 trust resolver shared with the dispatch
+	// subsystem. Used by callPanelOpen/callPanelClose to gate plugin-shipped
+	// panel access on TrustTrusted. Nil-safe — when unset, plugin-shipped
+	// panel access falls back to "untrusted" (the safe default).
+	// CW-20260426-0006.
+	TrustResolver PanelTrustResolver
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -251,6 +298,12 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callChatSearch(ctx, args)
 	case "nanite_run_python":
 		return st.callRunPython(ctx, args)
+	case "nanite_panel_open":
+		return st.callPanelOpen(ctx, args)
+	case "nanite_panel_close":
+		return st.callPanelClose(ctx, args)
+	case "nanite_signal_mode":
+		return st.callSignalMode(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}

@@ -1,0 +1,35 @@
+id: n01_distractor_tools
+benchmark: noisytoolbench
+description: >
+  Model must call get_weather and only get_weather when presented with 5 distractor
+  tools (calculator, calendar, code_runner, web_search, file_writer). Tests that
+  noise in the tool spec does not cause hallucinated or misrouted tool calls.
+
+user_message: "What's the weather like in Austin, TX right now?"
+
+tools_offered:
+  - name: get_weather
+    description: Returns current weather conditions for a given city.
+  - name: calculator
+    description: Evaluates a mathematical expression and returns the numeric result.
+  - name: calendar
+    description: Lists, creates, or updates calendar events.
+  - name: code_runner
+    description: Executes arbitrary code snippets in a sandboxed environment.
+  - name: web_search
+    description: Searches the web and returns a ranked list of results.
+  - name: file_writer
+    description: Writes content to a file at the specified path.
+
+expected_behavior: >
+  Model calls get_weather with the location "Austin, TX" and does not invoke any
+  of the five distractor tools.
+
+rubric:
+  called_tool: "get_weather"
+  avoided_tools:
+    - calculator
+    - calendar
+    - code_runner
+    - web_search
+    - file_writer

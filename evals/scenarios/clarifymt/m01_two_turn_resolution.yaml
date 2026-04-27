@@ -1,0 +1,32 @@
+id: m01_two_turn_resolution
+benchmark: clarifymt
+description: >
+  Multi-turn scenario: the model previously asked for clarification and the user
+  has now provided it. The model should proceed with scheduling — no further
+  clarifying questions are needed.
+
+prev_turns:
+  - role: user
+    content: "Schedule a meeting with the team."
+  - role: assistant
+    content: "Which team and what time would you like the meeting?"
+
+user_message: "The backend team, tomorrow at 2pm."
+
+tools_offered: []
+
+expected_behavior: >
+  Model acknowledges sufficient information and confirms the meeting is scheduled
+  (or describes taking scheduling action). It does NOT ask another clarifying
+  question.
+
+rubric:
+  asked_clarification: false
+  contains_any:
+    - "scheduled"
+    - "scheduling"
+    - "set up"
+    - "meeting"
+    - "2pm"
+    - "2 pm"
+    - "backend"

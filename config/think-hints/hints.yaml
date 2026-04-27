@@ -1,0 +1,98 @@
+# Think-hint catalog — v1 (CW-20260420-0022 / F5)
+#
+# Each entry defines an affordance hint surfaced in the think-tool block.
+# The hint-selector peer agent reads this catalog (via hint_catalog_summary)
+# and returns a ranked list of IDs to surface for the current turn.
+#
+# Field schema:
+#   id          — unique slug (a-z, 0-9, -)
+#   affordance  — display name; matches the think-block prose label
+#   body        — the prompt text injected when this hint is selected (max ~50 tokens)
+#   triggers    — optional structured matching for rule-based pre-filter
+#     scope_tier_in  — ScopeTier values that bias toward this hint
+#     reflex_id_in   — reflex IDs that bias toward this hint
+#     text_pattern   — substring match on normalized user input (lower-case)
+#   priority    — tiebreak integer; higher wins (0–100)
+#
+# Token budget: all selected hints must fit within 200 tokens (EstimateTokens).
+# The dispatcher truncates if the rendered block exceeds the budget.
+
+hints:
+
+  - id: scratchpad
+    affordance: scratchpad
+    body: >-
+      **Scratchpad** (nanite_scratchpad_write/read): stash interim values within
+      a turn; avoid re-fetching intermediate results.
+    triggers:
+      scope_tier_in: [trivial, small, medium, large, open]
+    priority: 40
+
+  - id: memory_recall
+    affordance: memory_recall
+    body: >-
+      **Memory** (nanite_memory_recall/save): recall durable facts before
+      research or planning; save conclusions after.
+    triggers:
+      scope_tier_in: [small, medium, large, open]
+    priority: 38
+
+  - id: playbook_research
+    affordance: playbook_research
+    body: >-
+      **Playbooks** (reflex catalog): reach for a pre-defined pattern
+      (researcher, planner, reviewer, worker) before improvising.
+    triggers:
+      scope_tier_in: [medium, large, open]
+      reflex_id_in: [researcher-mention, planner-mention, planner-large-task]
+    priority: 35
+
+  - id: peer_query
+    affordance: peer_query
+    body: >-
+      **Peer-query** (nanite_message_send): dispatch a focused question to a
+      specialist peer; use for second opinions or deep sub-tasks.
+    triggers:
+      scope_tier_in: [large, open]
+      reflex_id_in: [planner-mention, planner-large-task, researcher-mention]
+    priority: 30
+
+  - id: use_handoff_stash
+    affordance: use_handoff_stash
+    body: >-
+      **Handoff stash**: a compaction recovery stash may be available; check
+      nanite_handoff_stash_read before re-deriving context lost to compaction.
+    triggers:
+      text_pattern: "compaction"
+      reflex_id_in: []
+    priority: 25
+
+  - id: consult_skills
+    affordance: consult_skills
+    body: >-
+      **Skills** (nanite_skill_*): prefer a registered skill over improvising;
+      skills encode tested procedures for common agent tasks.
+    triggers:
+      scope_tier_in: [medium, large, open]
+      text_pattern: "skill"
+    priority: 22
+
+  - id: scope_check
+    affordance: scope_check
+    body: >-
+      **Scope check**: before acting, confirm the task boundary — what is NOT
+      in scope is as important as what is.
+    triggers:
+      scope_tier_in: [large, open]
+      reflex_id_in: [planner-mention, planner-large-task, strategist-mention]
+    priority: 20
+
+  - id: reviewer_gate
+    affordance: reviewer_gate
+    body: >-
+      **Review gate**: after producing a draft or plan, dispatch a reviewer peer
+      before committing to an irreversible action.
+    triggers:
+      scope_tier_in: [large, open]
+      reflex_id_in: [reviewer-mention, documentor-mention]
+    priority: 18

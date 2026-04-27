@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
@@ -460,6 +461,20 @@ func (s *chatServiceImpl) executeSingleTool(
 	}
 
 	duration := time.Since(start)
+
+	// I1 (CW-20260426-0004): record tool call to inspector (additive, non-blocking).
+	if s.inspector != nil && ls != nil && ls.inspectorTurnID != "" {
+		argsJSON, _ := json.Marshal(tu.Input)
+		s.inspector.RecordToolCall(sessionID, ls.inspectorTurnID, inspectsvc.ToolCallRecord{
+			ToolID:     tu.ID,
+			Name:       tu.Name,
+			Arguments:  string(argsJSON),
+			Result:     resultText,
+			IsError:    toolIsError,
+			LatencyMs:  duration.Milliseconds(),
+			CacheState: "n/a",
+		})
+	}
 
 	return toolExecResult{
 		resultBlock: provider.ContentBlock{

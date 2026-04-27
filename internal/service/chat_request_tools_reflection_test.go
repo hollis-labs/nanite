@@ -74,6 +74,7 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
+		"", // inspectorTurnID — inspector not wired in this test
 	)
 	if len(resultBlocks) != 1 || len(refs) != 1 {
 		t.Fatalf("expected 1 result block + ref; got %d / %d", len(resultBlocks), len(refs))
@@ -102,6 +103,7 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
+		"",
 	)
 	if len(resultBlocks2) != 1 || len(refs2) != 1 {
 		t.Fatalf("expected 1 result block + ref; got %d / %d", len(resultBlocks2), len(refs2))
@@ -141,6 +143,7 @@ func TestHandleRequestTools_LogsLoadedOutcome(t *testing.T) {
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
+		"",
 	)
 	if len(fake.logged) != 1 {
 		t.Fatalf("expected 1 logged row, got %d", len(fake.logged))

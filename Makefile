@@ -1,4 +1,4 @@
-.PHONY: build build-dev install dev clean test lint vuln generate-envelopes
+.PHONY: build build-dev install dev clean test lint vuln generate-envelopes eval
 
 # Build React SPA then embed in Go binary. Production build: NO build tags —
 # the `devmode` tag MUST NOT be set here. internal/plugin/devmode compiles to
@@ -74,6 +74,12 @@ lint-goroutines:
 		internal/server internal/api internal/memory internal/workflow \
 		2>/dev/null | grep -v 'safego\.Go' | grep -v 'safego\.Call' || \
 		echo "(no bare goroutines in target packages)"
+
+# Interaction-quality eval suite (I3 / CW-20260420-0028).
+# Gated behind the "eval" build tag — not included in default `go test ./...`.
+# Set NANITE_EVAL_LIVE=1 (with provider credentials) to run against a real model.
+eval:
+	go test -tags eval -race -count=1 -timeout=120s -v ./internal/eval/...
 
 # Run with default settings
 run: build

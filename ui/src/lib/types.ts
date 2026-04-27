@@ -475,6 +475,68 @@ export interface TurnSnapshotToolCall {
   success?: boolean;
 }
 
+// --- Inspector (I1, CW-20260426-0004) ---
+
+export interface InspectorSlotSnapshot {
+  name: string;
+  tokens: number;
+  cached: boolean;
+  cache_key?: string;
+  sensitive: boolean;
+  content: string;
+  traffic_light: 'green' | 'yellow' | 'red';
+}
+
+export interface InspectorLLMMessageRecord {
+  role: string;
+  content: string;
+  tokens: number;
+  classification?: string;
+}
+
+export interface InspectorBrokerDecision {
+  intent: string;
+  outcome: string;
+  selected_tools: string[];
+  layer_reached: string;
+  consecutive_empty: number;
+  total_calls: number;
+  loaded_count: number;
+  reflection_query?: string;
+  signals?: string;
+}
+
+export interface InspectorToolCallRecord {
+  tool_id: string;
+  name: string;
+  arguments: string;
+  result: string;
+  is_error: boolean;
+  latency_ms: number;
+  cache_state: string;
+}
+
+export interface InspectorTurnSnapshot {
+  session_id: string;
+  turn_id: string;
+  started_at: string;
+  slots: InspectorSlotSnapshot[];
+  llm_messages: InspectorLLMMessageRecord[];
+  broker_decisions: InspectorBrokerDecision[];
+  tool_calls: InspectorToolCallRecord[];
+  scope_tier?: string;
+  strategy?: { reflex_match_id?: string; max_turns: number; reasoning?: string };
+  playbook?: { name: string; steps?: string[] };
+  memory_hits?: { source: string; content: string; score?: number }[];
+  loop_status?: { detected: boolean; reason?: string };
+}
+
+export interface InspectorTurnsResponse {
+  session_id: string;
+  turns: InspectorTurnSnapshot[];
+  count: number;
+}
+
 // --- Envelopes ---
 
 export interface Envelope {

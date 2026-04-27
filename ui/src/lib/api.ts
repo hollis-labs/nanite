@@ -61,6 +61,8 @@ import type {
   MemoryCreateRequest,
   MemoryUpdateRequest,
   WorkspaceRoleTrustOverride,
+  InspectorTurnsResponse,
+  InspectorTurnSnapshot,
 } from "./types";
 import type { PluginRegistryResponse } from "./plugin-loader";
 
@@ -1762,6 +1764,29 @@ export const api = {
       { method: "DELETE" },
     );
     if (!res.ok) throw new Error(`Failed to delete role trust: ${res.status}`);
+    return res.json();
+  },
+
+  // Inspector (I1, CW-20260426-0004)
+  getInspectorTurns: async (
+    sessionId: string,
+    limit = 20,
+  ): Promise<InspectorTurnsResponse> => {
+    const res = await fetch(
+      `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns?limit=${limit}`,
+    );
+    if (!res.ok) throw new Error(`Failed to get inspector turns: ${res.status}`);
+    return res.json();
+  },
+
+  getInspectorTurn: async (
+    sessionId: string,
+    turnId: string,
+  ): Promise<InspectorTurnSnapshot> => {
+    const res = await fetch(
+      `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`,
+    );
+    if (!res.ok) throw new Error(`Failed to get inspector turn: ${res.status}`);
     return res.json();
   },
 };

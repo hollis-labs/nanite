@@ -43,6 +43,7 @@ import { ObservabilityDashboard } from "./observability/ObservabilityDashboard";
 import { PluginManager } from "./PluginManager";
 import { PreferencesPanel } from "./PreferencesPanel";
 import { SystemPromptsViewer } from "./SystemPromptsViewer";
+import { InspectorPanel } from "./inspector/InspectorPanel";
 import { ProviderManager } from "./ProviderManager";
 import { ShortcutsPanel } from "./ShortcutsPanel";
 import { SkillsBrowser } from "./SkillsBrowser";
@@ -112,6 +113,13 @@ const SYSTEM_PROMPTS_NAV_ITEM: NavItem = {
   icon: FileCode2,
 };
 
+/** Nav item injected into the System group when developer_mode=true (I1). */
+const INSPECTOR_NAV_ITEM: NavItem = {
+  id: "inspector",
+  label: "Inspector",
+  icon: Cpu,
+};
+
 function findItemInGroups(
   id: string,
   groups: NavGroup[],
@@ -138,21 +146,27 @@ export default function SettingsPage() {
     icon: resolveIcon(entry.icon),
   }));
 
-  // Inject "System Prompts" into the AI group when developer_mode is on.
+  // Inject "System Prompts" into the AI group and "Inspector" into System when developer_mode is on.
   const navGroups: NavGroup[] = BASE_NAV_GROUPS.map((group) => {
-    if (group.label !== "AI") return group;
-    if (!developerMode) return group;
-    // Insert before "Memory" (keep logical order: Providers, Agents, Skills, System Prompts, Memory)
-    const memoryIdx = group.items.findIndex((i) => i.id === "memory");
-    const items =
-      memoryIdx >= 0
-        ? [
-            ...group.items.slice(0, memoryIdx),
-            SYSTEM_PROMPTS_NAV_ITEM,
-            ...group.items.slice(memoryIdx),
-          ]
-        : [...group.items, SYSTEM_PROMPTS_NAV_ITEM];
-    return { ...group, items };
+    if (group.label === "AI") {
+      if (!developerMode) return group;
+      // Insert before "Memory" (keep logical order: Providers, Agents, Skills, System Prompts, Memory)
+      const memoryIdx = group.items.findIndex((i) => i.id === "memory");
+      const items =
+        memoryIdx >= 0
+          ? [
+              ...group.items.slice(0, memoryIdx),
+              SYSTEM_PROMPTS_NAV_ITEM,
+              ...group.items.slice(memoryIdx),
+            ]
+          : [...group.items, SYSTEM_PROMPTS_NAV_ITEM];
+      return { ...group, items };
+    }
+    if (group.label === "System" && developerMode) {
+      // Append Inspector after existing System items.
+      return { ...group, items: [...group.items, INSPECTOR_NAV_ITEM] };
+    }
+    return group;
   });
 
   const allGroups: NavGroup[] = pluginItems.length
@@ -213,6 +227,8 @@ export default function SettingsPage() {
         return <MemoryPanel />;
       case "observability":
         return <ObservabilityDashboard />;
+      case "inspector":
+        return developerMode ? <InspectorPanel /> : <PreferencesPanel />;
       default: {
         const pluginEntry = pluginTabs.find((e) => e.id === activeSection);
         if (pluginEntry?.component) {

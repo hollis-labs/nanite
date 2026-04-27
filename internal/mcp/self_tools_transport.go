@@ -121,6 +121,12 @@ type SelfToolsTransport struct {
 	// step still runs when GroundingRecaller is set and the gate is on).
 	// *store.Store satisfies grounding.ConsultationLogger.
 	GroundingLogger grounding.ConsultationLogger
+
+	// Elicitation is the G4 mid-call user-prompt service (CW-20260420-0018).
+	// When set, write tools that need user confirmation (e.g. nanite_message_send
+	// kind=directive) issue an elicitation/create request before proceeding.
+	// Nil-safe: tools auto-approve when Elicitation is not wired.
+	Elicitation ElicitationService
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -1132,17 +1138,46 @@ func (st *SelfToolsTransport) callMessageSend(ctx context.Context, args map[stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
+
+	kind := strArg(args, "kind", "")
+	body := strArg(args, "body", "")
+	msgType := strArg(args, "type", "")
+
+	// G4 elicitation pilot (CW-20260420-0018, D5): directive messages broadcast
+	// instructions to all recipients and carry elevated blast radius. Require
+	// explicit user confirmation before sending when elicitation is wired.
+	// Directive is a `type` value (see nanite_message_send InputSchema), not kind.
+	if msgType == "directive" && st.Elicitation != nil {
+		fromSessionID := strArg(args, "from_session_id", "")
+		fromAgentID := strArg(args, "from_agent_id", "")
+		elicitResp, err := elicitUserInput(ctx, st.Elicitation, fromSessionID, fromAgentID, "",
+			elicitationCreateParams{
+				Message: fmt.Sprintf("Send directive to %s? Body: %q", strArg(args, "to_agent_id", ""), body),
+				RequestedSchema: &elicitationRequestedSchema{
+					Type:        "boolean",
+					Title:       "Confirm directive send",
+					Description: "Directive messages instruct recipient agents to take action. Confirm to proceed.",
+				},
+			})
+		if err != nil {
+			return errorResult(fmt.Sprintf("elicitation: %v", err)), nil
+		}
+		if elicitResp.Action != "accept" {
+			return textResult(fmt.Sprintf("directive send aborted by user (action=%s)", elicitResp.Action)), nil
+		}
+	}
+
 	msg := messaging.SendInput{
 		FromSessionID: strArg(args, "from_session_id", ""),
 		FromAgentID:   strArg(args, "from_agent_id", ""),
 		ToSessionID:   strArg(args, "to_session_id", ""),
 		ToAgentID:     strArg(args, "to_agent_id", ""),
 		Channel:       strArg(args, "channel", ""),
-		Kind:          strArg(args, "kind", ""),
+		Kind:          kind,
 		PayloadJSON:   strArg(args, "payload_json", ""),
 		Subject:       strArg(args, "subject", ""),
-		Body:          strArg(args, "body", ""),
-		Type:          strArg(args, "type", ""),
+		Body:          body,
+		Type:          msgType,
 		ReplyTo:       strArg(args, "reply_to", ""),
 		RegisterAs:    strArg(args, "register_as", ""),
 	}

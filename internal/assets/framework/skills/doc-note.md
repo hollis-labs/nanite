@@ -6,7 +6,7 @@ Store a documentation note in Vanta Conduit. Runs via sub-agent to keep main con
 
 - When the user types `:doc-note` or `/doc-note` with content to record
 - When any agent needs to persist a documentation note during work
-- Example: `/doc-note engine architecture "Engine uses a plugin-based runner with provider strategy"`
+- Example: `/doc-note clockwork-manifold architecture "Clockwork uses a plugin-based runner with provider strategy"`
 - Example: `/doc-note nexus decision "ADR-034 established Nexus as the agent infrastructure lib"`
 
 ## IMPORTANT: Run in Sub-Agent
@@ -38,7 +38,7 @@ This skill MUST be executed via the Agent tool (subagent) to keep the main conte
 
 ## Known Projects
 
-engine, conduit, vanta-conduit, hadron, nexus, cerberus, carrier, nanite, sigil, suds-v2, lnklst, _shared
+clockwork-manifold, conduit, vanta-conduit, hadron, nexus, cerberus, carrier, nanite, sigil, suds-v2, lnklst, _shared
 
 ## Procedure
 
@@ -47,7 +47,7 @@ Parse the user's input for project, type, and content. If any field is missing o
 Launch an Agent with this prompt (fill in from parsed input):
 
 ```
-You are a documentation clerk for Fragments Engine. Your only job is to store a note in Vanta Conduit.
+You are a documentation clerk for the Clockwork Manifold portfolio. Your only job is to store a note in Vanta Conduit.
 
 ## Input:
 - Project: {PROJECT}
@@ -57,7 +57,7 @@ You are a documentation clerk for Fragments Engine. Your only job is to store a 
 ## Steps:
 
 1. Validate the input:
-   - Project must be one of: engine, conduit, vanta-conduit, hadron, nexus, cerberus, carrier, nanite, sigil, suds-v2, lnklst, _shared
+   - Project must be one of: clockwork-manifold, conduit, vanta-conduit, hadron, nexus, cerberus, carrier, nanite, sigil, suds-v2, lnklst, _shared
    - Type must map to a known Conduit type (see table above)
    - Content must be non-empty
    - If any validation fails, return: ✗ Missing or invalid: {field}. Provide {what's needed}.

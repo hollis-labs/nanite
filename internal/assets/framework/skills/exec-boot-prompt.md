@@ -94,19 +94,19 @@ If any of these are missing, stop and ask the user to produce them first (usuall
 
 ## Out of scope / deferred (don't scope-creep)
 
-**Filed BLGs in Engine** (`project_id=<project>`):
-- **BLG-XXX** — <title>
+**Filed backlog tasks in Clockwork** (`project_id=<project>`):
+- **CW-XXX** — <title>
 - ...
 
-**Not BLG'd** (KB GAPs): <list with pointers to the KB>
+**Not captured** (KB GAPs): <list with pointers to the KB>
 
-If you hit one of these, capture a BLG immediately and keep moving.
+If you hit one of these, capture a Clockwork backlog task immediately and keep moving.
 
 ## Backlog discipline
 
-- Engine source of truth: `mcp__engine__engine_backlog_list project_id=<project>`
-- Set `project_id` explicitly on capture
-- Grep tracking dirs for BLG-IDs before session close; reconcile
+- Clockwork source of truth: `mcp__clockwork__clockwork_task_list project_id=<project> tags=backlog`
+- Set `project_id` explicitly on capture; tag `backlog`
+- Grep tracking dirs for CW-IDs before session close; reconcile
 
 ## Tracking root for this execution session
 
@@ -125,11 +125,16 @@ Two-root contract: code → work_root, tracking → tracking_root.
 
 1. `cd <work_root>`
 2. `git status` — confirm clean, `main` at `<sha>` or later.
-3. `git switch -c feat/<slug>`
-4. Read the plan doc front-to-back.
-5. Read the spec's key sections for the *why*.
-6. Start with Task/Phase 1.
-7. <feature-specific first-task guidance>
+3. **Vanta recall** — surface any prior follow-ups, decisions, or limitations relevant to this feature BEFORE implementation starts:
+   ```
+   mcp__vanta__conduit_lookup namespaces=["user/<user>/memory"] query="<project> <feature-slug> follow-ups limitations decisions"
+   ```
+   Review the top 5–10 results. Flag anything that contradicts the plan's decisions-locked section OR names a known-limitation that this session touches. If something material surfaces, pause and reconcile before starting Task 1.
+4. `git switch -c feat/<slug>`
+5. Read the plan doc front-to-back.
+6. Read the spec's key sections for the *why*.
+7. Start with Task/Phase 1.
+8. <feature-specific first-task guidance>
 ```
 
 4. **Write the file.** Overwrite any existing boot prompt for this feature unless the user asks otherwise.
@@ -165,6 +170,7 @@ Two-root contract: code → work_root, tracking → tracking_root.
 - **Two-root contract** must be stated — code → work_root, tracking → tracking_root — so the executor doesn't mix artifacts.
 - **Exit gate must be copy-paste from the spec.** Don't invent new criteria in the boot prompt.
 - **Vanta-first anchor is required.** Insert the blockquote between the `**Scope:**` line and the first `##` section, verbatim from this skill's template. This ensures direct-boot sessions (`Boot @path`) still honor the Vanta-primary memory contract even when nanite agent resolution is skipped.
+- **Vanta recall step is required in "How to boot this session".** The `conduit_lookup` call is the natural moment when prior-session follow-ups and decisions need to surface — BEFORE the executor starts Task 1. Skipping it means the executor misses signal the prior session deliberately captured for this moment.
 
 ## Adjacent skills + docs
 

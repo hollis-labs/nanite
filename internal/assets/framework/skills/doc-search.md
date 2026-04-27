@@ -7,7 +7,7 @@ Search project documentation stored in Vanta Conduit. Returns results without in
 - When the user types `:doc-search` or `/doc-search` with a query
 - When any agent needs to retrieve documentation context
 - Example: `/doc-search "how does the runner work"` — semantic search across all projects
-- Example: `/doc-search --project engine --type architecture` — filtered structured query
+- Example: `/doc-search --project clockwork-manifold --type architecture` — filtered structured query
 - Example: `/doc-search --project nexus "broker pattern"` — scoped semantic search
 
 ## Input Format
@@ -18,7 +18,7 @@ Search project documentation stored in Vanta Conduit. Returns results without in
 
 **query** — Natural language question or keywords. Triggers semantic search via embeddings.
 
-**--project** — Scope to a single project namespace (e.g., `engine`, `vanta-conduit`). Optional.
+**--project** — Scope to a single project namespace (e.g., `clockwork-manifold`, `vanta-conduit`). Optional.
 
 **--type** — Filter by document type: architecture, decision, api, data, procedure, constraint, goal, note, summary. Optional.
 

@@ -185,7 +185,7 @@ The global config (`~/.nanite/config.yaml`) defines `default_skills` and `defaul
 
 ```yaml
 default_skills: [fast-triage, end-of-session, escalate]
-default_tools:  [engine, cortex, hadron, cerberus]
+default_tools:  [clockwork, vanta, hadron, cerberus]
 ```
 
 **default_skills** — Skills every agent gets regardless of its `skills:` array. Agent-specific skills are additive; they never replace defaults. A skill belongs here when every agent benefits from having it (e.g., structured user input, session handoff, blocker escalation).
@@ -233,7 +233,7 @@ Everything an agent outputs consumes context window tokens. Design skills to pro
 | shadcn-install | Add shadcn MCP + skill to a project | inline |
 | fast-triage | Structured feedback + item triage via browser UI | inline |
 | playbook | List, inspect, or boot session playbooks | inline |
-| nanite/ | Nanite knowledge vault skills | inline |
+| nil/ | Nil task and note manager (push, search, inbox, vaults) | inline |
 
 ### Vendor skills
 
@@ -301,6 +301,31 @@ Auto-generated timestamps (YYYYMMDD-HHMMSS-4random). Meaning from namespace, typ
 ### Lifecycle
 All agent writes start as `draft`. Promotion to `canonical` requires explicit action.
 
+## Registry
+
+The registry is a SQLite database at `~/.nanite/registry.db` that indexes all agents, skills, roles, playbooks, commands, and hooks across the global framework and all registered projects. It scans `.nanite/`, `.agentrc/`, and `.claude/` directories.
+
+**CLI:** `~/.nanite/bin/registry {index|report} [options]`
+
+- `registry index` — scan and upsert (safe to re-run). Flags: `--db PATH`, `--config PATH`, `--verbose`.
+- `registry report` — generate `~/.nanite/REGISTRY.md` with clickable file links organized by global → project → version drift. Flags: `--db PATH`, `--output PATH`.
+
+`registry-index` is a backward-compat symlink to `registry`. Reads project list from `~/.nanite/config.yaml`.
+
+**Schema:** `items` (type, name, description, system, scope, project, source_path, version, roles, skills, metadata, file_modified), `projects` (slug, root, lang, type, description, has_nanite, has_agentrc, has_claude), `scan_log`.
+
+**Useful queries:**
+```bash
+# All agents across portfolio
+sqlite3 -column -header ~/.nanite/registry.db "SELECT name, system, project FROM items WHERE type='agent' ORDER BY project;"
+
+# Version drift
+sqlite3 -column -header ~/.nanite/registry.db "SELECT project, system, version FROM items WHERE version != '' AND project != '' GROUP BY project ORDER BY version;"
+
+# Projects still on agentrc
+sqlite3 -column -header ~/.nanite/registry.db "SELECT slug FROM projects WHERE has_agentrc=1 AND has_nanite=0;"
+```
+
 ## Config Schema (v2.3.0)
 
 Single config file at `~/.nanite/config.yaml`:
@@ -339,13 +364,14 @@ The global config lists both monorepos and individual modules as first-class pro
 | suds-v2 | — |
 | fragmentsengine.com | — |
 | agent-workspaces | — |
-| fragments-engine | Monorepo root |
-| engine | Fragments Engine Core (task/sprint/project management, Nexus agent routing) |
+| clockwork-manifold | Clockwork Manifold — task orchestration and execution engine |
+| fragments-engine | Monorepo root (legacy, superseded by clockwork-manifold) |
+| engine | Legacy task/sprint/project core (read-only history; superseded by clockwork-manifold) |
 | conduit | Chat interface and conversation management |
 | vanta-conduit | Vanta Conduit — context memory, RAG, and document storage |
 | libs | Shared libraries (MCP, OTel, plugin, toolbroker) |
 
-`engine`, `conduit`, `vanta-conduit`, and `libs` are modules within the `fragments-engine` monorepo, listed individually so agents can scope to a single module.
+`engine`, `conduit`, `vanta-conduit`, and `libs` are modules within the legacy `fragments-engine` monorepo, listed individually so agents can scope to a single module. New task/sprint/project work happens in `clockwork-manifold`.
 
 Project-level config at `<project>/.nanite/config.yaml`:
 
@@ -364,13 +390,7 @@ agents:
 
 ## MCP Tool Namespace
 
-All skills and commands reference `mcp__engine__*` tools. The legacy `mcp__volon__*` namespace is no longer used. The service was previously labeled "Volon"; it is now "Engine" throughout.
-
-## Internal Planner (todos + plans)
-
-Nanite also exposes its own planner subsystem with five always-on MCP tools — `nanite_todo_{create,update,list}` and `nanite_plan_{create,update}` — for in-session and per-project work tracking. This is distinct from Engine (portfolio-wide tracking) and Claude Code's built-in `TodoWrite` (turn-scoped agent bookkeeping).
-
-See `docs/nanite-planner.md` for conventions: scope selection, TodoWrite-vs-nanite-todo decision rule, todo-vs-plan decision rule, status lifecycles, and the sub-agent handoff pattern using plan steps.
+All skills and commands reference `mcp__clockwork__*` tools. The legacy `mcp__volon__*` and `engine_*`  namespaces are no longer used. The service was previously labeled "Volon" / "Engine"; it is now "Clockwork" / "Clockwork Manifold" throughout.
 
 ## Version History
 

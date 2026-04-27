@@ -52,13 +52,17 @@ roles:
     file: meta/nanite-agent-manager.md
     type: meta
     description: Develop and maintain the Nanite agent framework
+  steward:
+    file: meta/steward.md
+    type: meta
+    description: Primary chat agent for agent-ops — context curation, memory hygiene, KB maintenance, inbox triage, idea capture, handoff discipline. Does NOT edit project code.
 
 # ─── Defaults ────────────────────────────────────────────
 # Skills and tools loaded for every agent, on top of agent-specific lists.
 # Agent-specific skills/tools are additive — they never replace defaults.
 
-default_skills: [fast-triage, end-of-session, escalate]
-default_tools:  [engine, cortex, hadron, cerberus]
+default_skills: [fast-triage, end-of-session, escalate, search-first, capture-to-vanta]
+default_tools:  [clockwork, vanta, hadron, cerberus]
 
 # ─── Docs ────────────────────────────────────────────────
 # Framework reference doc. nanite-agent-manager role keeps this current.
@@ -89,17 +93,18 @@ docs:
 # Used by agents to resolve project roots and load context.
 
 projects:
-  # Fragments Engine (monorepo — currently just engine/; conduit, cortex, and
-  # libs have been extracted into standalone repos elsewhere in ~/Projects-apps)
+  # Fragments Engine (legacy monorepo — superseded by Clockwork Manifold for task/sprint/project
+  # management. Repo retained as read-only history; do not boot for new work. Conduit, cortex, and
+  # libs were extracted into standalone repos elsewhere in ~/Projects-apps.)
   fragments-engine:
     root: ~/Projects-apps/fragments-engine
     type: monorepo
-    description: Core platform monorepo
+    description: Legacy platform monorepo (superseded by clockwork-manifold)
     modules:
       engine: { path: engine, lang: go }
 
   # Individual project entries (standalone repos)
-  engine:         { root: ~/Projects-apps/fragments-engine/engine, lang: go, description: "Fragments Engine Core — task/sprint/project management, agent routing" }
+  engine:         { root: ~/Projects-apps/fragments-engine/engine, lang: go, description: "Legacy task/sprint/project core — superseded by clockwork-manifold; read-only history" }
   vanta-conduit:  { root: ~/Projects-apps/vanta-conduit, lang: go, description: "Vanta Conduit — context memory, RAG, and document storage" }
 
   # Shared Go libraries monorepo (formerly fragments-engine/libs)
@@ -111,6 +116,7 @@ projects:
       go-directives: { path: libs/go-directives, lang: go }
       go-mcp:        { path: libs/go-mcp, lang: go }
       go-otel:       { path: libs/go-otel, lang: go }
+      go-plugin:     { path: libs/go-plugin, lang: go }
       go-providers:  { path: libs/go-providers, lang: go }
       go-queue:      { path: libs/go-queue, lang: go }
       go-toolbroker: { path: libs/go-toolbroker, lang: go }
@@ -133,3 +139,4 @@ projects:
 
   # Sites
   fragmentsengine.com: { root: ~/Projects-apps/fragmentsengine.com, type: static-site, description: Marketing site }
+  chrispian.dev: { root: ~/Projects/chrispian.dev, type: static-site, lang: typescript, description: "Personal dev blog — Astro + Tailwind v4 + shadcn + Torchlight, hosted on Cloudflare Pages" }

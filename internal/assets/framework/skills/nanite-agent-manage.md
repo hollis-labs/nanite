@@ -238,7 +238,7 @@ You are building a new skill for the Nanite agent framework.
 
 **Examples:**
 - `/nanite-agent-manage agent conduit-plugin-dev conduit --roles backend,go --skills go-build,go-lint,go-test,doc-note,doc-search --context agents/plugin-dev.md --description "Develop and maintain Conduit plugins"`
-- `/nanite-agent-manage agent engine-backend engine --roles backend,go --skills go-build,go-lint,go-test`
+- `/nanite-agent-manage agent clockwork-backend clockwork-manifold --roles backend,go --skills go-build,go-lint,go-test`
 - `/nanite-agent-manage agent nanite-frontend nanite --roles frontend,react --context agents/frontend.md`
 
 **Procedure:** Launch a sub-agent with:

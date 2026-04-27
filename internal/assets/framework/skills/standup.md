@@ -16,11 +16,11 @@ Generate a standup report from recent task completions and git activity across m
 
 - `--hours` — Lookback window. Default: 24.
 - `--format` — `brief` (default) or `full` (includes commit messages and task descriptions).
-- `--project` — Scope to a single Engine project. Default: all projects.
+- `--project` — Scope to a single Clockwork project. Default: all projects.
 
 ## Procedure
 
-1. **Gather task activity.** Use `mcp__engine__engine_tasks_list` to find recently updated tasks. If `--project` is given, filter by that project. Group by status (done, doing, blocked).
+1. **Gather task activity.** Use `mcp__clockwork__clockwork_task_list` to find recently updated tasks. If `--project` is given, filter by that `project_id`. Group by status (done, doing, blocked).
 
 2. **Gather git activity.** For each project directory known to the current workspace, run:
    ```bash
@@ -28,7 +28,7 @@ Generate a standup report from recent task completions and git activity across m
    ```
    If the workspace has a `.nanite/config.yaml` with a `projects` key, use those paths. Otherwise, use the current working directory only.
 
-3. **Check blockers.** Use `mcp__engine__engine_tasks_list` filtered to blocked status.
+3. **Check blockers.** Use `mcp__clockwork__clockwork_task_list` filtered to `status=blocked`.
 
 4. **Format report.**
 
@@ -37,11 +37,11 @@ Generate a standup report from recent task completions and git activity across m
    === STANDUP — YYYY-MM-DD ===
 
    DONE (last 24h):
-   - [TASK-001] Title here
+   - [CW-20260427-0001] Title here
    - [project] 3 commits: fix pipeline, add tests, update docs
 
    IN PROGRESS:
-   - [TASK-002] Title here (doing)
+   - [CW-20260427-0002] Title here (doing)
 
    BLOCKED:
    - None

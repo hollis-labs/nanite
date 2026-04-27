@@ -461,6 +461,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	var finalUsage *chat.Usage
 	var breakdown *chat.TokenBreakdown
 
+	// F3 (CW-20260420-0023) — interleaved thinking block accumulator.
+	// Collects signed thinking blocks emitted by the Anthropic provider when
+	// the interleaved-thinking-2025-05-14 beta is active. Blocks are stored in
+	// metadata.thinking_blocks for the post-stream pill and round-tripped as
+	// assistant message ContentBlocks on subsequent turns.
+	var thinkingBlocks []provider.ThinkingBlock
+
 	for ls.iteration = 0; ; ls.iteration++ {
 		// CW-20260418-0043 diagnostic.
 		diagCurrentIter = ls.iteration
@@ -584,6 +591,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			attribute.Int("nanite.tokens.total", breakdown.Total),
 			attribute.Int("nanite.tokens.ceiling", breakdown.Ceiling),
 		)
+
+		// F3 (CW-20260420-0023): inject reasoning config into provider context so
+		// the Anthropic adapter can gate the interleaved-thinking beta header.
+		if reasoningCfg.Enabled {
+			provCtx = provider.WithReasoningConfig(provCtx, provider.ReasoningConfig{
+				Enabled:      reasoningCfg.Enabled,
+				BudgetTokens: reasoningCfg.BudgetTokens,
+				BetasHeader:  reasoningCfg.BetasHeader,
+			})
+		}
 
 		// CLI session setup.
 		if chat.IsCLIProvider(providerName) {
@@ -900,6 +917,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					s.persistCLISessionID(sessionID, session, evt.SessionID)
 				}
 
+			case "thinking":
+				// F3 (CW-20260420-0023): interleaved thinking block. Persist
+				// signed block for round-trip; emit to FE as PhaseThinking.
+				if evt.ThinkingBlock != nil {
+					thinkingBlocks = append(thinkingBlocks, *evt.ThinkingBlock)
+					stopDiag := diagWatchChSend(ctx, "streamLoop.thinking", ch, sessionID, assistantMsgID, ls.iteration, "delta")
+					ch <- chat.StreamEvent{Type: "delta", Content: evt.ThinkingBlock.Thinking, Phase: chat.PhaseThinking}
+					stopDiag()
+				}
+
 			case "done":
 				// handled below
 			}
@@ -980,6 +1007,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 		// --- Build assistant message with tool_use blocks ---
 		var assistantBlocks []provider.ContentBlock
+		// F3 (CW-20260420-0023): thinking blocks MUST precede text and tool_use
+		// blocks in the assistant message. Anthropic verifies signatures on round-trip;
+		// preserve Thinking and Signature verbatim.
+		for _, tb := range thinkingBlocks {
+			assistantBlocks = append(assistantBlocks, provider.ContentBlock{
+				Type:      "thinking",
+				Text:      tb.Thinking,
+				Signature: tb.Signature,
+			})
+		}
 		if text := turnContent.String(); text != "" {
 			assistantBlocks = append(assistantBlocks, provider.ContentBlock{Type: "text", Text: text})
 		}
@@ -995,6 +1032,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		chatMessages = append(chatMessages, provider.ChatMessage{
 			Role: "assistant", ContentBlocks: assistantBlocks,
 		})
+		// Reset per-iteration thinking accumulator so next iteration starts fresh.
+		thinkingBlocks = thinkingBlocks[:0]
 
 		// --- Execute tools (pre-check → parallel/serial → post-process) ---
 
@@ -1221,9 +1260,26 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// Build message metadata. F4 (CW-20260419-0029): narration goes in
 	// metadata.thinking so the "expand thinking" UI affordance works across
 	// page refresh. Only stored when non-empty (tool-use turns).
-	msgMetadata := "{}"
+	// F3 (CW-20260420-0023): signed thinking blocks go in metadata.thinking_blocks
+	// (separate key from F4's narration prose so they round-trip with signatures).
+	type thinkingBlockMeta struct {
+		Thinking  string `json:"thinking"`
+		Signature string `json:"signature"`
+	}
+	meta := map[string]any{}
 	if thinking := narrationContent.String(); thinking != "" {
-		if metaJSON, err := json.Marshal(map[string]string{"thinking": thinking}); err == nil {
+		meta["thinking"] = thinking
+	}
+	if len(thinkingBlocks) > 0 {
+		blocks := make([]thinkingBlockMeta, len(thinkingBlocks))
+		for i, b := range thinkingBlocks {
+			blocks[i] = thinkingBlockMeta{Thinking: b.Thinking, Signature: b.Signature}
+		}
+		meta["thinking_blocks"] = blocks
+	}
+	msgMetadata := "{}"
+	if len(meta) > 0 {
+		if metaJSON, err := json.Marshal(meta); err == nil {
 			msgMetadata = string(metaJSON)
 		}
 	}

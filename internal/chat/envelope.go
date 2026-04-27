@@ -76,6 +76,12 @@ type Envelope struct {
 	ID        string         `json:"id,omitempty"`        // set by backend after CreateEnvelopeInstance
 	Title     string         `json:"title,omitempty"`
 	Subtitle  string         `json:"subtitle,omitempty"`
+	// Target is the optional drawer ID where this envelope should be rendered
+	// (J8 v1 — CW-20260426-0006). When set, the frontend opens the named drawer
+	// and renders the card content into it without requiring an explicit panel_open
+	// call. Known v1 values: "bottom_chat_drawer", "work", "workflows". Plugin-
+	// declared drawers may introduce additional IDs. Omit to render inline in chat.
+	Target    string         `json:"target,omitempty"`
 	Proposals []Proposal     `json:"proposals,omitempty"`
 	Questions []Question     `json:"questions,omitempty"`
 	Status    *Status        `json:"status,omitempty"`

@@ -144,9 +144,9 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	)
 
 	// System slot — think-tool block + workspace identity. Agent-specific
-	// content moves to the Agent slot.
+	// content moves to the Agent slot. v0/v1 selected by feature flag.
 	var sysB strings.Builder
-	sysB.WriteString(strings.TrimLeft(thinkToolBlock, "\n"))
+	sysB.WriteString(strings.TrimLeft(ThinkToolBlock(), "\n"))
 	if workspace != nil && workspace.Name != "" {
 		sysB.WriteString("\n\nWorkspace: ")
 		sysB.WriteString(workspace.Name)

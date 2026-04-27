@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 
@@ -95,8 +96,8 @@ func assembleSystemPromptFromTemplates(s *store.Store, agent *store.AgentProfile
 		}
 	}
 
-	// Append think tool guidance.
-	composed += thinkToolBlock
+	// Append think tool guidance (v0 baseline or v1 hint block per feature flag).
+	composed += ThinkToolBlock()
 
 	return composed
 }
@@ -226,8 +227,8 @@ func interpolateDisclosure(tmpl string, evt *store.CompactionEvent) string {
 	return out
 }
 
-// thinkToolBlock is a short instruction appended to every system prompt
-// telling the agent when to use the think tool for structured reasoning.
+// thinkToolBlock is the v0 think-tool instruction (baseline for eval A/B).
+// Active when NANITE_THINK_BLOCK_V1 is unset or "false".
 const thinkToolBlock = `
 
 ## Think Tool
@@ -235,6 +236,48 @@ Use the think tool to organize your reasoning before acting:
 - When new information changes your approach, think through the implications first.
 - Before complex multi-step tool sequences, plan the steps.
 - When checking completeness against requirements, verify coverage.`
+
+// thinkToolBlockV1 is the richer v1 hint block (CW-20260420-0021).
+// Active when NANITE_THINK_BLOCK_V1=true.
+//
+// Token budget: ≤ 200 tokens. Measured via EstimateTokens (chars/4).
+// All four affordances must appear: scratchpad, memory, playbooks, peer-query.
+//
+// TODO(F5/CW-20260420-0022): Replace this static list with dynamic hint
+// selection once the playbook runtime (CW-20260419-0027) and PeerQuery
+// dispatch land. F5 scores BuiltinReflexes() against session context and
+// injects only the top-N affordance hints.
+const thinkToolBlockV1 = `
+
+## Before Responding — Consider Your Affordances
+Use the think tool to plan before multi-step tool sequences or when new context changes your approach.
+
+- **Scratchpad** (nanite_scratchpad_write/read): stash interim values within a turn; avoid re-fetching.
+- **Memory** (nanite_memory_recall/save): recall durable facts before research or planning; save conclusions.
+- **Playbooks** (reflex catalog): reach for a pre-defined pattern (researcher, planner, reviewer, worker) before improvising.
+- **Peer-query** (forthcoming — F5/CW-20260420-0022): agent-to-agent consultation not yet wired; use memory/scratchpad to share state.`
+
+// IsThinkBlockV1Enabled returns true when NANITE_THINK_BLOCK_V1=true is set
+// in the environment. Default is ON (v1 active); opt back to v0 by setting
+// NANITE_THINK_BLOCK_V1=false for eval comparison against the baseline.
+func IsThinkBlockV1Enabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_THINK_BLOCK_V1")))
+	// Explicit opt-out: "false", "0", "no" → v0.
+	if v == "false" || v == "0" || v == "no" {
+		return false
+	}
+	// Default ON — any other value (including empty) activates v1.
+	return true
+}
+
+// ThinkToolBlock returns the active think-tool block depending on the feature
+// flag. v1 (richer hint list) is the default; v0 is the eval baseline.
+func ThinkToolBlock() string {
+	if IsThinkBlockV1Enabled() {
+		return thinkToolBlockV1
+	}
+	return thinkToolBlock
+}
 
 // buildSkillList creates a human-readable list of skills for the tool-awareness template.
 func buildSkillList(s *store.Store, agentID string) string {

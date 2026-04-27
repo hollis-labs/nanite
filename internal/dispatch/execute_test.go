@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/hollis-labs/nanite/internal/chat"
 )
 
 // fakeSpawner records what ExecuteTask asked it to spawn so tests can
@@ -34,15 +32,15 @@ func (f *fakeSpawner) Spawn(_ context.Context, req SpawnRequest) (*SpawnResult, 
 type recordingWrapper struct {
 	gotRole   Role
 	gotResult *SpawnResult
-	out       chat.Envelope
+	out       Envelope
 	err       error
 }
 
-func (r *recordingWrapper) Wrap(role Role, result *SpawnResult) (chat.Envelope, error) {
+func (r *recordingWrapper) Wrap(role Role, result *SpawnResult) (Envelope, error) {
 	r.gotRole = role
 	r.gotResult = result
 	if r.err != nil {
-		return chat.Envelope{}, r.err
+		return Envelope{}, r.err
 	}
 	return r.out, nil
 }
@@ -61,7 +59,7 @@ func TestExecuteTask_E2E_DispatchToWorker(t *testing.T) {
 		},
 	}
 	wrapper := &recordingWrapper{
-		out: chat.Envelope{
+		out: Envelope{
 			Kind:    "envelope",
 			Version: 1,
 			Type:    "report-card",
@@ -119,7 +117,7 @@ func TestExecuteTask_E2E_DispatchToWorker(t *testing.T) {
 // task (TierOpen × PatternSubagent) maps to the Planner role.
 func TestExecuteTask_E2E_OpenScopeRoutesToPlanner(t *testing.T) {
 	spawner := &fakeSpawner{result: &SpawnResult{Summary: "planned"}}
-	wrapper := &recordingWrapper{out: chat.Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
+	wrapper := &recordingWrapper{out: Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
 
 	// "build a complete X" hits ScopeTierOpenKeywords → TierOpen, and
 	// the size-driven rule promotes PatternSubagent → maps to Planner.
@@ -145,7 +143,7 @@ func TestExecuteTask_E2E_OpenScopeRoutesToPlanner(t *testing.T) {
 // caller, so async/background dispatch is forced to sync at the seam.
 func TestExecuteTask_BackgroundIsCoercedToSyncForCapture(t *testing.T) {
 	spawner := &fakeSpawner{result: &SpawnResult{Summary: "ok"}}
-	wrapper := &recordingWrapper{out: chat.Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
+	wrapper := &recordingWrapper{out: Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
 
 	args := ExecuteTaskArgs{
 		SessionID: "s1",

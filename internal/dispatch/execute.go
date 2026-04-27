@@ -7,9 +7,27 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 )
+
+// Envelope is the dispatch-package projection of a chat envelope. It
+// mirrors internal/chat.Envelope's shape but lives here so the dispatch
+// package can be imported from internal/mcp (which chat imports
+// transitively via orchestrator). The service layer maps dispatch.Envelope
+// to chat.Envelope at the seam where they meet — see
+// internal/service/dispatch_wiring.go.
+//
+// Field names match chat.Envelope so JSON marshalling round-trips
+// cleanly between the two types.
+type Envelope struct {
+	Kind     string         `json:"kind"`
+	Version  int            `json:"version"`
+	Type     string         `json:"type"`
+	ID       string         `json:"id,omitempty"`
+	Title    string         `json:"title,omitempty"`
+	Subtitle string         `json:"subtitle,omitempty"`
+	Data     map[string]any `json:"data,omitempty"`
+}
 
 // ExecuteTaskArgs carries the input to the executeTask dispatch primitive.
 type ExecuteTaskArgs struct {
@@ -73,11 +91,11 @@ type Spawner interface {
 // owner of envelope construction — this is a thin adapter so the dispatch
 // primitive stays narrow.
 type EnvelopeWrapper interface {
-	// Wrap turns a SpawnResult into a chat.Envelope ready for relay.
+	// Wrap turns a SpawnResult into a dispatch.Envelope ready for relay.
 	// Implementations may parse the existing fenced-block envelope JSON
 	// the worker emitted, or synthesize a default report-card envelope
 	// when the worker only emitted prose.
-	Wrap(role Role, result *SpawnResult) (chat.Envelope, error)
+	Wrap(role Role, result *SpawnResult) (Envelope, error)
 }
 
 // ErrNoSpawner is returned by ExecuteTask when no Spawner is configured.
@@ -105,18 +123,18 @@ var ErrNoWrapper = errors.New("dispatch: no envelope wrapper configured")
 // On any failure the primitive returns an error; the caller is
 // responsible for surfacing the failure to the user (typically via an
 // error-report envelope).
-func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, args ExecuteTaskArgs) (chat.Envelope, error) {
+func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, args ExecuteTaskArgs) (Envelope, error) {
 	if spawner == nil {
-		return chat.Envelope{}, ErrNoSpawner
+		return Envelope{}, ErrNoSpawner
 	}
 	if wrapper == nil {
-		return chat.Envelope{}, ErrNoWrapper
+		return Envelope{}, ErrNoWrapper
 	}
 	if strings.TrimSpace(args.Message) == "" {
-		return chat.Envelope{}, errors.New("dispatch: message is required")
+		return Envelope{}, errors.New("dispatch: message is required")
 	}
 	if args.SessionID == "" {
-		return chat.Envelope{}, errors.New("dispatch: session_id is required")
+		return Envelope{}, errors.New("dispatch: session_id is required")
 	}
 
 	// 1. Classify.
@@ -153,16 +171,16 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 		TimeoutSeconds:  args.TimeoutSeconds,
 	})
 	if err != nil {
-		return chat.Envelope{}, fmt.Errorf("dispatch: spawn %s: %w", assignment.Role.String(), err)
+		return Envelope{}, fmt.Errorf("dispatch: spawn %s: %w", assignment.Role.String(), err)
 	}
 	if result == nil {
-		return chat.Envelope{}, fmt.Errorf("dispatch: spawn %s returned nil result", assignment.Role.String())
+		return Envelope{}, fmt.Errorf("dispatch: spawn %s returned nil result", assignment.Role.String())
 	}
 
 	// 4 + 5. Wrap.
 	env, err := wrapper.Wrap(assignment.Role, result)
 	if err != nil {
-		return chat.Envelope{}, fmt.Errorf("dispatch: wrap envelope: %w", err)
+		return Envelope{}, fmt.Errorf("dispatch: wrap envelope: %w", err)
 	}
 
 	return env, nil
@@ -194,9 +212,9 @@ func estimateTokens(s string) int {
 type DefaultEnvelopeWrapper struct{}
 
 // Wrap implements EnvelopeWrapper.
-func (DefaultEnvelopeWrapper) Wrap(role Role, result *SpawnResult) (chat.Envelope, error) {
+func (DefaultEnvelopeWrapper) Wrap(role Role, result *SpawnResult) (Envelope, error) {
 	if result == nil {
-		return chat.Envelope{}, errors.New("dispatch: nil result")
+		return Envelope{}, errors.New("dispatch: nil result")
 	}
 
 	// If the worker emitted a structured envelope, prefer it verbatim.
@@ -206,7 +224,7 @@ func (DefaultEnvelopeWrapper) Wrap(role Role, result *SpawnResult) (chat.Envelop
 
 	// Otherwise synthesize a report-card envelope around the summary.
 	title := fmt.Sprintf("%s result", titleCase(role.String()))
-	return chat.Envelope{
+	return Envelope{
 		Kind:    "envelope",
 		Version: 1,
 		Type:    "report-card",
@@ -218,23 +236,23 @@ func (DefaultEnvelopeWrapper) Wrap(role Role, result *SpawnResult) (chat.Envelop
 	}, nil
 }
 
-// tryUnmarshalEnvelope attempts to parse raw as a chat.Envelope. Returns
+// tryUnmarshalEnvelope attempts to parse raw as a Envelope. Returns
 // (env, true) on a clean parse with non-empty Type; otherwise (zero,
 // false). Worker envelope JSON in subagent.Result.ResultJSON sometimes
 // arrives as `{}` (no envelope emitted) — that round-trips cleanly to
 // an empty Envelope which is not what callers want, so we treat
 // missing-Type as "not really an envelope."
-func tryUnmarshalEnvelope(raw string) (chat.Envelope, bool) {
+func tryUnmarshalEnvelope(raw string) (Envelope, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "{}" {
-		return chat.Envelope{}, false
+		return Envelope{}, false
 	}
-	var env chat.Envelope
+	var env Envelope
 	if err := json.Unmarshal([]byte(raw), &env); err != nil {
-		return chat.Envelope{}, false
+		return Envelope{}, false
 	}
 	if env.Type == "" {
-		return chat.Envelope{}, false
+		return Envelope{}, false
 	}
 	if env.Kind == "" {
 		env.Kind = "envelope"

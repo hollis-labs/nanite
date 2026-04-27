@@ -284,6 +284,15 @@ func cmdServe(args []string) {
 	selfTools.Subagent = container.Subagent
 	selfTools.Work = container.Streams
 
+	// CW-20260421-0010 (B3): wire the executeTask dispatch primitive.
+	// Adapts subagent.Service.Spawn to dispatch.Spawner so the chat
+	// agent's nanite_execute_task tool can drive role-based dispatch.
+	if container.Subagent != nil {
+		selfTools.Dispatch = service.NewDispatchSpawner(container.Subagent, s)
+		// DispatchWrapper left nil — the transport falls back to
+		// dispatch.DefaultEnvelopeWrapper when unset.
+	}
+
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {
 		if err := container.Tasks.Restore(context.Background()); err != nil {

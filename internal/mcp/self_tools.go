@@ -759,5 +759,27 @@ the current turn for subsequent writes.
 				"required": []string{"key"},
 			},
 		},
+		// --- executeTask dispatch primitive (CW-20260421-0010, B3) ---
+		{
+			Name: "nanite_execute_task",
+			Description: "Dispatch a task to a Worker or Planner role agent. The Chat agent (harness) calls this when the user's request needs concrete execution — file edits, tool runs, code work, planning — instead of a direct conversational reply.\n\n" +
+				"**When to use:** When the user asks for any work that requires tool calls beyond Chat's static surface (todos / plans / scratchpad / messaging / narration / executeTask itself). Examples: \"fix the bug\", \"audit X\", \"refactor Y\", \"build Z\".\n\n" +
+				"**When NOT to use:** Trivial conversational replies (\"thanks\", \"what does X mean\"). The Chat harness handles those directly without dispatch.\n\n" +
+				"**Behavior:** ScopeTier classifies the request, selects a Role (Worker for execution, Planner for open-scope breakdown), spawns the role agent with its own task-appropriate tool surface, captures the result, and returns it as a structured envelope. The Chat agent's context never sees raw worker output — only the envelope.\n\n" +
+				"**Required context:** session_id (your current session) and message (the task to dispatch). parent_agent_id, provider, and timeout_seconds are optional overrides.\n\n" +
+				"**Output shape:** A structured envelope JSON the harness relays to the user. The envelope's `type` describes the result shape (report-card, document-viewer, etc.).\n\n" +
+				"**Static surface note:** This is the ONLY way the Chat harness dispatches work. Do not expect raw spawn / shell / file tools — those are not on Chat's surface.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id":      map[string]any{"type": "string", "description": "The current session ID. The dispatched role's reply lands here."},
+					"parent_agent_id": map[string]any{"type": "string", "description": "Chat agent ID making the dispatch. Optional; defaults are inferred."},
+					"message":         map[string]any{"type": "string", "description": "The task or request to hand off. Pass through the user's original phrasing when possible — ScopeTier classifies on this string."},
+					"provider":        map[string]any{"type": "string", "description": "Optional provider override for the spawned role's session. Empty uses the role profile's default."},
+					"timeout_seconds": map[string]any{"type": "integer", "description": "Wall-time cap for the spawned role. 0 uses default (300)."},
+				},
+				"required": []string{"session_id", "message"},
+			},
+		},
 	}
 }

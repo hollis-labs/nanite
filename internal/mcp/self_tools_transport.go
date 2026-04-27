@@ -16,6 +16,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/crossapp"
+	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -64,6 +65,17 @@ type SelfToolsTransport struct {
 	// mutating todo/plan tools fire BroadcastWorkChanged after a successful
 	// write so the Work drawer rehydrates. CW-20260418-0044.
 	Work WorkBroadcaster
+
+	// Dispatch is the executeTask dispatch primitive. Set post-
+	// construction from the container; nil-safe (callers receive an
+	// errorResult). The transport translates the nanite_execute_task
+	// tool call to dispatch.ExecuteTask.
+	// (CW-20260421-0010, B3)
+	Dispatch dispatch.Spawner
+	// DispatchWrapper turns a worker SpawnResult into a chat.Envelope.
+	// Set post-construction; defaults to dispatch.DefaultEnvelopeWrapper{}
+	// when the transport detects a configured Dispatch with no wrapper.
+	DispatchWrapper dispatch.EnvelopeWrapper
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -176,6 +188,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callSubagentStatus(ctx, args)
 	case "nanite_subagent_cancel":
 		return st.callSubagentCancel(ctx, args)
+	case "nanite_execute_task":
+		return st.callExecuteTask(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}

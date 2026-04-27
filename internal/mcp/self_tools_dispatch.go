@@ -128,6 +128,13 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		}
 	}
 
+	// H1 trust resolution (CW-20260421-0014): populate WorkspaceID and
+	// AgentProfileID from the caller-profile ctx stamped by the service layer
+	// in executeToolBatch. When the ctx carries no profile (e.g. direct test
+	// invocations), both fields are empty and the subagent gate falls back to
+	// TrustNormal (approval required — existing safe default).
+	wsID, apID := CallerProfileFromContext(ctx)
+
 	envelope, err := dispatch.ExecuteTask(ctx, st.Dispatch, wrapper, dispatch.ExecuteTaskArgs{
 		SessionID:      sessionID,
 		ParentAgentID:  strArg(args, "parent_agent_id", ""),
@@ -135,6 +142,8 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		Provider:       strArg(args, "provider", ""),
 		TimeoutSeconds: intArg(args, "timeout_seconds", 0),
 		ReflexHints:    reflexHints,
+		WorkspaceID:    wsID,
+		AgentProfileID: apID,
 	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("dispatch: %v", err)), nil

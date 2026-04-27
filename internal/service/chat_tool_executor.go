@@ -302,6 +302,7 @@ func (s *chatServiceImpl) executeToolBatch(
 	agentID string,
 	ch chan chat.StreamEvent,
 	sessionID string,
+	workspaceID string,
 ) []toolExecResult {
 	// CW-20260418 (c7 scope_id bug fix): stamp the current chat session
 	// onto ctx so downstream tool handlers — notably the MCP self-tools
@@ -310,6 +311,12 @@ func (s *chatServiceImpl) executeToolBatch(
 	// the records land in the DB with scope_id="" and the Work drawer
 	// (which queries by the real session UUID) never finds them.
 	ctx = mcp.WithSessionID(ctx, sessionID)
+
+	// H1 trust gate (CW-20260421-0014): stamp (workspace_id, agent_profile_id)
+	// so MuxTransportAdapter and self_tools_dispatch can derive the caller's
+	// trust tier without changing CallTool signatures. agentID IS the
+	// agent_profiles.id for the primary agent of this session.
+	ctx = mcp.WithCallerProfile(ctx, workspaceID, agentID)
 
 	results := make([]toolExecResult, len(plans))
 

@@ -51,6 +51,13 @@ type ExecuteTaskArgs struct {
 	// RoleInvalid to use AssignRole.
 	RoleOverride Role
 
+	// WorkspaceID and AgentProfileID are forwarded to SpawnRequest for H1
+	// trust resolution (CW-20260421-0014). Empty strings cause the subagent
+	// gate to fall back to TrustNormal. Set by callExecuteTask from the
+	// CallerProfile ctx stamped in executeToolBatch.
+	WorkspaceID    string
+	AgentProfileID string
+
 	// ReflexHints carries pre-computed hints from the reflex matcher
 	// (internal/reflex). When non-nil, the tier and pattern hints
 	// override the classifier output before AssignRole is called; the
@@ -226,6 +233,8 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 		Mode:            mode,
 		Provider:        args.Provider,
 		TimeoutSeconds:  args.TimeoutSeconds,
+		WorkspaceID:     args.WorkspaceID,
+		AgentProfileID:  args.AgentProfileID,
 	})
 	if err != nil {
 		return Envelope{}, fmt.Errorf("dispatch: spawn %s: %w", assignment.Role.String(), err)

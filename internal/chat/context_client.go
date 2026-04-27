@@ -33,9 +33,14 @@ const ToolResultPruneAge = 2
 
 // ContextClient assembles and manages context for chat turns.
 type ContextClient struct {
-	Store         *store.Store
-	BudgetPct     float64                // fraction of context window to use (default 0.75)
-	ContextBroker *contextbroker.Broker  // universal context retrieval (nil = disabled)
+	Store          *store.Store
+	BudgetPct      float64               // fraction of context window to use (default 0.75)
+	ContextBroker  *contextbroker.Broker // universal context retrieval (nil = disabled)
+	// HintDispatcher, when set, enables v2 dynamic hint selection via the
+	// hint-selector peer agent (F5 / CW-20260420-0022). nil means the assembler
+	// falls through to the v0/v1 static ThinkToolBlock path. Also requires
+	// NANITE_THINK_BLOCK_V2_ENABLED=true in the environment.
+	HintDispatcher HintDispatcher
 }
 
 // NewContextClient creates a new ContextClient with default settings.
@@ -60,8 +65,18 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	)
 
 	// 1. Build the system prompt using prompt templates.
+	// hintOpts enables v2 dynamic hint selection when the ContextClient has a
+	// HintDispatcher wired and NANITE_THINK_BLOCK_V2_ENABLED=true. nil means
+	// the assembler falls back to the v0/v1 static ThinkToolBlock path.
 	skillList := buildSkillList(cb.Store, agent.ID)
-	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList, session.ID)
+	var hintOpts *HintSelectOpts
+	if cb.HintDispatcher != nil {
+		hintOpts = &HintSelectOpts{
+			Ctx:        ctx,
+			Dispatcher: cb.HintDispatcher,
+		}
+	}
+	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList, session.ID, hintOpts)
 
 	// 1b. Enrich system prompt with universal context retrieval.
 	if cb.ContextBroker != nil {
@@ -144,9 +159,15 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	)
 
 	// System slot — think-tool block + workspace identity. Agent-specific
-	// content moves to the Agent slot. v0/v1 selected by feature flag.
+	// content moves to the Agent slot. v0/v1/v2 selected by feature flags.
 	var sysB strings.Builder
-	sysB.WriteString(strings.TrimLeft(ThinkToolBlock(), "\n"))
+	var thinkBlock string
+	if cb.HintDispatcher != nil && IsThinkBlockV2Enabled() {
+		thinkBlock = ThinkToolBlockWithDispatch(ctx, cb.HintDispatcher, "", "", "")
+	} else {
+		thinkBlock = ThinkToolBlock()
+	}
+	sysB.WriteString(strings.TrimLeft(thinkBlock, "\n"))
 	if workspace != nil && workspace.Name != "" {
 		sysB.WriteString("\n\nWorkspace: ")
 		sysB.WriteString(workspace.Name)

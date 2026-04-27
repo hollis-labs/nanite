@@ -45,7 +45,10 @@ func assembleSystemPrompt(agent *store.AgentProfile, mode *store.AgentMode, work
 // CompactionContract disclosure is appended (P8A, CW-20260420-0025). The
 // disclosure variant is selected by the event's summary_mode and rendered
 // with metadata interpolated from the event row.
-func assembleSystemPromptFromTemplates(s *store.Store, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, skillList, sessionID string) string {
+//
+// hintOpts carries optional v2 hint-selection parameters (F5 / CW-20260420-0022).
+// Pass nil to use the v0/v1 static ThinkToolBlock path.
+func assembleSystemPromptFromTemplates(s *store.Store, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, skillList, sessionID string, hintOpts *HintSelectOpts) string {
 	// Build variables map for template resolution.
 	vars := map[string]string{
 		"agent_name":        agent.Name,
@@ -96,8 +99,19 @@ func assembleSystemPromptFromTemplates(s *store.Store, agent *store.AgentProfile
 		}
 	}
 
-	// Append think tool guidance (v0 baseline or v1 hint block per feature flag).
-	composed += ThinkToolBlock()
+	// Append think tool guidance (v0 baseline, v1 static, or v2 dynamic per feature flags).
+	// hintOpts carries the per-request context needed for v2 dispatch; nil falls back to v0/v1.
+	if hintOpts != nil && IsThinkBlockV2Enabled() {
+		composed += ThinkToolBlockWithDispatch(
+			hintOpts.Ctx,
+			hintOpts.Dispatcher,
+			hintOpts.UserInput,
+			hintOpts.ScopeTier,
+			hintOpts.ReflexMatchID,
+		)
+	} else {
+		composed += ThinkToolBlock()
+	}
 
 	return composed
 }
@@ -272,11 +286,31 @@ func IsThinkBlockV1Enabled() bool {
 
 // ThinkToolBlock returns the active think-tool block depending on the feature
 // flag. v1 (richer hint list) is the default; v0 is the eval baseline.
+//
+// To enable v2 dynamic selection pass a HintDispatcher via
+// ThinkToolBlockWithDispatch — this zero-arg form cannot dispatch and always
+// returns v0 or v1.
 func ThinkToolBlock() string {
 	if IsThinkBlockV1Enabled() {
 		return thinkToolBlockV1
 	}
 	return thinkToolBlock
+}
+
+// ThinkToolBlockWithDispatch returns the active think-tool block, upgrading to
+// v2 dynamic selection when NANITE_THINK_BLOCK_V2_ENABLED=true and dispatcher
+// is non-nil. Falls back to ThinkToolBlock() (v0/v1) otherwise.
+//
+// Parameters mirror ThinkToolBlockDynamic — see hint_dispatch.go.
+func ThinkToolBlockWithDispatch(ctx context.Context, dispatcher HintDispatcher, userInput, scopeTier, reflexMatchID string) string {
+	if !IsThinkBlockV1Enabled() {
+		// V1 flag is the gate: if v1 is off, bypass both v1 and v2.
+		return thinkToolBlock
+	}
+	if IsThinkBlockV2Enabled() && dispatcher != nil {
+		return ThinkToolBlockDynamic(ctx, dispatcher, userInput, scopeTier, reflexMatchID)
+	}
+	return thinkToolBlockV1
 }
 
 // buildSkillList creates a human-readable list of skills for the tool-awareness template.

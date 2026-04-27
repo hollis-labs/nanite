@@ -300,7 +300,7 @@ func TestAssembleSystemPromptFromTemplates_appendsDisclosure(t *testing.T) {
 	})
 
 	// With sessionID — disclosure should appear.
-	withDisc := assembleSystemPromptFromTemplates(s, agent, mode, workspace, "", sess.ID)
+	withDisc := assembleSystemPromptFromTemplates(s, agent, mode, workspace, "", sess.ID, nil)
 	if !strings.Contains(withDisc, "Compaction Notice (planning session)") {
 		t.Errorf("expected planning-mode disclosure in assembled prompt, got: %q", withDisc)
 	}
@@ -309,7 +309,7 @@ func TestAssembleSystemPromptFromTemplates_appendsDisclosure(t *testing.T) {
 	}
 
 	// Without sessionID — no disclosure.
-	withoutDisc := assembleSystemPromptFromTemplates(s, agent, mode, workspace, "", "")
+	withoutDisc := assembleSystemPromptFromTemplates(s, agent, mode, workspace, "", "", nil)
 	if strings.Contains(withoutDisc, "Compaction Notice") {
 		t.Errorf("expected no disclosure when sessionID empty, got: %q", withoutDisc)
 	}

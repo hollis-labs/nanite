@@ -451,6 +451,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// --- Tool-use loop ---
 	var fullContent strings.Builder
+	// F4 (CW-20260419-0029) — separate narration and final text accumulators.
+	// narrationContent captures inter-iteration prose (iterations that end with
+	// tool_use). finalContent captures the post-end_turn text (the answer).
+	// Only finalContent is stored as message.Content; narrationContent is saved
+	// in metadata.thinking for the expand-thinking affordance.
+	var narrationContent strings.Builder
+	var finalContent strings.Builder
 	var finalUsage *chat.Usage
 	var breakdown *chat.TokenBreakdown
 
@@ -482,8 +489,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				)
 				if decision == strategy_pkg_ReviewAskToClarify() {
 					q := strategyClarifyingQuestion(userContent, scopeTier, turnStrategy)
-					ch <- chat.StreamEvent{Type: "delta", Content: q}
+					ch <- chat.StreamEvent{Type: "delta", Content: q, Phase: chat.PhaseFinal}
 					fullContent.WriteString(q)
+					finalContent.WriteString(q)
 					handledByStrategy = true
 				}
 			}
@@ -494,7 +502,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// Synthesis deltas land in the stream before the terminated envelope
 			// so the user sees a coherent response rather than an abrupt cutoff.
 			if !handledByStrategy && (code == TerminationMaxTurns || code == TerminationRunawayToolFailures) {
-				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent)
+				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent, &finalContent)
 			}
 
 			// CW-20260417-0485: emit a typed `chat-loop-terminated` envelope
@@ -597,8 +605,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				provSpan.End()
 				slog.Info("chat-service: message.sending cancelled by plugin hook", "session_id", sessionID, "iter", ls.iteration)
 				blockMsg := "Message blocked by plugin policy."
-				ch <- chat.StreamEvent{Type: "delta", Content: blockMsg}
+				ch <- chat.StreamEvent{Type: "delta", Content: blockMsg, Phase: chat.PhaseFinal}
 				fullContent.WriteString(blockMsg)
+				finalContent.WriteString(blockMsg)
 				diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "plugin_cancel:message.sending", len(ls.toolCallRefs), ch)
 				break
 			}
@@ -772,6 +781,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// should retry with a compacted request instead of terminating.
 		contextOverflowRecovered := false
 
+		// F4 (CW-20260419-0029) — per-iteration delta buffer. Deltas are
+		// buffered during streaming and flushed with the correct phase once
+		// stopReason is known after the stream closes. Narration iterations
+		// (stopReason=tool_use) flush as PhaseNarration; the final iteration
+		// (stopReason=end_turn) flushes as PhaseFinal. The buffer is small —
+		// typically a handful of short prose fragments per iteration.
+		var iterDeltaBuf []string
+
 		// CW-20260418-0043 diagnostic — track provider stream duration + event count.
 		provStreamStart := time.Now()
 		diagProvEventCount := 0
@@ -790,12 +807,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				turnContent.WriteString(evt.Content)
 				fullContent.WriteString(evt.Content)
-				// CW-20260418-0043 diagnostic — watchdog on the hot delta
-				// send. No-op (returns a nil-op stop func) unless
-				// NANITE_CHAT_LOOP_DIAG=1 so production is zero-cost.
-				stopDiag := diagWatchChSend(ctx, "streamLoop.delta", ch, sessionID, assistantMsgID, ls.iteration, "delta")
-				ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
-				stopDiag()
+				// Buffer for phase-tagged flush after stopReason is known.
+				// CW-20260418-0043 diagnostic watchdog is deferred to flush site.
+				iterDeltaBuf = append(iterDeltaBuf, evt.Content)
 
 			case "tool_use":
 				if evt.ToolUse != nil {
@@ -895,6 +909,39 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		diagLogProviderStream(sessionID, assistantMsgID, ls.iteration,
 			time.Since(provStreamStart), diagProvEventCount, stopReason, len(toolUseBlocks))
 
+		// F4 (CW-20260419-0029) — flush buffered deltas with the correct phase.
+		// stopReason is now known: "tool_use" → narration, anything else → final.
+		// On context-overflow recovery (contextOverflowRecovered) we discard the
+		// buffer — the iteration is being retried so the partial content is stale.
+		if len(iterDeltaBuf) > 0 && !contextOverflowRecovered {
+			phase := chat.PhaseNarration
+			if stopReason != "tool_use" {
+				phase = chat.PhaseFinal
+			}
+			for _, fragment := range iterDeltaBuf {
+				stopDiag := diagWatchChSend(ctx, "streamLoop.delta.flush", ch, sessionID, assistantMsgID, ls.iteration, "delta")
+				ch <- chat.StreamEvent{Type: "delta", Content: fragment, Phase: phase}
+				stopDiag()
+			}
+		}
+
+		// F4 — route turnContent to the right accumulator now that phase is known.
+		// This drives the persistence split: narrationContent → metadata.thinking,
+		// finalContent → message.Content (via cleanContent / WrapResponse).
+		if !contextOverflowRecovered {
+			turnText := turnContent.String()
+			if stopReason == "tool_use" {
+				if turnText != "" {
+					narrationContent.WriteString(turnText)
+					narrationContent.WriteString("\n")
+				}
+			} else {
+				// The last iteration — and any early-exit text already in
+				// fullContent that didn't come from tool_use iterations.
+				finalContent.WriteString(turnText)
+			}
+		}
+
 		// T9 — the mid-stream overflow handler broke out of the stream loop so
 		// the outer loop can retry with a compacted request. Skip the
 		// post-stream processing (no content produced this attempt) and
@@ -980,6 +1027,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if ls.directReturn != "" {
 			fullContent.Reset()
 			fullContent.WriteString(ls.directReturn)
+			// F4: directReturn replaces all accumulated text; treat as final.
+			finalContent.Reset()
+			finalContent.WriteString(ls.directReturn)
 			ch <- chat.StreamEvent{Type: "replace_content", Content: ls.directReturn}
 			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "done:direct_return=subagent_literal", len(ls.toolCallRefs), ch)
 			break
@@ -1040,7 +1090,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Post-processing ---
-	responseContent := fullContent.String()
+	// F4 (CW-20260419-0029): responseContent operates on finalContent only —
+	// the narration (inter-iteration prose) is stored separately in metadata.
+	// fullContent still accumulates everything for legacy/error paths that need
+	// the full stream (e.g. persistPartialAssistant).
+	//
+	// If finalContent is empty (e.g. the loop exited on circuit_open with no
+	// final iteration, or directReturn was set), fall back to fullContent so
+	// the stored message is not empty. Old behaviour preserved for those paths.
+	finalText := finalContent.String()
+	if finalText == "" {
+		finalText = fullContent.String()
+	}
+	responseContent := finalText
 	if s.outputFilter != nil && s.outputFilter.Len() > 0 {
 		responseContent = s.outputFilter.Apply(responseContent)
 	}
@@ -1053,11 +1115,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
-	// Inject pending envelopes.
+	// Inject pending envelopes. These are appended post-loop so they are
+	// always part of the final response (PhaseFinal).
 	for _, env := range ls.pendingEnvelopes {
 		envelopeBlock := "\n\n```nanite-envelope\n" + env + "\n```"
 		responseContent += envelopeBlock
-		ch <- chat.StreamEvent{Type: "delta", Content: envelopeBlock}
+		ch <- chat.StreamEvent{Type: "delta", Content: envelopeBlock, Phase: chat.PhaseFinal}
 	}
 
 	// Parse envelopes.
@@ -1155,10 +1218,21 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	chat.LogStructuredWarnings(structured)
 	structuredJSON := structured.MarshalContent()
 
+	// Build message metadata. F4 (CW-20260419-0029): narration goes in
+	// metadata.thinking so the "expand thinking" UI affordance works across
+	// page refresh. Only stored when non-empty (tool-use turns).
+	msgMetadata := "{}"
+	if thinking := narrationContent.String(); thinking != "" {
+		if metaJSON, err := json.Marshal(map[string]string{"thinking": thinking}); err == nil {
+			msgMetadata = string(metaJSON)
+		}
+	}
+
 	// Save assistant message.
 	assistantMsg := &store.Message{
 		ID: assistantMsgID, SessionID: sessionID, AgentID: agent.ID,
 		Role: "assistant", Content: structuredJSON, Envelope: envelopeJSON,
+		Metadata: msgMetadata,
 	}
 	if err := s.store.CreateMessage(assistantMsg); err != nil {
 		slog.Error("chat-service: failed to save assistant message", "err", err)
@@ -2190,7 +2264,8 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 		switch evt.Type {
 		case "delta":
 			retryContent.WriteString(evt.Content)
-			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
+			// Envelope corrections are post-loop responses; always final.
+			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content, Phase: chat.PhaseFinal}
 		case "error":
 			slog.Warn("chat-service: envelope retry error", "err", evt.Error)
 			return nil
@@ -2331,7 +2406,8 @@ const earlyStopSynthesisPrompt = "You've reached the maximum number of steps. Pr
 
 // earlyStopSynthesis makes one final, no-tools completion call to the provider
 // when the chat loop hits max_iter or runaway_fail_cap. The response is
-// streamed as delta events into ch and accumulated in fullContent.
+// streamed as delta events into ch and accumulated in fullContent and
+// finalContent. finalContent may be nil (pre-F4 call sites).
 //
 // Errors from the synthesis call are logged and silently swallowed — the
 // loop will still break cleanly regardless of whether synthesis succeeds.
@@ -2346,6 +2422,7 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 	chatMessages []provider.ChatMessage,
 	ch chan<- chat.StreamEvent,
 	fullContent *strings.Builder,
+	finalContent *strings.Builder,
 ) {
 	// Truncate to the most recent messages to avoid sending a near-limit history
 	// to the synthesis call. Near max_turns the context may already be at the
@@ -2383,7 +2460,11 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 		switch evt.Type {
 		case "delta":
 			fullContent.WriteString(evt.Content)
-			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
+			if finalContent != nil {
+				finalContent.WriteString(evt.Content)
+			}
+			// Synthesis is the final answer after loop exhaustion; always final.
+			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content, Phase: chat.PhaseFinal}
 		case "error":
 			slog.Warn("chat-service: early-stop synthesis stream error", "err", evt.Error)
 		}

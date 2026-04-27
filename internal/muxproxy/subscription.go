@@ -116,6 +116,11 @@ func (m *Manager) Register(chatSessionID, subordinateSessionID, nickname string)
 		go m.attachStream(attachCtx, subordinateSessionID)
 	}
 
+	slog.Info("muxproxy: subordinate registered",
+		"chat_session", chatSessionID,
+		"subordinate_session", subordinateSessionID,
+		"nickname", nickname,
+	)
 	return ch
 }
 
@@ -123,6 +128,7 @@ func (m *Manager) Register(chatSessionID, subordinateSessionID, nickname string)
 // goroutine. Safe to call for unknown IDs.
 func (m *Manager) Unregister(sessionID string) {
 	m.mu.Lock()
+	nick := m.nickFor[sessionID]
 	if ch, ok := m.chanFor[sessionID]; ok {
 		close(ch)
 	}
@@ -134,6 +140,7 @@ func (m *Manager) Unregister(sessionID string) {
 	delete(m.chatOwner, sessionID)
 	delete(m.cancelFor, sessionID)
 	m.mu.Unlock()
+	slog.Info("muxproxy: subordinate unregistered", "session_id", sessionID, "nickname", nick)
 }
 
 // Nickname returns the label for a session, or "" if unregistered.

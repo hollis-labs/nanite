@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/hollis-labs/nanite/internal/dispatch"
 )
@@ -97,6 +98,11 @@ func (t *Transport) CallTool(ctx context.Context, name string, args map[string]a
 				return nil, fmt.Errorf("muxproxy: trust resolve error for tool %q: %w", name, err)
 			}
 			if tier == dispatch.TrustUntrusted {
+				slog.Warn("muxproxy: trust gate denied",
+					"tool", name,
+					"workspace", caller.WorkspaceID,
+					"agent_profile", caller.AgentProfileID,
+				)
 				return nil, fmt.Errorf("muxproxy: %w — tool %q requires at least normal trust",
 					dispatch.ErrUntrustedRole, name)
 			}
@@ -109,28 +115,40 @@ func (t *Transport) CallTool(ctx context.Context, name string, args map[string]a
 		if err != nil {
 			return nil, err
 		}
+		slog.Debug("muxproxy: mux_list_launches", "count", len(res))
 		return json.Marshal(map[string]any{"launches": res})
 	case "mux_launch":
 		launchID, _ := args["launch_id"].(string)
 		nickname, _ := args["nickname"].(string)
+		slog.Info("muxproxy: mux_launch", "launch_id", launchID, "nickname", nickname)
 		res, err := t.svc.LaunchSubordinate(ctx, launchID, nickname)
 		if err != nil {
 			return nil, err
 		}
+		slog.Info("muxproxy: subordinate launched", "session_id", res.SessionID, "nickname", res.Nickname)
 		return json.Marshal(res)
 	case "mux_send":
 		sessionID, _ := args["session_id"].(string)
 		text, _ := args["text"].(string)
+		slog.Debug("muxproxy: mux_send", "session_id", sessionID, "text_len", len(text))
 		res, err := t.svc.Send(ctx, sessionID, text)
 		if err != nil {
 			return nil, err
 		}
+		slog.Debug("muxproxy: mux_send done",
+			"session_id", sessionID,
+			"exit_status", res.ExitStatus,
+			"input_tokens", res.InputTokens,
+			"output_tokens", res.OutputTokens,
+		)
 		return json.Marshal(res)
 	case "mux_stop":
 		sessionID, _ := args["session_id"].(string)
+		slog.Info("muxproxy: mux_stop", "session_id", sessionID)
 		if err := t.svc.Stop(ctx, sessionID); err != nil {
 			return nil, err
 		}
+		slog.Info("muxproxy: subordinate stopped", "session_id", sessionID)
 		return json.Marshal(map[string]any{"stopped": true})
 	default:
 		return nil, fmt.Errorf("muxproxy: unknown tool %q", name)

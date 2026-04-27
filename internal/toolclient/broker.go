@@ -46,6 +46,13 @@ type ToolClient struct {
 	// In production this is nil and developerModeEnabled() falls back to
 	// the Store read.
 	DeveloperModeFunc func() bool
+
+	// Phase 5 / D3 (CW-20260419-0011) — reasoning-augmented selection.
+	// Both fields are nil-safe: when unset, the broker behaves exactly as
+	// before (keyword + token budget). Wiring code (service container) sets
+	// them when the underlying capabilities are available.
+	skills         []ToolPreferenceSkill
+	memoryRecaller MemoryRecaller
 }
 
 // SelectResult is the return shape of ToolClient.SelectToolsAsProvider. It
@@ -75,6 +82,66 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 		Config:      cfg,
 		Builtins:    NewBuiltinToolRegistry(),
 	}
+}
+
+// SetSkills attaches operator-authored tool-preference skills to the
+// broker. Subsequent SelectToolsAugmented calls factor the skill set into
+// ranking. Pass nil to clear.
+func (tb *ToolClient) SetSkills(skills []ToolPreferenceSkill) {
+	tb.skills = skills
+	slog.Info("toolclient: tool-preference skills attached", "count", len(skills))
+}
+
+// SetMemoryRecaller attaches a MemoryRecaller used to query Vanta for prior
+// successful tool sequences on similar intents. Nil-safe — when unset, the
+// memory ranking signal is effectively empty and selection falls back to
+// keyword + skills.
+func (tb *ToolClient) SetMemoryRecaller(r MemoryRecaller) {
+	tb.memoryRecaller = r
+	if r != nil {
+		slog.Info("toolclient: memory recaller attached")
+	}
+}
+
+// Skills returns the currently-attached operator skills (read-only — the
+// returned slice is the live reference; callers should not mutate it).
+func (tb *ToolClient) Skills() []ToolPreferenceSkill { return tb.skills }
+
+// MemoryRecaller returns the attached memory recaller, or nil when none.
+func (tb *ToolClient) MemoryRecaller() MemoryRecaller { return tb.memoryRecaller }
+
+// SelectToolsAugmented is the reasoning-augmented selection entry point used
+// by the service layer. It wraps SelectWithSignals: gathers the per-call
+// memory hits (via the attached MemoryRecaller, if any), and passes the
+// attached skills + Config-driven err-toward-more pad through.
+//
+// On any error from the underlying broker pass the call returns the error;
+// errors from the memory recaller are NOT propagated — they're absorbed
+// (logged) so memory unreachability never gates tool selection.
+func (tb *ToolClient) SelectToolsAugmented(
+	ctx context.Context,
+	intent string,
+	hints []string,
+	workspaceID, agentID string,
+	windowSize int,
+) ([]broker.ToolDefinition, string, string, error) {
+	var memHits []ToolPatternHit
+	if tb.memoryRecaller != nil {
+		hits, err := tb.memoryRecaller.RecallToolPatterns(ctx, intent)
+		if err != nil {
+			slog.Warn("toolclient: memory recall errored — continuing without memory signal",
+				"intent", intent, "err", err)
+		} else {
+			memHits = hits
+		}
+	}
+
+	pad := DefaultErrTowardMorePad
+	if tb.Config != nil && tb.Config.ErrTowardMorePad >= 0 {
+		pad = tb.Config.ErrTowardMorePad
+	}
+
+	return tb.SelectWithSignals(ctx, intent, hints, workspaceID, agentID, windowSize, tb.skills, memHits, pad)
 }
 
 // IsBuiltinTool reports whether the named tool is a builtin (registered

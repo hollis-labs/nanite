@@ -6,6 +6,21 @@ type Theme = 'dark' | 'light' | 'system'
 type RightRailTab = 'widgets' | 'inbox' | 'artifacts' | (string & {})
 export type LayoutPreset = 'focus' | 'default' | 'workspace' | 'reading'
 
+/**
+ * J9: per-panel user preferences persisted in layout store.
+ * - defaultPanel:  which panel ID is active on fresh open (user-configured).
+ * - panelEnabled:  map of panelId → enabled (false = hidden from tab strip).
+ * - panelOrder:    user-reordered sequence of panel IDs (subset or full list).
+ * - dismissedByUser: set of panel IDs user has dismissed since last conversational
+ *   trigger. Owned by layout store; J8 reads/clears this for its dismiss policy.
+ */
+export interface PanelPrefs {
+  defaultPanel?: string
+  panelEnabled: Record<string, boolean>
+  panelOrder: string[]
+  dismissedByUser: Record<string, boolean>
+}
+
 interface LayoutState {
   leftSidebarOpen: boolean
   rightRailOpen: boolean
@@ -43,6 +58,21 @@ interface LayoutState {
   setTheme: (theme: Theme) => void
   memoryModalOpen: boolean
   setMemoryModalOpen: (open: boolean) => void
+
+  // J9: panel preference actions
+  panelPrefs: PanelPrefs
+  /** Open rail and switch to panel id (J8 seam: panel_open). */
+  setPanelOpen: (id: string) => void
+  /** Set which panel is the user's default (shown on fresh open). */
+  setDefaultPanel: (id: string) => void
+  /** Toggle whether a panel appears in the tab strip. */
+  setPanelEnabled: (id: string, enabled: boolean) => void
+  /** Persist a user-chosen panel ordering. */
+  setPanelOrder: (order: string[]) => void
+  /** Mark a panel dismissed by user (J8 dismiss policy storage seam). */
+  markPanelDismissed: (id: string) => void
+  /** Clear the dismissed flag for a panel (J8 re-open after new trigger). */
+  clearPanelDismissed: (id: string) => void
 }
 
 function resolveTheme(theme: Theme): 'dark' | 'light' {
@@ -135,6 +165,38 @@ export const useLayoutStore = create<LayoutState>()(
       },
       memoryModalOpen: false,
       setMemoryModalOpen: (open) => set({ memoryModalOpen: open }),
+
+      // J9: panel preferences (persisted via Zustand persist)
+      panelPrefs: {
+        panelEnabled: {},
+        panelOrder: [],
+        dismissedByUser: {},
+      },
+      setPanelOpen: (id) =>
+        set({ rightRailOpen: true, rightRailTab: id as RightRailTab }),
+      setDefaultPanel: (id) =>
+        set((s) => ({ panelPrefs: { ...s.panelPrefs, defaultPanel: id } })),
+      setPanelEnabled: (id, enabled) =>
+        set((s) => ({
+          panelPrefs: {
+            ...s.panelPrefs,
+            panelEnabled: { ...s.panelPrefs.panelEnabled, [id]: enabled },
+          },
+        })),
+      setPanelOrder: (order) =>
+        set((s) => ({ panelPrefs: { ...s.panelPrefs, panelOrder: order } })),
+      markPanelDismissed: (id) =>
+        set((s) => ({
+          panelPrefs: {
+            ...s.panelPrefs,
+            dismissedByUser: { ...s.panelPrefs.dismissedByUser, [id]: true },
+          },
+        })),
+      clearPanelDismissed: (id) =>
+        set((s) => {
+          const { [id]: _, ...rest } = s.panelPrefs.dismissedByUser
+          return { panelPrefs: { ...s.panelPrefs, dismissedByUser: rest } }
+        }),
     }),
     {
       name: 'nanite-layout',

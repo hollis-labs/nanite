@@ -6,7 +6,7 @@ import { CommandPalette } from './CommandPalette'
 import { SearchModal } from './SearchModal'
 import { LeftSidebar } from './sidebar/LeftSidebar'
 import { ChatMain } from './chat/ChatMain'
-import { RightRail } from './RightRail'
+import { RightRailV2 } from './RightRailV2'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { getSlotComponent } from '@/lib/plugin-slot-lookup'
@@ -169,7 +169,7 @@ export function AppShell() {
       ) : isPluginPage ? (
         renderPluginPage()
       ) : null}
-      {currentPage === 'chat' && <RightRail inboxAgentId={inboxAgentId} />}
+      {currentPage === 'chat' && <RightRailV2 inboxAgentId={inboxAgentId} />}
       <MemoryModal />
       <CommandPalette
         open={commandPaletteOpen}

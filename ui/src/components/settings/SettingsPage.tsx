@@ -51,6 +51,7 @@ import { ToolDashboard } from "./ToolDashboard";
 import { WidgetManager } from "./WidgetManager";
 import { WorkspaceProjectManager } from "./WorkspaceProjectManager";
 import { ProfilePanel } from "./ProfilePanel";
+import { PanelManager } from "./PanelManager";
 
 interface NavItem {
   id: string;
@@ -98,6 +99,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { id: "tools", label: "Tools", icon: Wrench },
       { id: "plugins", label: "Plugins", icon: Puzzle },
       { id: "widgets", label: "Widgets", icon: LayoutGrid },
+      { id: "panels", label: "Panels", icon: SlidersHorizontal },
     ],
   },
   {
@@ -219,6 +221,8 @@ export default function SettingsPage() {
         return <PluginManager />;
       case "widgets":
         return <WidgetManager />;
+      case "panels":
+        return <PanelManager />;
       case "workspaces":
         return <WorkspaceProjectManager />;
       case "role-trust":

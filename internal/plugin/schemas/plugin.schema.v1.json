@@ -273,6 +273,44 @@
               }
             }
           }
+        },
+        "panels": {
+          "description": "Right-rail v2 panel contributions (J9). Each entry declares a panel the plugin adds to the right-rail tab strip. Plugin panels can register but render a placeholder in v1; full render function is a follow-up. Trust gate: install-time (H1); runtime panel_register is not supported in v1.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "Stable panel identifier. Referenced by J8 panel_open / panel_close."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Human-readable tab label shown in the right-rail tab strip."
+              },
+              "default_visible": {
+                "type": "boolean",
+                "description": "Whether the panel appears in the tab strip by default. Plugin panels default to false."
+              },
+              "icon": {
+                "type": "string",
+                "description": "Optional Lucide icon name (e.g. 'layers', 'file-text'). Falls back to generic Layers icon when omitted."
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Sort order hint. Plugin panels default to 100+; lower values appear first."
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional human-readable description shown in the Panels settings panel."
+              }
+            }
+          }
         }
       }
     },

@@ -140,6 +140,32 @@ type ManifestRegisters struct {
 	// (by regex pattern or output schema) emits its card_type. Plugin rules run
 	// AFTER built-in rules and can only add new card types, not override builtins.
 	CardRules     []CardRuleRegistration      `yaml:"card_rules"`
+	// Panels declares right-rail v2 panels this plugin contributes (J9).
+	// Each entry adds a panel to the host's panel registry and makes it
+	// available in the right-rail tab strip. Panel rendering in v1 is a
+	// placeholder — the render function for plugin panels is a follow-up.
+	// Trust gate: install-time only (H1); runtime registration is not supported.
+	Panels        []PanelRegistration         `yaml:"panels"`
+}
+
+// PanelRegistration declares a right-rail panel the plugin contributes.
+// Mirrors the card_rules shape: declarative at install time, registered into
+// the host panel registry at plugin load, unregistered at plugin unload.
+//
+// ID must match ^[a-z][a-z0-9-]*$ (same constraint as card_type).
+// Title is the human-readable tab label.
+// DefaultVisible controls whether the panel appears in the tab strip by
+// default (before user prefs override it). Plugin panels default to false.
+// Icon is an optional Lucide icon name (e.g. "layers", "file-text"). When
+// omitted the frontend falls back to the generic Layers icon.
+// Order is a numeric sort hint; plugin panels default to 100+.
+type PanelRegistration struct {
+	ID             string `yaml:"id"`
+	Title          string `yaml:"title"`
+	DefaultVisible bool   `yaml:"default_visible"`
+	Icon           string `yaml:"icon,omitempty"`
+	Order          int    `yaml:"order,omitempty"`
+	Description    string `yaml:"description,omitempty"`
 }
 
 // CardRuleRegistration declares a single Stage 1 card detection rule.

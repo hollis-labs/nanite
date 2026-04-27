@@ -160,6 +160,11 @@ type Host struct {
 	// plugin unload. Access is via RegisterCardRule / UnregisterPluginCardRules
 	// / DetectCardType / GetCardRules.
 	cardRules     cardRulesRegistry
+	// panels is the right-rail v2 panel registry (J9 — CW-20260426-0007).
+	// Built-in panels are registered at host init (tier=0); plugin panels are
+	// registered at plugin load (tier=1) and deregistered at plugin unload.
+	// Access is via RegisterPanel / UnregisterPluginPanels / GetPanels.
+	panels        panelRegistry
 	logger        plugin.Logger
 	ctx           context.Context
 	ctxCancel     context.CancelFunc
@@ -1496,6 +1501,10 @@ func (h *Host) UnloadPlugin(id string) error {
 	// mutex, so this is safe outside h.mu. Removes all Stage 1 card detection
 	// rules the plugin contributed.
 	h.UnregisterPluginCardRules(id)
+
+	// 17. Panels (J9 — CW-20260426-0007) — panelRegistry has its own mutex.
+	// Removes all right-rail panels the plugin contributed.
+	h.UnregisterPluginPanels(id)
 
 	// Task backends — invoke UnregisterBackend outside h.mu (task service
 	// has its own mutex). "local" is protected at the service layer; we

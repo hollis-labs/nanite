@@ -460,6 +460,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
 			})
+			s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 			return
 		}
 
@@ -490,6 +491,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					"msgs":    breakdown.Messages,
 					"tools":   breakdown.Tools,
 				})
+			s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 			return
 		}
 		// Log compaction continuation if budget enforcement reduced context.
@@ -645,6 +647,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
+				s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 				return
 			}
 			provSpan.RecordError(err)
@@ -684,11 +687,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
+				s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 				return
 			}
 			errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(tools)}
 			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
 			ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
+			s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 			return
 		}
 
@@ -802,10 +807,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					errDetails["recovery"] = "failed_after_retry"
 					ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, errDetails)
 					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, errDetails)
+					s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 					return
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
 				ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
+				s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 				return
 
 			case "session_id":
@@ -1178,6 +1185,38 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // ---------------------------------------------------------------------------
 // Private helper methods
 // ---------------------------------------------------------------------------
+
+// persistPartialAssistant saves a partial or interrupted assistant message row
+// so the turn survives a page refresh when an early-return error path fires
+// before the canonical post-loop CreateMessage call (CW-20260419-0019).
+//
+// content is the streamed text accumulated so far; if empty the placeholder
+// "[generation interrupted]" is stored so the row always exists.  The message
+// is saved with metadata `{"had_error":true}` so the frontend rehydration path
+// (loadPersistedErrorState / useChat.ts) can distinguish it from a normal turn.
+//
+// Errors are logged but not propagated — this is a best-effort persistence call
+// on the way out of an error path; the caller is already returning an error to
+// the client.
+func (s *chatServiceImpl) persistPartialAssistant(sessionID, assistantMsgID, agentID, content string) {
+	if content == "" {
+		content = "[generation interrupted]"
+	}
+	structured := chat.WrapResponse(content, "default", nil, nil, false, true)
+	structuredJSON := structured.MarshalContent()
+	msg := &store.Message{
+		ID:        assistantMsgID,
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Role:      "assistant",
+		Content:   structuredJSON,
+		Metadata:  `{"had_error":true}`,
+	}
+	if err := s.store.CreateMessage(msg); err != nil {
+		slog.Warn("chat-service: persistPartialAssistant: failed to save partial message",
+			"session_id", sessionID, "msg_id", assistantMsgID, "err", err)
+	}
+}
 
 // Compact-recovery trigger kinds. CW-20260418-0099: the pipeline serves two
 // distinct failure modes that share the same remedy; the kind is threaded

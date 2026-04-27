@@ -246,6 +246,10 @@ func (m *mockStreamProvider) Complete(_ context.Context, _ provider.ChatRequest)
 	return "", nil
 }
 
+func (m *mockStreamProvider) CompleteWithUsage(_ context.Context, _ provider.ChatRequest) (provider.CompleteResult, error) {
+	return provider.CompleteResult{}, nil
+}
+
 func (m *mockStreamProvider) Capabilities() provider.ProviderCapabilities {
 	return provider.ProviderCapabilities{}
 }

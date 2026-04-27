@@ -21,6 +21,12 @@ import (
 // a timeout. 5 minutes matches the plan's §T9 spawn-request default.
 const DefaultTimeoutSeconds = 300
 
+// spawnFanoutCap is the maximum number of Spawn invocations that may
+// have their runner executing concurrently. FIFO ordering is preserved
+// by the buffered-channel semaphore below.
+// fanout cap; knob target: CW-20260419-0001 publisher config
+const spawnFanoutCap = 3
+
 // Typed errors returned by Approve and Reject so callers can
 // distinguish rejection causes without string matching.
 var (
@@ -79,6 +85,12 @@ type Service struct {
 	// defer clears; Cancel invokes-and-deletes. Mutex-guarded.
 	cancelMu  sync.Mutex
 	cancelers map[string]context.CancelFunc
+
+	// spawnSem is a buffered-channel semaphore that bounds the number of
+	// Spawn invocations with an in-flight runner to spawnFanoutCap.
+	// Sends acquire a slot; receives release it. FIFO ordering is a
+	// property of Go channel scheduling under normal load.
+	spawnSem chan struct{}
 }
 
 // NewService constructs a Service. The db is used for subagent_runs
@@ -98,6 +110,7 @@ func NewService(db *sql.DB, runner Runner, poster MessagePoster, approver Approv
 		approver:  approver,
 		settings:  settings,
 		cancelers: make(map[string]context.CancelFunc),
+		spawnSem:  make(chan struct{}, spawnFanoutCap),
 	}
 }
 
@@ -264,23 +277,37 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		// background-derived ctx so the caller's short tool-call
 		// timeout (30s) doesn't cancel the child runner — same
 		// pattern as async mode. Cancel(runID) is still wired.
+		//
+		// Acquire the fan-out semaphore before executing. The
+		// caller's ctx governs the wait; if it cancels while
+		// queued we return cleanly without consuming a slot.
+		if err := svc.acquireSpawnSlot(ctx); err != nil {
+			return "", err
+		}
 		execCtx, execCancel := context.WithCancel(context.Background())
 		svc.cancelMu.Lock()
 		svc.cancelers[run.ID] = execCancel
 		svc.cancelMu.Unlock()
-		svc.execute(execCtx, run, req.ParentAgentID)
+		svc.executeWithSlot(execCtx, run, req.ParentAgentID)
 	case ModeAsync, ModeAPI:
 		// Non-blocking: fire-and-forget goroutine. The reply lands
 		// in the parent session's inbox (async) or chat (api).
 		// Background-derived ctx because the caller's request ctx
 		// will likely be done by the time the runner finishes;
 		// Cancel(runID) is the only intended cancellation path.
+		//
+		// Acquire the fan-out semaphore before launching the
+		// goroutine. The caller's ctx governs the wait so a
+		// queued async spawn can be cancelled before it starts.
+		if err := svc.acquireSpawnSlot(ctx); err != nil {
+			return "", err
+		}
 		runCtx, runCancel := context.WithCancel(context.Background())
 		svc.cancelMu.Lock()
 		svc.cancelers[run.ID] = runCancel
 		svc.cancelMu.Unlock()
 		safego.Go(context.Background(), "subagent.run", func() {
-			svc.execute(runCtx, run, req.ParentAgentID)
+			svc.executeWithSlot(runCtx, run, req.ParentAgentID)
 		})
 	}
 
@@ -481,6 +508,29 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 		svc.execute(runCtx, run, run.ParentAgentID)
 	})
 	return nil
+}
+
+// acquireSpawnSlot blocks until a slot in the fan-out semaphore is
+// available or ctx is cancelled. Returns ctx.Err() if the wait is
+// interrupted, nil on successful acquisition.
+func (svc *Service) acquireSpawnSlot(ctx context.Context) error {
+	select {
+	case svc.spawnSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// releaseSpawnSlot returns a previously-acquired slot to the semaphore.
+func (svc *Service) releaseSpawnSlot() { <-svc.spawnSem }
+
+// executeWithSlot wraps execute with a deferred semaphore release so
+// the slot is returned exactly once regardless of how execute exits
+// (success, error, or cancellation).
+func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID string) {
+	defer svc.releaseSpawnSlot()
+	svc.execute(ctx, run, parentAgentID)
 }
 
 // execute runs the runner, writes the result back to subagent_runs,

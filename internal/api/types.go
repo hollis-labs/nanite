@@ -38,6 +38,11 @@ type SwitchSessionModeRequest struct {
 type SendMessageRequest struct {
 	SessionID string `json:"session_id"`
 	Content   string `json:"content"`
+	// Effort biases the token budget multiplier and reasoning-block enablement
+	// for this turn. Valid values: "low", "normal" (default), "high", "max".
+	// Empty string or omitted → "normal". Unknown values are ignored (treated as normal).
+	// See internal/effort for the full mapping (CW-20260420-0014).
+	Effort string `json:"effort,omitempty"`
 }
 
 type AgentMessageRequest struct {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
+	"github.com/hollis-labs/nanite/internal/effort"
 )
 
 // ContinueSite identifies why the chat loop continues for another iteration.
@@ -48,8 +49,8 @@ const (
 // supersedes the constant — the typical Strategy.MaxTurns is 10-40, and
 // 75 only applies when the strategy planner is bypassed entirely.
 const (
-	defaultMaxTurns            = 75
-	defaultHardCeiling         = 200
+	defaultMaxTurns    = 75
+	defaultHardCeiling = 200
 	// CW-20260417-0485: ConsecutiveFailCap used to terminate the chat loop,
 	// cutting the LLM off before it could respond to the tool errors it had
 	// just received as tool_result blocks. The loop now threads tool errors
@@ -58,15 +59,15 @@ const (
 	// defaultRunawayFailCap. The soft cap still drives the "critical"
 	// tool_warning SSE event so the UI can warn the user before the runaway
 	// trips, but it no longer exits the loop.
-	defaultConsecutiveFailCap  = 3
+	defaultConsecutiveFailCap = 3
 	// defaultRunawayFailCap is the hard circuit-breaker. When consecutive
 	// tool failures reach this count the loop emits a typed
 	// `chat-loop-terminated` envelope and exits. Sized high enough that a
 	// reasonable LLM has multiple turns to recover (acknowledge error, try
 	// different args, try a different tool, or stop gracefully) before the
 	// breaker trips.
-	defaultRunawayFailCap      = 10
-	defaultIdleTimeoutSeconds  = 900 // 15 minutes
+	defaultRunawayFailCap     = 10
+	defaultIdleTimeoutSeconds = 900 // 15 minutes
 	// CW-20260419-0012 (quick fix): 3 → 6. 3 was an arbitrary
 	// conservative floor; empirically the agent needs 3 passes for
 	// intent-warmup and another 2-3 for follow-on exploration within
@@ -81,10 +82,10 @@ const (
 type TerminationCode string
 
 const (
-	TerminationRunawayToolFailures TerminationCode = "runaway_tool_failures"
-	TerminationMaxTurns            TerminationCode = "max_turns"
-	TerminationHardCeiling         TerminationCode = "hard_ceiling"
-	TerminationIdleTimeout         TerminationCode = "idle_timeout"
+	TerminationRunawayToolFailures  TerminationCode = "runaway_tool_failures"
+	TerminationMaxTurns             TerminationCode = "max_turns"
+	TerminationHardCeiling          TerminationCode = "hard_ceiling"
+	TerminationIdleTimeout          TerminationCode = "idle_timeout"
 	TerminationRetryBudgetExhausted TerminationCode = "retry_budget_exhausted"
 )
 
@@ -95,8 +96,8 @@ type TurnSnapshot struct {
 	Iteration    int                `json:"iteration"`
 	MaxTurns     int                `json:"max_turns"`
 	ToolCalls    []ToolCallSnapshot `json:"tool_calls,omitempty"`
-	TokensUsed   int               `json:"tokens_used"`
-	MessageCount int               `json:"message_count"`
+	TokensUsed   int                `json:"tokens_used"`
+	MessageCount int                `json:"message_count"`
 	Timestamp    time.Time          `json:"timestamp"`
 }
 
@@ -112,15 +113,15 @@ type ToolCallSnapshot struct {
 
 // iterationLimits holds the resolved limits for a loop invocation.
 type iterationLimits struct {
-	maxTurns            int
-	hardCeiling         int
-	consecutiveFailCap  int
+	maxTurns           int
+	hardCeiling        int
+	consecutiveFailCap int
 	// runawayFailCap is the hard circuit-breaker. See defaultRunawayFailCap
 	// and the CW-20260417-0485 comment there for the rationale.
-	runawayFailCap      int
-	idleTimeout         time.Duration
-	perToolMax          map[string]int // tool name → max iterations (0 = no limit)
-	defaultPerToolCap   int            // global per-tool cap from UserSettings (0 = no cap)
+	runawayFailCap    int
+	idleTimeout       time.Duration
+	perToolMax        map[string]int // tool name → max iterations (0 = no limit)
+	defaultPerToolCap int            // global per-tool cap from UserSettings (0 = no cap)
 }
 
 // loopState consolidates all mutable state for the generateResponse loop.
@@ -170,6 +171,12 @@ type loopState struct {
 	// the classifier has not yet run for this generation.
 	scopeTier        classify.ScopeTier
 	executionPattern classify.ExecutionPattern
+
+	// F1 (CW-20260420-0014): Effort scalar. Set once by generateResponse from
+	// the request context before the loop runs. Biases token budget (via
+	// BudgetMultiplier) and reasoning-block enablement (via ReasoningCfg).
+	// Orthogonal to ScopeTier — does NOT change roles, tools, or turn counts.
+	currentEffort effort.Effort
 
 	// Debug snapshots.
 	debugMode bool
@@ -460,6 +467,25 @@ func (ls *loopState) SetClassification(tier classify.ScopeTier, pattern classify
 // touchActivity updates the last activity timestamp.
 func (ls *loopState) touchActivity() {
 	ls.lastActivity = time.Now()
+}
+
+// SetEffort stores the per-turn Effort scalar. Called by generateResponse
+// once per generation, from the request context, before the loop body runs.
+// Invalid values are silently promoted to effort.Default.
+func (ls *loopState) SetEffort(e effort.Effort) {
+	if !e.IsValid() {
+		e = effort.Default
+	}
+	ls.currentEffort = e
+}
+
+// Effort returns the per-turn Effort scalar. Returns effort.Default when
+// SetEffort has not been called.
+func (ls *loopState) Effort() effort.Effort {
+	if !ls.currentEffort.IsValid() {
+		return effort.Default
+	}
+	return ls.currentEffort
 }
 
 // scratchpadWrite upserts key→value in the per-turn scratchpad.

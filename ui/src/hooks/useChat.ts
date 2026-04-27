@@ -318,7 +318,14 @@ export function useChat(sessionId: string | null) {
       console.log("[useChat] streaming=true, sending message...");
 
       try {
-        const { message_id } = await api.sendMessage({ session_id: sessionId, content });
+        // F1 (CW-20260420-0014): read active effort from store and pass it
+        // to the API so the budget multiplier + reasoning config are applied.
+        const activeEffort = useChatStore.getState().activeEffort
+        const { message_id } = await api.sendMessage({
+          session_id: sessionId,
+          content,
+          ...(activeEffort && activeEffort !== 'normal' ? { effort: activeEffort } : {}),
+        });
 
         // Connect to SSE stream
         // CW-20260418-0100: track the message id + reset cursor so

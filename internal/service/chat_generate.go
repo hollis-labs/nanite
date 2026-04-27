@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/effort"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -407,6 +408,21 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// read via loopState.Classification().
 	classifyAndAttach(ls, sessionID, userContent, toolNames)
 
+	// F1 (CW-20260420-0014): Effort scalar. Extracted from request context;
+	// defaults to EffortNormal when the caller did not set it. Biases the
+	// per-iteration token budget ceiling and reasoning-block configuration.
+	// Orthogonal to ScopeTier — does NOT change roles, tools, or turn counts.
+	turnEffort := effort.FromContext(ctx)
+	ls.SetEffort(turnEffort)
+	reasoningCfg := turnEffort.ReasoningCfg()
+	slog.Debug("chat-service: effort scalar",
+		"session_id", sessionID,
+		"effort", turnEffort.String(),
+		"budget_multiplier", turnEffort.BudgetMultiplier(),
+		"reasoning_enabled", reasoningCfg.Enabled,
+		"reasoning_budget_tokens", reasoningCfg.BudgetTokens,
+	)
+
 	// Load per-tool cap from UserSettings.
 	if us, err := s.store.GetUserSettings(); err == nil && us.ToolPerTurnCap > 0 {
 		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
@@ -513,6 +529,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// hardcoded 200K default. contextWindowSize returns 0 on miss, which
 		// causes EnforceTokenBudget to fall back to DefaultContextWindow * HardCeilingPct.
 		// (CW-20260426-0031)
+		//
+		// F1 (CW-20260420-0014): apply the Effort scalar multiplier to the
+		// budget ceiling BEFORE passing it to EnforceTokenBudget. This is the
+		// budget seam — the multiplier scales the existing ceiling rather than
+		// replacing it, so provider limits and model window sizes remain the
+		// authoritative upper bound.
 		preBudgetMsgCount := len(chatMessages)
 		preBudgetToolCount := len(tools)
 		var budgetErr error
@@ -520,6 +542,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if ws := s.contextWindowSize(providerName, model); ws > 0 {
 			budgetCeiling = int(float64(ws) * chat.HardCeilingPct)
 		}
+		budgetCeiling = effort.ApplyToCeiling(budgetCeiling, ls.Effort())
 		chatMessages, tools, breakdown, budgetErr = chat.EnforceTokenBudget(systemPrompt, chatMessages, tools, budgetCeiling)
 		if budgetErr != nil {
 			slog.Warn("chat-service: token budget enforcement refused", "err", budgetErr)

@@ -172,6 +172,9 @@ export const api = {
   sendMessage: async (data: {
     session_id: string;
     content: string;
+    // F1 (CW-20260420-0014): optional effort scalar.
+    // Values: "low" | "normal" | "high" | "max". Omit or empty → "normal".
+    effort?: string;
   }): Promise<{ message_id: string; stream_url: string }> => {
     const res = await fetch(`${API_BASE}/messages`, {
       method: "POST",

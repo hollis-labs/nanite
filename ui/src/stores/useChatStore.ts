@@ -81,6 +81,11 @@ interface ChatState {
   activeModel: string
   setActiveModel: (model: string) => void
 
+  // Effort (F1 / CW-20260420-0014) — per-turn token-budget + reasoning dial.
+  // Values: "low" | "normal" | "high" | "max". Default: "normal".
+  activeEffort: string
+  setActiveEffort: (effort: string) => void
+
   // Presence
   activeStreams: Map<string, ActiveStreamInfo>
   pendingTools: Map<string, PendingToolInfo>
@@ -304,6 +309,10 @@ export const useChatStore = create<ChatState>((set) => ({
   // Model
   activeModel: 'claude-sonnet-4-20250514',
   setActiveModel: (model: string) => set({ activeModel: model }),
+
+  // Effort
+  activeEffort: 'normal',
+  setActiveEffort: (effort: string) => set({ activeEffort: effort }),
 
   // Presence
   activeStreams: new Map(),

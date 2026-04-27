@@ -1,27 +1,27 @@
-import { useEffect, useCallback, useState, useRef } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import Placeholder from '@tiptap/extension-placeholder'
-import { Check, Terminal, X, Upload } from 'lucide-react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { StatusPill } from './envelopes/primitives/StatusPill'
-import { useSettings } from '@/hooks/useSettings'
-import { ComposerToolbar } from './ComposerToolbar'
-import { ShellInfoDrawer } from './ShellInfoDrawer'
-import { SlashCommandExtension, type SlashCommand } from './extensions/SlashCommandExtension'
-import { slashCommandSuggestion } from './extensions/slashCommandSuggestion'
-import { FileMentionExtension, type FileResult } from './extensions/FileMentionExtension'
-import { fileMentionSuggestion } from './extensions/fileMentionSuggestion'
-import { useShellMode } from '@/hooks/useShellMode'
-import { usePluginSlots } from '@/hooks/usePluginSlots'
-import { usePluginAction } from '@/hooks/usePluginAction'
-import { resolveIcon } from '@/lib/icons'
-import { useAppStore } from '@/stores/useAppStore'
-import { useWorkStore } from '@/stores/useWorkStore'
-import { useLayoutStore } from '@/stores/useLayoutStore'
-import { useWorkSync } from '@/hooks/useWorkSync'
-import { api } from '@/lib/api'
-import type { SlashCommandDef } from '@/lib/types'
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Placeholder from "@tiptap/extension-placeholder";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Check, Terminal, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { usePluginAction } from "@/hooks/usePluginAction";
+import { usePluginSlots } from "@/hooks/usePluginSlots";
+import { useSettings } from "@/hooks/useSettings";
+import { useShellMode } from "@/hooks/useShellMode";
+import { useWorkSync } from "@/hooks/useWorkSync";
+import { api } from "@/lib/api";
+import { resolveIcon } from "@/lib/icons";
+import type { SlashCommandDef } from "@/lib/types";
+import { useAppStore } from "@/stores/useAppStore";
+import { useLayoutStore } from "@/stores/useLayoutStore";
+import { useWorkStore } from "@/stores/useWorkStore";
+import { ComposerToolbar } from "./ComposerToolbar";
+import { StatusPill } from "./envelopes/primitives/StatusPill";
+import { FileMentionExtension, type FileResult } from "./extensions/FileMentionExtension";
+import { fileMentionSuggestion } from "./extensions/fileMentionSuggestion";
+import { type SlashCommand, SlashCommandExtension } from "./extensions/SlashCommandExtension";
+import { slashCommandSuggestion } from "./extensions/slashCommandSuggestion";
+import { ShellInfoDrawer } from "./ShellInfoDrawer";
 
 /**
  * POLISHED — chat composer shell.
@@ -52,166 +52,195 @@ import type { SlashCommandDef } from '@/lib/types'
  *    uppercase at 10px — consistent with every other caption in the system.
  */
 
-let slashMenuOpen = false
-let fileMentionMenuOpen = false
+let slashMenuOpen = false;
+let fileMentionMenuOpen = false;
 
-const MAX_HISTORY = 50
-let commandHistory: string[] = []
-let historyIndex = -1
+const MAX_HISTORY = 50;
+let commandHistory: string[] = [];
+let historyIndex = -1;
 
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
   try {
-    const stored = localStorage.getItem('nanite:command-history')
-    if (stored) commandHistory = JSON.parse(stored)
-  } catch { /* ignore */ }
+    const stored = localStorage.getItem("nanite:command-history");
+    if (stored) commandHistory = JSON.parse(stored);
+  } catch {
+    /* ignore */
+  }
 }
 
 function pushHistory(text: string) {
-  if (commandHistory[0] === text) return
-  commandHistory.unshift(text)
-  if (commandHistory.length > MAX_HISTORY) commandHistory.length = MAX_HISTORY
-  historyIndex = -1
+  if (commandHistory[0] === text) return;
+  commandHistory.unshift(text);
+  if (commandHistory.length > MAX_HISTORY) commandHistory.length = MAX_HISTORY;
+  historyIndex = -1;
   try {
-    localStorage.setItem('nanite:command-history', JSON.stringify(commandHistory))
-  } catch { /* ignore */ }
+    localStorage.setItem("nanite:command-history", JSON.stringify(commandHistory));
+  } catch {
+    /* ignore */
+  }
 }
 
 interface ChatComposerProps {
-  onSend: (content: string) => void
-  isStreaming?: boolean
-  onStop?: () => void
-  onEditorReady?: (focus: () => void) => void
-  reloadMessages?: () => void
-  drawer?: React.ReactNode
+  onSend: (content: string) => void;
+  isStreaming?: boolean;
+  onStop?: () => void;
+  onEditorReady?: (focus: () => void) => void;
+  reloadMessages?: () => void;
+  drawer?: React.ReactNode;
 }
 
-export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorReady, reloadMessages, drawer = null }: ChatComposerProps) {
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const setActiveSession = useAppStore((s) => s.setActiveSession)
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
-  const queryClient = useQueryClient()
-  const { mode: shellMode, cycleMode: cycleShellMode, setMode: setShellMode } = useShellMode(activeSessionId)
-  const [isShellInput, setIsShellInput] = useState(false)
-  const [shellRunning, setShellRunning] = useState(false)
-  const workToast = useWorkStore((s) => s.toastMessage)
-  const dismissWorkToast = useWorkStore((s) => s.dismissToast)
-  const { flushIfDirty } = useWorkSync()
-  const [dragOver, setDragOver] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const dropRef = useRef<HTMLDivElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+export function ChatComposer({
+  onSend,
+  isStreaming = false,
+  onStop,
+  onEditorReady,
+  reloadMessages,
+  drawer = null,
+}: ChatComposerProps) {
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const setActiveSession = useAppStore((s) => s.setActiveSession);
+  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+  const queryClient = useQueryClient();
+  const {
+    mode: shellMode,
+    cycleMode: cycleShellMode,
+    setMode: setShellMode,
+  } = useShellMode(activeSessionId);
+  const [isShellInput, setIsShellInput] = useState(false);
+  const [shellRunning, setShellRunning] = useState(false);
+  const workToast = useWorkStore((s) => s.toastMessage);
+  const dismissWorkToast = useWorkStore((s) => s.dismissToast);
+  const { flushIfDirty } = useWorkSync();
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    if (!activeSessionId || !e.dataTransfer.files.length) return
-    for (const file of Array.from(e.dataTransfer.files)) {
-      await api.uploadArtifact(activeSessionId, file)
-    }
-    queryClient.invalidateQueries({ queryKey: ['artifacts', activeSessionId] })
-  }, [activeSessionId, queryClient])
-
-  const handleFileUpload = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0 || !activeSessionId) return
-    setUploading(true)
-    try {
-      for (const file of Array.from(files)) {
-        await api.uploadArtifact(activeSessionId, file)
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      if (!activeSessionId || !e.dataTransfer.files.length) return;
+      for (const file of Array.from(e.dataTransfer.files)) {
+        await api.uploadArtifact(activeSessionId, file);
       }
-      queryClient.invalidateQueries({ queryKey: ['artifacts', activeSessionId] })
-    } catch (err) {
-      console.error('Failed to upload artifact:', err)
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }, [activeSessionId, queryClient])
+      queryClient.invalidateQueries({ queryKey: ["artifacts", activeSessionId] });
+    },
+    [activeSessionId, queryClient],
+  );
+
+  const handleFileUpload = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0 || !activeSessionId) return;
+      setUploading(true);
+      try {
+        for (const file of Array.from(files)) {
+          await api.uploadArtifact(activeSessionId, file);
+        }
+        queryClient.invalidateQueries({ queryKey: ["artifacts", activeSessionId] });
+      } catch (err) {
+        console.error("Failed to upload artifact:", err);
+      } finally {
+        setUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [activeSessionId, queryClient],
+  );
 
   const { data: commandDefs } = useQuery({
-    queryKey: ['commands'],
+    queryKey: ["commands"],
     queryFn: () => api.listCommands(),
     staleTime: 60_000,
-  })
-  const commandDefsRef = useRef<SlashCommandDef[]>([])
-  commandDefsRef.current = commandDefs ?? []
+  });
+  const commandDefsRef = useRef<SlashCommandDef[]>([]);
+  commandDefsRef.current = commandDefs ?? [];
 
-  const handleCommand = useCallback(async (cmd: SlashCommand) => {
-    switch (cmd.name) {
-      case 'new': {
-        const session = await api.createSession({ workspace_id: activeWorkspaceId || '' })
-        setActiveSession(session.id)
-        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
-        return
-      }
-      case 'fork': {
-        if (!activeSessionId) return
-        const forked = await api.forkSession(activeSessionId, { include_messages: true })
-        setActiveSession(forked.id)
-        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
-        return
-      }
-      case 'clone': {
-        if (!activeSessionId) return
-        const cloned = await api.forkSession(activeSessionId, { include_messages: false })
-        setActiveSession(cloned.id)
-        void queryClient.invalidateQueries({ queryKey: ['sessions'] })
-        return
-      }
-      case 'bookmark': {
-        if (!activeSessionId) return
-        const session = await api.getSession(activeSessionId)
-        const messages = session.messages || []
-        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
-        if (lastAssistant) {
-          await api.toggleBookmark(lastAssistant.id, activeSessionId)
-          void queryClient.invalidateQueries({ queryKey: ['bookmarks', activeSessionId] })
+  const handleCommand = useCallback(
+    async (cmd: SlashCommand) => {
+      switch (cmd.name) {
+        case "new": {
+          const session = await api.createSession({ workspace_id: activeWorkspaceId || "" });
+          setActiveSession(session.id);
+          void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+          return;
         }
-        return
-      }
-      case 'compact': {
-        if (!activeSessionId) return
-        await api.compactSession(activeSessionId)
-        void queryClient.invalidateQueries({ queryKey: ['session', activeSessionId] })
-        return
-      }
-      case 'agent':
-      case 'model':
-        return
-      case 'memory': {
-        useLayoutStore.getState().setMemoryModalOpen(true)
-        return
-      }
-      default: {
-        if (!activeSessionId) return
-        try {
-          const result = await api.executeCommand(cmd.name, activeSessionId, '')
-          if (result.action === 'message') {
-            reloadMessages?.()
-          } else if (result.action === 'skill') {
-            const parts = (result.content ?? '').trim().split(/\s+/)
-            const slug = parts[0]
-            const args = parts.slice(1).join(' ')
-            try {
-              const skill = await api.getSkill(`file-${slug}`)
-              if (skill?.prompt) {
-                const msg = args ? `${skill.prompt}\n\nArgs: ${args}` : skill.prompt
-                onSend(msg)
-              }
-            } catch {
-              if (result.content) onSend(result.content)
-            }
+        case "fork": {
+          if (!activeSessionId) return;
+          const forked = await api.forkSession(activeSessionId, { include_messages: true });
+          setActiveSession(forked.id);
+          void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+          return;
+        }
+        case "clone": {
+          if (!activeSessionId) return;
+          const cloned = await api.forkSession(activeSessionId, { include_messages: false });
+          setActiveSession(cloned.id);
+          void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+          return;
+        }
+        case "bookmark": {
+          if (!activeSessionId) return;
+          const session = await api.getSession(activeSessionId);
+          const messages = session.messages || [];
+          const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+          if (lastAssistant) {
+            await api.toggleBookmark(lastAssistant.id, activeSessionId);
+            void queryClient.invalidateQueries({ queryKey: ["bookmarks", activeSessionId] });
           }
-        } catch (err) {
-          console.error('Command execution failed:', err)
+          return;
+        }
+        case "compact": {
+          if (!activeSessionId) return;
+          await api.compactSession(activeSessionId);
+          void queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
+          return;
+        }
+        case "agent":
+        case "model":
+          return;
+        case "memory": {
+          useLayoutStore.getState().setMemoryModalOpen(true);
+          return;
+        }
+        default: {
+          if (!activeSessionId) return;
+          try {
+            const result = await api.executeCommand(cmd.name, activeSessionId, "");
+            if (result.action === "message") {
+              reloadMessages?.();
+            } else if (result.action === "skill") {
+              const parts = (result.content ?? "").trim().split(/\s+/);
+              const slug = parts[0];
+              const args = parts.slice(1).join(" ");
+              try {
+                const skill = await api.getSkill(`file-${slug}`);
+                if (skill?.prompt) {
+                  const msg = args ? `${skill.prompt}\n\nArgs: ${args}` : skill.prompt;
+                  onSend(msg);
+                } else {
+                  // Skill exists but has no prompt body (DB-only skill or empty file).
+                  // Fall back to sending the raw content so the agent receives the slug.
+                  if (result.content) onSend(result.content);
+                }
+              } catch {
+                // Skill not found or fetch error — send raw content as fallback.
+                if (result.content) onSend(result.content);
+              }
+            }
+          } catch (err) {
+            console.error("Command execution failed:", err);
+          }
         }
       }
-    }
-  }, [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages])
+    },
+    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages],
+  );
 
-  const handleCommandRef = useRef(handleCommand)
-  handleCommandRef.current = handleCommand
+  const handleCommandRef = useRef(handleCommand);
+  handleCommandRef.current = handleCommand;
 
-  const handleSendRef = useRef<() => void>(() => {})
+  const handleSendRef = useRef<() => void>(() => {});
 
   const editor = useEditor({
     extensions: [
@@ -225,22 +254,38 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         listItem: false,
       }),
       Placeholder.configure({
-        placeholder: 'Message Nanite… (Enter to send, / for commands, @ for files)',
+        placeholder: "Message Nanite… (Enter to send, / for commands, @ for files)",
       }),
       SlashCommandExtension.configure({
         suggestion: {
           ...slashCommandSuggestion,
-          command: ({ editor: ed, range, props }: { editor: any; range: { from: number; to: number }; props: SlashCommand }) => {
-            ed?.chain().focus().deleteRange(range).run()
-            void handleCommandRef.current(props)
+          command: ({
+            editor: ed,
+            range,
+            props,
+          }: {
+            editor: any;
+            range: { from: number; to: number };
+            props: SlashCommand;
+          }) => {
+            ed?.chain().focus().deleteRange(range).run();
+            void handleCommandRef.current(props);
           },
         },
       }),
       FileMentionExtension.configure({
         suggestion: {
           ...fileMentionSuggestion,
-          command: ({ editor: ed, range, props }: { editor: any; range: { from: number; to: number }; props: FileResult }) => {
-            ed?.chain().focus().deleteRange(range).insertContent(`@${props.path} `).run()
+          command: ({
+            editor: ed,
+            range,
+            props,
+          }: {
+            editor: any;
+            range: { from: number; to: number };
+            props: FileResult;
+          }) => {
+            ed?.chain().focus().deleteRange(range).insertContent(`@${props.path} `).run();
           },
         },
       }),
@@ -248,158 +293,188 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
     editorProps: {
       attributes: {
         class:
-          'bg-transparent text-sm text-fg placeholder:text-fg-faint outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm',
+          "bg-transparent text-sm text-fg placeholder:text-fg-faint outline-none min-h-[80px] max-h-[160px] overflow-y-auto py-2 px-1 leading-relaxed prose-sm",
       },
       handleKeyDown(_view, event) {
-        if (event.key === 'Enter') {
-          if (slashMenuOpen || fileMentionMenuOpen) return false
-          if (event.metaKey || event.ctrlKey || event.shiftKey) return false
-          const text = editor?.getText().trim() ?? ''
-          if (!text) return false
-          event.preventDefault()
-          handleSendRef.current()
-          return true
+        if (event.key === "Enter") {
+          if (slashMenuOpen || fileMentionMenuOpen) return false;
+          if (event.metaKey || event.ctrlKey || event.shiftKey) return false;
+          const text = editor?.getText().trim() ?? "";
+          if (!text) return false;
+          event.preventDefault();
+          handleSendRef.current();
+          return true;
         }
-        if (event.key === 'Tab' && !slashMenuOpen && !fileMentionMenuOpen) {
-          const text = editor?.getText() ?? ''
-          if (text.startsWith('/')) {
-            const parts = text.split(/\s+/)
-            const cmdName = parts[0]?.slice(1)
-            const cmdDef = commandDefsRef.current.find((c) => c.name === cmdName)
+        if (event.key === "Tab" && !slashMenuOpen && !fileMentionMenuOpen) {
+          const text = editor?.getText() ?? "";
+          if (text.startsWith("/")) {
+            const parts = text.split(/\s+/);
+            const cmdName = parts[0]?.slice(1);
+            const cmdDef = commandDefsRef.current.find((c) => c.name === cmdName);
             if (cmdDef?.args) {
-              const argIdx = parts.length - 2
-              const arg = cmdDef.args[argIdx]
+              const argIdx = parts.length - 2;
+              const arg = cmdDef.args[argIdx];
               if (arg?.options && arg.options.length > 0) {
-                event.preventDefault()
-                const current = parts[parts.length - 1] ?? ''
-                const currentOptIdx = arg.options.indexOf(current)
-                const nextOpt = arg.options[(currentOptIdx + 1) % arg.options.length]
-                parts[parts.length - 1] = nextOpt ?? ''
-                const newText = parts.join(' ')
-                editor?.commands.setContent(newText)
-                editor?.commands.focus('end')
-                return true
+                event.preventDefault();
+                const current = parts[parts.length - 1] ?? "";
+                const currentOptIdx = arg.options.indexOf(current);
+                const nextOpt = arg.options[(currentOptIdx + 1) % arg.options.length];
+                parts[parts.length - 1] = nextOpt ?? "";
+                const newText = parts.join(" ");
+                editor?.commands.setContent(newText);
+                editor?.commands.focus("end");
+                return true;
               }
             }
           }
         }
-        if (event.key === 'ArrowUp' && !slashMenuOpen && !fileMentionMenuOpen) {
-          const text = editor?.getText() ?? ''
-          const sel = editor?.state.selection
-          if (sel && sel.$head.pos <= 1 && !text.includes('\n') && commandHistory.length > 0) {
-            event.preventDefault()
-            const nextIdx = Math.min(historyIndex + 1, commandHistory.length - 1)
-            historyIndex = nextIdx
-            editor?.commands.setContent(commandHistory[nextIdx] ?? '')
-            editor?.commands.focus('end')
-            return true
+        if (event.key === "ArrowUp" && !slashMenuOpen && !fileMentionMenuOpen) {
+          const text = editor?.getText() ?? "";
+          const sel = editor?.state.selection;
+          if (sel && sel.$head.pos <= 1 && !text.includes("\n") && commandHistory.length > 0) {
+            event.preventDefault();
+            const nextIdx = Math.min(historyIndex + 1, commandHistory.length - 1);
+            historyIndex = nextIdx;
+            editor?.commands.setContent(commandHistory[nextIdx] ?? "");
+            editor?.commands.focus("end");
+            return true;
           }
         }
-        if (event.key === 'ArrowDown' && !slashMenuOpen && !fileMentionMenuOpen) {
+        if (event.key === "ArrowDown" && !slashMenuOpen && !fileMentionMenuOpen) {
           if (historyIndex >= 0) {
-            event.preventDefault()
-            historyIndex--
+            event.preventDefault();
+            historyIndex--;
             if (historyIndex < 0) {
-              editor?.commands.clearContent()
+              editor?.commands.clearContent();
             } else {
-              editor?.commands.setContent(commandHistory[historyIndex] ?? '')
-              editor?.commands.focus('end')
+              editor?.commands.setContent(commandHistory[historyIndex] ?? "");
+              editor?.commands.focus("end");
             }
-            return true
+            return true;
           }
         }
-        return false
+        return false;
       },
     },
-    content: '',
-  })
+    content: "",
+  });
 
   useEffect(() => {
-    if (!editor) return
+    if (!editor) return;
     const handler = () => {
-      const text = editor.getText()
-      setIsShellInput(text.startsWith('!') && text.length >= 1)
-    }
-    editor.on('update', handler)
-    return () => { editor.off('update', handler) }
-  }, [editor])
+      const text = editor.getText();
+      setIsShellInput(text.startsWith("!") && text.length >= 1);
+    };
+    editor.on("update", handler);
+    return () => {
+      editor.off("update", handler);
+    };
+  }, [editor]);
 
   useEffect(() => {
-    if (editor && onEditorReady) onEditorReady(() => { editor.commands.focus() })
-  }, [editor, onEditorReady])
+    if (editor && onEditorReady)
+      onEditorReady(() => {
+        editor.commands.focus();
+      });
+  }, [editor, onEditorReady]);
 
   useEffect(() => {
-    if (!workToast) return
-    const timer = setTimeout(() => dismissWorkToast(), 3000)
-    return () => clearTimeout(timer)
-  }, [workToast, dismissWorkToast])
+    if (!workToast) return;
+    const timer = setTimeout(() => dismissWorkToast(), 3000);
+    return () => clearTimeout(timer);
+  }, [workToast, dismissWorkToast]);
 
-  const [pendingShellCommand, setPendingShellCommand] = useState<string | null>(null)
+  const [pendingShellCommand, setPendingShellCommand] = useState<string | null>(null);
 
-  const executeShellCommand = useCallback(async (command: string, approved: boolean) => {
-    if (!activeSessionId) return
-    setShellRunning(true)
-    try {
-      const result = await api.shellExec(activeSessionId, command, approved)
-      if (result.requires_approval) {
-        setPendingShellCommand(command)
-        return
+  const executeShellCommand = useCallback(
+    async (command: string, approved: boolean) => {
+      if (!activeSessionId) return;
+      setShellRunning(true);
+      try {
+        const result = await api.shellExec(activeSessionId, command, approved);
+        if (result.requires_approval) {
+          setPendingShellCommand(command);
+          return;
+        }
+        setPendingShellCommand(null);
+        reloadMessages?.();
+      } catch (err) {
+        console.error("Shell exec failed:", err);
+      } finally {
+        setShellRunning(false);
+        setIsShellInput(false);
       }
-      setPendingShellCommand(null)
-      reloadMessages?.()
-    } catch (err) {
-      console.error('Shell exec failed:', err)
-    } finally {
-      setShellRunning(false)
-      setIsShellInput(false)
-    }
-  }, [activeSessionId, reloadMessages])
+    },
+    [activeSessionId, reloadMessages],
+  );
 
-  const handleShellExec = useCallback(async (command: string) => {
-    await executeShellCommand(command, shellMode !== 'ask')
-  }, [executeShellCommand, shellMode])
+  const handleShellExec = useCallback(
+    async (command: string) => {
+      await executeShellCommand(command, shellMode !== "ask");
+    },
+    [executeShellCommand, shellMode],
+  );
 
   const handleShellApprove = useCallback(() => {
-    if (pendingShellCommand) void executeShellCommand(pendingShellCommand, true)
-  }, [pendingShellCommand, executeShellCommand])
+    if (pendingShellCommand) void executeShellCommand(pendingShellCommand, true);
+  }, [pendingShellCommand, executeShellCommand]);
 
-  const handleShellDeny = useCallback(() => setPendingShellCommand(null), [])
+  const handleShellDeny = useCallback(() => setPendingShellCommand(null), []);
 
   const handleSend = useCallback(() => {
-    if (!editor) return
-    const text = editor.getText().trim()
-    if (!text) return
-    pushHistory(text)
-    if (text.startsWith('!') && text.length > 1) {
-      const command = text.slice(1).trim()
+    if (!editor) return;
+    const text = editor.getText().trim();
+    if (!text) return;
+    pushHistory(text);
+    if (text.startsWith("!") && text.length > 1) {
+      const command = text.slice(1).trim();
       if (command) {
-        editor.commands.clearContent()
-        void handleShellExec(command)
-        return
+        editor.commands.clearContent();
+        void handleShellExec(command);
+        return;
       }
     }
-    void flushIfDirty()
-    onSend(text)
-    editor.commands.clearContent()
-  }, [editor, onSend, handleShellExec, flushIfDirty])
+    // Handle /command-name typed without selecting from the autocomplete menu.
+    // The suggestion plugin only fires when the menu is open; once dismissed
+    // (Escape or click-away), the raw slash text remains. We detect and execute
+    // it here so the command still runs reliably without autocomplete.
+    if (text.startsWith("/") && text.length > 1) {
+      const withoutSlash = text.slice(1);
+      const spaceIdx = withoutSlash.indexOf(" ");
+      const cmdName = spaceIdx === -1 ? withoutSlash : withoutSlash.slice(0, spaceIdx);
+      if (cmdName) {
+        editor.commands.clearContent();
+        void handleCommandRef.current({
+          name: cmdName,
+          description: "",
+          category: "",
+          source: "builtin",
+        });
+        return;
+      }
+    }
+    void flushIfDirty();
+    onSend(text);
+    editor.commands.clearContent();
+  }, [editor, onSend, handleShellExec, flushIfDirty]);
 
-  handleSendRef.current = handleSend
+  handleSendRef.current = handleSend;
 
-  const hasContent = editor ? editor.getText().trim().length > 0 : false
+  const hasContent = editor ? editor.getText().trim().length > 0 : false;
 
-  const { data: settings } = useSettings()
-  const developerMode = settings?.developer_mode ?? false
+  const { data: settings } = useSettings();
+  const developerMode = settings?.developer_mode ?? false;
 
-  const composerAboveSlots = usePluginSlots('composer-above')
-  const composerBelowSlots = usePluginSlots('composer-below')
-  const handlePluginAction = usePluginAction()
+  const composerAboveSlots = usePluginSlots("composer-above");
+  const composerBelowSlots = usePluginSlots("composer-below");
+  const handlePluginAction = usePluginAction();
 
   return (
     <div className="shrink-0 px-4 pb-4 pt-2">
       {composerAboveSlots.length > 0 && (
         <div className="mb-1 flex items-center gap-1">
           {composerAboveSlots.map((entry) => {
-            const PluginIcon = resolveIcon(entry.icon)
+            const PluginIcon = resolveIcon(entry.icon);
             return (
               <button
                 key={entry.id}
@@ -410,7 +485,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
                 <PluginIcon className="h-3.5 w-3.5" />
                 <span>{entry.label}</span>
               </button>
-            )
+            );
           })}
         </div>
       )}
@@ -420,13 +495,16 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       <div
         ref={dropRef}
         className={`relative overflow-hidden border bg-bg-elevated shadow-lg transition-colors ${
-          drawer
-            ? 'rounded-b-[10px] rounded-t-none border-t-0'
-            : 'rounded-[10px]'
+          drawer ? "rounded-b-[10px] rounded-t-none border-t-0" : "rounded-[10px]"
         } ${
-          dragOver ? 'border-primary shadow-[inset_3px_0_0_0_var(--color-primary)]' : 'border-border-subtle'
+          dragOver
+            ? "border-primary shadow-[inset_3px_0_0_0_var(--color-primary)]"
+            : "border-border-subtle"
         }`}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => void handleDrop(e)}
       >
@@ -447,7 +525,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           <ShellInfoDrawer
             sessionId={activeSessionId}
             shellMode={shellMode}
-            onToggleDenylist={() => setShellMode(shellMode === 'yolo' ? 'session' : 'yolo')}
+            onToggleDenylist={() => setShellMode(shellMode === "yolo" ? "session" : "yolo")}
           />
         )}
 
@@ -544,8 +622,8 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
           onSend={handleSend}
           onStop={onStop}
           onAttach={() => fileInputRef.current?.click()}
-          onSlash={() => editor?.chain().focus().insertContent('/').run()}
-          onMention={() => editor?.chain().focus().insertContent('@').run()}
+          onSlash={() => editor?.chain().focus().insertContent("/").run()}
+          onMention={() => editor?.chain().focus().insertContent("@").run()}
           shellMode={shellMode}
           onCycleShell={cycleShellMode}
           uploading={uploading}
@@ -555,7 +633,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
       {composerBelowSlots.length > 0 && (
         <div className="mt-1 flex items-center gap-1">
           {composerBelowSlots.map((entry) => {
-            const PluginIcon = resolveIcon(entry.icon)
+            const PluginIcon = resolveIcon(entry.icon);
             return (
               <button
                 key={entry.id}
@@ -566,7 +644,7 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
                 <PluginIcon className="h-3.5 w-3.5" />
                 <span>{entry.label}</span>
               </button>
-            )
+            );
           })}
         </div>
       )}
@@ -575,8 +653,12 @@ export function ChatComposer({ onSend, isStreaming = false, onStop, onEditorRead
         Nanite may produce inaccurate information
       </p>
     </div>
-  )
+  );
 }
 
-export function setSlashMenuOpen(open: boolean) { slashMenuOpen = open }
-export function setFileMentionMenuOpen(open: boolean) { fileMentionMenuOpen = open }
+export function setSlashMenuOpen(open: boolean) {
+  slashMenuOpen = open;
+}
+export function setFileMentionMenuOpen(open: boolean) {
+  fileMentionMenuOpen = open;
+}

@@ -94,6 +94,11 @@ type SpawnRequest struct {
 	Mode            string
 	Provider        string
 	TimeoutSeconds  int
+	// WorkspaceID and AgentProfileID are required for H1 trust resolution
+	// (CW-20260421-0014). Empty strings cause the trust gate to fall back
+	// to TrustNormal.
+	WorkspaceID    string
+	AgentProfileID string
 }
 
 // SpawnResult is the worker output captured by the dispatch primitive.

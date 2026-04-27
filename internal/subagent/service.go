@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -69,15 +70,27 @@ type SettingsReader interface {
 	GetUserSettings() (*store.UserSettings, error)
 }
 
+// TrustResolverIface is the subset of dispatch.TrustResolver that the
+// subagent package depends on. *store.Store satisfies it via ResolveTrust.
+type TrustResolverIface = dispatch.TrustResolver
+
+// EventLogger persists audit events for trust-bypassed dispatches.
+// *store.Store satisfies it; nil = audit logging skipped.
+type EventLogger interface {
+	LogEvent(sessionID, eventType, category, detail, metadata string)
+}
+
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
-	db         *sql.DB
-	runner     Runner
-	poster     MessagePoster
-	approver   ApprovalEmitter
-	settings   SettingsReader
-	streamSink SubagentStreamSink
+	db           *sql.DB
+	runner       Runner
+	poster       MessagePoster
+	approver     ApprovalEmitter
+	settings     SettingsReader
+	streamSink   SubagentStreamSink
+	trustResolver TrustResolverIface
+	eventLogger  EventLogger
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
 	// Cancel(runID) can propagate cancellation into the in-flight
@@ -113,6 +126,14 @@ func NewService(db *sql.DB, runner Runner, poster MessagePoster, approver Approv
 		spawnSem:  make(chan struct{}, spawnFanoutCap),
 	}
 }
+
+// SetTrustResolver wires the H1 trust resolver. Call before any Spawn.
+// When nil, Spawn falls back to TrustNormal for every spawn.
+func (svc *Service) SetTrustResolver(r TrustResolverIface) { svc.trustResolver = r }
+
+// SetEventLogger wires the audit event logger. Call before any Spawn.
+// When nil, trust_dispatch audit rows are skipped (non-fatal).
+func (svc *Service) SetEventLogger(l EventLogger) { svc.eventLogger = l }
 
 // SetStreamSink wires (or unwires) the G-5 status-event sink. Pass nil
 // to disable emission. Safe to call before any Spawn.
@@ -197,70 +218,108 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
-	// Gate predicate: consult user settings + mode.
-	gate := false
-	if svc.settings != nil {
-		us, err := svc.settings.GetUserSettings()
-		if err != nil {
-			return "", fmt.Errorf("load settings: %w", err)
+	// H1 trust resolution: consult the workspace-scoped trust tier before
+	// any approval-gate logic. Tier determines whether to refuse, gate, or
+	// bypass the approval envelope.
+	trust := dispatch.TrustNormal
+	if svc.trustResolver != nil && req.WorkspaceID != "" && req.AgentProfileID != "" {
+		t, terr := svc.trustResolver.ResolveTrust(ctx, req.WorkspaceID, req.AgentProfileID)
+		if terr != nil {
+			// Fail closed: treat resolve error as normal (require approval).
+			slog.Warn("subagent: trust resolve error; defaulting to normal", "err", terr,
+				"workspace_id", req.WorkspaceID, "agent_profile_id", req.AgentProfileID)
+		} else {
+			trust = t
 		}
-		gate = (us.SubagentApprovalRequired && !us.DeveloperMode) || mode == ModeInteractive
-	} else {
-		// Nil settings = tests that don't care about gating; fall through to
-		// ungated unless mode explicitly requests interactive approval.
-		gate = mode == ModeInteractive
 	}
 
-	if gate {
-		// Gated path: validate prerequisites + marshal payload BEFORE any DB
-		// write so a misconfiguration (nil emitter) or marshal error doesn't
-		// leave a row orphaned in 'requested'. Post-insert failures (Emit,
-		// envelope-id persist) compensate by transitioning the run to
-		// 'failed' with an error reason — we preserve the audit trail
-		// rather than deleting.
-		if svc.approver == nil {
-			return "", fmt.Errorf("gated spawn requires approver but none configured")
-		}
-		payload, err := json.Marshal(map[string]any{
-			"run_id":          run.ID,
-			"role":            run.Role,
-			"prompt":          run.Prompt,
-			"mode":            run.Mode,
-			"provider":        run.Provider,
-			"parent_agent_id": run.ParentAgentID,
-			"timeout_seconds": run.TimeoutSeconds,
-			"inputs_json":     run.InputsJSON,
-			"risk_level":      "medium",
+	// Untrusted: refuse outright. ErrUntrustedRole must NOT be bypassed.
+	if trust == dispatch.TrustUntrusted {
+		return "", dispatch.ErrUntrustedRole
+	}
+
+	// Trusted: bypass approval, write audit log, proceed to ungated path.
+	if trust == dispatch.TrustTrusted {
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id":     req.WorkspaceID,
+			"agent_profile_id": req.AgentProfileID,
+			"role":             req.Role,
 		})
-		if err != nil {
-			return "", fmt.Errorf("marshal approval payload: %w", err)
+		if svc.eventLogger != nil {
+			svc.eventLogger.LogEvent(
+				req.ParentSessionID,
+				"trust_dispatch",
+				"trust",
+				fmt.Sprintf("role=%s tier=trusted bypass=approval", req.Role),
+				string(meta),
+			)
+		}
+	} else {
+		// TrustNormal path: evaluate the approval gate predicate.
+		gate := false
+		if svc.settings != nil {
+			us, err := svc.settings.GetUserSettings()
+			if err != nil {
+				return "", fmt.Errorf("load settings: %w", err)
+			}
+			gate = (us.SubagentApprovalRequired && !us.DeveloperMode) || mode == ModeInteractive
+		} else {
+			// Nil settings = tests that don't care about gating; fall through to
+			// ungated unless mode explicitly requests interactive approval.
+			gate = mode == ModeInteractive
 		}
 
-		run.Status = StatusRequested
-		if err := svc.insertRun(ctx, run); err != nil {
-			return "", fmt.Errorf("insert run: %w", err)
-		}
+		if gate {
+			// Gated path: validate prerequisites + marshal payload BEFORE any DB
+			// write so a misconfiguration (nil emitter) or marshal error doesn't
+			// leave a row orphaned in 'requested'. Post-insert failures (Emit,
+			// envelope-id persist) compensate by transitioning the run to
+			// 'failed' with an error reason — we preserve the audit trail
+			// rather than deleting.
+			if svc.approver == nil {
+				return "", fmt.Errorf("gated spawn requires approver but none configured")
+			}
+			payload, err := json.Marshal(map[string]any{
+				"run_id":          run.ID,
+				"role":            run.Role,
+				"prompt":          run.Prompt,
+				"mode":            run.Mode,
+				"provider":        run.Provider,
+				"parent_agent_id": run.ParentAgentID,
+				"timeout_seconds": run.TimeoutSeconds,
+				"inputs_json":     run.InputsJSON,
+				"risk_level":      "medium",
+			})
+			if err != nil {
+				return "", fmt.Errorf("marshal approval payload: %w", err)
+			}
 
-		envelopeID, err := svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)
-		if err != nil {
-			svc.markGatedSpawnFailed(run.ID, "approval envelope emission failed: "+err.Error())
-			return "", fmt.Errorf("emit approval envelope: %w", err)
-		}
+			run.Status = StatusRequested
+			if err := svc.insertRun(ctx, run); err != nil {
+				return "", fmt.Errorf("insert run: %w", err)
+			}
 
-		if _, uerr := svc.db.ExecContext(ctx,
-			`UPDATE subagent_runs SET envelope_instance_id=? WHERE id=?`, envelopeID, run.ID); uerr != nil {
-			svc.markGatedSpawnFailed(run.ID, "envelope id persist failed: "+uerr.Error())
-			return "", fmt.Errorf("persist envelope id: %w", uerr)
-		}
-		run.EnvelopeInstanceID = envelopeID
+			envelopeID, err := svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)
+			if err != nil {
+				svc.markGatedSpawnFailed(run.ID, "approval envelope emission failed: "+err.Error())
+				return "", fmt.Errorf("emit approval envelope: %w", err)
+			}
 
-		svc.emitStatus(run, "")
-		return run.ID, nil
+			if _, uerr := svc.db.ExecContext(ctx,
+				`UPDATE subagent_runs SET envelope_instance_id=? WHERE id=?`, envelopeID, run.ID); uerr != nil {
+				svc.markGatedSpawnFailed(run.ID, "envelope id persist failed: "+uerr.Error())
+				return "", fmt.Errorf("persist envelope id: %w", uerr)
+			}
+			run.EnvelopeInstanceID = envelopeID
+
+			svc.emitStatus(run, "")
+			return run.ID, nil
+		}
 	}
 
-	// Ungated path — existing behavior preserved exactly.
-	// Auto-approve only when the gate predicate above is false
-	// (that is, approval is not required and mode is not interactive).
+	// Ungated path — reached when:
+	//   a) trust == TrustTrusted (approval bypassed, audit written above), or
+	//   b) trust == TrustNormal and approval gate evaluated to false.
 	run.Status = StatusRunning
 	run.StartedAt = run.CreatedAt
 	if err := svc.insertRun(ctx, run); err != nil {

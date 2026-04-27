@@ -560,12 +560,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
 	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, approvalEmitter, cfg.Store)
 	subagentSvc.SetStreamSink(&subagentStreamSink{streams: streams})
+	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
+	subagentSvc.SetTrustResolver(cfg.Store)
+	subagentSvc.SetEventLogger(cfg.Store)
 
 	// G-4: register the subagent-spawn-approval typed response handler so
 	// POST /api/envelopes/:id/respond dispatches to Approve/Reject.
 	chat.RegisterResponseHandler("subagent-spawn-approval", chat.NewSubagentApprovalHandler(subagentSvc))
 
-	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink + approval handler)")
+	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink + approval handler + H1 trust)")
 
 	// G1 (CW-20260420-0016): background-job service. Async, non-session-
 	// bound dispatch for long-running tasks. Backend = PTY MVP (D2);

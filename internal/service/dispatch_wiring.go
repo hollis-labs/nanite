@@ -76,6 +76,8 @@ func (d *dispatchSpawner) Spawn(ctx context.Context, req dispatch.SpawnRequest) 
 		Mode:            mode,
 		Provider:        req.Provider,
 		TimeoutSeconds:  req.TimeoutSeconds,
+		WorkspaceID:     req.WorkspaceID,
+		AgentProfileID:  req.AgentProfileID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("dispatch spawn: %w", err)

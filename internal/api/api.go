@@ -315,6 +315,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/metrics/executions", a.handleGetRecentExecutionMetrics)
 	mux.HandleFunc("GET /api/metrics/utility", a.handleGetUtilityCallSummary)
 	mux.HandleFunc("GET /api/metrics/utility/log", a.handleGetUtilityCallLog)
+
+	// Role Trust (H1, CW-20260421-0014)
+	mux.HandleFunc("GET /api/workspaces/{workspace_id}/roles", a.handleListWorkspaceRoleTrust)
+	mux.HandleFunc("POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleSetWorkspaceRoleTrust)
+	mux.HandleFunc("DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleDeleteWorkspaceRoleTrust)
 }
 
 // jsonResp writes a JSON response with the given status code.

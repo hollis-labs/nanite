@@ -404,3 +404,12 @@ type CatalogInstallRequest struct {
 type SetProviderAPIKeyRequest struct {
 	APIKey string `json:"api_key"`
 }
+
+// --- Trust (H1, CW-20260421-0014) ---
+
+// SetWorkspaceRoleTrustRequest is the body for
+// POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust.
+type SetWorkspaceRoleTrustRequest struct {
+	Tier       string `json:"tier"`        // "untrusted" | "normal" | "trusted"
+	PromotedBy string `json:"promoted_by"` // optional attribution string
+}

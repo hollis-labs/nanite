@@ -154,6 +154,12 @@ type Host struct {
 	// plugin sees the event; returned envelopes are simply discarded.
 	// Set at startup via SetEnvelopeConsumer before plugins load.
 	envelopeConsumer subprocess.EnvelopeConsumer
+	// cardRules is the Stage 1 card detection rule registry (J5 —
+	// CW-20260421-0013). Built-in rules are registered at host init;
+	// plugin rules are registered at plugin load and deregistered at
+	// plugin unload. Access is via RegisterCardRule / UnregisterPluginCardRules
+	// / DetectCardType / GetCardRules.
+	cardRules     cardRulesRegistry
 	logger        plugin.Logger
 	ctx           context.Context
 	ctxCancel     context.CancelFunc
@@ -1485,6 +1491,11 @@ func (h *Host) UnloadPlugin(id string) error {
 			h.logger.Debug("plugin unload: removed commands", "plugin", id, "count", n)
 		}
 	}
+
+	// 16. Card rules (J5 — CW-20260421-0013) — cardRulesRegistry has its own
+	// mutex, so this is safe outside h.mu. Removes all Stage 1 card detection
+	// rules the plugin contributed.
+	h.UnregisterPluginCardRules(id)
 
 	// Task backends — invoke UnregisterBackend outside h.mu (task service
 	// has its own mutex). "local" is protected at the service layer; we

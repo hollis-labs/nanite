@@ -135,6 +135,31 @@ type ManifestRegisters struct {
 	HttpRoutes    []HTTPRouteRegistration     `yaml:"http_routes"`
 	McpServers    []MCPServerRegistration     `yaml:"mcp_servers"`
 	AgentProfiles []AgentProfileRegistration  `yaml:"agent_profiles"`
+	// CardRules declares Stage 1 card detection rules the plugin contributes.
+	// Each rule is evaluated against agent output text; the first matching rule
+	// (by regex pattern or output schema) emits its card_type. Plugin rules run
+	// AFTER built-in rules and can only add new card types, not override builtins.
+	CardRules     []CardRuleRegistration      `yaml:"card_rules"`
+}
+
+// CardRuleRegistration declares a single Stage 1 card detection rule.
+//
+// Exactly one of Pattern or OutputSchema must be set:
+//   - Pattern: a RE2-compatible regular expression matched against the full
+//     agent output text. The first match wins; the captured card_type is emitted.
+//   - OutputSchema: a relative path (inside the plugin dir) to a JSON Schema
+//     file. The output is parsed as JSON and validated against the schema;
+//     a successful validation emits card_type.
+//
+// CardType is the envelope type string to emit when the rule matches (must
+// match ^[a-z][a-z0-9-]*$, same constraint as envelope types).
+//
+// Description is optional human-readable documentation for the rule.
+type CardRuleRegistration struct {
+	CardType     string `yaml:"card_type"`
+	Pattern      string `yaml:"pattern,omitempty"`
+	OutputSchema string `yaml:"output_schema,omitempty"`
+	Description  string `yaml:"description,omitempty"`
 }
 
 // EnvelopeRegistration declares a chat envelope type the plugin emits.

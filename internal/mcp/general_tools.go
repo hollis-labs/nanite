@@ -402,20 +402,40 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
-	if err != nil {
-		return errorResult(fmt.Sprintf("invalid request: %v", err)), nil
-	}
+	resp, fetchErr := fetchWithRetry(ctx, client, rawURL)
+	if fetchErr != nil {
+		// Format a structured error result the model can act on.
+		detail := fetchErr.Detail
+		if detail == "" {
+			detail = "no additional detail"
+		}
+		msg := fmt.Sprintf(
+			"fetch_error: kind=%s url=%s attempts=%d",
+			fetchErr.Kind, fetchErr.URL, fetchErr.Attempts,
+		)
+		if fetchErr.Status != 0 {
+			msg += fmt.Sprintf(" status=%d", fetchErr.Status)
+		}
+		msg += fmt.Sprintf(" detail=%s", detail)
 
-	resp, err := client.Do(req)
-	if err != nil {
-		if errors.Is(err, errSSRFBlocked) {
-			return errorResult(fmt.Sprintf("fetch blocked: %v", err)), nil
+		// Append model-actionable hint per error kind.
+		switch fetchErr.Kind {
+		case FetchErrBlocked:
+			msg += "\nhint: site is blocking automated requests (anti-bot / WAF). Try a different URL or ask the user."
+		case FetchErrEmptyHTML:
+			msg += "\nhint: page appears JS-rendered or behind an anti-bot gate. The tier-1 fetch cannot bypass this — try an API endpoint or a different source."
+		case FetchErr5xxAfterRetries:
+			msg += "\nhint: server returned 5xx on all attempts. The site may be temporarily down — retry later or try a different URL."
+		case FetchErrTimeout:
+			msg += "\nhint: request timed out. The site may be slow or unreachable — try a more specific or smaller URL."
+		case FetchErrDNS:
+			msg += "\nhint: DNS resolution failed. Check that the hostname is correct."
+		case FetchErrTLS:
+			msg += "\nhint: TLS/certificate error. The site may have a misconfigured certificate."
+		case FetchErrRedirectLoop:
+			msg += "\nhint: too many redirects. Try the final destination URL directly."
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
-		}
-		return errorResult(fmt.Sprintf("fetch error: %v", err)), nil
+		return errorResult(msg), nil
 	}
 	defer resp.Body.Close()
 
@@ -430,6 +450,26 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 	truncatedByBody := len(raw) > webFetchBodyCap
 	if truncatedByBody {
 		raw = raw[:webFetchBodyCap]
+	}
+
+	// Detect empty-HTML: a tiny HTML response is almost always a JS-rendered
+	// stub or anti-bot gate. Surface it as a structured error rather than
+	// returning near-empty content that would confuse the model.
+	rawCT := resp.Header.Get("Content-Type")
+	if classifyEmptyHTML(rawCT, len(raw)) {
+		fe := &FetchError{
+			Kind:     FetchErrEmptyHTML,
+			URL:      rawURL,
+			Status:   resp.StatusCode,
+			Attempts: 1,
+			Detail:   fmt.Sprintf("body=%d bytes (threshold %d) content-type=%s", len(raw), emptyHTMLThreshold, rawCT),
+		}
+		msg := fmt.Sprintf(
+			"fetch_error: kind=%s url=%s attempts=%d status=%d detail=%s",
+			fe.Kind, fe.URL, fe.Attempts, fe.Status, fe.Detail,
+		)
+		msg += "\nhint: page appears JS-rendered or behind an anti-bot gate. The tier-1 fetch cannot bypass this — try an API endpoint or a different source."
+		return errorResult(msg), nil
 	}
 
 	// Sanitize upstream bytes before they are stitched into the tool

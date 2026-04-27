@@ -7,6 +7,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/reflex"
 )
 
@@ -18,6 +19,13 @@ import (
 // The Chat agent receives the envelope (via the tool result) and
 // relays it to the frontend. Raw worker output never enters the Chat
 // agent's context window — only the structured envelope does.
+//
+// E2 integration (CW-20260419-0028): when GroundingRecaller is set and
+// NANITE_GROUNDING_ENABLED=true, a memory recall step fires FIRST, before
+// the E1 reflex matcher. Memories above the similarity threshold are
+// prepended to the message as a "## Relevant memories" block (≤200 tokens).
+// Consultation rows are logged; outcome rows are written after the
+// follow-up (caller responsibility via grounding.RecordOutcome).
 //
 // E1 integration (CW-20260419-0027): before calling dispatch.ExecuteTask
 // this function runs the reflex matcher over the message. A matched reflex
@@ -44,6 +52,42 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	if message == "" {
 		return errorResult("message is required"), nil
 	}
+
+	// E2: Pre-strategy memory-grounding recall (CW-20260419-0028).
+	// Fires before E1 reflex matching so that memory context can influence
+	// the message seen by the dispatch layer. The grounding block is
+	// prepended to the dispatch message, not the original user-facing
+	// message — the worker/planner sees the enriched prompt.
+	//
+	// When the gate is off, groundingResult.Enabled == false and no rows
+	// are written. When enabled but no hits exceed the threshold, the
+	// message is unchanged.
+	turnID := strArg(args, "turn_id", "")
+	userID := strArg(args, "user_id", "")
+	dispatchMessage := message // may be prepended with memories block below
+	var groundingConsultationIDs []int64
+	if st.GroundingRecaller != nil {
+		groundingResult := st.GroundingRecaller.Recall(ctx, grounding.RecallInput{
+			UserInput: message,
+			SessionID: sessionID,
+			UserID:    userID,
+			TurnID:    turnID,
+		})
+		if groundingResult.Enabled {
+			// Log all hits (consumed/discarded) before dispatch. Errors are swallowed.
+			groundingConsultationIDs = grounding.LogConsultations(st.GroundingLogger, groundingResult, turnID)
+
+			// Prepend the surfaced memories block to the dispatch message.
+			if block := grounding.SystemPromptBlock(groundingResult); block != "" {
+				dispatchMessage = block + "\n" + message
+			}
+		}
+	}
+	// groundingConsultationIDs is available for post-generation outcome
+	// write-back via grounding.RecordOutcome; the MCP dispatch layer does
+	// not observe the follow-up turn directly, so write-back is the
+	// responsibility of the chat generation layer when it records outcomes.
+	_ = groundingConsultationIDs
 
 	// E1: Run reflex matcher before dispatch classification.
 	// Classify the message to get M1 priors, then let the reflex matcher
@@ -87,7 +131,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	envelope, err := dispatch.ExecuteTask(ctx, st.Dispatch, wrapper, dispatch.ExecuteTaskArgs{
 		SessionID:      sessionID,
 		ParentAgentID:  strArg(args, "parent_agent_id", ""),
-		Message:        message,
+		Message:        dispatchMessage,
 		Provider:       strArg(args, "provider", ""),
 		TimeoutSeconds: intArg(args, "timeout_seconds", 0),
 		ReflexHints:    reflexHints,

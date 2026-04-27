@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/crossapp"
 	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/service/install"
@@ -99,6 +100,20 @@ type SelfToolsTransport struct {
 	// Set post-construction; nil causes sandbox tool calls to error.
 	// CW-20260420-0019 (D6).
 	PythonDispatcher PythonToolDispatcher
+
+	// GroundingRecaller is the pre-strategy memory recall step
+	// (CW-20260419-0028, Phase 5 / E2). When non-nil and
+	// NANITE_GROUNDING_ENABLED=true, callExecuteTask performs a memory
+	// recall before dispatch classification and injects a "## Relevant
+	// memories" block into the message when hits exceed the similarity
+	// threshold. Set post-construction; nil means grounding is skipped
+	// entirely (same effect as the gate being off).
+	GroundingRecaller *grounding.Recaller
+	// GroundingLogger persists consultation and outcome rows.
+	// Set post-construction; nil disables grounding logging (the recall
+	// step still runs when GroundingRecaller is set and the gate is on).
+	// *store.Store satisfies grounding.ConsultationLogger.
+	GroundingLogger grounding.ConsultationLogger
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster

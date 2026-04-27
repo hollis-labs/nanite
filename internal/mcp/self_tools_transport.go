@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/builders"
+	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/crossapp"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/grounding"
@@ -63,6 +65,11 @@ type SelfToolsTransport struct {
 	Messaging *messaging.Service
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
+	// Background is the P9 background-job dispatch service. Set post-
+	// construction from the container; nil-safe (callers receive an
+	// errorResult for the nanite_background_* tools when unset).
+	// CW-20260420-0016.
+	Background *background.Service
 	// Work is set post-construction from the container; nil-safe. When set,
 	// mutating todo/plan tools fire BroadcastWorkChanged after a successful
 	// write so the Work drawer rehydrates. CW-20260418-0044.
@@ -226,6 +233,12 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callSubagentStatus(ctx, args)
 	case "nanite_subagent_cancel":
 		return st.callSubagentCancel(ctx, args)
+	case "nanite_background_job":
+		return st.callBackgroundJob(ctx, args)
+	case "nanite_background_status":
+		return st.callBackgroundStatus(ctx, args)
+	case "nanite_background_cancel":
+		return st.callBackgroundCancel(ctx, args)
 	case "nanite_execute_task":
 		return st.callExecuteTask(ctx, args)
 	case "nanite_chat_search":
@@ -1561,6 +1574,77 @@ func (st *SelfToolsTransport) callSubagentCancel(ctx context.Context, args map[s
 	defer cancel()
 	if err := st.Subagent.Cancel(ctx, strArg(args, "run_id", "")); err != nil {
 		return errorResult(fmt.Sprintf("subagent cancel: %v", err)), nil
+	}
+	return textResult("cancelled"), nil
+}
+
+// --- background-job handlers (CW-20260420-0016) ---
+//
+// nanite_background_job dispatches the P3 PatternBackground gate
+// before delegating to background.Service. Async by definition —
+// returns immediately with a job_id; the result envelope arrives
+// via messaging when the backend completes.
+
+func (st *SelfToolsTransport) callBackgroundJob(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Background == nil {
+		return errorResult("background service not configured"), nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
+	defer cancel()
+
+	req := background.JobRequest{
+		Agent:                strArg(args, "agent", ""),
+		Task:                 strArg(args, "task", ""),
+		OriginatingSessionID: strArg(args, "originating_session_id", ""),
+		OriginatingAgentID:   strArg(args, "originating_agent_id", ""),
+		Budget: background.JobBudget{
+			WallClockSeconds: intArg(args, "wall_clock_seconds", 0),
+			MaxOutputBytes:   intArg(args, "max_output_bytes", 0),
+		},
+	}
+	// The MCP boundary always asserts PatternBackground here — the tool
+	// is the gate's user-facing surface, so any caller invoking it has
+	// classified the request as background-shaped (or is misusing the
+	// tool). The Service-layer gate is still the authoritative check;
+	// this just makes the boundary obvious to readers.
+	id, err := st.Background.Submit(ctx, classify.PatternBackground, req)
+	if err != nil {
+		return errorResult(fmt.Sprintf("background submit: %v", err)), nil
+	}
+	out := map[string]any{"job_id": id}
+	data, _ := json.Marshal(out)
+	return textResult(string(data)), nil
+}
+
+func (st *SelfToolsTransport) callBackgroundStatus(_ context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Background == nil {
+		return errorResult("background service not configured"), nil
+	}
+	jobID := strArg(args, "job_id", "")
+	if jobID == "" {
+		return errorResult("job_id is required"), nil
+	}
+	res, err := st.Background.Result(jobID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("background status: %v", err)), nil
+	}
+	data, err := json.Marshal(res)
+	if err != nil {
+		return errorResult(fmt.Sprintf("background status marshal: %v", err)), nil
+	}
+	return textResult(string(data)), nil
+}
+
+func (st *SelfToolsTransport) callBackgroundCancel(_ context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Background == nil {
+		return errorResult("background service not configured"), nil
+	}
+	jobID := strArg(args, "job_id", "")
+	if jobID == "" {
+		return errorResult("job_id is required"), nil
+	}
+	if err := st.Background.Cancel(jobID); err != nil {
+		return errorResult(fmt.Sprintf("background cancel: %v", err)), nil
 	}
 	return textResult("cancelled"), nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
+	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
@@ -67,6 +68,12 @@ type Container struct {
 	// Subagent service — inline spawn / status / cancel for
 	// primary-agent-dispatched child agents (T9).
 	Subagent *subagent.Service
+
+	// Background service — non-session-bound, async dispatch for
+	// long-running work (P9 BackgroundJob, CW-20260420-0016). Result
+	// envelopes ride the Messaging service back to the originating
+	// session as channel=inbox notifications.
+	Background *background.Service
 
 	// Internal todo/plan system.
 	Todos TodoService
@@ -546,6 +553,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink + approval handler)")
 
+	// G1 (CW-20260420-0016): background-job service. Async, non-session-
+	// bound dispatch for long-running tasks. Backend = PTY MVP (D2);
+	// agent-mux swap (D3) is a wiring change behind the same Backend
+	// interface. Result envelopes ride the messaging service back to the
+	// originating session as channel=inbox notifications.
+	backgroundSvc := background.NewService(background.NewPTYBackend(), messagingSvc)
+	slog.Info("service container: background-job service enabled (PTY backend)")
+
 	// Worker manager — requires ChatService for delegation.
 	// Uses SetWorkers to break the circular dependency (ChatService <-> WorkerManager).
 	var workers *worker.Manager
@@ -641,6 +656,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		MCP:                 cfg.MCP,
 		Messaging:           messagingSvc,
 		Subagent:            subagentSvc,
+		Background:          backgroundSvc,
 		Todos:               todos,
 		Conduit:             conduitInstance,
 		Memory:              memorySvc,

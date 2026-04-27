@@ -674,6 +674,58 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"run_id"},
 			},
 		},
+		// --- Background job (P9 BackgroundJob, CW-20260420-0016) ---
+		{
+			Name: "nanite_background_job",
+			Description: "Dispatch a long-running task as an async, non-session-bound background job. Returns a job_id immediately; the result lands as an inbox notification on the originating session when the job completes.\n\n" +
+				"**Contrast with sibling primitives — pick the right one:**\n" +
+				"- **peer_query** (sync, in-session): a single quick question to a peer agent; you wait for the reply inline. Lightest.\n" +
+				"- **nanite_spawn_subagent** (sync/async, in-session): a delegated subtask whose lifecycle is tied to this session. Medium.\n" +
+				"- **nanite_background_job** (async, NON-session-bound): heavy or long-running work that should not block this session. Reply arrives via the messaging inbox when done — possibly after this turn ends.\n\n" +
+				"**When to use:** Codebase crawls, multi-file research, transcript analysis, or anything you'd otherwise abandon partway through because the calling turn ends. Only fires when the P3 ScopeTier classifier says ExecutionPattern=background — pass that pattern explicitly.\n\n" +
+				"**Required context:** task (the prompt the spawned process runs), originating_session_id, originating_agent_id. agent (role slug) and budget are optional (defaults: 30 min wall-clock, 1 MiB output cap).\n\n" +
+				"**Output shape:** {job_id}. The completion envelope (channel=inbox, kind=notification, from_agent_id=background-job) carries a structured JobResult JSON in payload_json with status (succeeded/failed/cancelled), output, error, started_at, completed_at. Poll nanite_message_inbox after the turn or chain via nanite_background_status.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"task":                   map[string]any{"type": "string", "description": "The prompt / instruction the background process executes."},
+					"agent":                  map[string]any{"type": "string", "description": "Optional agent slug for the dispatched job. Backend-defined."},
+					"originating_session_id": map[string]any{"type": "string", "description": "Session that submitted the job; the completion envelope is delivered here."},
+					"originating_agent_id":   map[string]any{"type": "string", "description": "Agent that submitted the job; conventionally the to_agent on the completion envelope."},
+					"wall_clock_seconds":     map[string]any{"type": "integer", "description": "Optional wall-clock cap. 0 uses default (1800s)."},
+					"max_output_bytes":       map[string]any{"type": "integer", "description": "Optional captured-output cap. 0 uses default (1 MiB)."},
+				},
+				"required": []string{"task", "originating_session_id", "originating_agent_id"},
+			},
+		},
+		{
+			Name: "nanite_background_status",
+			Description: "Return the current lifecycle state and (when terminal) result of a background job.\n\n" +
+				"**When to use:** After nanite_background_job, to poll progress. Prefer waiting for the inbox notification; this is for active polling cases.\n\n" +
+				"**Required context:** job_id from the nanite_background_job response.\n\n" +
+				"**Output shape:** {job_id, status: pending|running|succeeded|failed|cancelled, output, error, started_at, completed_at, output_truncated}.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"job_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"job_id"},
+			},
+		},
+		{
+			Name: "nanite_background_cancel",
+			Description: "Cancel an in-flight background job. Idempotent — calling on an already-terminal job is a no-op.\n\n" +
+				"**When to use:** When the background work is no longer needed (e.g. the user cancelled the request, or a faster path materialized). The backend kills the process group; descendants are reaped.\n\n" +
+				"**Required context:** job_id from the nanite_background_job response.\n\n" +
+				"**Output shape:** Confirmation of cancellation or no-op if already terminal.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"job_id": map[string]any{"type": "string"},
+				},
+				"required": []string{"job_id"},
+			},
+		},
 		// --- Scratchpad tools (P4 Scratchpad, CW-20260419-0025) ---
 		{
 			Name: "nanite_scratchpad_write",

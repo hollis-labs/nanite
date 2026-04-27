@@ -283,6 +283,7 @@ func cmdServe(args []string) {
 	selfTools.TodoStore = s
 	selfTools.Messaging = container.Messaging
 	selfTools.Subagent = container.Subagent
+	selfTools.Background = container.Background
 	selfTools.Work = container.Streams
 
 	// CW-20260421-0010 (B3): wire the executeTask dispatch primitive.

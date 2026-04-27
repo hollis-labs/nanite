@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, Bot, Info, Loader2, Sparkles } from "lucide-react";
+import { ArrowDown, Bot, ChevronDown, ChevronRight, Info, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
 import type { AgentMode, Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
+import { useSettings } from "@/hooks/useSettings";
 import { ChatMessage } from "./ChatMessage";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
@@ -78,6 +79,14 @@ export function ChatTranscript({
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const queryClient = useQueryClient();
+
+  // F4 (CW-20260419-0029) — narration strip + collapse-pill.
+  const streamingNarration = useChatStore((s) => s.streamingNarration);
+  const streamingFinal = useChatStore((s) => s.streamingFinal);
+  const { data: settings } = useSettings();
+  const developerMode = settings?.developer_mode ?? false;
+  // Post-stream: narration collapses to a pill; dev-mode defaults to expanded.
+  const [narrationExpanded, setNarrationExpanded] = useState(false);
 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
@@ -338,8 +347,8 @@ export function ChatTranscript({
 
         {isStreaming && toolWarnings.length > 0 && <ToolWarningBanner warnings={toolWarnings} />}
 
-        {/* Streaming message */}
-        {isStreaming && streamingContent && (
+        {/* Streaming message — F4 (CW-20260419-0029) narration strip + answer bubble */}
+        {isStreaming && (
           <div className="flex gap-3">
             <div
               className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] ${avatarStyle.bg} ${avatarStyle.text}`}
@@ -350,25 +359,27 @@ export function ChatTranscript({
               <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
                 Nanite
               </div>
-              <MessageContent content={streamingContent} role="assistant" />
-              {streamStalled && <ThinkingIndicator />}
-            </div>
-          </div>
-        )}
 
-        {/* Thinking indicator — before content arrives */}
-        {isStreaming && !streamingContent && (
-          <div className="flex gap-3">
-            <div
-              className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] ${avatarStyle.bg} ${avatarStyle.text}`}
-            >
-              <Bot className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
-                Nanite
-              </div>
-              <ThinkingIndicator />
+              {/* Narration strip — live while narration is arriving; shows ThinkingIndicator when nothing yet */}
+              {streamingNarration ? (
+                <div className="mb-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2">
+                  <div className="font-mono text-[10px] uppercase tracking-wide text-fg-faint mb-1">
+                    Working…
+                  </div>
+                  <div className="text-[12px] leading-relaxed text-fg-muted line-clamp-3">
+                    {streamingNarration}
+                  </div>
+                </div>
+              ) : !streamingFinal ? (
+                // No narration and no final text yet — show the baseline thinking dots
+                <ThinkingIndicator />
+              ) : null}
+
+              {/* Final answer area — renders as it arrives */}
+              {streamingFinal && (
+                <MessageContent content={streamingFinal} role="assistant" />
+              )}
+              {streamStalled && <ThinkingIndicator />}
             </div>
           </div>
         )}

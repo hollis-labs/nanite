@@ -1,4 +1,4 @@
-import { Bot, User, BookmarkCheck } from 'lucide-react'
+import { Bot, User, BookmarkCheck, ChevronDown, ChevronRight } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import type { Message, AgentMode, Envelope } from '@/lib/types'
 import { MessageContent } from './MessageContent'
@@ -145,6 +145,11 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
   const contextMenuSlots = usePluginSlots('context-menu:message')
   const handlePluginAction = usePluginAction()
 
+  // F4 (CW-20260419-0029) — narration collapse-pill.
+  // dev-mode: default expanded; otherwise collapsed.
+  const developerMode = settings?.developer_mode ?? false
+  const [narrationExpanded, setNarrationExpanded] = useState(developerMode)
+
   // Parse structured message format (v=1) or fall through to legacy raw text.
   const { text: displayText, structured } = useMemo(
     () => parseStructuredContent(message.content),
@@ -164,6 +169,27 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
     } catch { /* not JSON */ }
     return null
   }, [message.role, message.metadata])
+
+  // F4 (CW-20260419-0029) — narration thinking stored in metadata.thinking.
+  // Old messages without narration render as-is; new messages show the pill.
+  const narrationThinking = useMemo(() => {
+    if (message.role !== 'assistant' || !message.metadata) return null
+    try {
+      const meta = typeof message.metadata === 'string'
+        ? JSON.parse(message.metadata)
+        : message.metadata
+      return typeof meta?.thinking === 'string' && meta.thinking.length > 0
+        ? meta.thinking as string
+        : null
+    } catch { /* not JSON */ }
+    return null
+  }, [message.role, message.metadata])
+
+  // Rough step count: split by newlines as narration is stored paragraph-per-iteration.
+  const narrationStepCount = useMemo(() => {
+    if (!narrationThinking) return 0
+    return narrationThinking.split('\n').filter((l: string) => l.trim().length > 0).length
+  }, [narrationThinking])
 
   const isShellExec = shellMeta !== null
   const isUser = message.role === 'user'
@@ -299,6 +325,29 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             )
           })}
         </div>
+        {/* F4 (CW-20260419-0029) — narration collapse-pill for assistant messages */}
+        {!isUser && narrationThinking && (
+          <div className="mb-2">
+            <button
+              type="button"
+              onClick={() => setNarrationExpanded((v) => !v)}
+              className="flex items-center gap-1.5 rounded-[6px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[11px] font-mono uppercase tracking-wide text-fg-faint hover:text-fg-muted hover:bg-surface-hover transition-colors"
+              aria-expanded={narrationExpanded}
+            >
+              {narrationExpanded
+                ? <ChevronDown className="w-3 h-3" />
+                : <ChevronRight className="w-3 h-3" />}
+              {narrationExpanded
+                ? 'Hide agent process'
+                : `Agent worked through ${narrationStepCount} step${narrationStepCount !== 1 ? 's' : ''}`}
+            </button>
+            {narrationExpanded && (
+              <div className="mt-1.5 rounded-[6px] border border-border-subtle bg-surface px-3 py-2.5 text-[12px] leading-relaxed text-fg-muted whitespace-pre-wrap">
+                {narrationThinking}
+              </div>
+            )}
+          </div>
+        )}
         {(
           <div
             className={`${

@@ -23,6 +23,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
+	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/messaging"
@@ -136,6 +137,10 @@ type Container struct {
 	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil when developer_mode is false.
 	Inspector *inspectsvc.Service
+
+	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
+	// Always non-nil; instantiated once at container boot.
+	LoopDetector *loopdetect.Detector
 
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
@@ -530,6 +535,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Info("service container: inspector service enabled (developer_mode=true)")
 	}
 
+	// I2 (CW-20260420-0029): loop detector — always-on, per-session windows.
+	// Instantiated once at container boot; shared across all sessions.
+	loopDetector := loopdetect.New()
+	slog.Info("service container: loop detector enabled (I2, fingerprint-based)")
+
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -562,6 +572,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		StrategyLogger: cfg.Store,
 		// I1 (CW-20260426-0004): inspector — nil when developer_mode=false.
 		Inspector: inspectorSvc,
+		// I2 (CW-20260420-0029): loop detector — always-on.
+		LoopDetector: loopDetector,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed
@@ -734,6 +746,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Permissions:         permissions,
 		AdapterRegistry:     adapterRegistry,
 		Inspector:           inspectorSvc,
+		LoopDetector:        loopDetector,
 		RunStore:            runStore,
 		WorkflowBroadcaster: workflowBroadcaster,
 		AppConfig:           cfg.AppConfig,

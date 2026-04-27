@@ -208,6 +208,16 @@ func (s *Service) RecordScopeTier(sessionID, turnID string, tier string) {
 	})
 }
 
+// RecordLoopStatus records the I2 loop-detection result for the turn.
+// Overwrites any previously-recorded LoopStatus for this turn.
+func (s *Service) RecordLoopStatus(sessionID, turnID string, rec *LoopRecord) {
+	sb := s.getOrCreate(sessionID)
+	sb.upsert(turnID, func(snap *TurnSnapshot) {
+		snap.SessionID = sessionID
+		snap.LoopStatus = rec
+	})
+}
+
 // Snapshot returns the TurnSnapshot for (sessionID, turnID), or nil if not
 // found.
 func (s *Service) Snapshot(sessionID, turnID string) *TurnSnapshot {

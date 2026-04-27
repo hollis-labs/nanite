@@ -15,6 +15,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
+	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
@@ -474,6 +475,40 @@ func (s *chatServiceImpl) executeSingleTool(
 			LatencyMs:  duration.Milliseconds(),
 			CacheState: "n/a",
 		})
+	}
+
+	// I2 (CW-20260420-0029): fingerprint-based loop detection.
+	// Non-blocking: Record acquires its own mutex and returns immediately.
+	if s.loopDetector != nil && ls != nil {
+		argsJSON, _ := json.Marshal(tu.Input)
+		turnID := ""
+		if ls.inspectorTurnID != "" {
+			turnID = ls.inspectorTurnID
+		}
+		sig := loopdetect.Signal{
+			SessionID: sessionID,
+			TurnID:    turnID,
+			ToolName:  tu.Name,
+			Args:      json.RawMessage(argsJSON),
+			Timestamp: time.Now(),
+		}
+		if det, detected := s.loopDetector.Record(sig); detected {
+			slog.Warn("loop_detected",
+				"session_id", sessionID,
+				"tool_name", det.ToolName,
+				"fingerprint", string(det.Fingerprint),
+				"count", det.Count,
+				"window_size", det.WindowSize,
+				"turn_id", det.DetectedAtTurn,
+				"reason", det.Reason,
+			)
+			if s.inspector != nil && det.DetectedAtTurn != "" {
+				s.inspector.RecordLoopStatus(sessionID, det.DetectedAtTurn, &inspectsvc.LoopRecord{
+					Detected: true,
+					Reason:   det.Reason,
+				})
+			}
+		}
 	}
 
 	return toolExecResult{

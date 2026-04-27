@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
+	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -129,6 +130,10 @@ type ChatServiceConfig struct {
 	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil-safe: when nil the inspector is disabled. Set when developer_mode=true.
 	Inspector *inspectsvc.Service
+
+	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
+	// nil-safe: when nil loop detection is disabled. Shared across all sessions.
+	LoopDetector *loopdetect.Detector
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -184,6 +189,10 @@ type chatServiceImpl struct {
 	// inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil-safe: wired only when developer_mode=true.
 	inspector *inspectsvc.Service
+
+	// loopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
+	// nil-safe: disabled when nil.
+	loopDetector *loopdetect.Detector
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -249,6 +258,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		sessionEventWriter:  cfg.SessionEventWriter,
 		strategyLogger:      cfg.StrategyLogger,
 		inspector:           cfg.Inspector,
+		loopDetector:        cfg.LoopDetector,
 	}
 }
 

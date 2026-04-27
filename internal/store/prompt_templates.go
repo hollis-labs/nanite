@@ -3,8 +3,10 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -198,8 +200,15 @@ func (s *Store) RemovePromptTemplateFromAgent(agentID, templateID string) error 
 	return nil
 }
 
+// once ensures the canonical template missing warning is emitted only once per process.
+var (
+	canonicalTemplateMissingOnce sync.Once
+)
+
 // ComposePromptForAgent assembles the system prompt for an agent by merging all assigned
 // prompt templates in priority order, resolving {{var}} placeholders from the variables map.
+// If the agent is file-default (the canonical Chat agent) and has no templates assigned,
+// emits a one-shot warning indicating the canonical chat-role-harness template is missing.
 func (s *Store) ComposePromptForAgent(agentID string, variables map[string]string) (string, error) {
 	templates, err := s.ListPromptTemplatesForAgent(agentID)
 	if err != nil {
@@ -207,6 +216,20 @@ func (s *Store) ComposePromptForAgent(agentID string, variables map[string]strin
 	}
 
 	if len(templates) == 0 {
+		// Warn once if the canonical Chat agent is missing its canonical template.
+		// The chat-role-harness template is seeded by migration 027 and should be
+		// assigned to file-default; its absence indicates a migration failure or
+		// manual deletion, causing sessions to silently fall back to agent.SystemPrompt.
+		if agentID == "file-default" {
+			canonicalTemplateMissingOnce.Do(func() {
+				slog.Warn(
+					"store: canonical chat-role-harness template missing for file-default agent",
+					"template_slug", "chat-role-harness",
+					"agent_id", "file-default",
+					"migration", "027_chat_role_harness_prompt.sql",
+				)
+			})
+		}
 		return "", nil
 	}
 

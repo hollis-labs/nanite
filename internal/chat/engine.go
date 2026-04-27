@@ -75,11 +75,14 @@ type ToolWarningPayload struct {
 // assistant's answer. Old clients without phase awareness receive the field as
 // omitempty so the change is additive.
 //
-// F3 (interleaved-thinking-2025-05-14) will add PhaseThinking for Claude
-// think-block content; extend the value space here without breaking changes.
+// PhaseThinking (F3 / CW-20260420-0023) carries interleaved thinking blocks
+// from the interleaved-thinking-2025-05-14 beta. These arrive between tool
+// calls as signed think-block content. The FE routes them to the "Working…"
+// strip and the post-stream collapse-pill.
 const (
 	PhaseNarration = "narration" // inter-iteration prose, between tool_use blocks
 	PhaseFinal     = "final"     // post-end_turn text — the answer bubble
+	PhaseThinking  = "thinking"  // F3: interleaved thinking block content (signed)
 )
 
 // StreamEvent is the event sent to SSE clients.

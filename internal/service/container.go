@@ -561,6 +561,18 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	backgroundSvc := background.NewService(background.NewPTYBackend(), messagingSvc)
 	slog.Info("service container: background-job service enabled (PTY backend)")
 
+	// F5 follow-up (CW-20260420-0022): wire the HintDispatcher adapter
+	// into ContextClient so NANITE_THINK_BLOCK_V2_ENABLED=true actually
+	// fires v2 dynamic hints in production. Without this assignment the
+	// production path falls through to v1 static hints (matching the
+	// pre-Phase-7 behavior). Adapter is dispatch.Spawner-backed, slug
+	// "hint-selector"; sub-millisecond cost when v2 is disabled because
+	// the IsThinkBlockV2Enabled gate runs before the dispatcher is
+	// consulted.
+	hintSpawner := NewDispatchSpawner(subagentSvc, cfg.Store)
+	contextClient.HintDispatcher = NewHintDispatchAdapter(hintSpawner)
+	slog.Info("service container: hint dispatcher wired (F5 production wiring, CW-20260420-0022)")
+
 	// Worker manager — requires ChatService for delegation.
 	// Uses SetWorkers to break the circular dependency (ChatService <-> WorkerManager).
 	var workers *worker.Manager

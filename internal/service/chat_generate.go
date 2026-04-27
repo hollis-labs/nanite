@@ -20,6 +20,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/effort"
+	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -340,6 +341,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	chatMessages := slotResult.Messages
 	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
 
+	// I1 (CW-20260426-0004): inspector — allocate a turn ID and record slots.
+	// turnID is carried forward through the rest of generateResponse so
+	// broker/tool producers can append to the same snapshot.
+	var inspectorTurnID string
+	if s.inspector != nil {
+		inspectorTurnID = s.inspector.NextTurnID(sessionID)
+		s.inspector.EnsureTurn(sessionID, inspectorTurnID)
+		if slotResult.Window != nil {
+			s.recordInspectorSlots(sessionID, inspectorTurnID, slotResult)
+		}
+		s.recordInspectorLLMMessages(sessionID, inspectorTurnID, chatMessages, systemPrompt)
+	}
+
 	// S3b — emit a tools-variant slot_changed envelope when the classifier
 	// transitioned this turn's Tools slot between pointer / full / partial.
 	emitToolSlotChangedIfNeeded(ch, slotResult.ToolCache)
@@ -407,6 +421,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// P3 (CW-20260420-0013): pre-loop classification. Downstream consumers
 	// read via loopState.Classification().
 	classifyAndAttach(ls, sessionID, userContent, toolNames)
+
+	// I1 (CW-20260426-0004): attach turn ID to loop state so broker/tool
+	// producers can record to the same snapshot.
+	ls.inspectorTurnID = inspectorTurnID
+
+	// I1 (CW-20260426-0004): record scope tier to inspector (B2 already shipped).
+	if s.inspector != nil && inspectorTurnID != "" {
+		classifiedTier, _ := ls.Classification()
+		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
+	}
 
 	// F1 (CW-20260420-0014): Effort scalar. Extracted from request context;
 	// defaults to EffortNormal when the caller did not set it. Biases the
@@ -1047,6 +1071,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					&ls.consecutiveEmptyRequests, &ls.totalRequestToolsCalls, ls.maxRequestToolsCalls,
 					resultBlocks, ls.toolCallRefs,
 					sessionID, &ls.reflectionFired,
+					ls.inspectorTurnID,
 				)
 			} else {
 				regularTools = append(regularTools, tu)
@@ -1963,6 +1988,7 @@ func (s *chatServiceImpl) handleRequestTools(
 	toolCallRefs []chat.ToolCallRef,
 	sessionID string,
 	reflectionFired *bool,
+	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
 ) ([]provider.ContentBlock, []chat.ToolCallRef) {
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
@@ -2001,7 +2027,7 @@ func (s *chatServiceImpl) handleRequestTools(
 		)
 		slog.Info("chat-service: request_tools reflected (D3)",
 			"session_id", sessionID, "consecutive_empty", *consecutiveEmpty, "total_calls", *totalCalls)
-		s.persistBrokerCall(sessionID, requestedIntent, "reflected", *consecutiveEmpty, *totalCalls, 0, reflection)
+		s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, "reflected", *consecutiveEmpty, *totalCalls, 0, reflection, sortedKeys(loadedTools), "")
 
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: reflection}
 		resultBlocks = append(resultBlocks, provider.ContentBlock{
@@ -2028,7 +2054,7 @@ func (s *chatServiceImpl) handleRequestTools(
 			reason, strings.Join(loadedList, ", "),
 		)
 		slog.Warn("chat-service: request_tools halted", "reason", reason, "session_id", sessionID)
-		s.persistBrokerCall(sessionID, requestedIntent, "halted", *consecutiveEmpty, *totalCalls, 0, "")
+		s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, "halted", *consecutiveEmpty, *totalCalls, 0, "", sortedKeys(loadedTools), "")
 
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 		resultBlocks = append(resultBlocks, provider.ContentBlock{
@@ -2063,7 +2089,7 @@ func (s *chatServiceImpl) handleRequestTools(
 	slog.Info("chat-service: request_tools loaded",
 		"count", len(loaded), "consecutive_empty", *consecutiveEmpty,
 		"tools", loaded, "session_id", sessionID, "outcome", outcome)
-	s.persistBrokerCall(sessionID, requestedIntent, outcome, *consecutiveEmpty, *totalCalls, len(loaded), "")
+	s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, outcome, *consecutiveEmpty, *totalCalls, len(loaded), "", loaded, "")
 
 	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 	resultBlocks = append(resultBlocks, provider.ContentBlock{
@@ -2087,14 +2113,27 @@ func sortedKeys(m map[string]bool) []string {
 }
 
 // persistBrokerCall records every request_tools meta-tool call into the
-// broker_decisions table. Best-effort: a failed write is logged but never
-// gates the loop. The chat service's store-backed BrokerDecisionLogger is
-// only available via toolServiceImpl; we route through that adapter so
-// tests with a stub ToolService don't have to provide a Store.
+// broker_decisions table AND the inspector ring buffer (when inspector is
+// wired). Best-effort: a failed write is logged but never gates the loop.
+// The chat service's store-backed BrokerDecisionLogger is only available via
+// toolServiceImpl; we route through that adapter so tests with a stub
+// ToolService don't have to provide a Store.
 func (s *chatServiceImpl) persistBrokerCall(
 	sessionID, intent, outcome string,
 	consecutiveEmpty, totalCalls, loadedCount int,
 	reflectionQuery string,
+) {
+	s.persistBrokerCallEx(sessionID, "", intent, outcome, consecutiveEmpty, totalCalls, loadedCount, reflectionQuery, nil, "")
+}
+
+// persistBrokerCallEx is the extended form used by handleRequestTools to also
+// record the broker decision into the inspector aggregator.
+func (s *chatServiceImpl) persistBrokerCallEx(
+	sessionID, inspectorTurnID, intent, outcome string,
+	consecutiveEmpty, totalCalls, loadedCount int,
+	reflectionQuery string,
+	selectedTools []string,
+	layerReached string,
 ) {
 	if sessionID == "" {
 		return
@@ -2110,6 +2149,20 @@ func (s *chatServiceImpl) persistBrokerCall(
 		sessionID, intent, outcome,
 		consecutiveEmpty, totalCalls, loadedCount, reflectionQuery,
 	)
+	// I1 (CW-20260426-0004): additive — also emit to inspector.
+	if s.inspector != nil && inspectorTurnID != "" {
+		d := inspectsvc.BrokerDecision{
+			Intent:           intent,
+			Outcome:          outcome,
+			SelectedTools:    selectedTools,
+			LayerReached:     layerReached,
+			ConsecutiveEmpty: consecutiveEmpty,
+			TotalCalls:       totalCalls,
+			LoadedCount:      loadedCount,
+			ReflectionQuery:  reflectionQuery,
+		}
+		s.inspector.RecordBrokerDecision(sessionID, inspectorTurnID, d)
+	}
 }
 
 // brokerCallPersister is the narrow surface persistBrokerCall uses. It is

@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/filter"
+	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/go-providers/provider"
@@ -124,6 +125,10 @@ type ChatServiceConfig struct {
 	// planning still runs and applies its MaxTurns to the loop budget,
 	// but no row is written. *store.Store satisfies the interface.
 	StrategyLogger strategyDecisionLogger
+
+	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
+	// nil-safe: when nil the inspector is disabled. Set when developer_mode=true.
+	Inspector *inspectsvc.Service
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -175,6 +180,10 @@ type chatServiceImpl struct {
 	// strategyLogger persists v1 strategy decisions. nil-safe.
 	// (CW-20260419-0026, Phase 5 / E3.)
 	strategyLogger strategyDecisionLogger
+
+	// inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
+	// nil-safe: wired only when developer_mode=true.
+	inspector *inspectsvc.Service
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -239,6 +248,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		activeGen:               make(map[string]*inFlightGen),
 		sessionEventWriter:  cfg.SessionEventWriter,
 		strategyLogger:      cfg.StrategyLogger,
+		inspector:           cfg.Inspector,
 	}
 }
 

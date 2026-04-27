@@ -205,6 +205,12 @@ type loopState struct {
 	// Evicted automatically: loopState is created fresh per generateResponse call.
 	scratchpad      map[string]any
 	scratchpadBytes int
+
+	// I1 (CW-20260426-0004): inspector turn ID for the dev-mode aggregator.
+	// Set by generateResponse after slot assembly; propagated into
+	// handleRequestTools and executeSingleTool so broker/tool producers
+	// can append to the same per-turn snapshot.
+	inspectorTurnID string
 }
 
 // maxCompactRecoverableAttempts caps the number of synchronous compaction

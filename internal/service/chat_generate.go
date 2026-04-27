@@ -894,6 +894,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					ctx, tu, ch, tools, ls.loadedTools,
 					&ls.consecutiveEmptyRequests, &ls.totalRequestToolsCalls, ls.maxRequestToolsCalls,
 					resultBlocks, ls.toolCallRefs,
+					sessionID, &ls.reflectionFired,
 				)
 			} else {
 				regularTools = append(regularTools, tu)
@@ -1739,6 +1740,20 @@ func classifyModeFromAgentTags(agent *store.AgentProfile) string {
 }
 
 // handleRequestTools processes a request_tools meta-tool call within the tool loop.
+//
+// Phase 5 / D3 (CW-20260419-0011) — reasoning-augmented broker:
+//
+//   - The first time the per-turn cap trips, the broker emits a REFLECTION
+//     prompt instead of a hard halt. It lists what's loaded and asks the
+//     LLM to restate the underlying goal in one sentence. The next
+//     request_tools call uses that restatement as a fresh query.
+//   - If the cap trips a SECOND time within the same turn (i.e. the LLM
+//     reflected once already and is still asking), we fall back to the
+//     pre-Phase-5 hard halt — we don't reflect repeatedly.
+//   - Every call is persisted to broker_decisions with intent + outcome +
+//     consecutive_empty + total_calls so future Phase 4 mining work has a
+//     ground-truth signal to learn from. (Phase 4 mining itself is
+//     deferred — see follow-ups.)
 func (s *chatServiceImpl) handleRequestTools(
 	ctx context.Context,
 	tu provider.ToolUseBlock,
@@ -1750,24 +1765,63 @@ func (s *chatServiceImpl) handleRequestTools(
 	maxCalls int,
 	resultBlocks []provider.ContentBlock,
 	toolCallRefs []chat.ToolCallRef,
+	sessionID string,
+	reflectionFired *bool,
 ) ([]provider.ContentBlock, []chat.ToolCallRef) {
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
 
+	// Pull the LLM-supplied intent up front so it ends up in every
+	// broker_decisions row (selected, loaded, empty, halted, reflected).
+	requestedIntent := ""
+	if tu.Input != nil {
+		if v, ok := tu.Input["intent"]; ok {
+			if s, ok := v.(string); ok {
+				requestedIntent = s
+			}
+		}
+	}
+
+	capTripped := *totalCalls > maxCalls || *consecutiveEmpty >= 2
+
+	// First cap-trip → reflection. Only if reflectionFired is non-nil and
+	// hasn't fired yet for this turn. This is the Phase 5 D3 entry point.
+	if capTripped && reflectionFired != nil && !*reflectionFired {
+		*reflectionFired = true
+		loadedList := sortedKeys(loadedTools)
+		reflection := fmt.Sprintf(
+			"Tool discovery soft cap reached (consecutive_empty=%d, total_calls=%d). "+
+				"Currently loaded:\n\n  %s\n\n"+
+				"Before asking for more tools, REFLECT and answer in one sentence: "+
+				"What is the underlying goal the user asked you to accomplish? "+
+				"State the goal directly — not the keyword you'd search with. "+
+				"Then either (a) call request_tools ONE more time using that goal as the intent — "+
+				"the broker will use your restated goal as a fresh query against tools, memory, and operator skills — "+
+				"OR (b) use a tool above that gets you closer to the goal, OR "+
+				"(c) describe to the user what specific capability you need so they can guide you. "+
+				"Repeated request_tools calls after this point will be hard-halted.",
+			*consecutiveEmpty, *totalCalls,
+			strings.Join(loadedList, ", "),
+		)
+		slog.Info("chat-service: request_tools reflected (D3)",
+			"session_id", sessionID, "consecutive_empty", *consecutiveEmpty, "total_calls", *totalCalls)
+		s.persistBrokerCall(sessionID, requestedIntent, "reflected", *consecutiveEmpty, *totalCalls, 0, reflection)
+
+		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: reflection}
+		resultBlocks = append(resultBlocks, provider.ContentBlock{
+			Type: "tool_result", ToolUseID: tu.ID, Content: reflection,
+		})
+		toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
+		return resultBlocks, toolCallRefs
+	}
+
 	// Hard cap. CW-20260419-0012: friendlier halt message that actually
 	// helps the LLM decide what to do instead of just telling it "no."
-	// It lists what IS loaded (so the LLM can inventory), prompts goal
-	// reflection, and offers two escape paths (use what's there OR ask
-	// user) — rather than the previous "do NOT call request_tools again"
-	// which read as a punishment. Real conceptual rework lives in
-	// CW-20260419-0011; this is the low-lift polish.
-	if *totalCalls > maxCalls || *consecutiveEmpty >= 2 {
+	// Phase 5 D3 retains this as the second-strike fallback after a single
+	// reflection round.
+	if capTripped {
 		reason := fmt.Sprintf("consecutive_empty=%d, total_calls=%d", *consecutiveEmpty, *totalCalls)
-		loadedList := make([]string, 0, len(loadedTools))
-		for name := range loadedTools {
-			loadedList = append(loadedList, name)
-		}
-		sort.Strings(loadedList)
+		loadedList := sortedKeys(loadedTools)
 		rtResult := fmt.Sprintf(
 			"Tool discovery cap reached (%s). The tools currently loaded for this turn are:\n\n  %s\n\n"+
 				"Before asking for more tools, consider:\n"+
@@ -1777,7 +1831,9 @@ func (s *chatServiceImpl) handleRequestTools(
 				"Further request_tools calls this turn will be ignored; use a loaded tool or respond to the user.",
 			reason, strings.Join(loadedList, ", "),
 		)
-		slog.Warn("chat-service: request_tools halted", "reason", reason)
+		slog.Warn("chat-service: request_tools halted", "reason", reason, "session_id", sessionID)
+		s.persistBrokerCall(sessionID, requestedIntent, "halted", *consecutiveEmpty, *totalCalls, 0, "")
+
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 		resultBlocks = append(resultBlocks, provider.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: rtResult,
@@ -1797,8 +1853,10 @@ func (s *chatServiceImpl) handleRequestTools(
 		}
 	}
 
+	outcome := "loaded"
 	if len(loaded) == 0 {
 		*consecutiveEmpty++
+		outcome = "empty"
 		if *consecutiveEmpty == 1 {
 			rtResult += "\n\nNo new tools were loaded for this request. If you believe the right tools exist, try rephrasing your intent with different keywords. Otherwise, proceed with the tools you have."
 		}
@@ -1806,7 +1864,10 @@ func (s *chatServiceImpl) handleRequestTools(
 		*consecutiveEmpty = 0
 	}
 
-	slog.Info("chat-service: request_tools loaded", "count", len(loaded), "consecutive_empty", *consecutiveEmpty, "tools", loaded)
+	slog.Info("chat-service: request_tools loaded",
+		"count", len(loaded), "consecutive_empty", *consecutiveEmpty,
+		"tools", loaded, "session_id", sessionID, "outcome", outcome)
+	s.persistBrokerCall(sessionID, requestedIntent, outcome, *consecutiveEmpty, *totalCalls, len(loaded), "")
 
 	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 	resultBlocks = append(resultBlocks, provider.ContentBlock{
@@ -1815,6 +1876,52 @@ func (s *chatServiceImpl) handleRequestTools(
 	toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
 
 	return resultBlocks, toolCallRefs
+}
+
+// sortedKeys returns the keys of a map[string]bool in alphabetical order.
+// Tiny helper used by the request_tools reflection / halt formatters so the
+// loaded-tools listing is deterministic across turns.
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// persistBrokerCall records every request_tools meta-tool call into the
+// broker_decisions table. Best-effort: a failed write is logged but never
+// gates the loop. The chat service's store-backed BrokerDecisionLogger is
+// only available via toolServiceImpl; we route through that adapter so
+// tests with a stub ToolService don't have to provide a Store.
+func (s *chatServiceImpl) persistBrokerCall(
+	sessionID, intent, outcome string,
+	consecutiveEmpty, totalCalls, loadedCount int,
+	reflectionQuery string,
+) {
+	if sessionID == "" {
+		return
+	}
+	logger, ok := s.tools.(brokerCallPersister)
+	if !ok || logger == nil {
+		return
+	}
+	if intent == "" {
+		intent = "(no intent supplied)"
+	}
+	logger.LogRequestToolsCall(
+		sessionID, intent, outcome,
+		consecutiveEmpty, totalCalls, loadedCount, reflectionQuery,
+	)
+}
+
+// brokerCallPersister is the narrow surface persistBrokerCall uses. It is
+// satisfied by toolServiceImpl (which holds a *store.Store via the
+// BrokerDecisionLogger setter); a stub ToolService that doesn't satisfy
+// this interface is silently a no-op for persistence.
+type brokerCallPersister interface {
+	LogRequestToolsCall(sessionID, intent, outcome string, consecutiveEmpty, totalCalls, loadedCount int, reflectionQuery string)
 }
 
 // detectStuckLoop checks for repeated identical tool results and returns

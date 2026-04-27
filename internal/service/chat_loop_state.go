@@ -149,6 +149,14 @@ type loopState struct {
 	totalRequestToolsCalls   int
 	maxRequestToolsCalls     int
 
+	// Phase 5 / D3 (CW-20260419-0011) — broker reflection on cap.
+	// reflectionFired is set once the broker has emitted the reflection
+	// prompt for this turn. The next request_tools call after that uses
+	// the LLM's restated goal as a fresh broker query rather than halting
+	// outright. Subsequent caps (after reflection) fall back to the
+	// pre-Phase-5 hard halt; we don't reflect repeatedly within one turn.
+	reflectionFired bool
+
 	// Activity tracking.
 	lastActivity time.Time
 

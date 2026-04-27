@@ -342,12 +342,17 @@ export function useChat(sessionId: string | null) {
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
-            // F4 (CW-20260419-0029): route by phase.
+            // F4 (CW-20260419-0029) + F3 (CW-20260420-0023): route by phase.
             // "narration" → thinking strip (not accumulated as the answer).
+            // "thinking"  → thinking strip (F3 interleaved thinking block).
             // "final"     → answer bubble (accumulated for persistence).
             // No phase (pre-F4 or legacy streams) → treat as final (old behaviour).
             if (data.phase === "narration") {
               store().appendStreamNarration(data.content);
+            } else if (data.phase === "thinking") {
+              // F3: interleaved thinking block content — shown in "Working…" strip,
+              // not accumulated into the answer bubble.
+              store().appendStreamThinking(data.content);
             } else {
               // "final" or absent — goes into the answer accumulator.
               accumulated += data.content;

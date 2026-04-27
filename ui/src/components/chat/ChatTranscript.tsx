@@ -1,12 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, Bot, ChevronDown, ChevronRight, Info, Loader2, Sparkles } from "lucide-react";
+import { ArrowDown, Bot, Info, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
 import type { AgentMode, Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
-import { useSettings } from "@/hooks/useSettings";
 import { ChatMessage } from "./ChatMessage";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
@@ -81,12 +80,10 @@ export function ChatTranscript({
   const queryClient = useQueryClient();
 
   // F4 (CW-20260419-0029) — narration strip + collapse-pill.
+  // F3 (CW-20260420-0023) — thinking strip.
   const streamingNarration = useChatStore((s) => s.streamingNarration);
   const streamingFinal = useChatStore((s) => s.streamingFinal);
-  const { data: settings } = useSettings();
-  const developerMode = settings?.developer_mode ?? false;
-  // Post-stream: narration collapses to a pill; dev-mode defaults to expanded.
-  const [narrationExpanded, setNarrationExpanded] = useState(false);
+  const streamingThinking = useChatStore((s) => s.streamingThinking);
 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
@@ -360,18 +357,26 @@ export function ChatTranscript({
                 Nanite
               </div>
 
-              {/* Narration strip — live while narration is arriving; shows ThinkingIndicator when nothing yet */}
-              {streamingNarration ? (
+              {/* Working strip — live while narration or thinking is arriving; shows ThinkingIndicator when nothing yet */}
+              {(streamingNarration || streamingThinking) ? (
                 <div className="mb-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-fg-faint mb-1">
                     Working…
                   </div>
-                  <div className="text-[12px] leading-relaxed text-fg-muted line-clamp-3">
-                    {streamingNarration}
-                  </div>
+                  {/* F3: thinking content shown with italic muted styling to distinguish from narration */}
+                  {streamingThinking && (
+                    <div className="text-[12px] leading-relaxed text-fg-muted/70 italic line-clamp-2 mb-1">
+                      {streamingThinking}
+                    </div>
+                  )}
+                  {streamingNarration && (
+                    <div className="text-[12px] leading-relaxed text-fg-muted line-clamp-3">
+                      {streamingNarration}
+                    </div>
+                  )}
                 </div>
               ) : !streamingFinal ? (
-                // No narration and no final text yet — show the baseline thinking dots
+                // No narration/thinking and no final text yet — show the baseline thinking dots
                 <ThinkingIndicator />
               ) : null}
 

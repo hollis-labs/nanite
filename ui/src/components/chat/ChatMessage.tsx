@@ -185,6 +185,21 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
     return null
   }, [message.role, message.metadata])
 
+  // F3 (CW-20260420-0023) — signed thinking blocks stored in metadata.thinking_blocks.
+  // Round-tripped from the Anthropic interleaved-thinking beta. Rendered with
+  // a distinct "thinking" badge inside the expanded pill.
+  const thinkingBlocks = useMemo(() => {
+    if (message.role !== 'assistant' || !message.metadata) return null
+    try {
+      const meta = typeof message.metadata === 'string'
+        ? JSON.parse(message.metadata)
+        : message.metadata
+      if (!Array.isArray(meta?.thinking_blocks) || meta.thinking_blocks.length === 0) return null
+      return meta.thinking_blocks as Array<{ thinking: string; signature: string }>
+    } catch { /* not JSON */ }
+    return null
+  }, [message.role, message.metadata])
+
   // Rough step count: split by newlines as narration is stored paragraph-per-iteration.
   const narrationStepCount = useMemo(() => {
     if (!narrationThinking) return 0
@@ -325,8 +340,8 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             )
           })}
         </div>
-        {/* F4 (CW-20260419-0029) — narration collapse-pill for assistant messages */}
-        {!isUser && narrationThinking && (
+        {/* F4 (CW-20260419-0029) + F3 (CW-20260420-0023) — collapse-pill for agent process */}
+        {!isUser && (narrationThinking || thinkingBlocks) && (
           <div className="mb-2">
             <button
               type="button"
@@ -343,7 +358,18 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
             </button>
             {narrationExpanded && (
               <div className="mt-1.5 rounded-[6px] border border-border-subtle bg-surface px-3 py-2.5 text-[12px] leading-relaxed text-fg-muted whitespace-pre-wrap">
-                {narrationThinking}
+                {/* F3: thinking blocks rendered with a "thinking" badge, italicised */}
+                {thinkingBlocks && thinkingBlocks.map((tb, idx) => (
+                  <div key={idx} className="mb-2">
+                    <span className="inline-block mb-1 font-mono text-[10px] uppercase tracking-wide text-fg-faint border border-border-subtle rounded px-1 py-0.5">
+                      thinking
+                    </span>
+                    <p className="text-fg-muted/80 italic">{tb.thinking}</p>
+                  </div>
+                ))}
+                {narrationThinking && (
+                  <div>{narrationThinking}</div>
+                )}
               </div>
             )}
           </div>

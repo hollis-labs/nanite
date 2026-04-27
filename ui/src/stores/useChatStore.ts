@@ -10,12 +10,17 @@ interface ChatState {
   streamingNarration: string
   /** F4 — post-end_turn final answer text. This becomes the assistant bubble. */
   streamingFinal: string
+  /** F3 (CW-20260420-0023) — interleaved thinking text. Live during streaming.
+   *  Shown in the "Working…" strip alongside narration. Collapses to the pill
+   *  post-stream, rendered with a distinct "thinking" badge. */
+  streamingThinking: string
   streamingSessionId: string | null
   setStreaming: (streaming: boolean) => void
   setStreamingSessionId: (id: string | null) => void
   appendStreamContent: (content: string) => void
   appendStreamNarration: (content: string) => void
   appendStreamFinal: (content: string) => void
+  appendStreamThinking: (content: string) => void
   replaceStreamContent: (content: string) => void
   clearStream: () => void
 
@@ -117,6 +122,7 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingContent: '',
   streamingNarration: '',
   streamingFinal: '',
+  streamingThinking: '',
   streamingSessionId: null,
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setStreamingSessionId: (id) => set({ streamingSessionId: id }),
@@ -131,11 +137,14 @@ export const useChatStore = create<ChatState>((set) => ({
       // (e.g. ChatTranscript's streamingContent prop) render the answer.
       streamingContent: state.streamingFinal + content,
     })),
+  appendStreamThinking: (content) =>
+    set((state) => ({ streamingThinking: state.streamingThinking + content })),
   replaceStreamContent: (content) => set({ streamingContent: content, streamingFinal: content }),
   clearStream: () => set({
     streamingContent: '',
     streamingNarration: '',
     streamingFinal: '',
+    streamingThinking: '',
     isStreaming: false,
     streamingSessionId: null,
     statusMessage: null,

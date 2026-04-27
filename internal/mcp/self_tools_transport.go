@@ -76,6 +76,18 @@ type SelfToolsTransport struct {
 	// Set post-construction; defaults to dispatch.DefaultEnvelopeWrapper{}
 	// when the transport detects a configured Dispatch with no wrapper.
 	DispatchWrapper dispatch.EnvelopeWrapper
+
+	// PythonPermChecker is the permission engine used by nanite_run_python
+	// to validate tool calls made from inside the Python sandbox.
+	// Set post-construction; nil disables permission checks (all tool calls
+	// from the sandbox are allowed — only appropriate for tests).
+	// CW-20260420-0019 (D6).
+	PythonPermChecker PythonPermissionChecker
+	// PythonDispatcher routes tool calls from inside the Python sandbox
+	// through the same dispatch path as normal tool calls.
+	// Set post-construction; nil causes sandbox tool calls to error.
+	// CW-20260420-0019 (D6).
+	PythonDispatcher PythonToolDispatcher
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -192,6 +204,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callExecuteTask(ctx, args)
 	case "nanite_chat_search":
 		return st.callChatSearch(ctx, args)
+	case "nanite_run_python":
+		return st.callRunPython(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -1561,4 +1575,58 @@ func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 		}
 	}
 	return sources, nil
+}
+
+// --- nanite_run_python handler (CW-20260420-0019, D6) ---
+
+// callRunPython handles the nanite_run_python self-tool. Runs Python code
+// in an isolated subprocess sandbox with a dual-FD tool-call channel that
+// routes through the permission engine on every tool invocation.
+//
+// This tool is Worker/Planner-only; it is intentionally absent from
+// ChatToolSurface (see internal/dispatch/role.go — no "nanite_run_python"
+// prefix in the allow-list, and the Chat-surface enforcement test asserts it).
+func (st *SelfToolsTransport) callRunPython(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	code := strArg(args, "code", "")
+	if code == "" {
+		return errorResult("code is required"), nil
+	}
+
+	// Parse optional args object.
+	var scriptArgs map[string]any
+	if raw, ok := args["args"].(map[string]any); ok {
+		scriptArgs = raw
+	}
+
+	timeLimitSec := intArg(args, "time_limit_seconds", pythonSandboxDefaultTimeLimitSec)
+	memLimitMB := intArg(args, "memory_limit_mb", pythonSandboxDefaultMemLimitMB)
+
+	// Resolve session ID from arg or context.
+	sessionID := strArg(args, "session_id", "")
+	if sessionID == "" {
+		sessionID = SessionIDFromContext(ctx)
+	}
+	if sessionID == "" {
+		sessionID = "ptc-default"
+	}
+
+	result, err := RunPythonSandbox(
+		ctx,
+		sessionID,
+		code,
+		scriptArgs,
+		timeLimitSec,
+		memLimitMB,
+		st.PythonPermChecker,
+		st.PythonDispatcher,
+	)
+	if err != nil {
+		return errorResult(fmt.Sprintf("python sandbox: %v", err)), nil
+	}
+
+	out, jsonErr := json.Marshal(result)
+	if jsonErr != nil {
+		return errorResult(fmt.Sprintf("python sandbox: marshal result: %v", jsonErr)), nil
+	}
+	return textResult(string(out)), nil
 }

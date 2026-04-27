@@ -18,8 +18,13 @@ func SelfToolProviderDefinitions() []provider.ToolDefinition {
 }
 
 // selfToolDefinitions returns all self-service tool definitions.
+// NOTE: nanite_run_python is included here so it appears in the worker/planner
+// surface, but it is intentionally NOT added to dispatch.ChatToolSurface and
+// does not match any prefix in ChatToolSurface — EnforceChatSurface will
+// filter it out for Chat agents. (CW-20260420-0019, D6)
 func selfToolDefinitions() []Tool {
 	return []Tool{
+		naniteRunPythonToolDefinition(),
 		{
 			Name: "nanite_create_skill",
 			Description: "Create a new skill that binds a set of tool names to a named category.\n\n" +

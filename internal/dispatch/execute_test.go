@@ -272,3 +272,54 @@ func TestDefaultEnvelopeWrapper_TreatsEmptyAsProse(t *testing.T) {
 		t.Errorf("summary = %q, want x", got)
 	}
 }
+
+// TestExecuteTask_WorkspaceAndProfileThreadedToSpawn verifies that
+// ExecuteTaskArgs.WorkspaceID and .AgentProfileID are forwarded verbatim
+// to the SpawnRequest so the subagent trust gate can fire. H1 CW-20260421-0014.
+func TestExecuteTask_WorkspaceAndProfileThreadedToSpawn(t *testing.T) {
+	spawner := &fakeSpawner{result: &SpawnResult{Summary: "ok"}}
+	wrapper := &recordingWrapper{out: Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
+
+	args := ExecuteTaskArgs{
+		SessionID:      "sess-trust",
+		Message:        "do the thing",
+		WorkspaceID:    "ws-dogfood",
+		AgentProfileID: "ap-worker-id",
+	}
+
+	if _, err := ExecuteTask(context.Background(), spawner, wrapper, args); err != nil {
+		t.Fatalf("ExecuteTask error: %v", err)
+	}
+
+	if spawner.got.WorkspaceID != "ws-dogfood" {
+		t.Errorf("WorkspaceID = %q, want ws-dogfood", spawner.got.WorkspaceID)
+	}
+	if spawner.got.AgentProfileID != "ap-worker-id" {
+		t.Errorf("AgentProfileID = %q, want ap-worker-id", spawner.got.AgentProfileID)
+	}
+}
+
+// TestExecuteTask_EmptyWorkspaceProfile_FallsThrough verifies that when no
+// WorkspaceID / AgentProfileID are set, the SpawnRequest carries empty
+// strings (which causes the subagent gate to fall back to TrustNormal).
+func TestExecuteTask_EmptyWorkspaceProfile_FallsThrough(t *testing.T) {
+	spawner := &fakeSpawner{result: &SpawnResult{Summary: "ok"}}
+	wrapper := &recordingWrapper{out: Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
+
+	args := ExecuteTaskArgs{
+		SessionID: "sess-no-trust",
+		Message:   "do the thing",
+		// WorkspaceID and AgentProfileID intentionally omitted.
+	}
+
+	if _, err := ExecuteTask(context.Background(), spawner, wrapper, args); err != nil {
+		t.Fatalf("ExecuteTask error: %v", err)
+	}
+
+	if spawner.got.WorkspaceID != "" {
+		t.Errorf("expected empty WorkspaceID fallback, got %q", spawner.got.WorkspaceID)
+	}
+	if spawner.got.AgentProfileID != "" {
+		t.Errorf("expected empty AgentProfileID fallback, got %q", spawner.got.AgentProfileID)
+	}
+}

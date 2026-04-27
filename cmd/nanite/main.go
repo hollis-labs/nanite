@@ -285,6 +285,10 @@ func cmdServe(args []string) {
 	selfTools.Subagent = container.Subagent
 	selfTools.Background = container.Background
 	selfTools.Work = container.Streams
+	// G4 (CW-20260420-0018): wire elicitation service so write tools
+	// (e.g. nanite_message_send kind=directive) can request mid-call
+	// user confirmation via elicitation/create.
+	selfTools.Elicitation = container.Elicitation
 
 	// CW-20260421-0010 (B3): wire the executeTask dispatch primitive.
 	// Adapts subagent.Service.Spawn to dispatch.Spawner so the chat

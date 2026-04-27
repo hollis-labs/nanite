@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/coordination"
@@ -74,6 +75,13 @@ type Container struct {
 	// envelopes ride the Messaging service back to the originating
 	// session as channel=inbox notifications.
 	Background *background.Service
+
+	// Elicitation service — MCP elicitation/create mid-tool user prompts
+	// (CW-20260420-0018, G4). Write tools that need user confirmation call
+	// into this service; the service pushes an elicitation-prompt envelope
+	// to the chat surface and blocks until the user responds or the timeout
+	// fires. Nil-safe: tools auto-approve when not wired.
+	Elicitation *elicitation.Service
 
 	// Internal todo/plan system.
 	Todos TodoService
@@ -561,6 +569,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	backgroundSvc := background.NewService(background.NewPTYBackend(), messagingSvc)
 	slog.Info("service container: background-job service enabled (PTY backend)")
 
+	// G4 (CW-20260420-0018): elicitation service — MCP elicitation/create
+	// mid-tool user prompts. The emitter persists an elicitation-prompt
+	// envelope and streams it to the chat UI; the response handler routes
+	// user responses back to the waiting tool call.
+	elicitEmitter := NewElicitationEmitter(cfg.Store, streams)
+	elicitSvc := elicitation.New(elicitEmitter, 0) // 0 → picks up env / default (5 min)
+	chat.RegisterResponseHandler("elicitation-prompt", chat.NewElicitationResponseHandler(elicitSvc))
+	slog.Info("service container: elicitation service enabled (G4, CW-20260420-0018)")
+
 	// F5 follow-up (CW-20260420-0022): wire the HintDispatcher adapter
 	// into ContextClient so NANITE_THINK_BLOCK_V2_ENABLED=true actually
 	// fires v2 dynamic hints in production. Without this assignment the
@@ -669,6 +686,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Messaging:           messagingSvc,
 		Subagent:            subagentSvc,
 		Background:          backgroundSvc,
+		Elicitation:         elicitSvc,
 		Todos:               todos,
 		Conduit:             conduitInstance,
 		Memory:              memorySvc,

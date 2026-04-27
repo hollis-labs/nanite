@@ -23,6 +23,12 @@ type Skill struct {
 	Prompt       string `json:"prompt,omitempty"` // markdown body; set for file-based skills, empty for DB-only
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
+	// J7 ingestion metadata (CW-20260421-0011).
+	Source       string `json:"source"`        // "builtin", "user", "project", "plugin", "claude"
+	ImportedAt   string `json:"imported_at"`   // RFC3339 timestamp of last ingest; empty for non-file skills
+	OriginSystem string `json:"origin_system"` // "nanite", "agentrc", "claude", etc. — free-form provenance
+	Format       string `json:"format"`        // "markdown", "yaml"
+	Version      int    `json:"version"`       // bumped on re-ingest when content changes
 }
 
 // AgentSkill represents an assignment of a skill to an agent.
@@ -32,12 +38,27 @@ type AgentSkill struct {
 	Config  string `json:"config"`
 }
 
+// skillColumns is the canonical SELECT column list for skills.
+const skillColumns = `id, name, slug, description, category, tool_bindings, input_schema,
+        is_builtin, settings, COALESCE(icon,''), created_at, updated_at,
+        COALESCE(source,'builtin'), COALESCE(imported_at,''),
+        COALESCE(origin_system,''), COALESCE(format,'markdown'), COALESCE(version,1),
+        COALESCE(prompt,'')`
+
+// scanSkill scans a row into a Skill using the canonical column order.
+func scanSkill(scanner interface{ Scan(...any) error }, sk *Skill) error {
+	return scanner.Scan(
+		&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
+		&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
+		&sk.CreatedAt, &sk.UpdatedAt,
+		&sk.Source, &sk.ImportedAt, &sk.OriginSystem, &sk.Format, &sk.Version,
+		&sk.Prompt,
+	)
+}
+
 // ListSkills returns all skills ordered by name.
 func (s *Store) ListSkills() ([]Skill, error) {
-	rows, err := s.DB.Query(
-		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, COALESCE(icon,''), created_at, updated_at
-		 FROM skills ORDER BY name`,
-	)
+	rows, err := s.DB.Query(`SELECT ` + skillColumns + ` FROM skills ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list skills: %w", err)
 	}
@@ -46,9 +67,7 @@ func (s *Store) ListSkills() ([]Skill, error) {
 	out := make([]Skill, 0)
 	for rows.Next() {
 		var sk Skill
-		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
-			&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
-			&sk.CreatedAt, &sk.UpdatedAt); err != nil {
+		if err := scanSkill(rows, &sk); err != nil {
 			return nil, fmt.Errorf("scan skill: %w", err)
 		}
 		out = append(out, sk)
@@ -59,16 +78,10 @@ func (s *Store) ListSkills() ([]Skill, error) {
 // GetSkill returns a skill by ID.
 func (s *Store) GetSkill(id string) (*Skill, error) {
 	var sk Skill
-	err := s.DB.QueryRow(
-		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, COALESCE(icon,''), created_at, updated_at
-		 FROM skills WHERE id = ?`, id,
-	).Scan(&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
-		&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
-		&sk.CreatedAt, &sk.UpdatedAt)
-	if err == sql.ErrNoRows {
+	row := s.DB.QueryRow(`SELECT `+skillColumns+` FROM skills WHERE id = ?`, id)
+	if err := scanSkill(row, &sk); err == sql.ErrNoRows {
 		return nil, nil
-	}
-	if err != nil {
+	} else if err != nil {
 		return nil, fmt.Errorf("get skill %s: %w", id, err)
 	}
 	return &sk, nil
@@ -77,16 +90,10 @@ func (s *Store) GetSkill(id string) (*Skill, error) {
 // GetSkillBySlug returns a skill by slug.
 func (s *Store) GetSkillBySlug(slug string) (*Skill, error) {
 	var sk Skill
-	err := s.DB.QueryRow(
-		`SELECT id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, COALESCE(icon,''), created_at, updated_at
-		 FROM skills WHERE slug = ?`, slug,
-	).Scan(&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
-		&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
-		&sk.CreatedAt, &sk.UpdatedAt)
-	if err == sql.ErrNoRows {
+	row := s.DB.QueryRow(`SELECT `+skillColumns+` FROM skills WHERE slug = ?`, slug)
+	if err := scanSkill(row, &sk); err == sql.ErrNoRows {
 		return nil, nil
-	}
-	if err != nil {
+	} else if err != nil {
 		return nil, fmt.Errorf("get skill by slug %s: %w", slug, err)
 	}
 	return &sk, nil
@@ -107,13 +114,25 @@ func (s *Store) CreateSkill(sk *Skill) error {
 	if sk.Settings == "" {
 		sk.Settings = "{}"
 	}
+	if sk.Source == "" {
+		sk.Source = "builtin"
+	}
+	if sk.Format == "" {
+		sk.Format = "markdown"
+	}
+	if sk.Version == 0 {
+		sk.Version = 1
+	}
 
 	_, err := s.DB.Exec(
-		`INSERT INTO skills (id, name, slug, description, category, tool_bindings, input_schema, is_builtin, settings, icon, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO skills (id, name, slug, description, category, tool_bindings, input_schema,
+		                     is_builtin, settings, icon, created_at, updated_at,
+		                     source, imported_at, origin_system, format, version, prompt)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sk.ID, sk.Name, sk.Slug, sk.Description, sk.Category,
 		sk.ToolBindings, sk.InputSchema, sk.IsBuiltin, sk.Settings, nullIfEmpty(sk.Icon),
 		now, now,
+		sk.Source, sk.ImportedAt, sk.OriginSystem, sk.Format, sk.Version, sk.Prompt,
 	)
 	if err != nil {
 		return fmt.Errorf("create skill: %w", err)
@@ -128,11 +147,14 @@ func (s *Store) UpdateSkill(sk *Skill) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.DB.Exec(
 		`UPDATE skills SET name = ?, slug = ?, description = ?, category = ?,
-		        tool_bindings = ?, input_schema = ?, settings = ?, icon = ?, updated_at = ?
+		        tool_bindings = ?, input_schema = ?, settings = ?, icon = ?,
+		        source = ?, imported_at = ?, origin_system = ?, format = ?, version = ?,
+		        prompt = ?, updated_at = ?
 		 WHERE id = ?`,
 		sk.Name, sk.Slug, sk.Description, sk.Category,
 		sk.ToolBindings, sk.InputSchema, sk.Settings, nullIfEmpty(sk.Icon),
-		now, sk.ID,
+		sk.Source, sk.ImportedAt, sk.OriginSystem, sk.Format, sk.Version,
+		sk.Prompt, now, sk.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update skill: %w", err)
@@ -163,9 +185,7 @@ func (s *Store) DeleteSkill(id string) error {
 // ListAgentSkills returns all skills assigned to an agent.
 func (s *Store) ListAgentSkills(agentID string) ([]Skill, error) {
 	rows, err := s.DB.Query(
-		`SELECT sk.id, sk.name, sk.slug, sk.description, sk.category, sk.tool_bindings,
-		        sk.input_schema, sk.is_builtin, sk.settings, COALESCE(sk.icon,''),
-		        sk.created_at, sk.updated_at
+		`SELECT `+skillColumns+`
 		 FROM skills sk
 		 JOIN agent_skills ags ON sk.id = ags.skill_id
 		 WHERE ags.agent_id = ?
@@ -179,9 +199,7 @@ func (s *Store) ListAgentSkills(agentID string) ([]Skill, error) {
 	out := make([]Skill, 0)
 	for rows.Next() {
 		var sk Skill
-		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Slug, &sk.Description, &sk.Category,
-			&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
-			&sk.CreatedAt, &sk.UpdatedAt); err != nil {
+		if err := scanSkill(rows, &sk); err != nil {
 			return nil, fmt.Errorf("scan agent skill: %w", err)
 		}
 		out = append(out, sk)

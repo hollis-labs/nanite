@@ -251,6 +251,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 	slog.Info("service container: discovered file-based agents", "count", len(agentDefs))
 
+	// J7 (CW-20260421-0011): auto-ingest discovered agent definitions into DB.
+	// File → parse → DB upsert. H1 trust: user/plugin sources → untrusted tier.
+	// Built-in definitions (Source != "user"/"plugin") retain 'normal' tier.
+	// Errors per-def are logged non-fatal via AutoIngestAgents.
+	if n := AutoIngestAgents(cfg.Store, agentDefs); n > 0 {
+		slog.Info("service container: auto-ingested agents into DB", "count", n)
+	}
+
 	agents := NewAgentService(AgentServiceConfig{
 		Agents:     cfg.Store,
 		Writers:    cfg.Store,
@@ -305,6 +313,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: built-in skills", "err", bErr)
 	}
 	slog.Info("service container: discovered file-based skills", "count", len(skillDefs))
+
+	// J7 (CW-20260421-0011): auto-ingest discovered skill definitions into DB.
+	// Skills from ~/.nanite/skills/ (Source="user") land as non-builtin rows.
+	// Errors per-def are logged non-fatal via AutoIngestSkills.
+	if n := AutoIngestSkills(cfg.Store, skillDefs); n > 0 {
+		slog.Info("service container: auto-ingested skills into DB", "count", n)
+	}
 
 	skills := NewSkillService(SkillServiceConfig{
 		Skills:     cfg.Store,

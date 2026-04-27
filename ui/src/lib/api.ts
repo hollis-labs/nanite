@@ -60,6 +60,7 @@ import type {
   MemoryListResponse,
   MemoryCreateRequest,
   MemoryUpdateRequest,
+  WorkspaceRoleTrustOverride,
 } from "./types";
 import type { PluginRegistryResponse } from "./plugin-loader";
 
@@ -1720,6 +1721,47 @@ export const api = {
       const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update memory status: ${res.status}`);
     }
+    return res.json();
+  },
+
+  // Role trust — H1 CW-20260421-0014
+  // GET /api/workspaces/{workspace_id}/roles
+  listWorkspaceRoleTrust: async (
+    workspaceID: string,
+  ): Promise<{ workspace_id: string; trust_overrides: WorkspaceRoleTrustOverride[] }> => {
+    const res = await fetch(`${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles`);
+    if (!res.ok) throw new Error(`Failed to list role trust: ${res.status}`);
+    return res.json();
+  },
+
+  // POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust
+  setWorkspaceRoleTrust: async (
+    workspaceID: string,
+    agentProfileID: string,
+    tier: "untrusted" | "normal" | "trusted",
+  ): Promise<{ workspace_id: string; agent_profile_id: string; trust_tier: string }> => {
+    const res = await fetch(
+      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier, promoted_by: "ui" }),
+      },
+    );
+    if (!res.ok) throw new Error(`Failed to set role trust: ${res.status}`);
+    return res.json();
+  },
+
+  // DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust
+  deleteWorkspaceRoleTrust: async (
+    workspaceID: string,
+    agentProfileID: string,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) throw new Error(`Failed to delete role trust: ${res.status}`);
     return res.json();
   },
 };

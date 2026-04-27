@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   Palette,
   Puzzle,
+  Shield,
   SlidersHorizontal,
   Sparkles,
   User,
@@ -33,6 +34,7 @@ import { useNavigationStore } from "@/stores/useNavigationStore";
 import { ActionsPanel } from "./ActionsPanel";
 import { AgentProfileManager } from "./AgentProfileManager";
 import { MemoryPanel } from "./MemoryPanel";
+import { RoleTrustPanel } from "./RoleTrustPanel";
 
 const AppearancePanel = lazy(() =>
   import("./appearance/AppearancePanel").then((m) => ({ default: m.AppearancePanel })),
@@ -77,6 +79,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { id: "providers", label: "Providers", icon: Cpu },
       { id: "agents", label: "Agents", icon: Bot },
       { id: "skills", label: "Skills", icon: Sparkles },
+      { id: "role-trust", label: "Role Trust", icon: Shield },
       // "System Prompts" is injected here when developer_mode=true (see SettingsPage)
       { id: "memory", label: "Memory", icon: Brain },
     ],
@@ -204,6 +207,8 @@ export default function SettingsPage() {
         return <WidgetManager />;
       case "workspaces":
         return <WorkspaceProjectManager />;
+      case "role-trust":
+        return <RoleTrustPanel />;
       case "memory":
         return <MemoryPanel />;
       case "observability":

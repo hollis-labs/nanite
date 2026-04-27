@@ -1123,3 +1123,17 @@ export interface MemoryUpdateRequest {
   confidence: number;
   tags: string[];
 }
+
+// --- Role Trust (H1 CW-20260421-0014) ---
+
+export type TrustTier = "untrusted" | "normal" | "trusted";
+
+// WorkspaceRoleTrustOverride is a single row from workspace_role_trust
+// listing the explicit override for one agent profile in a workspace.
+export interface WorkspaceRoleTrustOverride {
+  workspace_id: string;
+  agent_profile_id: string;
+  trust_tier: TrustTier;
+  promoted_at: string;
+  promoted_by: string;
+}

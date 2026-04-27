@@ -29,6 +29,8 @@ func TestEnforceChatSurface_FiltersToStaticAllowList(t *testing.T) {
 		{Name: "nanite_show_document"},
 		// Allowed (executeTask).
 		{Name: "nanite_execute_task"},
+		// Allowed (chat_search, P8B).
+		{Name: "nanite_chat_search"},
 		// Meta-tools — always allowed.
 		{Name: "fetch_tool_result"},
 		{Name: "search_tool_result"},
@@ -54,18 +56,19 @@ func TestEnforceChatSurface_FiltersToStaticAllowList(t *testing.T) {
 	got := EnforceChatSurface(in)
 
 	expected := map[string]bool{
-		"nanite_todo_create":     true,
-		"nanite_todo_list":       true,
-		"nanite_plan_create":     true,
+		"nanite_todo_create":      true,
+		"nanite_todo_list":        true,
+		"nanite_plan_create":      true,
 		"nanite_scratchpad_write": true,
-		"nanite_message_send":    true,
-		"nanite_handoff_request": true,
-		"nanite_show_report":     true,
-		"nanite_show_document":   true,
-		"nanite_execute_task":    true,
-		"fetch_tool_result":      true,
-		"search_tool_result":     true,
-		"request_tools":          true,
+		"nanite_message_send":     true,
+		"nanite_handoff_request":  true,
+		"nanite_show_report":      true,
+		"nanite_show_document":    true,
+		"nanite_execute_task":     true,
+		"nanite_chat_search":      true,
+		"fetch_tool_result":       true,
+		"search_tool_result":      true,
+		"request_tools":           true,
 	}
 
 	gotNames := make([]string, len(got))

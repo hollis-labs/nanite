@@ -190,6 +190,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callSubagentCancel(ctx, args)
 	case "nanite_execute_task":
 		return st.callExecuteTask(ctx, args)
+	case "nanite_chat_search":
+		return st.callChatSearch(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}

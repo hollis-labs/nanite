@@ -89,6 +89,8 @@ var ChatToolSurface = []string{
 	"nanite_show_",
 	// The dispatch primitive itself.
 	"nanite_execute_task",
+	// Conversation search (P8B, CW-20260420-0026).
+	"nanite_chat_search",
 }
 
 // chatSurfaceMetaToolExceptions are always allowed on the Chat surface:

@@ -44,6 +44,18 @@ type CompactionEventWriter interface {
 	WriteCompactionEvent(ctx context.Context, event CompactionEvent) error
 }
 
+// CompactionEventReader fetches the most recent compaction event for a session.
+// The chat assembly path uses this to detect a "fresh" compaction (one where
+// no assistant turn has run since the event was emitted) and inject the
+// CompactionContract disclosure prompt for that turn (CW-20260420-0025, P8A).
+//
+// Implemented by the service layer so the context package remains free of
+// store imports. (nil, nil) is the canonical "no event yet" return — callers
+// should treat that as "no disclosure to inject".
+type CompactionEventReader interface {
+	GetLatestCompactionEvent(ctx context.Context, sessionID string) (*CompactionEvent, error)
+}
+
 // BuildPayloadFromScratchpad extracts HandoffStashPayload fields from a
 // scratchpad snapshot using well-known string-slice keys. Missing or
 // wrongly-typed keys produce empty slices — the stash is always written.

@@ -115,6 +115,7 @@ type minimalStore struct {
 	stubTodoStore
 	stubPlanStore
 	stubHandoffStashStore
+	stubCompactionEventStore
 	stubEnvelopeStore
 }
 
@@ -128,6 +129,18 @@ func (stubEnvelopeStore) GetEnvelopeInstance(id string) (*store.EnvelopeInstance
 type stubHandoffStashStore struct{}
 
 func (stubHandoffStashStore) UpsertHandoffStash(store.HandoffStash) error { return nil }
+
+type stubCompactionEventStore struct{}
+
+func (stubCompactionEventStore) WriteCompactionEvent(context.Context, store.CompactionEvent) error {
+	return nil
+}
+func (stubCompactionEventStore) GetLatestCompactionEvent(context.Context, string) (*store.CompactionEvent, error) {
+	return nil, nil
+}
+func (stubCompactionEventStore) ListCompactionEventsBySession(context.Context, string, int) ([]store.CompactionEvent, error) {
+	return nil, nil
+}
 
 // Stubs to satisfy the Store composite interface for tests.
 type stubSessionStore struct{}

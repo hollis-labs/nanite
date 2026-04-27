@@ -1607,6 +1607,46 @@ func NewStashWriter(s HandoffStashStore) ctxpkg.StashWriter {
 	return storeStashWriter{s: s}
 }
 
+// storeCompactionEventReader bridges CompactionEventStore to
+// ctxpkg.CompactionEventReader (P8A, CW-20260420-0025). The chat assembly path
+// uses this reader to decide whether to inject a CompactionContract disclosure
+// for the current turn.
+type storeCompactionEventReader struct {
+	s CompactionEventStore
+}
+
+func (r storeCompactionEventReader) GetLatestCompactionEvent(ctx context.Context, sessionID string) (*ctxpkg.CompactionEvent, error) {
+	evt, err := r.s.GetLatestCompactionEvent(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if evt == nil {
+		return nil, nil
+	}
+	out := ctxpkg.CompactionEvent{
+		ID:                   evt.ID,
+		SessionID:            evt.SessionID,
+		CoverageWindowStart:  evt.CoverageWindowStart,
+		CoverageWindowEnd:    evt.CoverageWindowEnd,
+		EvictedCachePointers: append([]string(nil), evt.EvictedCachePointers...),
+		PreservedSources:     append([]string(nil), evt.PreservedSources...),
+		SummaryMode:          evt.SummaryMode,
+		SummaryTokenCount:    evt.SummaryTokenCount,
+		OriginalTokenCount:   evt.OriginalTokenCount,
+		HandoffStashID:       evt.HandoffStashID,
+		StagesApplied:        append([]string(nil), evt.StagesApplied...),
+		CreatedAt:            evt.CreatedAt,
+	}
+	return &out, nil
+}
+
+// NewCompactionEventReader returns a ctxpkg.CompactionEventReader backed by the
+// given store. Exported so api / chat / context packages can share the bridge
+// without importing the unexported adapter directly.
+func NewCompactionEventReader(s CompactionEventStore) ctxpkg.CompactionEventReader {
+	return storeCompactionEventReader{s: s}
+}
+
 // BuildSummarizer resolves the provider+model used to summarize compacted
 // conversation spans. UserSettings can override; an empty/missing override
 // falls back to the configured default chat provider so summarization always

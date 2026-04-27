@@ -128,8 +128,10 @@ func (e Effort) BudgetMultiplier() float64 {
 // from an Effort level.
 //
 // F3 (interleaved thinking adoption, CW-20260420-0023) extends this struct
-// with provider-specific fields (e.g., the betas header). Keep this struct
-// provider-agnostic so F3 can augment without breaking this package.
+// with BetasHeader and BudgetMode. The package stays provider-agnostic —
+// BetasHeader is a raw string the caller appends to whatever beta list the
+// provider already sends; BudgetMode is an advisory string the Anthropic
+// adapter translates to thinking_config.type.
 type ReasoningConfig struct {
 	// Enabled reports whether reasoning/thinking blocks should be requested.
 	Enabled bool
@@ -140,6 +142,18 @@ type ReasoningConfig struct {
 	//
 	// 0 means "use the provider's default budget."
 	BudgetTokens int
+
+	// BetasHeader is the beta header value to append to the provider's
+	// existing anthropic-beta header when Enabled is true and the model
+	// supports interleaved thinking (F3 / CW-20260420-0023).
+	// Empty string means "no additional beta flag needed."
+	BetasHeader string
+
+	// BudgetMode is an advisory token-budget strategy hint for the
+	// Anthropic thinking_config. Supported values:
+	//   "enabled" — use BudgetTokens as the max_tokens ceiling (default).
+	// Providers that don't recognise the value ignore this field.
+	BudgetMode string
 }
 
 // reasoningBudgetHigh is the token budget for EffortHigh reasoning.
@@ -150,17 +164,33 @@ const reasoningBudgetHigh = 8_000
 // 20 000 tokens — intensive reasoning for hard problems.
 const reasoningBudgetMax = 20_000
 
+// InterleavedThinkingBetaHeader is the Anthropic beta header value that
+// enables interleaved thinking (thinking_delta blocks between tool calls).
+// Supported on Opus 4.5+ and Sonnet 4.5+ (claude-*-4-* family with version
+// suffix ≥ 20250514). F3 / CW-20260420-0023.
+const InterleavedThinkingBetaHeader = "interleaved-thinking-2025-05-14"
+
 // ReasoningCfg returns the ReasoningConfig for this Effort level.
 //
-//	low, normal → Enabled=false, BudgetTokens=0
-//	high        → Enabled=true,  BudgetTokens=8 000
-//	max         → Enabled=true,  BudgetTokens=20 000
+//	low, normal → Enabled=false, BudgetTokens=0, BetasHeader=""
+//	high        → Enabled=true,  BudgetTokens=8 000,  BetasHeader=interleaved-thinking-2025-05-14
+//	max         → Enabled=true,  BudgetTokens=20 000, BetasHeader=interleaved-thinking-2025-05-14
 func (e Effort) ReasoningCfg() ReasoningConfig {
 	switch e {
 	case EffortHigh:
-		return ReasoningConfig{Enabled: true, BudgetTokens: reasoningBudgetHigh}
+		return ReasoningConfig{
+			Enabled:      true,
+			BudgetTokens: reasoningBudgetHigh,
+			BetasHeader:  InterleavedThinkingBetaHeader,
+			BudgetMode:   "enabled",
+		}
 	case EffortMax:
-		return ReasoningConfig{Enabled: true, BudgetTokens: reasoningBudgetMax}
+		return ReasoningConfig{
+			Enabled:      true,
+			BudgetTokens: reasoningBudgetMax,
+			BetasHeader:  InterleavedThinkingBetaHeader,
+			BudgetMode:   "enabled",
+		}
 	default:
 		return ReasoningConfig{Enabled: false}
 	}

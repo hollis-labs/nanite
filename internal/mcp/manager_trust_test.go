@@ -123,8 +123,12 @@ func TestManager_ExecuteTool_StripsANSIAndEnforcesTierResultCap(t *testing.T) {
 	if err := mgr.AddServer("srv", ft, TierBuiltin); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}
+	// Discover so the uniform-name index is populated (ADR-002).
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
 
-	got, err := mgr.ExecuteTool(context.Background(), "mcp__srv__tool", nil)
+	got, err := mgr.ExecuteTool(context.Background(), "tool", nil)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -143,7 +147,10 @@ func TestManager_ExecuteTool_StripsANSIAndEnforcesTierResultCap(t *testing.T) {
 	if err := mgr2.AddServer("srv", ft2, TierThirdPartyHTTP); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}
-	if _, err := mgr2.ExecuteTool(context.Background(), "mcp__srv__tool", nil); err == nil {
+	if err := mgr2.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+	if _, err := mgr2.ExecuteTool(context.Background(), "tool", nil); err == nil {
 		t.Error("expected tier result-cap error, got nil")
 	}
 }
@@ -166,7 +173,10 @@ func TestManager_ExecuteTool_DropsInvalidBlockTypes(t *testing.T) {
 	if err := mgr.AddServer("srv", ft, TierBuiltin); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}
-	got, err := mgr.ExecuteTool(context.Background(), "mcp__srv__anything", nil)
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+	got, err := mgr.ExecuteTool(context.Background(), "anything", nil)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -198,8 +208,11 @@ func TestManager_ExecuteTool_InjectionScanObservabilityOnly(t *testing.T) {
 	if err := mgr.AddServer("srv", ft, TierThirdPartyHTTP); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
 
-	got, err := mgr.ExecuteTool(context.Background(), "mcp__srv__tool", nil)
+	got, err := mgr.ExecuteTool(context.Background(), "tool", nil)
 	if err != nil {
 		// Injection scan is observe-only — the call must succeed.
 		t.Fatalf("ExecuteTool returned error on injection hit (should be observe-only): %v", err)
@@ -239,8 +252,11 @@ func TestManager_ExecuteTool_ANSIStrippedBeforeInjectionScan(t *testing.T) {
 	if err := mgr.AddServer("srv", ft, TierBuiltin); err != nil {
 		t.Fatalf("AddServer: %v", err)
 	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
 
-	got, err := mgr.ExecuteTool(context.Background(), "mcp__srv__tool", nil)
+	got, err := mgr.ExecuteTool(context.Background(), "tool", nil)
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}

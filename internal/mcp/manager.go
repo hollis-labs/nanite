@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 
@@ -38,21 +39,32 @@ type DiscoveryWarning struct {
 }
 
 // Manager holds multiple MCP server connections and provides unified tool access.
+//
+// Uniform tool registry (CW-20260427-0017, ADR-002): every MCP tool is
+// registered under a uniform agent-facing name (no `mcp__server__` prefix).
+// The mapping uniform-name → (server, original tool) is owned by the
+// uniformIndex map; ExecuteTool / ResolveToolServer go through it. The
+// originating server is preserved as audit metadata so observability
+// pipelines still know which MCP backend a call hit, while the agent only
+// ever sees the uniform name.
 type Manager struct {
 	servers           map[string]MCPTransport // name -> transport
 	serverTiers       map[string]TrustTier    // name -> trust tier
 	pluginServers     map[string][]string     // pluginID -> server names (reverse map for hot-unload)
 	tools             []toolEntry             // all discovered tools with server association
+	uniformIndex      map[string]*toolEntry   // uniform name → entry (owns the *toolEntry)
 	discoveryWarnings []DiscoveryWarning      // tools rejected during discovery
 	Broker            *broker.LocalBroker     // intent-aware tool broker
 	LoadChecker       ToolLoadChecker         // optional loadType filter
 	mu                sync.RWMutex
 }
 
-// toolEntry associates a tool with its originating server.
+// toolEntry associates a tool with its originating server and the
+// uniform agent-facing name assigned at registration time.
 type toolEntry struct {
-	serverName string
-	tool       Tool
+	serverName  string
+	uniformName string // agent-facing name; never carries `mcp__` prefix
+	tool        Tool
 }
 
 // NewManager creates a new MCP Manager.
@@ -61,6 +73,7 @@ func NewManager() *Manager {
 		servers:       make(map[string]MCPTransport),
 		serverTiers:   make(map[string]TrustTier),
 		pluginServers: make(map[string][]string),
+		uniformIndex:  make(map[string]*toolEntry),
 	}
 }
 
@@ -133,11 +146,14 @@ func (m *Manager) RemoveServer(name string) {
 	delete(m.servers, name)
 	delete(m.serverTiers, name)
 
-	// Remove tools that belonged to this server.
+	// Remove tools that belonged to this server (in both the slice view
+	// and the uniform-name index).
 	filtered := m.tools[:0]
 	for _, entry := range m.tools {
 		if entry.serverName != name {
 			filtered = append(filtered, entry)
+		} else {
+			delete(m.uniformIndex, entry.uniformName)
 		}
 	}
 	m.tools = filtered
@@ -256,10 +272,21 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	defer m.mu.Unlock()
 
 	m.tools = nil
+	m.uniformIndex = make(map[string]*toolEntry)
 	m.discoveryWarnings = nil
 	var totalTools int
 
-	for name, transport := range m.servers {
+	// Iterate servers in deterministic name order so collision resolution
+	// is reproducible across runs (without ordering, two servers with the
+	// same tool name would race for the uniform slot).
+	serverNames := make([]string, 0, len(m.servers))
+	for name := range m.servers {
+		serverNames = append(serverNames, name)
+	}
+	sort.Strings(serverNames)
+
+	for _, name := range serverNames {
+		transport := m.servers[name]
 		tier := m.tierForLocked(name)
 		limits := LimitsFor(tier)
 
@@ -307,10 +334,27 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 				}
 				continue
 			}
-			m.tools = append(m.tools, toolEntry{
-				serverName: name,
-				tool:       t,
-			})
+
+			// Compute the uniform agent-facing name and resolve collisions.
+			uniform := m.assignUniformNameLocked(name, t.Name)
+			if uniform == "" {
+				slog.Warn("mcp: tool dropped (uniform name collision unresolvable)",
+					"server", name, "tool", t.Name)
+				m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
+					ServerName: name,
+					ToolName:   t.Name,
+					Reason:     "uniform_name_collision",
+				})
+				continue
+			}
+
+			entry := &toolEntry{
+				serverName:  name,
+				uniformName: uniform,
+				tool:        t,
+			}
+			m.tools = append(m.tools, *entry)
+			m.uniformIndex[uniform] = &m.tools[len(m.tools)-1]
 			accepted++
 			totalTools++
 		}
@@ -323,12 +367,16 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 		)
 	}
 
-	// Register tools with the broker if available.
+	// Register tools with the broker under their uniform agent-facing
+	// names. Server attribution is preserved on the broker.ToolDefinition
+	// so audit/telemetry retains source-server context, but the broker's
+	// tool index is keyed by the uniform name the agent will see.
 	if m.Broker != nil {
 		var brokerTools []broker.ToolDefinition
-		for _, entry := range m.tools {
+		for i := range m.tools {
+			entry := &m.tools[i]
 			brokerTools = append(brokerTools, broker.ToolDefinition{
-				Name:        entry.tool.Name,
+				Name:        entry.uniformName,
 				Description: entry.tool.Description,
 				InputSchema: entry.tool.InputSchema,
 				Server:      entry.serverName,
@@ -348,13 +396,14 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 }
 
 // GetTools returns available tools as provider.ToolDefinition slice, filtered
-// by the broker's default rules (intent "*"). Tool names are prefixed with "mcp__<server>__".
+// by the broker's default rules (intent "*"). Names are uniform (no
+// `mcp__server__` prefix) — see ADR-002.
 func (m *Manager) GetTools() []provider.ToolDefinition {
 	return m.GetToolsForIntent("*", nil)
 }
 
 // GetToolsForIntent returns tools filtered by the broker for the given intent and hints.
-// If no broker is configured, returns all tools unfiltered.
+// If no broker is configured, returns all tools unfiltered. Names are uniform.
 func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -370,11 +419,12 @@ func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.To
 		return m.getAllToolsLocked()
 	}
 
-	// Convert broker ToolDefinitions back to provider.ToolDefinition with prefixed names.
+	// The broker is registered with uniform names already (see
+	// DiscoverTools); selection results carry uniform names directly.
 	defs := make([]provider.ToolDefinition, 0, len(result.Tools))
 	for _, t := range result.Tools {
 		defs = append(defs, provider.ToolDefinition{
-			Name:        fmt.Sprintf("mcp__%s__%s", t.Server, t.Name),
+			Name:        t.Name,
 			Description: t.Description,
 			InputSchema: t.InputSchema,
 		})
@@ -396,12 +446,11 @@ func (m *Manager) GetAllTools() []provider.ToolDefinition {
 func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
 	defs := make([]provider.ToolDefinition, 0, len(m.tools))
 	for _, entry := range m.tools {
-		qualifiedName := fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name)
-		if m.LoadChecker != nil && !m.LoadChecker.IsToolEnabled(qualifiedName) {
+		if m.LoadChecker != nil && !m.LoadChecker.IsToolEnabled(entry.uniformName) {
 			continue
 		}
 		defs = append(defs, provider.ToolDefinition{
-			Name:        qualifiedName,
+			Name:        entry.uniformName,
 			Description: entry.tool.Description,
 			InputSchema: entry.tool.InputSchema,
 		})
@@ -410,14 +459,14 @@ func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
 }
 
 // GetAllToolsUnfiltered returns every discovered tool regardless of loadType.
-// Used for diagnostics and the tool load preferences UI.
+// Used for diagnostics and the tool load preferences UI. Names are uniform.
 func (m *Manager) GetAllToolsUnfiltered() []provider.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	defs := make([]provider.ToolDefinition, 0, len(m.tools))
 	for _, entry := range m.tools {
 		defs = append(defs, provider.ToolDefinition{
-			Name:        fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name),
+			Name:        entry.uniformName,
 			Description: entry.tool.Description,
 			InputSchema: entry.tool.InputSchema,
 		})
@@ -425,8 +474,124 @@ func (m *Manager) GetAllToolsUnfiltered() []provider.ToolDefinition {
 	return defs
 }
 
-// ExecuteTool routes a tool call to the correct server and returns the result as text.
-// Tool names are expected in the format "mcp__<server>__<tool_name>".
+// ToolAttribution returns the originating MCP server and the tool's
+// original name on that server, given a uniform agent-facing name.
+// Returns ok=false when the name is not a registered MCP tool. Used by
+// audit / telemetry sites that need source-server context after the
+// agent-facing surface has been flattened.
+func (m *Manager) ToolAttribution(uniformName string) (server, originalTool string, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, found := m.uniformIndex[uniformName]
+	if !found {
+		return "", "", false
+	}
+	return entry.serverName, entry.tool.Name, true
+}
+
+// HasServer reports whether a server with the given name is registered.
+// Replaces the legacy "scan tools for `mcp__<server>__` prefix" check
+// that callers used to detect server presence.
+func (m *Manager) HasServer(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.servers[name]
+	return ok
+}
+
+// assignUniformNameLocked computes the uniform agent-facing name for a
+// tool, resolving collisions against the existing uniformIndex.
+//
+// Resolution order:
+//  1. Default — bare tool name (`memory_write` from `mux`).
+//  2. Reserved-namespace defense — if the bare name lives in `nanite_*`,
+//     force-prefix with the server (`<server>_<tool>`) regardless of any
+//     collision. The nanite_ namespace is exclusive to first-party
+//     self-tools.
+//  3. Collision — if the default slot is already occupied by a tool from
+//     a different server, fall back to `<server>_<tool>` and try that
+//     slot. Both the incumbent and the newcomer keep their disambiguated
+//     forms; the bare slot is freed (the incumbent is rewritten too).
+//  4. If the disambiguated slot is also occupied, drop the tool with a
+//     warning — this is a hard collision (two servers exporting the same
+//     `<server>_<tool>` shape, which can only happen if servers share a
+//     name, which AddServer rejects, OR if a server's tool name embeds
+//     another server's name as a prefix). Returns "".
+//
+// Caller holds m.mu.
+func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
+	bare := UniformToolName(serverName, toolName)
+	if bare == "" {
+		return ""
+	}
+
+	// (2) Reserved-namespace defense.
+	if IsReservedSelfToolName(bare) {
+		disambig := DisambiguatedToolName(serverName, toolName)
+		if _, taken := m.uniformIndex[disambig]; taken {
+			return ""
+		}
+		slog.Warn("mcp: third-party tool name collides with reserved nanite_ namespace; force-prefixed",
+			"server", serverName, "tool", toolName, "uniform", disambig)
+		return disambig
+	}
+
+	// (1) Default slot.
+	if existing, taken := m.uniformIndex[bare]; !taken {
+		return bare
+	} else if existing.serverName == serverName {
+		// Same-server duplicate (validators above should have caught it,
+		// but be defensive). Return empty to drop.
+		return ""
+	} else {
+		// (3) Collision — rewrite the incumbent into its disambiguated
+		// slot, then place the newcomer in its own disambiguated slot.
+		incumbentDisambig := DisambiguatedToolName(existing.serverName, existing.tool.Name)
+		newcomerDisambig := DisambiguatedToolName(serverName, toolName)
+
+		// Hard-collision guard: incumbent already has a same-shape slot,
+		// or newcomer's disambiguated slot is taken by yet another tool.
+		if _, taken := m.uniformIndex[incumbentDisambig]; taken {
+			if existing.uniformName != incumbentDisambig {
+				return ""
+			}
+		}
+		if _, taken := m.uniformIndex[newcomerDisambig]; taken {
+			return ""
+		}
+
+		// Rewrite the incumbent.
+		delete(m.uniformIndex, bare)
+		existing.uniformName = incumbentDisambig
+		m.uniformIndex[incumbentDisambig] = existing
+		slog.Warn("mcp: tool-name collision — disambiguated both servers",
+			"name", bare,
+			"incumbent_server", existing.serverName,
+			"incumbent_uniform", incumbentDisambig,
+			"newcomer_server", serverName,
+			"newcomer_uniform", newcomerDisambig,
+		)
+
+		// Record collision warnings on each affected server.
+		m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
+			ServerName: existing.serverName,
+			ToolName:   existing.tool.Name,
+			Reason:     "uniform_name_collision_disambiguated",
+		})
+		m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
+			ServerName: serverName,
+			ToolName:   toolName,
+			Reason:     "uniform_name_collision_disambiguated",
+		})
+
+		return newcomerDisambig
+	}
+}
+
+// ExecuteTool routes a tool call to the correct server and returns the
+// result as text. The tool name is the uniform agent-facing name (no
+// `mcp__server__` prefix); the manager looks up the originating server
+// via the uniform-name index.
 //
 // Result handling (S4b T3 + T5 + D5):
 //  1. ValidateBlockType drops blocks whose Type is not in the allowlist.
@@ -440,8 +605,25 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 	ctx, span := feotel.ToolCallSpan(ctx, name)
 	defer span.End()
 
-	serverName, toolName, err := parsePrefixedToolName(name)
-	if err != nil {
+	m.mu.RLock()
+	entry, found := m.uniformIndex[name]
+	var (
+		serverName string
+		toolName   string
+		transport  MCPTransport
+		tier       TrustTier
+		ok         bool
+	)
+	if found {
+		serverName = entry.serverName
+		toolName = entry.tool.Name
+		transport, ok = m.servers[serverName]
+		tier = m.tierForLocked(serverName)
+	}
+	m.mu.RUnlock()
+
+	if !found {
+		err := fmt.Errorf("unknown MCP tool: %s", name)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return "", err
@@ -450,12 +632,8 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 	span.SetAttributes(
 		attribute.String("nanite.mcp.server", serverName),
 		attribute.String("nanite.mcp.tool", toolName),
+		attribute.String("nanite.mcp.uniform_name", name),
 	)
-
-	m.mu.RLock()
-	transport, ok := m.servers[serverName]
-	tier := m.tierForLocked(serverName)
-	m.mu.RUnlock()
 
 	if !ok {
 		err := fmt.Errorf("unknown MCP server: %s", serverName)
@@ -472,8 +650,92 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		return "", err
 	}
 
-	// Concatenate text content blocks, stripping ANSI and scanning for
-	// injection patterns on the way through.
+	out, err := assembleToolResultText(serverName, toolName, result)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
+	}
+	if err := ValidateResultSize(tier, len(out)); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", fmt.Errorf("call tool %s on %s: %w", toolName, serverName, err)
+	}
+
+	span.SetAttributes(attribute.Int("nanite.mcp.result_len", len(out)))
+	return out, nil
+}
+
+// ResolveToolServer finds which server owns a uniform agent-facing tool
+// name. Returns the server name and the same uniform name (the
+// "prefixed" return retained for compat with the historical signature),
+// or empty strings if not found.
+func (m *Manager) ResolveToolServer(uniformName string) (serverName, resolvedName string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if entry, ok := m.uniformIndex[uniformName]; ok {
+		return entry.serverName, entry.uniformName
+	}
+	return "", ""
+}
+
+// ExecuteToolOnServer is the explicit-server execution path used by
+// internal callers that know which server they want to talk to (the
+// chat orchestrator's Engine sprint creator, the contextbroker sources,
+// etc.) — they should NOT have to look up a uniform name to reach a
+// known tool. Bypasses the uniform-name index but still applies the
+// trust-tier validation pipeline.
+func (m *Manager) ExecuteToolOnServer(ctx context.Context, serverName, toolName string, input map[string]any) (string, error) {
+	if toolName == "" {
+		return "", fmt.Errorf("mcp: ExecuteToolOnServer: empty tool name")
+	}
+	uniform := UniformToolName(serverName, toolName)
+	ctx, span := feotel.ToolCallSpan(ctx, uniform)
+	defer span.End()
+
+	m.mu.RLock()
+	transport, ok := m.servers[serverName]
+	tier := m.tierForLocked(serverName)
+	m.mu.RUnlock()
+	if !ok {
+		err := fmt.Errorf("unknown MCP server: %s", serverName)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
+	}
+
+	span.SetAttributes(
+		attribute.String("nanite.mcp.server", serverName),
+		attribute.String("nanite.mcp.tool", toolName),
+	)
+
+	result, err := transport.CallTool(ctx, toolName, input)
+	if err != nil {
+		err = fmt.Errorf("call tool %s on %s: %w", toolName, serverName, err)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
+	}
+
+	out, err := assembleToolResultText(serverName, toolName, result)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
+	}
+	if err := ValidateResultSize(tier, len(out)); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", fmt.Errorf("call tool %s on %s: %w", toolName, serverName, err)
+	}
+	span.SetAttributes(attribute.Int("nanite.mcp.result_len", len(out)))
+	return out, nil
+}
+
+// assembleToolResultText concatenates valid text blocks from a tool
+// result, applying ANSI stripping and injection-pattern observability.
+// It returns an error when the result is flagged IsError.
+func assembleToolResultText(serverName, toolName string, result *ToolResult) (string, error) {
 	var sb strings.Builder
 	for _, c := range result.Content {
 		if err := ValidateBlockType(c); err != nil {
@@ -486,8 +748,6 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		}
 		text := StripANSI(c.Text)
 		for _, hit := range ScanInjection(text) {
-			// T5 observability: log + structured metric record. D3 says
-			// observe-only in S4b — do not short-circuit the result.
 			slog.Warn("mcp: injection pattern detected",
 				"server", serverName,
 				"tool", toolName,
@@ -506,35 +766,10 @@ func (m *Manager) ExecuteTool(ctx context.Context, name string, input map[string
 		}
 		sb.WriteString(text)
 	}
-
 	if result.IsError {
-		err := fmt.Errorf("tool error: %s", sb.String())
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", err
+		return "", fmt.Errorf("tool error: %s", sb.String())
 	}
-
-	if err := ValidateResultSize(tier, sb.Len()); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return "", fmt.Errorf("call tool %s on %s: %w", toolName, serverName, err)
-	}
-
-	span.SetAttributes(attribute.Int("nanite.mcp.result_len", sb.Len()))
 	return sb.String(), nil
-}
-
-// ResolveToolServer finds which server owns a bare (unprefixed) tool name.
-// Returns the server name and prefixed tool name, or empty strings if not found.
-func (m *Manager) ResolveToolServer(toolName string) (serverName, prefixedName string) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, entry := range m.tools {
-		if entry.tool.Name == toolName {
-			return entry.serverName, fmt.Sprintf("mcp__%s__%s", entry.serverName, toolName)
-		}
-	}
-	return "", ""
 }
 
 // HasTools reports whether any tools are available.
@@ -601,11 +836,13 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 
 	diff := &DiscoveryDiff{}
 
+	// currentTools is keyed by uniform agent-facing name (post
+	// internalization). The originating server is captured on each entry
+	// for skill metadata (audit attribution).
 	m.mu.RLock()
 	currentTools := make(map[string]toolEntry, len(m.tools))
 	for _, entry := range m.tools {
-		prefixed := fmt.Sprintf("mcp__%s__%s", entry.serverName, entry.tool.Name)
-		currentTools[prefixed] = entry
+		currentTools[entry.uniformName] = entry
 	}
 	diff.Total = len(currentTools)
 	m.mu.RUnlock()
@@ -621,9 +858,11 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 		existingSlugs[existingSkills[i].Slug] = &existingSkills[i]
 	}
 
-	// Create skills for new tools.
-	for prefixed, entry := range currentTools {
-		slug := toolNameToSlug(prefixed)
+	// Create skills for new tools. The skill slug is derived from the
+	// uniform agent-facing name; tool_bindings record the same uniform
+	// name so callers that resolve the binding can dispatch directly.
+	for uniform, entry := range currentTools {
+		slug := toolNameToSlug(uniform)
 		if _, exists := existingSlugs[slug]; exists {
 			continue
 		}
@@ -633,7 +872,7 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 			Slug:         slug,
 			Description:  entry.tool.Description,
 			Category:     "auto-discovered",
-			ToolBindings: fmt.Sprintf(`[%q]`, entry.tool.Name),
+			ToolBindings: fmt.Sprintf(`[%q]`, uniform),
 			IsBuiltin:    false,
 			Settings:     fmt.Sprintf(`{"server":%q,"auto_discovered":true}`, entry.serverName),
 		}
@@ -641,7 +880,7 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 			slog.Warn("mcp: auto-discover failed to create skill", "slug", slug, "err", err)
 			continue
 		}
-		diff.Added = append(diff.Added, prefixed)
+		diff.Added = append(diff.Added, uniform)
 		slog.Info("mcp: auto-discovered new tool → skill", "slug", slug)
 	}
 
@@ -652,8 +891,8 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 		}
 		// Check if any current tool matches this slug.
 		found := false
-		for prefixed := range currentTools {
-			if toolNameToSlug(prefixed) == slug {
+		for uniform := range currentTools {
+			if toolNameToSlug(uniform) == slug {
 				found = true
 				break
 			}
@@ -674,7 +913,7 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 	return diff, nil
 }
 
-// toolNameToSlug converts a prefixed tool name to a URL-safe slug.
+// toolNameToSlug converts a uniform tool name to a URL-safe slug.
 func toolNameToSlug(name string) string {
 	slug := strings.ReplaceAll(name, "__", "-")
 	slug = strings.ReplaceAll(slug, "_", "-")
@@ -706,24 +945,6 @@ func (m *Manager) Close() {
 			slog.Info("mcp: closed transport", "server", nt.name)
 		}
 	}
-}
-
-// parsePrefixedToolName splits "mcp__server__tool_name" into server and tool name.
-func parsePrefixedToolName(name string) (server, tool string, err error) {
-	if !strings.HasPrefix(name, "mcp__") {
-		return "", "", fmt.Errorf("tool name %q missing mcp__ prefix", name)
-	}
-	rest := strings.TrimPrefix(name, "mcp__")
-	idx := strings.Index(rest, "__")
-	if idx < 0 {
-		return "", "", fmt.Errorf("tool name %q missing server separator", name)
-	}
-	server = rest[:idx]
-	tool = rest[idx+2:]
-	if server == "" || tool == "" {
-		return "", "", fmt.Errorf("tool name %q has empty server or tool", name)
-	}
-	return server, tool, nil
 }
 
 // GetDiscoveryWarnings returns warnings from the last discovery run.

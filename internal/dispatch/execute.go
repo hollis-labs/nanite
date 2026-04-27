@@ -50,6 +50,36 @@ type ExecuteTaskArgs struct {
 	// classifier output. Test seam; production callers leave it
 	// RoleInvalid to use AssignRole.
 	RoleOverride Role
+
+	// ReflexHints carries pre-computed hints from the reflex matcher
+	// (internal/reflex). When non-nil, the tier and pattern hints
+	// override the classifier output before AssignRole is called; the
+	// AgentSlug hint, when non-empty, overrides the AssignRole default
+	// slug. The reflex layer is always upstream of AssignRole — reflexes
+	// produce hints; AssignRole consumes them.
+	//
+	// nil means "no reflex matched; use classifier output as-is".
+	ReflexHints *ReflexHints
+}
+
+// ReflexHints carries the dispatch-layer projection of a reflex match result.
+// It avoids a direct import of internal/reflex from internal/dispatch (which
+// would create a cycle, since internal/reflex imports internal/dispatch).
+// The MCP layer (internal/mcp/self_tools_dispatch.go) constructs this struct
+// from a reflex.ReflexMatch and passes it through ExecuteTaskArgs.
+type ReflexHints struct {
+	// HintTier overrides the M1 classifier ScopeTier when non-zero.
+	HintTier classify.ScopeTier
+	// HintPattern overrides the M1 classifier ExecutionPattern when non-zero.
+	HintPattern classify.ExecutionPattern
+	// AgentSlug, when non-empty, overrides the AssignRole default slug
+	// (WorkerRoleSlug or PlannerRoleSlug).
+	AgentSlug string
+	// Mode overrides the RoleAssignment.Mode when non-empty.
+	// Values: "sync", "async". Empty means use AssignRole's default.
+	Mode string
+	// ReflexID is the matched reflex's ID. Informational; used in telemetry.
+	ReflexID string
 }
 
 // SpawnRequest mirrors the shape subagent.Service.Spawn accepts. Defined
@@ -143,8 +173,30 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 		MessageTokenEst: estimateTokens(args.Message),
 	})
 
+	// 1b. Apply reflex hints when present (E1 — CW-20260419-0027).
+	// Reflexes are the upstream hint layer; they override the M1 classifier
+	// output before AssignRole maps (tier, pattern) → RoleAssignment. This
+	// keeps AssignRole's mapping table stable — reflexes change what goes in,
+	// not how the map works.
+	if h := args.ReflexHints; h != nil {
+		if h.HintTier != 0 {
+			tier = h.HintTier
+		}
+		if h.HintPattern != 0 {
+			pattern = h.HintPattern
+		}
+	}
+
 	// 2. Assign role.
 	assignment := AssignRole(tier, pattern)
+	if args.ReflexHints != nil {
+		if args.ReflexHints.AgentSlug != "" {
+			assignment.AgentSlug = args.ReflexHints.AgentSlug
+		}
+		if args.ReflexHints.Mode != "" {
+			assignment.Mode = args.ReflexHints.Mode
+		}
+	}
 	if args.RoleOverride.IsValid() {
 		// Test seam — preserves the spawned slug from AssignRole so the
 		// override can change the role flag without forcing the caller to

@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/crossapp"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/messaging"
+	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -76,6 +77,16 @@ type SelfToolsTransport struct {
 	// Set post-construction; defaults to dispatch.DefaultEnvelopeWrapper{}
 	// when the transport detects a configured Dispatch with no wrapper.
 	DispatchWrapper dispatch.EnvelopeWrapper
+
+	// ReflexSet is the merged (builtin + user-override) reflex slice used
+	// by the E1 reflex matcher (CW-20260419-0027). Set post-construction
+	// from the startup wiring (see internal/service or cmd/nanite). When
+	// nil, reflex matching is skipped and the dispatch path is unchanged.
+	ReflexSet []reflex.Reflex
+	// ReflexLogger persists reflex match events to playbook_match_log.
+	// Set post-construction; nil disables match logging (matching still
+	// runs and influences dispatch). *store.Store satisfies this interface.
+	ReflexLogger reflex.MatchLogger
 
 	// PythonPermChecker is the permission engine used by nanite_run_python
 	// to validate tool calls made from inside the Python sandbox.

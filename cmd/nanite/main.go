@@ -20,6 +20,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
+	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
 	"github.com/hollis-labs/go-providers/provider"
@@ -500,6 +501,15 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 		slog.Error("mcp: failed to register builtin server", "name", "code", "err", err)
 	}
 	selfTools := mcp.NewSelfToolsTransport(s)
+	// E1 (CW-20260419-0027): wire reflex set + logger into the dispatch path.
+	// LoadUserReflexes returns nil on a missing dir (not an error); merge with
+	// builtins so user overrides with priority>=50 reliably beat built-ins.
+	userReflexes, err := reflex.LoadUserReflexes("")
+	if err != nil {
+		slog.Warn("reflex: failed to load user overrides", "err", err)
+	}
+	selfTools.ReflexSet = reflex.MergeReflexes(reflex.BuiltinReflexes(), userReflexes)
+	selfTools.ReflexLogger = s
 	if err := mcpManager.AddServer("self", selfTools, mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
 	}

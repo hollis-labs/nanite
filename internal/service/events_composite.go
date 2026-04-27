@@ -178,12 +178,13 @@ func (c *CompositeEmitter) EmitPreCompact(ctx context.Context, sessionID string,
 	// Persist a context_pre_compact row so P8 part C (CW-20260420-0027) has
 	// a queryable seam. channel = trigger_kind; payload carries message_count
 	// and trigger_kind so the row is self-contained for consumers.
+	// Written synchronously (not via safego.Go) so the row lands before the
+	// caller proceeds to EmitPostCompact — ordering is required for P8 consumers
+	// that query pre/post compact rows in sequence.
 	if c.sessionWriter != nil {
 		payload := fmt.Sprintf(`{"message_count":%d,"trigger_kind":%q}`, messageCount, reason)
-		safego.Go(ctx, "service.events.session.pre-compact", func() {
-			c.sessionWriter.WriteSessionEvent(ctx, sessionID,
-				messaging.EventContextPreCompact, reason, payload)
-		})
+		c.sessionWriter.WriteSessionEvent(ctx, sessionID,
+			messaging.EventContextPreCompact, reason, payload)
 	}
 }
 
@@ -197,6 +198,8 @@ func (c *CompositeEmitter) EmitPostCompact(ctx context.Context, sessionID string
 	// Persist a context_post_compact row for P8 part C (CW-20260420-0027).
 	// stages_applied is a JSON array; tokens_saved and the channel are
 	// included so a single row query is sufficient for P8 consumption.
+	// Written synchronously (not via safego.Go) to preserve pre→post ordering
+	// guarantee for P8 consumers (mirrors EmitPreCompact's synchronous write).
 	if c.sessionWriter != nil {
 		stagesJSON := `[]`
 		if len(stagesApplied) > 0 {
@@ -208,9 +211,7 @@ func (c *CompositeEmitter) EmitPostCompact(ctx context.Context, sessionID string
 		}
 		payload := fmt.Sprintf(`{"tokens_saved":%d,"stages_applied":%s}`,
 			tokensSaved, stagesJSON)
-		safego.Go(ctx, "service.events.session.post-compact", func() {
-			c.sessionWriter.WriteSessionEvent(ctx, sessionID,
-				messaging.EventContextPostCompact, "compaction", payload)
-		})
+		c.sessionWriter.WriteSessionEvent(ctx, sessionID,
+			messaging.EventContextPostCompact, "compaction", payload)
 	}
 }

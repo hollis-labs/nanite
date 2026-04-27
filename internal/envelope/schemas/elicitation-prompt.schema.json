@@ -1,0 +1,46 @@
+{
+  "$id": "elicitation-prompt",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Elicitation Prompt",
+  "description": "A mid-tool-call user prompt issued by MCP elicitation/create (spec 2025-06-18). Rendered inline in chat with a text input (string schema) or accept/decline buttons (boolean schema).",
+  "type": "object",
+  "required": ["elicitation_id", "message", "schema_type", "origin", "timeout_at"],
+  "properties": {
+    "elicitation_id": {
+      "type": "string",
+      "description": "Unique ID of the pending elicitation request. Must be echoed back in the response."
+    },
+    "message": {
+      "type": "string",
+      "description": "The question or prompt shown to the user."
+    },
+    "schema_type": {
+      "type": "string",
+      "enum": ["boolean", "string"],
+      "description": "Response type: boolean renders accept/decline buttons; string renders a text input."
+    },
+    "schema_title": {
+      "type": "string",
+      "description": "Optional short label shown above the input widget."
+    },
+    "schema_description": {
+      "type": "string",
+      "description": "Optional helper text shown below the input widget."
+    },
+    "tool_call_id": {
+      "type": "string",
+      "description": "Originating tool-call ID (MCP tool_use_id) for client-side correlation."
+    },
+    "origin": {
+      "type": "string",
+      "enum": ["server", "client"],
+      "description": "Where the elicitation was issued: server (Nanite's own tool) or client (external MCP server)."
+    },
+    "timeout_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the server will auto-cancel if no response arrives (default: 5 min from creation)."
+    }
+  },
+  "additionalProperties": false
+}

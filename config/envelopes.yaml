@@ -108,3 +108,10 @@ core:
   - type: chat-loop-terminated
     component: components/chat/envelopes/ChatLoopTerminatedCard
     export: ChatLoopTerminatedCard
+
+  # CW-20260420-0018 — MCP elicitation/create mid-tool user prompt (G4).
+  # Renders inline in chat with boolean (accept/decline) or string (text input)
+  # input depending on schema_type. User response routes back via ResponseV1.
+  - type: elicitation-prompt
+    component: components/chat/envelopes/ElicitationPromptCard
+    export: ElicitationPromptCard

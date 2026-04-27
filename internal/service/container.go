@@ -520,6 +520,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SessionEventWriter: messagingSvc,
 		DBPath:             cfg.Store.DBPath(),
 		AdapterRegistry:    adapterRegistry,
+		// CW-20260419-0026 (E3): wire the strategy decision logger.
+		// *store.Store satisfies strategyDecisionLogger via
+		// internal/store/strategy_log.go.
+		StrategyLogger: cfg.Store,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed

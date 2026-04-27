@@ -412,6 +412,24 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
 	}
 
+	// E3 (CW-20260419-0026, Phase 5): strategy planning. Reads the M1
+	// classification we just attached, runs the reflex matcher over the
+	// user input, and produces a Strategy with an initial turn budget.
+	// The budget replaces the hard-coded defaultMaxTurns ceiling for
+	// this turn (E4 absorption — CW-20260419-0020). Grounding is NOT
+	// consulted here in v1 (the recall step lives in mcp.callExecuteTask
+	// and only fires on subagent dispatch).
+	scopeTier, executionPattern := ls.Classification()
+	turnStrategy := planStrategyForTurn(
+		ctx,
+		sessionID, assistantMsgID, userContent,
+		scopeTier, executionPattern,
+		nil, /* reflexSet — falls back to BuiltinReflexes() */
+		nil, /* groundingResult — not consulted in v1 chat-loop strategy */
+		s.strategyLogger,
+	)
+	applyStrategyToLimits(ls, turnStrategy)
+
 	// CW-20260418-0043 diagnostic — log effective loop config on entry.
 	diagLogLoopStart(sessionID, assistantMsgID, agent.ID, ls, cap(ch))
 
@@ -429,12 +447,37 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if stop, code, reason := ls.shouldStop(); stop {
 			slog.Warn("chat-loop stopped", "reason", reason, "code", code, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
 
+			// E3 (CW-20260419-0026, Phase 5): mid-execution review fires
+			// at budget exhaustion. When max_turns is hit AND no tool result
+			// was load-bearing this turn, we ask a clarifying question
+			// instead of synthesising a thin / fabricated answer. When data
+			// IS load-bearing, we fall through to the existing early-stop
+			// synthesis path which wraps with partial data.
+			handledByStrategy := false
+			if code == TerminationMaxTurns {
+				hasUsableData := strategyHasUsableData(ls)
+				decision := reviewExhaustedBudget(ctx, turnStrategy, ls.iteration, ls.resolvedMaxTurns(), hasUsableData)
+				slog.Info("chat-service: strategy review",
+					"session_id", sessionID,
+					"decision", string(decision),
+					"has_usable_data", hasUsableData,
+					"iteration", ls.iteration,
+					"max_turns", ls.resolvedMaxTurns(),
+				)
+				if decision == strategy_pkg_ReviewAskToClarify() {
+					q := strategyClarifyingQuestion(userContent, scopeTier, turnStrategy)
+					ch <- chat.StreamEvent{Type: "delta", Content: q}
+					fullContent.WriteString(q)
+					handledByStrategy = true
+				}
+			}
+
 			// Early-stopping-generate: when the loop hits its iteration ceiling
 			// (max_turns or runaway tool failures), make one final no-tools LLM
 			// call to synthesize a best-effort answer from the work done so far.
 			// Synthesis deltas land in the stream before the terminated envelope
 			// so the user sees a coherent response rather than an abrupt cutoff.
-			if code == TerminationMaxTurns || code == TerminationRunawayToolFailures {
+			if !handledByStrategy && (code == TerminationMaxTurns || code == TerminationRunawayToolFailures) {
 				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent)
 			}
 

@@ -25,25 +25,28 @@ const (
 
 // Default iteration limits.
 //
-// CW-20260419-0020 (tracked for the long-term fix): `defaultMaxTurns`
-// as a fixed constant is the wrong shape — the tool broker doesn't
-// know upfront whether a task is small or large, and any fixed ceiling
-// cuts the agent off mid-thought when scope legitimately expands. The
-// intended design (see the task for full spec) is a negotiated budget:
+// CW-20260419-0020 (E4) is now ABSORBED INTO E3 (CW-20260419-0026) —
+// `defaultMaxTurns` is the fallback only. The strategy planner
+// (internal/strategy.PlanStrategy) chooses the per-turn budget based on
+// intent classification + reflex match + (future) grounding evidence,
+// and the chat loop overwrites limits.maxTurns with Strategy.MaxTurns
+// before entering the loop body. On budget exhaustion, the strategy
+// reviewer (ReviewMidExecution) decides whether to wrap with partial
+// data, ask a clarifying question, or extend the budget (v2). Every
+// decision + rationale is logged to strategy_decisions.
 //
-//   1. Broker picks an initial budget based on classified task size.
-//   2. On hitting the budget, the loop asks the agent to explain WHY
-//      it needs more (scope grew, tool failure streak, exploration
-//      fan-out, etc.) instead of terminating.
-//   3. Broker decides whether to raise (and by how much) or stop.
-//   4. Every decision + reasoning is logged so we can audit over time.
+// The constant below is preserved so unit tests, code paths that bypass
+// the strategy planner, and on-disk migrations that compare to the
+// historical default keep working.
 //
-// Until that lands: interim bump to 75 (from 25) after c17/c27 UAT showed
-// 25 is the default-case ceiling, not a rare safety net — list+analyze
-// asks routinely need 20-30 tool calls just for the fetching phase, and
-// the LLM was being cut off mid-thought with no final message. 75 gives
-// headroom without uncorking; hardCeiling=200 still catches true runaways.
-// Tunable via user_settings once CW-20260419-0020 ships.
+// Historical context (preserved for the audit trail): the constant was
+// bumped to 75 (from 25) after c17/c27 UAT showed 25 is the default-case
+// ceiling, not a rare safety net — list+analyze asks routinely need
+// 20-30 tool calls just for the fetching phase, and the LLM was being
+// cut off mid-thought with no final message. 75 gives headroom without
+// uncorking; hardCeiling=200 still catches true runaways. Strategy now
+// supersedes the constant — the typical Strategy.MaxTurns is 10-40, and
+// 75 only applies when the strategy planner is bypassed entirely.
 const (
 	defaultMaxTurns            = 75
 	defaultHardCeiling         = 200

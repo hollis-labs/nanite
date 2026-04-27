@@ -118,6 +118,12 @@ type ChatServiceConfig struct {
 	// to write CLAUDE.md and .mcp.json on each chat turn. nil = sandbox file
 	// writes are skipped.
 	AdapterRegistry *agent.AdapterRegistry
+
+	// StrategyLogger persists v1 strategy decisions to strategy_decisions
+	// (CW-20260419-0026, Phase 5 / E3). nil-safe: when absent, strategy
+	// planning still runs and applies its MaxTurns to the loop budget,
+	// but no row is written. *store.Store satisfies the interface.
+	StrategyLogger strategyDecisionLogger
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -165,6 +171,10 @@ type chatServiceImpl struct {
 	dbPath string
 	// adapterRegistry is forwarded to sandbox.Populate on each CLI chat turn.
 	adapterRegistry *agent.AdapterRegistry
+
+	// strategyLogger persists v1 strategy decisions. nil-safe.
+	// (CW-20260419-0026, Phase 5 / E3.)
+	strategyLogger strategyDecisionLogger
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -228,6 +238,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		lifecycle:               lifecycle.NewManager("service.chat"),
 		activeGen:               make(map[string]*inFlightGen),
 		sessionEventWriter:  cfg.SessionEventWriter,
+		strategyLogger:      cfg.StrategyLogger,
 	}
 }
 

@@ -220,6 +220,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// will be wired when the plugin host supports adapter registration.
 	adapterRegistry := newRuntimeAdapterRegistry()
 
+	// Ensure ~/.nanite/agents/ exists on first run (J6, CW-20260421-0006).
+	// Silently continue on error — a missing home dir is non-fatal at startup.
+	if err := agent.EnsureHomeDirs(""); err != nil {
+		slog.Warn("service container: ensure agent home dirs", "err", err)
+	}
+
 	// Discover file-based agent definitions from all priority locations.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
 		WorkingDir: ".",
@@ -277,6 +283,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// context_post_compact rows for P8 part C (CW-20260426-0002).
 	events.WithSessionWriter(messagingSvc)
 	slog.Info("service container: messaging service enabled")
+
+	// Ensure ~/.nanite/skills/ exists on first run (J6, CW-20260421-0006).
+	// Silently continue on error — a missing home dir is non-fatal at startup.
+	if err := skill.EnsureHomeDirs(""); err != nil {
+		slog.Warn("service container: ensure skill home dirs", "err", err)
+	}
 
 	// Discover file-based skill definitions from all 5 priority locations.
 	skillDefs, err := skill.Discover(skill.DiscoverOptions{

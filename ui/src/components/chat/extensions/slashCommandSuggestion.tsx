@@ -1,5 +1,6 @@
 import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
-import { createRoot, flushSync, type Root } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { setSlashMenuOpen } from "../ChatComposer";
 import type { SlashCommand } from "./SlashCommandExtension";
 import { SlashCommandMenu, type SlashCommandMenuRef } from "./SlashCommandMenu";

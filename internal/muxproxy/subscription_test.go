@@ -3,6 +3,7 @@ package muxproxy
 import (
 	"context"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,11 +41,22 @@ type publishedEvent struct {
 }
 
 type fakePublisher struct {
+	mu        sync.Mutex
 	published []publishedEvent
 }
 
 func (fp *fakePublisher) PublishSubEvent(sessionID string, evt SubEvent) {
+	fp.mu.Lock()
+	defer fp.mu.Unlock()
 	fp.published = append(fp.published, publishedEvent{sessionID: sessionID, evt: evt})
+}
+
+func (fp *fakePublisher) snapshot() []publishedEvent {
+	fp.mu.Lock()
+	defer fp.mu.Unlock()
+	out := make([]publishedEvent, len(fp.published))
+	copy(out, fp.published)
+	return out
 }
 
 func TestManager_RegisterAndFanout(t *testing.T) {
@@ -90,13 +102,14 @@ func TestManager_RegisterAndFanout(t *testing.T) {
 	// Give dispatch a moment to call the publisher for each event.
 	time.Sleep(50 * time.Millisecond)
 
-	if len(fp.published) == 0 {
+	pub := fp.snapshot()
+	if len(pub) == 0 {
 		t.Fatal("publisher received no events")
 	}
 
 	// Find the delta.
 	var foundDelta bool
-	for _, pe := range fp.published {
+	for _, pe := range pub {
 		if pe.sessionID != "chat-1" {
 			t.Fatalf("want sessionID=chat-1, got %q", pe.sessionID)
 		}
@@ -105,7 +118,7 @@ func TestManager_RegisterAndFanout(t *testing.T) {
 		}
 	}
 	if !foundDelta {
-		t.Fatalf("no subordinate_delta found in %+v", fp.published)
+		t.Fatalf("no subordinate_delta found in %+v", pub)
 	}
 }
 
@@ -125,8 +138,8 @@ func TestManager_IgnoresUnregisteredSessions(t *testing.T) {
 	// orphan session.
 	time.Sleep(100 * time.Millisecond)
 
-	if len(fp.published) != 0 {
-		t.Fatalf("publisher received event for unregistered session: %+v", fp.published)
+	if pub := fp.snapshot(); len(pub) != 0 {
+		t.Fatalf("publisher received event for unregistered session: %+v", pub)
 	}
 }
 

@@ -5,10 +5,17 @@ interface ChatState {
   // Streaming
   isStreaming: boolean
   streamingContent: string
+  /** F4 (CW-20260419-0029) — inter-iteration narration text. Live during streaming.
+   *  Collapses to a pill after stream_end. Empty when the turn had no tool calls. */
+  streamingNarration: string
+  /** F4 — post-end_turn final answer text. This becomes the assistant bubble. */
+  streamingFinal: string
   streamingSessionId: string | null
   setStreaming: (streaming: boolean) => void
   setStreamingSessionId: (id: string | null) => void
   appendStreamContent: (content: string) => void
+  appendStreamNarration: (content: string) => void
+  appendStreamFinal: (content: string) => void
   replaceStreamContent: (content: string) => void
   clearStream: () => void
 
@@ -108,13 +115,32 @@ export const useChatStore = create<ChatState>((set) => ({
   // Streaming
   isStreaming: false,
   streamingContent: '',
+  streamingNarration: '',
+  streamingFinal: '',
   streamingSessionId: null,
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setStreamingSessionId: (id) => set({ streamingSessionId: id }),
   appendStreamContent: (content) =>
     set((state) => ({ streamingContent: state.streamingContent + content })),
-  replaceStreamContent: (content) => set({ streamingContent: content }),
-  clearStream: () => set({ streamingContent: '', isStreaming: false, streamingSessionId: null, statusMessage: null, streamStalled: false }),
+  appendStreamNarration: (content) =>
+    set((state) => ({ streamingNarration: state.streamingNarration + content })),
+  appendStreamFinal: (content) =>
+    set((state) => ({
+      streamingFinal: state.streamingFinal + content,
+      // Keep streamingContent in sync with final text so legacy consumers
+      // (e.g. ChatTranscript's streamingContent prop) render the answer.
+      streamingContent: state.streamingFinal + content,
+    })),
+  replaceStreamContent: (content) => set({ streamingContent: content, streamingFinal: content }),
+  clearStream: () => set({
+    streamingContent: '',
+    streamingNarration: '',
+    streamingFinal: '',
+    isStreaming: false,
+    streamingSessionId: null,
+    statusMessage: null,
+    streamStalled: false,
+  }),
 
   // Status messages
   statusMessage: null,

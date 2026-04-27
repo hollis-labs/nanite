@@ -342,8 +342,17 @@ export function useChat(sessionId: string | null) {
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
-            accumulated += data.content;
-            store().appendStreamContent(data.content);
+            // F4 (CW-20260419-0029): route by phase.
+            // "narration" → thinking strip (not accumulated as the answer).
+            // "final"     → answer bubble (accumulated for persistence).
+            // No phase (pre-F4 or legacy streams) → treat as final (old behaviour).
+            if (data.phase === "narration") {
+              store().appendStreamNarration(data.content);
+            } else {
+              // "final" or absent — goes into the answer accumulator.
+              accumulated += data.content;
+              store().appendStreamFinal(data.content);
+            }
             // Clear any transient status message when content starts flowing.
             store().setStatusMessage(null);
           }

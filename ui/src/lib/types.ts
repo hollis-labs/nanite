@@ -149,6 +149,14 @@ export interface StreamEvent {
     | "session_takeover"
     | "approval_request"
     | "plugin_envelope";
+  /**
+   * Phase classifies delta events by their narrative role (F4 / CW-20260419-0029).
+   * "narration" — inter-iteration prose emitted between tool_use blocks.
+   * "final"     — post-end_turn text that forms the assistant's answer.
+   * Absent on pre-F4 streams and on non-delta event types.
+   * F3 will extend this with "thinking" for interleaved think-block content.
+   */
+  phase?: "narration" | "final";
   content?: string;
   message_id?: string;
   agent_id?: string;

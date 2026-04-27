@@ -68,6 +68,20 @@ type ToolWarningPayload struct {
 	Level             string `json:"level"` // "warning" or "critical"
 }
 
+// Delta phase constants for StreamEvent.Phase (F4 / CW-20260419-0029).
+//
+// Narration is inter-iteration prose the LLM emits while calling tools
+// ("Let me look at X…"). Final is the post-end_turn text that becomes the
+// assistant's answer. Old clients without phase awareness receive the field as
+// omitempty so the change is additive.
+//
+// F3 (interleaved-thinking-2025-05-14) will add PhaseThinking for Claude
+// think-block content; extend the value space here without breaking changes.
+const (
+	PhaseNarration = "narration" // inter-iteration prose, between tool_use blocks
+	PhaseFinal     = "final"     // post-end_turn text — the answer bubble
+)
+
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
 	Type            string     `json:"type"`                        // stream_start, delta, replace_content, stream_end, error, tool_call, tool_result, status, circuit_open, session_takeover, tool_warning, plugin_envelope, message_received, subagent_run_status_changed
@@ -84,6 +98,13 @@ type StreamEvent struct {
 	PluginID        string     `json:"plugin_id,omitempty"`         // emitting plugin id for plugin_envelope
 	Data            string     `json:"data,omitempty"`              // JSON payload for tool_warning events
 	Detail          string     `json:"detail,omitempty"`            // Short label for tool_call (e.g., command, path)
+
+	// Phase classifies delta events by their narrative role (F4 / CW-20260419-0029).
+	// "narration" — inter-iteration prose between tool_use blocks.
+	// "final"     — post-end_turn text that forms the assistant's answer.
+	// Empty for non-delta event types and for legacy streams that predate F4.
+	// F3 will extend this with "thinking" for interleaved think-block content.
+	Phase string `json:"phase,omitempty"`
 
 	// EventID is a monotonically increasing sequence number per message stream,
 	// assigned by StreamManager when the event is written to the ring buffer.

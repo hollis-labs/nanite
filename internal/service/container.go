@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/filter"
+	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/messaging"
@@ -131,6 +132,10 @@ type Container struct {
 
 	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
 	AdapterRegistry *agent.AdapterRegistry
+
+	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
+	// nil when developer_mode is false.
+	Inspector *inspectsvc.Service
 
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
@@ -517,6 +522,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	syncCatalogToRegistry(modelCatalog)
 	modelCatalog.StartRefresher(catalogCtx)
 
+	// I1 (CW-20260426-0004): inspector service — dev-mode only.
+	// Created unconditionally but only populated/queried when developer_mode=true.
+	var inspectorSvc *inspectsvc.Service
+	if us, err := cfg.Store.GetUserSettings(); err == nil && us.DeveloperMode {
+		inspectorSvc = inspectsvc.NewService()
+		slog.Info("service container: inspector service enabled (developer_mode=true)")
+	}
+
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -547,6 +560,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// *store.Store satisfies strategyDecisionLogger via
 		// internal/store/strategy_log.go.
 		StrategyLogger: cfg.Store,
+		// I1 (CW-20260426-0004): inspector — nil when developer_mode=false.
+		Inspector: inspectorSvc,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed
@@ -718,6 +733,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		ModelSelector:       modelSelector,
 		Permissions:         permissions,
 		AdapterRegistry:     adapterRegistry,
+		Inspector:           inspectorSvc,
 		RunStore:            runStore,
 		WorkflowBroadcaster: workflowBroadcaster,
 		AppConfig:           cfg.AppConfig,

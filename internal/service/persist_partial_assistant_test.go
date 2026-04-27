@@ -95,6 +95,61 @@ func TestPersistPartialAssistant_EmptyContentPlaceholder(t *testing.T) {
 	}
 }
 
+// TestF4Persistence_NarrationInMetadataThinking verifies the F4 persistence
+// contract: when a message is created with narration in metadata.thinking and
+// final text as content, both fields survive a round-trip through a real store
+// (CW-20260419-0029).
+func TestF4Persistence_NarrationInMetadataThinking(t *testing.T) {
+	s, err := store.New(t.TempDir() + "/f4_persist.db")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	sess := &store.Session{ID: "sess-f4", Status: "active"}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	narration := "Let me look at the file...\nLet me also check the other file..."
+	finalText := "Here is the answer to your question."
+
+	// Build metadata the same way generateResponse does.
+	metaJSON, err := json.Marshal(map[string]string{"thinking": narration})
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+
+	msg := &store.Message{
+		ID:        "msg-f4",
+		SessionID: "sess-f4",
+		AgentID:   "agent-f4",
+		Role:      "assistant",
+		Content:   finalText,
+		Metadata:  string(metaJSON),
+	}
+	if err := s.CreateMessage(msg); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	// Read it back and verify both fields.
+	got, err := s.GetMessage("msg-f4")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if got.Content != finalText {
+		t.Errorf("content: got %q, want %q", got.Content, finalText)
+	}
+
+	var meta map[string]string
+	if err := json.Unmarshal([]byte(got.Metadata), &meta); err != nil {
+		t.Fatalf("metadata not valid JSON: %q — %v", got.Metadata, err)
+	}
+	if meta["thinking"] != narration {
+		t.Errorf("metadata.thinking: got %q, want %q", meta["thinking"], narration)
+	}
+}
+
 // TestPersistPartialAssistant_RealStore exercises the full path against a real
 // SQLite store to assert the row is actually readable after the call.  This is
 // the integration-level check that covers all early-return sites that flow

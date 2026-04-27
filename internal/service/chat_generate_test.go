@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -279,6 +280,7 @@ func TestEarlyStopSynthesis_StreamsDeltasToChannel(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 16)
 	var fullContent strings.Builder
 
+	var finalContent strings.Builder
 	svc.earlyStopSynthesis(
 		context.Background(),
 		prov,
@@ -288,6 +290,7 @@ func TestEarlyStopSynthesis_StreamsDeltasToChannel(t *testing.T) {
 		nil, // chatMessages
 		ch,
 		&fullContent,
+		&finalContent,
 	)
 
 	close(ch)
@@ -331,6 +334,7 @@ func TestEarlyStopSynthesis_NoToolsForwarded(t *testing.T) {
 		[]provider.ChatMessage{{Role: "user", Content: "prior message"}},
 		ch,
 		&fullContent,
+		nil, // finalContent — optional; nil is safe
 	)
 	close(ch)
 
@@ -364,6 +368,7 @@ func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
 		prior,
 		ch,
 		&fullContent,
+		nil, // finalContent — optional; nil is safe
 	)
 	close(ch)
 
@@ -406,5 +411,130 @@ func TestEarlyStopSynthesis_FiringCodes(t *testing.T) {
 		if fires(code) {
 			t.Errorf("expected synthesis NOT to fire for %s", code)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// F4 Phase-tagging tests (CW-20260419-0029 / CW-20260426-0019)
+// ---------------------------------------------------------------------------
+
+// TestStreamEventPhaseConstants verifies the exported Phase constants exist
+// and have the expected wire values. F3 will add PhaseThinking — this test
+// serves as a registry guard so future additions don't silently collide.
+func TestStreamEventPhaseConstants(t *testing.T) {
+	if chat.PhaseNarration != "narration" {
+		t.Errorf("PhaseNarration: got %q, want %q", chat.PhaseNarration, "narration")
+	}
+	if chat.PhaseFinal != "final" {
+		t.Errorf("PhaseFinal: got %q, want %q", chat.PhaseFinal, "final")
+	}
+}
+
+// TestStreamEventPhaseFieldOmitEmpty verifies that the Phase field is omitted
+// from non-delta events (omitempty behaviour — old clients must not see it).
+func TestStreamEventPhaseFieldOmitEmpty(t *testing.T) {
+	marshal := func(v any) string {
+		b, _ := json.Marshal(v)
+		return string(b)
+	}
+
+	// Non-delta event: Phase must be absent.
+	nonDelta := chat.StreamEvent{Type: "tool_call", Tool: "example_tool"}
+	out := marshal(nonDelta)
+	if strings.Contains(out, "phase") {
+		t.Errorf("non-delta event JSON should not contain 'phase' field; got: %s", out)
+	}
+
+	// Delta with phase set: must appear.
+	withPhase := chat.StreamEvent{Type: "delta", Content: "hi", Phase: chat.PhaseNarration}
+	out2 := marshal(withPhase)
+	if !strings.Contains(out2, `"phase":"narration"`) {
+		t.Errorf("delta event with PhaseNarration should contain phase field; got: %s", out2)
+	}
+
+	// Delta with no phase: must be absent (old stream behaviour).
+	noPhase := chat.StreamEvent{Type: "delta", Content: "hi"}
+	out3 := marshal(noPhase)
+	if strings.Contains(out3, "phase") {
+		t.Errorf("delta event with no phase should not contain 'phase' field; got: %s", out3)
+	}
+}
+
+// TestEarlyStopSynthesis_FinalContentPopulated verifies that earlyStopSynthesis
+// also populates the finalContent accumulator when provided. This is the
+// F4 persistence path: narrationContent stays separate; synthesis → finalContent.
+func TestEarlyStopSynthesis_FinalContentPopulated(t *testing.T) {
+	prov := &mockStreamProvider{
+		events: []provider.StreamEvent{
+			{Type: "delta", Content: "The answer is 42."},
+			{Type: "done"},
+		},
+	}
+
+	svc := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 16)
+	var fullContent strings.Builder
+	var finalContent strings.Builder
+
+	svc.earlyStopSynthesis(
+		context.Background(),
+		prov,
+		"test-model",
+		"system",
+		nil,
+		nil,
+		ch,
+		&fullContent,
+		&finalContent,
+	)
+	close(ch)
+
+	// Drain channel.
+	for range ch {
+	}
+
+	if fullContent.String() != "The answer is 42." {
+		t.Errorf("fullContent mismatch: %q", fullContent.String())
+	}
+	if finalContent.String() != "The answer is 42." {
+		t.Errorf("finalContent mismatch: %q", finalContent.String())
+	}
+}
+
+// TestEarlyStopSynthesis_DeltasTaggedFinal verifies that synthesis delta events
+// carry Phase=PhaseFinal so the frontend routes them to the answer bubble.
+func TestEarlyStopSynthesis_DeltasTaggedFinal(t *testing.T) {
+	prov := &mockStreamProvider{
+		events: []provider.StreamEvent{
+			{Type: "delta", Content: "answer text"},
+			{Type: "done"},
+		},
+	}
+
+	svc := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 16)
+	var fullContent strings.Builder
+
+	svc.earlyStopSynthesis(
+		context.Background(),
+		prov,
+		"test-model",
+		"",
+		nil,
+		nil,
+		ch,
+		&fullContent,
+		nil,
+	)
+	close(ch)
+
+	var phases []string
+	for ev := range ch {
+		if ev.Type == "delta" {
+			phases = append(phases, ev.Phase)
+		}
+	}
+	if len(phases) != 1 || phases[0] != chat.PhaseFinal {
+		t.Errorf("synthesis deltas must be tagged PhaseFinal; got phases=%v", phases)
 	}
 }

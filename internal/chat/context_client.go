@@ -61,7 +61,7 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 
 	// 1. Build the system prompt using prompt templates.
 	skillList := buildSkillList(cb.Store, agent.ID)
-	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList)
+	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList, session.ID)
 
 	// 1b. Enrich system prompt with universal context retrieval.
 	if cb.ContextBroker != nil {
@@ -157,9 +157,11 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	}
 
 	// Agent slot — composed via prompt templates with skills, falling back to
-	// raw agent + mode strings when no template is assigned.
+	// raw agent + mode strings when no template is assigned. The agent slot
+	// also carries the post-compaction disclosure (P8A) when one is fresh
+	// for this session.
 	skillList := buildSkillList(cb.Store, agent.ID)
-	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList)
+	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList, session.ID)
 
 	// Rules slot — agent tags + tool allowlist. S4a expands this.
 	rules := buildRulesSlotContent(agent)
@@ -265,7 +267,14 @@ func formatPacketItemsBySource(packet *contextbroker.ContextPacket, memoryOnly b
 // assembleAgentSlotContent composes the agent-specific portion of the prompt
 // (agent.SystemPrompt, mode addendum, skill list) without the workspace or
 // think-tool sections that live in the System slot.
-func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *store.AgentMode, skillList string) string {
+//
+// When sessionID is non-empty and a fresh CompactionContract event exists for
+// the session, the appropriate mode-anchored disclosure is appended (P8A,
+// CW-20260420-0025). Disclosure lands in the agent slot because (a) the
+// agent slot already carries mode-specific content, and (b) every system
+// prompt assembly path passes through this function or its sibling
+// assembleSystemPromptFromTemplates.
+func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *store.AgentMode, skillList, sessionID string) string {
 	vars := map[string]string{
 		"agent_name":        agent.Name,
 		"agent_description": agent.Description,
@@ -300,6 +309,11 @@ func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *s
 	}
 	if skillList != "" {
 		composed += "\n\nAvailable skills:\n" + skillList
+	}
+	if sessionID != "" {
+		if disclosure := renderCompactionDisclosure(s, sessionID); disclosure != "" {
+			composed += "\n\n" + disclosure
+		}
 	}
 	return composed
 }

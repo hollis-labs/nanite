@@ -310,6 +310,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Debug
 	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 
+	// Inspector (I1 — dev-mode per-turn aggregator, CW-20260426-0004)
+	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns", a.handleInspectorListTurns)
+	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns/{turn_id}", a.handleInspectorGetTurn)
+
 	// Execution Metrics
 	mux.HandleFunc("GET /api/sessions/{id}/metrics", a.handleGetSessionExecutionMetrics)
 	mux.HandleFunc("GET /api/metrics/executions", a.handleGetRecentExecutionMetrics)

@@ -7,11 +7,20 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
+
+// PromptTemplateReader is the narrow surface ToolService uses to detect
+// the Chat-role harness binding. *store.Store satisfies it; tests can
+// inject a fake.
+type PromptTemplateReader interface {
+	ListPromptTemplatesForAgent(agentID string) ([]store.PromptTemplate, error)
+}
 
 // ToolSelection holds the result of tool selection, including progressive
 // discovery metadata. Mirrors chat.toolSelection but is owned by the service layer.
@@ -87,6 +96,12 @@ type toolServiceImpl struct {
 	mcpManager     *mcp.Manager
 	agents         AgentReader
 	decisionLogger BrokerDecisionLogger
+
+	// promptTemplates is the seam used to detect the Chat-role harness
+	// binding so the static surface (dispatch.ChatToolSurface) can be
+	// enforced at boot time. Nil-safe: when unset, the chat-surface
+	// filter is a no-op and behaviour matches pre-B3.
+	promptTemplates PromptTemplateReader
 }
 
 // NewToolService creates a ToolService. Both toolClient and mcpManager may be
@@ -102,6 +117,37 @@ func NewToolService(tc *toolclient.ToolClient, mcpMgr *mcp.Manager, agents Agent
 // SetDecisionLogger attaches a broker decision logger (typically *store.Store).
 func (s *toolServiceImpl) SetDecisionLogger(dl BrokerDecisionLogger) {
 	s.decisionLogger = dl
+}
+
+// SetPromptTemplateReader attaches the prompt-template reader used to
+// detect Chat-role harness binding. Wired by the container; nil-safe
+// (tests that do not exercise the chat-surface filter may leave it
+// unset).
+func (s *toolServiceImpl) SetPromptTemplateReader(r PromptTemplateReader) {
+	s.promptTemplates = r
+}
+
+// promptTemplateAdapter bridges PromptTemplateReader (returns
+// store.PromptTemplate) to dispatch.PromptTemplateLister (returns
+// dispatch.PromptTemplateRef). Lets the dispatch package stay
+// independent of internal/store.
+type promptTemplateAdapter struct {
+	r PromptTemplateReader
+}
+
+func (a *promptTemplateAdapter) ListPromptTemplatesForAgent(agentID string) ([]dispatch.PromptTemplateRef, error) {
+	if a == nil || a.r == nil {
+		return nil, nil
+	}
+	tpls, err := a.r.ListPromptTemplatesForAgent(agentID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dispatch.PromptTemplateRef, len(tpls))
+	for i, t := range tpls {
+		out[i] = dispatch.PromptTemplateRef{ID: t.ID, Slug: t.Slug}
+	}
+	return out, nil
 }
 
 // SelectForAgent implements ToolService.
@@ -142,6 +188,29 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	if s.agents != nil {
 		if agent, err := s.agents.GetAgent(agentID); err == nil {
 			allTools = filterToolsByAllowlist(allTools, agent.Tools)
+		}
+	}
+
+	// CW-20260421-0010 (B3): enforce the Chat-role harness static tool
+	// surface. When the agent has the chat-role-harness prompt template
+	// bound, clamp tools to dispatch.ChatToolSurface so the harness
+	// cannot leak work-execution tools (dev_*, shell_*, mcp__*, etc.)
+	// into its turn. Surfaces are fixed at boot — they do not change
+	// mid-turn (harness spec §1).
+	//
+	// Boundary: this check applies ONLY to the Chat agent. Worker /
+	// Planner agents spawned via executeTask have their own profile
+	// permissions and are unaffected.
+	if s.promptTemplates != nil {
+		adapter := &promptTemplateAdapter{r: s.promptTemplates}
+		isChat, err := dispatch.IsChatRoleAgent(adapter, agentID)
+		if err != nil {
+			slog.Warn("service/tool: chat-role detection failed; surface NOT enforced", "agent", agentID, "err", err)
+		} else if isChat {
+			before := len(allTools)
+			allTools = dispatch.EnforceChatSurface(allTools)
+			slog.Info("service/tool: chat-role harness surface enforced",
+				"agent", agentID, "before", before, "after", len(allTools))
 		}
 	}
 

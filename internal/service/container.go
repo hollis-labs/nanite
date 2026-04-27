@@ -354,6 +354,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	tools := NewToolService(cfg.ToolClient, cfg.MCP, agentReader)
 	if impl, ok := tools.(*toolServiceImpl); ok {
 		impl.SetDecisionLogger(cfg.Store)
+		// B3 (CW-20260421-0010): wire the prompt-template reader so
+		// SelectForAgent can detect Chat-role harness agents and clamp
+		// their tool surface to dispatch.ChatToolSurface.
+		impl.SetPromptTemplateReader(cfg.Store)
 	}
 
 	// --- Orchestration (Wave 2) ---

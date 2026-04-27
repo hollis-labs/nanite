@@ -20,6 +20,30 @@ type StashWriter interface {
 	WriteHandoffStash(ctx context.Context, sessionID, stashID string, payload HandoffStashPayload) error
 }
 
+// CompactionEvent is the context-package mirror of store.CompactionEvent, used to
+// decouple the compaction pipeline from the store. The service layer adapts between
+// them via CompactionEventWriter.
+type CompactionEvent struct {
+	ID                   string
+	SessionID            string
+	CoverageWindowStart  *string
+	CoverageWindowEnd    *string
+	EvictedCachePointers []string
+	PreservedSources     []string
+	SummaryMode          string
+	SummaryTokenCount    int
+	OriginalTokenCount   int
+	HandoffStashID       *string
+	StagesApplied        []string
+	CreatedAt            string
+}
+
+// CompactionEventWriter persists structured compaction metadata. Implemented by
+// the service layer so the context package remains free of store imports.
+type CompactionEventWriter interface {
+	WriteCompactionEvent(ctx context.Context, event CompactionEvent) error
+}
+
 // BuildPayloadFromScratchpad extracts HandoffStashPayload fields from a
 // scratchpad snapshot using well-known string-slice keys. Missing or
 // wrongly-typed keys produce empty slices — the stash is always written.

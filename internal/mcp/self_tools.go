@@ -759,6 +759,38 @@ the current turn for subsequent writes.
 				"required": []string{"key"},
 			},
 		},
+		// --- chat_search self-tool (P8B, CW-20260420-0026) ---
+		{
+			Name: "nanite_chat_search",
+			Description: "Search your own past conversation, including parts that were summarized away during compaction. " +
+				"Use this when the post-compaction disclosure prompt mentions an elided detail you need.\n\n" +
+				"**When to use:** When you need to find something from earlier in this session — a specific decision, " +
+				"a value, a file path, or any detail the user mentioned — including content that may have been " +
+				"compacted into a summary.\n\n" +
+				"**Anti-pattern:** Do NOT use for general knowledge questions or external research — this only searches " +
+				"THIS session's history. Use Vanta or web search for those.\n\n" +
+				"**Output shape:** Returns up to N snippets, each with: turn_id, role (user/assistant), excerpt with " +
+				"query highlighted, source (active|summary), compaction_event_id (if from a summary).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Substring or regex to find (case-insensitive)",
+					},
+					"scope": map[string]any{
+						"type":        "string",
+						"enum":        []string{"active", "compacted", "all"},
+						"description": "Which messages to search: active (not summarized), compacted (summary blobs only), or all (default: all)",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Max snippets to return (default 20, max 100)",
+					},
+				},
+				"required": []string{"query"},
+			},
+		},
 		// --- executeTask dispatch primitive (CW-20260421-0010, B3) ---
 		{
 			Name: "nanite_execute_task",

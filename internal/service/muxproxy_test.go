@@ -1,3 +1,5 @@
+//go:build devmode
+
 package service
 
 import (

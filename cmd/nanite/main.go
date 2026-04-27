@@ -280,10 +280,9 @@ func cmdServe(args []string) {
 		slogx.Fatal("failed to create service container", "err", err)
 	}
 
-	// POC: CW-20260420-0047 — wire mux Manager's StreamPublisher now that
-	// StreamManager is available. Run goroutine is started after
-	// daemonLifecycle is constructed below.
-	muxMgr.SetPublisher(muxStreamAdapter{streams: container.Streams})
+	// G5: wire mux Manager's StreamPublisher — devmode-only, no-op in production.
+	// Run goroutine is started after daemonLifecycle is constructed below.
+	wireMuxPublisher(muxMgr, container.Streams)
 
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
@@ -346,17 +345,8 @@ func cmdServe(args []string) {
 	// container.Shutdown so daemons stop referencing container state.
 	daemonLifecycle := lifecycle.NewManager("cmd.nanite.daemons")
 
-	// POC: CW-20260420-0047 — start the mux Manager event-fan goroutine.
-	// Publisher was set above; Run drives the StreamEvents subscription.
-	// After Run returns (ctx canceled), best-effort cleanup of subordinates.
-	daemonLifecycle.Go("mux-manager", func(ctx context.Context) {
-		muxMgr.Run(ctx)
-		// ctx is already canceled here; use a fresh background ctx with a short
-		// timeout so StopSession calls can actually reach the daemon.
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		muxSvc.StopAll(cleanupCtx)
-	})
+	// G5: start mux Manager goroutine — devmode-only, no-op in production.
+	startMuxManager(daemonLifecycle, muxMgr, muxSvc)
 
 	// Shutdown handler. Uses context.Background() because cmdServe has no
 	// parent ctx at this scope; the goroutine lives until the process exits.
@@ -509,6 +499,11 @@ func registerLegacyPTYAlias(registry *provider.Registry) {
 // runs auto-discovery, and creates the tool broker. Returns the mux Manager
 // and MuxProxy service so the caller can wire a StreamPublisher, start Run,
 // and call StopAll on shutdown. CW-20260420-0047.
+//
+// The mux-orchestrator transport and tool registration is gated behind the
+// devmode build tag via registerMuxTransport (G5 — CW-20260421-0001).
+// In production builds registerMuxTransport is a no-op and no mux_* tools
+// appear in the tool surface.
 func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager, *service.MuxProxy) {
 	mcpManager := mcp.NewManager()
 
@@ -539,15 +534,6 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
 	}
 
-	// POC: CW-20260420-0047 — mux orchestrator subordinate-agent transport.
-	// Removing the next four lines + import reverts the MCP wiring.
-	muxMgr := muxproxy.NewManager()
-	muxSvc := service.NewMuxProxy(muxproxy.Client(), muxMgr)
-	muxTransport := muxproxy.NewTransport(muxSvc)
-	if err := mcpManager.AddServer("mux-orchestrator", &mcp.MuxTransportAdapter{Inner: muxTransport}, mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "mux-orchestrator", "err", err)
-	}
-
 	loadPersistedMCPServers(s, mcpManager)
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
 	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
@@ -572,9 +558,10 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	slog.Info("registered self-service built-in tools", "count", len(selfToolDefs))
 
-	// POC: tool broker registration for the four mux_* tools.
-	tb.Builtins.RegisterBuiltins("mux-orchestrator", muxproxy.ToolDefinitions())
-	slog.Info("registered mux orchestrator built-in tools", "count", len(muxproxy.ToolDefinitions()))
+	// G5 (CW-20260421-0001): mux transport + tool registration — devmode only.
+	// registerMuxTransport is a no-op in non-devmode builds; mux_* tools are
+	// absent from the production tool surface.
+	muxMgr, muxSvc := registerMuxTransport(mcpManager, tb, s)
 
 	// Register result-cache meta-tools (S4a). These let the LLM recall
 	// truncated tool results via fetch_tool_result / search_tool_result.
@@ -817,25 +804,3 @@ func cmdMCPServe(args []string) {
 	}
 }
 
-// muxStreamAdapter adapts *service.StreamManager to the muxproxy.StreamPublisher
-// interface. It converts muxproxy.SubEvent → chat.StreamEvent and calls
-// BroadcastSessionStreamEvent. CW-20260420-0047.
-type muxStreamAdapter struct {
-	streams *service.StreamManager
-}
-
-func (a muxStreamAdapter) PublishSubEvent(sessionID string, evt muxproxy.SubEvent) {
-	sev := chat.StreamEvent{
-		Type:    evt.Type,
-		Content: evt.Content,
-		AgentID: evt.AgentID,
-		Tool:    evt.Tool,
-	}
-	if evt.InputTokens != 0 || evt.OutputTokens != 0 {
-		sev.Usage = &chat.Usage{
-			InputTokens:  evt.InputTokens,
-			OutputTokens: evt.OutputTokens,
-		}
-	}
-	a.streams.BroadcastSessionStreamEvent(sessionID, sev)
-}

@@ -226,10 +226,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: built-in default agent", "err", defErr)
 	}
 	// POC CW-20260420-0047: mux orchestrator agent profile.
-	if muxDef, muxErr := builtin.MuxOrchestratorAgent(); muxErr == nil {
-		agentDefs = append(agentDefs, muxDef)
-	} else {
+	// MuxOrchestratorAgent returns (nil, nil) in non-devmode builds; guard
+	// the nil-def case so we don't append a nil pointer to agentDefs.
+	if muxDef, muxErr := builtin.MuxOrchestratorAgent(); muxErr != nil {
 		slog.Warn("service container: built-in mux orchestrator agent", "err", muxErr)
+	} else if muxDef != nil {
+		agentDefs = append(agentDefs, muxDef)
 	}
 	slog.Info("service container: discovered file-based agents", "count", len(agentDefs))
 

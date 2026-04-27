@@ -54,6 +54,9 @@ func WrapExistingTools(defs []provider.ToolDefinition) []Tool {
 }
 
 // classifyExisting determines category, source, and tags for a known tool name.
+// With MCP internalization (ADR-002) the agent-facing surface no longer
+// emits a `mcp__server__` prefix; classification consults the explicit
+// known-name maps and otherwise defaults to session/builtin.
 func classifyExisting(name string) (category, source string, tags []string) {
 	// Check dev tools.
 	if cat, ok := devToolCategories[name]; ok {
@@ -70,11 +73,11 @@ func classifyExisting(name string) (category, source string, tags []string) {
 		return cat, SourceBuiltin, []string{"self-service", "builtin"}
 	}
 
-	// MCP tools (mcp__server__name pattern).
-	if len(name) > 5 && name[:5] == "mcp__" {
-		return CategoryMCP, SourceMCP, []string{"mcp"}
-	}
-
-	// Unknown — default to session/builtin.
+	// Unknown — default to session/builtin. Pre-ADR-002 we tagged tool
+	// names containing the `mcp__` prefix as SourceMCP, but that signal
+	// is gone from the agent-facing surface. Callers that need to mark
+	// a tool as MCP-origin should call WrapProviderDef directly with
+	// SourceMCP and tag "mcp"; bulk classification by name alone is
+	// no longer possible.
 	return CategorySession, SourceBuiltin, []string{"builtin"}
 }

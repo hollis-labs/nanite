@@ -435,16 +435,17 @@ func TestToolMetaInfo_ConcurrencySafe(t *testing.T) {
 		tool       string
 		wantSafe   bool
 	}{
-		{"read tool", "mcp__dev__dev_read", true},
-		{"grep tool", "mcp__dev__dev_grep", true},
-		{"glob tool", "mcp__dev__dev_glob", true},
-		{"search tool", "mcp__conduit__context_search", true},
-		{"web fetch", "mcp__general__web_fetch", true},
-		{"web search", "mcp__general__web_search", true},
-		{"write tool", "mcp__dev__dev_write", false},
-		{"edit tool", "mcp__dev__dev_edit", false},
-		{"bash tool", "mcp__dev__dev_bash", false},
-		{"delete tool", "mcp__engine__engine_task_delete", false},
+		// Uniform agent-facing names per ADR-002 — no `mcp__server__` prefix.
+		{"read tool", "dev_read", true},
+		{"grep tool", "dev_grep", true},
+		{"glob tool", "dev_glob", true},
+		{"search tool", "context_search", true},
+		{"web fetch", "web_fetch", true},
+		{"web search", "web_search", true},
+		{"write tool", "dev_write", false},
+		{"edit tool", "dev_edit", false},
+		{"bash tool", "dev_bash", false},
+		{"delete tool", "engine_task_delete", false},
 	}
 
 	for _, tt := range tests {

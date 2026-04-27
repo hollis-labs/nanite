@@ -7,6 +7,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // --- stub MCP manager for tool tests ---
@@ -101,10 +102,11 @@ func TestExtractIntent(t *testing.T) {
 }
 
 func TestFilterToolsByAllowlist(t *testing.T) {
+	// Uniform agent-facing names (ADR-002 — no `mcp__server__` prefix).
 	tools := []provider.ToolDefinition{
-		{Name: "mcp__engine__task_create"},
-		{Name: "mcp__engine__task_list"},
-		{Name: "mcp__conduit__search"},
+		{Name: "engine_task_create"},
+		{Name: "engine_task_list"},
+		{Name: "context_search"},
 		{Name: "dev_read"},
 	}
 
@@ -114,8 +116,8 @@ func TestFilterToolsByAllowlist(t *testing.T) {
 		t.Errorf("empty allowlist: got %d tools, want 4", len(filtered))
 	}
 
-	// Specific allowlist.
-	filtered = filterToolsByAllowlist(tools, `["mcp__engine__*", "dev_read"]`)
+	// Specific allowlist using uniform-name globs.
+	filtered = filterToolsByAllowlist(tools, `["engine_*", "dev_read"]`)
 	if len(filtered) != 3 {
 		t.Errorf("specific allowlist: got %d tools, want 3", len(filtered))
 	}
@@ -127,15 +129,35 @@ func TestFilterToolsByAllowlist(t *testing.T) {
 	}
 }
 
-func TestCountMCPTools(t *testing.T) {
+// TestCountMCPOriginTools verifies the post-ADR-002 builtin/MCP-origin
+// distinction: instead of pattern-matching on `mcp__` prefix, the
+// counter consults the toolclient's BuiltinToolRegistry.
+func TestCountMCPOriginTools(t *testing.T) {
+	// nil toolClient — pessimistic: count everything as MCP-origin.
 	tools := []provider.ToolDefinition{
-		{Name: "mcp__engine__task_create"},
+		{Name: "task_create"},
 		{Name: "dev_read"},
-		{Name: "mcp__conduit__search"},
-		{Name: "request_tools"},
 	}
-	if got := countMCPTools(tools); got != 2 {
-		t.Errorf("countMCPTools = %d, want 2", got)
+	if got := countMCPOriginTools(nil, tools); got != 2 {
+		t.Errorf("countMCPOriginTools(nil) = %d, want 2 (pessimistic)", got)
+	}
+
+	// With a toolclient that knows two builtins, only the unknown name counts.
+	tc := toolclient.New(nil, nil, toolclient.DefaultConfig())
+	tc.Builtins.RegisterBuiltins("dev", []provider.ToolDefinition{
+		{Name: "dev_read"},
+	})
+	tc.Builtins.RegisterBuiltins("self", []provider.ToolDefinition{
+		{Name: "request_tools"},
+	})
+	mixed := []provider.ToolDefinition{
+		{Name: "task_create"},   // MCP-origin
+		{Name: "dev_read"},      // builtin
+		{Name: "context_search"}, // MCP-origin
+		{Name: "request_tools"},  // builtin (meta)
+	}
+	if got := countMCPOriginTools(tc, mixed); got != 2 {
+		t.Errorf("countMCPOriginTools = %d, want 2 (only task_create + context_search)", got)
 	}
 }
 

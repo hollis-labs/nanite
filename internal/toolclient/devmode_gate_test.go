@@ -9,6 +9,11 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 )
 
+// All tool names in this file use the uniform agent-facing form
+// established by ADR-002: there is no `mcp__server__` prefix on the
+// agent-visible side. The dev-tool gate consequently inspects bare
+// `dev_*` names only.
+
 // ---------------------------------------------------------------------------
 // isDevTool unit tests
 // ---------------------------------------------------------------------------
@@ -19,22 +24,16 @@ func TestIsDevTool(t *testing.T) {
 		toolName  string
 		wantIsDev bool
 	}{
-		// Bare dev-server names.
-		{"dev_bash bare", "dev_bash", true},
-		{"dev_read bare", "dev_read", true},
-		{"dev_write bare", "dev_write", true},
-		{"dev_edit bare", "dev_edit", true},
-		{"dev_glob bare", "dev_glob", true},
-		{"dev_grep bare", "dev_grep", true},
-		// MCP-prefixed dev-server names.
-		{"dev_bash prefixed", "mcp__dev__dev_bash", true},
-		{"dev_read prefixed", "mcp__dev__dev_read", true},
-		{"dev_write prefixed", "mcp__dev__dev_write", true},
+		// Dev-server names — uniform agent-facing form.
+		{"dev_bash", "dev_bash", true},
+		{"dev_read", "dev_read", true},
+		{"dev_write", "dev_write", true},
+		{"dev_edit", "dev_edit", true},
+		{"dev_glob", "dev_glob", true},
+		{"dev_grep", "dev_grep", true},
 		// Non-dev tools must not be flagged.
 		{"general web_fetch", "web_fetch", false},
-		{"mcp other server", "mcp__general__web_fetch", false},
 		{"nanite self-tool", "nanite_todo_create", false},
-		{"mcp self", "mcp__self__nanite_todo_create", false},
 		// Edge cases.
 		{"empty string", "", false},
 		{"dev prefix no underscore", "dev", false},
@@ -146,10 +145,11 @@ func TestSelectToolsAsProvider_DevToolsIncludedWhenDevModeOn(t *testing.T) {
 	}
 }
 
-// TestSelectToolsAsProvider_MCPDevToolsExcludedWhenDevModeOff verifies that
-// MCP-prefixed dev tools (mcp__dev__dev_bash etc.) are also filtered when
-// developer_mode is false. This covers the case where dev tools are discovered
-// through the MCP Manager rather than the builtin registry.
+// TestSelectToolsAsProvider_MCPDevToolsExcludedWhenDevModeOff verifies
+// that dev tools discovered via the MCP Manager are also filtered when
+// developer_mode is false. Post ADR-002 the broker emits uniform names,
+// so the gate's bare-name `dev_*` check covers both the builtin path
+// and the MCP path uniformly.
 func TestSelectToolsAsProvider_MCPDevToolsExcludedWhenDevModeOff(t *testing.T) {
 	mgr := mcp.NewManager()
 	if err := mgr.AddServer("dev", &mockTransport{tools: []mcp.Tool{
@@ -177,14 +177,16 @@ func TestSelectToolsAsProvider_MCPDevToolsExcludedWhenDevModeOff(t *testing.T) {
 	}
 
 	names := toolNames(res.Tools)
-	if !names["mcp__general__web_fetch"] {
-		t.Error("mcp__general__web_fetch must appear in selection to prove MCP tools were registered")
+	// Uniform name (no `mcp__general__` prefix) must appear to prove
+	// MCP tools were registered and emitted under their uniform form.
+	if !names["web_fetch"] {
+		t.Error("web_fetch must appear in selection to prove MCP tools were registered (uniform name)")
 	}
-	if names["mcp__dev__dev_bash"] {
-		t.Error("mcp__dev__dev_bash must NOT appear in selection when developer_mode=false")
+	if names["dev_bash"] {
+		t.Error("dev_bash must NOT appear in selection when developer_mode=false")
 	}
-	if names["mcp__dev__dev_read"] {
-		t.Error("mcp__dev__dev_read must NOT appear in selection when developer_mode=false")
+	if names["dev_read"] {
+		t.Error("dev_read must NOT appear in selection when developer_mode=false")
 	}
 }
 
@@ -210,12 +212,10 @@ func TestCallTool_DevToolsDeniedWhenDevModeOff(t *testing.T) {
 	tb.DeveloperModeFunc = func() bool { return false }
 
 	devToolCases := []struct {
-		callName string // name the LLM would use
+		callName string // uniform agent-facing name
 	}{
 		{"dev_bash"},
 		{"dev_read"},
-		{"mcp__dev__dev_bash"},
-		{"mcp__dev__dev_read"},
 	}
 
 	for _, tc := range devToolCases {
@@ -244,7 +244,7 @@ func TestCallTool_DevToolsAllowedWhenDevModeOn(t *testing.T) {
 	tb := New(mgr, nil, DefaultConfig())
 	tb.DeveloperModeFunc = func() bool { return true }
 
-	result, err := tb.CallTool(context.Background(), "agent-1", "mcp__dev__dev_bash", map[string]any{"command": "echo hi"})
+	result, err := tb.CallTool(context.Background(), "agent-1", "dev_bash", map[string]any{"command": "echo hi"})
 	if err != nil {
 		t.Fatalf("expected success for dev tool when developer_mode=true, got: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestCallTool_NonDevToolsUnaffectedByDevMode(t *testing.T) {
 	tb := New(mgr, nil, DefaultConfig())
 	tb.DeveloperModeFunc = func() bool { return false }
 
-	result, err := tb.CallTool(context.Background(), "agent-1", "mcp__general__web_fetch", map[string]any{"url": "https://example.com"})
+	result, err := tb.CallTool(context.Background(), "agent-1", "web_fetch", map[string]any{"url": "https://example.com"})
 	if err != nil {
 		t.Fatalf("non-dev tool must not be blocked by developer_mode gate, got: %v", err)
 	}

@@ -5,6 +5,11 @@ import (
 	"testing"
 )
 
+// All tool-name examples in this file use the uniform agent-facing
+// naming established by ADR-002 (no `mcp__server__` prefix). The
+// pattern matcher is naming-agnostic; the choice of examples merely
+// reflects what production tool names look like post-internalization.
+
 func TestParsePermissions_Empty(t *testing.T) {
 	p := ParsePermissions("")
 	if p.MaxCallsPerTurn != DefaultMaxCallsPerTurn {
@@ -23,12 +28,12 @@ func TestParsePermissions_EmptyObject(t *testing.T) {
 }
 
 func TestParsePermissions_WithLists(t *testing.T) {
-	raw := `{"allow_list":["mcp__engine__*"],"deny_list":["mcp__hadron__hadron_bp_*"],"max_calls_per_turn":5}`
+	raw := `{"allow_list":["engine_*"],"deny_list":["hadron_bp_*"],"max_calls_per_turn":5}`
 	p := ParsePermissions(raw)
-	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__engine__*" {
+	if len(p.AllowList) != 1 || p.AllowList[0] != "engine_*" {
 		t.Errorf("unexpected allow_list: %v", p.AllowList)
 	}
-	if len(p.DenyList) != 1 || p.DenyList[0] != "mcp__hadron__hadron_bp_*" {
+	if len(p.DenyList) != 1 || p.DenyList[0] != "hadron_bp_*" {
 		t.Errorf("unexpected deny_list: %v", p.DenyList)
 	}
 	if p.MaxCallsPerTurn != 5 {
@@ -45,64 +50,64 @@ func TestParsePermissions_InvalidJSON(t *testing.T) {
 
 func TestCheckPermission_NoRestrictions(t *testing.T) {
 	p := ToolPermissions{MaxCallsPerTurn: 25}
-	if !p.CheckPermission("mcp__engine__task_create") {
+	if !p.CheckPermission("task_create") {
 		t.Error("expected allow with no restrictions")
 	}
 }
 
 func TestCheckPermission_AllowList(t *testing.T) {
 	p := ToolPermissions{
-		AllowList:       []string{"mcp__engine__*"},
+		AllowList:       []string{"engine_*"},
 		MaxCallsPerTurn: 25,
 	}
 
-	if !p.CheckPermission("mcp__engine__task_create") {
+	if !p.CheckPermission("engine_task_create") {
 		t.Error("expected allow for matching pattern")
 	}
-	if p.CheckPermission("mcp__hadron__hadron_health") {
+	if p.CheckPermission("hadron_health") {
 		t.Error("expected deny for non-matching pattern")
 	}
 }
 
 func TestCheckPermission_DenyList(t *testing.T) {
 	p := ToolPermissions{
-		DenyList:        []string{"mcp__hadron__hadron_bp_*"},
+		DenyList:        []string{"hadron_bp_*"},
 		MaxCallsPerTurn: 25,
 	}
 
-	if !p.CheckPermission("mcp__hadron__hadron_health") {
+	if !p.CheckPermission("hadron_health") {
 		t.Error("expected allow for non-matching deny pattern")
 	}
-	if p.CheckPermission("mcp__hadron__hadron_bp_clone_repos") {
+	if p.CheckPermission("hadron_bp_clone_repos") {
 		t.Error("expected deny for matching deny pattern")
 	}
 }
 
 func TestCheckPermission_DenyTakesPrecedence(t *testing.T) {
 	p := ToolPermissions{
-		AllowList:       []string{"mcp__hadron__*"},
-		DenyList:        []string{"mcp__hadron__hadron_bp_*"},
+		AllowList:       []string{"hadron_*"},
+		DenyList:        []string{"hadron_bp_*"},
 		MaxCallsPerTurn: 25,
 	}
 
-	if !p.CheckPermission("mcp__hadron__hadron_health") {
+	if !p.CheckPermission("hadron_health") {
 		t.Error("expected allow: matches allow, not deny")
 	}
-	if p.CheckPermission("mcp__hadron__hadron_bp_build_cortex_backend") {
+	if p.CheckPermission("hadron_bp_build_cortex_backend") {
 		t.Error("expected deny: deny takes precedence over allow")
 	}
 }
 
 func TestCheckPermission_ExactMatch(t *testing.T) {
 	p := ToolPermissions{
-		AllowList:       []string{"mcp__engine__volon_task_create"},
+		AllowList:       []string{"volon_task_create"},
 		MaxCallsPerTurn: 25,
 	}
 
-	if !p.CheckPermission("mcp__engine__volon_task_create") {
+	if !p.CheckPermission("volon_task_create") {
 		t.Error("expected allow for exact match")
 	}
-	if p.CheckPermission("mcp__engine__volon_task_delete") {
+	if p.CheckPermission("volon_task_delete") {
 		t.Error("expected deny for non-matching exact pattern")
 	}
 }
@@ -110,24 +115,24 @@ func TestCheckPermission_ExactMatch(t *testing.T) {
 // --- Unmarshal alias tests (TASK-20260320-106) ---
 
 func TestUnmarshalJSON_AllowShorthand(t *testing.T) {
-	raw := `{"allow":["mcp__email__*"]}`
+	raw := `{"allow":["email_*"]}`
 	var p ToolPermissions
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__email__*" {
-		t.Fatalf("expected AllowList=[mcp__email__*], got %v", p.AllowList)
+	if len(p.AllowList) != 1 || p.AllowList[0] != "email_*" {
+		t.Fatalf("expected AllowList=[email_*], got %v", p.AllowList)
 	}
 }
 
 func TestUnmarshalJSON_AllowListCanonical(t *testing.T) {
-	raw := `{"allow_list":["mcp__email__*"]}`
+	raw := `{"allow_list":["email_*"]}`
 	var p ToolPermissions
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__email__*" {
-		t.Fatalf("expected AllowList=[mcp__email__*], got %v", p.AllowList)
+	if len(p.AllowList) != 1 || p.AllowList[0] != "email_*" {
+		t.Fatalf("expected AllowList=[email_*], got %v", p.AllowList)
 	}
 }
 
@@ -183,8 +188,8 @@ func TestUnmarshalJSON_MaxCallsPerTurn(t *testing.T) {
 }
 
 func TestParsePermissions_ShorthandAllow(t *testing.T) {
-	p := ParsePermissions(`{"allow":["mcp__email__*"]}`)
-	if len(p.AllowList) != 1 || p.AllowList[0] != "mcp__email__*" {
+	p := ParsePermissions(`{"allow":["email_*"]}`)
+	if len(p.AllowList) != 1 || p.AllowList[0] != "email_*" {
 		t.Fatalf("ParsePermissions did not handle shorthand allow: %v", p.AllowList)
 	}
 	if p.MaxCallsPerTurn != DefaultMaxCallsPerTurn {
@@ -193,16 +198,16 @@ func TestParsePermissions_ShorthandAllow(t *testing.T) {
 }
 
 func TestCheckPermission_WithMergedAllowList(t *testing.T) {
-	raw := `{"allow":["mcp__email__*"],"allow_list":["mcp__teams__*"]}`
+	raw := `{"allow":["email_*"],"allow_list":["teams_*"]}`
 	p := ParsePermissions(raw)
 
 	tests := []struct {
 		tool string
 		want bool
 	}{
-		{"mcp__email__send", true},
-		{"mcp__teams__notify", true},
-		{"mcp__dev__bash", false},
+		{"email_send", true},
+		{"teams_notify", true},
+		{"dev_bash", false},
 	}
 	for _, tt := range tests {
 		got := p.CheckPermission(tt.tool)
@@ -213,14 +218,14 @@ func TestCheckPermission_WithMergedAllowList(t *testing.T) {
 }
 
 func TestCheckPermission_DenyShorthandTakesPrecedence(t *testing.T) {
-	raw := `{"allow_list":["mcp__email__*"],"deny":["mcp__email__send"]}`
+	raw := `{"allow_list":["email_*"],"deny":["email_send"]}`
 	p := ParsePermissions(raw)
 
-	if p.CheckPermission("mcp__email__send") {
-		t.Error("expected deny to take precedence for mcp__email__send")
+	if p.CheckPermission("email_send") {
+		t.Error("expected deny to take precedence for email_send")
 	}
-	if !p.CheckPermission("mcp__email__read") {
-		t.Error("expected mcp__email__read to be allowed")
+	if !p.CheckPermission("email_read") {
+		t.Error("expected email_read to be allowed")
 	}
 }
 

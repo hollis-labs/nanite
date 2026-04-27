@@ -85,13 +85,12 @@ func TestWrapExistingTools(t *testing.T) {
 		{Name: "dev_write", Description: "write"},
 		{Name: "web_fetch", Description: "fetch"},
 		{Name: "nanite_list_agents", Description: "list agents"},
-		{Name: "mcp__engine__task_create", Description: "create task"},
 		{Name: "unknown_tool", Description: "mystery"},
 	}
 
 	tools := tool.WrapExistingTools(defs)
-	if len(tools) != 6 {
-		t.Fatalf("got %d tools, want 6", len(tools))
+	if len(tools) != 5 {
+		t.Fatalf("got %d tools, want 5", len(tools))
 	}
 
 	// dev_read → core-io
@@ -106,12 +105,14 @@ func TestWrapExistingTools(t *testing.T) {
 	if tools[3].Category() != tool.CategoryAgent {
 		t.Errorf("nanite_list_agents category = %q", tools[3].Category())
 	}
-	// mcp__ tool → mcp
-	if tools[4].Category() != tool.CategoryMCP {
-		t.Errorf("mcp tool category = %q", tools[4].Category())
+	// Unknown tool defaults to session/builtin (post ADR-002 there is no
+	// `mcp__` substring signal — callers wrap MCP-origin tools explicitly
+	// via WrapProviderDef + SourceMCP).
+	if tools[4].Category() != tool.CategorySession {
+		t.Errorf("unknown tool category = %q, want %q", tools[4].Category(), tool.CategorySession)
 	}
-	if tools[4].Source() != tool.SourceMCP {
-		t.Errorf("mcp tool source = %q", tools[4].Source())
+	if tools[4].Source() != tool.SourceBuiltin {
+		t.Errorf("unknown tool source = %q, want %q", tools[4].Source(), tool.SourceBuiltin)
 	}
 }
 

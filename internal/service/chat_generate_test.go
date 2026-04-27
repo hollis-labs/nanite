@@ -69,7 +69,8 @@ func TestHasUsableTools(t *testing.T) {
 	if !hasUsableTools([]provider.ToolDefinition{{Name: "dev_read"}}) {
 		t.Fatal("built-in tools must count as usable tools")
 	}
-	if !hasUsableTools([]provider.ToolDefinition{{Name: "mcp__conduit__lookup"}}) {
+	// Uniform MCP-origin name (ADR-002 — no `mcp__server__` prefix).
+	if !hasUsableTools([]provider.ToolDefinition{{Name: "context_lookup"}}) {
 		t.Fatal("MCP tools must count as usable tools")
 	}
 }

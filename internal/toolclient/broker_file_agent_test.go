@@ -38,7 +38,7 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 // permissions are authoritative — no DB lookup, no WARN.
 func TestGetPermissions_FileAgentResolverShortCircuitsStore(t *testing.T) {
 	resolved := ToolPermissions{
-		AllowList:       []string{"mcp__dev__*"},
+		AllowList:       []string{"dev_*"},
 		MaxCallsPerTurn: 9,
 	}
 	tb := New(nil, nil, DefaultConfig())
@@ -53,7 +53,7 @@ func TestGetPermissions_FileAgentResolverShortCircuitsStore(t *testing.T) {
 	if got.MaxCallsPerTurn != 9 {
 		t.Errorf("MaxCallsPerTurn = %d, want 9 (resolver should win)", got.MaxCallsPerTurn)
 	}
-	if len(got.AllowList) != 1 || got.AllowList[0] != "mcp__dev__*" {
+	if len(got.AllowList) != 1 || got.AllowList[0] != "dev_*" {
 		t.Errorf("AllowList = %v", got.AllowList)
 	}
 }

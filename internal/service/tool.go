@@ -176,7 +176,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	}
 
 	// If no MCP tools from the broker, try direct discovery from agent's configured servers.
-	mcpCount := countMCPTools(allTools)
+	mcpCount := countMCPOriginTools(s.toolClient, allTools)
 	if mcpCount == 0 && s.mcpManager != nil && s.agents != nil {
 		agent, err := s.agents.GetAgent(agentID)
 		if err == nil {
@@ -194,9 +194,9 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	// CW-20260421-0010 (B3): enforce the Chat-role harness static tool
 	// surface. When the agent has the chat-role-harness prompt template
 	// bound, clamp tools to dispatch.ChatToolSurface so the harness
-	// cannot leak work-execution tools (dev_*, shell_*, mcp__*, etc.)
-	// into its turn. Surfaces are fixed at boot — they do not change
-	// mid-turn (harness spec §1).
+	// cannot leak work-execution tools (dev_*, shell_*, MCP-origin tools,
+	// etc.) into its turn. Surfaces are fixed at boot — they do not
+	// change mid-turn (harness spec §1).
 	//
 	// Boundary: this check applies ONLY to the Chat agent. Worker /
 	// Planner agents spawned via executeTask have their own profile
@@ -220,16 +220,19 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		slog.Info("service/tool: selected tools for agent", "count", len(allTools), "agent", agentID)
 	}
 
-	// Check if progressive discovery should be used.
-	mcpToolCount := countMCPTools(allTools)
+	// Check if progressive discovery should be used. With internalization
+	// (ADR-002) the agent-facing surface is uniform; we identify MCP-origin
+	// tools by asking the toolclient which names are NOT registered as
+	// builtins. The `mcp__` prefix is no longer emitted on the agent surface.
+	mcpToolCount := countMCPOriginTools(s.toolClient, allTools)
 	if mcpToolCount > ProgressiveDiscoveryThreshold && s.toolClient != nil {
 		summaries := s.toolClient.ListToolSummaries()
 		catalog := chat.BuildToolCatalog(summaries)
 
-		// Keep builtin (non-MCP) tools alongside request_tools meta-tool.
+		// Keep builtin tools alongside request_tools meta-tool.
 		builtinTools := []provider.ToolDefinition{toolclient.RequestToolsMetaTool()}
 		for _, t := range allTools {
-			if !strings.HasPrefix(t.Name, "mcp__") {
+			if s.toolClient.IsBuiltinTool(t.Name) {
 				builtinTools = append(builtinTools, t)
 			}
 		}
@@ -356,6 +359,8 @@ func (s *toolServiceImpl) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
 
 // discoverAgentMCPTools performs direct MCP discovery from an agent's
 // configured server list. Returns the updated tool slice and seen map.
+// Tool names are uniform (ADR-002); collisions are resolved by the
+// caller's broker / Manager layer, not here.
 func (s *toolServiceImpl) discoverAgentMCPTools(
 	ctx context.Context,
 	mcpServersJSON string,
@@ -366,15 +371,16 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 	// Silently ignore bad JSON — matches existing engine behaviour.
 	_ = parseJSONStrings(mcpServersJSON, &servers)
 
-	beforeCount := countMCPTools(allTools)
+	beforeCount := countMCPOriginTools(s.toolClient, allTools)
 	for _, srv := range servers {
 		srvTools, err := s.mcpManager.DiscoverServerTools(ctx, srv)
 		if err != nil {
 			continue
 		}
 		for _, t := range srvTools {
-			name := fmt.Sprintf("mcp__%s__%s", srv, t.Name)
-			if seen[name] {
+			// Use the canonical uniform name (no `mcp__server__` prefix).
+			name := mcp.UniformToolName(srv, t.Name)
+			if name == "" || seen[name] {
 				continue
 			}
 			seen[name] = true
@@ -385,18 +391,27 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 			})
 		}
 	}
-	afterCount := countMCPTools(allTools)
+	afterCount := countMCPOriginTools(s.toolClient, allTools)
 	if afterCount > beforeCount {
 		slog.Info("service/tool: direct MCP discovery added tools from configured servers", "added", afterCount-beforeCount)
 	}
 	return allTools, seen
 }
 
-// countMCPTools counts tools with the "mcp__" prefix.
-func countMCPTools(tools []provider.ToolDefinition) int {
+// countMCPOriginTools counts tools that did NOT come from the builtin
+// registry — i.e. those that originated from an MCP server. With ADR-002
+// the agent-facing surface is uniform; we no longer have a name-prefix
+// signal to count by, so we ask the toolclient to classify each name.
+func countMCPOriginTools(tc *toolclient.ToolClient, tools []provider.ToolDefinition) int {
+	if tc == nil {
+		// Without a toolclient we cannot distinguish; treat all as MCP-origin
+		// to preserve the historical behaviour of triggering progressive
+		// discovery when the manager exposes a large tool surface.
+		return len(tools)
+	}
 	n := 0
 	for _, t := range tools {
-		if strings.HasPrefix(t.Name, "mcp__") {
+		if !tc.IsBuiltinTool(t.Name) {
 			n++
 		}
 	}

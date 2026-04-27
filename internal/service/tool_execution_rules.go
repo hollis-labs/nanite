@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -64,24 +63,10 @@ func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, to
 	return true, ""
 }
 
-// enforceExecutionRulesForTool applies enforceExecutionRules to a tool name,
-// including the unprefixed fallback check for mcp__ prefixed tools.
+// enforceExecutionRulesForTool applies enforceExecutionRules to a tool name.
+// With MCP internalization (ADR-002) the tool name is uniform — there is
+// no `mcp__server__` prefix to strip, so the historical bare-name fallback
+// check is no longer needed.
 func (s *chatServiceImpl) enforceExecutionRulesForTool(ctx context.Context, agentID, toolName string) (bool, string) {
-	allowed, reason := s.enforceExecutionRules(ctx, agentID, toolName)
-	if !allowed {
-		return false, reason
-	}
-
-	// For mcp__server__tool names, also check the bare tool name.
-	if strings.HasPrefix(toolName, "mcp__") {
-		parts := strings.SplitN(toolName, "__", 3)
-		if len(parts) == 3 {
-			bareAllowed, bareReason := s.enforceExecutionRules(ctx, agentID, parts[2])
-			if !bareAllowed {
-				return false, bareReason
-			}
-		}
-	}
-
-	return true, ""
+	return s.enforceExecutionRules(ctx, agentID, toolName)
 }

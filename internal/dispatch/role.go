@@ -75,6 +75,13 @@ const PlannerRoleSlug = "planner"
 // with any entry. This keeps the surface stable as the underlying
 // nanite_todo_*, nanite_plan_*, nanite_scratchpad_*, nanite_message_*,
 // nanite_show_*, and nanite_execute_task tools evolve.
+//
+// Post MCP internalization (CW-20260427-0017, ADR-002) the surface
+// guarantee is "exact prefix match against this list". MCP-origin tools
+// no longer carry a `mcp__server__` prefix to reject by name — they are
+// kept off the Chat surface because they don't share any prefix in this
+// list (e.g. an MCP-published `task_create` or `memory_write` simply
+// fails the `nanite_*` / meta-tool checks below and is filtered out).
 var ChatToolSurface = []string{
 	// Todos primitive.
 	"nanite_todo_",

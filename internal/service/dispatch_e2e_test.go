@@ -55,7 +55,10 @@ func TestB3_EndToEnd_ChatSurfaceAndEnvelopeOnlyDispatch(t *testing.T) {
 		{Name: "dev_write"},
 		{Name: "shell_exec"},
 		{Name: "web_fetch"},
-		{Name: "mcp__engine__task_create"},
+		// MCP-origin tool, uniform agent-facing name (ADR-002 — no
+		// `mcp__server__` prefix). Filtered out because it doesn't match
+		// any prefix in dispatch.ChatToolSurface.
+		{Name: "task_create"}, // formerly mcp__engine__task_create
 		{Name: "nanite_spawn_subagent"},
 	}
 
@@ -96,7 +99,7 @@ func TestB3_EndToEnd_ChatSurfaceAndEnvelopeOnlyDispatch(t *testing.T) {
 
 	// 1b. Work-execution tools rejected — verifies the contract
 	// "Chat dispatches; it does not execute."
-	rejected := []string{"dev_read", "dev_write", "shell_exec", "web_fetch", "mcp__engine__task_create", "nanite_spawn_subagent"}
+	rejected := []string{"dev_read", "dev_write", "shell_exec", "web_fetch", "task_create", "nanite_spawn_subagent"}
 	for _, n := range rejected {
 		if contains_e2e(chatNames, n) {
 			t.Errorf("chat surface leaked work-execution tool %q (must NOT be on Chat surface)", n)

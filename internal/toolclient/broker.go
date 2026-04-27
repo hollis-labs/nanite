@@ -77,6 +77,17 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 	}
 }
 
+// IsBuiltinTool reports whether the named tool is a builtin (registered
+// via tb.Builtins.RegisterBuiltins). Used to distinguish builtin tools
+// from MCP-discovered tools on the uniform agent-facing surface (ADR-002),
+// where the legacy `mcp__` prefix is no longer available as a signal.
+func (tb *ToolClient) IsBuiltinTool(name string) bool {
+	if tb.Builtins == nil {
+		return false
+	}
+	return tb.Builtins.Has(name)
+}
+
 // strictTrue is a pointer to true used as the default Strict value for
 // broker-registered tools. Strict mode causes Anthropic to validate tool
 // inputs against the declared schema at call time, surfacing malformed calls
@@ -167,21 +178,13 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 // SelectToolsAsProvider / CallTool.
 const DevServerName = "dev"
 
-// isDevTool reports whether a tool name belongs to the dev server. It matches
-// both the bare form ("dev_bash") and the MCP-prefixed form
-// ("mcp__dev__dev_bash"). This is the canonical check used at both
-// selection-time and execution-time to enforce the developer_mode gate.
+// isDevTool reports whether a tool name belongs to the dev server. With
+// MCP internalization (CW-20260427-0017, ADR-002) tool names are
+// uniform agent-facing — there is no `mcp__server__` prefix. Dev tools
+// are recognized by their `dev_*` prefix; the legacy `mcp__dev__*` form
+// is no longer emitted on the agent surface.
 func isDevTool(toolName string) bool {
-	// Prefixed form: mcp__dev__*
-	if strings.HasPrefix(toolName, "mcp__"+DevServerName+"__") {
-		return true
-	}
-	// Bare form: dev_* (tools resolved without the mcp__ prefix by the builtin
-	// registry or when the LLM omits the prefix).
-	if strings.HasPrefix(toolName, DevServerName+"_") {
-		return true
-	}
-	return false
+	return strings.HasPrefix(toolName, DevServerName+"_")
 }
 
 // developerModeEnabled reports whether developer_mode is active for this
@@ -257,15 +260,16 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	}
 
 	// Append broker-selected MCP tools, filtered by agent permissions.
+	// Names are uniform (no `mcp__server__` prefix) per ADR-002; the
+	// broker is registered with uniform names by mcp.Manager, so t.Name
+	// here is already the agent-facing name.
+	//
 	// Strict defaults to true for all broker-registered tools so malformed
 	// tool calls fail at the provider boundary instead of wasting retry turns.
 	// Tools that require a permissive schema (rare) can opt out by setting
 	// Strict: pointer-to-false in their ToolDefinition before registration.
 	for _, t := range tools {
 		name := t.Name
-		if t.Server != "" {
-			name = fmt.Sprintf("mcp__%s__%s", t.Server, t.Name)
-		}
 		// Dev-tool gate: skip dev tools when developer_mode is off.
 		if !devMode && isDevTool(name) {
 			continue
@@ -287,22 +291,16 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	return &SelectResult{Tools: defs, OverrideBlock: overrideBlock}, nil
 }
 
-// CallTool executes a tool call after checking permissions. Routes through the MCP Manager.
-// Tools with the mcp__ prefix are routed directly. Unprefixed tools (builtins, native tools)
-// are resolved to their owning server via the Manager's tool registry.
+// CallTool executes a tool call after checking permissions. Routes through
+// the MCP Manager via the uniform agent-facing name (no `mcp__server__`
+// prefix per ADR-002). The single name is the only signal — it is used
+// for permission checks, the dev-tool gate, and the manager lookup.
 //
-// Permission enforcement runs twice: once against the caller-supplied name
-// and, for unprefixed tools, once more against the resolved mcp__server__tool
-// name. Policies written as "mcp__server__*" patterns would otherwise miss
-// the bare-name fallback path that resolves via MCPManager.ResolveToolServer
-// — an agent with deny_list: ["mcp__dev__*"] could still invoke "dev_bash"
-// by omitting the prefix. Structured deny errors are returned for both.
-//
-// Dev-tool gate: if the tool resolves to the "dev" server (dev_bash, dev_read,
-// dev_write, dev_edit, dev_glob, dev_grep) and developer_mode is false in
-// user_settings, execution is denied regardless of the agent's permission
-// policy. This is the execution-time backstop that complements the
-// selection-time filter in SelectToolsAsProvider.
+// Dev-tool gate: if the tool name belongs to the "dev" set (dev_bash,
+// dev_read, dev_write, dev_edit, dev_glob, dev_grep) and developer_mode
+// is false in user_settings, execution is denied regardless of the
+// agent's permission policy. This is the execution-time backstop that
+// complements the selection-time filter in SelectToolsAsProvider.
 func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
 	// Dev-tool gate (execution-time backstop). Applied before the permission
 	// check so a misconfigured allow-list cannot re-enable dev tools when
@@ -311,7 +309,6 @@ func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, ar
 		return "", fmt.Errorf("permission denied: tool %q requires developer_mode to be enabled", toolName)
 	}
 
-	// Check permissions against the caller-supplied name first.
 	if !tb.CheckPermission(agentID, toolName) {
 		return "", fmt.Errorf("permission denied: tool %q not permitted for agent %q", toolName, agentID)
 	}
@@ -320,23 +317,7 @@ func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, ar
 		return "", fmt.Errorf("no MCP manager configured")
 	}
 
-	// Tools with mcp__ prefix already have routing info — pass through.
-	// Unprefixed tools (native/builtin) need server resolution; re-check the
-	// resolved prefixed name so deny patterns targeting "mcp__server__*" catch
-	// the bare-name bypass route.
-	execName := toolName
-	if !strings.HasPrefix(toolName, "mcp__") {
-		if server, prefixed := tb.MCPManager.ResolveToolServer(toolName); server != "" {
-			execName = prefixed
-			if !tb.CheckPermission(agentID, execName) {
-				return "", fmt.Errorf("permission denied: tool %q (resolved to %q) not permitted for agent %q", toolName, execName, agentID)
-			}
-		} else {
-			return "", fmt.Errorf("tool %q not found in any registered server", toolName)
-		}
-	}
-
-	return tb.MCPManager.ExecuteTool(ctx, execName, args)
+	return tb.MCPManager.ExecuteTool(ctx, toolName, args)
 }
 
 // CallToolWithPolicyCheck is a convenience that additionally rejects argument

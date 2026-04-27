@@ -34,7 +34,7 @@ func (f *fakePromptTemplateReader) ListPromptTemplatesForAgent(agentID string) (
 // gate for B3: when the resolved agent has the chat-role-harness prompt
 // template assigned, SelectForAgent must clamp the returned tool slice to
 // dispatch.ChatToolSurface — work-execution tools (dev_*, shell_*,
-// mcp__*, web_fetch, raw spawn) must NOT survive.
+// MCP-origin tools, web_fetch, raw spawn) must NOT survive.
 //
 // The test uses a tool client that returns a known mixed set (allowed +
 // rejected tools) and asserts the surface enforcement runs after the
@@ -44,8 +44,9 @@ func TestToolService_SelectForAgent_ChatSurfaceEnforcement(t *testing.T) {
 	// We need to feed a mixed tool set into SelectForAgent's pipeline.
 	// The simplest path that doesn't require a full toolclient stack:
 	// use a stub MCP manager configured against an agent with a list of
-	// MCP servers, so discoverAgentMCPTools populates allTools. Each
-	// stub tool is registered under the mcp__server__name shape.
+	// MCP servers, so discoverAgentMCPTools populates allTools. Tool
+	// names are uniform (ADR-002 — no `mcp__server__` prefix on the
+	// agent surface).
 	//
 	// Then we verify the chat-surface filter clamps the result.
 
@@ -63,7 +64,9 @@ func TestToolService_SelectForAgent_ChatSurfaceEnforcement(t *testing.T) {
 		"dev_write",
 		"shell_exec",
 		"web_fetch",
-		"mcp__engine__task_create",
+		// Uniform MCP-origin name (ADR-002): filtered because it doesn't
+		// match any prefix on the Chat surface.
+		"task_create",
 		"nanite_spawn_subagent",
 	}
 

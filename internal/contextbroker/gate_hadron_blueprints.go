@@ -113,12 +113,11 @@ func (g *HadronBlueprintGate) Fetch(ctx context.Context, intent Intent, budget i
 
 // fetchBlueprints retrieves blueprints from Hadron and filters them.
 func (g *HadronBlueprintGate) fetchBlueprints(ctx context.Context, intent Intent, maxTokens int) ([]ContextItem, error) {
-	toolName := fmt.Sprintf("mcp__%s__hadron_blueprints_list", g.ServerName)
 	input := map[string]any{
 		"limit": 25, // Get enough to filter from
 	}
 
-	result, err := g.MCP.ExecuteTool(ctx, toolName, input)
+	result, err := g.MCP.ExecuteToolOnServer(ctx, g.ServerName, "hadron_blueprints_list", input)
 	if err != nil {
 		return nil, fmt.Errorf("hadron_blueprints_list: %w", err)
 	}

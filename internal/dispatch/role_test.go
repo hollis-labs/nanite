@@ -45,8 +45,13 @@ func TestEnforceChatSurface_FiltersToStaticAllowList(t *testing.T) {
 		{Name: "dev_grep"},
 		{Name: "shell_exec"},
 		{Name: "web_fetch"},
-		{Name: "mcp__engine__task_create"},
-		{Name: "mcp__conduit__memory_write"},
+		// MCP-origin tools post-internalization (ADR-002) — uniform
+		// agent-facing names with no `mcp__server__` prefix. The Chat
+		// surface filters them out because they don't match any prefix
+		// in ChatToolSurface (no `nanite_*`, no meta-tool).
+		{Name: "task_create"},        // formerly mcp__engine__task_create
+		{Name: "memory_write"},        // formerly mcp__conduit__memory_write
+		{Name: "clockwork_task_get"}, // mux MCP
 		// Spawn primitive itself is NOT on the surface — Chat dispatches
 		// via executeTask (the high-level primitive), not the raw spawn
 		// tool.
@@ -80,7 +85,7 @@ func TestEnforceChatSurface_FiltersToStaticAllowList(t *testing.T) {
 	// Every surviving tool must be on the allow-list.
 	for _, name := range gotNames {
 		if !expected[name] {
-			t.Errorf("EnforceChatSurface leaked non-surface tool %q (rejected list: dev_*, shell_*, mcp__*, nanite_spawn_subagent must NEVER survive)", name)
+			t.Errorf("EnforceChatSurface leaked non-surface tool %q (rejected: dev_*, shell_*, web_*, MCP-origin tools, nanite_spawn_subagent must NEVER survive)", name)
 		}
 	}
 	// Every expected tool must have survived.
@@ -98,8 +103,14 @@ func TestIsChatSurfaceTool_RejectsDangerousTools(t *testing.T) {
 		"dev_read", "dev_write", "dev_edit", "dev_glob", "dev_grep",
 		"shell_exec", "bash",
 		"web_fetch", "web_search",
-		"mcp__engine__task_create",
-		"mcp__conduit__memory_write",
+		// Uniform MCP-origin names (ADR-002): even with no `mcp__server__`
+		// prefix to reject by, these are kept off the Chat surface
+		// because they don't match any of ChatToolSurface's allow-list
+		// prefixes (`nanite_*`, meta-tools).
+		"task_create",        // formerly mcp__engine__task_create
+		"memory_write",       // formerly mcp__conduit__memory_write
+		"clockwork_task_get", // mux MCP — the most common agent surface tool
+		"hadron_run_get",     // hadron MCP
 		// raw spawn — Chat dispatches via the high-level primitive, not
 		// this one.
 		"nanite_spawn_subagent",

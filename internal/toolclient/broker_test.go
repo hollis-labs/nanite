@@ -331,9 +331,10 @@ func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 	}
 
 	// The top result should be the task_create tool (highest score).
+	// Uniform agent-facing name (ADR-002): no `mcp__test__` prefix.
 	found := false
 	for _, r := range result {
-		if r.Name == "mcp__test__volon_task_create" {
+		if r.Name == "volon_task_create" {
 			found = true
 			break
 		}
@@ -486,14 +487,14 @@ func TestHandleRequestTools_ByName(t *testing.T) {
 	tb := newTestBrokerWithTools(tools)
 
 	matched, _ := tb.HandleRequestTools(map[string]any{
-		"tool_names": []any{"mcp__test__volon_task_create"},
+		"tool_names": []any{"volon_task_create"},
 	})
 
 	if len(matched) != 1 {
 		t.Fatalf("expected 1 tool matched by name, got %d", len(matched))
 	}
-	if matched[0].Name != "mcp__test__volon_task_create" {
-		t.Errorf("expected mcp__test__volon_task_create, got %s", matched[0].Name)
+	if matched[0].Name != "volon_task_create" {
+		t.Errorf("expected volon_task_create (uniform name post ADR-002), got %s", matched[0].Name)
 	}
 }
 

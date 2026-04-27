@@ -262,9 +262,11 @@ func (e *Engine) ClearSessionGrants(sessionID string) {
 }
 
 // isFileEditTool returns true for tools that are file edit operations.
+// Tool names are uniform on the agent surface (ADR-002) — no `mcp__`
+// prefix.
 func isFileEditTool(name string) bool {
 	switch name {
-	case "mcp__dev__edit", "mcp__dev__write", "dev_edit", "dev_write":
+	case "dev_edit", "dev_write":
 		return true
 	}
 	return false

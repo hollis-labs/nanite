@@ -3,10 +3,10 @@ package mcp
 import "github.com/hollis-labs/go-providers/provider"
 
 // showEnvelopeTargetDesc and showEnvelopeModeDesc are shared input-schema
-// descriptions for the optional `target` and `mode` fields on the
-// nanite_show_giphy / nanite_show_document / nanite_show_report tools.
-// They mirror the chat.Envelope.Target / chat.Envelope.Mode contract (J8 v1 —
-// CW-20260426-0006); the FE picks them up via applyEnvelopePanelEffects.
+// descriptions for the optional `target` and `mode` fields on
+// nanite_show_card. They mirror the chat.Envelope.Target / chat.Envelope.Mode
+// contract (J8 v1 — CW-20260426-0006); the FE picks them up via
+// applyEnvelopePanelEffects.
 const (
 	showEnvelopeTargetDesc = "Optional drawer ID to open when this card arrives. v1 vocabulary: " +
 		"\"bottom_chat_drawer\" (long-form reference content below the chat transcript), " +
@@ -197,56 +197,44 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_show_giphy",
-			Description: "Search Giphy for an animated GIF and display it in chat as a rich card (giphy-modal envelope).\n\n" +
-				"**When to use:** When the user asks for a GIF, wants to celebrate, or the conversation tone calls for a visual reaction. This is purely cosmetic.\n\n" +
-				"**When NOT to use:** Do NOT use to \"display\" real data or metrics — use nanite_show_report or nanite_show_document for that. This renders a GIF, not structured information.\n\n" +
-				"**Output shape:** Emits a giphy-modal envelope; the UI renders the first matching GIF inline in chat.",
+			Name: "nanite_show_card",
+			Description: "Render a structured envelope card in chat. One generic surface for the v1 passive-renderable card types — replaces the older per-type nanite_show_giphy / nanite_show_document / nanite_show_report tools (CW-20260428-0019, A3).\n\n" +
+				"**When to use:** When you want to display structured content in chat (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
+				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths and are NOT addressable here.\n\n" +
+				"**Required context:** `type` from the v1 allow-list and `data` matching the per-type schema. The handler validates `data` against `internal/envelope/schemas/<type>.schema.json` at the boundary; payloads that miss required fields, wrong types, or carry unknown keys are rejected with a structured error citing the schema field that failed.\n\n" +
+				"**Grounding:** For prose-bearing card types (`report-card`, `document-viewer`) you MUST also pass `sources` — a JSON array of `{tool_use_id, tool_name, note?}` objects citing the tool calls whose results ground the content. If you didn't fetch the data this turn, render a plain-text reply instead of an empty card.\n\n" +
+				"**Output shape:** Emits a `<type>` envelope. The card renders inline by default; pass `target` to route drawer-visibility (Gap A — CW-20260428-0007) or `mode` to signal a workspace mode preset.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"query":  map[string]any{"type": "string", "description": "Search term (e.g. 'celebration', 'thumbs up', 'mind blown')"},
+					"type": map[string]any{
+						"type":        "string",
+						"description": "Envelope type from the v1 passive-renderable allow-list. Each value validates against its own per-type schema.",
+						"enum": []string{
+							"giphy-modal",
+							"document-viewer",
+							"report-card",
+							"info-card",
+							"list-card",
+							"metric-card",
+							"progress-card",
+							"table-card",
+							"timeline-card",
+							"diff-card",
+						},
+					},
+					"data": map[string]any{
+						"type":        "object",
+						"description": "Card payload matching the schema for the chosen `type`. Schemas live at internal/envelope/schemas/<type>.schema.json — fields the schema doesn't declare are rejected (additionalProperties:false).",
+					},
+					"sources": map[string]any{
+						"type":        "string",
+						"description": "JSON array of grounding objects: [{tool_use_id, tool_name, note?}]. REQUIRED for report-card and document-viewer. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the content. If you didn't fetch the data, don't render the card.",
+					},
 					"target": map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
 					"mode":   map[string]any{"type": "string", "description": showEnvelopeModeDesc},
 				},
-				"required": []string{"query"},
-			},
-		},
-		{
-			Name: "nanite_show_document",
-			Description: "Display a document in chat as a rich scrollable viewer. Use for executive summaries, reports, meeting notes, or any long-form content the user should read. " +
-				"The user expects LIVE data: you MUST ground the content in data returned from previous tool calls made during this generation. Cite those tool calls in the `sources` field. Do NOT compose from memory or pattern-completion.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"title":             map[string]any{"type": "string", "description": "Document title"},
-					"content":           map[string]any{"type": "string", "description": "Document body (HTML or markdown). Must be derived from the tool_use_ids listed in `sources`."},
-					"format":            map[string]any{"type": "string", "description": "Content format: html or markdown (default: markdown)"},
-					"sections":          map[string]any{"type": "string", "description": "Comma-separated section names for jump-nav (optional)"},
-					"download_filename": map[string]any{"type": "string", "description": "Filename for download button (optional, e.g. report.html)"},
-					"sources":           map[string]any{"type": "string", "description": "JSON array of objects documenting the grounding: [{tool_use_id, tool_name, note?}]. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the content. Minimum 1 source. If you didn't fetch the data, don't render the document — say so in plain text instead."},
-					"target":            map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
-					"mode":              map[string]any{"type": "string", "description": showEnvelopeModeDesc},
-				},
-				"required": []string{"title", "content", "sources"},
-			},
-		},
-		{
-			Name: "nanite_show_report",
-			Description: "Display a metrics report card in chat with labeled values, progress bars, and action buttons. Use for sprint progress, portfolio health, or status summaries. " +
-				"The user expects LIVE data: you MUST ground every metric and summary bullet in data returned from previous tool calls made during this generation. Cite those tool calls in the `sources` field. Do NOT compose from memory or pattern-completion — if you haven't fetched the numbers, don't render a card.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"title":   map[string]any{"type": "string", "description": "Report title"},
-					"metrics": map[string]any{"type": "string", "description": "JSON array of metric objects: [{label, value, percent?, color?}]. Every value must come from a tool result cited in `sources`. Colors: emerald, green, amber, red, blue, violet."},
-					"summary": map[string]any{"type": "string", "description": "Summary text (markdown). Must be derived from the tool_use_ids listed in `sources`. Optional."},
-					"actions": map[string]any{"type": "string", "description": "JSON array of action objects: [{label, action, id?}]. Optional."},
-					"sources": map[string]any{"type": "string", "description": "JSON array of objects documenting the grounding: [{tool_use_id, tool_name, note?}]. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the report. Minimum 1 source. If you didn't fetch the data, don't render the report — say so in plain text instead."},
-					"target":  map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
-					"mode":    map[string]any{"type": "string", "description": showEnvelopeModeDesc},
-				},
-				"required": []string{"title", "metrics", "sources"},
+				"required": []string{"type", "data"},
 			},
 		},
 		// Builder tools — interactive step-by-step creation flows

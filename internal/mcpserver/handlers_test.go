@@ -200,10 +200,19 @@ func TestMakeHandler_EmptyArguments(t *testing.T) {
 // blocks before being returned to the SDK caller.
 func TestMakeHandler_EnvelopeConversion(t *testing.T) {
 	srv := newTestServer(t)
-	// nanite_show_giphy emits an envelope marker in its text output.
-	h := srv.makeHandler("nanite_show_giphy")
+	// nanite_show_card emits an envelope marker in its text output. Using
+	// info-card here because it has no grounding/sources requirement, so
+	// the smoke check stays focused on the envelope-conversion path.
+	h := srv.makeHandler("nanite_show_card")
 
-	args, _ := json.Marshal(map[string]any{"query": "cat"})
+	args, _ := json.Marshal(map[string]any{
+		"type": "info-card",
+		"data": map[string]any{
+			"title":   "Smoke Test",
+			"body":    "envelope conversion check",
+			"variant": "info",
+		},
+	})
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{Arguments: args},
 	}

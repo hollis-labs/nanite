@@ -79,10 +79,9 @@ var BuiltinCategories = map[string]string{
 	"nanite_start_builder":    "agent",
 	"nanite_builder_step":     "agent",
 
-	// Document rendering — reading is the user-facing action.
-	"nanite_show_document": "core-io",
-	"nanite_show_report":   "core-io",
-	"nanite_show_giphy":    "other",
+	// Envelope card rendering — generic emission tool, reading the result is
+	// the user-facing action.
+	"nanite_show_card": "core-io",
 
 	// Small utilities — bucket under "other"; intent rules don't target them
 	// (and if the user asks for them by name, the explicit-signals layer

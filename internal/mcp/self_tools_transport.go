@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -19,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/crossapp"
 	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/reflex"
@@ -236,12 +233,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callNavigateEngine(args)
 	case "nanite_refresh_engine":
 		return st.callRefreshEngine(args)
-	case "nanite_show_giphy":
-		return st.callShowGiphy(args)
-	case "nanite_show_document":
-		return st.callShowDocument(args)
-	case "nanite_show_report":
-		return st.callShowReport(args)
+	case "nanite_show_card":
+		return st.callShowCard(args)
 	case "nanite_start_builder":
 		return st.callStartBuilder(args)
 	case "nanite_builder_step":
@@ -582,134 +575,10 @@ func (st *SelfToolsTransport) callRefreshEngine(args map[string]any) (*ToolResul
 	return textResult("Engine GUI data refreshed."), nil
 }
 
-func (st *SelfToolsTransport) callShowGiphy(args map[string]any) (*ToolResult, error) {
-	query, _ := args["query"].(string)
-	if query == "" {
-		return errorResult("query is required"), nil
-	}
-
-	apiKey := os.Getenv("GIPHY_API_KEY")
-	if apiKey == "" {
-		// No API key — pick a demo GIF based on query keywords.
-		demoGifs := map[string]string{
-			"celebration": "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif",
-			"success":     "https://media.giphy.com/media/a0h7sAqON67nO/giphy.gif",
-			"thumbs up":   "https://media.giphy.com/media/111ebonMs90YLu/giphy.gif",
-			"mind blown":  "https://media.giphy.com/media/xT0xeJpnrWC3XWblEk/giphy.gif",
-			"happy":       "https://media.giphy.com/media/BlVnrxJgTGsUw/giphy.gif",
-			"dance":       "https://media.giphy.com/media/l0MYt5jPR6QX5APm0/giphy.gif",
-			"cat":         "https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif",
-			"dog":         "https://media.giphy.com/media/4Zo41lhzKt6iZ8xff9/giphy.gif",
-			"hamster":     "https://media.giphy.com/media/l2JhIUyUs8KDCCf3W/giphy.gif",
-			"running":     "https://media.giphy.com/media/11BAxHG7paxJcI/giphy.gif",
-			"coding":      "https://media.giphy.com/media/ZVik7pBtu9dNS/giphy.gif",
-			"coffee":      "https://media.giphy.com/media/DrJm6F9poo4aA/giphy.gif",
-			"rocket":      "https://media.giphy.com/media/mi6DsSSNKDbUY/giphy.gif",
-			"fire":        "https://media.giphy.com/media/j3IxJRLNLZz9sXR7ZA/giphy.gif",
-		}
-		// Match query words against known keys, fallback to a random one.
-		gifURL := ""
-		lowerQ := strings.ToLower(query)
-		for keyword, url := range demoGifs {
-			if strings.Contains(lowerQ, keyword) {
-				gifURL = url
-				break
-			}
-		}
-		if gifURL == "" {
-			// Pick based on hash of query for consistent but varied results.
-			keys := make([]string, 0, len(demoGifs))
-			for k := range demoGifs {
-				keys = append(keys, k)
-			}
-			h := 0
-			for _, c := range query {
-				h = h*31 + int(c)
-			}
-			if h < 0 {
-				h = -h
-			}
-			gifURL = demoGifs[keys[h%len(keys)]]
-		}
-
-		envData := map[string]any{
-			"title":   fmt.Sprintf("Here's your %s!", query),
-			"gif_url": gifURL,
-			"source":  "GIPHY (demo mode)",
-			"query":   query,
-		}
-		envJSON, _ := json.Marshal(buildShowEnvelope("giphy-modal", envData, args))
-		result := fmt.Sprintf("Found a GIF for %q! (demo mode — set GIPHY_API_KEY for live search)\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", query, string(envJSON))
-		return textResult(result), nil
-	}
-
-	giphyURL := fmt.Sprintf("https://api.giphy.com/v1/gifs/search?api_key=%s&q=%s&limit=1&rating=g",
-		apiKey, url.QueryEscape(query))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, giphyURL, nil)
-	if err != nil {
-		return errorResult(fmt.Sprintf("create Giphy request: %v", err)), nil
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return errorResult(fmt.Sprintf("Giphy API error: %v", err)), nil
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-	if err != nil {
-		return errorResult(fmt.Sprintf("read Giphy response: %v", err)), nil
-	}
-
-	var giphyResp struct {
-		Data []struct {
-			Title  string `json:"title"`
-			Images struct {
-				Original struct {
-					URL string `json:"url"`
-				} `json:"original"`
-				FixedWidth struct {
-					URL string `json:"url"`
-				} `json:"fixed_width"`
-			} `json:"images"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &giphyResp); err != nil {
-		return errorResult(fmt.Sprintf("parse Giphy response: %v", err)), nil
-	}
-
-	if len(giphyResp.Data) == 0 {
-		return textResult(fmt.Sprintf("No GIFs found for %q. Try a different search term.", query)), nil
-	}
-
-	gif := giphyResp.Data[0]
-	gifURL := gif.Images.Original.URL
-	if gifURL == "" {
-		gifURL = gif.Images.FixedWidth.URL
-	}
-
-	// Build envelope data for the giphy-modal component.
-	envData := map[string]any{
-		"title":   fmt.Sprintf("Here's your %s!", query),
-		"gif_url": gifURL,
-		"source":  "GIPHY",
-		"query":   query,
-	}
-	envJSON, _ := json.Marshal(buildShowEnvelope("giphy-modal", envData, args))
-
-	// Return with envelope marker for engine.go to extract.
-	result := fmt.Sprintf("Found a GIF for %q!\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", query, string(envJSON))
-	return textResult(result), nil
-}
-
 // --- envelope injection handlers ---
 
-// buildShowEnvelope assembles the envelope JSON shape emitted by the
-// nanite_show_* tools. It propagates the optional `target` and `mode` args
+// buildShowEnvelope assembles the envelope JSON shape emitted by
+// nanite_show_card. It propagates the optional `target` and `mode` args
 // onto top-level envelope fields so the FE's applyEnvelopePanelEffects can
 // route drawer-visibility from a tool result (CW-20260428-0007 / J8 v1).
 // Empty values are omitted so unknown-mode/unknown-target cases stay silent.
@@ -729,91 +598,80 @@ func buildShowEnvelope(envType string, data map[string]any, args map[string]any)
 	return env
 }
 
-func (st *SelfToolsTransport) callShowDocument(args map[string]any) (*ToolResult, error) {
-	title, _ := args["title"].(string)
-	content, _ := args["content"].(string)
-	if title == "" || content == "" {
-		return errorResult("title and content are required"), nil
-	}
-
-	// CW-20260419-0022 (UAT c19): the user expects LIVE data in rendered
-	// documents. Reject calls without documented sources so the LLM can't
-	// fabricate content from memory / pattern completion without at least
-	// declaring what it grounded on. This is a shallow check — it validates
-	// shape, not that the cited tool_use_ids were actually called in this
-	// generation. The deep check is tracked in the grounding-design ticket.
-	sources, sourcesErr := parseSourcesArg(args)
-	if sourcesErr != nil {
-		return errorResult(sourcesErr.Error()), nil
-	}
-
-	format := strArg(args, "format", "markdown")
-	downloadFilename := strArg(args, "download_filename", "")
-
-	envData := map[string]any{
-		"title":   title,
-		"content": content,
-		"format":  format,
-		"sources": sources,
-	}
-	if downloadFilename != "" {
-		envData["download_filename"] = downloadFilename
-		envData["download_enabled"] = true
-	}
-	if sections, _ := args["sections"].(string); sections != "" {
-		var sectionList []string
-		for _, s := range strings.Split(sections, ",") {
-			s = strings.TrimSpace(s)
-			if s != "" {
-				sectionList = append(sectionList, s)
-			}
-		}
-		envData["sections"] = sectionList
-	}
-
-	envJSON, _ := json.Marshal(buildShowEnvelope("document-viewer", envData, args))
-
-	result := fmt.Sprintf("Document ready: %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", title, string(envJSON))
-	return textResult(result), nil
+// groundedShowCardTypes are the envelope types whose payload is prose the
+// agent renders from tool output. We require the `sources` arg for these
+// so the agent has to declare what it grounded the content on. Other
+// passive renderables (metric-card, table-card, etc.) carry structured
+// values that don't need this gate.
+var groundedShowCardTypes = map[string]bool{
+	"report-card":     true,
+	"document-viewer": true,
 }
 
-func (st *SelfToolsTransport) callShowReport(args map[string]any) (*ToolResult, error) {
-	title, _ := args["title"].(string)
-	metricsStr, _ := args["metrics"].(string)
-	if title == "" || metricsStr == "" {
-		return errorResult("title and metrics are required"), nil
+// callShowCard is the generic envelope-emission tool for the v1 passive-
+// renderable allow-list (CW-20260428-0019, A3 — Collab UI v1). It replaces
+// the per-type nanite_show_giphy / nanite_show_document / nanite_show_report
+// tools that existed pre-A3.
+//
+// The agent supplies the envelope `type` (any value in
+// envelope.PassiveRenderableTypes) plus a `data` object that this handler
+// validates against the per-type JSON Schema before stamping into the
+// envelope. target/mode propagation reuses buildShowEnvelope (Gap A).
+//
+// For envelope types whose body is agent-authored prose grounded in tool
+// output (report-card, document-viewer), `sources` is required and
+// validated via parseSourcesArg, then post-stamped onto data after schema
+// validation — the schemas don't currently model `sources` (and use
+// additionalProperties:false), so we add the field after the schema check
+// rather than relaxing the schemas.
+func (st *SelfToolsTransport) callShowCard(args map[string]any) (*ToolResult, error) {
+	envType, _ := args["type"].(string)
+	if envType == "" {
+		return errorResult("type is required: pass an envelope type from " + strings.Join(envelope.PassiveRenderableTypes, ", ")), nil
+	}
+	if !envelope.IsPassiveRenderable(envType) {
+		return errorResult(fmt.Sprintf(
+			"envelope type %q is not addressable through nanite_show_card. Allow-list (v1): %s. "+
+				"Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), "+
+				"runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt, subagent-spawn-approval), "+
+				"and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths.",
+			envType, strings.Join(envelope.PassiveRenderableTypes, ", "))), nil
 	}
 
-	var metrics []any
-	if err := json.Unmarshal([]byte(metricsStr), &metrics); err != nil {
-		return errorResult(fmt.Sprintf("invalid metrics JSON: %v", err)), nil
+	data, ok := args["data"].(map[string]any)
+	if !ok || data == nil {
+		return errorResult("data is required and must be a JSON object matching the per-type schema"), nil
 	}
 
-	// CW-20260419-0022 (UAT c19): see callShowDocument for rationale.
-	sources, sourcesErr := parseSourcesArg(args)
-	if sourcesErr != nil {
-		return errorResult(sourcesErr.Error()), nil
+	if err := envelope.ValidateData(envType, data); err != nil {
+		return errorResult(fmt.Sprintf("data does not match the %q schema: %v", envType, err)), nil
 	}
 
-	envData := map[string]any{
-		"title":        title,
-		"generated_at": time.Now().Format(time.RFC3339),
-		"metrics":      metrics,
-		"sources":      sources,
+	if groundedShowCardTypes[envType] {
+		// CW-20260419-0022 (UAT c19): prose-bearing cards must declare what
+		// tool_use_ids ground their content. Shallow shape check; the deep
+		// "were these tool_use_ids actually called this turn" check is
+		// tracked separately.
+		sources, sourcesErr := parseSourcesArg(args)
+		if sourcesErr != nil {
+			return errorResult(sourcesErr.Error()), nil
+		}
+		data["sources"] = sources
 	}
-	if summary, _ := args["summary"].(string); summary != "" {
-		envData["summary"] = summary
-	}
-	if actionsStr, _ := args["actions"].(string); actionsStr != "" {
-		var actions []any
-		if err := json.Unmarshal([]byte(actionsStr), &actions); err == nil {
-			envData["actions"] = actions
+
+	if envType == "report-card" {
+		if _, has := data["generated_at"]; !has {
+			data["generated_at"] = time.Now().Format(time.RFC3339)
 		}
 	}
 
-	envJSON, _ := json.Marshal(buildShowEnvelope("report-card", envData, args))
+	envJSON, _ := json.Marshal(buildShowEnvelope(envType, data, args))
 
-	result := fmt.Sprintf("Report: %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", title, string(envJSON))
+	label := envType
+	if title, _ := data["title"].(string); title != "" {
+		label = fmt.Sprintf("%s: %s", envType, title)
+	}
+	result := fmt.Sprintf("%s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", label, string(envJSON))
 	return textResult(result), nil
 }
 
@@ -1763,12 +1621,13 @@ func strArg(args map[string]any, key, def string) string {
 	return v
 }
 
-// parseSourcesArg decodes the `sources` argument for nanite_show_document /
-// nanite_show_report. Shape: JSON array of objects with at least a
-// `tool_use_id` or `tool_name` field. Enforces presence + non-empty + basic
-// per-entry shape — this is the cheap grounding check (CW-20260419-0022).
-// Validating that the cited tool_use_ids were actually invoked in this
-// generation is the deep check tracked separately.
+// parseSourcesArg decodes the `sources` argument for nanite_show_card when
+// type is report-card or document-viewer (the prose-bearing card types).
+// Shape: JSON array of objects with at least a `tool_use_id` or `tool_name`
+// field. Enforces presence + non-empty + basic per-entry shape — this is
+// the cheap grounding check (CW-20260419-0022). Validating that the cited
+// tool_use_ids were actually invoked in this generation is the deep check
+// tracked separately.
 func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 	raw, ok := args["sources"].(string)
 	if !ok || raw == "" {

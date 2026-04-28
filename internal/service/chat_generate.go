@@ -124,7 +124,7 @@ Workflow:
 - **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
 
 Grounded rendering:
-- ` + "`nanite_show_report`" + ` and ` + "`nanite_show_document`" + ` require a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.`
+- ` + "`nanite_show_card`" + ` with ` + "`type=\"report-card\"`" + ` or ` + "`type=\"document-viewer\"`" + ` requires a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.`
 
 // generateResponse loads context, calls the provider, streams events, and saves
 // the result. This is the refactored version of Engine.generateResponse — it

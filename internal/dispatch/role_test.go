@@ -24,9 +24,9 @@ func TestEnforceChatSurface_FiltersToStaticAllowList(t *testing.T) {
 		// Allowed (peer query / messaging).
 		{Name: "nanite_message_send"},
 		{Name: "nanite_handoff_request"},
-		// Allowed (narration).
-		{Name: "nanite_show_report"},
-		{Name: "nanite_show_document"},
+		// Allowed (narration — generic envelope-emit tool replaces per-type
+		// nanite_show_* tools as of CW-20260428-0019).
+		{Name: "nanite_show_card"},
 		// Allowed (executeTask).
 		{Name: "nanite_execute_task"},
 		// Allowed (chat_search, P8B).
@@ -71,8 +71,7 @@ func TestEnforceChatSurface_FiltersToStaticAllowList(t *testing.T) {
 		"nanite_scratchpad_write": true,
 		"nanite_message_send":     true,
 		"nanite_handoff_request":  true,
-		"nanite_show_report":      true,
-		"nanite_show_document":    true,
+		"nanite_show_card":        true,
 		"nanite_execute_task":     true,
 		"nanite_chat_search":      true,
 		"nanite_panel_open":       true,

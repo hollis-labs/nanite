@@ -15,7 +15,6 @@ import {
   Sparkles,
   User,
   Wrench,
-  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Suspense, lazy, useEffect, useState } from "react";
@@ -90,7 +89,8 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     label: "Workspace",
     items: [
       { id: "workspaces", label: "Workspaces", icon: Building2 },
-      { id: "actions", label: "Actions", icon: Zap },
+      // hidden pending CW-20260421-0012 scope review (K5 / CW-20260421-0004)
+      // { id: "actions", label: "Actions", icon: Zap },
     ],
   },
   {

@@ -4,7 +4,10 @@
   "title": "Progress Card",
   "description": "A progress bar with optional step checklist.",
   "type": "object",
-  "required": ["title", "progress"],
+  "required": [
+    "title",
+    "progress"
+  ],
   "properties": {
     "title": {
       "type": "string",
@@ -28,15 +31,23 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["label", "done"],
+        "required": [
+          "label",
+          "done"
+        ],
         "properties": {
-          "label": { "type": "string" },
-          "done": { "type": "boolean" }
+          "label": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
       },
       "description": "Step checklist."
     }
   },
+  "default_render_target": "bottom_chat_drawer",
   "additionalProperties": false
 }

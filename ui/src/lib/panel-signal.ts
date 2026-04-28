@@ -71,9 +71,17 @@ export function applyPanelSignal(sig: PanelSignalPayload): void {
 
 /**
  * Apply panel-related side effects from an envelope arriving via the chat
- * stream. Reads `target` (declarative drawer routing) and `mode` (preset
- * map). Both fields go through the layout store with source='agent' so the
- * dismiss machine gates correctly.
+ * stream. Reads three independent fields:
+ *
+ *   - `target` (J8) — visibility hint: open the named panel.
+ *   - `render_target` (A2) — placement hint: route the envelope into the
+ *     named panel's inbox slot AND open the panel. Skipped when the
+ *     dismiss machine refuses the open (matches `target` semantics).
+ *   - `mode` (J8) — workspace preset: open the panels in the preset map.
+ *
+ * All three go through the layout store with source='agent' so the dismiss
+ * machine stays the single source of truth for whether the open actually
+ * happens.
  *
  * Called from useChat's plugin_envelope handler. The envelope is also
  * persisted into the chat store as a normal PluginEnvelopeItem; this helper
@@ -83,6 +91,9 @@ export function applyEnvelopePanelEffects(envelope: Envelope): void {
   if (envelope.target) {
     openPanelById(envelope.target, "agent");
   }
+  if (envelope.render_target) {
+    routeEnvelopeToPanel(envelope.render_target, envelope);
+  }
   if (envelope.mode) {
     const preset = resolvePanelMode(envelope.mode);
     if (preset) {
@@ -91,6 +102,19 @@ export function applyEnvelopePanelEffects(envelope: Envelope): void {
       }
     }
   }
+}
+
+/**
+ * Push the envelope into the named panel's inbox slot and open the panel.
+ * The dismiss machine still gates the open — if the user has dismissed the
+ * panel since the last conversational trigger, the open is a no-op. We
+ * still push the envelope into the slot so a subsequent user-open lands on
+ * the freshest content (Q5 — drawer-owned policy).
+ */
+function routeEnvelopeToPanel(panelId: string, envelope: Envelope): void {
+  const store = useLayoutStore.getState();
+  store.pushPanelEnvelope(panelId, envelope);
+  openPanelById(panelId, "agent");
 }
 
 /**

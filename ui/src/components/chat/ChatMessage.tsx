@@ -12,6 +12,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { useChatStore } from '@/stores/useChatStore'
+import { useLayoutStore } from '@/stores/useLayoutStore'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { usePluginAction } from '@/hooks/usePluginAction'
 import { resolveIcon } from '@/lib/icons'
@@ -394,10 +395,24 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
         )}
 
         {/* Envelope rendering — stop pointer propagation so interactive envelope
-            elements (checkboxes, buttons) aren't swallowed by ContextMenuTrigger */}
+            elements (checkboxes, buttons) aren't swallowed by ContextMenuTrigger.
+            A2 — when render_target is set and was not blocked, render a stub
+            link instead of the full envelope; the card itself lands in the
+            named panel's inbox slot via applyEnvelopePanelEffects. Blocked
+            routings fall through to inline so the user still sees the
+            content, with a debug pill noting the block reason. */}
         {envelope && !isUser && (
           <div className="mt-3" onPointerDownCapture={(e) => e.stopPropagation()}>
-            <EnvelopeRenderer envelope={envelope} onSendMessage={onSendMessage} userMessageCount={userMessageCount} />
+            {envelope.render_target && !envelope.render_target_blocked ? (
+              <RenderTargetStub envelope={envelope} />
+            ) : (
+              <>
+                <EnvelopeRenderer envelope={envelope} onSendMessage={onSendMessage} userMessageCount={userMessageCount} />
+                {envelope.render_target_blocked && (
+                  <RenderTargetBlockedPill reason={envelope.render_target_blocked} attemptedTarget={envelope.render_target} />
+                )}
+              </>
+            )}
           </div>
         )}
 
@@ -460,5 +475,50 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
         })}
       </ContextMenuContent>
     </ContextMenu>
+  )
+}
+
+// A2 — CW-20260428-0008. RenderTargetStub stands in for the full envelope
+// in chat when the card has been routed to a panel inbox slot. Click
+// re-opens the panel so the user can find the routed card.
+function RenderTargetStub({ envelope }: { envelope: Envelope }) {
+  const setBottomDrawerOpen = useLayoutStore((s) => s.setBottomDrawerOpen)
+  const setPanelOpen = useLayoutStore((s) => s.setPanelOpen)
+  const target = envelope.render_target ?? ''
+  const label = envelope.title ? `${envelope.type}: ${envelope.title}` : envelope.type
+  const handleClick = () => {
+    if (target === 'bottom_chat_drawer') {
+      setBottomDrawerOpen(true, 'user')
+    } else if (target) {
+      setPanelOpen(target, 'user')
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-surface text-xs text-fg-muted hover:text-fg hover:bg-surface/80 transition-colors"
+      title={`Open ${target} to see this card`}
+    >
+      <span aria-hidden>📎</span>
+      <span className="truncate">
+        Sent <span className="font-medium text-fg">{label}</span> to <span className="font-mono text-fg-faint">{target}</span>
+      </span>
+    </button>
+  )
+}
+
+// A2 — debug pill rendered next to an inline envelope when the backend
+// rejected an explicit render_target at the trust gate. Surfaces the
+// blocked-reason so the agent's intent is visible without requiring the
+// inspector view.
+function RenderTargetBlockedPill({ reason, attemptedTarget }: { reason: string; attemptedTarget?: string }) {
+  return (
+    <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] text-warning border border-warning/40 bg-warning/10">
+      <span aria-hidden>⚠️</span>
+      <span>
+        Routing to <span className="font-mono">{attemptedTarget || 'unknown'}</span> blocked: {reason}
+      </span>
+    </div>
   )
 }

@@ -60,14 +60,23 @@ func IsPassiveRenderable(envelopeType string) bool {
 // the schema files. Compilation is cheap relative to validation but a chat
 // session can fire dozens of show_card calls per turn, so reuse pays off
 // quickly.
+//
+// schemaRawCache stores the parsed schema document alongside the compiled
+// validator so we can read custom annotation keywords (like
+// `default_render_target`, A2 — CW-20260428-0008) that the compiler doesn't
+// expose. Both caches are populated together by loadSchema so they stay
+// consistent.
 var (
-	schemaCacheMu sync.Mutex
-	schemaCache   = map[string]*jsonschema.Schema{}
+	schemaCacheMu  sync.Mutex
+	schemaCache    = map[string]*jsonschema.Schema{}
+	schemaRawCache = map[string]map[string]any{}
 )
 
 // loadSchema returns a compiled schema for the given envelope type, lazily
 // compiling on first use. Errors carry the type name so the caller's error
-// message stays informative.
+// message stays informative. Populates both schemaCache (compiled) and
+// schemaRawCache (parsed map) so DefaultRenderTarget can read annotation
+// keywords without re-parsing the file.
 func loadSchema(envelopeType string) (*jsonschema.Schema, error) {
 	schemaCacheMu.Lock()
 	defer schemaCacheMu.Unlock()
@@ -82,12 +91,12 @@ func loadSchema(envelopeType string) (*jsonschema.Schema, error) {
 		}
 		return nil, fmt.Errorf("read schema for %q: %w", envelopeType, err)
 	}
-	var doc any
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	var docMap map[string]any
+	if err := json.Unmarshal(raw, &docMap); err != nil {
 		return nil, fmt.Errorf("parse schema for %q: %w", envelopeType, err)
 	}
 	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource(envelopeType+".schema.json", doc); err != nil {
+	if err := compiler.AddResource(envelopeType+".schema.json", any(docMap)); err != nil {
 		return nil, fmt.Errorf("register schema for %q: %w", envelopeType, err)
 	}
 	compiled, err := compiler.Compile(envelopeType + ".schema.json")
@@ -95,7 +104,30 @@ func loadSchema(envelopeType string) (*jsonschema.Schema, error) {
 		return nil, fmt.Errorf("compile schema for %q: %w", envelopeType, err)
 	}
 	schemaCache[envelopeType] = compiled
+	schemaRawCache[envelopeType] = docMap
 	return compiled, nil
+}
+
+// DefaultRenderTarget returns the schema-declared default render-target for
+// envelopeType, or "" if the schema does not declare one (or the type is
+// unknown). The runtime stamps this onto Envelope.RenderTarget when the
+// agent did not provide an explicit value (A2 — CW-20260428-0008).
+//
+// Defaults are limited to built-in panel IDs by convention so the schema
+// path bypasses the trust gate that applies to explicit agent overrides.
+// See docs/panels/envelope-render-target.md for the v1 default table.
+func DefaultRenderTarget(envelopeType string) string {
+	if _, err := loadSchema(envelopeType); err != nil {
+		return ""
+	}
+	schemaCacheMu.Lock()
+	doc := schemaRawCache[envelopeType]
+	schemaCacheMu.Unlock()
+	if doc == nil {
+		return ""
+	}
+	v, _ := doc["default_render_target"].(string)
+	return v
 }
 
 // errIsNotExist returns true for fs.ErrNotExist (fs.ReadFile wraps it).

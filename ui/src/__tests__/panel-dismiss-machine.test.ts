@@ -40,6 +40,7 @@ function reset() {
     rightRailTab: "widgets",
     bottomChatDrawerOpen: false,
     panelPrefs: { ...PRISTINE_PREFS },
+    panelEnvelopes: {},
   });
 }
 
@@ -285,5 +286,112 @@ describe("J8 v1 concrete scenario — document in chat drawer + plan in work pan
     applyPanelSignal({ action: "open", panel_id: "work" });
     s = useLayoutStore.getState();
     expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
+  });
+});
+
+// ---- A2 — render_target routing -----------------------------------------
+// CW-20260428-0008. The placement field that's separate from the visibility
+// field. Pushes envelopes into the named panel's inbox slot AND opens the
+// panel; the dismiss machine still gates the open so a user-dismissed
+// drawer does not auto-open.
+
+describe("applyEnvelopePanelEffects — render_target", () => {
+  it("pushes envelope into panelEnvelopes and opens the bottom drawer", () => {
+    const env = {
+      kind: "envelope",
+      version: 1,
+      type: "info-card",
+      title: "Hello",
+      data: { title: "Hello", body: "world" },
+      render_target: "bottom_chat_drawer",
+    };
+    applyEnvelopePanelEffects(env);
+    const s = useLayoutStore.getState();
+    expect(s.bottomChatDrawerOpen).toBe(true);
+    expect(s.panelEnvelopes["bottom_chat_drawer"]).toHaveLength(1);
+    expect(s.panelEnvelopes["bottom_chat_drawer"][0].title).toBe("Hello");
+  });
+
+  it("routes to right-rail panels by id (work, workflows)", () => {
+    const env = {
+      kind: "envelope",
+      version: 1,
+      type: "info-card",
+      data: { title: "T", body: "b" },
+      render_target: "work",
+    };
+    applyEnvelopePanelEffects(env);
+    const s = useLayoutStore.getState();
+    expect(s.panelEnvelopes["work"]).toHaveLength(1);
+    expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
+  });
+
+  it("dismiss machine still gates render_target opens for the bottom drawer", () => {
+    useLayoutStore.getState().markPanelDismissed("bottom_chat_drawer");
+    const env = {
+      kind: "envelope",
+      version: 1,
+      type: "info-card",
+      data: { title: "T", body: "b" },
+      render_target: "bottom_chat_drawer",
+    };
+    applyEnvelopePanelEffects(env);
+    const s = useLayoutStore.getState();
+    // Drawer stays closed (dismissed), but envelope is still pushed into
+    // the slot so a subsequent user-open lands on the freshest content.
+    expect(s.bottomChatDrawerOpen).toBe(false);
+    expect(s.panelEnvelopes["bottom_chat_drawer"]).toHaveLength(1);
+  });
+
+  it("multiple envelopes accumulate in arrival order (drawer policy decides display)", () => {
+    applyEnvelopePanelEffects({
+      kind: "envelope",
+      version: 1,
+      type: "info-card",
+      title: "First",
+      data: { title: "First", body: "1" },
+      render_target: "bottom_chat_drawer",
+    });
+    applyEnvelopePanelEffects({
+      kind: "envelope",
+      version: 1,
+      type: "info-card",
+      title: "Second",
+      data: { title: "Second", body: "2" },
+      render_target: "bottom_chat_drawer",
+    });
+    const queue = useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer"];
+    expect(queue).toHaveLength(2);
+    expect(queue[0].title).toBe("First");
+    expect(queue[1].title).toBe("Second");
+  });
+
+  it("clearPanelEnvelopes empties the inbox for a panel", () => {
+    applyEnvelopePanelEffects({
+      kind: "envelope",
+      version: 1,
+      type: "info-card",
+      data: { title: "T", body: "b" },
+      render_target: "bottom_chat_drawer",
+    });
+    useLayoutStore.getState().clearPanelEnvelopes("bottom_chat_drawer");
+    expect(useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer"]).toBeUndefined();
+  });
+
+  it("envelope can carry both target and render_target (independent effects)", () => {
+    applyEnvelopePanelEffects({
+      kind: "envelope",
+      version: 1,
+      type: "info-card",
+      data: { title: "T", body: "b" },
+      target: "work",
+      render_target: "bottom_chat_drawer",
+    });
+    const s = useLayoutStore.getState();
+    expect(s.bottomChatDrawerOpen).toBe(true);
+    expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
+    expect(s.panelEnvelopes["bottom_chat_drawer"]).toHaveLength(1);
+    // No envelope routed to "work" — only render_target pushes into the queue.
+    expect(s.panelEnvelopes["work"]).toBeUndefined();
   });
 });

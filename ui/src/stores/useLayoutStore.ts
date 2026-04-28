@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { Envelope } from '@/lib/types'
 
 type ToolDrawerState = 'closed' | 'compact' | 'expanded'
 type Theme = 'dark' | 'light' | 'system'
@@ -110,6 +111,19 @@ interface LayoutState {
   bottomChatDrawerOpen: boolean
   /** Open/close the bottom chat drawer with source attribution for the dismiss machine. */
   setBottomDrawerOpen: (open: boolean, source?: 'agent' | 'user') => void
+
+  // A2 v1 — per-panel envelope inbox (CW-20260428-0008). When an envelope
+  // arrives with `render_target` set, applyEnvelopePanelEffects pushes it
+  // into panelEnvelopes[render_target] and the panel's inbox slot picks it
+  // up. NOT persisted across reload (Q3 — transient render-target
+  // envelopes don't auto-restore; the chat-history stub re-routes on
+  // click). Reset on rehydrate.
+  panelEnvelopes: Record<string, Envelope[]>
+  /** Push an envelope into a panel's inbox slot. Caller is responsible for
+   *  dismiss-machine gating; this just stores. */
+  pushPanelEnvelope: (panelId: string, envelope: Envelope) => void
+  /** Clear all envelopes routed to a single panel (drawer-owned policy). */
+  clearPanelEnvelopes: (panelId: string) => void
 }
 
 function resolveTheme(theme: Theme): 'dark' | 'light' {
@@ -318,6 +332,21 @@ export const useLayoutStore = create<LayoutState>()(
             panelPrefs: { ...s.panelPrefs, panelOpenSource: nextSource },
           }
         }),
+
+      // A2 v1 panel-envelope inbox (CW-20260428-0008).
+      panelEnvelopes: {} as Record<string, Envelope[]>,
+      pushPanelEnvelope: (panelId, envelope) =>
+        set((s) => ({
+          panelEnvelopes: {
+            ...s.panelEnvelopes,
+            [panelId]: [...(s.panelEnvelopes[panelId] ?? []), envelope],
+          },
+        })),
+      clearPanelEnvelopes: (panelId) =>
+        set((s) => {
+          const { [panelId]: _drop, ...rest } = s.panelEnvelopes
+          return { panelEnvelopes: rest }
+        }),
     }),
     {
       name: 'nanite-layout',
@@ -336,6 +365,10 @@ export const useLayoutStore = create<LayoutState>()(
         // Never restore modal open state from persisted storage
         if (state) {
           state.memoryModalOpen = false
+          // A2 — Q3: transient render-target envelopes do NOT auto-restore
+          // on session reload. The chat-history stub stays (envelopes are in
+          // the transcript) and clicking it re-routes the card.
+          state.panelEnvelopes = {}
         }
         // Listen for OS theme changes when in system mode
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

@@ -4,7 +4,10 @@
   "title": "Metric Card",
   "description": "A single metric display with optional trend indicator.",
   "type": "object",
-  "required": ["label", "value"],
+  "required": [
+    "label",
+    "value"
+  ],
   "properties": {
     "label": {
       "type": "string",
@@ -12,8 +15,12 @@
     },
     "value": {
       "oneOf": [
-        { "type": "string" },
-        { "type": "number" }
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
       ],
       "description": "The metric value."
     },
@@ -23,13 +30,21 @@
     },
     "trend": {
       "type": "string",
-      "enum": ["up", "down", "flat"],
+      "enum": [
+        "up",
+        "down",
+        "flat"
+      ],
       "description": "Trend direction."
     },
     "previous": {
       "oneOf": [
-        { "type": "string" },
-        { "type": "number" }
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
       ],
       "description": "Previous value for comparison."
     },
@@ -38,5 +53,6 @@
       "description": "Additional context."
     }
   },
+  "default_render_target": "bottom_chat_drawer",
   "additionalProperties": false
 }

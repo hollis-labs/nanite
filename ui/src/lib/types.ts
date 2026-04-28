@@ -566,14 +566,33 @@ export interface Envelope {
   status?: { phase: string; progress: number };
   data?: Record<string, unknown>;
   /**
-   * J8 v1 — declarative drawer routing (CW-20260426-0006). When set, the
-   * envelope renderer opens the named drawer (using the agent_opened state
-   * for the dismiss machine) and renders the card into it instead of inline
-   * in the chat transcript. Known v1 IDs: `bottom_chat_drawer`, `work`,
-   * `workflows`. Plugin-shipped panel IDs are accepted for trusted callers.
-   * Omit to render inline in chat (current default behavior).
+   * J8 v1 — visibility hint (CW-20260426-0006). The optional panel ID to
+   * OPEN when this envelope arrives. Does NOT control where the envelope
+   * renders. Known v1 IDs: `bottom_chat_drawer`, `work`, `workflows`.
+   * Plugin-shipped panel IDs are accepted for trusted callers. Omit to
+   * skip the visibility signal. For routing the card itself, see
+   * `render_target` (A2). Both fields can be set independently.
    */
   target?: string;
+  /**
+   * A2 — placement hint (CW-20260428-0008). The optional panel ID where
+   * this envelope should RENDER. When set and the FE dismiss-machine
+   * permits, the envelope is pushed into the panel's inbox slot
+   * (`useLayoutStore.panelEnvelopes[render_target]`) and the chat shows a
+   * stub link instead of the full envelope. Empty / undefined = inline
+   * render (the historical default). The backend stamps this from the
+   * per-type schema's `default_render_target` when the agent did not
+   * provide one; explicit agent override wins.
+   */
+  render_target?: string;
+  /**
+   * A2 — debug indicator (CW-20260428-0008). When the backend rejected an
+   * explicit render_target at the trust gate, this carries a short reason
+   * code (`untrusted_plugin_panel`, `unknown_panel`, `untrusted`). The FE
+   * surfaces it as a small inline pill so the agent's blocked intent is
+   * visible. The envelope renders inline as a fallback.
+   */
+  render_target_blocked?: string;
   /**
    * J8 v1 — mode/status signal carried alongside the envelope
    * (CW-20260426-0006). When set, the FE resolves the mode against the

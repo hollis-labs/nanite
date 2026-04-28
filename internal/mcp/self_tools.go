@@ -8,14 +8,20 @@ import "github.com/hollis-labs/go-providers/provider"
 // contract (J8 v1 — CW-20260426-0006); the FE picks them up via
 // applyEnvelopePanelEffects.
 const (
-	showEnvelopeTargetDesc = "Optional drawer ID to open when this card arrives. v1 vocabulary: " +
+	showEnvelopeTargetDesc = "Optional drawer ID to OPEN when this card arrives. v1 vocabulary: " +
 		"\"bottom_chat_drawer\" (long-form reference content below the chat transcript), " +
 		"\"work\" (right-rail todos/plans/sprint cards), \"workflows\" (right-rail guided-interaction templates). " +
-		"Plugin-declared drawers may add more. Omit to render inline in chat without opening a drawer. " +
-		"Card content still renders inline — this only signals drawer visibility (Gap A; render-relocation is a separate feature)."
+		"Plugin-declared drawers may add more. Visibility hint only — does NOT control where the card renders. " +
+		"For routing the card itself, use `render_target` instead."
+	showEnvelopeRenderTargetDesc = "Optional panel ID where the card SHOULD RENDER (A2 — CW-20260428-0008). " +
+		"v1 vocabulary: \"bottom_chat_drawer\", \"work\", \"workflows\" (built-in panels are always allowed); " +
+		"plugin-declared panels are accepted only when the calling agent has H1 trust — otherwise the routing is " +
+		"dropped and the card falls back to inline with a `render_target_blocked` hint. " +
+		"When omitted, the schema's `default_render_target` (if any) is used; for the 10 passive renderables that's " +
+		"\"bottom_chat_drawer\". Pass an empty string to force-inline a card whose schema would otherwise route to a drawer."
 	showEnvelopeModeDesc = "Optional workspace mode hint that travels with the envelope. " +
 		"v1 vocabulary: \"planning\" (FE preset opens [work, workflows]). " +
-		"Independent of `target` — both can be set. Empty/unknown values are silent no-ops on the FE."
+		"Independent of `target` and `render_target` — all three can be set. Empty/unknown values are silent no-ops on the FE."
 )
 
 // SelfToolProviderDefinitions returns all self-service tool definitions
@@ -217,12 +223,12 @@ func selfToolDefinitions() []Tool {
 		},
 		{
 			Name: "nanite_show_card",
-			Description: "Render a structured envelope card in chat. One generic surface for the v1 passive-renderable card types — replaces the older per-type nanite_show_giphy / nanite_show_document / nanite_show_report tools (CW-20260428-0019, A3).\n\n" +
-				"**When to use:** When you want to display structured content in chat (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
+			Description: "Render a structured envelope card in chat or in a drawer. One generic surface for the v1 passive-renderable card types — replaces the older per-type nanite_show_giphy / nanite_show_document / nanite_show_report tools (CW-20260428-0019, A3).\n\n" +
+				"**When to use:** When you want to display structured content (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
 				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths and are NOT addressable here.\n\n" +
 				"**Required context:** `type` from the v1 allow-list and `data` matching the per-type schema. The handler validates `data` against `internal/envelope/schemas/<type>.schema.json` at the boundary; payloads that miss required fields, wrong types, or carry unknown keys are rejected with a structured error citing the schema field that failed.\n\n" +
 				"**Grounding:** For prose-bearing card types (`report-card`, `document-viewer`) you MUST also pass `sources` — a JSON array of `{tool_use_id, tool_name, note?}` objects citing the tool calls whose results ground the content. If you didn't fetch the data this turn, render a plain-text reply instead of an empty card.\n\n" +
-				"**Output shape:** Emits a `<type>` envelope. The card renders inline by default; pass `target` to route drawer-visibility (Gap A — CW-20260428-0007) or `mode` to signal a workspace mode preset.",
+				"**Render destination:** By default the card lands wherever the schema's `default_render_target` says — for the 10 passive renderables that's the bottom drawer. Pass `render_target` to override, or `render_target=\"\"` to force-inline. `target` (visibility — open this drawer) and `mode` (workspace preset) remain independent levers; both can travel with the envelope.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -250,8 +256,9 @@ func selfToolDefinitions() []Tool {
 						"type":        "string",
 						"description": "JSON array of grounding objects: [{tool_use_id, tool_name, note?}]. REQUIRED for report-card and document-viewer. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the content. If you didn't fetch the data, don't render the card.",
 					},
-					"target": map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
-					"mode":   map[string]any{"type": "string", "description": showEnvelopeModeDesc},
+					"target":        map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
+					"render_target": map[string]any{"type": "string", "description": showEnvelopeRenderTargetDesc},
+					"mode":          map[string]any{"type": "string", "description": showEnvelopeModeDesc},
 				},
 				"required": []string{"type", "data"},
 			},

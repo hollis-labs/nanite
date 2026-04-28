@@ -234,7 +234,7 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	case "nanite_refresh_engine":
 		return st.callRefreshEngine(args)
 	case "nanite_show_card":
-		return st.callShowCard(args)
+		return st.callShowCard(ctx, args)
 	case "nanite_giphy_search":
 		return st.callGiphySearch(args)
 	case "nanite_start_builder":
@@ -584,7 +584,11 @@ func (st *SelfToolsTransport) callRefreshEngine(args map[string]any) (*ToolResul
 // onto top-level envelope fields so the FE's applyEnvelopePanelEffects can
 // route drawer-visibility from a tool result (CW-20260428-0007 / J8 v1).
 // Empty values are omitted so unknown-mode/unknown-target cases stay silent.
-func buildShowEnvelope(envType string, data map[string]any, args map[string]any) map[string]any {
+//
+// renderTarget and renderTargetBlocked are resolved upstream by the caller
+// (callShowCard's trust gate) and stamped here so the wire shape stays in
+// one place. Callers without render-target plumbing pass empty strings.
+func buildShowEnvelope(envType string, data map[string]any, args map[string]any, renderTarget, renderTargetBlocked string) map[string]any {
 	env := map[string]any{
 		"kind":    "envelope",
 		"version": 1,
@@ -596,6 +600,12 @@ func buildShowEnvelope(envType string, data map[string]any, args map[string]any)
 	}
 	if mode, _ := args["mode"].(string); mode != "" {
 		env["mode"] = mode
+	}
+	if renderTarget != "" {
+		env["render_target"] = renderTarget
+	}
+	if renderTargetBlocked != "" {
+		env["render_target_blocked"] = renderTargetBlocked
 	}
 	return env
 }
@@ -626,7 +636,20 @@ var groundedShowCardTypes = map[string]bool{
 // validation — the schemas don't currently model `sources` (and use
 // additionalProperties:false), so we add the field after the schema check
 // rather than relaxing the schemas.
-func (st *SelfToolsTransport) callShowCard(args map[string]any) (*ToolResult, error) {
+//
+// A2 — CW-20260428-0008. The handler resolves the envelope's render-target
+// here:
+//   - If the agent passed an explicit `render_target`, gate it through the
+//     same V1BuiltinPanelIDs / resolvePanelAccess trust check that protects
+//     panel_signal emission. Untrusted plugin-panel routing is dropped to
+//     inline + a render_target_blocked hint.
+//   - Otherwise read the per-type schema's `default_render_target` (built-
+//     in panel IDs only by convention) and stamp that.
+//
+// ctx is used by the trust resolver; passing context.Background() in tests
+// without TrustResolver/PanelLookup wired skips plugin-panel access (the
+// gate falls back to "untrusted" so the deny path is still exercised).
+func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	envType, _ := args["type"].(string)
 	if envType == "" {
 		return errorResult("type is required: pass an envelope type from " + strings.Join(envelope.PassiveRenderableTypes, ", ")), nil
@@ -667,7 +690,9 @@ func (st *SelfToolsTransport) callShowCard(args map[string]any) (*ToolResult, er
 		}
 	}
 
-	envJSON, _ := json.Marshal(buildShowEnvelope(envType, data, args))
+	renderTarget, renderTargetBlocked := st.resolveShowCardRenderTarget(ctx, envType, args)
+
+	envJSON, _ := json.Marshal(buildShowEnvelope(envType, data, args, renderTarget, renderTargetBlocked))
 
 	label := envType
 	if title, _ := data["title"].(string); title != "" {
@@ -675,6 +700,38 @@ func (st *SelfToolsTransport) callShowCard(args map[string]any) (*ToolResult, er
 	}
 	result := fmt.Sprintf("%s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", label, string(envJSON))
 	return textResult(result), nil
+}
+
+// resolveShowCardRenderTarget decides where the envelope should render. The
+// rules (A2 — CW-20260428-0008):
+//
+//   - Empty agent arg + no schema default → ("", "") inline.
+//   - Empty agent arg + schema default → (default, "") — schema defaults
+//     are limited to built-in IDs by convention so they bypass the gate.
+//   - Explicit agent value pointing at a built-in panel → (id, "") allowed.
+//   - Explicit agent value pointing at a plugin panel:
+//     * trust gate passes → (id, "") allowed.
+//     * trust gate fails  → ("", reason). Render falls back to inline and
+//       the FE surfaces the blocked-reason as a debug pill.
+//
+// The agent can pass render_target="" explicitly to force-inline a card
+// whose schema would otherwise route to a drawer; the empty string is
+// distinguishable from a missing arg here only because we read the raw
+// args map, but in practice both flow through the same "no override"
+// branch — that's the intended behavior.
+func (st *SelfToolsTransport) resolveShowCardRenderTarget(ctx context.Context, envType string, args map[string]any) (string, string) {
+	override, hasOverride := args["render_target"].(string)
+	if !hasOverride || override == "" {
+		return envelope.DefaultRenderTarget(envType), ""
+	}
+	if V1BuiltinPanelIDs[override] {
+		return override, ""
+	}
+	allowed, reason := st.resolvePanelAccess(ctx, override)
+	if allowed {
+		return override, ""
+	}
+	return "", reason
 }
 
 // --- todo/plan handlers ---

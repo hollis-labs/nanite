@@ -1,31 +1,35 @@
 /**
- * BottomChatDrawer — J10 (CW-20260426-0008)
+ * BottomChatDrawer — J10 (CW-20260426-0008) + A2 inbox slot (CW-20260428-0008)
  *
- * Three-tab bottom drawer:
+ * Five-tab bottom drawer:
  *   Tab 0 — Scratchpad (extends P4 scratchpad infrastructure)
  *   Tab 1 — Documents (sidebar list + content view, per-doc include/exclude toggle)
  *   Tab 2 — Session Context (user-authored session-scoped prompt block)
+ *   Tab 3 — Pins (J11 agent-pinned content)
+ *   Tab 4 — Cards (A2 inbox slot — routed envelopes via render_target)
  *
  * Opens via:
  *   - /scratch command (bare invocation)
  *   - Agent panel_open("bottom_chat_drawer") via envelope target
+ *   - Agent envelope.render_target = "bottom_chat_drawer" (A2)
  *   - Direct user click on drawer toggle
  *
  * Dismiss policy: follows J8 state machine (setBottomDrawerOpen in useLayoutStore).
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { X, FileText, StickyNote, MessageSquare, Plus, Trash2, Eye, EyeOff, Maximize2, Minimize2, Pin, PinOff } from 'lucide-react'
+import { X, FileText, StickyNote, MessageSquare, Plus, Trash2, Eye, EyeOff, Maximize2, Minimize2, Pin, PinOff, Inbox } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
 import type { Document, PinnedContent } from '@/lib/types'
+import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
 
 // ── Tab IDs ──────────────────────────────────────────────────────────────────
 
-type DrawerTab = 'scratchpad' | 'documents' | 'context' | 'pins'
+type DrawerTab = 'scratchpad' | 'documents' | 'context' | 'pins' | 'cards'
 
 // ── Main component ───────────────────────────────────────────────────────────
 
@@ -94,6 +98,12 @@ export function BottomChatDrawer({ initialTab = 'scratchpad', onScratchpadRef }:
             label="Pins"
             onClick={() => setActiveTab('pins')}
           />
+          <TabButton
+            active={activeTab === 'cards'}
+            icon={<Inbox className="w-3.5 h-3.5" />}
+            label="Cards"
+            onClick={() => setActiveTab('cards')}
+          />
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -123,7 +133,62 @@ export function BottomChatDrawer({ initialTab = 'scratchpad', onScratchpadRef }:
         {activeTab === 'documents' && <DocumentsTab />}
         {activeTab === 'context' && <SessionContextTab />}
         {activeTab === 'pins' && <PinsTab />}
+        {activeTab === 'cards' && <CardsTab />}
       </div>
+    </div>
+  )
+}
+
+// ── Cards tab ────────────────────────────────────────────────────────────────
+// A2 inbox slot — routed envelopes (envelope.render_target = "bottom_chat_drawer").
+// Q5 policy: latest transient replaces previous (one slot, generic). Pinning
+// is Phase C work (CW-20260428-0012); for now the latest envelope wins and
+// we keep a small history viewer below it for context.
+
+function CardsTab() {
+  const envelopes = useLayoutStore((s) => s.panelEnvelopes['bottom_chat_drawer'] ?? [])
+  const clearPanelEnvelopes = useLayoutStore((s) => s.clearPanelEnvelopes)
+  const latest = envelopes.length > 0 ? envelopes[envelopes.length - 1] : null
+  const history = envelopes.slice(0, -1).slice(-5).reverse()
+
+  if (!latest) {
+    return <EmptyState message="No routed cards yet — agent-emitted cards will land here when they're routed to the bottom drawer." />
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-3 py-1 shrink-0">
+        <p className="text-xs text-fg-muted">
+          Routed cards — latest from agent (transient; not restored on reload)
+        </p>
+        <button
+          type="button"
+          onClick={() => clearPanelEnvelopes('bottom_chat_drawer')}
+          className="text-xs text-fg-faint hover:text-fg-muted transition-colors"
+        >
+          Clear
+        </button>
+      </div>
+      <ScrollArea className="flex-1">
+        <div className="p-3 space-y-3">
+          <EnvelopeRenderer envelope={latest} />
+          {history.length > 0 && (
+            <div className="pt-3 border-t border-border space-y-2">
+              <p className="text-[11px] text-fg-faint uppercase tracking-wide">Earlier this session</p>
+              {history.map((env, i) => (
+                <details key={i} className="text-xs text-fg-muted">
+                  <summary className="cursor-pointer hover:text-fg">
+                    {env.title ? `${env.type}: ${env.title}` : env.type}
+                  </summary>
+                  <div className="mt-2">
+                    <EnvelopeRenderer envelope={env} />
+                  </div>
+                </details>
+              ))}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
     </div>
   )
 }

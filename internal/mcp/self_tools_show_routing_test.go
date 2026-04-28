@@ -146,7 +146,7 @@ func TestCallShowCard_AllPassiveRenderables_RoundTrip(t *testing.T) {
 				args["sources"] = validSources
 			}
 
-			res, err := st.callShowCard(args)
+			res, err := st.callShowCard(context.Background(), args)
 			if err != nil {
 				t.Fatalf("callShowCard returned error: %v", err)
 			}
@@ -197,7 +197,7 @@ func TestCallShowCard_RejectsTypeOutsideAllowList(t *testing.T) {
 	for _, envType := range rejected {
 		envType := envType
 		t.Run(envType, func(t *testing.T) {
-			res, err := st.callShowCard(map[string]any{
+			res, err := st.callShowCard(context.Background(), map[string]any{
 				"type": envType,
 				"data": map[string]any{},
 			})
@@ -219,7 +219,7 @@ func TestCallShowCard_RejectsTypeOutsideAllowList(t *testing.T) {
 // boundary for an in-list type, citing the missing required field.
 func TestCallShowCard_RejectsInvalidData(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.callShowCard(map[string]any{
+	res, err := st.callShowCard(context.Background(), map[string]any{
 		"type": "metric-card",
 		"data": map[string]any{
 			// metric-card requires `label` and `value`; provide only label.
@@ -250,7 +250,7 @@ func TestCallShowCard_ReportCard_RequiresSources(t *testing.T) {
 		"data": cloneMap(validShowCardPayloads["report-card"]),
 		// No sources arg.
 	}
-	res, err := st.callShowCard(args)
+	res, err := st.callShowCard(context.Background(), args)
 	if err != nil {
 		t.Fatalf("callShowCard returned transport error: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestCallShowCard_DocumentViewer_RequiresSources(t *testing.T) {
 		"type": "document-viewer",
 		"data": cloneMap(validShowCardPayloads["document-viewer"]),
 	}
-	res, err := st.callShowCard(args)
+	res, err := st.callShowCard(context.Background(), args)
 	if err != nil {
 		t.Fatalf("callShowCard returned transport error: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestCallShowCard_PropagatesTargetAndMode(t *testing.T) {
 		"target":  "bottom_chat_drawer",
 		"mode":    "planning",
 	}
-	res, err := st.callShowCard(args)
+	res, err := st.callShowCard(context.Background(), args)
 	if err != nil {
 		t.Fatalf("callShowCard returned error: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestCallShowCard_OmitsEmptyTargetAndMode(t *testing.T) {
 		"type": "info-card",
 		"data": cloneMap(validShowCardPayloads["info-card"]),
 	}
-	res, err := st.callShowCard(args)
+	res, err := st.callShowCard(context.Background(), args)
 	if err != nil {
 		t.Fatalf("callShowCard returned error: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestCallShowCard_ReportCard_StampsGeneratedAtWhenMissing(t *testing.T) {
 		"data":    data,
 		"sources": validSources,
 	}
-	res, err := st.callShowCard(args)
+	res, err := st.callShowCard(context.Background(), args)
 	if err != nil {
 		t.Fatalf("callShowCard returned error: %v", err)
 	}

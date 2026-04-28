@@ -223,7 +223,7 @@ function WelcomeScreen() {
       <div className="max-w-lg w-full text-center mb-10">
         <h1 className="text-2xl font-semibold text-fg mb-2">Welcome to Nanite</h1>
         <p className="text-sm text-fg-muted">
-          Multi-agent chat harness for Fragments Engine. Get started by picking an action below.
+          Multi-agent chat harness. Get started by picking an action below.
         </p>
       </div>
 

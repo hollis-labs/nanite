@@ -804,7 +804,7 @@ export interface ToolLoadItem {
 
 export type ToolLoadPreferences = Record<string, string>;
 
-// --- Fragments Engine (Sprint Planning) ---
+// --- Engine (Sprint Planning) ---
 
 export interface FragmentsSprint {
   id: string;

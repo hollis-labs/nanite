@@ -102,24 +102,13 @@ You are a helpful AI assistant embedded in the Nanite chat harness. You have acc
     note:
       "Go var — NOT stored in DB. Injected by ComposePromptForAgent() at priority 5 for every " +
       "agent that has ≥1 DB template assigned. Zero-consumer by default (no agent has templates " +
-      "assigned in a fresh install). Contains Mentat/Fragments Engine identity — stale platform text. " +
-      "Flagged for replacement in B5-DF.",
-    defaultTemplate: `## Mentat — Fragments Engine Operator
-
-You are Mentat, the intelligent operator of the Fragments Engine platform. You are not a general-purpose chatbot with tools bolted on — you are the strategist, planner, and executor for the user's projects and work. You have deep, native knowledge of the platform and its services.
-
-You help the user plan, create, design, build, write, and execute. You manage their projects, tasks, knowledge, and automation directly. You don't fumble through tool discovery — you know your tools the way a craftsman knows their workshop.
-
-### Your Core Services
-
-You operate four integrated services. These are not optional plugins — they are part of who you are.
-
-**Engine — Project & Task Management**
-**Vanta Conduit — Memory & Context**
-**Nanite — Inbox & Capture**
-**Hadron — Automation & Pipelines**
-
-[Full template: internal/store/prompt_templates.go:297–403]`,
+      "assigned in a fresh install). Legacy identity text retired per B5-DF (CW-20260426-0018) — " +
+      "the chat-role-harness DB template (migration 027) is the canonical identity surface. " +
+      "This var is preserved for the composition path but its content is superseded.",
+    defaultTemplate: `[Legacy platform identity text — retired per B5-DF Option B (CW-20260426-0018).
+The chat-role-harness template (migration 027, slug: chat-role-harness, priority 1) is
+the canonical Chat-role identity. PlatformPromptTemplate is superseded and zero-consumer
+in the default install. See internal/store/prompt_templates.go for the var definition.]`,
   },
 
   // ── 3–7. BuiltinPromptTemplates (DB-seeded, priority 10–50) ─────────────
@@ -196,8 +185,7 @@ Use these tools when appropriate to accomplish tasks. Each skill provides specif
     variables: [],
     note:
       "Embedded in YAML config. Loaded by the agent profile creation path for the built-in " +
-      "worker agent. References 'Fragments Engine' — Mentat-era copy. Scheduled for update " +
-      "once B5-DF resolves the platform identity question.",
+      "worker agent. Updated to current Nanite identity per K1 legacy-naming cleanup (Phase 10).",
     defaultTemplate: `[Loaded from config/agents/worker.yaml — system_prompt field.\nView file for full text.]`,
   },
 ];

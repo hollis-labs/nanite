@@ -174,7 +174,7 @@ interface RightRailV2Props {
   inboxAgentId?: string
 }
 
-export function RightRailV2({ inboxAgentId = 'mentat-001' }: RightRailV2Props) {
+export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props) {
   const open = useLayoutStore((s) => s.rightRailOpen)
   const activeTab = useLayoutStore((s) => s.rightRailTab)
   const setRightRailTab = useLayoutStore((s) => s.setRightRailTab)

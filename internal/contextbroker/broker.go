@@ -1,4 +1,4 @@
-// Package contextbroker provides universal context retrieval for Mentat.
+// Package contextbroker provides universal context retrieval for Nanite.
 // It aggregates context from multiple sources (Vanta Conduit, PCC, Engine, Session)
 // and returns a budget-bounded context packet for any consumer.
 //

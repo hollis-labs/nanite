@@ -17,7 +17,7 @@ type OrchestrationPlan struct {
 	Aggregation   string    `json:"aggregation"`
 	SprintID      string    `json:"sprint_id,omitempty"`       // Engine sprint ID if created
 	TaskIDs       []string  `json:"task_ids,omitempty"`        // Engine task IDs if created
-	HasEngine     bool      `json:"has_engine"`                // whether Fragments Engine integration is available
+	HasEngine     bool      `json:"has_engine"`                // whether Engine integration is available
 	HasCortex     bool      `json:"has_cortex"`                // whether Vanta Conduit is available for knowledge
 	PlanOnly      bool      `json:"plan_only"`                 // true if no MCP services available to execute
 }
@@ -154,7 +154,7 @@ func (o *Orchestrator) hasToolPrefix(serverName string) bool {
 	return o.MCPManager.HasServer(serverName)
 }
 
-// createEngineSprint creates a Fragments Engine sprint with one task per sub-task.
+// createEngineSprint creates an Engine sprint with one task per sub-task.
 func (o *Orchestrator) createEngineSprint(ctx context.Context, projectID string, decomposition *DecompositionResult) (string, []string, error) {
 	if o.MCPManager == nil {
 		return "", nil, fmt.Errorf("no MCP manager")

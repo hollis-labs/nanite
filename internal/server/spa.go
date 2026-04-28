@@ -12,7 +12,7 @@ import (
 var embeddedUI embed.FS
 
 const placeholderHTML = `<!DOCTYPE html>
-<html><head><title>Mentat Chat</title></head>
+<html><head><title>Nanite Chat</title></head>
 <body><div id="app-root">Loading...</div></body></html>`
 
 func setSPACacheHeaders(w http.ResponseWriter, assetPath string) {

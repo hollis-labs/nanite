@@ -811,7 +811,7 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to remove template from agent: ${res.status}`);
   },
 
-  // Fragments Engine Backlog
+  // Engine Backlog
   createFragmentsBacklogItem: async (data: {
     title: string;
     body: string;
@@ -954,7 +954,7 @@ export const api = {
     return res.text();
   },
 
-  // Fragments Engine (Sprint Planning)
+  // Engine (Sprint Planning)
   getFragmentsSprints: async (projectId?: string): Promise<{ items: FragmentsSprint[]; count: number }> => {
     const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
     const res = await fetch(`${API_BASE}/plugins/engine/sprints${params}`);

@@ -9,8 +9,11 @@
 --         agents WITH templates got PlatformPromptTemplate prepended (stale Mentat identity)
 -- After:  both paths produce the same canonical Chat identity
 --
--- The Chat-role harness prompt content mirrors internal/agent/builtin/default.md
--- (authority: harness spec §3, three-role model Chat role definition).
+-- PROMPT-SYNC: CW-20260427-0014
+-- Canonical source: internal/agent/builtin/default.md (the frontmatter PROMPT-SYNC comment
+-- has the maintenance rule). This SQL is a re-flowing of that file for SQL embedding:
+-- backticks stripped to plain text, ' escaped as '', markdown inline code flattened.
+-- When default.md changes, re-flow here — do NOT edit this SQL in isolation.
 -- Slug: chat-role-harness  Priority: 1  Scope: system  is_builtin: 1
 --
 -- The fixed ID 'blt-chat-harness-001' is stable across re-runs.

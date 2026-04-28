@@ -56,7 +56,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve agent: request param → user settings default → mentat-001.
+	// Resolve agent: request param → user settings default → file-default.
 	agentID := req.AgentID
 	if agentID == "" {
 		if settings, err := a.Services.Store.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
@@ -64,7 +64,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if agentID == "" {
-		agentID = "mentat-001"
+		agentID = "file-default"
 	}
 
 	// Assign the resolved agent as primary.

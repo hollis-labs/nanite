@@ -108,6 +108,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/context-prompt", a.handleGetSessionContextPrompt)
 	mux.HandleFunc("PUT /api/sessions/{id}/context-prompt", a.handleSetSessionContextPrompt)
 
+	// Pinned content (J11, CW-20260426-0009)
+	mux.HandleFunc("GET /api/sessions/{id}/pins", a.handleListPins)
+	mux.HandleFunc("DELETE /api/pins/{id}", a.handleDeletePin)
+
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
 	mux.HandleFunc("POST /api/commands/execute", a.handleExecuteCommand)

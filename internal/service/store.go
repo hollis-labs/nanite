@@ -241,6 +241,23 @@ type HandoffStashStore interface {
 	UpsertHandoffStash(stash store.HandoffStash) error
 }
 
+// ReminderStore covers reminder persistence (J11, CW-20260426-0009).
+type ReminderStore interface {
+	CreateReminder(r store.Reminder) error
+	GetReminder(id string) (store.Reminder, error)
+	ListUnfiredReminders(sessionID string) ([]store.Reminder, error)
+	MarkReminderFired(id string) error
+	DeleteReminder(id string) error
+}
+
+// PinnedContentStore covers pinned content persistence (J11, CW-20260426-0009).
+type PinnedContentStore interface {
+	CreatePinnedContent(p store.PinnedContent) error
+	ListPinnedContent(sessionID string) ([]store.PinnedContent, error)
+	DeletePinnedContent(id string) error
+	ClearSessionPins(sessionID string) error
+}
+
 // CompactionEventStore covers structured compaction-event persistence and
 // retrieval (P8 CompactionContract — write side CW-20260420-0027 Part C,
 // read side CW-20260420-0025 Part A disclosure injection).
@@ -280,6 +297,8 @@ type Store interface {
 	HandoffStashStore
 	CompactionEventStore
 	EnvelopeStore
+	ReminderStore
+	PinnedContentStore
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

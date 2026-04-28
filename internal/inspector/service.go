@@ -122,6 +122,12 @@ func copySnapshot(s *TurnSnapshot) *TurnSnapshot {
 	c.BrokerDecisions = append([]BrokerDecision(nil), s.BrokerDecisions...)
 	c.ToolCalls = append([]ToolCallRecord(nil), s.ToolCalls...)
 	c.MemoryHits = append([]MemoryRecord(nil), s.MemoryHits...)
+	if s.Reminders != nil {
+		rc := *s.Reminders
+		rc.SetThisTurn = append([]ReminderItem(nil), s.Reminders.SetThisTurn...)
+		rc.FiredThisTurn = append([]ReminderItem(nil), s.Reminders.FiredThisTurn...)
+		c.Reminders = &rc
+	}
 	return &c
 }
 
@@ -205,6 +211,21 @@ func (s *Service) RecordScopeTier(sessionID, turnID string, tier string) {
 	sb.upsert(turnID, func(snap *TurnSnapshot) {
 		snap.SessionID = sessionID
 		snap.ScopeTier = tier
+	})
+}
+
+// RecordReminders records reminder activity (set + fired) for the turn (J11).
+// Merges with any previously-recorded reminders for this turn — set and fired
+// slices are appended to so multiple producers can contribute.
+func (s *Service) RecordReminders(sessionID, turnID string, rec RemindersRecord) {
+	sb := s.getOrCreate(sessionID)
+	sb.upsert(turnID, func(snap *TurnSnapshot) {
+		snap.SessionID = sessionID
+		if snap.Reminders == nil {
+			snap.Reminders = &RemindersRecord{}
+		}
+		snap.Reminders.SetThisTurn = append(snap.Reminders.SetThisTurn, rec.SetThisTurn...)
+		snap.Reminders.FiredThisTurn = append(snap.Reminders.FiredThisTurn, rec.FiredThisTurn...)
 	})
 }
 

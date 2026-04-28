@@ -904,6 +904,89 @@ the current turn for subsequent writes.
 				"required": []string{"mode"},
 			},
 		},
+		// --- Reminders + Pin (J11, CW-20260426-0009) ---
+		{
+			Name: "nanite_set_reminder",
+			Description: "Set a deterministic reminder that fires at a future time or after N turns, " +
+				"injecting your reminder text into context as a <system-reminder> block.\n\n" +
+				"**When to use:** When you want to remember to do something later — e.g. 'don't forget to file a ticket', " +
+				"'review the plan after 5 turns', 'check status at 3pm'.\n\n" +
+				"**Trigger shapes (v1):**\n" +
+				"- Time-based: `{\"type\":\"time\",\"at\":\"<RFC3339>\"}` — fires when the clock reaches the given time.\n" +
+				"- Turn-count: `{\"type\":\"turn_count\",\"n\":5}` — fires N turns after this call.\n\n" +
+				"**When NOT to use:** Do not use for calendar events, cross-system notifications, or anything requiring " +
+				"an LLM to decide when to fire — triggers are always deterministic in v1.\n\n" +
+				"**Reminder display:** When a reminder fires, its text is injected as `<system-reminder>` into the next turn's " +
+				"context and surfaced in the I1 dev-mode inspector. There is no UI toast in v1.\n\n" +
+				"**Output shape:** `{reminder_id, status: 'set', trigger}`.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"text": map[string]any{
+						"type":        "string",
+						"description": "The reminder text to inject when the trigger fires.",
+					},
+					"trigger": map[string]any{
+						"type":        "object",
+						"description": "Trigger condition. v1 shapes: {type:'time',at:'<RFC3339>'} or {type:'turn_count',n:<N>}.",
+						"properties": map[string]any{
+							"type": map[string]any{"type": "string", "enum": []string{"time", "turn_count"}},
+							"at":   map[string]any{"type": "string", "description": "RFC3339 fire time (for type=time)"},
+							"n":    map[string]any{"type": "integer", "description": "Number of turns to wait (for type=turn_count)"},
+						},
+						"required": []string{"type"},
+					},
+				},
+				"required": []string{"text", "trigger"},
+			},
+		},
+		{
+			Name: "nanite_pin",
+			Description: "Pin content so the system keeps it in context across turns (session scope) or sessions (cross_session). " +
+				"Pinned content rides in the SlotUserContext budget and is visible in the bottom drawer Pins tab.\n\n" +
+				"**When to use:** When you want to keep a piece of context visible throughout the conversation or across sessions — " +
+				"e.g. a key decision, a reference snippet, a current task description.\n\n" +
+				"**Scopes:**\n" +
+				"- `turn`: ephemeral, cleared after the current turn (not stored in DB).\n" +
+				"- `session`: survives compaction, cleared at session end. **Default.**\n" +
+				"- `cross_session`: persists until explicit unpin via nanite_unpin.\n\n" +
+				"**Budget:** Pinned content shares the 2000-token SlotUserContext budget. " +
+				"Oldest pins truncate first when over budget. Keep pins thin.\n\n" +
+				"**Output shape:** `{pin_id, scope, status: 'pinned'}`.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"content": map[string]any{
+						"type":        "string",
+						"description": "Content to pin. Keep thin — shares the 2000-token SlotUserContext budget.",
+					},
+					"scope": map[string]any{
+						"type":        "string",
+						"enum":        []string{"turn", "session", "cross_session"},
+						"description": "Pin lifetime. Default: session.",
+					},
+				},
+				"required": []string{"content"},
+			},
+		},
+		{
+			Name: "nanite_unpin",
+			Description: "Remove a pinned item by ID, freeing its context budget.\n\n" +
+				"**When to use:** When pinned content is no longer needed — after the user acknowledges it, " +
+				"after the task it describes is complete, or when the budget needs freeing.\n\n" +
+				"**Required context:** pin_id from a prior nanite_pin call.\n\n" +
+				"**Output shape:** `{pin_id, status: 'unpinned'}`.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"pin_id": map[string]any{
+						"type":        "string",
+						"description": "Pin ID to remove (from prior nanite_pin call).",
+					},
+				},
+				"required": []string{"pin_id"},
+			},
+		},
 		// --- executeTask dispatch primitive (CW-20260421-0010, B3) ---
 		{
 			Name: "nanite_execute_task",

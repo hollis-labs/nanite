@@ -64,6 +64,7 @@ import type {
   InspectorTurnsResponse,
   InspectorTurnSnapshot,
   Document,
+  PinnedContent,
 } from "./types";
 import type { PluginRegistryResponse } from "./plugin-loader";
 
@@ -480,6 +481,18 @@ export const api = {
       body: JSON.stringify({ prompt }),
     })
     if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`)
+  },
+
+  // Pinned content (J11, CW-20260426-0009)
+  listPins: async (sessionId: string): Promise<PinnedContent[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/pins`)
+    if (!res.ok) throw new Error(`Failed to list pins: ${res.status}`)
+    return res.json()
+  },
+
+  deletePin: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/pins/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to delete pin: ${res.status}`)
   },
 
   // Compact

@@ -36,6 +36,10 @@ type TurnSnapshot struct {
 
 	// LoopStatus — nil until I2 (loop detection) wires up.
 	LoopStatus *LoopRecord `json:"loop_status,omitempty"`
+
+	// Reminders shows the reminder activity for this turn (J11, CW-20260426-0009).
+	// Nil until the reminder engine wires up its producer.
+	Reminders *RemindersRecord `json:"reminders,omitempty"`
 }
 
 // SlotSnapshot describes one context window slot.
@@ -155,4 +159,22 @@ type LoopRecord struct {
 	Detected bool   `json:"detected"`
 	// Reason describes the detection signal.
 	Reason   string `json:"reason,omitempty"`
+}
+
+// RemindersRecord holds reminder activity for one turn (J11, CW-20260426-0009).
+type RemindersRecord struct {
+	// SetThisTurn lists reminders created by the agent during this turn.
+	SetThisTurn []ReminderItem `json:"set_this_turn,omitempty"`
+	// FiredThisTurn lists reminders whose trigger condition fired this turn.
+	FiredThisTurn []ReminderItem `json:"fired_this_turn,omitempty"`
+}
+
+// ReminderItem is one reminder entry in the inspector display.
+type ReminderItem struct {
+	// ID is the reminder row ID.
+	ID string `json:"id"`
+	// Text is the reminder message text.
+	Text string `json:"text"`
+	// TriggerJSON is the raw trigger shape for display.
+	TriggerJSON string `json:"trigger_json"`
 }

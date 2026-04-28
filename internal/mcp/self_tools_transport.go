@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -174,6 +175,13 @@ type SelfToolsTransport struct {
 	// panel access falls back to "untrusted" (the safe default).
 	// CW-20260426-0006.
 	TrustResolver PanelTrustResolver
+
+	// ReminderEngine is the deterministic trigger engine for agent-set reminders
+	// (J11, CW-20260426-0009). When set, nanite_set_reminder calls register the
+	// creation turn with the engine so turn_count triggers compute correctly.
+	// Nil-safe — without the engine, reminders are persisted but turn_count
+	// triggers fall back to turn 0 as the creation baseline.
+	ReminderEngine *reminders.Engine
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -304,6 +312,13 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callPanelClose(ctx, args)
 	case "nanite_signal_mode":
 		return st.callSignalMode(ctx, args)
+	// --- Reminders + Pin (J11, CW-20260426-0009) ---
+	case "nanite_set_reminder":
+		return st.callSetReminder(ctx, args)
+	case "nanite_pin":
+		return st.callPin(ctx, args)
+	case "nanite_unpin":
+		return st.callUnpin(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}

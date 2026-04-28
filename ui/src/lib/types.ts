@@ -516,6 +516,17 @@ export interface InspectorToolCallRecord {
   cache_state: string;
 }
 
+export interface InspectorReminderItem {
+  id: string;
+  text: string;
+  trigger_json: string;
+}
+
+export interface InspectorRemindersRecord {
+  set_this_turn?: InspectorReminderItem[];
+  fired_this_turn?: InspectorReminderItem[];
+}
+
 export interface InspectorTurnSnapshot {
   session_id: string;
   turn_id: string;
@@ -529,6 +540,8 @@ export interface InspectorTurnSnapshot {
   playbook?: { name: string; steps?: string[] };
   memory_hits?: { source: string; content: string; score?: number }[];
   loop_status?: { detected: boolean; reason?: string };
+  /** Reminders set and fired this turn (J11, CW-20260426-0009) */
+  reminders?: InspectorRemindersRecord;
 }
 
 export interface InspectorTurnsResponse {
@@ -701,6 +714,18 @@ export interface Document {
   /** true = send full content; false = send pointer (name + summary) */
   full_content: boolean
   summary: string
+  created_at: string
+  updated_at: string
+}
+
+// --- Pinned content (J11, CW-20260426-0009) ---
+
+export interface PinnedContent {
+  id: string
+  session_id?: string | null
+  scope: 'turn' | 'session' | 'cross_session'
+  content: string
+  agent_id: string
   created_at: string
   updated_at: string
 }

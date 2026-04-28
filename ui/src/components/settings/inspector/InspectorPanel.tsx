@@ -15,6 +15,7 @@ import type {
   InspectorBrokerDecision,
   InspectorToolCallRecord,
   InspectorLLMMessageRecord,
+  InspectorRemindersRecord,
 } from '@/lib/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
@@ -373,10 +374,56 @@ function TurnDetail({
             ) : (
               <EmptyProducer label="Loop status — no signal yet (I2 not wired)." />
             )}
+            <RemindersSection reminders={snap.reminders} />
           </div>
         )}
       </ScrollArea>
     </div>
+  )
+}
+
+// ─── Reminders section (J11, CW-20260426-0009) ───────────────────────────────
+
+function RemindersSection({ reminders }: { reminders?: InspectorRemindersRecord }) {
+  const hasData =
+    (reminders?.set_this_turn && reminders.set_this_turn.length > 0) ||
+    (reminders?.fired_this_turn && reminders.fired_this_turn.length > 0)
+
+  if (!hasData) {
+    return <EmptyProducer label="Reminders — none set or fired this turn." />
+  }
+
+  return (
+    <PanelCard title="Reminders">
+      <div className="space-y-2 text-[11px]">
+        {reminders?.fired_this_turn && reminders.fired_this_turn.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase text-fg-muted font-medium mb-1">Fired this turn</p>
+            <div className="space-y-1">
+              {reminders.fired_this_turn.map((r) => (
+                <div key={r.id} className="rounded border border-green-300 bg-green-50 px-2 py-1 text-green-900">
+                  <span className="font-medium">↑ </span>{r.text}
+                  <span className="ml-2 text-[9px] text-green-700 font-mono">{r.trigger_json}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {reminders?.set_this_turn && reminders.set_this_turn.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase text-fg-muted font-medium mb-1">Set this turn</p>
+            <div className="space-y-1">
+              {reminders.set_this_turn.map((r) => (
+                <div key={r.id} className="rounded border border-border-subtle bg-bg px-2 py-1 text-fg-muted">
+                  <span className="font-mono text-[9px] text-fg-faint">{r.id}: </span>{r.text}
+                  <span className="ml-2 text-[9px] font-mono text-fg-faint">{r.trigger_json}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </PanelCard>
   )
 }
 

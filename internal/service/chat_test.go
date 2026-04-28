@@ -117,6 +117,8 @@ type minimalStore struct {
 	stubHandoffStashStore
 	stubCompactionEventStore
 	stubEnvelopeStore
+	stubReminderStore
+	stubPinnedContentStore
 }
 
 type stubEnvelopeStore struct{}
@@ -125,6 +127,21 @@ func (stubEnvelopeStore) CreateEnvelopeInstance(inst *store.EnvelopeInstance) er
 func (stubEnvelopeStore) GetEnvelopeInstance(id string) (*store.EnvelopeInstance, error) {
 	return nil, fmt.Errorf("not found")
 }
+
+type stubReminderStore struct{}
+
+func (stubReminderStore) CreateReminder(store.Reminder) error                   { return nil }
+func (stubReminderStore) GetReminder(string) (store.Reminder, error)            { return store.Reminder{}, nil }
+func (stubReminderStore) ListUnfiredReminders(string) ([]store.Reminder, error) { return nil, nil }
+func (stubReminderStore) MarkReminderFired(string) error                        { return nil }
+func (stubReminderStore) DeleteReminder(string) error                           { return nil }
+
+type stubPinnedContentStore struct{}
+
+func (stubPinnedContentStore) CreatePinnedContent(store.PinnedContent) error          { return nil }
+func (stubPinnedContentStore) ListPinnedContent(string) ([]store.PinnedContent, error) { return nil, nil }
+func (stubPinnedContentStore) DeletePinnedContent(string) error                        { return nil }
+func (stubPinnedContentStore) ClearSessionPins(string) error                           { return nil }
 
 type stubHandoffStashStore struct{}
 

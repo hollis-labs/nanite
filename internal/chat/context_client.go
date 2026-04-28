@@ -248,10 +248,12 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 //  1. The session-scoped user context prompt (sessions.context_prompt).
 //  2. Any included documents (documents.included=true), injected as pointer
 //     (name + summary) or full content based on documents.full_content.
+//  3. Pinned content (pinned_content table) — session + cross_session scopes.
+//     J11 (CW-20260426-0009): pinned content rides in the 2000-token budget.
+//     Oldest pins are truncated first when over budget.
 //
-// Returns an empty string when neither is set, leaving the slot empty (no
-// contribution to the system prompt for that turn). This is the desired default:
-// documents and the context prompt are excluded unless explicitly included.
+// Returns an empty string when none of the above are set. The slot is excluded
+// from the system prompt for that turn when empty (no waste of budget).
 func buildUserContextSlot(s *store.Store, sessionID string) string {
 	var parts []string
 
@@ -277,6 +279,24 @@ func buildUserContextSlot(s *store.Store, sessionID string) string {
 		}
 		if len(docParts) > 0 {
 			parts = append(parts, "## Session Documents\n"+strings.Join(docParts, "\n\n"))
+		}
+	}
+
+	// Pinned content (J11, CW-20260426-0009). Session + cross_session scopes.
+	// Budget: 2000 tokens shared with the above. Oldest pins truncate first.
+	// Turn-scoped pins are ephemeral and not persisted here — they are injected
+	// directly into the turn context by the reminder engine.
+	if pins, err := s.ListPinnedContent(sessionID); err == nil && len(pins) > 0 {
+		var pinParts []string
+		for _, pin := range pins {
+			label := "[pinned]"
+			if pin.Scope == store.PinScopeCrossSession {
+				label = "[pinned:cross-session]"
+			}
+			pinParts = append(pinParts, fmt.Sprintf("%s %s", label, pin.Content))
+		}
+		if len(pinParts) > 0 {
+			parts = append(parts, "## Pinned Context\n"+strings.Join(pinParts, "\n"))
 		}
 	}
 

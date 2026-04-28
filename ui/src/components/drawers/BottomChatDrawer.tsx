@@ -15,17 +15,17 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { X, FileText, StickyNote, MessageSquare, Plus, Trash2, Eye, EyeOff, Maximize2, Minimize2 } from 'lucide-react'
+import { X, FileText, StickyNote, MessageSquare, Plus, Trash2, Eye, EyeOff, Maximize2, Minimize2, Pin, PinOff } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
-import type { Document } from '@/lib/types'
+import type { Document, PinnedContent } from '@/lib/types'
 
 // ── Tab IDs ──────────────────────────────────────────────────────────────────
 
-type DrawerTab = 'scratchpad' | 'documents' | 'context'
+type DrawerTab = 'scratchpad' | 'documents' | 'context' | 'pins'
 
 // ── Main component ───────────────────────────────────────────────────────────
 
@@ -88,6 +88,12 @@ export function BottomChatDrawer({ initialTab = 'scratchpad', onScratchpadRef }:
             label="Session Context"
             onClick={() => setActiveTab('context')}
           />
+          <TabButton
+            active={activeTab === 'pins'}
+            icon={<Pin className="w-3.5 h-3.5" />}
+            label="Pins"
+            onClick={() => setActiveTab('pins')}
+          />
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -116,6 +122,7 @@ export function BottomChatDrawer({ initialTab = 'scratchpad', onScratchpadRef }:
         )}
         {activeTab === 'documents' && <DocumentsTab />}
         {activeTab === 'context' && <SessionContextTab />}
+        {activeTab === 'pins' && <PinsTab />}
       </div>
     </div>
   )
@@ -650,6 +657,103 @@ function SessionContextTab() {
           onChange={handleChange}
         />
       </div>
+    </div>
+  )
+}
+
+// ── Pins tab ─────────────────────────────────────────────────────────────────
+// J11 (CW-20260426-0009): lists agent-pinned content with unpin button,
+// per-pin scope label, and source-agent attribution.
+
+function PinsTab() {
+  const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const queryClient = useQueryClient()
+
+  const { data: pins = [], isLoading } = useQuery({
+    queryKey: ['pins', activeSessionId],
+    queryFn: () => api.listPins(activeSessionId!),
+    enabled: !!activeSessionId,
+    refetchInterval: 5000, // refresh frequently — pins can be set during a turn
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deletePin(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['pins', activeSessionId] })
+    },
+  })
+
+  if (!activeSessionId) {
+    return <EmptyState message="No active session" />
+  }
+
+  const scopeLabel = (scope: PinnedContent['scope']) => {
+    switch (scope) {
+      case 'turn': return 'Turn'
+      case 'session': return 'Session'
+      case 'cross_session': return 'Cross-session'
+      default: return scope
+    }
+  }
+
+  const scopeColour = (scope: PinnedContent['scope']) => {
+    switch (scope) {
+      case 'turn': return 'text-fg-faint'
+      case 'session': return 'text-blue-600'
+      case 'cross_session': return 'text-violet-600'
+      default: return 'text-fg-muted'
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-3 py-1 shrink-0">
+        <p className="text-xs text-fg-muted">
+          Pinned context — survives compaction · set by agent via <code className="font-mono text-fg-faint">nanite_pin</code>
+        </p>
+      </div>
+      <ScrollArea className="flex-1">
+        {isLoading && (
+          <div className="px-3 py-2 text-xs text-fg-faint">Loading…</div>
+        )}
+        {!isLoading && pins.length === 0 && (
+          <div className="px-3 py-4 text-xs text-fg-faint italic">
+            No pinned content yet. The agent can pin content using <code className="font-mono">nanite_pin</code>.
+          </div>
+        )}
+        <div className="space-y-1 p-2">
+          {pins.map((pin) => (
+            <div
+              key={pin.id}
+              className="group flex items-start gap-2 px-2 py-2 rounded-lg border border-border bg-surface text-xs"
+            >
+              <Pin className="w-3 h-3 shrink-0 mt-0.5 text-fg-faint" />
+              <div className="flex-1 min-w-0">
+                <p className="text-fg leading-relaxed break-words">{pin.content}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className={`text-[10px] font-medium ${scopeColour(pin.scope)}`}>
+                    {scopeLabel(pin.scope)}
+                  </span>
+                  {pin.agent_id && (
+                    <span className="text-[10px] text-fg-faint">
+                      by {pin.agent_id}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => deleteMutation.mutate(pin.id)}
+                disabled={deleteMutation.isPending}
+                className="p-0.5 rounded text-fg-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100"
+                title="Unpin"
+              >
+                <PinOff className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
     </div>
   )
 }

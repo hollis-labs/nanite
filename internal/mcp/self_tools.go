@@ -197,6 +197,25 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
+			Name: "nanite_giphy_search",
+			Description: "Search GIPHY for an animated GIF and return its URL plus metadata. Pure data fetch — does NOT render anything in chat.\n\n" +
+				"**When to use:** When the user asks for a GIF or the conversation tone calls for a visual reaction. Call this first to fetch the URL, then chain into nanite_show_card to render.\n\n" +
+				"**Chaining pattern:**\n" +
+				"1. nanite_giphy_search(query: \"celebration\") → {gif_url, title, attribution, alt_text}\n" +
+				"2. nanite_show_card(type: \"giphy-modal\", data: {gif_url: <step 1>, title: <step 1 title>, source: <step 1 attribution>, query: \"celebration\"})\n\n" +
+				"**Demo mode:** When the server's GIPHY_API_KEY is unset, this returns one of a curated set of demo GIFs (deterministic per query). Useful for development; production should set the key.\n\n" +
+				"**Output shape:** Single object {gif_url, title, attribution, alt_text} for limit=1 (default). For limit>1: {results: [{...}, ...]}. " +
+				"Failures return a structured-error object instead: {error: \"http_error\"|\"no_results\"|\"parse_error\", details?, query}. IsError stays false on these — the call succeeded, the search did not. Branch on `error`.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string", "description": "Search term (e.g. 'celebration', 'thumbs up', 'mind blown')"},
+					"limit": map[string]any{"type": "number", "description": "Max results (default 1, max 10). Limit=1 returns a single object; limit>1 returns {results: [...]}."},
+				},
+				"required": []string{"query"},
+			},
+		},
+		{
 			Name: "nanite_show_card",
 			Description: "Render a structured envelope card in chat. One generic surface for the v1 passive-renderable card types — replaces the older per-type nanite_show_giphy / nanite_show_document / nanite_show_report tools (CW-20260428-0019, A3).\n\n" +
 				"**When to use:** When you want to display structured content in chat (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +

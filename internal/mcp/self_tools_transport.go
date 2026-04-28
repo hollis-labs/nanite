@@ -235,6 +235,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callRefreshEngine(args)
 	case "nanite_show_card":
 		return st.callShowCard(args)
+	case "nanite_giphy_search":
+		return st.callGiphySearch(args)
 	case "nanite_start_builder":
 		return st.callStartBuilder(args)
 	case "nanite_builder_step":

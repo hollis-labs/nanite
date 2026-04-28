@@ -178,6 +178,7 @@ export function RightRailV2({ inboxAgentId = 'mentat-001' }: RightRailV2Props) {
   const open = useLayoutStore((s) => s.rightRailOpen)
   const activeTab = useLayoutStore((s) => s.rightRailTab)
   const setRightRailTab = useLayoutStore((s) => s.setRightRailTab)
+  const setPanelOpen = useLayoutStore((s) => s.setPanelOpen)
   const panelPrefs = useLayoutStore((s) => s.panelPrefs)
   const markPanelDismissed = useLayoutStore((s) => s.markPanelDismissed)
 
@@ -282,15 +283,22 @@ export function RightRailV2({ inboxAgentId = 'mentat-001' }: RightRailV2Props) {
       ? panelPrefs.defaultPanel
       : finalPanelIds[0] ?? 'widgets'
 
-  // Handle user tab switch: emit dismiss for the previous tab, update store
+  // Handle user tab switch: emit dismiss for the previous tab, update store.
+  // J8 v1 (CW-20260426-0006) — go through setPanelOpen with source='user' so
+  // the 4-state dismiss machine attributes the new tab as user_opened (which
+  // overrides the dismiss flag and refuses subsequent agent-driven closes).
   const handleTabSwitch = useCallback((id: string) => {
     const prev = resolvedActiveTab
     if (prev !== id) {
       emitPanelDismiss(prev)
       markPanelDismissed(prev)
     }
-    setRightRailTab(id)
-  }, [resolvedActiveTab, setRightRailTab, markPanelDismissed])
+    setPanelOpen(id, 'user')
+    // setRightRailTab kept as a fallback for code paths that need the old
+    // signature (no source attribution); not strictly required after J8 v1
+    // because setPanelOpen now atomically sets rail-open + tab.
+    void setRightRailTab
+  }, [resolvedActiveTab, setRightRailTab, setPanelOpen, markPanelDismissed])
 
   // Resolve display title
   const displayTitle = activeTab === 'artifacts'

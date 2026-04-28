@@ -35,10 +35,16 @@ core:
   - type: approval-card
     component: components/chat/envelopes/ApprovalCard
     export: ApprovalCard
+    # props discriminator: EnvelopeRenderer feeds the envelope's `approval`
+    # field to the card as the `approval` prop instead of the default `data`.
+    props: approval
 
   - type: proposal-card
     component: components/chat/envelopes/ProposalCard
     export: ProposalCard
+    # props discriminator: EnvelopeRenderer feeds the envelope's first
+    # proposal as the `proposal` prop.
+    props: proposal
 
   - type: question-form
     # backend-only — InterviewCard renders via EnvelopeRenderer fallback path

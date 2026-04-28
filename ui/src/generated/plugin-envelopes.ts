@@ -159,7 +159,6 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     ),
     source: "core",
   },
-  // CW-20260420-0018 — MCP elicitation/create mid-tool user prompt (G4).
   "elicitation-prompt": {
     component: lazy(() =>
       import("@/components/chat/envelopes/ElicitationPromptCard").then((m) => ({

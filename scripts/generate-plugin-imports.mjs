@@ -112,12 +112,17 @@ function validateManifest(entries) {
     if (e.export && !exportPattern.test(e.export)) {
       errors.push(`${prefix} (${e.type}): export "${e.export}" must match ${exportPattern}`);
     }
+    if (e.props !== undefined && !['approval', 'proposal', 'envelope'].includes(e.props)) {
+      errors.push(`${prefix} (${e.type}): props "${e.props}" must be one of "approval" | "proposal" | "envelope"`);
+    }
   }
 
   return errors;
 }
 
 // --- Code generation ---
+
+const VALID_PROPS = new Set(['approval', 'proposal', 'envelope']);
 
 function generateLazyImport(type, component, exportName) {
   return `  "${type}": {
@@ -133,8 +138,15 @@ function generateOutput(coreEntries) {
   const coreWithoutComponents = coreEntries.filter(e => !e.component);
 
   const coreLines = coreWithComponents.map(e => {
+    let propsLine = '';
+    if (e.props) {
+      if (!VALID_PROPS.has(e.props)) {
+        throw new Error(`envelope ${e.type}: props "${e.props}" must be one of ${[...VALID_PROPS].join(', ')}`);
+      }
+      propsLine = `\n    props: "${e.props}",`;
+    }
     return `${generateLazyImport(e.type, e.component, e.export)}
-    source: "core",
+    source: "core",${propsLine}
   },`;
   });
 
@@ -157,6 +169,10 @@ type LazyEnvelopeComponent = React.LazyExoticComponent<ComponentType<any>>;
 export interface EnvelopeRegistryEntry {
   component: LazyEnvelopeComponent;
   source: string; // "core" | pluginId
+  /** Prop-shape discriminator used by EnvelopeRenderer to build componentProps.
+   * "approval" → { approval }, "proposal" → { proposal },
+   * "envelope" → { envelope }, undefined → { data } (default). */
+  props?: "approval" | "proposal" | "envelope";
 }
 
 // --- CORE ENVELOPES (generated from config/envelopes.yaml) ---
@@ -170,23 +186,26 @@ export const ENVELOPE_REGISTRY: Record<string, EnvelopeRegistryEntry> = {
 };
 
 /**
- * Get the envelope component for a given type.
+ * Get the registry entry for a given envelope type, or undefined if unregistered.
+ * Returns the full EnvelopeRegistryEntry so callers can inspect \`.component\` and
+ * \`.props\` (prop-shape discriminator) without a separate lookup.
  * In recover mode, pass \`recoverMode: true\` to restrict to core-only entries.
  */
 export function getEnvelopeComponent(
   type: string,
   recoverMode = false,
-): LazyEnvelopeComponent | undefined {
+): EnvelopeRegistryEntry | undefined {
   const entry = ENVELOPE_REGISTRY[type];
   if (entry) {
     if (recoverMode && entry.source !== "core") return undefined;
-    return entry.component;
+    return entry;
   }
 
   // Fallback: check dynamically loaded plugins (skip in recover mode).
   if (recoverMode) return undefined;
   const dynamic = getDynamicEnvelope(type);
-  return dynamic?.component;
+  if (!dynamic) return undefined;
+  return { component: dynamic.component, source: dynamic.source };
 }
 `;
 }

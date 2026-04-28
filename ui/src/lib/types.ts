@@ -552,6 +552,24 @@ export interface Envelope {
   approval?: EnvelopeApprovalRequest;
   status?: { phase: string; progress: number };
   data?: Record<string, unknown>;
+  /**
+   * J8 v1 — declarative drawer routing (CW-20260426-0006). When set, the
+   * envelope renderer opens the named drawer (using the agent_opened state
+   * for the dismiss machine) and renders the card into it instead of inline
+   * in the chat transcript. Known v1 IDs: `bottom_chat_drawer`, `work`,
+   * `workflows`. Plugin-shipped panel IDs are accepted for trusted callers.
+   * Omit to render inline in chat (current default behavior).
+   */
+  target?: string;
+  /**
+   * J8 v1 — mode/status signal carried alongside the envelope
+   * (CW-20260426-0006). When set, the FE resolves the mode against the
+   * preset map at `ui/src/lib/panel-modes.ts` and opens the associated
+   * panels using the agent_opened state. Independent of `target` — both
+   * can be set on the same envelope. v1 vocabulary: `planning`. Unknown
+   * modes are silently ignored.
+   */
+  mode?: string;
 }
 
 export interface Proposal {

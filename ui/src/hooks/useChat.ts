@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import type { ApprovalRequest, ChatError, ChatErrorCode, Envelope, Message, PluginEnvelopeItem, StreamEvent, ToolWarning, UserSettings } from "@/lib/types";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
+import { applyEnvelopePanelEffects, applyPanelSignal } from "@/lib/panel-signal";
 
 const PAGE_SIZE = 50;
 
@@ -28,6 +29,8 @@ const SSE = {
   ERROR: "error",
   APPROVAL_REQUEST: "approval_request",
   PLUGIN_ENVELOPE: "plugin_envelope",
+  /** J8 v1 (CW-20260426-0006) — agent-driven panel open/close/mode signals. */
+  PANEL_SIGNAL: "panel_signal",
 } as const;
 
 function makeChatError(
@@ -315,6 +318,12 @@ export function useChat(sessionId: string | null) {
       store().clearPendingApprovals();
       store().clearChatErrors();
       clearPersistedErrorState(sessionId);
+      // J8 v1 (CW-20260426-0006) — dismiss-reset trigger. The v1 simplification
+      // is "any new user-message turn resets all dismiss state for all panels"
+      // so the agent can re-open dismissed drawers on the next turn. Smarter
+      // classified-trigger version captured as
+      // followups_j8_classified_dismiss_reset.
+      useLayoutStore.getState().clearAllPanelDismissed();
       console.log("[useChat] streaming=true, sending message...");
 
       try {
@@ -438,11 +447,36 @@ export function useChat(sessionId: string | null) {
               receivedAt: Date.now(),
             };
             store().addPluginEnvelope(item, sessionId);
+            // J8 v1 — declarative drawer routing. When the envelope carries a
+            // target field, route the open/render through the layout store with
+            // source='agent' so the dismiss machine gates correctly.
+            applyEnvelopePanelEffects(envelope);
             if (import.meta.env?.DEV) {
               console.debug("[useChat] plugin_envelope", item);
             }
           } catch (err) {
             console.warn("[useChat] Failed to parse plugin_envelope event:", e.data, err);
+          }
+        });
+
+        es.addEventListener(SSE.PANEL_SIGNAL, (e: MessageEvent) => {
+          touchStreamEvent();
+          recordEventId(e.data as string);
+          try {
+            const evt: StreamEvent = JSON.parse(e.data as string);
+            if (!evt.envelope) return;
+            const sig = JSON.parse(evt.envelope) as {
+              action: 'open' | 'close' | 'mode';
+              panel_id?: string;
+              mode?: string;
+              source?: 'agent' | 'user';
+            };
+            applyPanelSignal(sig);
+            if (import.meta.env?.DEV) {
+              console.debug("[useChat] panel_signal", sig);
+            }
+          } catch (err) {
+            console.warn("[useChat] Failed to parse panel_signal event:", e.data, err);
           }
         });
 

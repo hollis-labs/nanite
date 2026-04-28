@@ -638,12 +638,7 @@ func (st *SelfToolsTransport) callShowGiphy(args map[string]any) (*ToolResult, e
 			"source":  "GIPHY (demo mode)",
 			"query":   query,
 		}
-		envJSON, _ := json.Marshal(map[string]any{
-			"kind":    "envelope",
-			"version": 1,
-			"type":    "giphy-modal",
-			"data":    envData,
-		})
+		envJSON, _ := json.Marshal(buildShowEnvelope("giphy-modal", envData, args))
 		result := fmt.Sprintf("Found a GIF for %q! (demo mode — set GIPHY_API_KEY for live search)\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", query, string(envJSON))
 		return textResult(result), nil
 	}
@@ -704,12 +699,7 @@ func (st *SelfToolsTransport) callShowGiphy(args map[string]any) (*ToolResult, e
 		"source":  "GIPHY",
 		"query":   query,
 	}
-	envJSON, _ := json.Marshal(map[string]any{
-		"kind":    "envelope",
-		"version": 1,
-		"type":    "giphy-modal",
-		"data":    envData,
-	})
+	envJSON, _ := json.Marshal(buildShowEnvelope("giphy-modal", envData, args))
 
 	// Return with envelope marker for engine.go to extract.
 	result := fmt.Sprintf("Found a GIF for %q!\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", query, string(envJSON))
@@ -717,6 +707,27 @@ func (st *SelfToolsTransport) callShowGiphy(args map[string]any) (*ToolResult, e
 }
 
 // --- envelope injection handlers ---
+
+// buildShowEnvelope assembles the envelope JSON shape emitted by the
+// nanite_show_* tools. It propagates the optional `target` and `mode` args
+// onto top-level envelope fields so the FE's applyEnvelopePanelEffects can
+// route drawer-visibility from a tool result (CW-20260428-0007 / J8 v1).
+// Empty values are omitted so unknown-mode/unknown-target cases stay silent.
+func buildShowEnvelope(envType string, data map[string]any, args map[string]any) map[string]any {
+	env := map[string]any{
+		"kind":    "envelope",
+		"version": 1,
+		"type":    envType,
+		"data":    data,
+	}
+	if target, _ := args["target"].(string); target != "" {
+		env["target"] = target
+	}
+	if mode, _ := args["mode"].(string); mode != "" {
+		env["mode"] = mode
+	}
+	return env
+}
 
 func (st *SelfToolsTransport) callShowDocument(args map[string]any) (*ToolResult, error) {
 	title, _ := args["title"].(string)
@@ -760,12 +771,7 @@ func (st *SelfToolsTransport) callShowDocument(args map[string]any) (*ToolResult
 		envData["sections"] = sectionList
 	}
 
-	envJSON, _ := json.Marshal(map[string]any{
-		"kind":    "envelope",
-		"version": 1,
-		"type":    "document-viewer",
-		"data":    envData,
-	})
+	envJSON, _ := json.Marshal(buildShowEnvelope("document-viewer", envData, args))
 
 	result := fmt.Sprintf("Document ready: %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", title, string(envJSON))
 	return textResult(result), nil
@@ -805,12 +811,7 @@ func (st *SelfToolsTransport) callShowReport(args map[string]any) (*ToolResult, 
 		}
 	}
 
-	envJSON, _ := json.Marshal(map[string]any{
-		"kind":    "envelope",
-		"version": 1,
-		"type":    "report-card",
-		"data":    envData,
-	})
+	envJSON, _ := json.Marshal(buildShowEnvelope("report-card", envData, args))
 
 	result := fmt.Sprintf("Report: %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", title, string(envJSON))
 	return textResult(result), nil

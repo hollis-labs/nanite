@@ -2,6 +2,22 @@ package mcp
 
 import "github.com/hollis-labs/go-providers/provider"
 
+// showEnvelopeTargetDesc and showEnvelopeModeDesc are shared input-schema
+// descriptions for the optional `target` and `mode` fields on the
+// nanite_show_giphy / nanite_show_document / nanite_show_report tools.
+// They mirror the chat.Envelope.Target / chat.Envelope.Mode contract (J8 v1 —
+// CW-20260426-0006); the FE picks them up via applyEnvelopePanelEffects.
+const (
+	showEnvelopeTargetDesc = "Optional drawer ID to open when this card arrives. v1 vocabulary: " +
+		"\"bottom_chat_drawer\" (long-form reference content below the chat transcript), " +
+		"\"work\" (right-rail todos/plans/sprint cards), \"workflows\" (right-rail guided-interaction templates). " +
+		"Plugin-declared drawers may add more. Omit to render inline in chat without opening a drawer. " +
+		"Card content still renders inline — this only signals drawer visibility (Gap A; render-relocation is a separate feature)."
+	showEnvelopeModeDesc = "Optional workspace mode hint that travels with the envelope. " +
+		"v1 vocabulary: \"planning\" (FE preset opens [work, workflows]). " +
+		"Independent of `target` — both can be set. Empty/unknown values are silent no-ops on the FE."
+)
+
 // SelfToolProviderDefinitions returns all self-service tool definitions
 // in provider.ToolDefinition format, suitable for registering as built-ins.
 func SelfToolProviderDefinitions() []provider.ToolDefinition {
@@ -189,7 +205,9 @@ func selfToolDefinitions() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"query": map[string]any{"type": "string", "description": "Search term (e.g. 'celebration', 'thumbs up', 'mind blown')"},
+					"query":  map[string]any{"type": "string", "description": "Search term (e.g. 'celebration', 'thumbs up', 'mind blown')"},
+					"target": map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
+					"mode":   map[string]any{"type": "string", "description": showEnvelopeModeDesc},
 				},
 				"required": []string{"query"},
 			},
@@ -207,6 +225,8 @@ func selfToolDefinitions() []Tool {
 					"sections":          map[string]any{"type": "string", "description": "Comma-separated section names for jump-nav (optional)"},
 					"download_filename": map[string]any{"type": "string", "description": "Filename for download button (optional, e.g. report.html)"},
 					"sources":           map[string]any{"type": "string", "description": "JSON array of objects documenting the grounding: [{tool_use_id, tool_name, note?}]. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the content. Minimum 1 source. If you didn't fetch the data, don't render the document — say so in plain text instead."},
+					"target":            map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
+					"mode":              map[string]any{"type": "string", "description": showEnvelopeModeDesc},
 				},
 				"required": []string{"title", "content", "sources"},
 			},
@@ -223,6 +243,8 @@ func selfToolDefinitions() []Tool {
 					"summary": map[string]any{"type": "string", "description": "Summary text (markdown). Must be derived from the tool_use_ids listed in `sources`. Optional."},
 					"actions": map[string]any{"type": "string", "description": "JSON array of action objects: [{label, action, id?}]. Optional."},
 					"sources": map[string]any{"type": "string", "description": "JSON array of objects documenting the grounding: [{tool_use_id, tool_name, note?}]. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the report. Minimum 1 source. If you didn't fetch the data, don't render the report — say so in plain text instead."},
+					"target":  map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
+					"mode":    map[string]any{"type": "string", "description": showEnvelopeModeDesc},
 				},
 				"required": []string{"title", "metrics", "sources"},
 			},

@@ -64,7 +64,19 @@ Key fields:
   CW-20260426-0006). When set, the frontend opens the named drawer and
   renders the card into it without requiring an explicit `panel_open` tool
   call. Known v1 values: `"bottom_chat_drawer"`, `"work"`, `"workflows"`.
+  Plugin-shipped panel IDs are also accepted (subject to H1 trust on the
+  Stage 2 emit side).
+- `mode` — optional mode/status signal (J8 v1, CW-20260426-0006). When set,
+  the FE resolves the mode against a preset map (`ui/src/lib/panel-modes.ts`)
+  and opens the associated panel set with `source='agent'`. v1 vocabulary:
+  `planning` → opens `[work, workflows]`. Unknown modes are silent FE
+  no-ops (forward-compat). Independent of `target` — both can be set on the
+  same envelope.
 - `data` — freeform payload; shape is envelope-type-specific.
+
+See `docs/architecture/agent-panels.md` for the full agent-controlled panels
+v1 contract (panel_open / panel_close / signal_mode tools, 4-state dismiss
+machine, plugin trust gate, mode preset map).
 
 ## Stage 3 — Narrow-LLM TLDR (future)
 

@@ -12,7 +12,7 @@ type ToolEntry struct {
 	Name             string   `json:"name"`
 	Category         string   `json:"category"`
 	ShortDescription string   `json:"short_description"` // max 80 chars
-	Server           string   `json:"server"`             // MCP server name (engine, hadron, conduit, etc.)
+	Server           string   `json:"server"`             // MCP server name (hadron, conduit, etc.)
 	UseCases         []string `json:"use_cases"`          // 2-3 brief use-case phrases
 }
 
@@ -115,91 +115,10 @@ func containsStr(slice []string, s string) bool {
 }
 
 // DefaultToolKnowledge returns the curated tool catalog covering all known
-// MCP servers (Engine, Hadron, Vanta Conduit) plus built-in developer and general tools.
+// MCP servers (Hadron, Vanta Conduit) plus built-in developer and general tools.
 func DefaultToolKnowledge() *ToolKnowledge {
 	return &ToolKnowledge{
 		Categories: map[string][]ToolEntry{
-			// ── Project Management (Engine) ──────────────
-			"project-management": {
-				{
-					Name:             "engine_task_create",
-					Category:         "project-management",
-					ShortDescription: "Create a new task in a sprint",
-					Server:           "engine",
-					UseCases:         []string{"user asks to create a task or ticket", "breaking work into subtasks", "capturing a TODO"},
-				},
-				{
-					Name:             "engine_task_get",
-					Category:         "project-management",
-					ShortDescription: "Retrieve details of a specific task",
-					Server:           "engine",
-					UseCases:         []string{"looking up task status", "reading task description", "checking acceptance criteria"},
-				},
-				{
-					Name:             "engine_task_update",
-					Category:         "project-management",
-					ShortDescription: "Update a task's fields (title, description, etc.)",
-					Server:           "engine",
-					UseCases:         []string{"editing task details", "adding notes to a task", "changing priority"},
-				},
-				{
-					Name:             "engine_task_transition",
-					Category:         "project-management",
-					ShortDescription: "Move a task between workflow states",
-					Server:           "engine",
-					UseCases:         []string{"marking a task done", "moving task to in-progress", "transitioning task status"},
-				},
-				{
-					Name:             "engine_tasks_list",
-					Category:         "project-management",
-					ShortDescription: "List tasks, optionally filtered by sprint or status",
-					Server:           "engine",
-					UseCases:         []string{"viewing sprint backlog", "finding open tasks", "listing work items"},
-				},
-				{
-					Name:             "engine_sprint_create",
-					Category:         "project-management",
-					ShortDescription: "Create a new sprint",
-					Server:           "engine",
-					UseCases:         []string{"starting a new iteration", "planning sprint work", "sprint setup"},
-				},
-				{
-					Name:             "engine_sprint_get",
-					Category:         "project-management",
-					ShortDescription: "Get sprint details and progress",
-					Server:           "engine",
-					UseCases:         []string{"checking sprint status", "reviewing sprint goals", "sprint progress report"},
-				},
-				{
-					Name:             "engine_sprints_list",
-					Category:         "project-management",
-					ShortDescription: "List all sprints for a project",
-					Server:           "engine",
-					UseCases:         []string{"viewing sprint history", "finding active sprint", "project timeline"},
-				},
-				{
-					Name:             "engine_backlog_capture",
-					Category:         "project-management",
-					ShortDescription: "Capture an idea into the backlog",
-					Server:           "engine",
-					UseCases:         []string{"saving an idea for later", "adding to product backlog", "capturing feature request"},
-				},
-				{
-					Name:             "engine_backlog_list",
-					Category:         "project-management",
-					ShortDescription: "List backlog items",
-					Server:           "engine",
-					UseCases:         []string{"reviewing backlog", "prioritizing upcoming work", "grooming session"},
-				},
-				{
-					Name:             "engine_projects_list",
-					Category:         "project-management",
-					ShortDescription: "List all projects",
-					Server:           "engine",
-					UseCases:         []string{"finding a project", "switching context between projects"},
-				},
-			},
-
 			// ── Automation & CI/CD (Hadron) ────────────────────────
 			"automation": {
 				{
@@ -403,13 +322,6 @@ func DefaultToolKnowledge() *ToolKnowledge {
 
 			// ── General / Utility ──────────────────────────────────
 			"general": {
-				{
-					Name:             "engine_health",
-					Category:         "general",
-					ShortDescription: "Check Engine project management service health",
-					Server:           "engine",
-					UseCases:         []string{"service health check", "connectivity test"},
-				},
 				{
 					Name:             "hadron_workspace_get",
 					Category:         "general",

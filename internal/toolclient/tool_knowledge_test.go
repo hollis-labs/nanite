@@ -8,7 +8,6 @@ func TestDefaultToolKnowledge_HasCategories(t *testing.T) {
 	tk := DefaultToolKnowledge()
 
 	requiredCategories := []string{
-		"project-management",
 		"automation",
 		"context",
 		"developer",
@@ -26,8 +25,8 @@ func TestDefaultToolKnowledge_HasCategories(t *testing.T) {
 		}
 	}
 
-	if len(tk.Categories) < 5 {
-		t.Errorf("expected at least 5 categories, got %d", len(tk.Categories))
+	if len(tk.Categories) < 4 {
+		t.Errorf("expected at least 4 categories, got %d", len(tk.Categories))
 	}
 
 	// Verify every entry has required fields populated.
@@ -61,10 +60,6 @@ func TestForIntent_MatchesRelevantTools(t *testing.T) {
 		wantNone  []string // none of these should appear
 	}{
 		{
-			intent:  "create task sprint",
-			wantAny: []string{"engine_task_create", "engine_sprint_create"},
-		},
-		{
 			intent:  "build pipeline deploy",
 			wantAny: []string{"hadron_run_enqueue", "hadron_pipeline_enqueue", "cerberus_build"},
 		},
@@ -73,9 +68,8 @@ func TestForIntent_MatchesRelevantTools(t *testing.T) {
 			wantAny: []string{"context_write", "context_view"},
 		},
 		{
-			intent:   "service logs debug",
-			wantAny:  []string{"cerberus_logs"},
-			wantNone: []string{"engine_task_create"},
+			intent:  "service logs debug",
+			wantAny: []string{"cerberus_logs"},
 		},
 		{
 			intent: "",
@@ -136,7 +130,7 @@ func TestSummary_IsCompact(t *testing.T) {
 	}
 
 	// Verify it contains category headers.
-	requiredHeaders := []string{"[project-management]", "[automation]", "[context]", "[developer]", "[general]"}
+	requiredHeaders := []string{"[automation]", "[context]", "[developer]", "[general]"}
 	for _, header := range requiredHeaders {
 		if !containsStr2(summary, header) {
 			t.Errorf("Summary() missing category header %q", header)

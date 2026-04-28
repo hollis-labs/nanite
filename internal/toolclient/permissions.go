@@ -149,10 +149,10 @@ func (p ToolPermissions) CheckPermission(toolName string) bool {
 // Supports path.Match syntax plus simple prefix matching with trailing *.
 //
 // Tool names are uniform on the agent-facing surface (ADR-002), so a
-// glob like "engine_*" matches an MCP-published `engine_task_create`
+// glob like "hadron_*" matches an MCP-published `hadron_run_enqueue`
 // directly, without the legacy `mcp__server__` prefix.
 func MatchPattern(pattern, name string) bool {
-	// Handle prefix glob: "engine_*" matches "engine_task_create".
+	// Handle prefix glob: "hadron_*" matches "hadron_run_enqueue".
 	if strings.HasSuffix(pattern, "*") {
 		return strings.HasPrefix(name, strings.TrimSuffix(pattern, "*"))
 	}

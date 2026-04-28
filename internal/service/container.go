@@ -478,11 +478,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			sources = append(sources, contextbroker.NewConduitSource(cfg.MCP))
 		}
 
-		// EngineSource — requires MCP manager (calls Engine tools).
-		if cfg.MCP != nil {
-			sources = append(sources, contextbroker.NewEngineSource(cfg.MCP))
-		}
-
 		// PCCSource — reads filesystem, always available.
 		sources = append(sources, contextbroker.NewPCCSource(".nanite/pcc/global"))
 

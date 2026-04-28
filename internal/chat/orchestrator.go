@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -13,21 +12,17 @@ import (
 
 // OrchestrationPlan represents the plan for executing decomposed sub-tasks.
 type OrchestrationPlan struct {
-	SubTasks      []SubTask `json:"sub_tasks"`
-	Aggregation   string    `json:"aggregation"`
-	SprintID      string    `json:"sprint_id,omitempty"`       // Engine sprint ID if created
-	TaskIDs       []string  `json:"task_ids,omitempty"`        // Engine task IDs if created
-	HasEngine     bool      `json:"has_engine"`                // whether Engine integration is available
-	HasCortex     bool      `json:"has_cortex"`                // whether Vanta Conduit is available for knowledge
-	PlanOnly      bool      `json:"plan_only"`                 // true if no MCP services available to execute
+	SubTasks    []SubTask `json:"sub_tasks"`
+	Aggregation string    `json:"aggregation"`
+	HasCortex   bool      `json:"has_cortex"` // whether Vanta Conduit is available for knowledge
+	PlanOnly    bool      `json:"plan_only"`  // true if no MCP services available to execute
 }
 
 // SubTaskResult holds the result of executing a single sub-task.
 type SubTaskResult struct {
-	Title   string `json:"title"`
-	Output  string `json:"output"`
-	Error   string `json:"error,omitempty"`
-	TaskID  string `json:"task_id,omitempty"` // Engine task ID if tracked
+	Title  string `json:"title"`
+	Output string `json:"output"`
+	Error  string `json:"error,omitempty"`
 }
 
 // OrchestrationResult holds the final aggregated output.
@@ -59,12 +54,11 @@ func (o *Orchestrator) HasDecomposer() bool {
 }
 
 // BuildPlan creates an orchestration plan from a decomposition result.
-// It checks for Engine/Vanta Conduit availability and optionally creates a sprint.
+// It checks for Vanta Conduit availability for knowledge grounding.
 func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *DecompositionResult, projectID string) (*OrchestrationPlan, error) {
 	plan := &OrchestrationPlan{
 		SubTasks:    decomposition.SubTasks,
 		Aggregation: decomposition.Aggregation,
-		HasEngine:   o.hasToolPrefix("engine"),
 		HasCortex:   o.hasToolPrefix("conduit"),
 	}
 
@@ -75,21 +69,9 @@ func (o *Orchestrator) BuildPlan(ctx context.Context, decomposition *Decompositi
 		return plan, nil
 	}
 
-	// Check Vanta Conduit for relevant knowledge before creating tasks.
+	// Check Vanta Conduit for relevant knowledge before executing sub-tasks.
 	if plan.HasCortex {
 		slog.Info("orchestrator: conduit available — sub-tasks can leverage agent knowledge")
-	}
-
-	// Create Engine sprint + tasks if available.
-	if plan.HasEngine && projectID != "" {
-		sprintID, taskIDs, err := o.createEngineSprint(ctx, projectID, decomposition)
-		if err != nil {
-			slog.Warn("orchestrator: failed to create Engine sprint (continuing without tracking)", "err", err)
-		} else {
-			plan.SprintID = sprintID
-			plan.TaskIDs = taskIDs
-			slog.Info("orchestrator: created Engine sprint", "sprint_id", sprintID, "tasks", len(taskIDs))
-		}
 	}
 
 	return plan, nil
@@ -152,59 +134,4 @@ func (o *Orchestrator) hasToolPrefix(serverName string) bool {
 		return false
 	}
 	return o.MCPManager.HasServer(serverName)
-}
-
-// createEngineSprint creates an Engine sprint with one task per sub-task.
-func (o *Orchestrator) createEngineSprint(ctx context.Context, projectID string, decomposition *DecompositionResult) (string, []string, error) {
-	if o.MCPManager == nil {
-		return "", nil, fmt.Errorf("no MCP manager")
-	}
-
-	// Create sprint via MCP tool call. Explicit-server path (ADR-002):
-	// the orchestrator knows the server it wants to talk to, so it
-	// reaches it via ExecuteToolOnServer rather than through the uniform
-	// agent-facing index.
-	sprintResult, err := o.MCPManager.ExecuteToolOnServer(ctx, "engine", "engine_sprint_create", map[string]any{
-		"project_id":  projectID,
-		"title":       "Auto-decomposed task sprint",
-		"description": fmt.Sprintf("Sprint with %d sub-tasks from task decomposition", len(decomposition.SubTasks)),
-	})
-	if err != nil {
-		return "", nil, fmt.Errorf("create sprint: %w", err)
-	}
-
-	// Parse sprint ID from result.
-	var sprintResp struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(sprintResult), &sprintResp); err != nil {
-		slog.Warn("orchestrator: could not parse sprint response", "err", err)
-		return "", nil, fmt.Errorf("parse sprint response: %w", err)
-	}
-
-	// Create a task for each sub-task.
-	var taskIDs []string
-	for _, st := range decomposition.SubTasks {
-		taskResult, err := o.MCPManager.ExecuteToolOnServer(ctx, "engine", "engine_task_create", map[string]any{
-			"project_id":  projectID,
-			"sprint_id":   sprintResp.ID,
-			"title":       st.Title,
-			"description": st.Description,
-		})
-		if err != nil {
-			slog.Warn("orchestrator: failed to create Engine task", "title", st.Title, "err", err)
-			continue
-		}
-
-		var taskResp struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal([]byte(taskResult), &taskResp); err != nil {
-			slog.Warn("orchestrator: could not parse task response", "err", err)
-			continue
-		}
-		taskIDs = append(taskIDs, taskResp.ID)
-	}
-
-	return sprintResp.ID, taskIDs, nil
 }

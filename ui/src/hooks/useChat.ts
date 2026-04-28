@@ -329,7 +329,7 @@ export function useChat(sessionId: string | null) {
       try {
         // F1 (CW-20260420-0014): read active effort from store and pass it
         // to the API so the budget multiplier + reasoning config are applied.
-        const activeEffort = useChatStore.getState().activeEffort
+        const activeEffort = useChatStore.getState().activeEffort;
         const { message_id } = await api.sendMessage({
           session_id: sessionId,
           content,

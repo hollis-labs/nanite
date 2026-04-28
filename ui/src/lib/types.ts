@@ -687,6 +687,24 @@ export interface Artifact {
   created_at: string;
 }
 
+// --- Documents (J10, CW-20260426-0008) ---
+
+export interface Document {
+  id: string
+  session_id: string
+  name: string
+  mime_type: string
+  content: string
+  size_bytes: number
+  /** Include document in agent context */
+  included: boolean
+  /** true = send full content; false = send pointer (name + summary) */
+  full_content: boolean
+  summary: string
+  created_at: string
+  updated_at: string
+}
+
 // --- Tool Call Display ---
 
 export type ToolCallDisplayMode = "indicator" | "minimal" | "compact" | "full";

@@ -97,6 +97,17 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/artifacts/upload", a.handleUploadArtifact)
 	mux.HandleFunc("POST /api/artifacts/place", a.handlePlaceArtifact)
 
+	// Documents (J10, CW-20260426-0008)
+	mux.HandleFunc("GET /api/sessions/{id}/documents", a.handleListDocuments)
+	mux.HandleFunc("POST /api/sessions/{id}/documents", a.handleCreateDocument)
+	mux.HandleFunc("GET /api/documents/{id}", a.handleGetDocument)
+	mux.HandleFunc("PUT /api/documents/{id}", a.handleUpdateDocument)
+	mux.HandleFunc("DELETE /api/documents/{id}", a.handleDeleteDocument)
+
+	// Session context prompt (J10, CW-20260426-0008)
+	mux.HandleFunc("GET /api/sessions/{id}/context-prompt", a.handleGetSessionContextPrompt)
+	mux.HandleFunc("PUT /api/sessions/{id}/context-prompt", a.handleSetSessionContextPrompt)
+
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
 	mux.HandleFunc("POST /api/commands/execute", a.handleExecuteCommand)

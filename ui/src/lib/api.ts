@@ -63,6 +63,7 @@ import type {
   WorkspaceRoleTrustOverride,
   InspectorTurnsResponse,
   InspectorTurnSnapshot,
+  Document,
 } from "./types";
 import type { PluginRegistryResponse } from "./plugin-loader";
 
@@ -424,6 +425,61 @@ export const api = {
     });
     if (!res.ok) throw new Error(`Failed to upload artifact: ${res.status}`);
     return res.json();
+  },
+
+  // Documents (J10, CW-20260426-0008)
+  listDocuments: async (sessionId: string): Promise<Document[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/documents`)
+    if (!res.ok) throw new Error(`Failed to list documents: ${res.status}`)
+    return res.json()
+  },
+
+  createDocument: async (
+    sessionId: string,
+    doc: { name: string; content: string; mime_type?: string; summary?: string },
+  ): Promise<Document> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...doc, included: false, full_content: false }),
+    })
+    if (!res.ok) throw new Error(`Failed to create document: ${res.status}`)
+    return res.json()
+  },
+
+  updateDocument: async (
+    id: string,
+    update: { included?: boolean; full_content?: boolean; summary?: string },
+  ): Promise<Document> => {
+    const res = await fetch(`${API_BASE}/documents/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    })
+    if (!res.ok) throw new Error(`Failed to update document: ${res.status}`)
+    return res.json()
+  },
+
+  deleteDocument: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/documents/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to delete document: ${res.status}`)
+  },
+
+  // Session context prompt (J10, CW-20260426-0008)
+  getSessionContextPrompt: async (sessionId: string): Promise<string> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`)
+    if (!res.ok) throw new Error(`Failed to get context prompt: ${res.status}`)
+    const data = await res.json()
+    return data.prompt ?? ''
+  },
+
+  setSessionContextPrompt: async (sessionId: string, prompt: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    })
+    if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`)
   },
 
   // Compact

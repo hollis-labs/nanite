@@ -7,13 +7,18 @@ import (
 
 // Slot names. Ordered by assembly priority.
 const (
-	SlotSystem       = "system"
-	SlotMemory       = "memory"
-	SlotAgent        = "agent"
-	SlotRules        = "rules"
-	SlotTools        = "tools"
-	SlotSession      = "session"
-	SlotContext      = "context"      // dynamic enrichment (plugins, context broker)
+	SlotSystem      = "system"
+	SlotMemory      = "memory"
+	SlotAgent       = "agent"
+	SlotRules       = "rules"
+	SlotTools       = "tools"
+	SlotSession     = "session"
+	SlotContext     = "context"     // dynamic enrichment (plugins, context broker)
+	SlotUserContext = "user_context" // J10 (CW-20260426-0008): user-authored session context prompt.
+	// Not compactable — survives compaction like SlotAgent/SlotRules.
+	// Populated from sessions.context_prompt. Composes with HandoffStash
+	// (CW-20260420-0024) — both are pinned slots that survive compaction.
+	// J11 (CW-20260426-0009) pin tool will also use this same pattern.
 	SlotConversation = "conversation" // messages — subject to compaction
 )
 
@@ -28,6 +33,7 @@ var SlotOrder = []string{
 	SlotTools,
 	SlotSession,
 	SlotContext,
+	SlotUserContext,
 	SlotConversation,
 }
 
@@ -46,8 +52,8 @@ type Slot struct {
 }
 
 // DefaultCompactable returns the default compactability per slot. System,
-// Agent, and Rules survive compaction so the model never loses identity,
-// instructions, or policy mid-conversation.
+// Agent, Rules, and UserContext survive compaction so the model never loses
+// identity, instructions, policy, or the user's session-scoped context mid-conversation.
 func DefaultCompactable() map[string]bool {
 	return map[string]bool{
 		SlotSystem:       false,
@@ -57,6 +63,7 @@ func DefaultCompactable() map[string]bool {
 		SlotTools:        true,
 		SlotSession:      true,
 		SlotContext:      true,
+		SlotUserContext:  false, // J10: pinned — survives compaction.
 		SlotConversation: true,
 	}
 }
@@ -93,9 +100,10 @@ func DefaultBudgets() map[string]int {
 		SlotMemory:       2000,
 		SlotAgent:        1000,
 		SlotRules:        500,
-		SlotTools:        0, // proportional to selected tool count
+		SlotTools:        0,    // proportional to selected tool count
 		SlotSession:      1000,
-		SlotContext:      0, // dynamic
-		SlotConversation: 0, // gets remainder
+		SlotContext:      0,    // dynamic
+		SlotUserContext:  2000, // J10: user context prompt; thin by design.
+		SlotConversation: 0,    // gets remainder
 	}
 }

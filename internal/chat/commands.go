@@ -74,6 +74,47 @@ func NewCommandRegistry() *CommandRegistry {
 		{SlashCommand{Name: "model", Description: "Switch model", Category: "config", Source: "builtin"}, nil},
 		{SlashCommand{Name: "mode", Description: "Switch agent mode", Category: "agent", Source: "builtin"}, nil},
 		{SlashCommand{Name: "memory", Description: "Browse and manage memories", Category: "tools", Source: "builtin"}, nil},
+		// J10 (CW-20260426-0008): scratchpad slash command + aliases.
+		// All three names are registered so the user can type any of them.
+		// Bare invocation (no args) → opens scratchpad drawer (client-side).
+		// With args → appends text to scratchpad without sending to agent.
+		// Handler returns "client" action so the frontend decides behaviour.
+		{SlashCommand{
+			Name:        "scratch",
+			Description: "Open scratchpad (bare) or append text without sending to agent",
+			Category:    "tools",
+			Source:      "builtin",
+			Args: []CommandArg{{
+				Name:        "text",
+				Description: "Text to append to scratchpad (omit to open)",
+				Required:    false,
+				Type:        "string",
+			}},
+		}, scratchpadHandler},
+		{SlashCommand{
+			Name:        "pad",
+			Description: "Alias for /scratch",
+			Category:    "tools",
+			Source:      "builtin",
+			Args: []CommandArg{{
+				Name:        "text",
+				Description: "Text to append to scratchpad (omit to open)",
+				Required:    false,
+				Type:        "string",
+			}},
+		}, scratchpadHandler},
+		{SlashCommand{
+			Name:        "scratchpad",
+			Description: "Alias for /scratch",
+			Category:    "tools",
+			Source:      "builtin",
+			Args: []CommandArg{{
+				Name:        "text",
+				Description: "Text to append to scratchpad (omit to open)",
+				Required:    false,
+				Type:        "string",
+			}},
+		}, scratchpadHandler},
 		{SlashCommand{Name: "help", Description: "Show available commands", Category: "help", Source: "builtin"}, r.handleHelp},
 	}
 
@@ -199,6 +240,20 @@ func (r *CommandRegistry) RemoveByPlugin(pluginID string) int {
 		}
 	}
 	return n
+}
+
+// scratchpadHandler handles /scratch, /pad, /scratchpad commands.
+// Bare invocation (no args): returns action="client", content="scratch_open" so
+// the frontend opens the scratchpad drawer. With args: returns
+// action="scratch_append" so the frontend appends text to the scratchpad WITHOUT
+// sending it to the agent. Scratchpad content is excluded from agent context by
+// default; the user must explicitly reference it (J10, CW-20260426-0008).
+func scratchpadHandler(_ context.Context, _ string, args string) (*CommandResult, error) {
+	text := strings.TrimSpace(args)
+	if text == "" {
+		return &CommandResult{Action: "client", Content: "scratch_open"}, nil
+	}
+	return &CommandResult{Action: "scratch_append", Content: text}, nil
 }
 
 // RegisterSkillCommand registers a file-based skill as a slash command.

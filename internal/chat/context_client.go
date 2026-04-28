@@ -142,6 +142,7 @@ type SlotSources struct {
 	Rules            string                 // agent tags + tool allowlist (S4a expands)
 	Session          string                 // session name, mode label, workspace name
 	Context          string                 // formatted ContextBroker items where Source != "memory"
+	UserContext      string                 // J10 (CW-20260426-0008): user-authored session context prompt + included docs.
 	Messages         []provider.ChatMessage // conversation slot messages
 	EnrichmentActive bool                   // true when Context slot was populated by the broker
 }
@@ -221,6 +222,15 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		chatMessages[i] = provider.ChatMessage{Role: role, Content: m.Content}
 	}
 
+	// J10 (CW-20260426-0008): user context prompt + included documents.
+	// Both are pinned and NOT compactable (SlotUserContext). The user context
+	// prompt is authored in the bottom drawer. Included documents are injected
+	// as pointers (name + summary) by default, or full content when
+	// full_content=true. This slot composes with HandoffStash (CW-20260420-0024)
+	// for compaction-survival — both are non-compactable pinned slots.
+	// J11 (CW-20260426-0009) pin tool will extend this same pattern.
+	userContextContent := buildUserContextSlot(cb.Store, session.ID)
+
 	return &SlotSources{
 		System:           sysB.String(),
 		Memory:           memoryContent,
@@ -228,9 +238,49 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		Rules:            rules,
 		Session:          sessionContent,
 		Context:          contextContent,
+		UserContext:      userContextContent,
 		Messages:         chatMessages,
 		EnrichmentActive: enrichmentActive,
 	}, nil
+}
+
+// buildUserContextSlot assembles the SlotUserContext content from:
+//  1. The session-scoped user context prompt (sessions.context_prompt).
+//  2. Any included documents (documents.included=true), injected as pointer
+//     (name + summary) or full content based on documents.full_content.
+//
+// Returns an empty string when neither is set, leaving the slot empty (no
+// contribution to the system prompt for that turn). This is the desired default:
+// documents and the context prompt are excluded unless explicitly included.
+func buildUserContextSlot(s *store.Store, sessionID string) string {
+	var parts []string
+
+	// Session context prompt.
+	if prompt, err := s.GetSessionContextPrompt(sessionID); err == nil && strings.TrimSpace(prompt) != "" {
+		parts = append(parts, "## Session Context\n"+strings.TrimSpace(prompt))
+	}
+
+	// Included documents.
+	if docs, err := s.GetIncludedDocuments(sessionID); err == nil && len(docs) > 0 {
+		var docParts []string
+		for _, doc := range docs {
+			if doc.FullContent {
+				docParts = append(docParts, fmt.Sprintf("### Document: %s\n%s", doc.Name, doc.Content))
+			} else {
+				// Pointer mode: name + summary only.
+				summary := doc.Summary
+				if summary == "" {
+					summary = fmt.Sprintf("(document ID: %s, size: %d bytes)", doc.ID, doc.SizeBytes)
+				}
+				docParts = append(docParts, fmt.Sprintf("### Document: %s (pointer)\n%s", doc.Name, summary))
+			}
+		}
+		if len(docParts) > 0 {
+			parts = append(parts, "## Session Documents\n"+strings.Join(docParts, "\n\n"))
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
 }
 
 // deriveIntent extracts the broker intent from the session's recent user turn.

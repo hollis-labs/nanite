@@ -1,5 +1,7 @@
 import { AlertTriangle, Key, MessageSquare, Puzzle, RefreshCw, Settings, X } from "lucide-react";
+import { useRef } from "react";
 import { TaskThreadPanel } from "@/components/messaging/TaskThreadPanel";
+import { BottomChatDrawer, type ScratchpadControls } from "@/components/drawers/BottomChatDrawer";
 import { useChat } from "@/hooks/useChat";
 import { useTaskContext } from "@/hooks/useTaskContext";
 import { useAppStore } from "@/stores/useAppStore";
@@ -17,6 +19,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const taskThreadOpen = useLayoutStore((s) => s.taskThreadOpen);
   const toggleTaskThread = useLayoutStore((s) => s.toggleTaskThread);
+  const scratchpadControlsRef = useRef<ScratchpadControls | null>(null);
   const {
     messages,
     isStreaming,
@@ -156,8 +159,15 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
             onStop={stopStreaming}
             onEditorReady={onEditorReady}
             reloadMessages={loadMessages}
+            scratchpadControlsRef={scratchpadControlsRef}
           />
         </div>
+        {/* J10 (CW-20260426-0008): bottom chat drawer — scratchpad, documents, session context */}
+        <BottomChatDrawer
+          onScratchpadRef={(controls) => {
+            scratchpadControlsRef.current = controls;
+          }}
+        />
       </main>
       {isTaskSession && taskId && (
         <TaskThreadPanel taskId={taskId} open={taskThreadOpen} onToggle={toggleTaskThread} />

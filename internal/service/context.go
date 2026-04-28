@@ -188,6 +188,9 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 
 	cw.SetContent(ctxpkg.SlotSession, sources.Session)
 	cw.SetContent(ctxpkg.SlotContext, sources.Context)
+	// J10 (CW-20260426-0008): user context prompt + included documents.
+	// SlotUserContext is non-compactable (survives compaction like SlotAgent).
+	cw.SetContent(ctxpkg.SlotUserContext, sources.UserContext)
 	cw.SetContent(ctxpkg.SlotConversation, serializeMessagesForSlot(sources.Messages))
 
 	if sources.EnrichmentActive {
@@ -553,7 +556,7 @@ func composeLegacySystemPrompt(sources *chat.SlotSources, toolsContent, prefix s
 	if prefix != "" {
 		parts = append(parts, prefix)
 	}
-	for _, p := range []string{sources.System, sources.Agent, sources.Rules, toolsContent, sources.Session, sources.Memory, sources.Context} {
+	for _, p := range []string{sources.System, sources.Agent, sources.Rules, toolsContent, sources.Session, sources.Memory, sources.Context, sources.UserContext} {
 		if p != "" {
 			parts = append(parts, p)
 		}

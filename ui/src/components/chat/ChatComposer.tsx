@@ -3,7 +3,8 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Check, Terminal, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import type { ScratchpadControls } from "@/components/drawers/BottomChatDrawer";
 import { usePluginAction } from "@/hooks/usePluginAction";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
 import { useSettings } from "@/hooks/useSettings";
@@ -87,6 +88,8 @@ interface ChatComposerProps {
   onEditorReady?: (focus: () => void) => void;
   reloadMessages?: () => void;
   drawer?: React.ReactNode;
+  /** J10 (CW-20260426-0008): ref to scratchpad controls for /scratch command. */
+  scratchpadControlsRef?: RefObject<ScratchpadControls | null>;
 }
 
 export function ChatComposer({
@@ -96,6 +99,7 @@ export function ChatComposer({
   onEditorReady,
   reloadMessages,
   drawer = null,
+  scratchpadControlsRef,
 }: ChatComposerProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
@@ -157,7 +161,7 @@ export function ChatComposer({
   commandDefsRef.current = commandDefs ?? [];
 
   const handleCommand = useCallback(
-    async (cmd: SlashCommand) => {
+    async (cmd: SlashCommand, cmdArgs = "") => {
       switch (cmd.name) {
         case "new": {
           const session = await api.createSession({ workspace_id: activeWorkspaceId || "" });
@@ -203,6 +207,26 @@ export function ChatComposer({
           useLayoutStore.getState().setMemoryModalOpen(true);
           return;
         }
+        // J10 (CW-20260426-0008): /scratch, /pad, /scratchpad slash commands.
+        // These commands are intercepted client-side before hitting the server
+        // execute path. The bare-invocation case opens the bottom drawer and
+        // switches to the scratchpad tab; the with-args case appends text to
+        // the scratchpad WITHOUT sending to the agent.
+        case "scratch":
+        case "pad":
+        case "scratchpad": {
+          const store = useLayoutStore.getState();
+          if (cmdArgs.trim()) {
+            // With text — append to scratchpad without sending to agent.
+            // Open the drawer so the user can see the append happened.
+            store.setBottomDrawerOpen(true, "user");
+            scratchpadControlsRef?.current?.append(cmdArgs.trim());
+          } else {
+            // Bare invocation — open drawer to scratchpad tab.
+            store.setBottomDrawerOpen(true, "user");
+          }
+          return;
+        }
         default: {
           if (!activeSessionId) return;
           try {
@@ -234,7 +258,7 @@ export function ChatComposer({
         }
       }
     },
-    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages],
+    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages, scratchpadControlsRef],
   );
 
   const handleCommandRef = useRef(handleCommand);
@@ -438,18 +462,19 @@ export function ChatComposer({
     // The suggestion plugin only fires when the menu is open; once dismissed
     // (Escape or click-away), the raw slash text remains. We detect and execute
     // it here so the command still runs reliably without autocomplete.
+    // Args (text after the command name) are preserved and forwarded so that
+    // /scratch some text correctly appends "some text" to the scratchpad.
     if (text.startsWith("/") && text.length > 1) {
       const withoutSlash = text.slice(1);
       const spaceIdx = withoutSlash.indexOf(" ");
       const cmdName = spaceIdx === -1 ? withoutSlash : withoutSlash.slice(0, spaceIdx);
+      const cmdArgs = spaceIdx === -1 ? "" : withoutSlash.slice(spaceIdx + 1).trim();
       if (cmdName) {
         editor.commands.clearContent();
-        void handleCommandRef.current({
-          name: cmdName,
-          description: "",
-          category: "",
-          source: "builtin",
-        });
+        void handleCommandRef.current(
+          { name: cmdName, description: "", category: "", source: "builtin" },
+          cmdArgs,
+        );
         return;
       }
     }

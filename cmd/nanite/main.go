@@ -318,6 +318,9 @@ func cmdServe(args []string) {
 		return ids
 	}
 	selfTools.TrustResolver = s
+	// J11 (CW-20260426-0009): wire the reminder engine so RegisterTurnCount
+	// calls from nanite_set_reminder hit the correct shared Engine instance.
+	selfTools.ReminderEngine = container.ReminderEngine
 
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {

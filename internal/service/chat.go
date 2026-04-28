@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -134,6 +135,10 @@ type ChatServiceConfig struct {
 	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
 	// nil-safe: when nil loop detection is disabled. Shared across all sessions.
 	LoopDetector *loopdetect.Detector
+
+	// ReminderEngine is the deterministic trigger engine for agent-set reminders
+	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
+	ReminderEngine *reminders.Engine
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -193,6 +198,10 @@ type chatServiceImpl struct {
 	// loopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
 	// nil-safe: disabled when nil.
 	loopDetector *loopdetect.Detector
+
+	// reminderEngine is the deterministic trigger engine for agent-set reminders
+	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
+	reminderEngine *reminders.Engine
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -259,6 +268,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		strategyLogger:      cfg.StrategyLogger,
 		inspector:           cfg.Inspector,
 		loopDetector:        cfg.LoopDetector,
+		reminderEngine:      cfg.ReminderEngine,
 	}
 }
 

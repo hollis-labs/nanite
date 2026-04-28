@@ -24,6 +24,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/messaging"
@@ -141,6 +142,11 @@ type Container struct {
 	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
 	// Always non-nil; instantiated once at container boot.
 	LoopDetector *loopdetect.Detector
+
+	// ReminderEngine is the deterministic trigger engine for agent-set reminders
+	// (J11, CW-20260426-0009). Always non-nil; per-session state is keyed
+	// by sessionID inside the Engine.
+	ReminderEngine *reminders.Engine
 
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
@@ -567,6 +573,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	loopDetector := loopdetect.New()
 	slog.Info("service container: loop detector enabled (I2, fingerprint-based)")
 
+	// J11 (CW-20260426-0009): reminder engine — deterministic trigger evaluation.
+	// A single engine is shared across sessions; per-session state lives inside
+	// the engine (keyed by sessionID / reminderID). Always instantiated so the
+	// SelfToolsTransport can register creation turns even before the first eval.
+	reminderEngine := reminders.NewEngine(cfg.Store)
+	slog.Info("service container: reminder engine enabled (J11, CW-20260426-0009)")
+
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -601,6 +614,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Inspector: inspectorSvc,
 		// I2 (CW-20260420-0029): loop detector — always-on.
 		LoopDetector: loopDetector,
+		// J11 (CW-20260426-0009): reminder engine — always-on.
+		ReminderEngine: reminderEngine,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed
@@ -774,6 +789,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AdapterRegistry:     adapterRegistry,
 		Inspector:           inspectorSvc,
 		LoopDetector:        loopDetector,
+		ReminderEngine:      reminderEngine,
 		RunStore:            runStore,
 		WorkflowBroadcaster: workflowBroadcaster,
 		AppConfig:           cfg.AppConfig,

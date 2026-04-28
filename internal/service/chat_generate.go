@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/messaging"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
@@ -341,6 +342,29 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	chatMessages := slotResult.Messages
 	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
 
+	// J11 (CW-20260426-0009): evaluate reminder triggers and inject any that
+	// fired into SlotUserContext. Uses session.MessageCount as the monotonic
+	// session turn counter (no new schema field needed). Must run before the
+	// inspector records slots so the inspector sees the injected content.
+	var firedReminders []store.Reminder
+	if s.reminderEngine != nil && slotResult.Window != nil {
+		if fired, evalErr := s.reminderEngine.EvalTurn(sessionID, session.MessageCount); evalErr != nil {
+			slog.Warn("chat-service: reminder engine eval failed", "session_id", sessionID, "err", evalErr)
+		} else if len(fired) > 0 {
+			firedReminders = fired
+			injection := reminders.FormatInjection(fired)
+			existing := ""
+			if slot := slotResult.Window.Slot(ctxpkg.SlotUserContext); slot != nil {
+				existing = slot.Content
+			}
+			if existing != "" {
+				slotResult.Window.SetContent(ctxpkg.SlotUserContext, existing+"\n\n"+injection)
+			} else {
+				slotResult.Window.SetContent(ctxpkg.SlotUserContext, injection)
+			}
+		}
+	}
+
 	// I1 (CW-20260426-0004): inspector — allocate a turn ID and record slots.
 	// turnID is carried forward through the rest of generateResponse so
 	// broker/tool producers can append to the same snapshot.
@@ -352,6 +376,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			s.recordInspectorSlots(sessionID, inspectorTurnID, slotResult)
 		}
 		s.recordInspectorLLMMessages(sessionID, inspectorTurnID, chatMessages, systemPrompt)
+		// J11 (CW-20260426-0009): record fired reminders so the I1 dev-mode panel
+		// can surface them. No-op when no reminders fired this turn.
+		if len(firedReminders) > 0 {
+			rec := inspectsvc.RemindersRecord{}
+			for _, r := range firedReminders {
+				rec.FiredThisTurn = append(rec.FiredThisTurn, inspectsvc.ReminderItem{
+					ID:          r.ID,
+					Text:        r.Text,
+					TriggerJSON: r.TriggerJSON,
+				})
+			}
+			s.inspector.RecordReminders(sessionID, inspectorTurnID, rec)
+		}
 	}
 
 	// S3b — emit a tools-variant slot_changed envelope when the classifier

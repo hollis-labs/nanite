@@ -1,4 +1,4 @@
-import { MessageSquare, Search, Plus, Settings, User, LayoutGrid } from 'lucide-react'
+import { MessageSquare, Search, Plus, Settings, User } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
@@ -102,24 +102,6 @@ export function NavRail() {
             </Tooltip>
           )
         })}
-
-        {/* Gallery — dev only */}
-        {import.meta.env.DEV && (
-          <Tooltip content="Gallery" side="right">
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`w-10 h-10 rounded-lg ${
-                currentPage === 'gallery'
-                  ? 'bg-surface text-primary'
-                  : 'text-fg-secondary hover:text-fg'
-              }`}
-              onClick={() => setCurrentPage('gallery' as any)}
-            >
-              <LayoutGrid className="w-5 h-5" />
-            </Button>
-          </Tooltip>
-        )}
 
         {/* Plugin-registered nav items */}
         {pluginNavItems.map((entry) => {

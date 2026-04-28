@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/hollis-labs/go-providers/provider"
@@ -25,13 +26,18 @@ const (
 // CompactionResult captures what happened during compaction for event emission
 // and debugging.
 type CompactionResult struct {
-	Summary         string // LLM-generated summary that replaced the compacted span
-	RemovedMessages int    // count of messages replaced
-	TokensSaved     int    // tokens reclaimed
-	Mode            string // compaction mode used
-	StagesApplied   []string
-	RawMessages     []provider.ChatMessage // original messages (for plugin extraction)
-	HandoffStashID  string                 // P7: stash_id written pre-compaction; empty if StashWriter nil
+	Summary               string                 // LLM-generated summary that replaced the compacted span
+	RemovedMessages       int                    // count of messages replaced
+	TokensSaved           int                    // tokens reclaimed
+	Mode                  string                 // compaction mode used
+	StagesApplied         []string
+	RawMessages           []provider.ChatMessage // original messages (for plugin extraction)
+	HandoffStashID        string                 // P7: stash_id written pre-compaction; empty if StashWriter nil
+	CoverageWindowStart   *string                // P8: turn_id marking span start (nullable)
+	CoverageWindowEnd     *string                // P8: turn_id marking span end (nullable)
+	EvictedCachePointers  []string               // P8: cache pointers lost during compaction
+	PreservedSources      []string               // P8: what was preserved/referenced
+	OriginalTokenCount    int                    // P8: token count before compaction
 }
 
 // Summarizer makes a simple non-streaming LLM call. Implemented by the
@@ -58,6 +64,10 @@ type CompactionPipeline struct {
 	SessionID          string
 	StashWriter        StashWriter
 	ScratchpadSnapshot map[string]any
+
+	// P8 CompactionEventWriter — optional post-compaction metadata emission (CW-20260420-0027).
+	// If CompactionEventWriter is nil the metadata emission is skipped (backwards-compatible).
+	CompactionEventWriter CompactionEventWriter
 }
 
 // Stage is a single compaction action. Returns true if it made progress.
@@ -138,6 +148,34 @@ func (p *CompactionPipeline) runStages(ctx context.Context, recheckBetweenStages
 	}
 
 	p.refreshConversationSlot()
+
+	// P8 CompactionContract: emit structured metadata if writer is available
+	if p.CompactionEventWriter != nil && p.SessionID != "" {
+		evt := CompactionEvent{
+			ID:                   uuid.New().String(),
+			SessionID:            p.SessionID,
+			CoverageWindowStart:  result.CoverageWindowStart,
+			CoverageWindowEnd:    result.CoverageWindowEnd,
+			EvictedCachePointers: result.EvictedCachePointers,
+			PreservedSources:     result.PreservedSources,
+			SummaryMode:          result.Mode,
+			SummaryTokenCount:    result.TokensSaved,
+			OriginalTokenCount:   result.OriginalTokenCount,
+			StagesApplied:        result.StagesApplied,
+			CreatedAt:            time.Now().UTC().Format(time.RFC3339),
+		}
+		if result.HandoffStashID != "" {
+			evt.HandoffStashID = &result.HandoffStashID
+		}
+		if err := p.CompactionEventWriter.WriteCompactionEvent(ctx, evt); err != nil {
+			slog.Warn("compaction: event emission failed (non-fatal)",
+				"session_id", p.SessionID, "err", err)
+		} else {
+			slog.Info("compaction: event emitted",
+				"session_id", p.SessionID, "event_id", evt.ID)
+		}
+	}
+
 	return result, nil
 }
 

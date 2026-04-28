@@ -15,12 +15,15 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/effort"
+	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/messaging"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -71,6 +74,29 @@ func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
 		b.WriteString(overrideBlock)
 	}
 	return b.String()
+}
+
+// hasUsableTools reports whether the turn exposes any tools to the LLM.
+// Built-in tools (for example dev_* and self-service tools) count — the
+// "no tools" warning should only fire when the final selection is empty.
+func hasUsableTools(tools []provider.ToolDefinition) bool {
+	return len(tools) > 0
+}
+
+// adjustToolStrictnessForProvider disables strict tool schemas for provider/model
+// combinations that reject the "strict" field outright. Keep the broker-level
+// default strict-on behavior intact; this is a last-mile compatibility shim.
+func adjustToolStrictnessForProvider(providerName, model string, tools []provider.ToolDefinition) {
+	if providerName != "anthropic" {
+		return
+	}
+	if model != "claude-sonnet-4-20250514" {
+		return
+	}
+	strictFalse := false
+	for i := range tools {
+		tools[i].Strict = &strictFalse
+	}
 }
 
 // generateResponseTimeout is the maximum wall-clock time a single
@@ -241,13 +267,18 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// --- Tool selection via ToolService (must precede slot assembly so the
 	// Tools slot and the dynamic system prefix can be derived from the result). ---
-	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID)
+	// Thread the per-model context window so the tool token budget is computed
+	// from the actual model window (e.g. 1M for Gemini) rather than the
+	// hardcoded 200K default. contextWindowSize returns 0 on miss, which causes
+	// the broker to fall back to DefaultContextWindowTokens (CW-20260426-0032).
+	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID, s.contextWindowSize(providerName, model))
 	if err != nil {
 		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}
 	}
 	tools := selection.Tools
 	normalizeToolInputSchemas(tools)
+	adjustToolStrictnessForProvider(providerName, model, tools)
 
 	// Build the dynamic per-turn system prefix from tool selection. This text
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks
@@ -258,10 +289,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// warning event (side-effect, stays here) and pass the flag to the pure
 	// composeExtraSystemPrefix helper.
 	noTools := false
-	if !selection.Progressive && countMCPTools(tools) == 0 {
+	if !selection.Progressive && !hasUsableTools(tools) {
 		noTools = true
 		warningPayload := chat.ToolWarningPayload{
-			Error: "This agent has no MCP tools configured. Responses will be text-only.",
+			Error: "This agent has no tools configured. Responses will be text-only.",
 			Level: "critical",
 		}
 		warningJSON, _ := json.Marshal(warningPayload)
@@ -310,6 +341,55 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 	chatMessages := slotResult.Messages
 	systemPrompt := slotResult.SystemPrompt // legacy concat — for budget enforcer + telemetry
+
+	// J11 (CW-20260426-0009): evaluate reminder triggers and inject any that
+	// fired into SlotUserContext. Uses session.MessageCount as the monotonic
+	// session turn counter (no new schema field needed). Must run before the
+	// inspector records slots so the inspector sees the injected content.
+	var firedReminders []store.Reminder
+	if s.reminderEngine != nil && slotResult.Window != nil {
+		if fired, evalErr := s.reminderEngine.EvalTurn(sessionID, session.MessageCount); evalErr != nil {
+			slog.Warn("chat-service: reminder engine eval failed", "session_id", sessionID, "err", evalErr)
+		} else if len(fired) > 0 {
+			firedReminders = fired
+			injection := reminders.FormatInjection(fired)
+			existing := ""
+			if slot := slotResult.Window.Slot(ctxpkg.SlotUserContext); slot != nil {
+				existing = slot.Content
+			}
+			if existing != "" {
+				slotResult.Window.SetContent(ctxpkg.SlotUserContext, existing+"\n\n"+injection)
+			} else {
+				slotResult.Window.SetContent(ctxpkg.SlotUserContext, injection)
+			}
+		}
+	}
+
+	// I1 (CW-20260426-0004): inspector — allocate a turn ID and record slots.
+	// turnID is carried forward through the rest of generateResponse so
+	// broker/tool producers can append to the same snapshot.
+	var inspectorTurnID string
+	if s.inspector != nil {
+		inspectorTurnID = s.inspector.NextTurnID(sessionID)
+		s.inspector.EnsureTurn(sessionID, inspectorTurnID)
+		if slotResult.Window != nil {
+			s.recordInspectorSlots(sessionID, inspectorTurnID, slotResult)
+		}
+		s.recordInspectorLLMMessages(sessionID, inspectorTurnID, chatMessages, systemPrompt)
+		// J11 (CW-20260426-0009): record fired reminders so the I1 dev-mode panel
+		// can surface them. No-op when no reminders fired this turn.
+		if len(firedReminders) > 0 {
+			rec := inspectsvc.RemindersRecord{}
+			for _, r := range firedReminders {
+				rec.FiredThisTurn = append(rec.FiredThisTurn, inspectsvc.ReminderItem{
+					ID:          r.ID,
+					Text:        r.Text,
+					TriggerJSON: r.TriggerJSON,
+				})
+			}
+			s.inspector.RecordReminders(sessionID, inspectorTurnID, rec)
+		}
+	}
 
 	// S3b — emit a tools-variant slot_changed envelope when the classifier
 	// transitioned this turn's Tools slot between pointer / full / partial.
@@ -379,18 +459,75 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// read via loopState.Classification().
 	classifyAndAttach(ls, sessionID, userContent, toolNames)
 
+	// I1 (CW-20260426-0004): attach turn ID to loop state so broker/tool
+	// producers can record to the same snapshot.
+	ls.inspectorTurnID = inspectorTurnID
+
+	// I1 (CW-20260426-0004): record scope tier to inspector (B2 already shipped).
+	if s.inspector != nil && inspectorTurnID != "" {
+		classifiedTier, _ := ls.Classification()
+		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
+	}
+
+	// F1 (CW-20260420-0014): Effort scalar. Extracted from request context;
+	// defaults to EffortNormal when the caller did not set it. Biases the
+	// per-iteration token budget ceiling and reasoning-block configuration.
+	// Orthogonal to ScopeTier — does NOT change roles, tools, or turn counts.
+	turnEffort := effort.FromContext(ctx)
+	ls.SetEffort(turnEffort)
+	reasoningCfg := turnEffort.ReasoningCfg()
+	slog.Debug("chat-service: effort scalar",
+		"session_id", sessionID,
+		"effort", turnEffort.String(),
+		"budget_multiplier", turnEffort.BudgetMultiplier(),
+		"reasoning_enabled", reasoningCfg.Enabled,
+		"reasoning_budget_tokens", reasoningCfg.BudgetTokens,
+	)
+
 	// Load per-tool cap from UserSettings.
 	if us, err := s.store.GetUserSettings(); err == nil && us.ToolPerTurnCap > 0 {
 		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
 	}
+
+	// E3 (CW-20260419-0026, Phase 5): strategy planning. Reads the M1
+	// classification we just attached, runs the reflex matcher over the
+	// user input, and produces a Strategy with an initial turn budget.
+	// The budget replaces the hard-coded defaultMaxTurns ceiling for
+	// this turn (E4 absorption — CW-20260419-0020). Grounding is NOT
+	// consulted here in v1 (the recall step lives in mcp.callExecuteTask
+	// and only fires on subagent dispatch).
+	scopeTier, executionPattern := ls.Classification()
+	turnStrategy := planStrategyForTurn(
+		ctx,
+		sessionID, assistantMsgID, userContent,
+		scopeTier, executionPattern,
+		nil, /* reflexSet — falls back to BuiltinReflexes() */
+		nil, /* groundingResult — not consulted in v1 chat-loop strategy */
+		s.strategyLogger,
+	)
+	applyStrategyToLimits(ls, turnStrategy)
 
 	// CW-20260418-0043 diagnostic — log effective loop config on entry.
 	diagLogLoopStart(sessionID, assistantMsgID, agent.ID, ls, cap(ch))
 
 	// --- Tool-use loop ---
 	var fullContent strings.Builder
+	// F4 (CW-20260419-0029) — separate narration and final text accumulators.
+	// narrationContent captures inter-iteration prose (iterations that end with
+	// tool_use). finalContent captures the post-end_turn text (the answer).
+	// Only finalContent is stored as message.Content; narrationContent is saved
+	// in metadata.thinking for the expand-thinking affordance.
+	var narrationContent strings.Builder
+	var finalContent strings.Builder
 	var finalUsage *chat.Usage
 	var breakdown *chat.TokenBreakdown
+
+	// F3 (CW-20260420-0023) — interleaved thinking block accumulator.
+	// Collects signed thinking blocks emitted by the Anthropic provider when
+	// the interleaved-thinking-2025-05-14 beta is active. Blocks are stored in
+	// metadata.thinking_blocks for the post-stream pill and round-tripped as
+	// assistant message ContentBlocks on subsequent turns.
+	var thinkingBlocks []provider.ThinkingBlock
 
 	for ls.iteration = 0; ; ls.iteration++ {
 		// CW-20260418-0043 diagnostic.
@@ -401,13 +538,39 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if stop, code, reason := ls.shouldStop(); stop {
 			slog.Warn("chat-loop stopped", "reason", reason, "code", code, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
 
+			// E3 (CW-20260419-0026, Phase 5): mid-execution review fires
+			// at budget exhaustion. When max_turns is hit AND no tool result
+			// was load-bearing this turn, we ask a clarifying question
+			// instead of synthesising a thin / fabricated answer. When data
+			// IS load-bearing, we fall through to the existing early-stop
+			// synthesis path which wraps with partial data.
+			handledByStrategy := false
+			if code == TerminationMaxTurns {
+				hasUsableData := strategyHasUsableData(ls)
+				decision := reviewExhaustedBudget(ctx, turnStrategy, ls.iteration, ls.resolvedMaxTurns(), hasUsableData)
+				slog.Info("chat-service: strategy review",
+					"session_id", sessionID,
+					"decision", string(decision),
+					"has_usable_data", hasUsableData,
+					"iteration", ls.iteration,
+					"max_turns", ls.resolvedMaxTurns(),
+				)
+				if decision == strategy_pkg_ReviewAskToClarify() {
+					q := strategyClarifyingQuestion(userContent, scopeTier, turnStrategy)
+					ch <- chat.StreamEvent{Type: "delta", Content: q, Phase: chat.PhaseFinal}
+					fullContent.WriteString(q)
+					finalContent.WriteString(q)
+					handledByStrategy = true
+				}
+			}
+
 			// Early-stopping-generate: when the loop hits its iteration ceiling
 			// (max_turns or runaway tool failures), make one final no-tools LLM
 			// call to synthesize a best-effort answer from the work done so far.
 			// Synthesis deltas land in the stream before the terminated envelope
 			// so the user sees a coherent response rather than an abrupt cutoff.
-			if code == TerminationMaxTurns || code == TerminationRunawayToolFailures {
-				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent)
+			if !handledByStrategy && (code == TerminationMaxTurns || code == TerminationRunawayToolFailures) {
+				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent, &finalContent)
 			}
 
 			// CW-20260417-0485: emit a typed `chat-loop-terminated` envelope
@@ -432,14 +595,31 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
 			})
+			s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 			return
 		}
 
 		// Token budget enforcement.
+		// Thread the per-model context window into EnforceTokenBudget so that
+		// models with larger windows (e.g. Gemini 1M) are not over-pruned by the
+		// hardcoded 200K default. contextWindowSize returns 0 on miss, which
+		// causes EnforceTokenBudget to fall back to DefaultContextWindow * HardCeilingPct.
+		// (CW-20260426-0031)
+		//
+		// F1 (CW-20260420-0014): apply the Effort scalar multiplier to the
+		// budget ceiling BEFORE passing it to EnforceTokenBudget. This is the
+		// budget seam — the multiplier scales the existing ceiling rather than
+		// replacing it, so provider limits and model window sizes remain the
+		// authoritative upper bound.
 		preBudgetMsgCount := len(chatMessages)
 		preBudgetToolCount := len(tools)
 		var budgetErr error
-		chatMessages, tools, breakdown, budgetErr = chat.EnforceTokenBudget(systemPrompt, chatMessages, tools, 0)
+		var budgetCeiling int
+		if ws := s.contextWindowSize(providerName, model); ws > 0 {
+			budgetCeiling = int(float64(ws) * chat.HardCeilingPct)
+		}
+		budgetCeiling = effort.ApplyToCeiling(budgetCeiling, ls.Effort())
+		chatMessages, tools, breakdown, budgetErr = chat.EnforceTokenBudget(systemPrompt, chatMessages, tools, budgetCeiling)
 		if budgetErr != nil {
 			slog.Warn("chat-service: token budget enforcement refused", "err", budgetErr)
 			if s.events != nil {
@@ -453,6 +633,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					"msgs":    breakdown.Messages,
 					"tools":   breakdown.Tools,
 				})
+			s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 			return
 		}
 		// Log compaction continuation if budget enforcement reduced context.
@@ -471,6 +652,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			attribute.Int("nanite.tokens.total", breakdown.Total),
 			attribute.Int("nanite.tokens.ceiling", breakdown.Ceiling),
 		)
+
+		// F3 (CW-20260420-0023): inject reasoning config into provider context so
+		// the Anthropic adapter can gate the interleaved-thinking beta header.
+		if reasoningCfg.Enabled {
+			provCtx = provider.WithReasoningConfig(provCtx, provider.ReasoningConfig{
+				Enabled:      reasoningCfg.Enabled,
+				BudgetTokens: reasoningCfg.BudgetTokens,
+				BetasHeader:  reasoningCfg.BetasHeader,
+			})
+		}
 
 		// CLI session setup.
 		if chat.IsCLIProvider(providerName) {
@@ -492,8 +683,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				provSpan.End()
 				slog.Info("chat-service: message.sending cancelled by plugin hook", "session_id", sessionID, "iter", ls.iteration)
 				blockMsg := "Message blocked by plugin policy."
-				ch <- chat.StreamEvent{Type: "delta", Content: blockMsg}
+				ch <- chat.StreamEvent{Type: "delta", Content: blockMsg, Phase: chat.PhaseFinal}
 				fullContent.WriteString(blockMsg)
+				finalContent.WriteString(blockMsg)
 				diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "plugin_cancel:message.sending", len(ls.toolCallRefs), ch)
 				break
 			}
@@ -608,6 +800,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
+				s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 				return
 			}
 			provSpan.RecordError(err)
@@ -647,11 +840,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
+				s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 				return
 			}
 			errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(tools)}
 			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
 			ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
+			s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 			return
 		}
 
@@ -663,6 +858,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// T9 — set by the mid-stream overflow handler when the outer loop
 		// should retry with a compacted request instead of terminating.
 		contextOverflowRecovered := false
+
+		// F4 (CW-20260419-0029) — per-iteration delta buffer. Deltas are
+		// buffered during streaming and flushed with the correct phase once
+		// stopReason is known after the stream closes. Narration iterations
+		// (stopReason=tool_use) flush as PhaseNarration; the final iteration
+		// (stopReason=end_turn) flushes as PhaseFinal. The buffer is small —
+		// typically a handful of short prose fragments per iteration.
+		var iterDeltaBuf []string
 
 		// CW-20260418-0043 diagnostic — track provider stream duration + event count.
 		provStreamStart := time.Now()
@@ -682,12 +885,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				turnContent.WriteString(evt.Content)
 				fullContent.WriteString(evt.Content)
-				// CW-20260418-0043 diagnostic — watchdog on the hot delta
-				// send. No-op (returns a nil-op stop func) unless
-				// NANITE_CHAT_LOOP_DIAG=1 so production is zero-cost.
-				stopDiag := diagWatchChSend(ctx, "streamLoop.delta", ch, sessionID, assistantMsgID, ls.iteration, "delta")
-				ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
-				stopDiag()
+				// Buffer for phase-tagged flush after stopReason is known.
+				// CW-20260418-0043 diagnostic watchdog is deferred to flush site.
+				iterDeltaBuf = append(iterDeltaBuf, evt.Content)
 
 			case "tool_use":
 				if evt.ToolUse != nil {
@@ -765,15 +965,27 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					errDetails["recovery"] = "failed_after_retry"
 					ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, errDetails)
 					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, errDetails)
+					s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 					return
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
 				ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
+				s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
 				return
 
 			case "session_id":
 				if evt.SessionID != "" {
 					s.persistCLISessionID(sessionID, session, evt.SessionID)
+				}
+
+			case "thinking":
+				// F3 (CW-20260420-0023): interleaved thinking block. Persist
+				// signed block for round-trip; emit to FE as PhaseThinking.
+				if evt.ThinkingBlock != nil {
+					thinkingBlocks = append(thinkingBlocks, *evt.ThinkingBlock)
+					stopDiag := diagWatchChSend(ctx, "streamLoop.thinking", ch, sessionID, assistantMsgID, ls.iteration, "delta")
+					ch <- chat.StreamEvent{Type: "delta", Content: evt.ThinkingBlock.Thinking, Phase: chat.PhaseThinking}
+					stopDiag()
 				}
 
 			case "done":
@@ -784,6 +996,39 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// CW-20260418-0043 diagnostic — provider stream closed.
 		diagLogProviderStream(sessionID, assistantMsgID, ls.iteration,
 			time.Since(provStreamStart), diagProvEventCount, stopReason, len(toolUseBlocks))
+
+		// F4 (CW-20260419-0029) — flush buffered deltas with the correct phase.
+		// stopReason is now known: "tool_use" → narration, anything else → final.
+		// On context-overflow recovery (contextOverflowRecovered) we discard the
+		// buffer — the iteration is being retried so the partial content is stale.
+		if len(iterDeltaBuf) > 0 && !contextOverflowRecovered {
+			phase := chat.PhaseNarration
+			if stopReason != "tool_use" {
+				phase = chat.PhaseFinal
+			}
+			for _, fragment := range iterDeltaBuf {
+				stopDiag := diagWatchChSend(ctx, "streamLoop.delta.flush", ch, sessionID, assistantMsgID, ls.iteration, "delta")
+				ch <- chat.StreamEvent{Type: "delta", Content: fragment, Phase: phase}
+				stopDiag()
+			}
+		}
+
+		// F4 — route turnContent to the right accumulator now that phase is known.
+		// This drives the persistence split: narrationContent → metadata.thinking,
+		// finalContent → message.Content (via cleanContent / WrapResponse).
+		if !contextOverflowRecovered {
+			turnText := turnContent.String()
+			if stopReason == "tool_use" {
+				if turnText != "" {
+					narrationContent.WriteString(turnText)
+					narrationContent.WriteString("\n")
+				}
+			} else {
+				// The last iteration — and any early-exit text already in
+				// fullContent that didn't come from tool_use iterations.
+				finalContent.WriteString(turnText)
+			}
+		}
 
 		// T9 — the mid-stream overflow handler broke out of the stream loop so
 		// the outer loop can retry with a compacted request. Skip the
@@ -823,6 +1068,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 		// --- Build assistant message with tool_use blocks ---
 		var assistantBlocks []provider.ContentBlock
+		// F3 (CW-20260420-0023): thinking blocks MUST precede text and tool_use
+		// blocks in the assistant message. Anthropic verifies signatures on round-trip;
+		// preserve Thinking and Signature verbatim.
+		for _, tb := range thinkingBlocks {
+			assistantBlocks = append(assistantBlocks, provider.ContentBlock{
+				Type:      "thinking",
+				Text:      tb.Thinking,
+				Signature: tb.Signature,
+			})
+		}
 		if text := turnContent.String(); text != "" {
 			assistantBlocks = append(assistantBlocks, provider.ContentBlock{Type: "text", Text: text})
 		}
@@ -838,6 +1093,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		chatMessages = append(chatMessages, provider.ChatMessage{
 			Role: "assistant", ContentBlocks: assistantBlocks,
 		})
+		// Reset per-iteration thinking accumulator so next iteration starts fresh.
+		thinkingBlocks = thinkingBlocks[:0]
 
 		// --- Execute tools (pre-check → parallel/serial → post-process) ---
 
@@ -850,6 +1107,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					ctx, tu, ch, tools, ls.loadedTools,
 					&ls.consecutiveEmptyRequests, &ls.totalRequestToolsCalls, ls.maxRequestToolsCalls,
 					resultBlocks, ls.toolCallRefs,
+					sessionID, &ls.reflectionFired,
+					ls.inspectorTurnID,
 				)
 			} else {
 				regularTools = append(regularTools, tu)
@@ -860,12 +1119,22 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		plans := s.preCheckTools(ctx, sessionID, agentID, regularTools, ls, ch, selection, tools)
 
 		// Execute tools: concurrent-safe in parallel, serial one at a time.
-		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID)
+		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID, session.WorkspaceID)
 
 		// Post-process: stuck loop detection, truncation, envelopes, artifacts.
 		newBlocks, newRefs := s.postProcessToolResults(ctx, plans, execResults, ls, ch, sessionID, agentID, assistantMsgID)
 		resultBlocks = append(resultBlocks, newBlocks...)
 		ls.toolCallRefs = append(ls.toolCallRefs, newRefs...)
+		if ls.directReturn != "" {
+			fullContent.Reset()
+			fullContent.WriteString(ls.directReturn)
+			// F4: directReturn replaces all accumulated text; treat as final.
+			finalContent.Reset()
+			finalContent.WriteString(ls.directReturn)
+			ch <- chat.StreamEvent{Type: "replace_content", Content: ls.directReturn}
+			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "done:direct_return=subagent_literal", len(ls.toolCallRefs), ch)
+			break
+		}
 
 		// Append tool results as user message.
 		chatMessages = append(chatMessages, provider.ChatMessage{
@@ -922,7 +1191,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Post-processing ---
-	responseContent := fullContent.String()
+	// F4 (CW-20260419-0029): responseContent operates on finalContent only —
+	// the narration (inter-iteration prose) is stored separately in metadata.
+	// fullContent still accumulates everything for legacy/error paths that need
+	// the full stream (e.g. persistPartialAssistant).
+	//
+	// If finalContent is empty (e.g. the loop exited on circuit_open with no
+	// final iteration, or directReturn was set), fall back to fullContent so
+	// the stored message is not empty. Old behaviour preserved for those paths.
+	finalText := finalContent.String()
+	if finalText == "" {
+		finalText = fullContent.String()
+	}
+	responseContent := finalText
 	if s.outputFilter != nil && s.outputFilter.Len() > 0 {
 		responseContent = s.outputFilter.Apply(responseContent)
 	}
@@ -935,11 +1216,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
-	// Inject pending envelopes.
+	// Inject pending envelopes. These are appended post-loop so they are
+	// always part of the final response (PhaseFinal).
 	for _, env := range ls.pendingEnvelopes {
 		envelopeBlock := "\n\n```nanite-envelope\n" + env + "\n```"
 		responseContent += envelopeBlock
-		ch <- chat.StreamEvent{Type: "delta", Content: envelopeBlock}
+		ch <- chat.StreamEvent{Type: "delta", Content: envelopeBlock, Phase: chat.PhaseFinal}
 	}
 
 	// Parse envelopes.
@@ -1037,10 +1319,38 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	chat.LogStructuredWarnings(structured)
 	structuredJSON := structured.MarshalContent()
 
+	// Build message metadata. F4 (CW-20260419-0029): narration goes in
+	// metadata.thinking so the "expand thinking" UI affordance works across
+	// page refresh. Only stored when non-empty (tool-use turns).
+	// F3 (CW-20260420-0023): signed thinking blocks go in metadata.thinking_blocks
+	// (separate key from F4's narration prose so they round-trip with signatures).
+	type thinkingBlockMeta struct {
+		Thinking  string `json:"thinking"`
+		Signature string `json:"signature"`
+	}
+	meta := map[string]any{}
+	if thinking := narrationContent.String(); thinking != "" {
+		meta["thinking"] = thinking
+	}
+	if len(thinkingBlocks) > 0 {
+		blocks := make([]thinkingBlockMeta, len(thinkingBlocks))
+		for i, b := range thinkingBlocks {
+			blocks[i] = thinkingBlockMeta{Thinking: b.Thinking, Signature: b.Signature}
+		}
+		meta["thinking_blocks"] = blocks
+	}
+	msgMetadata := "{}"
+	if len(meta) > 0 {
+		if metaJSON, err := json.Marshal(meta); err == nil {
+			msgMetadata = string(metaJSON)
+		}
+	}
+
 	// Save assistant message.
 	assistantMsg := &store.Message{
 		ID: assistantMsgID, SessionID: sessionID, AgentID: agent.ID,
 		Role: "assistant", Content: structuredJSON, Envelope: envelopeJSON,
+		Metadata: msgMetadata,
 	}
 	if err := s.store.CreateMessage(assistantMsg); err != nil {
 		slog.Error("chat-service: failed to save assistant message", "err", err)
@@ -1076,7 +1386,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		SessionID: sessionID, MessageID: assistantMsgID,
 		Provider: providerName, Adapter: adapterType, Model: model,
 		AgentID: agent.ID, AgentSlug: agent.Slug, Mode: mode.Slug,
-		DurationMs: time.Since(startTime).Milliseconds(),
+		DurationMs:      time.Since(startTime).Milliseconds(),
 		ContextMessages: len(chatMessages), ToolIterations: ls.iteration,
 		ToolCalls: len(ls.toolCallRefs),
 	}
@@ -1135,6 +1445,38 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // Private helper methods
 // ---------------------------------------------------------------------------
 
+// persistPartialAssistant saves a partial or interrupted assistant message row
+// so the turn survives a page refresh when an early-return error path fires
+// before the canonical post-loop CreateMessage call (CW-20260419-0019).
+//
+// content is the streamed text accumulated so far; if empty the placeholder
+// "[generation interrupted]" is stored so the row always exists.  The message
+// is saved with metadata `{"had_error":true}` so the frontend rehydration path
+// (loadPersistedErrorState / useChat.ts) can distinguish it from a normal turn.
+//
+// Errors are logged but not propagated — this is a best-effort persistence call
+// on the way out of an error path; the caller is already returning an error to
+// the client.
+func (s *chatServiceImpl) persistPartialAssistant(sessionID, assistantMsgID, agentID, content string) {
+	if content == "" {
+		content = "[generation interrupted]"
+	}
+	structured := chat.WrapResponse(content, "default", nil, nil, false, true)
+	structuredJSON := structured.MarshalContent()
+	msg := &store.Message{
+		ID:        assistantMsgID,
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Role:      "assistant",
+		Content:   structuredJSON,
+		Metadata:  `{"had_error":true}`,
+	}
+	if err := s.store.CreateMessage(msg); err != nil {
+		slog.Warn("chat-service: persistPartialAssistant: failed to save partial message",
+			"session_id", sessionID, "msg_id", assistantMsgID, "err", err)
+	}
+}
+
 // Compact-recovery trigger kinds. CW-20260418-0099: the pipeline serves two
 // distinct failure modes that share the same remedy; the kind is threaded
 // through so logs / slot_changed reasoning reflect the actual trigger
@@ -1142,6 +1484,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 const (
 	compactTriggerContextOverflow = "context_overflow"
 	compactTriggerRateBudget      = "rate_budget_exceeded"
+	compactTriggerBudgetGate      = "budget_gate" // pre-loop budget ceiling (enforceBudgetOrCompact)
 )
 
 // recoverFromContextOverflow runs the CompactionPipeline synchronously.
@@ -1216,6 +1559,9 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	}
 
 	tokensBefore := result.Window.UsedTokens()
+	if s.events != nil {
+		s.events.EmitPreCompact(ctx, sessionID, len(chatMessages), triggerKind)
+	}
 
 	// CW-20260418-0099 bugfix: Run() short-circuits when Window.NeedsCompaction()
 	// is false — and NeedsCompaction evaluates against the MODEL's context
@@ -1263,6 +1609,9 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	}); emitErr != nil {
 		slog.Warn("chat-service: slot_changed emit failed during compact-recoverable recovery",
 			"err", emitErr, "trigger_kind", triggerKind)
+	}
+	if s.events != nil {
+		s.events.EmitPostCompact(ctx, sessionID, tokensBefore-tokensAfter, cr.StagesApplied)
 	}
 
 	slog.Info("chat-service: compact-recoverable recovery ran",
@@ -1446,6 +1795,9 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	}
 
 	tokensBefore := result.Window.UsedTokens()
+	if s.events != nil {
+		s.events.EmitPreCompact(ctx, sessionID, len(chatMessages), compactTriggerBudgetGate)
+	}
 	cr, err := pipeline.Run(ctx)
 	if err != nil {
 		slog.Warn("chat-service: compaction pipeline failed; ceiling enforcer will catch", "err", err, "session_id", sessionID)
@@ -1470,6 +1822,9 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 		TokensAfter:  tokensAfter,
 	}); emitErr != nil {
 		slog.Warn("chat-service: slot_changed emit failed", "err", emitErr)
+	}
+	if s.events != nil {
+		s.events.EmitPostCompact(ctx, sessionID, tokensBefore-tokensAfter, cr.StagesApplied)
 	}
 	if s.pluginHost != nil {
 		stages := append([]string(nil), cr.StagesApplied...)
@@ -1509,6 +1864,46 @@ func (w storeStashWriter) WriteHandoffStash(ctx context.Context, sessionID, stas
 // importing the unexported storeStashWriter directly.
 func NewStashWriter(s HandoffStashStore) ctxpkg.StashWriter {
 	return storeStashWriter{s: s}
+}
+
+// storeCompactionEventReader bridges CompactionEventStore to
+// ctxpkg.CompactionEventReader (P8A, CW-20260420-0025). The chat assembly path
+// uses this reader to decide whether to inject a CompactionContract disclosure
+// for the current turn.
+type storeCompactionEventReader struct {
+	s CompactionEventStore
+}
+
+func (r storeCompactionEventReader) GetLatestCompactionEvent(ctx context.Context, sessionID string) (*ctxpkg.CompactionEvent, error) {
+	evt, err := r.s.GetLatestCompactionEvent(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if evt == nil {
+		return nil, nil
+	}
+	out := ctxpkg.CompactionEvent{
+		ID:                   evt.ID,
+		SessionID:            evt.SessionID,
+		CoverageWindowStart:  evt.CoverageWindowStart,
+		CoverageWindowEnd:    evt.CoverageWindowEnd,
+		EvictedCachePointers: append([]string(nil), evt.EvictedCachePointers...),
+		PreservedSources:     append([]string(nil), evt.PreservedSources...),
+		SummaryMode:          evt.SummaryMode,
+		SummaryTokenCount:    evt.SummaryTokenCount,
+		OriginalTokenCount:   evt.OriginalTokenCount,
+		HandoffStashID:       evt.HandoffStashID,
+		StagesApplied:        append([]string(nil), evt.StagesApplied...),
+		CreatedAt:            evt.CreatedAt,
+	}
+	return &out, nil
+}
+
+// NewCompactionEventReader returns a ctxpkg.CompactionEventReader backed by the
+// given store. Exported so api / chat / context packages can share the bridge
+// without importing the unexported adapter directly.
+func NewCompactionEventReader(s CompactionEventStore) ctxpkg.CompactionEventReader {
+	return storeCompactionEventReader{s: s}
 }
 
 // BuildSummarizer resolves the provider+model used to summarize compacted
@@ -1603,6 +1998,20 @@ func classifyModeFromAgentTags(agent *store.AgentProfile) string {
 }
 
 // handleRequestTools processes a request_tools meta-tool call within the tool loop.
+//
+// Phase 5 / D3 (CW-20260419-0011) — reasoning-augmented broker:
+//
+//   - The first time the per-turn cap trips, the broker emits a REFLECTION
+//     prompt instead of a hard halt. It lists what's loaded and asks the
+//     LLM to restate the underlying goal in one sentence. The next
+//     request_tools call uses that restatement as a fresh query.
+//   - If the cap trips a SECOND time within the same turn (i.e. the LLM
+//     reflected once already and is still asking), we fall back to the
+//     pre-Phase-5 hard halt — we don't reflect repeatedly.
+//   - Every call is persisted to broker_decisions with intent + outcome +
+//     consecutive_empty + total_calls so future Phase 4 mining work has a
+//     ground-truth signal to learn from. (Phase 4 mining itself is
+//     deferred — see follow-ups.)
 func (s *chatServiceImpl) handleRequestTools(
 	ctx context.Context,
 	tu provider.ToolUseBlock,
@@ -1614,24 +2023,64 @@ func (s *chatServiceImpl) handleRequestTools(
 	maxCalls int,
 	resultBlocks []provider.ContentBlock,
 	toolCallRefs []chat.ToolCallRef,
+	sessionID string,
+	reflectionFired *bool,
+	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
 ) ([]provider.ContentBlock, []chat.ToolCallRef) {
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
 
+	// Pull the LLM-supplied intent up front so it ends up in every
+	// broker_decisions row (selected, loaded, empty, halted, reflected).
+	requestedIntent := ""
+	if tu.Input != nil {
+		if v, ok := tu.Input["intent"]; ok {
+			if s, ok := v.(string); ok {
+				requestedIntent = s
+			}
+		}
+	}
+
+	capTripped := *totalCalls > maxCalls || *consecutiveEmpty >= 2
+
+	// First cap-trip → reflection. Only if reflectionFired is non-nil and
+	// hasn't fired yet for this turn. This is the Phase 5 D3 entry point.
+	if capTripped && reflectionFired != nil && !*reflectionFired {
+		*reflectionFired = true
+		loadedList := sortedKeys(loadedTools)
+		reflection := fmt.Sprintf(
+			"Tool discovery soft cap reached (consecutive_empty=%d, total_calls=%d). "+
+				"Currently loaded:\n\n  %s\n\n"+
+				"Before asking for more tools, REFLECT and answer in one sentence: "+
+				"What is the underlying goal the user asked you to accomplish? "+
+				"State the goal directly — not the keyword you'd search with. "+
+				"Then either (a) call request_tools ONE more time using that goal as the intent — "+
+				"the broker will use your restated goal as a fresh query against tools, memory, and operator skills — "+
+				"OR (b) use a tool above that gets you closer to the goal, OR "+
+				"(c) describe to the user what specific capability you need so they can guide you. "+
+				"Repeated request_tools calls after this point will be hard-halted.",
+			*consecutiveEmpty, *totalCalls,
+			strings.Join(loadedList, ", "),
+		)
+		slog.Info("chat-service: request_tools reflected (D3)",
+			"session_id", sessionID, "consecutive_empty", *consecutiveEmpty, "total_calls", *totalCalls)
+		s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, "reflected", *consecutiveEmpty, *totalCalls, 0, reflection, sortedKeys(loadedTools), "")
+
+		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: reflection}
+		resultBlocks = append(resultBlocks, provider.ContentBlock{
+			Type: "tool_result", ToolUseID: tu.ID, Content: reflection,
+		})
+		toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
+		return resultBlocks, toolCallRefs
+	}
+
 	// Hard cap. CW-20260419-0012: friendlier halt message that actually
 	// helps the LLM decide what to do instead of just telling it "no."
-	// It lists what IS loaded (so the LLM can inventory), prompts goal
-	// reflection, and offers two escape paths (use what's there OR ask
-	// user) — rather than the previous "do NOT call request_tools again"
-	// which read as a punishment. Real conceptual rework lives in
-	// CW-20260419-0011; this is the low-lift polish.
-	if *totalCalls > maxCalls || *consecutiveEmpty >= 2 {
+	// Phase 5 D3 retains this as the second-strike fallback after a single
+	// reflection round.
+	if capTripped {
 		reason := fmt.Sprintf("consecutive_empty=%d, total_calls=%d", *consecutiveEmpty, *totalCalls)
-		loadedList := make([]string, 0, len(loadedTools))
-		for name := range loadedTools {
-			loadedList = append(loadedList, name)
-		}
-		sort.Strings(loadedList)
+		loadedList := sortedKeys(loadedTools)
 		rtResult := fmt.Sprintf(
 			"Tool discovery cap reached (%s). The tools currently loaded for this turn are:\n\n  %s\n\n"+
 				"Before asking for more tools, consider:\n"+
@@ -1641,7 +2090,9 @@ func (s *chatServiceImpl) handleRequestTools(
 				"Further request_tools calls this turn will be ignored; use a loaded tool or respond to the user.",
 			reason, strings.Join(loadedList, ", "),
 		)
-		slog.Warn("chat-service: request_tools halted", "reason", reason)
+		slog.Warn("chat-service: request_tools halted", "reason", reason, "session_id", sessionID)
+		s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, "halted", *consecutiveEmpty, *totalCalls, 0, "", sortedKeys(loadedTools), "")
+
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 		resultBlocks = append(resultBlocks, provider.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: rtResult,
@@ -1661,8 +2112,10 @@ func (s *chatServiceImpl) handleRequestTools(
 		}
 	}
 
+	outcome := "loaded"
 	if len(loaded) == 0 {
 		*consecutiveEmpty++
+		outcome = "empty"
 		if *consecutiveEmpty == 1 {
 			rtResult += "\n\nNo new tools were loaded for this request. If you believe the right tools exist, try rephrasing your intent with different keywords. Otherwise, proceed with the tools you have."
 		}
@@ -1670,7 +2123,10 @@ func (s *chatServiceImpl) handleRequestTools(
 		*consecutiveEmpty = 0
 	}
 
-	slog.Info("chat-service: request_tools loaded", "count", len(loaded), "consecutive_empty", *consecutiveEmpty, "tools", loaded)
+	slog.Info("chat-service: request_tools loaded",
+		"count", len(loaded), "consecutive_empty", *consecutiveEmpty,
+		"tools", loaded, "session_id", sessionID, "outcome", outcome)
+	s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, outcome, *consecutiveEmpty, *totalCalls, len(loaded), "", loaded, "")
 
 	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
 	resultBlocks = append(resultBlocks, provider.ContentBlock{
@@ -1679,6 +2135,79 @@ func (s *chatServiceImpl) handleRequestTools(
 	toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
 
 	return resultBlocks, toolCallRefs
+}
+
+// sortedKeys returns the keys of a map[string]bool in alphabetical order.
+// Tiny helper used by the request_tools reflection / halt formatters so the
+// loaded-tools listing is deterministic across turns.
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// persistBrokerCall records every request_tools meta-tool call into the
+// broker_decisions table AND the inspector ring buffer (when inspector is
+// wired). Best-effort: a failed write is logged but never gates the loop.
+// The chat service's store-backed BrokerDecisionLogger is only available via
+// toolServiceImpl; we route through that adapter so tests with a stub
+// ToolService don't have to provide a Store.
+func (s *chatServiceImpl) persistBrokerCall(
+	sessionID, intent, outcome string,
+	consecutiveEmpty, totalCalls, loadedCount int,
+	reflectionQuery string,
+) {
+	s.persistBrokerCallEx(sessionID, "", intent, outcome, consecutiveEmpty, totalCalls, loadedCount, reflectionQuery, nil, "")
+}
+
+// persistBrokerCallEx is the extended form used by handleRequestTools to also
+// record the broker decision into the inspector aggregator.
+func (s *chatServiceImpl) persistBrokerCallEx(
+	sessionID, inspectorTurnID, intent, outcome string,
+	consecutiveEmpty, totalCalls, loadedCount int,
+	reflectionQuery string,
+	selectedTools []string,
+	layerReached string,
+) {
+	if sessionID == "" {
+		return
+	}
+	logger, ok := s.tools.(brokerCallPersister)
+	if !ok || logger == nil {
+		return
+	}
+	if intent == "" {
+		intent = "(no intent supplied)"
+	}
+	logger.LogRequestToolsCall(
+		sessionID, intent, outcome,
+		consecutiveEmpty, totalCalls, loadedCount, reflectionQuery,
+	)
+	// I1 (CW-20260426-0004): additive — also emit to inspector.
+	if s.inspector != nil && inspectorTurnID != "" {
+		d := inspectsvc.BrokerDecision{
+			Intent:           intent,
+			Outcome:          outcome,
+			SelectedTools:    selectedTools,
+			LayerReached:     layerReached,
+			ConsecutiveEmpty: consecutiveEmpty,
+			TotalCalls:       totalCalls,
+			LoadedCount:      loadedCount,
+			ReflectionQuery:  reflectionQuery,
+		}
+		s.inspector.RecordBrokerDecision(sessionID, inspectorTurnID, d)
+	}
+}
+
+// brokerCallPersister is the narrow surface persistBrokerCall uses. It is
+// satisfied by toolServiceImpl (which holds a *store.Store via the
+// BrokerDecisionLogger setter); a stub ToolService that doesn't satisfy
+// this interface is silently a no-op for persistence.
+type brokerCallPersister interface {
+	LogRequestToolsCall(sessionID, intent, outcome string, consecutiveEmpty, totalCalls, loadedCount int, reflectionQuery string)
 }
 
 // detectStuckLoop checks for repeated identical tool results and returns
@@ -1881,7 +2410,8 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 		switch evt.Type {
 		case "delta":
 			retryContent.WriteString(evt.Content)
-			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
+			// Envelope corrections are post-loop responses; always final.
+			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content, Phase: chat.PhaseFinal}
 		case "error":
 			slog.Warn("chat-service: envelope retry error", "err", evt.Error)
 			return nil
@@ -2022,7 +2552,8 @@ const earlyStopSynthesisPrompt = "You've reached the maximum number of steps. Pr
 
 // earlyStopSynthesis makes one final, no-tools completion call to the provider
 // when the chat loop hits max_iter or runaway_fail_cap. The response is
-// streamed as delta events into ch and accumulated in fullContent.
+// streamed as delta events into ch and accumulated in fullContent and
+// finalContent. finalContent may be nil (pre-F4 call sites).
 //
 // Errors from the synthesis call are logged and silently swallowed — the
 // loop will still break cleanly regardless of whether synthesis succeeds.
@@ -2037,6 +2568,7 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 	chatMessages []provider.ChatMessage,
 	ch chan<- chat.StreamEvent,
 	fullContent *strings.Builder,
+	finalContent *strings.Builder,
 ) {
 	// Truncate to the most recent messages to avoid sending a near-limit history
 	// to the synthesis call. Near max_turns the context may already be at the
@@ -2074,7 +2606,11 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 		switch evt.Type {
 		case "delta":
 			fullContent.WriteString(evt.Content)
-			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content}
+			if finalContent != nil {
+				finalContent.WriteString(evt.Content)
+			}
+			// Synthesis is the final answer after loop exhaustion; always final.
+			ch <- chat.StreamEvent{Type: "delta", Content: evt.Content, Phase: chat.PhaseFinal}
 		case "error":
 			slog.Warn("chat-service: early-stop synthesis stream error", "err", evt.Error)
 		}

@@ -358,6 +358,26 @@ func (v *validator) validateCrossRefs(m *plugin.PluginManifest) {
 		}
 		seenAP[a.ID] = true
 	}
+
+	// Card rule card_types must be unique and have exactly one matcher set.
+	seenCR := map[string]bool{}
+	for i, cr := range m.Registers.CardRules {
+		field := fmt.Sprintf("registers.card_rules[%d]", i)
+		if cr.CardType == "" {
+			v.refuse(KindCrossRef, field+".card_type", "card rule requires card_type")
+			continue
+		}
+		if seenCR[cr.CardType] {
+			v.refuse(KindCrossRef, field+".card_type", fmt.Sprintf("duplicate card_type %q", cr.CardType))
+		}
+		seenCR[cr.CardType] = true
+		if cr.Pattern == "" && cr.OutputSchema == "" {
+			v.refuse(KindCrossRef, field, fmt.Sprintf("card_type %q: exactly one of pattern or output_schema is required", cr.CardType))
+		}
+		if cr.Pattern != "" && cr.OutputSchema != "" {
+			v.refuse(KindCrossRef, field, fmt.Sprintf("card_type %q: pattern and output_schema are mutually exclusive", cr.CardType))
+		}
+	}
 }
 
 // validateBundleAssets checks that files referenced by the manifest exist

@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import type { ApprovalRequest, ChatError, ChatErrorCode, Envelope, Message, PluginEnvelopeItem, StreamEvent, ToolWarning, UserSettings } from "@/lib/types";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
+import { applyEnvelopePanelEffects, applyPanelSignal } from "@/lib/panel-signal";
 
 const PAGE_SIZE = 50;
 
@@ -17,6 +18,7 @@ const STALL_CHECK_INTERVAL_MS = 5_000;
 /** SSE event type constants — single source of truth for stream event names */
 const SSE = {
   DELTA: "delta",
+  REPLACE_CONTENT: "replace_content",
   TOOL_CALL: "tool_call",
   TOOL_RESULT: "tool_result",
   TOOL_WARNING: "tool_warning",
@@ -27,6 +29,8 @@ const SSE = {
   ERROR: "error",
   APPROVAL_REQUEST: "approval_request",
   PLUGIN_ENVELOPE: "plugin_envelope",
+  /** J8 v1 (CW-20260426-0006) — agent-driven panel open/close/mode signals. */
+  PANEL_SIGNAL: "panel_signal",
 } as const;
 
 function makeChatError(
@@ -314,10 +318,23 @@ export function useChat(sessionId: string | null) {
       store().clearPendingApprovals();
       store().clearChatErrors();
       clearPersistedErrorState(sessionId);
+      // J8 v1 (CW-20260426-0006) — dismiss-reset trigger. The v1 simplification
+      // is "any new user-message turn resets all dismiss state for all panels"
+      // so the agent can re-open dismissed drawers on the next turn. Smarter
+      // classified-trigger version captured as
+      // followups_j8_classified_dismiss_reset.
+      useLayoutStore.getState().clearAllPanelDismissed();
       console.log("[useChat] streaming=true, sending message...");
 
       try {
-        const { message_id } = await api.sendMessage({ session_id: sessionId, content });
+        // F1 (CW-20260420-0014): read active effort from store and pass it
+        // to the API so the budget multiplier + reasoning config are applied.
+        const activeEffort = useChatStore.getState().activeEffort;
+        const { message_id } = await api.sendMessage({
+          session_id: sessionId,
+          content,
+          ...(activeEffort && activeEffort !== 'normal' ? { effort: activeEffort } : {}),
+        });
 
         // Connect to SSE stream
         // CW-20260418-0100: track the message id + reset cursor so
@@ -334,9 +351,34 @@ export function useChat(sessionId: string | null) {
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
-            accumulated += data.content;
-            store().appendStreamContent(data.content);
+            // F4 (CW-20260419-0029) + F3 (CW-20260420-0023): route by phase.
+            // "narration" → thinking strip (not accumulated as the answer).
+            // "thinking"  → thinking strip (F3 interleaved thinking block).
+            // "final"     → answer bubble (accumulated for persistence).
+            // No phase (pre-F4 or legacy streams) → treat as final (old behaviour).
+            if (data.phase === "narration") {
+              store().appendStreamNarration(data.content);
+            } else if (data.phase === "thinking") {
+              // F3: interleaved thinking block content — shown in "Working…" strip,
+              // not accumulated into the answer bubble.
+              store().appendStreamThinking(data.content);
+            } else {
+              // "final" or absent — goes into the answer accumulator.
+              accumulated += data.content;
+              store().appendStreamFinal(data.content);
+            }
             // Clear any transient status message when content starts flowing.
+            store().setStatusMessage(null);
+          }
+        });
+
+        es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
+          touchStreamEvent();
+          recordEventId(e.data as string);
+          const data: StreamEvent = JSON.parse(e.data as string);
+          if (data.content != null) {
+            accumulated = data.content;
+            store().replaceStreamContent(data.content);
             store().setStatusMessage(null);
           }
         });
@@ -405,11 +447,36 @@ export function useChat(sessionId: string | null) {
               receivedAt: Date.now(),
             };
             store().addPluginEnvelope(item, sessionId);
+            // J8 v1 — declarative drawer routing. When the envelope carries a
+            // target field, route the open/render through the layout store with
+            // source='agent' so the dismiss machine gates correctly.
+            applyEnvelopePanelEffects(envelope);
             if (import.meta.env?.DEV) {
               console.debug("[useChat] plugin_envelope", item);
             }
           } catch (err) {
             console.warn("[useChat] Failed to parse plugin_envelope event:", e.data, err);
+          }
+        });
+
+        es.addEventListener(SSE.PANEL_SIGNAL, (e: MessageEvent) => {
+          touchStreamEvent();
+          recordEventId(e.data as string);
+          try {
+            const evt: StreamEvent = JSON.parse(e.data as string);
+            if (!evt.envelope) return;
+            const sig = JSON.parse(evt.envelope) as {
+              action: 'open' | 'close' | 'mode';
+              panel_id?: string;
+              mode?: string;
+              source?: 'agent' | 'user';
+            };
+            applyPanelSignal(sig);
+            if (import.meta.env?.DEV) {
+              console.debug("[useChat] panel_signal", sig);
+            }
+          } catch (err) {
+            console.warn("[useChat] Failed to parse panel_signal event:", e.data, err);
           }
         });
 
@@ -629,6 +696,16 @@ export function useChat(sessionId: string | null) {
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content) {
           store().appendStreamContent(data.content);
+          store().setStatusMessage(null);
+        }
+      });
+
+      es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
+        touchStreamEvent();
+        recordEventId(e.data as string);
+        const data: StreamEvent = JSON.parse(e.data as string);
+        if (data.content != null) {
+          store().replaceStreamContent(data.content);
           store().setStatusMessage(null);
         }
       });

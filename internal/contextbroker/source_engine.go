@@ -70,13 +70,12 @@ func (s *EngineSource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 
 // fetchTasks retrieves tasks from Engine for a project.
 func (s *EngineSource) fetchTasks(ctx context.Context, projectID string, budget int) ([]ContextItem, error) {
-	toolName := fmt.Sprintf("mcp__%s__engine_tasks_list", s.ServerName)
 	input := map[string]any{
 		"project_id": projectID,
 		"status":     "doing",
 	}
 
-	result, err := s.MCP.ExecuteTool(ctx, toolName, input)
+	result, err := s.MCP.ExecuteToolOnServer(ctx, s.ServerName, "engine_tasks_list", input)
 	if err != nil {
 		return nil, fmt.Errorf("engine_tasks_list: %w", err)
 	}
@@ -86,12 +85,11 @@ func (s *EngineSource) fetchTasks(ctx context.Context, projectID string, budget 
 
 // fetchSprints retrieves active sprints from Engine.
 func (s *EngineSource) fetchSprints(ctx context.Context, projectID string, budget int) ([]ContextItem, error) {
-	toolName := fmt.Sprintf("mcp__%s__engine_sprints_list", s.ServerName)
 	input := map[string]any{
 		"project_id": projectID,
 	}
 
-	result, err := s.MCP.ExecuteTool(ctx, toolName, input)
+	result, err := s.MCP.ExecuteToolOnServer(ctx, s.ServerName, "engine_sprints_list", input)
 	if err != nil {
 		return nil, fmt.Errorf("engine_sprints_list: %w", err)
 	}

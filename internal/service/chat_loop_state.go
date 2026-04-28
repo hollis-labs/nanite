@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
+	"github.com/hollis-labs/nanite/internal/effort"
 )
 
 // ContinueSite identifies why the chat loop continues for another iteration.
@@ -25,28 +26,31 @@ const (
 
 // Default iteration limits.
 //
-// CW-20260419-0020 (tracked for the long-term fix): `defaultMaxTurns`
-// as a fixed constant is the wrong shape — the tool broker doesn't
-// know upfront whether a task is small or large, and any fixed ceiling
-// cuts the agent off mid-thought when scope legitimately expands. The
-// intended design (see the task for full spec) is a negotiated budget:
+// CW-20260419-0020 (E4) is now ABSORBED INTO E3 (CW-20260419-0026) —
+// `defaultMaxTurns` is the fallback only. The strategy planner
+// (internal/strategy.PlanStrategy) chooses the per-turn budget based on
+// intent classification + reflex match + (future) grounding evidence,
+// and the chat loop overwrites limits.maxTurns with Strategy.MaxTurns
+// before entering the loop body. On budget exhaustion, the strategy
+// reviewer (ReviewMidExecution) decides whether to wrap with partial
+// data, ask a clarifying question, or extend the budget (v2). Every
+// decision + rationale is logged to strategy_decisions.
 //
-//   1. Broker picks an initial budget based on classified task size.
-//   2. On hitting the budget, the loop asks the agent to explain WHY
-//      it needs more (scope grew, tool failure streak, exploration
-//      fan-out, etc.) instead of terminating.
-//   3. Broker decides whether to raise (and by how much) or stop.
-//   4. Every decision + reasoning is logged so we can audit over time.
+// The constant below is preserved so unit tests, code paths that bypass
+// the strategy planner, and on-disk migrations that compare to the
+// historical default keep working.
 //
-// Until that lands: interim bump to 75 (from 25) after c17/c27 UAT showed
-// 25 is the default-case ceiling, not a rare safety net — list+analyze
-// asks routinely need 20-30 tool calls just for the fetching phase, and
-// the LLM was being cut off mid-thought with no final message. 75 gives
-// headroom without uncorking; hardCeiling=200 still catches true runaways.
-// Tunable via user_settings once CW-20260419-0020 ships.
+// Historical context (preserved for the audit trail): the constant was
+// bumped to 75 (from 25) after c17/c27 UAT showed 25 is the default-case
+// ceiling, not a rare safety net — list+analyze asks routinely need
+// 20-30 tool calls just for the fetching phase, and the LLM was being
+// cut off mid-thought with no final message. 75 gives headroom without
+// uncorking; hardCeiling=200 still catches true runaways. Strategy now
+// supersedes the constant — the typical Strategy.MaxTurns is 10-40, and
+// 75 only applies when the strategy planner is bypassed entirely.
 const (
-	defaultMaxTurns            = 75
-	defaultHardCeiling         = 200
+	defaultMaxTurns    = 75
+	defaultHardCeiling = 200
 	// CW-20260417-0485: ConsecutiveFailCap used to terminate the chat loop,
 	// cutting the LLM off before it could respond to the tool errors it had
 	// just received as tool_result blocks. The loop now threads tool errors
@@ -55,15 +59,15 @@ const (
 	// defaultRunawayFailCap. The soft cap still drives the "critical"
 	// tool_warning SSE event so the UI can warn the user before the runaway
 	// trips, but it no longer exits the loop.
-	defaultConsecutiveFailCap  = 3
+	defaultConsecutiveFailCap = 3
 	// defaultRunawayFailCap is the hard circuit-breaker. When consecutive
 	// tool failures reach this count the loop emits a typed
 	// `chat-loop-terminated` envelope and exits. Sized high enough that a
 	// reasonable LLM has multiple turns to recover (acknowledge error, try
 	// different args, try a different tool, or stop gracefully) before the
 	// breaker trips.
-	defaultRunawayFailCap      = 10
-	defaultIdleTimeoutSeconds  = 900 // 15 minutes
+	defaultRunawayFailCap     = 10
+	defaultIdleTimeoutSeconds = 900 // 15 minutes
 	// CW-20260419-0012 (quick fix): 3 → 6. 3 was an arbitrary
 	// conservative floor; empirically the agent needs 3 passes for
 	// intent-warmup and another 2-3 for follow-on exploration within
@@ -78,10 +82,10 @@ const (
 type TerminationCode string
 
 const (
-	TerminationRunawayToolFailures TerminationCode = "runaway_tool_failures"
-	TerminationMaxTurns            TerminationCode = "max_turns"
-	TerminationHardCeiling         TerminationCode = "hard_ceiling"
-	TerminationIdleTimeout         TerminationCode = "idle_timeout"
+	TerminationRunawayToolFailures  TerminationCode = "runaway_tool_failures"
+	TerminationMaxTurns             TerminationCode = "max_turns"
+	TerminationHardCeiling          TerminationCode = "hard_ceiling"
+	TerminationIdleTimeout          TerminationCode = "idle_timeout"
 	TerminationRetryBudgetExhausted TerminationCode = "retry_budget_exhausted"
 )
 
@@ -92,8 +96,8 @@ type TurnSnapshot struct {
 	Iteration    int                `json:"iteration"`
 	MaxTurns     int                `json:"max_turns"`
 	ToolCalls    []ToolCallSnapshot `json:"tool_calls,omitempty"`
-	TokensUsed   int               `json:"tokens_used"`
-	MessageCount int               `json:"message_count"`
+	TokensUsed   int                `json:"tokens_used"`
+	MessageCount int                `json:"message_count"`
 	Timestamp    time.Time          `json:"timestamp"`
 }
 
@@ -109,15 +113,15 @@ type ToolCallSnapshot struct {
 
 // iterationLimits holds the resolved limits for a loop invocation.
 type iterationLimits struct {
-	maxTurns            int
-	hardCeiling         int
-	consecutiveFailCap  int
+	maxTurns           int
+	hardCeiling        int
+	consecutiveFailCap int
 	// runawayFailCap is the hard circuit-breaker. See defaultRunawayFailCap
 	// and the CW-20260417-0485 comment there for the rationale.
-	runawayFailCap      int
-	idleTimeout         time.Duration
-	perToolMax          map[string]int // tool name → max iterations (0 = no limit)
-	defaultPerToolCap   int            // global per-tool cap from UserSettings (0 = no cap)
+	runawayFailCap    int
+	idleTimeout       time.Duration
+	perToolMax        map[string]int // tool name → max iterations (0 = no limit)
+	defaultPerToolCap int            // global per-tool cap from UserSettings (0 = no cap)
 }
 
 // loopState consolidates all mutable state for the generateResponse loop.
@@ -129,6 +133,7 @@ type loopState struct {
 	toolCallRefs     []chat.ToolCallRef
 	pendingEnvelopes []string
 	wasTruncated     bool
+	directReturn     string
 
 	// Iteration control.
 	iteration           int
@@ -148,6 +153,14 @@ type loopState struct {
 	totalRequestToolsCalls   int
 	maxRequestToolsCalls     int
 
+	// Phase 5 / D3 (CW-20260419-0011) — broker reflection on cap.
+	// reflectionFired is set once the broker has emitted the reflection
+	// prompt for this turn. The next request_tools call after that uses
+	// the LLM's restated goal as a fresh broker query rather than halting
+	// outright. Subsequent caps (after reflection) fall back to the
+	// pre-Phase-5 hard halt; we don't reflect repeatedly within one turn.
+	reflectionFired bool
+
 	// Activity tracking.
 	lastActivity time.Time
 
@@ -158,6 +171,12 @@ type loopState struct {
 	// the classifier has not yet run for this generation.
 	scopeTier        classify.ScopeTier
 	executionPattern classify.ExecutionPattern
+
+	// F1 (CW-20260420-0014): Effort scalar. Set once by generateResponse from
+	// the request context before the loop runs. Biases token budget (via
+	// BudgetMultiplier) and reasoning-block enablement (via ReasoningCfg).
+	// Orthogonal to ScopeTier — does NOT change roles, tools, or turn counts.
+	currentEffort effort.Effort
 
 	// Debug snapshots.
 	debugMode bool
@@ -186,6 +205,12 @@ type loopState struct {
 	// Evicted automatically: loopState is created fresh per generateResponse call.
 	scratchpad      map[string]any
 	scratchpadBytes int
+
+	// I1 (CW-20260426-0004): inspector turn ID for the dev-mode aggregator.
+	// Set by generateResponse after slot assembly; propagated into
+	// handleRequestTools and executeSingleTool so broker/tool producers
+	// can append to the same per-turn snapshot.
+	inspectorTurnID string
 }
 
 // maxCompactRecoverableAttempts caps the number of synchronous compaction
@@ -448,6 +473,25 @@ func (ls *loopState) SetClassification(tier classify.ScopeTier, pattern classify
 // touchActivity updates the last activity timestamp.
 func (ls *loopState) touchActivity() {
 	ls.lastActivity = time.Now()
+}
+
+// SetEffort stores the per-turn Effort scalar. Called by generateResponse
+// once per generation, from the request context, before the loop body runs.
+// Invalid values are silently promoted to effort.Default.
+func (ls *loopState) SetEffort(e effort.Effort) {
+	if !e.IsValid() {
+		e = effort.Default
+	}
+	ls.currentEffort = e
+}
+
+// Effort returns the per-turn Effort scalar. Returns effort.Default when
+// SetEffort has not been called.
+func (ls *loopState) Effort() effort.Effort {
+	if !ls.currentEffort.IsValid() {
+		return effort.Default
+	}
+	return ls.currentEffort
 }
 
 // scratchpadWrite upserts key→value in the per-turn scratchpad.

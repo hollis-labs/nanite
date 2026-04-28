@@ -6,6 +6,40 @@ type Theme = 'dark' | 'light' | 'system'
 type RightRailTab = 'widgets' | 'inbox' | 'artifacts' | (string & {})
 export type LayoutPreset = 'focus' | 'default' | 'workspace' | 'reading'
 
+/**
+ * J9: per-panel user preferences persisted in layout store.
+ * - defaultPanel:  which panel ID is active on fresh open (user-configured).
+ * - panelEnabled:  map of panelId → enabled (false = hidden from tab strip).
+ * - panelOrder:    user-reordered sequence of panel IDs (subset or full list).
+ * - dismissedByUser: set of panel IDs user has dismissed since last conversational
+ *   trigger. Owned by layout store; J8 reads/clears this for its dismiss policy.
+ *
+ * J8 v1 (CW-20260426-0006): the 4-state dismiss state machine derives its
+ * state from these two maps:
+ *   - state(panel) = `user_dismissed`  iff dismissedByUser[panel] === true
+ *   - state(panel) = `user_opened`     iff panelOpenSource[panel] === 'user'
+ *   - state(panel) = `agent_opened`    iff panelOpenSource[panel] === 'agent'
+ *   - state(panel) = `closed`          otherwise
+ *
+ * panelOpenSource attribution rules:
+ *   - user toggles a panel via UI         → 'user'
+ *   - agent calls panel_open / signal_mode → 'agent'   (subject to dismiss gate)
+ *   - panel closed                         → null      (entry deleted)
+ *
+ * dismissedByUser is cleared en bloc by clearDismissedAll() on the next
+ * user-message turn (the "any new user turn resets" simplification — see
+ * the followups_j8_classified_dismiss_reset note for the smarter classified
+ * version).
+ */
+export interface PanelPrefs {
+  defaultPanel?: string
+  panelEnabled: Record<string, boolean>
+  panelOrder: string[]
+  dismissedByUser: Record<string, boolean>
+  /** Who last opened this panel — drives the 4-state dismiss machine. */
+  panelOpenSource: Record<string, 'agent' | 'user'>
+}
+
 interface LayoutState {
   leftSidebarOpen: boolean
   rightRailOpen: boolean
@@ -43,6 +77,39 @@ interface LayoutState {
   setTheme: (theme: Theme) => void
   memoryModalOpen: boolean
   setMemoryModalOpen: (open: boolean) => void
+
+  // J9: panel preference actions
+  panelPrefs: PanelPrefs
+  /** Open rail and switch to panel id (J8 seam: panel_open). Records source. */
+  setPanelOpen: (id: string, source?: 'agent' | 'user') => void
+  /** Set which panel is the user's default (shown on fresh open). */
+  setDefaultPanel: (id: string) => void
+  /** Toggle whether a panel appears in the tab strip. */
+  setPanelEnabled: (id: string, enabled: boolean) => void
+  /** Persist a user-chosen panel ordering. */
+  setPanelOrder: (order: string[]) => void
+  /** Mark a panel dismissed by user (J8 dismiss policy storage seam). */
+  markPanelDismissed: (id: string) => void
+  /** Clear the dismissed flag for a panel (J8 re-open after new trigger). */
+  clearPanelDismissed: (id: string) => void
+  /**
+   * J8 v1 dismiss-reset hook: clears the dismissedByUser map en bloc.
+   * Called by the chat composer on every new user-message turn (the
+   * v1 simplification "any new user turn resets all dismiss state for
+   * all drawers"). Smarter classified-trigger version is captured as
+   * followups_j8_classified_dismiss_reset.
+   */
+  clearAllPanelDismissed: () => void
+
+  // J8 v1 — bottom_chat_drawer (CW-20260426-0006). The bottom chat drawer
+  // is a separate UI surface from the right-rail panel host; it sits below
+  // the chat transcript and surfaces long-form reference content (documents,
+  // scratchpads). It is NOT in J9's right-rail catalog (widgets/work/
+  // workflows/inbox/artifacts) so it has its own open/close state and source
+  // attribution.
+  bottomChatDrawerOpen: boolean
+  /** Open/close the bottom chat drawer with source attribution for the dismiss machine. */
+  setBottomDrawerOpen: (open: boolean, source?: 'agent' | 'user') => void
 }
 
 function resolveTheme(theme: Theme): 'dark' | 'light' {
@@ -135,6 +202,122 @@ export const useLayoutStore = create<LayoutState>()(
       },
       memoryModalOpen: false,
       setMemoryModalOpen: (open) => set({ memoryModalOpen: open }),
+
+      // J9: panel preferences (persisted via Zustand persist)
+      panelPrefs: {
+        panelEnabled: {},
+        panelOrder: [],
+        dismissedByUser: {},
+        panelOpenSource: {},
+      },
+      setPanelOpen: (id, source = 'user') =>
+        set((s) => {
+          // J8 v1 dismiss machine: agent-driven opens are blocked when the
+          // user has dismissed the panel since the last conversational
+          // trigger. User-driven opens override the dismiss flag (manual
+          // open == intent re-affirmation).
+          const dismissed = s.panelPrefs.dismissedByUser[id] === true
+          if (source === 'agent' && dismissed) {
+            return s // NO-OP — agent silently fails the open per J8 contract.
+          }
+          // User-driven opens clear the dismiss flag for the panel they opened.
+          let nextDismissed = s.panelPrefs.dismissedByUser
+          if (source === 'user' && dismissed) {
+            const { [id]: _drop, ...rest } = nextDismissed
+            nextDismissed = rest
+          }
+          return {
+            rightRailOpen: true,
+            rightRailTab: id as RightRailTab,
+            panelPrefs: {
+              ...s.panelPrefs,
+              dismissedByUser: nextDismissed,
+              panelOpenSource: { ...s.panelPrefs.panelOpenSource, [id]: source },
+            },
+          }
+        }),
+      setDefaultPanel: (id) =>
+        set((s) => ({ panelPrefs: { ...s.panelPrefs, defaultPanel: id } })),
+      setPanelEnabled: (id, enabled) =>
+        set((s) => ({
+          panelPrefs: {
+            ...s.panelPrefs,
+            panelEnabled: { ...s.panelPrefs.panelEnabled, [id]: enabled },
+          },
+        })),
+      setPanelOrder: (order) =>
+        set((s) => ({ panelPrefs: { ...s.panelPrefs, panelOrder: order } })),
+      markPanelDismissed: (id) =>
+        set((s) => {
+          // Dismiss clears the source attribution — the panel is no longer
+          // "agent_opened" or "user_opened"; it's `user_dismissed`.
+          const { [id]: _drop, ...nextSource } = s.panelPrefs.panelOpenSource
+          return {
+            panelPrefs: {
+              ...s.panelPrefs,
+              dismissedByUser: { ...s.panelPrefs.dismissedByUser, [id]: true },
+              panelOpenSource: nextSource,
+            },
+          }
+        }),
+      clearPanelDismissed: (id) =>
+        set((s) => {
+          const { [id]: _, ...rest } = s.panelPrefs.dismissedByUser
+          return { panelPrefs: { ...s.panelPrefs, dismissedByUser: rest } }
+        }),
+      clearAllPanelDismissed: () =>
+        set((s) => ({
+          panelPrefs: { ...s.panelPrefs, dismissedByUser: {} },
+        })),
+
+      // J8 v1 — bottom_chat_drawer state (separate from right-rail).
+      bottomChatDrawerOpen: false,
+      setBottomDrawerOpen: (open, source = 'user') =>
+        set((s) => {
+          const id = 'bottom_chat_drawer'
+          if (open) {
+            const dismissed = s.panelPrefs.dismissedByUser[id] === true
+            if (source === 'agent' && dismissed) {
+              return s // NO-OP — dismiss-gated agent open.
+            }
+            let nextDismissed = s.panelPrefs.dismissedByUser
+            if (source === 'user' && dismissed) {
+              const { [id]: _drop, ...rest } = nextDismissed
+              nextDismissed = rest
+            }
+            return {
+              bottomChatDrawerOpen: true,
+              panelPrefs: {
+                ...s.panelPrefs,
+                dismissedByUser: nextDismissed,
+                panelOpenSource: { ...s.panelPrefs.panelOpenSource, [id]: source },
+              },
+            }
+          }
+          // Close path. User-close marks dismissed; agent-close drops the source
+          // entry but does not touch dismiss state.
+          if (source === 'user') {
+            const { [id]: _drop, ...nextSource } = s.panelPrefs.panelOpenSource
+            return {
+              bottomChatDrawerOpen: false,
+              panelPrefs: {
+                ...s.panelPrefs,
+                dismissedByUser: { ...s.panelPrefs.dismissedByUser, [id]: true },
+                panelOpenSource: nextSource,
+              },
+            }
+          }
+          // Agent-close: only honored when the panel was agent-opened.
+          // Refuse to close a user-opened drawer (J8 user-overrides-agent rule).
+          if (s.panelPrefs.panelOpenSource[id] === 'user') {
+            return s
+          }
+          const { [id]: _drop, ...nextSource } = s.panelPrefs.panelOpenSource
+          return {
+            bottomChatDrawerOpen: false,
+            panelPrefs: { ...s.panelPrefs, panelOpenSource: nextSource },
+          }
+        }),
     }),
     {
       name: 'nanite-layout',

@@ -45,8 +45,8 @@ func TestCheck_defaultMode_asksForDestructive(t *testing.T) {
 func TestCheck_acceptEditsMode(t *testing.T) {
 	e := NewEngine(ModeAcceptEdits, nil)
 
-	// File edits auto-allowed.
-	result := e.Check(context.Background(), "s1", "mcp__dev__edit", nil, ToolMeta{})
+	// File edits auto-allowed (uniform name post ADR-002).
+	result := e.Check(context.Background(), "s1", "dev_edit", nil, ToolMeta{})
 	if result.Decision != DecisionAllow {
 		t.Errorf("accept-edits should auto-allow file edits, got %s", result.Decision)
 	}
@@ -62,8 +62,8 @@ func TestCheck_ruleOverride(t *testing.T) {
 	rules := &RuleSet{
 		Rules: []Rule{
 			{Tool: "shell", Pattern: "rm -rf", Behavior: DecisionDeny},
-			{Tool: "mcp__dev__edit", Pattern: "/src/**", Behavior: DecisionAllow},
-			{Tool: "mcp__engine__task_delete", Behavior: DecisionAsk},
+			{Tool: "dev_edit", Pattern: "/src/**", Behavior: DecisionAllow},
+			{Tool: "task_delete", Behavior: DecisionAsk}, // formerly mcp__engine__task_delete
 		},
 	}
 	e := NewEngine(ModeDefault, rules)
@@ -76,14 +76,14 @@ func TestCheck_ruleOverride(t *testing.T) {
 	}
 
 	// Edit in /src: allowed by rule.
-	result = e.Check(context.Background(), "s1", "mcp__dev__edit",
+	result = e.Check(context.Background(), "s1", "dev_edit",
 		map[string]any{"path": "/src/main.go"}, ToolMeta{})
 	if result.Decision != DecisionAllow {
 		t.Errorf("expected allow for /src edit, got %s", result.Decision)
 	}
 
 	// Task delete: ask by rule.
-	result = e.Check(context.Background(), "s1", "mcp__engine__task_delete",
+	result = e.Check(context.Background(), "s1", "task_delete",
 		nil, ToolMeta{})
 	if result.Decision != DecisionAsk {
 		t.Errorf("expected ask for task delete, got %s", result.Decision)

@@ -1,0 +1,30 @@
+schema_version: 1
+name: card-rules-demo
+id: card-rules-demo
+version: 1.0.0
+description: >
+  Reference plugin demonstrating card_rules manifest extension (J5).
+  Registers two Stage 1 card detection rules: one regex-based rule that
+  detects a "metrics-summary" card when output contains a fenced metrics
+  block, and one JSON-schema-based rule (deferred to on-disk asset resolution)
+  for a "data-table" card type.
+author: Nanite
+license: Apache-2.0
+protocol: 1
+runtime: builtin
+nanite_compat:
+  min: "0.1.0"
+registers:
+  card_rules:
+    - card_type: metrics-summary
+      pattern: "```metrics"
+      description: >
+        Emits a metrics-summary card when the agent output contains a fenced
+        ```metrics block. The block is expected to contain JSON with a "metrics"
+        array.
+    - card_type: data-table
+      pattern: "```data-table"
+      description: >
+        Emits a data-table card when the agent output contains a fenced
+        ```data-table block. The block is expected to contain JSON with
+        "headers" and "rows" arrays.

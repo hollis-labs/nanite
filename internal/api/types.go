@@ -38,6 +38,11 @@ type SwitchSessionModeRequest struct {
 type SendMessageRequest struct {
 	SessionID string `json:"session_id"`
 	Content   string `json:"content"`
+	// Effort biases the token budget multiplier and reasoning-block enablement
+	// for this turn. Valid values: "low", "normal" (default), "high", "max".
+	// Empty string or omitted → "normal". Unknown values are ignored (treated as normal).
+	// See internal/effort for the full mapping (CW-20260420-0014).
+	Effort string `json:"effort,omitempty"`
 }
 
 type AgentMessageRequest struct {
@@ -398,4 +403,13 @@ type CatalogInstallRequest struct {
 
 type SetProviderAPIKeyRequest struct {
 	APIKey string `json:"api_key"`
+}
+
+// --- Trust (H1, CW-20260421-0014) ---
+
+// SetWorkspaceRoleTrustRequest is the body for
+// POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust.
+type SetWorkspaceRoleTrustRequest struct {
+	Tier       string `json:"tier"`        // "untrusted" | "normal" | "trusted"
+	PromotedBy string `json:"promoted_by"` // optional attribution string
 }

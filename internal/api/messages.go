@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/effort"
 )
 
 func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -20,7 +21,17 @@ func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgID, err := a.Services.Chat.HandleMessage(r.Context(), req.SessionID, req.Content)
+	// F1 (CW-20260420-0014): parse effort scalar from the request and carry it
+	// into the context so generateResponse can apply the budget multiplier and
+	// reasoning-block config without changing the HandleMessage signature.
+	// Unknown / empty values resolve to effort.Default (EffortNormal).
+	e := effort.Parse(req.Effort)
+	if !e.IsValid() {
+		e = effort.Default
+	}
+	ctx := effort.WithContext(r.Context(), e)
+
+	msgID, err := a.Services.Chat.HandleMessage(ctx, req.SessionID, req.Content)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

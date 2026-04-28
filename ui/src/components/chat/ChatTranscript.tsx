@@ -79,6 +79,12 @@ export function ChatTranscript({
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const queryClient = useQueryClient();
 
+  // F4 (CW-20260419-0029) — narration strip + collapse-pill.
+  // F3 (CW-20260420-0023) — thinking strip.
+  const streamingNarration = useChatStore((s) => s.streamingNarration);
+  const streamingFinal = useChatStore((s) => s.streamingFinal);
+  const streamingThinking = useChatStore((s) => s.streamingThinking);
+
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
 
@@ -338,8 +344,8 @@ export function ChatTranscript({
 
         {isStreaming && toolWarnings.length > 0 && <ToolWarningBanner warnings={toolWarnings} />}
 
-        {/* Streaming message */}
-        {isStreaming && streamingContent && (
+        {/* Streaming message — F4 (CW-20260419-0029) narration strip + answer bubble */}
+        {isStreaming && (
           <div className="flex gap-3">
             <div
               className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] ${avatarStyle.bg} ${avatarStyle.text}`}
@@ -350,25 +356,35 @@ export function ChatTranscript({
               <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
                 Nanite
               </div>
-              <MessageContent content={streamingContent} role="assistant" />
-              {streamStalled && <ThinkingIndicator />}
-            </div>
-          </div>
-        )}
 
-        {/* Thinking indicator — before content arrives */}
-        {isStreaming && !streamingContent && (
-          <div className="flex gap-3">
-            <div
-              className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] ${avatarStyle.bg} ${avatarStyle.text}`}
-            >
-              <Bot className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
-                Nanite
-              </div>
-              <ThinkingIndicator />
+              {/* Working strip — live while narration or thinking is arriving; shows ThinkingIndicator when nothing yet */}
+              {(streamingNarration || streamingThinking) ? (
+                <div className="mb-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2">
+                  <div className="font-mono text-[10px] uppercase tracking-wide text-fg-faint mb-1">
+                    Working…
+                  </div>
+                  {/* F3: thinking content shown with italic muted styling to distinguish from narration */}
+                  {streamingThinking && (
+                    <div className="text-[12px] leading-relaxed text-fg-muted/70 italic line-clamp-2 mb-1">
+                      {streamingThinking}
+                    </div>
+                  )}
+                  {streamingNarration && (
+                    <div className="text-[12px] leading-relaxed text-fg-muted line-clamp-3">
+                      {streamingNarration}
+                    </div>
+                  )}
+                </div>
+              ) : !streamingFinal ? (
+                // No narration/thinking and no final text yet — show the baseline thinking dots
+                <ThinkingIndicator />
+              ) : null}
+
+              {/* Final answer area — renders as it arrives */}
+              {streamingFinal && (
+                <MessageContent content={streamingFinal} role="assistant" />
+              )}
+              {streamStalled && <ThinkingIndicator />}
             </div>
           </div>
         )}

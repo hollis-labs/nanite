@@ -13,8 +13,11 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/filter"
+	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
+	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -118,6 +121,24 @@ type ChatServiceConfig struct {
 	// to write CLAUDE.md and .mcp.json on each chat turn. nil = sandbox file
 	// writes are skipped.
 	AdapterRegistry *agent.AdapterRegistry
+
+	// StrategyLogger persists v1 strategy decisions to strategy_decisions
+	// (CW-20260419-0026, Phase 5 / E3). nil-safe: when absent, strategy
+	// planning still runs and applies its MaxTurns to the loop budget,
+	// but no row is written. *store.Store satisfies the interface.
+	StrategyLogger strategyDecisionLogger
+
+	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
+	// nil-safe: when nil the inspector is disabled. Set when developer_mode=true.
+	Inspector *inspectsvc.Service
+
+	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
+	// nil-safe: when nil loop detection is disabled. Shared across all sessions.
+	LoopDetector *loopdetect.Detector
+
+	// ReminderEngine is the deterministic trigger engine for agent-set reminders
+	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
+	ReminderEngine *reminders.Engine
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -165,6 +186,22 @@ type chatServiceImpl struct {
 	dbPath string
 	// adapterRegistry is forwarded to sandbox.Populate on each CLI chat turn.
 	adapterRegistry *agent.AdapterRegistry
+
+	// strategyLogger persists v1 strategy decisions. nil-safe.
+	// (CW-20260419-0026, Phase 5 / E3.)
+	strategyLogger strategyDecisionLogger
+
+	// inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
+	// nil-safe: wired only when developer_mode=true.
+	inspector *inspectsvc.Service
+
+	// loopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
+	// nil-safe: disabled when nil.
+	loopDetector *loopdetect.Detector
+
+	// reminderEngine is the deterministic trigger engine for agent-set reminders
+	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
+	reminderEngine *reminders.Engine
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -228,6 +265,10 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		lifecycle:               lifecycle.NewManager("service.chat"),
 		activeGen:               make(map[string]*inFlightGen),
 		sessionEventWriter:  cfg.SessionEventWriter,
+		strategyLogger:      cfg.StrategyLogger,
+		inspector:           cfg.Inspector,
+		loopDetector:        cfg.LoopDetector,
+		reminderEngine:      cfg.ReminderEngine,
 	}
 }
 

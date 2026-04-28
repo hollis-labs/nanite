@@ -101,63 +101,54 @@ var errSSRFBlocked = errors.New("ssrf: blocked destination")
 func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	return []Tool{
 		{
-			Name:        "web_fetch",
-			Description: "Fetch a URL via HTTP GET and return the response body as text. Returns status code and body truncated at 8000 chars. Note: many news/social sites block automated requests (403/Cloudflare). Works best with APIs, documentation sites, and raw content URLs. Example: web_fetch(url=\"https://api.github.com/repos/hollis-labs/nanite\")",
+			Name: "web_fetch",
+			Description: "Fetch a URL via HTTP GET and return the response body as text.\n\n" +
+				"**When to use:** When the user asks to retrieve content from a public URL — API endpoints, documentation pages, raw file URLs, or any web resource.\n\n" +
+				"**When NOT to use:** Do not use for internal/private IPs, localhost, or cloud IMDS addresses (169.254.169.254) — those are blocked by SSRF guard. Do not use as a substitute for code or file operations already available via dev_read/dev_glob.\n\n" +
+				"**Output shape:** Status line (\"Status: 200 OK\"), optional Content-Type, blank line, then the response body — truncated to 8000 chars if larger (up to 1 MiB is read from the server before truncation). Truncation is flagged with a [truncated: ...] suffix.\n\n" +
+				"**Notes:** Many news/social sites block automated requests (403/Cloudflare). Works best with APIs, documentation sites, and raw content URLs. Example: web_fetch(url=\"https://api.github.com/repos/hollis-labs/nanite\")",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"url": map[string]any{"type": "string", "description": "Full URL including https://. Example: https://docs.anthropic.com/en/docs"},
+					"url": map[string]any{"type": "string", "description": "Full URL including https://. Must be a public hostname — private IPs, localhost, and link-local addresses are blocked. Example: https://docs.anthropic.com/en/docs"},
 				},
 				"required": []string{"url"},
 			},
 		},
 		{
-			Name:        "json_parse",
-			Description: "Extract a value from a JSON string using dot-notation path (e.g. .data.items[0].name).",
+			Name: "json_parse",
+			Description: "Extract a value from a JSON string using dot-notation path (e.g. .data.items[0].name).\n\n" +
+				"**When to use:** When you have a JSON blob (e.g. from a prior tool result) and need to extract a deeply nested field without writing code.\n\n" +
+				"**When NOT to use:** Do not use for structured iteration over arrays — extract a specific field by path. If you need to loop, parse the full JSON yourself.\n\n" +
+				"**Output shape:** The value at the path as a string (primitive), \"null\" for null, or a JSON-encoded sub-object/array.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"json": map[string]any{"type": "string", "description": "JSON string to parse"},
-					"path": map[string]any{"type": "string", "description": "Dot-notation path (e.g. .data.items[0].name)"},
+					"path": map[string]any{"type": "string", "description": "Dot-notation path (e.g. .data.items[0].name). Leading dot is optional."},
 				},
 				"required": []string{"json", "path"},
 			},
 		},
 		{
-			Name:        "datetime",
-			Description: "Get current UTC time, or compute date math (e.g. +3d, -1h, +30m, -2w).",
+			Name: "datetime",
+			Description: "Get the current UTC time, or compute a date offset from now.\n\n" +
+				"**When to use:** When you need to compute a future or past timestamp (e.g. deadline in 3 days, token expiry in 1 hour). The current date is already available in the system prompt for today's date questions — don't call this just to check the date.\n\n" +
+				"**When NOT to use:** Do not call for simple \"what day is it\" questions — that is already in your context. Do not use for calendar arithmetic beyond day/week offsets.\n\n" +
+				"**Output shape:** RFC3339 timestamp string, always UTC. Example: \"2026-04-29T15:00:00Z\".\n\n" +
+				"**Supported units:** s (seconds), m (minutes), h (hours), d (days), w (weeks). Prefix with + or -. Examples: +3d, -1h, +30m, -2w.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"operation": map[string]any{"type": "string", "description": "Date math expression (e.g. +3d, -1h). Omit for current time."},
+					"operation": map[string]any{"type": "string", "description": "Date math expression: <sign><n><unit> where sign is + or -, n is an integer, and unit is s/m/h/d/w. Examples: +3d, -1h, +30m. Omit to get the current time."},
 				},
 			},
 		},
 		{
-			Name:        "base64_encode",
-			Description: "Encode a string to base64.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"input": map[string]any{"type": "string", "description": "String to encode"},
-				},
-				"required": []string{"input"},
-			},
-		},
-		{
-			Name:        "base64_decode",
-			Description: "Decode a base64 string.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"input": map[string]any{"type": "string", "description": "Base64 string to decode"},
-				},
-				"required": []string{"input"},
-			},
-		},
-		{
-			Name:        "url_encode",
-			Description: "URL percent-encode a string.",
+			Name: "base64_encode",
+			Description: "Encode a UTF-8 string to standard base64.\n\n" +
+				"**When to use:** When you need to encode binary-safe data for HTTP headers, JSON payloads, or similar protocols.\n\n" +
+				"**Output shape:** Base64 string (standard alphabet, no line wrapping). Chain with base64_decode to reverse.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -167,46 +158,84 @@ func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 			},
 		},
 		{
-			Name:        "url_decode",
-			Description: "Decode a URL percent-encoded string.",
+			Name: "base64_decode",
+			Description: "Decode a standard base64 string back to its original UTF-8 form.\n\n" +
+				"**When to use:** When you received a base64-encoded value (e.g. from a credential store or API response) and need to read the plaintext.\n\n" +
+				"**Output shape:** Decoded string. Returns an error if the input is not valid base64.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"input": map[string]any{"type": "string", "description": "URL-encoded string to decode"},
+					"input": map[string]any{"type": "string", "description": "Base64-encoded string to decode (standard alphabet)"},
 				},
 				"required": []string{"input"},
 			},
 		},
 		{
-			Name:        "hash",
-			Description: "Compute a hash of an input string. Supports sha256 and md5.",
+			Name: "url_encode",
+			Description: "URL percent-encode a string for use in query parameters.\n\n" +
+				"**When to use:** When you need to embed a user-supplied value in a URL query string safely (spaces → +, special chars → %XX).\n\n" +
+				"**Output shape:** Percent-encoded string. Chain with url_decode to reverse.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input": map[string]any{"type": "string", "description": "String to percent-encode for a URL query parameter"},
+				},
+				"required": []string{"input"},
+			},
+		},
+		{
+			Name: "url_decode",
+			Description: "Decode a URL percent-encoded string.\n\n" +
+				"**When to use:** When you have a percent-encoded value from a URL and need to read it as plain text.\n\n" +
+				"**Output shape:** Decoded string. Returns an error if the encoding is invalid.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input": map[string]any{"type": "string", "description": "URL percent-encoded string to decode"},
+				},
+				"required": []string{"input"},
+			},
+		},
+		{
+			Name: "hash",
+			Description: "Compute a hash of an input string.\n\n" +
+				"**When to use:** When you need to verify integrity, derive a cache key, or produce a fingerprint. sha256 is the default and the recommended choice for any security-adjacent use.\n\n" +
+				"**When NOT to use:** md5 is available as an explicit user request but is NOT suitable for security purposes (collision-prone). If you're computing a password or secret fingerprint, always use sha256.\n\n" +
+				"**Output shape:** Lowercase hex-encoded hash string. Example: \"a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e\" (sha256 of \"Hello World\").",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"input":     map[string]any{"type": "string", "description": "String to hash"},
-					"algorithm": map[string]any{"type": "string", "description": "Hash algorithm: sha256 (default) or md5"},
+					"algorithm": map[string]any{"type": "string", "description": "Hash algorithm: sha256 (default, recommended) or md5 (not for security use)"},
 				},
 				"required": []string{"input"},
 			},
 		},
 		{
-			Name:        "math_eval",
-			Description: "Evaluate a basic arithmetic expression with +, -, *, /, ^, parentheses, and floats.",
+			Name: "math_eval",
+			Description: "Evaluate a basic arithmetic expression and return the numeric result.\n\n" +
+				"**When to use:** When the user asks for arithmetic that would be imprecise if done in the LLM's head — percentage calculations, exponentiation, or multi-step formulas.\n\n" +
+				"**When NOT to use:** Do not use for statistics, matrix math, or string operations — this is arithmetic only. Do not pass expressions longer than 1 KiB (the cap will return an error).\n\n" +
+				"**Supported operators:** + - * / ^ (power), unary minus, parentheses, and float literals. Example: \"(100 * 0.08) + 15.5\" → \"23.5\". No functions (no sqrt, sin, etc.).\n\n" +
+				"**Output shape:** A number as a string — integer if the result is whole (e.g. \"42\"), floating-point otherwise (e.g. \"3.14159\").",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"expression": map[string]any{"type": "string", "description": "Arithmetic expression to evaluate"},
+					"expression": map[string]any{"type": "string", "description": "Arithmetic expression to evaluate. Max 1 KiB. Supports +, -, *, /, ^ (power), parentheses, and float literals. Example: \"(100 * 0.08) + 15.5\""},
 				},
 				"required": []string{"expression"},
 			},
 		},
 		{
-			Name:        "think",
-			Description: "A scratchpad tool for organizing your reasoning. Use this to pause and think through your approach before acting. The thought content is the value — the tool simply acknowledges receipt.",
+			Name: "think",
+			Description: "A scratchpad for organizing reasoning before acting — not a data-fetching tool.\n\n" +
+				"**When to use:** When you want to reason through a multi-step problem, plan a sequence of tool calls, or review what you already know before committing to an approach. Useful before complex queries where a wrong choice would waste round-trips.\n\n" +
+				"**When NOT to use:** Do NOT use as a substitute for actual tool calls — thinking about data you haven't fetched does not make the data available. If you need information, call the tool that provides it. Do not use to \"remember\" something across turns — use nanite_scratchpad_write for intra-turn state, or Vanta memory tools for cross-session state.\n\n" +
+				"**Output shape:** Always returns \"Thought recorded.\" — the server stores nothing. The value is the structured reasoning you produce inside the call itself.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"thought": map[string]any{"type": "string", "description": "Your internal reasoning, plan, or analysis"},
+					"thought": map[string]any{"type": "string", "description": "Your internal reasoning, plan, or analysis. Write this as if explaining your approach to another engineer."},
 				},
 				"required": []string{"thought"},
 			},
@@ -373,20 +402,40 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
-	if err != nil {
-		return errorResult(fmt.Sprintf("invalid request: %v", err)), nil
-	}
+	resp, fetchErr := fetchWithRetry(ctx, client, rawURL)
+	if fetchErr != nil {
+		// Format a structured error result the model can act on.
+		detail := fetchErr.Detail
+		if detail == "" {
+			detail = "no additional detail"
+		}
+		msg := fmt.Sprintf(
+			"fetch_error: kind=%s url=%s attempts=%d",
+			fetchErr.Kind, fetchErr.URL, fetchErr.Attempts,
+		)
+		if fetchErr.Status != 0 {
+			msg += fmt.Sprintf(" status=%d", fetchErr.Status)
+		}
+		msg += fmt.Sprintf(" detail=%s", detail)
 
-	resp, err := client.Do(req)
-	if err != nil {
-		if errors.Is(err, errSSRFBlocked) {
-			return errorResult(fmt.Sprintf("fetch blocked: %v", err)), nil
+		// Append model-actionable hint per error kind.
+		switch fetchErr.Kind {
+		case FetchErrBlocked:
+			msg += "\nhint: site is blocking automated requests (anti-bot / WAF). Try a different URL or ask the user."
+		case FetchErrEmptyHTML:
+			msg += "\nhint: page appears JS-rendered or behind an anti-bot gate. The tier-1 fetch cannot bypass this — try an API endpoint or a different source."
+		case FetchErr5xxAfterRetries:
+			msg += "\nhint: server returned 5xx on all attempts. The site may be temporarily down — retry later or try a different URL."
+		case FetchErrTimeout:
+			msg += "\nhint: request timed out. The site may be slow or unreachable — try a more specific or smaller URL."
+		case FetchErrDNS:
+			msg += "\nhint: DNS resolution failed. Check that the hostname is correct."
+		case FetchErrTLS:
+			msg += "\nhint: TLS/certificate error. The site may have a misconfigured certificate."
+		case FetchErrRedirectLoop:
+			msg += "\nhint: too many redirects. Try the final destination URL directly."
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
-		}
-		return errorResult(fmt.Sprintf("fetch error: %v", err)), nil
+		return errorResult(msg), nil
 	}
 	defer resp.Body.Close()
 
@@ -401,6 +450,26 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 	truncatedByBody := len(raw) > webFetchBodyCap
 	if truncatedByBody {
 		raw = raw[:webFetchBodyCap]
+	}
+
+	// Detect empty-HTML: a tiny HTML response is almost always a JS-rendered
+	// stub or anti-bot gate. Surface it as a structured error rather than
+	// returning near-empty content that would confuse the model.
+	rawCT := resp.Header.Get("Content-Type")
+	if classifyEmptyHTML(rawCT, len(raw)) {
+		fe := &FetchError{
+			Kind:     FetchErrEmptyHTML,
+			URL:      rawURL,
+			Status:   resp.StatusCode,
+			Attempts: 1,
+			Detail:   fmt.Sprintf("body=%d bytes (threshold %d) content-type=%s", len(raw), emptyHTMLThreshold, rawCT),
+		}
+		msg := fmt.Sprintf(
+			"fetch_error: kind=%s url=%s attempts=%d status=%d detail=%s",
+			fe.Kind, fe.URL, fe.Attempts, fe.Status, fe.Detail,
+		)
+		msg += "\nhint: page appears JS-rendered or behind an anti-bot gate. The tier-1 fetch cannot bypass this — try an API endpoint or a different source."
+		return errorResult(msg), nil
 	}
 
 	// Sanitize upstream bytes before they are stitched into the tool

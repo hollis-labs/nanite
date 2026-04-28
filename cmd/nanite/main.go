@@ -20,6 +20,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
+	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
 	"github.com/hollis-labs/go-providers/provider"
@@ -29,6 +30,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
+	"github.com/hollis-labs/nanite/internal/muxproxy"
 	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
@@ -195,7 +197,7 @@ func cmdServe(args []string) {
 	slog.Info("output filters registered", "filters", outputFilters.Names())
 
 	// Set up MCP manager, tool broker, and self-service tools.
-	mcpManager, tb, selfTools := initMCP(s)
+	mcpManager, tb, selfTools, muxMgr, muxSvc := initMCP(s)
 
 	// Set up activity emitter (Volon GUI events).
 	activity := chat.NewActivityEmitter("")
@@ -278,11 +280,47 @@ func cmdServe(args []string) {
 		slogx.Fatal("failed to create service container", "err", err)
 	}
 
+	// G5: wire mux Manager's StreamPublisher — devmode-only, no-op in production.
+	// Run goroutine is started after daemonLifecycle is constructed below.
+	wireMuxPublisher(muxMgr, container.Streams)
+
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
 	selfTools.Messaging = container.Messaging
 	selfTools.Subagent = container.Subagent
+	selfTools.Background = container.Background
 	selfTools.Work = container.Streams
+	// G4 (CW-20260420-0018): wire elicitation service so write tools
+	// (e.g. nanite_message_send kind=directive) can request mid-call
+	// user confirmation via elicitation/create.
+	selfTools.Elicitation = container.Elicitation
+
+	// CW-20260421-0010 (B3): wire the executeTask dispatch primitive.
+	// Adapts subagent.Service.Spawn to dispatch.Spawner so the chat
+	// agent's nanite_execute_task tool can drive role-based dispatch.
+	if container.Subagent != nil {
+		selfTools.Dispatch = service.NewDispatchSpawner(container.Subagent, s)
+		// DispatchWrapper left nil — the transport falls back to
+		// dispatch.DefaultEnvelopeWrapper when unset.
+	}
+
+	// CW-20260426-0006 (J8 v1): wire panel-control surface.
+	//   - PanelSignalSink — push panel_signal SSE events on the originating session.
+	//   - PanelLookup — enumerate plugin-registered panels for the access check.
+	//   - TrustResolver — H1 gate for plugin-shipped panels (built-ins skip the gate).
+	selfTools.PanelSignalSink = container.Streams
+	selfTools.PanelLookup = func() []string {
+		entries := pluginHost.GetPanels()
+		ids := make([]string, len(entries))
+		for i, e := range entries {
+			ids[i] = e.ID
+		}
+		return ids
+	}
+	selfTools.TrustResolver = s
+	// J11 (CW-20260426-0009): wire the reminder engine so RegisterTurnCount
+	// calls from nanite_set_reminder hit the correct shared Engine instance.
+	selfTools.ReminderEngine = container.ReminderEngine
 
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {
@@ -324,6 +362,9 @@ func cmdServe(args []string) {
 	// snapshots, reapers). Owned by cmdServe; shut down on signal before
 	// container.Shutdown so daemons stop referencing container state.
 	daemonLifecycle := lifecycle.NewManager("cmd.nanite.daemons")
+
+	// G5: start mux Manager goroutine — devmode-only, no-op in production.
+	startMuxManager(daemonLifecycle, muxMgr, muxSvc)
 
 	// Shutdown handler. Uses context.Background() because cmdServe has no
 	// parent ctx at this scope; the goroutine lives until the process exits.
@@ -455,17 +496,33 @@ func initProviders(devMode bool) *provider.Registry {
 			slog.Info("subprocess provider registered", "name", subName, "path", path)
 		}
 	}
-	// Backwards-compat alias: "pty" → Claude adapter (if available).
-	if ptyBridge := provider.NewPTYBridge(); ptyBridge != nil {
-		registry.Register("pty", ptyBridge)
-	}
+	registerLegacyPTYAlias(registry)
 
 	return registry
 }
 
+func registerLegacyPTYAlias(registry *provider.Registry) {
+	// Backwards-compat alias: "pty" should mirror the registered Claude PTY
+	// provider so it inherits the same adapter wrapping and sandbox flags.
+	if claudePTY, ok := registry.Get("pty-claude"); ok {
+		registry.Register("pty", claudePTY)
+		return
+	}
+	if ptyBridge := provider.NewPTYBridge(); ptyBridge != nil {
+		registry.Register("pty", ptyBridge)
+	}
+}
+
 // initMCP sets up the MCP manager with built-in and user-configured servers,
-// runs auto-discovery, and creates the tool broker.
-func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport) {
+// runs auto-discovery, and creates the tool broker. Returns the mux Manager
+// and MuxProxy service so the caller can wire a StreamPublisher, start Run,
+// and call StopAll on shutdown. CW-20260420-0047.
+//
+// The mux-orchestrator transport and tool registration is gated behind the
+// devmode build tag via registerMuxTransport (G5 — CW-20260421-0001).
+// In production builds registerMuxTransport is a no-op and no mux_* tools
+// appear in the tool surface.
+func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager, *service.MuxProxy) {
 	mcpManager := mcp.NewManager()
 
 	homeDir, _ := os.UserHomeDir()
@@ -482,6 +539,15 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 		slog.Error("mcp: failed to register builtin server", "name", "code", "err", err)
 	}
 	selfTools := mcp.NewSelfToolsTransport(s)
+	// E1 (CW-20260419-0027): wire reflex set + logger into the dispatch path.
+	// LoadUserReflexes returns nil on a missing dir (not an error); merge with
+	// builtins so user overrides with priority>=50 reliably beat built-ins.
+	userReflexes, err := reflex.LoadUserReflexes("")
+	if err != nil {
+		slog.Warn("reflex: failed to load user overrides", "err", err)
+	}
+	selfTools.ReflexSet = reflex.MergeReflexes(reflex.BuiltinReflexes(), userReflexes)
+	selfTools.ReflexLogger = s
 	if err := mcpManager.AddServer("self", selfTools, mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
 	}
@@ -510,6 +576,11 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	slog.Info("registered self-service built-in tools", "count", len(selfToolDefs))
 
+	// G5 (CW-20260421-0001): mux transport + tool registration — devmode only.
+	// registerMuxTransport is a no-op in non-devmode builds; mux_* tools are
+	// absent from the production tool surface.
+	muxMgr, muxSvc := registerMuxTransport(mcpManager, tb, s)
+
 	// Register result-cache meta-tools (S4a). These let the LLM recall
 	// truncated tool results via fetch_tool_result / search_tool_result.
 	tb.Builtins.RegisterBuiltins("result-cache", []provider.ToolDefinition{
@@ -517,7 +588,7 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 		toolclient.SearchToolResultMetaTool(),
 	})
 
-	return mcpManager, tb, selfTools
+	return mcpManager, tb, selfTools, muxMgr, muxSvc
 }
 
 // startBackgroundWorkers launches periodic goroutines for cleanup, snapshots,
@@ -750,3 +821,4 @@ func cmdMCPServe(args []string) {
 		os.Exit(1)
 	}
 }
+

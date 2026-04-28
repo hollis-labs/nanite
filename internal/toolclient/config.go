@@ -30,6 +30,21 @@ type Config struct {
 	// ContextWindowTokens is the total context window size in tokens.
 	// Default: 200000.
 	ContextWindowTokens int
+
+	// ErrTowardMorePad is the number of zero-score (neutral) tool candidates
+	// the reasoning-augmented selection appends to the strict-relevance set
+	// when the token budget admits them. Per CW-20260426-0010 #3, the broker
+	// errs toward "a little more" rather than "a little less" — under-loading
+	// costs an LLM round-trip through request_tools, which is much more
+	// expensive than the ~14 tokens an extra description costs.
+	// Default: 3. Set to 0 to disable the bias.
+	ErrTowardMorePad int
+
+	// SkillsDir is the absolute path to the operator-authored
+	// `*.tools.preferences.md` directory. When empty, the default
+	// `$HOME/.nanite/skills` is used at construction time. Set to a sentinel
+	// "off" value to explicitly disable skill loading.
+	SkillsDir string
 }
 
 // DefaultConfig returns a Config using the default rules from tool-broker lib.
@@ -40,6 +55,7 @@ func DefaultConfig() *Config {
 		AgentOverrides:      make(map[string][]broker.Rule),
 		ToolTokenBudgetPct:  DefaultToolTokenBudgetPct,
 		ContextWindowTokens: DefaultContextWindowTokens,
+		ErrTowardMorePad:    DefaultErrTowardMorePad,
 	}
 }
 
@@ -61,6 +77,7 @@ func LoadConfig(path string) *Config {
 		AgentOverrides:      make(map[string][]broker.Rule),
 		ToolTokenBudgetPct:  DefaultToolTokenBudgetPct,
 		ContextWindowTokens: DefaultContextWindowTokens,
+		ErrTowardMorePad:    DefaultErrTowardMorePad,
 	}
 }
 

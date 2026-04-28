@@ -8,12 +8,21 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/builders"
+	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/crossapp"
+	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/messaging"
+	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -26,6 +35,31 @@ import (
 type WorkBroadcaster interface {
 	BroadcastWorkChanged()
 }
+
+// PanelSignalSink is the narrow surface the panel-control tools use to push
+// panel_signal stream events onto the originating chat session. The signature
+// is a (sessionID, type, jsonPayload) triple rather than a chat.StreamEvent —
+// the service layer adapts these arguments into a chat.StreamEvent so the mcp
+// package stays free of the chat import (avoids the chat → toolclient → mcp
+// import cycle). J8 v1 — CW-20260426-0006.
+type PanelSignalSink interface {
+	BroadcastPanelSignal(sessionID, signalType, jsonPayload string) int
+}
+
+// PanelLookup returns the IDs of plugin-shipped panels currently registered
+// with the host. nanite_panel_open / nanite_panel_close use this to validate
+// a panel_id outside the V1BuiltinPanelIDs set before applying H1 trust
+// gating. Wired from main.go via a closure over plugin.Host.GetPanels — using
+// a closure (rather than an interface) avoids importing the plugin package
+// from internal/mcp (which would create a cycle through plugin → mcp →
+// service → ...). J8 v1 — CW-20260426-0006.
+type PanelLookup func() []string
+
+// PanelTrustResolver mirrors dispatch.TrustResolver narrowly so the panel
+// handlers can resolve H1 trust without importing dispatch directly into the
+// transport. *store.Store already satisfies dispatch.TrustResolver; main.go
+// adapts the same value through this interface.
+type PanelTrustResolver = dispatch.TrustResolver
 
 // TodoStoreInterface is the subset of store.Store needed by todo/plan MCP tools.
 // Defined here to avoid circular imports with the service package. Uses raw
@@ -57,10 +91,97 @@ type SelfToolsTransport struct {
 	Messaging *messaging.Service
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
+	// Background is the P9 background-job dispatch service. Set post-
+	// construction from the container; nil-safe (callers receive an
+	// errorResult for the nanite_background_* tools when unset).
+	// CW-20260420-0016.
+	Background *background.Service
 	// Work is set post-construction from the container; nil-safe. When set,
 	// mutating todo/plan tools fire BroadcastWorkChanged after a successful
 	// write so the Work drawer rehydrates. CW-20260418-0044.
 	Work WorkBroadcaster
+
+	// Dispatch is the executeTask dispatch primitive. Set post-
+	// construction from the container; nil-safe (callers receive an
+	// errorResult). The transport translates the nanite_execute_task
+	// tool call to dispatch.ExecuteTask.
+	// (CW-20260421-0010, B3)
+	Dispatch dispatch.Spawner
+	// DispatchWrapper turns a worker SpawnResult into a chat.Envelope.
+	// Set post-construction; defaults to dispatch.DefaultEnvelopeWrapper{}
+	// when the transport detects a configured Dispatch with no wrapper.
+	DispatchWrapper dispatch.EnvelopeWrapper
+
+	// ReflexSet is the merged (builtin + user-override) reflex slice used
+	// by the E1 reflex matcher (CW-20260419-0027). Set post-construction
+	// from the startup wiring (see internal/service or cmd/nanite). When
+	// nil, reflex matching is skipped and the dispatch path is unchanged.
+	ReflexSet []reflex.Reflex
+	// ReflexLogger persists reflex match events to playbook_match_log.
+	// Set post-construction; nil disables match logging (matching still
+	// runs and influences dispatch). *store.Store satisfies this interface.
+	ReflexLogger reflex.MatchLogger
+
+	// PythonPermChecker is the permission engine used by nanite_run_python
+	// to validate tool calls made from inside the Python sandbox.
+	// Set post-construction; nil disables permission checks (all tool calls
+	// from the sandbox are allowed — only appropriate for tests).
+	// CW-20260420-0019 (D6).
+	PythonPermChecker PythonPermissionChecker
+	// PythonDispatcher routes tool calls from inside the Python sandbox
+	// through the same dispatch path as normal tool calls.
+	// Set post-construction; nil causes sandbox tool calls to error.
+	// CW-20260420-0019 (D6).
+	PythonDispatcher PythonToolDispatcher
+
+	// GroundingRecaller is the pre-strategy memory recall step
+	// (CW-20260419-0028, Phase 5 / E2). When non-nil and
+	// NANITE_GROUNDING_ENABLED=true, callExecuteTask performs a memory
+	// recall before dispatch classification and injects a "## Relevant
+	// memories" block into the message when hits exceed the similarity
+	// threshold. Set post-construction; nil means grounding is skipped
+	// entirely (same effect as the gate being off).
+	GroundingRecaller *grounding.Recaller
+	// GroundingLogger persists consultation and outcome rows.
+	// Set post-construction; nil disables grounding logging (the recall
+	// step still runs when GroundingRecaller is set and the gate is on).
+	// *store.Store satisfies grounding.ConsultationLogger.
+	GroundingLogger grounding.ConsultationLogger
+
+	// Elicitation is the G4 mid-call user-prompt service (CW-20260420-0018).
+	// When set, write tools that need user confirmation (e.g. nanite_message_send
+	// kind=directive) issue an elicitation/create request before proceeding.
+	// Nil-safe: tools auto-approve when Elicitation is not wired.
+	Elicitation ElicitationService
+
+	// PanelSignalSink fans panel_open/panel_close/mode signals (J8 v1) onto the
+	// originating chat session's stream. Nil-safe — when unwired, panel tools
+	// still return their {opened: true} confirmation but the FE receives no
+	// out-of-band signal. *service.StreamManager satisfies this.
+	// CW-20260426-0006.
+	PanelSignalSink PanelSignalSink
+
+	// PanelLookup returns the IDs of plugin-shipped panels currently
+	// registered with the plugin host. Used by callPanelOpen/callPanelClose
+	// to validate panel IDs outside the V1 built-in set before applying H1
+	// trust gating. Nil-safe — when unwired, only V1 built-in panel IDs are
+	// addressable and plugin-shipped panel IDs return {reason: "unknown_panel"}.
+	// CW-20260426-0006.
+	PanelLookup PanelLookup
+
+	// TrustResolver is the H1 trust resolver shared with the dispatch
+	// subsystem. Used by callPanelOpen/callPanelClose to gate plugin-shipped
+	// panel access on TrustTrusted. Nil-safe — when unset, plugin-shipped
+	// panel access falls back to "untrusted" (the safe default).
+	// CW-20260426-0006.
+	TrustResolver PanelTrustResolver
+
+	// ReminderEngine is the deterministic trigger engine for agent-set reminders
+	// (J11, CW-20260426-0009). When set, nanite_set_reminder calls register the
+	// creation turn with the engine so turn_count triggers compute correctly.
+	// Nil-safe — without the engine, reminders are persisted but turn_count
+	// triggers fall back to turn 0 as the creation baseline.
+	ReminderEngine *reminders.Engine
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -173,6 +294,31 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callSubagentStatus(ctx, args)
 	case "nanite_subagent_cancel":
 		return st.callSubagentCancel(ctx, args)
+	case "nanite_background_job":
+		return st.callBackgroundJob(ctx, args)
+	case "nanite_background_status":
+		return st.callBackgroundStatus(ctx, args)
+	case "nanite_background_cancel":
+		return st.callBackgroundCancel(ctx, args)
+	case "nanite_execute_task":
+		return st.callExecuteTask(ctx, args)
+	case "nanite_chat_search":
+		return st.callChatSearch(ctx, args)
+	case "nanite_run_python":
+		return st.callRunPython(ctx, args)
+	case "nanite_panel_open":
+		return st.callPanelOpen(ctx, args)
+	case "nanite_panel_close":
+		return st.callPanelClose(ctx, args)
+	case "nanite_signal_mode":
+		return st.callSignalMode(ctx, args)
+	// --- Reminders + Pin (J11, CW-20260426-0009) ---
+	case "nanite_set_reminder":
+		return st.callSetReminder(ctx, args)
+	case "nanite_pin":
+		return st.callPin(ctx, args)
+	case "nanite_unpin":
+		return st.callUnpin(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -1060,17 +1206,46 @@ func (st *SelfToolsTransport) callMessageSend(ctx context.Context, args map[stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
+
+	kind := strArg(args, "kind", "")
+	body := strArg(args, "body", "")
+	msgType := strArg(args, "type", "")
+
+	// G4 elicitation pilot (CW-20260420-0018, D5): directive messages broadcast
+	// instructions to all recipients and carry elevated blast radius. Require
+	// explicit user confirmation before sending when elicitation is wired.
+	// Directive is a `type` value (see nanite_message_send InputSchema), not kind.
+	if msgType == "directive" && st.Elicitation != nil {
+		fromSessionID := strArg(args, "from_session_id", "")
+		fromAgentID := strArg(args, "from_agent_id", "")
+		elicitResp, err := elicitUserInput(ctx, st.Elicitation, fromSessionID, fromAgentID, "",
+			elicitationCreateParams{
+				Message: fmt.Sprintf("Send directive to %s? Body: %q", strArg(args, "to_agent_id", ""), body),
+				RequestedSchema: &elicitationRequestedSchema{
+					Type:        "boolean",
+					Title:       "Confirm directive send",
+					Description: "Directive messages instruct recipient agents to take action. Confirm to proceed.",
+				},
+			})
+		if err != nil {
+			return errorResult(fmt.Sprintf("elicitation: %v", err)), nil
+		}
+		if elicitResp.Action != "accept" {
+			return textResult(fmt.Sprintf("directive send aborted by user (action=%s)", elicitResp.Action)), nil
+		}
+	}
+
 	msg := messaging.SendInput{
 		FromSessionID: strArg(args, "from_session_id", ""),
 		FromAgentID:   strArg(args, "from_agent_id", ""),
 		ToSessionID:   strArg(args, "to_session_id", ""),
 		ToAgentID:     strArg(args, "to_agent_id", ""),
 		Channel:       strArg(args, "channel", ""),
-		Kind:          strArg(args, "kind", ""),
+		Kind:          kind,
 		PayloadJSON:   strArg(args, "payload_json", ""),
 		Subject:       strArg(args, "subject", ""),
-		Body:          strArg(args, "body", ""),
-		Type:          strArg(args, "type", ""),
+		Body:          body,
+		Type:          msgType,
 		ReplyTo:       strArg(args, "reply_to", ""),
 		RegisterAs:    strArg(args, "register_as", ""),
 	}
@@ -1279,7 +1454,202 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 	if err != nil {
 		return errorResult(fmt.Sprintf("spawn subagent: %v", err)), nil
 	}
+	if req.Mode == "" || req.Mode == subagent.ModeSync {
+		if summary, ok := st.syncSubagentSummary(ctx, id); ok {
+			return textResult(summary), nil
+		}
+	}
 	return textResult(fmt.Sprintf("spawned: %s", id)), nil
+}
+
+func (st *SelfToolsTransport) syncSubagentSummary(ctx context.Context, runID string) (string, bool) {
+	run, err := st.Subagent.Status(ctx, runID)
+	if err != nil || run == nil || run.ChildSessionID == "" {
+		return "", false
+	}
+	msgs, err := st.Store.ListMessages(run.ChildSessionID, 20)
+	if err != nil {
+		return "", false
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "assistant" || msgs[i].Content == "" {
+			continue
+		}
+		if text := extractStoredAssistantText(msgs[i].Content); text != "" {
+			if literal, ok := extractLiteralSubagentOutput(run.Prompt, text); ok {
+				return literal, true
+			}
+			return text, true
+		}
+		return msgs[i].Content, true
+	}
+	return "", false
+}
+
+func extractStoredAssistantText(content string) string {
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return ""
+	}
+	return payload.Text
+}
+
+func extractLiteralSubagentOutput(prompt, text string) (string, bool) {
+	if !looksLikeLiteralContentPrompt(prompt) {
+		return "", false
+	}
+	block, ok := extractSingleFencedCodeBlock(text)
+	if ok {
+		return formatLiteralFileReadReply(prompt, block)
+	}
+	list, ok := extractLeadingNumberedList(text)
+	if !ok {
+		return "", false
+	}
+	return formatLiteralFileReadReply(prompt, list)
+}
+
+func looksLikeLiteralContentPrompt(prompt string) bool {
+	p := strings.ToLower(prompt)
+	if !strings.Contains(p, "/") {
+		return false
+	}
+	if !strings.Contains(p, "read") {
+		return false
+	}
+	return strings.Contains(p, "line") || strings.Contains(p, "return the content")
+}
+
+func extractSingleFencedCodeBlock(text string) (string, bool) {
+	start := strings.Index(text, "```")
+	if start < 0 {
+		return "", false
+	}
+	endRel := strings.Index(text[start+3:], "```")
+	if endRel < 0 {
+		return "", false
+	}
+	end := start + 3 + endRel + 3
+	if strings.Contains(text[end:], "```") {
+		return "", false
+	}
+	return strings.TrimSpace(text[start:end]), true
+}
+
+func extractLeadingNumberedList(text string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	var out []string
+	collecting := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if collecting {
+				break
+			}
+			continue
+		}
+		if isNumberedListLine(trimmed) {
+			collecting = true
+			out = append(out, trimmed)
+			continue
+		}
+		if collecting {
+			break
+		}
+	}
+	if len(out) < 2 {
+		return "", false
+	}
+	return strings.Join(out, "\n"), true
+}
+
+func isNumberedListLine(line string) bool {
+	if len(line) < 3 || line[1] != '.' || line[2] != ' ' {
+		return false
+	}
+	return line[0] >= '0' && line[0] <= '9'
+}
+
+func formatLiteralFileReadReply(prompt, literal string) (string, bool) {
+	lines, ok := normalizeLiteralLines(literal)
+	if !ok || len(lines) == 0 {
+		return "", false
+	}
+	pathLabel := "requested file"
+	if path := extractPromptPath(prompt); path != "" {
+		pathLabel = filepath.Base(path)
+	}
+	var b strings.Builder
+	if n, ok := extractRequestedLineCount(prompt); ok {
+		fmt.Fprintf(&b, "First %d lines of `%s`:\n\n", n, pathLabel)
+	} else {
+		fmt.Fprintf(&b, "Requested content from `%s`:\n\n", pathLabel)
+	}
+	for i, line := range lines {
+		rendered := "(blank line)"
+		if strings.TrimSpace(line) != "" {
+			rendered = fmt.Sprintf("`%s`", line)
+		}
+		fmt.Fprintf(&b, "%d. %s", i+1, rendered)
+		if i < len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String(), true
+}
+
+func normalizeLiteralLines(literal string) ([]string, bool) {
+	literal = strings.TrimSpace(literal)
+	if strings.HasPrefix(literal, "```") {
+		body := literal[3:]
+		if idx := strings.IndexByte(body, '\n'); idx >= 0 {
+			body = body[idx+1:]
+		}
+		if end := strings.LastIndex(body, "```"); end >= 0 {
+			body = body[:end]
+		}
+		body = strings.TrimRight(body, "\n")
+		return strings.Split(body, "\n"), true
+	}
+	lines := strings.Split(literal, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !isNumberedListLine(trimmed) {
+			return nil, false
+		}
+		item := strings.TrimSpace(trimmed[3:])
+		switch item {
+		case "(empty line)", "(blank line)":
+			out = append(out, "")
+		default:
+			out = append(out, strings.Trim(item, "`"))
+		}
+	}
+	return out, len(out) > 0
+}
+
+var (
+	promptPathPattern      = regexp.MustCompile(`/[^\s` + "`" + `]+`)
+	promptFirstLinesPattern = regexp.MustCompile(`(?i)first\s+(\d+)\s+lines?`)
+)
+
+func extractPromptPath(prompt string) string {
+	return promptPathPattern.FindString(prompt)
+}
+
+func extractRequestedLineCount(prompt string) (int, bool) {
+	m := promptFirstLinesPattern.FindStringSubmatch(prompt)
+	if len(m) != 2 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 func (st *SelfToolsTransport) callSubagentStatus(ctx context.Context, args map[string]any) (*ToolResult, error) {
@@ -1307,6 +1677,77 @@ func (st *SelfToolsTransport) callSubagentCancel(ctx context.Context, args map[s
 	defer cancel()
 	if err := st.Subagent.Cancel(ctx, strArg(args, "run_id", "")); err != nil {
 		return errorResult(fmt.Sprintf("subagent cancel: %v", err)), nil
+	}
+	return textResult("cancelled"), nil
+}
+
+// --- background-job handlers (CW-20260420-0016) ---
+//
+// nanite_background_job dispatches the P3 PatternBackground gate
+// before delegating to background.Service. Async by definition —
+// returns immediately with a job_id; the result envelope arrives
+// via messaging when the backend completes.
+
+func (st *SelfToolsTransport) callBackgroundJob(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Background == nil {
+		return errorResult("background service not configured"), nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
+	defer cancel()
+
+	req := background.JobRequest{
+		Agent:                strArg(args, "agent", ""),
+		Task:                 strArg(args, "task", ""),
+		OriginatingSessionID: strArg(args, "originating_session_id", ""),
+		OriginatingAgentID:   strArg(args, "originating_agent_id", ""),
+		Budget: background.JobBudget{
+			WallClockSeconds: intArg(args, "wall_clock_seconds", 0),
+			MaxOutputBytes:   intArg(args, "max_output_bytes", 0),
+		},
+	}
+	// The MCP boundary always asserts PatternBackground here — the tool
+	// is the gate's user-facing surface, so any caller invoking it has
+	// classified the request as background-shaped (or is misusing the
+	// tool). The Service-layer gate is still the authoritative check;
+	// this just makes the boundary obvious to readers.
+	id, err := st.Background.Submit(ctx, classify.PatternBackground, req)
+	if err != nil {
+		return errorResult(fmt.Sprintf("background submit: %v", err)), nil
+	}
+	out := map[string]any{"job_id": id}
+	data, _ := json.Marshal(out)
+	return textResult(string(data)), nil
+}
+
+func (st *SelfToolsTransport) callBackgroundStatus(_ context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Background == nil {
+		return errorResult("background service not configured"), nil
+	}
+	jobID := strArg(args, "job_id", "")
+	if jobID == "" {
+		return errorResult("job_id is required"), nil
+	}
+	res, err := st.Background.Result(jobID)
+	if err != nil {
+		return errorResult(fmt.Sprintf("background status: %v", err)), nil
+	}
+	data, err := json.Marshal(res)
+	if err != nil {
+		return errorResult(fmt.Sprintf("background status marshal: %v", err)), nil
+	}
+	return textResult(string(data)), nil
+}
+
+func (st *SelfToolsTransport) callBackgroundCancel(_ context.Context, args map[string]any) (*ToolResult, error) {
+	if st.Background == nil {
+		return errorResult("background service not configured"), nil
+	}
+	jobID := strArg(args, "job_id", "")
+	if jobID == "" {
+		return errorResult("job_id is required"), nil
+	}
+	if err := st.Background.Cancel(jobID); err != nil {
+		return errorResult(fmt.Sprintf("background cancel: %v", err)), nil
 	}
 	return textResult("cancelled"), nil
 }
@@ -1347,4 +1788,58 @@ func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 		}
 	}
 	return sources, nil
+}
+
+// --- nanite_run_python handler (CW-20260420-0019, D6) ---
+
+// callRunPython handles the nanite_run_python self-tool. Runs Python code
+// in an isolated subprocess sandbox with a dual-FD tool-call channel that
+// routes through the permission engine on every tool invocation.
+//
+// This tool is Worker/Planner-only; it is intentionally absent from
+// ChatToolSurface (see internal/dispatch/role.go — no "nanite_run_python"
+// prefix in the allow-list, and the Chat-surface enforcement test asserts it).
+func (st *SelfToolsTransport) callRunPython(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	code := strArg(args, "code", "")
+	if code == "" {
+		return errorResult("code is required"), nil
+	}
+
+	// Parse optional args object.
+	var scriptArgs map[string]any
+	if raw, ok := args["args"].(map[string]any); ok {
+		scriptArgs = raw
+	}
+
+	timeLimitSec := intArg(args, "time_limit_seconds", pythonSandboxDefaultTimeLimitSec)
+	memLimitMB := intArg(args, "memory_limit_mb", pythonSandboxDefaultMemLimitMB)
+
+	// Resolve session ID from arg or context.
+	sessionID := strArg(args, "session_id", "")
+	if sessionID == "" {
+		sessionID = SessionIDFromContext(ctx)
+	}
+	if sessionID == "" {
+		sessionID = "ptc-default"
+	}
+
+	result, err := RunPythonSandbox(
+		ctx,
+		sessionID,
+		code,
+		scriptArgs,
+		timeLimitSec,
+		memLimitMB,
+		st.PythonPermChecker,
+		st.PythonDispatcher,
+	)
+	if err != nil {
+		return errorResult(fmt.Sprintf("python sandbox: %v", err)), nil
+	}
+
+	out, jsonErr := json.Marshal(result)
+	if jsonErr != nil {
+		return errorResult(fmt.Sprintf("python sandbox: marshal result: %v", jsonErr)), nil
+	}
+	return textResult(string(out)), nil
 }

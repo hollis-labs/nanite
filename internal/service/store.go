@@ -1,6 +1,10 @@
 package service
 
-import "github.com/hollis-labs/nanite/internal/store"
+import (
+	"context"
+
+	"github.com/hollis-labs/nanite/internal/store"
+)
 
 // Domain-scoped sub-interfaces carved from store.Store's methods.
 // Each service depends only on the slice it needs. The concrete
@@ -237,6 +241,32 @@ type HandoffStashStore interface {
 	UpsertHandoffStash(stash store.HandoffStash) error
 }
 
+// ReminderStore covers reminder persistence (J11, CW-20260426-0009).
+type ReminderStore interface {
+	CreateReminder(r store.Reminder) error
+	GetReminder(id string) (store.Reminder, error)
+	ListUnfiredReminders(sessionID string) ([]store.Reminder, error)
+	MarkReminderFired(id string) error
+	DeleteReminder(id string) error
+}
+
+// PinnedContentStore covers pinned content persistence (J11, CW-20260426-0009).
+type PinnedContentStore interface {
+	CreatePinnedContent(p store.PinnedContent) error
+	ListPinnedContent(sessionID string) ([]store.PinnedContent, error)
+	DeletePinnedContent(id string) error
+	ClearSessionPins(sessionID string) error
+}
+
+// CompactionEventStore covers structured compaction-event persistence and
+// retrieval (P8 CompactionContract — write side CW-20260420-0027 Part C,
+// read side CW-20260420-0025 Part A disclosure injection).
+type CompactionEventStore interface {
+	WriteCompactionEvent(ctx context.Context, event store.CompactionEvent) error
+	GetLatestCompactionEvent(ctx context.Context, sessionID string) (*store.CompactionEvent, error)
+	ListCompactionEventsBySession(ctx context.Context, sessionID string, limit int) ([]store.CompactionEvent, error)
+}
+
 // Store is the composite interface satisfied by *store.Store.
 // Services that need the full surface (e.g. the Container constructor) use this.
 // EnvelopeStore covers persistence for envelope instances emitted during a chat turn.
@@ -265,7 +295,10 @@ type Store interface {
 	TodoStore
 	PlanStore
 	HandoffStashStore
+	CompactionEventStore
 	EnvelopeStore
+	ReminderStore
+	PinnedContentStore
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

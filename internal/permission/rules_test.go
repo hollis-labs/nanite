@@ -11,30 +11,32 @@ func TestRule_matchToolName(t *testing.T) {
 	if !r.Matches("shell", nil) {
 		t.Error("should match exact tool name")
 	}
-	if r.Matches("mcp__dev__edit", nil) {
+	if r.Matches("dev_edit", nil) {
 		t.Error("should not match different tool")
 	}
 }
 
 func TestRule_matchToolGlob(t *testing.T) {
-	r := Rule{Tool: "mcp__dev__*", Behavior: DecisionAllow}
-	if !r.Matches("mcp__dev__edit", nil) {
+	// Uniform names post ADR-002 — `dev_*` glob still matches the dev_*
+	// suite without the legacy `mcp__dev__` prefix.
+	r := Rule{Tool: "dev_*", Behavior: DecisionAllow}
+	if !r.Matches("dev_edit", nil) {
 		t.Error("should match glob")
 	}
-	if !r.Matches("mcp__dev__read", nil) {
+	if !r.Matches("dev_read", nil) {
 		t.Error("should match glob")
 	}
-	if r.Matches("mcp__engine__task", nil) {
+	if r.Matches("task_create", nil) {
 		t.Error("should not match different prefix")
 	}
 }
 
 func TestRule_matchInputPath(t *testing.T) {
-	r := Rule{Tool: "mcp__dev__edit", Pattern: "/src/**", Behavior: DecisionAllow}
-	if !r.Matches("mcp__dev__edit", map[string]any{"path": "/src/main.go"}) {
+	r := Rule{Tool: "dev_edit", Pattern: "/src/**", Behavior: DecisionAllow}
+	if !r.Matches("dev_edit", map[string]any{"path": "/src/main.go"}) {
 		t.Error("should match path in /src/")
 	}
-	if r.Matches("mcp__dev__edit", map[string]any{"path": "/config/app.yaml"}) {
+	if r.Matches("dev_edit", map[string]any{"path": "/config/app.yaml"}) {
 		t.Error("should not match path outside /src/")
 	}
 }
@@ -59,7 +61,7 @@ func TestLoadRulesFromFile(t *testing.T) {
     - tool: "shell"
       pattern: "rm -rf"
       behavior: deny
-    - tool: "mcp__dev__edit"
+    - tool: "dev_edit"
       pattern: "/src/**"
       behavior: allow
 `
@@ -122,7 +124,7 @@ func TestMergeRuleSets(t *testing.T) {
 	project := &RuleSet{
 		Mode: ModeAcceptEdits,
 		Rules: []Rule{
-			{Tool: "mcp__dev__edit", Behavior: DecisionAllow},
+			{Tool: "dev_edit", Behavior: DecisionAllow},
 		},
 	}
 

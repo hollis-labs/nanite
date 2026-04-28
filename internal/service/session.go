@@ -13,7 +13,7 @@ type CreateSessionOpts struct {
 	ProjectID   string
 	Model       string
 	Provider    string
-	AgentID     string // optional; falls back to settings default, then "mentat-001"
+	AgentID     string // optional; falls back to settings default, then "file-default"
 }
 
 // ForkOpts holds the parameters for forking a session.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -20,6 +21,12 @@ import (
 // DefaultTimeoutSeconds bounds a runner when the caller doesn't set
 // a timeout. 5 minutes matches the plan's §T9 spawn-request default.
 const DefaultTimeoutSeconds = 300
+
+// spawnFanoutCap is the maximum number of Spawn invocations that may
+// have their runner executing concurrently. FIFO ordering is preserved
+// by the buffered-channel semaphore below.
+// fanout cap; knob target: CW-20260419-0001 publisher config
+const spawnFanoutCap = 3
 
 // Typed errors returned by Approve and Reject so callers can
 // distinguish rejection causes without string matching.
@@ -63,15 +70,27 @@ type SettingsReader interface {
 	GetUserSettings() (*store.UserSettings, error)
 }
 
+// TrustResolverIface is the subset of dispatch.TrustResolver that the
+// subagent package depends on. *store.Store satisfies it via ResolveTrust.
+type TrustResolverIface = dispatch.TrustResolver
+
+// EventLogger persists audit events for trust-bypassed dispatches.
+// *store.Store satisfies it; nil = audit logging skipped.
+type EventLogger interface {
+	LogEvent(sessionID, eventType, category, detail, metadata string)
+}
+
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
-	db         *sql.DB
-	runner     Runner
-	poster     MessagePoster
-	approver   ApprovalEmitter
-	settings   SettingsReader
-	streamSink SubagentStreamSink
+	db           *sql.DB
+	runner       Runner
+	poster       MessagePoster
+	approver     ApprovalEmitter
+	settings     SettingsReader
+	streamSink   SubagentStreamSink
+	trustResolver TrustResolverIface
+	eventLogger  EventLogger
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
 	// Cancel(runID) can propagate cancellation into the in-flight
@@ -79,6 +98,12 @@ type Service struct {
 	// defer clears; Cancel invokes-and-deletes. Mutex-guarded.
 	cancelMu  sync.Mutex
 	cancelers map[string]context.CancelFunc
+
+	// spawnSem is a buffered-channel semaphore that bounds the number of
+	// Spawn invocations with an in-flight runner to spawnFanoutCap.
+	// Sends acquire a slot; receives release it. FIFO ordering is a
+	// property of Go channel scheduling under normal load.
+	spawnSem chan struct{}
 }
 
 // NewService constructs a Service. The db is used for subagent_runs
@@ -98,8 +123,17 @@ func NewService(db *sql.DB, runner Runner, poster MessagePoster, approver Approv
 		approver:  approver,
 		settings:  settings,
 		cancelers: make(map[string]context.CancelFunc),
+		spawnSem:  make(chan struct{}, spawnFanoutCap),
 	}
 }
+
+// SetTrustResolver wires the H1 trust resolver. Call before any Spawn.
+// When nil, Spawn falls back to TrustNormal for every spawn.
+func (svc *Service) SetTrustResolver(r TrustResolverIface) { svc.trustResolver = r }
+
+// SetEventLogger wires the audit event logger. Call before any Spawn.
+// When nil, trust_dispatch audit rows are skipped (non-fatal).
+func (svc *Service) SetEventLogger(l EventLogger) { svc.eventLogger = l }
 
 // SetStreamSink wires (or unwires) the G-5 status-event sink. Pass nil
 // to disable emission. Safe to call before any Spawn.
@@ -184,70 +218,108 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
-	// Gate predicate: consult user settings + mode.
-	gate := false
-	if svc.settings != nil {
-		us, err := svc.settings.GetUserSettings()
-		if err != nil {
-			return "", fmt.Errorf("load settings: %w", err)
+	// H1 trust resolution: consult the workspace-scoped trust tier before
+	// any approval-gate logic. Tier determines whether to refuse, gate, or
+	// bypass the approval envelope.
+	trust := dispatch.TrustNormal
+	if svc.trustResolver != nil && req.WorkspaceID != "" && req.AgentProfileID != "" {
+		t, terr := svc.trustResolver.ResolveTrust(ctx, req.WorkspaceID, req.AgentProfileID)
+		if terr != nil {
+			// Fail closed: treat resolve error as normal (require approval).
+			slog.Warn("subagent: trust resolve error; defaulting to normal", "err", terr,
+				"workspace_id", req.WorkspaceID, "agent_profile_id", req.AgentProfileID)
+		} else {
+			trust = t
 		}
-		gate = (us.SubagentApprovalRequired && !us.DeveloperMode) || mode == ModeInteractive
-	} else {
-		// Nil settings = tests that don't care about gating; fall through to
-		// ungated unless mode explicitly requests interactive approval.
-		gate = mode == ModeInteractive
 	}
 
-	if gate {
-		// Gated path: validate prerequisites + marshal payload BEFORE any DB
-		// write so a misconfiguration (nil emitter) or marshal error doesn't
-		// leave a row orphaned in 'requested'. Post-insert failures (Emit,
-		// envelope-id persist) compensate by transitioning the run to
-		// 'failed' with an error reason — we preserve the audit trail
-		// rather than deleting.
-		if svc.approver == nil {
-			return "", fmt.Errorf("gated spawn requires approver but none configured")
-		}
-		payload, err := json.Marshal(map[string]any{
-			"run_id":          run.ID,
-			"role":            run.Role,
-			"prompt":          run.Prompt,
-			"mode":            run.Mode,
-			"provider":        run.Provider,
-			"parent_agent_id": run.ParentAgentID,
-			"timeout_seconds": run.TimeoutSeconds,
-			"inputs_json":     run.InputsJSON,
-			"risk_level":      "medium",
+	// Untrusted: refuse outright. ErrUntrustedRole must NOT be bypassed.
+	if trust == dispatch.TrustUntrusted {
+		return "", dispatch.ErrUntrustedRole
+	}
+
+	// Trusted: bypass approval, write audit log, proceed to ungated path.
+	if trust == dispatch.TrustTrusted {
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id":     req.WorkspaceID,
+			"agent_profile_id": req.AgentProfileID,
+			"role":             req.Role,
 		})
-		if err != nil {
-			return "", fmt.Errorf("marshal approval payload: %w", err)
+		if svc.eventLogger != nil {
+			svc.eventLogger.LogEvent(
+				req.ParentSessionID,
+				"trust_dispatch",
+				"trust",
+				fmt.Sprintf("role=%s tier=trusted bypass=approval", req.Role),
+				string(meta),
+			)
+		}
+	} else {
+		// TrustNormal path: evaluate the approval gate predicate.
+		gate := false
+		if svc.settings != nil {
+			us, err := svc.settings.GetUserSettings()
+			if err != nil {
+				return "", fmt.Errorf("load settings: %w", err)
+			}
+			gate = (us.SubagentApprovalRequired && !us.DeveloperMode) || mode == ModeInteractive
+		} else {
+			// Nil settings = tests that don't care about gating; fall through to
+			// ungated unless mode explicitly requests interactive approval.
+			gate = mode == ModeInteractive
 		}
 
-		run.Status = StatusRequested
-		if err := svc.insertRun(ctx, run); err != nil {
-			return "", fmt.Errorf("insert run: %w", err)
-		}
+		if gate {
+			// Gated path: validate prerequisites + marshal payload BEFORE any DB
+			// write so a misconfiguration (nil emitter) or marshal error doesn't
+			// leave a row orphaned in 'requested'. Post-insert failures (Emit,
+			// envelope-id persist) compensate by transitioning the run to
+			// 'failed' with an error reason — we preserve the audit trail
+			// rather than deleting.
+			if svc.approver == nil {
+				return "", fmt.Errorf("gated spawn requires approver but none configured")
+			}
+			payload, err := json.Marshal(map[string]any{
+				"run_id":          run.ID,
+				"role":            run.Role,
+				"prompt":          run.Prompt,
+				"mode":            run.Mode,
+				"provider":        run.Provider,
+				"parent_agent_id": run.ParentAgentID,
+				"timeout_seconds": run.TimeoutSeconds,
+				"inputs_json":     run.InputsJSON,
+				"risk_level":      "medium",
+			})
+			if err != nil {
+				return "", fmt.Errorf("marshal approval payload: %w", err)
+			}
 
-		envelopeID, err := svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)
-		if err != nil {
-			svc.markGatedSpawnFailed(run.ID, "approval envelope emission failed: "+err.Error())
-			return "", fmt.Errorf("emit approval envelope: %w", err)
-		}
+			run.Status = StatusRequested
+			if err := svc.insertRun(ctx, run); err != nil {
+				return "", fmt.Errorf("insert run: %w", err)
+			}
 
-		if _, uerr := svc.db.ExecContext(ctx,
-			`UPDATE subagent_runs SET envelope_instance_id=? WHERE id=?`, envelopeID, run.ID); uerr != nil {
-			svc.markGatedSpawnFailed(run.ID, "envelope id persist failed: "+uerr.Error())
-			return "", fmt.Errorf("persist envelope id: %w", uerr)
-		}
-		run.EnvelopeInstanceID = envelopeID
+			envelopeID, err := svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)
+			if err != nil {
+				svc.markGatedSpawnFailed(run.ID, "approval envelope emission failed: "+err.Error())
+				return "", fmt.Errorf("emit approval envelope: %w", err)
+			}
 
-		svc.emitStatus(run, "")
-		return run.ID, nil
+			if _, uerr := svc.db.ExecContext(ctx,
+				`UPDATE subagent_runs SET envelope_instance_id=? WHERE id=?`, envelopeID, run.ID); uerr != nil {
+				svc.markGatedSpawnFailed(run.ID, "envelope id persist failed: "+uerr.Error())
+				return "", fmt.Errorf("persist envelope id: %w", uerr)
+			}
+			run.EnvelopeInstanceID = envelopeID
+
+			svc.emitStatus(run, "")
+			return run.ID, nil
+		}
 	}
 
-	// Ungated path — existing behavior preserved exactly.
-	// Auto-approve only when the gate predicate above is false
-	// (that is, approval is not required and mode is not interactive).
+	// Ungated path — reached when:
+	//   a) trust == TrustTrusted (approval bypassed, audit written above), or
+	//   b) trust == TrustNormal and approval gate evaluated to false.
 	run.Status = StatusRunning
 	run.StartedAt = run.CreatedAt
 	if err := svc.insertRun(ctx, run); err != nil {
@@ -264,23 +336,37 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		// background-derived ctx so the caller's short tool-call
 		// timeout (30s) doesn't cancel the child runner — same
 		// pattern as async mode. Cancel(runID) is still wired.
+		//
+		// Acquire the fan-out semaphore before executing. The
+		// caller's ctx governs the wait; if it cancels while
+		// queued we return cleanly without consuming a slot.
+		if err := svc.acquireSpawnSlot(ctx); err != nil {
+			return "", err
+		}
 		execCtx, execCancel := context.WithCancel(context.Background())
 		svc.cancelMu.Lock()
 		svc.cancelers[run.ID] = execCancel
 		svc.cancelMu.Unlock()
-		svc.execute(execCtx, run, req.ParentAgentID)
+		svc.executeWithSlot(execCtx, run, req.ParentAgentID)
 	case ModeAsync, ModeAPI:
 		// Non-blocking: fire-and-forget goroutine. The reply lands
 		// in the parent session's inbox (async) or chat (api).
 		// Background-derived ctx because the caller's request ctx
 		// will likely be done by the time the runner finishes;
 		// Cancel(runID) is the only intended cancellation path.
+		//
+		// Acquire the fan-out semaphore before launching the
+		// goroutine. The caller's ctx governs the wait so a
+		// queued async spawn can be cancelled before it starts.
+		if err := svc.acquireSpawnSlot(ctx); err != nil {
+			return "", err
+		}
 		runCtx, runCancel := context.WithCancel(context.Background())
 		svc.cancelMu.Lock()
 		svc.cancelers[run.ID] = runCancel
 		svc.cancelMu.Unlock()
 		safego.Go(context.Background(), "subagent.run", func() {
-			svc.execute(runCtx, run, req.ParentAgentID)
+			svc.executeWithSlot(runCtx, run, req.ParentAgentID)
 		})
 	}
 
@@ -481,6 +567,29 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 		svc.execute(runCtx, run, run.ParentAgentID)
 	})
 	return nil
+}
+
+// acquireSpawnSlot blocks until a slot in the fan-out semaphore is
+// available or ctx is cancelled. Returns ctx.Err() if the wait is
+// interrupted, nil on successful acquisition.
+func (svc *Service) acquireSpawnSlot(ctx context.Context) error {
+	select {
+	case svc.spawnSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// releaseSpawnSlot returns a previously-acquired slot to the semaphore.
+func (svc *Service) releaseSpawnSlot() { <-svc.spawnSem }
+
+// executeWithSlot wraps execute with a deferred semaphore release so
+// the slot is returned exactly once regardless of how execute exits
+// (success, error, or cancellation).
+func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID string) {
+	defer svc.releaseSpawnSlot()
+	svc.execute(ctx, run, parentAgentID)
 }
 
 // execute runs the runner, writes the result back to subagent_runs,

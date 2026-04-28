@@ -82,6 +82,13 @@ type SpawnRequest struct {
 	// Enables budget-aware routing (e.g. pty-claude for heavy tasks,
 	// anthropic for lightweight ones) without changing the agent profile.
 	Provider string
+	// WorkspaceID is the workspace the spawn is scoped to. Required
+	// for trust resolution (H1, CW-20260421-0014). Empty string
+	// causes the trust gate to fall back to TrustNormal.
+	WorkspaceID string
+	// AgentProfileID is the DB ID of the agent profile being spawned.
+	// Required for trust resolution. Empty string falls back to TrustNormal.
+	AgentProfileID string
 }
 
 // Run represents a single spawn lifecycle row persisted in

@@ -138,6 +138,7 @@ export interface StreamEvent {
   type:
     | "stream_start"
     | "delta"
+    | "replace_content"
     | "stream_end"
     | "error"
     | "tool_call"
@@ -148,6 +149,14 @@ export interface StreamEvent {
     | "session_takeover"
     | "approval_request"
     | "plugin_envelope";
+  /**
+   * Phase classifies delta events by their narrative role (F4 / CW-20260419-0029).
+   * "narration" — inter-iteration prose emitted between tool_use blocks.
+   * "final"     — post-end_turn text that forms the assistant's answer.
+   * "thinking"  — F3 (CW-20260420-0023) interleaved thinking block content.
+   * Absent on pre-F4 streams and on non-delta event types.
+   */
+  phase?: "narration" | "final" | "thinking";
   content?: string;
   message_id?: string;
   agent_id?: string;
@@ -466,6 +475,81 @@ export interface TurnSnapshotToolCall {
   success?: boolean;
 }
 
+// --- Inspector (I1, CW-20260426-0004) ---
+
+export interface InspectorSlotSnapshot {
+  name: string;
+  tokens: number;
+  cached: boolean;
+  cache_key?: string;
+  sensitive: boolean;
+  content: string;
+  traffic_light: 'green' | 'yellow' | 'red';
+}
+
+export interface InspectorLLMMessageRecord {
+  role: string;
+  content: string;
+  tokens: number;
+  classification?: string;
+}
+
+export interface InspectorBrokerDecision {
+  intent: string;
+  outcome: string;
+  selected_tools: string[];
+  layer_reached: string;
+  consecutive_empty: number;
+  total_calls: number;
+  loaded_count: number;
+  reflection_query?: string;
+  signals?: string;
+}
+
+export interface InspectorToolCallRecord {
+  tool_id: string;
+  name: string;
+  arguments: string;
+  result: string;
+  is_error: boolean;
+  latency_ms: number;
+  cache_state: string;
+}
+
+export interface InspectorReminderItem {
+  id: string;
+  text: string;
+  trigger_json: string;
+}
+
+export interface InspectorRemindersRecord {
+  set_this_turn?: InspectorReminderItem[];
+  fired_this_turn?: InspectorReminderItem[];
+}
+
+export interface InspectorTurnSnapshot {
+  session_id: string;
+  turn_id: string;
+  started_at: string;
+  slots: InspectorSlotSnapshot[];
+  llm_messages: InspectorLLMMessageRecord[];
+  broker_decisions: InspectorBrokerDecision[];
+  tool_calls: InspectorToolCallRecord[];
+  scope_tier?: string;
+  strategy?: { reflex_match_id?: string; max_turns: number; reasoning?: string };
+  playbook?: { name: string; steps?: string[] };
+  memory_hits?: { source: string; content: string; score?: number }[];
+  loop_status?: { detected: boolean; reason?: string };
+  /** Reminders set and fired this turn (J11, CW-20260426-0009) */
+  reminders?: InspectorRemindersRecord;
+}
+
+export interface InspectorTurnsResponse {
+  session_id: string;
+  turns: InspectorTurnSnapshot[];
+  count: number;
+}
+
 // --- Envelopes ---
 
 export interface Envelope {
@@ -481,6 +565,24 @@ export interface Envelope {
   approval?: EnvelopeApprovalRequest;
   status?: { phase: string; progress: number };
   data?: Record<string, unknown>;
+  /**
+   * J8 v1 — declarative drawer routing (CW-20260426-0006). When set, the
+   * envelope renderer opens the named drawer (using the agent_opened state
+   * for the dismiss machine) and renders the card into it instead of inline
+   * in the chat transcript. Known v1 IDs: `bottom_chat_drawer`, `work`,
+   * `workflows`. Plugin-shipped panel IDs are accepted for trusted callers.
+   * Omit to render inline in chat (current default behavior).
+   */
+  target?: string;
+  /**
+   * J8 v1 — mode/status signal carried alongside the envelope
+   * (CW-20260426-0006). When set, the FE resolves the mode against the
+   * preset map at `ui/src/lib/panel-modes.ts` and opens the associated
+   * panels using the agent_opened state. Independent of `target` — both
+   * can be set on the same envelope. v1 vocabulary: `planning`. Unknown
+   * modes are silently ignored.
+   */
+  mode?: string;
 }
 
 export interface Proposal {
@@ -598,6 +700,36 @@ export interface Artifact {
   created_at: string;
 }
 
+// --- Documents (J10, CW-20260426-0008) ---
+
+export interface Document {
+  id: string
+  session_id: string
+  name: string
+  mime_type: string
+  content: string
+  size_bytes: number
+  /** Include document in agent context */
+  included: boolean
+  /** true = send full content; false = send pointer (name + summary) */
+  full_content: boolean
+  summary: string
+  created_at: string
+  updated_at: string
+}
+
+// --- Pinned content (J11, CW-20260426-0009) ---
+
+export interface PinnedContent {
+  id: string
+  session_id?: string | null
+  scope: 'turn' | 'session' | 'cross_session'
+  content: string
+  agent_id: string
+  created_at: string
+  updated_at: string
+}
+
 // --- Tool Call Display ---
 
 export type ToolCallDisplayMode = "indicator" | "minimal" | "compact" | "full";
@@ -672,7 +804,7 @@ export interface ToolLoadItem {
 
 export type ToolLoadPreferences = Record<string, string>;
 
-// --- Fragments Engine (Sprint Planning) ---
+// --- Engine (Sprint Planning) ---
 
 export interface FragmentsSprint {
   id: string;
@@ -1113,4 +1245,18 @@ export interface MemoryUpdateRequest {
   origin: MemoryOrigin;
   confidence: number;
   tags: string[];
+}
+
+// --- Role Trust (H1 CW-20260421-0014) ---
+
+export type TrustTier = "untrusted" | "normal" | "trusted";
+
+// WorkspaceRoleTrustOverride is a single row from workspace_role_trust
+// listing the explicit override for one agent profile in a workspace.
+export interface WorkspaceRoleTrustOverride {
+  workspace_id: string;
+  agent_profile_id: string;
+  trust_tier: TrustTier;
+  promoted_at: string;
+  promoted_by: string;
 }

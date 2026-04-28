@@ -12,7 +12,7 @@ func TestValidAgent(t *testing.T) {
 		Slug:            "test-agent",
 		SystemPrompt:    "You are a test agent.",
 		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"allow_list":["mcp__conduit__*"]}`,
+		ToolPermissions: `{"allow_list":["memory_*","context_*"]}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
@@ -94,7 +94,7 @@ func TestInvalidGlobPattern(t *testing.T) {
 		Slug:            "bad-glob",
 		SystemPrompt:    "You have bad patterns.",
 		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"allow_list":["mcp__conduit__[invalid"]}`,
+		ToolPermissions: `{"allow_list":["memory_[invalid"]}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if result.OK() {
@@ -108,7 +108,7 @@ func TestValidAgentWithAllowAndMCPServers(t *testing.T) {
 		Slug:            "full-agent",
 		SystemPrompt:    "You are a full agent.",
 		MCPServers:      `["conduit","engine"]`,
-		ToolPermissions: `{"allow_list":["mcp__conduit__*","mcp__engine__*"],"max_calls_per_turn":10}`,
+		ToolPermissions: `{"allow_list":["memory_*","engine_*"],"max_calls_per_turn":10}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
@@ -147,7 +147,7 @@ func TestDenyListWithInvalidGlob(t *testing.T) {
 		Slug:            "bad-deny",
 		SystemPrompt:    "You have bad deny.",
 		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"deny_list":["mcp__[bad"]}`,
+		ToolPermissions: `{"deny_list":["memory_[bad"]}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if result.OK() {
@@ -162,7 +162,7 @@ func TestPrefixGlobIsValid(t *testing.T) {
 		Slug:            "prefix-glob",
 		SystemPrompt:    "You use prefix globs.",
 		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"allow_list":["mcp__conduit__*","mcp__engine__task_*"]}`,
+		ToolPermissions: `{"allow_list":["memory_*","engine_task_*"]}`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {

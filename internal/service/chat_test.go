@@ -50,7 +50,7 @@ func (s *stubAgentService) ListModes(_ context.Context, _ string) ([]store.Agent
 
 type stubToolService struct{}
 
-func (s *stubToolService) SelectForAgent(_ context.Context, _, _, _, _ string) (*ToolSelection, error) {
+func (s *stubToolService) SelectForAgent(_ context.Context, _, _, _, _ string, _ int) (*ToolSelection, error) {
 	return &ToolSelection{}, nil
 }
 func (s *stubToolService) Execute(_ context.Context, _, _ string, _ map[string]any) (*ToolResult, error) {
@@ -115,7 +115,10 @@ type minimalStore struct {
 	stubTodoStore
 	stubPlanStore
 	stubHandoffStashStore
+	stubCompactionEventStore
 	stubEnvelopeStore
+	stubReminderStore
+	stubPinnedContentStore
 }
 
 type stubEnvelopeStore struct{}
@@ -125,9 +128,36 @@ func (stubEnvelopeStore) GetEnvelopeInstance(id string) (*store.EnvelopeInstance
 	return nil, fmt.Errorf("not found")
 }
 
+type stubReminderStore struct{}
+
+func (stubReminderStore) CreateReminder(store.Reminder) error                   { return nil }
+func (stubReminderStore) GetReminder(string) (store.Reminder, error)            { return store.Reminder{}, nil }
+func (stubReminderStore) ListUnfiredReminders(string) ([]store.Reminder, error) { return nil, nil }
+func (stubReminderStore) MarkReminderFired(string) error                        { return nil }
+func (stubReminderStore) DeleteReminder(string) error                           { return nil }
+
+type stubPinnedContentStore struct{}
+
+func (stubPinnedContentStore) CreatePinnedContent(store.PinnedContent) error          { return nil }
+func (stubPinnedContentStore) ListPinnedContent(string) ([]store.PinnedContent, error) { return nil, nil }
+func (stubPinnedContentStore) DeletePinnedContent(string) error                        { return nil }
+func (stubPinnedContentStore) ClearSessionPins(string) error                           { return nil }
+
 type stubHandoffStashStore struct{}
 
 func (stubHandoffStashStore) UpsertHandoffStash(store.HandoffStash) error { return nil }
+
+type stubCompactionEventStore struct{}
+
+func (stubCompactionEventStore) WriteCompactionEvent(context.Context, store.CompactionEvent) error {
+	return nil
+}
+func (stubCompactionEventStore) GetLatestCompactionEvent(context.Context, string) (*store.CompactionEvent, error) {
+	return nil, nil
+}
+func (stubCompactionEventStore) ListCompactionEventsBySession(context.Context, string, int) ([]store.CompactionEvent, error) {
+	return nil, nil
+}
 
 // Stubs to satisfy the Store composite interface for tests.
 type stubSessionStore struct{}

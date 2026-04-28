@@ -97,6 +97,21 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/artifacts/upload", a.handleUploadArtifact)
 	mux.HandleFunc("POST /api/artifacts/place", a.handlePlaceArtifact)
 
+	// Documents (J10, CW-20260426-0008)
+	mux.HandleFunc("GET /api/sessions/{id}/documents", a.handleListDocuments)
+	mux.HandleFunc("POST /api/sessions/{id}/documents", a.handleCreateDocument)
+	mux.HandleFunc("GET /api/documents/{id}", a.handleGetDocument)
+	mux.HandleFunc("PUT /api/documents/{id}", a.handleUpdateDocument)
+	mux.HandleFunc("DELETE /api/documents/{id}", a.handleDeleteDocument)
+
+	// Session context prompt (J10, CW-20260426-0008)
+	mux.HandleFunc("GET /api/sessions/{id}/context-prompt", a.handleGetSessionContextPrompt)
+	mux.HandleFunc("PUT /api/sessions/{id}/context-prompt", a.handleSetSessionContextPrompt)
+
+	// Pinned content (J11, CW-20260426-0009)
+	mux.HandleFunc("GET /api/sessions/{id}/pins", a.handleListPins)
+	mux.HandleFunc("DELETE /api/pins/{id}", a.handleDeletePin)
+
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
 	mux.HandleFunc("POST /api/commands/execute", a.handleExecuteCommand)
@@ -310,11 +325,20 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Debug
 	mux.HandleFunc("GET /api/debug/slots", a.handleDebugSlots)
 
+	// Inspector (I1 — dev-mode per-turn aggregator, CW-20260426-0004)
+	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns", a.handleInspectorListTurns)
+	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns/{turn_id}", a.handleInspectorGetTurn)
+
 	// Execution Metrics
 	mux.HandleFunc("GET /api/sessions/{id}/metrics", a.handleGetSessionExecutionMetrics)
 	mux.HandleFunc("GET /api/metrics/executions", a.handleGetRecentExecutionMetrics)
 	mux.HandleFunc("GET /api/metrics/utility", a.handleGetUtilityCallSummary)
 	mux.HandleFunc("GET /api/metrics/utility/log", a.handleGetUtilityCallLog)
+
+	// Role Trust (H1, CW-20260421-0014)
+	mux.HandleFunc("GET /api/workspaces/{workspace_id}/roles", a.handleListWorkspaceRoleTrust)
+	mux.HandleFunc("POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleSetWorkspaceRoleTrust)
+	mux.HandleFunc("DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleDeleteWorkspaceRoleTrust)
 }
 
 // jsonResp writes a JSON response with the given status code.

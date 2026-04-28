@@ -47,17 +47,18 @@ type ToolClient struct {
 	// the Store read.
 	DeveloperModeFunc func() bool
 
-	// enricher backs the per-turn override block composition. Set by New when
-	// a store is available; nil-safe via the storeEnricher's own fallback.
-	// Kept unexported — callers work with broker.Enricher through the
-	// SelectToolsAsProvider result.
-	enricher broker.Enricher
+	// Phase 5 / D3 (CW-20260419-0011) — reasoning-augmented selection.
+	// Both fields are nil-safe: when unset, the broker behaves exactly as
+	// before (keyword + token budget). Wiring code (service container) sets
+	// them when the underlying capabilities are available.
+	skills         []ToolPreferenceSkill
+	memoryRecaller MemoryRecaller
 }
 
 // SelectResult is the return shape of ToolClient.SelectToolsAsProvider. It
 // carries both the provider-shaped tool definitions for the LLM and the
-// markdown override block composed from per-tool Hints (go-toolbroker
-// broker.ComposeOverrideBlock), ready to append to the system prompt.
+// markdown override block composed from per-tool Hints (via the broker's
+// WithEnricher option), ready to append to the system prompt.
 type SelectResult struct {
 	Tools         []provider.ToolDefinition
 	OverrideBlock string
@@ -71,7 +72,8 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 		cfg = DefaultConfig()
 	}
 
-	lb := broker.NewLocalBroker(nil, cfg.Rules)
+	enr := NewStoreEnricher(s)
+	lb := broker.NewLocalBroker(nil, cfg.Rules, broker.WithEnricher(enr))
 
 	return &ToolClient{
 		LocalBroker: lb,
@@ -79,8 +81,78 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 		Store:       s,
 		Config:      cfg,
 		Builtins:    NewBuiltinToolRegistry(),
-		enricher:    NewStoreEnricher(s),
 	}
+}
+
+// SetSkills attaches operator-authored tool-preference skills to the
+// broker. Subsequent SelectToolsAugmented calls factor the skill set into
+// ranking. Pass nil to clear.
+func (tb *ToolClient) SetSkills(skills []ToolPreferenceSkill) {
+	tb.skills = skills
+	slog.Info("toolclient: tool-preference skills attached", "count", len(skills))
+}
+
+// SetMemoryRecaller attaches a MemoryRecaller used to query Vanta for prior
+// successful tool sequences on similar intents. Nil-safe — when unset, the
+// memory ranking signal is effectively empty and selection falls back to
+// keyword + skills.
+func (tb *ToolClient) SetMemoryRecaller(r MemoryRecaller) {
+	tb.memoryRecaller = r
+	if r != nil {
+		slog.Info("toolclient: memory recaller attached")
+	}
+}
+
+// Skills returns the currently-attached operator skills (read-only — the
+// returned slice is the live reference; callers should not mutate it).
+func (tb *ToolClient) Skills() []ToolPreferenceSkill { return tb.skills }
+
+// MemoryRecaller returns the attached memory recaller, or nil when none.
+func (tb *ToolClient) MemoryRecaller() MemoryRecaller { return tb.memoryRecaller }
+
+// SelectToolsAugmented is the reasoning-augmented selection entry point used
+// by the service layer. It wraps SelectWithSignals: gathers the per-call
+// memory hits (via the attached MemoryRecaller, if any), and passes the
+// attached skills + Config-driven err-toward-more pad through.
+//
+// On any error from the underlying broker pass the call returns the error;
+// errors from the memory recaller are NOT propagated — they're absorbed
+// (logged) so memory unreachability never gates tool selection.
+func (tb *ToolClient) SelectToolsAugmented(
+	ctx context.Context,
+	intent string,
+	hints []string,
+	workspaceID, agentID string,
+	windowSize int,
+) ([]broker.ToolDefinition, string, string, error) {
+	var memHits []ToolPatternHit
+	if tb.memoryRecaller != nil {
+		hits, err := tb.memoryRecaller.RecallToolPatterns(ctx, intent)
+		if err != nil {
+			slog.Warn("toolclient: memory recall errored — continuing without memory signal",
+				"intent", intent, "err", err)
+		} else {
+			memHits = hits
+		}
+	}
+
+	pad := DefaultErrTowardMorePad
+	if tb.Config != nil && tb.Config.ErrTowardMorePad >= 0 {
+		pad = tb.Config.ErrTowardMorePad
+	}
+
+	return tb.SelectWithSignals(ctx, intent, hints, workspaceID, agentID, windowSize, tb.skills, memHits, pad)
+}
+
+// IsBuiltinTool reports whether the named tool is a builtin (registered
+// via tb.Builtins.RegisterBuiltins). Used to distinguish builtin tools
+// from MCP-discovered tools on the uniform agent-facing surface (ADR-002),
+// where the legacy `mcp__` prefix is no longer available as a signal.
+func (tb *ToolClient) IsBuiltinTool(name string) bool {
+	if tb.Builtins == nil {
+		return false
+	}
+	return tb.Builtins.Has(name)
 }
 
 // strictTrue is a pointer to true used as the default Strict value for
@@ -103,10 +175,15 @@ func isWildcardIntent(intent string) bool {
 	return intent == "" || intent == "*"
 }
 
-// SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools.
+// SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools,
+// together with the per-tool override block from the broker enricher.
 // Optionally scoped by workspace and agent for rule overrides.
 // If intent is "*" or empty, logs a warning and returns a minimal fallback set.
-func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string) ([]broker.ToolDefinition, error) {
+//
+// windowSize is the per-session context window in tokens (from models.dev /
+// user settings). When windowSize <= 0 the broker falls back to
+// DefaultContextWindowTokens so behaviour on unknown models is preserved.
+func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) ([]broker.ToolDefinition, string, error) {
 	// Reject wildcard intent — fall back to a minimal safe set.
 	if isWildcardIntent(intent) {
 		slog.Warn("toolclient: wildcard/empty intent received — returning fallback set",
@@ -122,7 +199,7 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 
 	result, err := tb.LocalBroker.SelectTools(ctx, intent, hints)
 	if err != nil {
-		return nil, fmt.Errorf("select tools: %w", err)
+		return nil, "", fmt.Errorf("select tools: %w", err)
 	}
 
 	tools := result.Tools
@@ -130,12 +207,17 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 		tools = tools[:MaxSelectedTools]
 	}
 
-	// Apply token budget pruning.
+	// Apply token budget pruning using the per-session context window.
+	// windowSize <= 0 means the model is unknown — fall back to the static
+	// default so behaviour on unknown models is preserved (never a hard failure).
 	budgetPct := tb.Config.ToolTokenBudgetPct
 	if budgetPct <= 0 {
 		budgetPct = DefaultToolTokenBudgetPct
 	}
-	ctxWindow := tb.Config.ContextWindowTokens
+	ctxWindow := windowSize
+	if ctxWindow <= 0 {
+		ctxWindow = tb.Config.ContextWindowTokens
+	}
 	if ctxWindow <= 0 {
 		ctxWindow = DefaultContextWindowTokens
 	}
@@ -151,9 +233,10 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 	slog.Info("toolclient: selected tools for intent",
 		"selected", len(tools), "total", result.Total, "intent", intent,
 		"workspace", workspaceID, "agent", agentID,
-		"tool_tokens", EstimateToolTokens(tools), "budget", tokenBudget)
+		"tool_tokens", EstimateToolTokens(tools), "budget", tokenBudget,
+		"ctx_window", ctxWindow)
 
-	return tools, nil
+	return tools, result.OverrideBlock, nil
 }
 
 // DevServerName is the MCP server name for developer tools (dev_bash, dev_read,
@@ -162,21 +245,13 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 // SelectToolsAsProvider / CallTool.
 const DevServerName = "dev"
 
-// isDevTool reports whether a tool name belongs to the dev server. It matches
-// both the bare form ("dev_bash") and the MCP-prefixed form
-// ("mcp__dev__dev_bash"). This is the canonical check used at both
-// selection-time and execution-time to enforce the developer_mode gate.
+// isDevTool reports whether a tool name belongs to the dev server. With
+// MCP internalization (CW-20260427-0017, ADR-002) tool names are
+// uniform agent-facing — there is no `mcp__server__` prefix. Dev tools
+// are recognized by their `dev_*` prefix; the legacy `mcp__dev__*` form
+// is no longer emitted on the agent surface.
 func isDevTool(toolName string) bool {
-	// Prefixed form: mcp__dev__*
-	if strings.HasPrefix(toolName, "mcp__"+DevServerName+"__") {
-		return true
-	}
-	// Bare form: dev_* (tools resolved without the mcp__ prefix by the builtin
-	// registry or when the LLM omits the prefix).
-	if strings.HasPrefix(toolName, DevServerName+"_") {
-		return true
-	}
-	return false
+	return strings.HasPrefix(toolName, DevServerName+"_")
 }
 
 // developerModeEnabled reports whether developer_mode is active for this
@@ -211,12 +286,16 @@ func (tb *ToolClient) developerModeEnabled() bool {
 // runs after permission filtering so the override block never mentions a
 // tool the LLM won't actually see.
 //
+// windowSize is the per-session context window in tokens (from models.dev /
+// user settings). Pass 0 when the model is unknown — SelectTools will fall
+// back to DefaultContextWindowTokens so behaviour is preserved.
+//
 // Dev-tool gate: tools from the "dev" server (dev_bash, dev_read, dev_write,
 // dev_edit, dev_glob, dev_grep) are stripped from the returned set when
 // developer_mode is false in user_settings. This prevents the LLM from ever
 // seeing or requesting those tools in non-developer sessions.
-func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (*SelectResult, error) {
-	tools, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID)
+func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) (*SelectResult, error) {
+	tools, overrideBlock, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID, windowSize)
 	if err != nil {
 		return nil, err
 	}
@@ -248,15 +327,16 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	}
 
 	// Append broker-selected MCP tools, filtered by agent permissions.
+	// Names are uniform (no `mcp__server__` prefix) per ADR-002; the
+	// broker is registered with uniform names by mcp.Manager, so t.Name
+	// here is already the agent-facing name.
+	//
 	// Strict defaults to true for all broker-registered tools so malformed
 	// tool calls fail at the provider boundary instead of wasting retry turns.
 	// Tools that require a permissive schema (rare) can opt out by setting
 	// Strict: pointer-to-false in their ToolDefinition before registration.
 	for _, t := range tools {
 		name := t.Name
-		if t.Server != "" {
-			name = fmt.Sprintf("mcp__%s__%s", t.Server, t.Name)
-		}
 		// Dev-tool gate: skip dev tools when developer_mode is off.
 		if !devMode && isDevTool(name) {
 			continue
@@ -272,44 +352,22 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		})
 	}
 
-	// Compose override block from the FINAL selection (post-permission,
-	// post-prune). Nil enricher or no-enriched-tools both yield empty block.
-	// Enrichment is cosmetic — a compose error never fails selection; it is
-	// logged and the block ships empty. ComposeOverrideBlock itself returns
-	// ("", nil) on nil enricher, so the guard below is for log clarity only.
-	var overrideBlock string
-	if tb.enricher != nil && len(defs) > 0 {
-		names := make([]string, len(defs))
-		for i, d := range defs {
-			names[i] = d.Name
-		}
-		block, err := broker.ComposeOverrideBlock(ctx, names, tb.enricher)
-		if err != nil {
-			slog.Warn("toolclient: compose override block failed", "err", err)
-		} else {
-			overrideBlock = block
-		}
-	}
-
+	// overrideBlock was returned by SelectTools (from the broker's SelectResult
+	// composed via the WithEnricher option). No second LocalBroker.SelectTools
+	// call needed — the D1 redundant-call pattern is eliminated here.
 	return &SelectResult{Tools: defs, OverrideBlock: overrideBlock}, nil
 }
 
-// CallTool executes a tool call after checking permissions. Routes through the MCP Manager.
-// Tools with the mcp__ prefix are routed directly. Unprefixed tools (builtins, native tools)
-// are resolved to their owning server via the Manager's tool registry.
+// CallTool executes a tool call after checking permissions. Routes through
+// the MCP Manager via the uniform agent-facing name (no `mcp__server__`
+// prefix per ADR-002). The single name is the only signal — it is used
+// for permission checks, the dev-tool gate, and the manager lookup.
 //
-// Permission enforcement runs twice: once against the caller-supplied name
-// and, for unprefixed tools, once more against the resolved mcp__server__tool
-// name. Policies written as "mcp__server__*" patterns would otherwise miss
-// the bare-name fallback path that resolves via MCPManager.ResolveToolServer
-// — an agent with deny_list: ["mcp__dev__*"] could still invoke "dev_bash"
-// by omitting the prefix. Structured deny errors are returned for both.
-//
-// Dev-tool gate: if the tool resolves to the "dev" server (dev_bash, dev_read,
-// dev_write, dev_edit, dev_glob, dev_grep) and developer_mode is false in
-// user_settings, execution is denied regardless of the agent's permission
-// policy. This is the execution-time backstop that complements the
-// selection-time filter in SelectToolsAsProvider.
+// Dev-tool gate: if the tool name belongs to the "dev" set (dev_bash,
+// dev_read, dev_write, dev_edit, dev_glob, dev_grep) and developer_mode
+// is false in user_settings, execution is denied regardless of the
+// agent's permission policy. This is the execution-time backstop that
+// complements the selection-time filter in SelectToolsAsProvider.
 func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
 	// Dev-tool gate (execution-time backstop). Applied before the permission
 	// check so a misconfigured allow-list cannot re-enable dev tools when
@@ -318,7 +376,6 @@ func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, ar
 		return "", fmt.Errorf("permission denied: tool %q requires developer_mode to be enabled", toolName)
 	}
 
-	// Check permissions against the caller-supplied name first.
 	if !tb.CheckPermission(agentID, toolName) {
 		return "", fmt.Errorf("permission denied: tool %q not permitted for agent %q", toolName, agentID)
 	}
@@ -327,23 +384,7 @@ func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, ar
 		return "", fmt.Errorf("no MCP manager configured")
 	}
 
-	// Tools with mcp__ prefix already have routing info — pass through.
-	// Unprefixed tools (native/builtin) need server resolution; re-check the
-	// resolved prefixed name so deny patterns targeting "mcp__server__*" catch
-	// the bare-name bypass route.
-	execName := toolName
-	if !strings.HasPrefix(toolName, "mcp__") {
-		if server, prefixed := tb.MCPManager.ResolveToolServer(toolName); server != "" {
-			execName = prefixed
-			if !tb.CheckPermission(agentID, execName) {
-				return "", fmt.Errorf("permission denied: tool %q (resolved to %q) not permitted for agent %q", toolName, execName, agentID)
-			}
-		} else {
-			return "", fmt.Errorf("tool %q not found in any registered server", toolName)
-		}
-	}
-
-	return tb.MCPManager.ExecuteTool(ctx, execName, args)
+	return tb.MCPManager.ExecuteTool(ctx, toolName, args)
 }
 
 // CallToolWithPolicyCheck is a convenience that additionally rejects argument

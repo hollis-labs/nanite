@@ -243,6 +243,74 @@
               "file": { "type": "string" }
             }
           }
+        },
+        "card_rules": {
+          "description": "Stage 1 card detection rules. Each rule maps a regex pattern or JSON Schema match to a card type. Plugin rules run after built-in rules and can only add new card types, not override built-ins.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["card_type"],
+            "additionalProperties": false,
+            "properties": {
+              "card_type": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "Envelope type emitted when this rule matches."
+              },
+              "pattern": {
+                "type": "string",
+                "minLength": 1,
+                "description": "RE2-compatible regex matched against the full agent output text. Mutually exclusive with output_schema."
+              },
+              "output_schema": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Relative path (within the plugin dir) to a JSON Schema file. The output is parsed as JSON and validated against the schema. Mutually exclusive with pattern."
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional human-readable documentation for this rule."
+              }
+            }
+          }
+        },
+        "panels": {
+          "description": "Right-rail v2 panel contributions (J9). Each entry declares a panel the plugin adds to the right-rail tab strip. Plugin panels can register but render a placeholder in v1; full render function is a follow-up. Trust gate: install-time (H1); runtime panel_register is not supported in v1.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "Stable panel identifier. Referenced by J8 panel_open / panel_close."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Human-readable tab label shown in the right-rail tab strip."
+              },
+              "default_visible": {
+                "type": "boolean",
+                "description": "Whether the panel appears in the tab strip by default. Plugin panels default to false."
+              },
+              "icon": {
+                "type": "string",
+                "description": "Optional Lucide icon name (e.g. 'layers', 'file-text'). Falls back to generic Layers icon when omitted."
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Sort order hint. Plugin panels default to 100+; lower values appear first."
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional human-readable description shown in the Panels settings panel."
+              }
+            }
+          }
         }
       }
     },

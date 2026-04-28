@@ -355,8 +355,51 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		host.logger.Info("manifest agent_profiles: yaml-driven registration deferred (follow-up B.4 task)", "plugin", pluginID, "count", len(reg.AgentProfiles))
 		skipped += len(reg.AgentProfiles)
 	}
+	// 6. Card rules (J5 — CW-20260421-0013). Compile and register each rule
+	// into the host's Stage 1 detection registry. Built-in rules have already
+	// been registered at host startup (tier=0); these plugin rules land at
+	// tier=1 and can only ADD new card types, never override built-ins.
+	// pluginDir is passed to compileCardRule so output_schema rules can resolve
+	// their JSON Schema files. When pluginDir is empty (in-process builtin with
+	// no on-disk dir) schema-based rules are compiled without the schema file
+	// and will simply never match — this mirrors the envelope schema behavior.
+	if len(reg.CardRules) > 0 {
+		if err := registerManifestCardRules(host, manifest, pluginID, pluginDir); err != nil {
+			return err
+		}
+	}
+	// 7. Panels (J9 — CW-20260426-0007). Register plugin-declared right-rail
+	// panels into the host panel registry. Plugin panels are catalogued here at
+	// load time; the render function is a placeholder in v1 (plugin panel
+	// rendering is deferred to a follow-up ticket). Built-in panels are
+	// registered by the host at startup (tier=0); these land at tier=1 and
+	// cannot override built-in panel IDs.
+	if len(reg.Panels) > 0 {
+		if err := registerManifestPanels(host, manifest, pluginID); err != nil {
+			return err
+		}
+	}
 	if skipped > 0 {
 		host.logger.Info("manifest registrations applied (subset)", "plugin", pluginID, "deferred", skipped)
+	}
+	return nil
+}
+
+// registerManifestCardRules compiles and registers all card_rules entries from
+// the manifest into the host's Stage 1 card detection registry.
+// Errors on invalid card_type, bad regex, or schema collision with built-ins.
+func registerManifestCardRules(host *Host, manifest *PluginManifest, pluginID, pluginDir string) error {
+	for i, r := range manifest.Registers.CardRules {
+		if r.CardType == "" {
+			return fmt.Errorf("plugin %q: card_rules[%d] missing card_type", pluginID, i)
+		}
+		entry, err := compileCardRule(r, pluginID, pluginDir)
+		if err != nil {
+			return fmt.Errorf("plugin %q: card_rules[%d]: %w", pluginID, i, err)
+		}
+		if err := host.RegisterCardRule(entry); err != nil {
+			return fmt.Errorf("plugin %q: register card rule %q: %w", pluginID, r.CardType, err)
+		}
 	}
 	return nil
 }

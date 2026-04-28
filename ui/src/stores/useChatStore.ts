@@ -5,10 +5,23 @@ interface ChatState {
   // Streaming
   isStreaming: boolean
   streamingContent: string
+  /** F4 (CW-20260419-0029) — inter-iteration narration text. Live during streaming.
+   *  Collapses to a pill after stream_end. Empty when the turn had no tool calls. */
+  streamingNarration: string
+  /** F4 — post-end_turn final answer text. This becomes the assistant bubble. */
+  streamingFinal: string
+  /** F3 (CW-20260420-0023) — interleaved thinking text. Live during streaming.
+   *  Shown in the "Working…" strip alongside narration. Collapses to the pill
+   *  post-stream, rendered with a distinct "thinking" badge. */
+  streamingThinking: string
   streamingSessionId: string | null
   setStreaming: (streaming: boolean) => void
   setStreamingSessionId: (id: string | null) => void
   appendStreamContent: (content: string) => void
+  appendStreamNarration: (content: string) => void
+  appendStreamFinal: (content: string) => void
+  appendStreamThinking: (content: string) => void
+  replaceStreamContent: (content: string) => void
   clearStream: () => void
 
   // Status messages (transient, e.g. retry notifications)
@@ -80,6 +93,11 @@ interface ChatState {
   activeModel: string
   setActiveModel: (model: string) => void
 
+  // Effort (F1 / CW-20260420-0014) — per-turn token-budget + reasoning dial.
+  // Values: "low" | "normal" | "high" | "max". Default: "normal".
+  activeEffort: string
+  setActiveEffort: (effort: string) => void
+
   // Presence
   activeStreams: Map<string, ActiveStreamInfo>
   pendingTools: Map<string, PendingToolInfo>
@@ -102,12 +120,36 @@ export const useChatStore = create<ChatState>((set) => ({
   // Streaming
   isStreaming: false,
   streamingContent: '',
+  streamingNarration: '',
+  streamingFinal: '',
+  streamingThinking: '',
   streamingSessionId: null,
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setStreamingSessionId: (id) => set({ streamingSessionId: id }),
   appendStreamContent: (content) =>
     set((state) => ({ streamingContent: state.streamingContent + content })),
-  clearStream: () => set({ streamingContent: '', isStreaming: false, streamingSessionId: null, statusMessage: null, streamStalled: false }),
+  appendStreamNarration: (content) =>
+    set((state) => ({ streamingNarration: state.streamingNarration + content })),
+  appendStreamFinal: (content) =>
+    set((state) => ({
+      streamingFinal: state.streamingFinal + content,
+      // Keep streamingContent in sync with final text so legacy consumers
+      // (e.g. ChatTranscript's streamingContent prop) render the answer.
+      streamingContent: state.streamingFinal + content,
+    })),
+  appendStreamThinking: (content) =>
+    set((state) => ({ streamingThinking: state.streamingThinking + content })),
+  replaceStreamContent: (content) => set({ streamingContent: content, streamingFinal: content }),
+  clearStream: () => set({
+    streamingContent: '',
+    streamingNarration: '',
+    streamingFinal: '',
+    streamingThinking: '',
+    isStreaming: false,
+    streamingSessionId: null,
+    statusMessage: null,
+    streamStalled: false,
+  }),
 
   // Status messages
   statusMessage: null,
@@ -302,6 +344,10 @@ export const useChatStore = create<ChatState>((set) => ({
   // Model
   activeModel: 'claude-sonnet-4-20250514',
   setActiveModel: (model: string) => set({ activeModel: model }),
+
+  // Effort
+  activeEffort: 'normal',
+  setActiveEffort: (effort: string) => set({ activeEffort: effort }),
 
   // Presence
   activeStreams: new Map(),

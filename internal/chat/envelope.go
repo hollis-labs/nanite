@@ -76,6 +76,20 @@ type Envelope struct {
 	ID        string         `json:"id,omitempty"`        // set by backend after CreateEnvelopeInstance
 	Title     string         `json:"title,omitempty"`
 	Subtitle  string         `json:"subtitle,omitempty"`
+	// Target is the optional drawer ID where this envelope should be rendered
+	// (J8 v1 — CW-20260426-0006). When set, the frontend opens the named drawer
+	// and renders the card content into it without requiring an explicit panel_open
+	// call. Known v1 values: "bottom_chat_drawer", "work", "workflows". Plugin-
+	// declared drawers may introduce additional IDs. Omit to render inline in chat.
+	Target    string         `json:"target,omitempty"`
+	// Mode is the optional mode/status signal carried alongside the envelope
+	// (J8 v1 — CW-20260426-0006). When set, the frontend resolves the mode
+	// against a preset map (see ui/src/lib/panel-modes.ts) and opens the
+	// associated panels using the agent_opened state. v1 vocabulary: "planning"
+	// → opens [work, workflows]. Empty/unknown modes are no-ops on the FE.
+	// Mode is independent of Target — both can be set on the same envelope so
+	// a card can route to one drawer while signaling a broader workspace mode.
+	Mode      string         `json:"mode,omitempty"`
 	Proposals []Proposal     `json:"proposals,omitempty"`
 	Questions []Question     `json:"questions,omitempty"`
 	Status    *Status        `json:"status,omitempty"`

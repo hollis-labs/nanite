@@ -583,3 +583,174 @@ func TestCompactionPipeline_E2E_StashRoundTrip(t *testing.T) {
 		t.Error("expected at least one compaction stage applied alongside stash write")
 	}
 }
+
+// mockCompactionEventWriter captures emitted CompactionEvents for testing.
+type mockCompactionEventWriter struct {
+	calls []CompactionEvent
+}
+
+func (m *mockCompactionEventWriter) WriteCompactionEvent(ctx context.Context, evt CompactionEvent) error {
+	m.calls = append(m.calls, evt)
+	return nil
+}
+
+// TestCompactionPipeline_eventEmission verifies that a CompactionEvent is
+// emitted after successful compaction when a CompactionEventWriter is wired.
+func TestCompactionPipeline_eventEmission(t *testing.T) {
+	msgs := makeMessages(10, 200) // 2000 tokens
+
+	// Use RunForce to guarantee compaction stages run (don't rely on NeedsCompaction)
+	cw := NewContextWindow(100_000, nil)
+	cw.SetContent(SlotSystem, "system")
+	cw.SetContent(SlotConversation, serializeMessages(msgs, DefaultEstimator{}))
+
+	eventWriter := &mockCompactionEventWriter{}
+
+	p := &CompactionPipeline{
+		Window:                   cw,
+		Estimator:                DefaultEstimator{},
+		Summarizer:               &mockSummarizer{},
+		Mode:                     CompactionModeCode,
+		ConversationMessages:     msgs,
+		SessionID:                "emit-test-sess",
+		CompactionEventWriter:    eventWriter,
+	}
+
+	// Use RunForce to guarantee stages apply
+	_, err := p.RunForce(context.Background())
+	if err != nil {
+		t.Fatalf("RunForce: %v", err)
+	}
+
+	if len(eventWriter.calls) != 1 {
+		t.Fatalf("expected 1 event emitted, got %d", len(eventWriter.calls))
+	}
+
+	evt := eventWriter.calls[0]
+	if evt.SessionID != "emit-test-sess" {
+		t.Errorf("event session_id mismatch: %q", evt.SessionID)
+	}
+	if evt.SummaryMode != CompactionModeCode {
+		t.Errorf("event summary_mode: expected %q, got %q", CompactionModeCode, evt.SummaryMode)
+	}
+	if len(evt.StagesApplied) == 0 {
+		t.Error("expected at least one stage applied in event")
+	}
+	if evt.ID == "" {
+		t.Error("event id should not be empty")
+	}
+}
+
+// TestCompactionPipeline_noEventWhenWriterNil verifies no panic when
+// CompactionEventWriter is nil (backwards-compatible).
+func TestCompactionPipeline_noEventWhenWriterNil(t *testing.T) {
+	msgs := makeMessages(10, 200)
+
+	cw := NewContextWindow(100_000, nil)
+	cw.SetContent(SlotSystem, "system")
+	cw.SetContent(SlotConversation, serializeMessages(msgs, DefaultEstimator{}))
+
+	p := &CompactionPipeline{
+		Window:                cw,
+		Estimator:             DefaultEstimator{},
+		Summarizer:            &mockSummarizer{},
+		Mode:                  CompactionModeGeneral,
+		ConversationMessages:  msgs,
+		SessionID:             "no-writer-sess",
+		CompactionEventWriter: nil, // explicitly nil
+	}
+
+	// Use RunForce to guarantee stages apply even with nil writer
+	result, err := p.RunForce(context.Background())
+	if err != nil {
+		t.Fatalf("RunForce: %v", err)
+	}
+
+	// Should complete without panic
+	if result == nil {
+		t.Error("expected non-nil result")
+	}
+}
+
+// TestCompactionEventWriter_allModes verifies mode-specific emission.
+func TestCompactionEventWriter_allModes(t *testing.T) {
+	modes := []string{CompactionModeCode, CompactionModePlan, CompactionModeResearch, CompactionModeGeneral}
+
+	for _, mode := range modes {
+		t.Run(mode, func(t *testing.T) {
+			msgs := makeMessages(10, 200)
+			cw := NewContextWindow(100_000, nil)
+			cw.SetContent(SlotSystem, "system")
+			cw.SetContent(SlotConversation, serializeMessages(msgs, DefaultEstimator{}))
+
+			eventWriter := &mockCompactionEventWriter{}
+
+			p := &CompactionPipeline{
+				Window:                cw,
+				Estimator:             DefaultEstimator{},
+				Summarizer:            &mockSummarizer{},
+				Mode:                  mode,
+				ConversationMessages:  msgs,
+				SessionID:             "mode-test-" + mode,
+				CompactionEventWriter: eventWriter,
+			}
+
+			// Use RunForce to guarantee stages apply
+			_, err := p.RunForce(context.Background())
+			if err != nil {
+				t.Fatalf("RunForce: %v", err)
+			}
+
+			if len(eventWriter.calls) != 1 {
+				t.Fatalf("expected 1 event, got %d", len(eventWriter.calls))
+			}
+
+			if eventWriter.calls[0].SummaryMode != mode {
+				t.Errorf("mode mismatch: expected %q, got %q", mode, eventWriter.calls[0].SummaryMode)
+			}
+		})
+	}
+}
+
+// TestCompactionEvent_handoffStashLinkage verifies that HandoffStashID is
+// properly linked when a stash is written.
+func TestCompactionEvent_handoffStashLinkage(t *testing.T) {
+	msgs := makeMessages(10, 200)
+	cw := NewContextWindow(100_000, nil)
+	cw.SetContent(SlotSystem, "system")
+	cw.SetContent(SlotConversation, serializeMessages(msgs, DefaultEstimator{}))
+
+	stashWriter := &mockStashWriter{}
+	eventWriter := &mockCompactionEventWriter{}
+
+	p := &CompactionPipeline{
+		Window:                cw,
+		Estimator:             DefaultEstimator{},
+		Summarizer:            &mockSummarizer{},
+		Mode:                  CompactionModePlan,
+		ConversationMessages:  msgs,
+		SessionID:             "linkage-test-sess",
+		StashWriter:           stashWriter,
+		ScratchpadSnapshot:    map[string]any{"decisions_locked": []any{"d1"}},
+		CompactionEventWriter: eventWriter,
+	}
+
+	// Use RunForce to guarantee stages apply
+	result, err := p.RunForce(context.Background())
+	if err != nil {
+		t.Fatalf("RunForce: %v", err)
+	}
+
+	if result.HandoffStashID == "" {
+		t.Fatal("result should have HandoffStashID")
+	}
+
+	if len(eventWriter.calls) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(eventWriter.calls))
+	}
+
+	evt := eventWriter.calls[0]
+	if evt.HandoffStashID == nil || *evt.HandoffStashID != result.HandoffStashID {
+		t.Errorf("event HandoffStashID mismatch: expected %q, got %v", result.HandoffStashID, evt.HandoffStashID)
+	}
+}

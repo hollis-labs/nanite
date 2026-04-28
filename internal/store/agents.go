@@ -46,6 +46,10 @@ type AgentProfile struct {
 	CapabilitiesJSON string `json:"capabilities_json"`
 	LimitsJSON       string `json:"limits_json"`
 	ModelStrategy    string `json:"model_strategy"`
+	// J7 ingestion metadata (CW-20260421-0011).
+	ImportedAt   string `json:"imported_at"`   // RFC3339 timestamp of last ingest; empty for non-file agents
+	OriginSystem string `json:"origin_system"` // "nanite", "agentrc", "claude", etc. — free-form provenance
+	Format       string `json:"format"`        // "markdown", "yaml"
 }
 
 // agentColumns is the canonical SELECT column list for agent_profiles.
@@ -54,7 +58,8 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at,
         agent_hash, version, tools, directories, constraints, tags, status, source, source_ref,
         COALESCE(icon,''),
-        kind, capabilities_json, limits_json, model_strategy`
+        kind, capabilities_json, limits_json, model_strategy,
+        COALESCE(imported_at,''), COALESCE(origin_system,''), COALESCE(format,'markdown')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -65,6 +70,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.AgentHash, &a.Version, &a.Tools, &a.Directories, &a.Constraints, &a.Tags,
 		&a.Status, &a.Source, &a.SourceRef, &a.Icon,
 		&a.Kind, &a.CapabilitiesJSON, &a.LimitsJSON, &a.ModelStrategy,
+		&a.ImportedAt, &a.OriginSystem, &a.Format,
 	)
 }
 
@@ -177,6 +183,10 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		a.LimitsJSON = "{}"
 	}
 
+	if a.Format == "" {
+		a.Format = "markdown"
+	}
+
 	_, err := s.DB.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
 		                              modes, default_mode, default_model, default_provider,
@@ -184,8 +194,9 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              created_at, updated_at,
 		                              agent_hash, version, tools, directories, constraints,
 		                              tags, status, source, source_ref, icon,
-		                              kind, capabilities_json, limits_json, model_strategy)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              kind, capabilities_json, limits_json, model_strategy,
+		                              imported_at, origin_system, format)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -193,6 +204,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
 		a.Tags, a.Status, a.Source, a.SourceRef, nullIfEmpty(a.Icon),
 		a.Kind, a.CapabilitiesJSON, a.LimitsJSON, a.ModelStrategy,
+		a.ImportedAt, a.OriginSystem, a.Format,
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -266,7 +278,8 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
 		        updated_at = ?,
 		        agent_hash = ?, version = ?, tools = ?, directories = ?, constraints = ?,
-		        tags = ?, status = ?, icon = ?
+		        tags = ?, status = ?, icon = ?,
+		        imported_at = ?, origin_system = ?, format = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
@@ -274,6 +287,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		now,
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
 		a.Tags, a.Status, nullIfEmpty(a.Icon),
+		a.ImportedAt, a.OriginSystem, a.Format,
 		a.ID,
 	)
 	if err != nil {

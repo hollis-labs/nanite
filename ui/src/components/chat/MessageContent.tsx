@@ -1,5 +1,6 @@
 import { useMemo, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import { ArtifactChip } from './ArtifactChip'
 import hljs from 'highlight.js/lib/core'
@@ -244,7 +245,7 @@ export function MessageContent({ content, role }: { content: string; role: 'user
 
   return (
     <div className="text-sm text-fg leading-relaxed prose-dark">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
         {displayContent}
       </ReactMarkdown>
       {hasPendingEnvelope && (

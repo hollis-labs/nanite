@@ -119,7 +119,7 @@ func containsStr(slice []string, s string) bool {
 func DefaultToolKnowledge() *ToolKnowledge {
 	return &ToolKnowledge{
 		Categories: map[string][]ToolEntry{
-			// ── Project Management (Fragments Engine) ──────────────
+			// ── Project Management (Engine) ──────────────
 			"project-management": {
 				{
 					Name:             "engine_task_create",
@@ -406,7 +406,7 @@ func DefaultToolKnowledge() *ToolKnowledge {
 				{
 					Name:             "engine_health",
 					Category:         "general",
-					ShortDescription: "Check Fragments Engine project management service health",
+					ShortDescription: "Check Engine project management service health",
 					Server:           "engine",
 					UseCases:         []string{"service health check", "connectivity test"},
 				},

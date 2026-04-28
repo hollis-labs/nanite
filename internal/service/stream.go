@@ -536,6 +536,23 @@ func (sm *StreamManager) BroadcastSessionStreamEvent(sessionID string, evt chat.
 	return delivered
 }
 
+// BroadcastPanelSignal adapts mcp.PanelSignalSink to the chat.StreamEvent
+// shape. Used by J8 v1 panel-control tools (nanite_panel_open / panel_close /
+// signal_mode) so the mcp package can push panel signals without importing
+// chat (which would cycle through chat → toolclient → mcp).
+//
+// signalType is the SSE event type ("panel_signal"); jsonPayload is the
+// already-marshaled PanelSignal JSON. Both ride on the existing Envelope
+// field on chat.StreamEvent so no new wire field is introduced.
+//
+// CW-20260426-0006.
+func (sm *StreamManager) BroadcastPanelSignal(sessionID, signalType, jsonPayload string) int {
+	return sm.BroadcastSessionStreamEvent(sessionID, chat.StreamEvent{
+		Type:     signalType,
+		Envelope: jsonPayload,
+	})
+}
+
 // --- Plugin envelope delivery (BLG-20260413-012) ---
 
 // sendOutcome classifies the result of a non-blocking envelope send so

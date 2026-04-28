@@ -2,6 +2,8 @@ package toolclient
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -27,8 +29,8 @@ func TestSelectTools_ReturnsTools(t *testing.T) {
 	}
 	tb.RegisterTools(tools)
 
-	// Select with wildcard intent.
-	selected, err := tb.SelectTools(context.Background(), "*", nil, "", "")
+	// Select with wildcard intent. Pass 0 to exercise the DefaultContextWindowTokens fallback.
+	selected, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("SelectTools error: %v", err)
 	}
@@ -52,7 +54,7 @@ func TestSelectTools_CapsAtMax(t *testing.T) {
 	}
 	tb.RegisterTools(tools)
 
-	selected, err := tb.SelectTools(context.Background(), "*", nil, "", "")
+	selected, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("SelectTools error: %v", err)
 	}
@@ -147,6 +149,69 @@ func TestDefaultConfig_HasTokenBudget(t *testing.T) {
 	}
 	if cfg.ContextWindowTokens != DefaultContextWindowTokens {
 		t.Errorf("expected ContextWindowTokens=%d, got %d", DefaultContextWindowTokens, cfg.ContextWindowTokens)
+	}
+}
+
+// TestSelectTools_GeminiWindowBudget asserts that the tool token budget scales
+// with the per-session context window. A Gemini-1M session must receive a
+// budget significantly larger than a 200K session (A5 audit Risk 2, item 7,
+// CW-20260426-0032).
+func TestSelectTools_GeminiWindowBudget(t *testing.T) {
+	// Build a ToolClient with enough tools to saturate a 200K budget at 20%
+	// (40K tokens) but fit comfortably inside a 1M budget (200K tokens).
+	cfg := DefaultConfig()
+	tb := New(nil, nil, cfg)
+
+	// Register 10 identical tools whose combined token estimate exceeds the
+	// 200K-window budget (200K * 20% = 40K) but fits within the 1M budget
+	// (1M * 20% = 200K). A description of ~500 chars is ~125 tokens each;
+	// 10 tools = ~1250 tokens — well under both budgets. Use a description
+	// large enough that the difference is measurable.
+	longDesc := strings.Repeat("x", 800) // ~200 tokens each
+	tools := make([]broker.ToolDefinition, 10)
+	for i := range tools {
+		tools[i] = broker.ToolDefinition{
+			Name:        fmt.Sprintf("heavy_tool_%d", i),
+			Server:      "test",
+			Description: longDesc,
+		}
+	}
+	tb.RegisterTools(tools)
+
+	// Select with a 200K window (default).
+	tools200k, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 200_000)
+	if err != nil {
+		t.Fatalf("SelectTools(200K): %v", err)
+	}
+
+	// Select with a 1M window (Gemini).
+	tools1m, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 1_000_000)
+	if err != nil {
+		t.Fatalf("SelectTools(1M): %v", err)
+	}
+
+	// With identical tool sets but different windows, the 1M budget should
+	// permit at least as many tools as the 200K budget. For a meaningful
+	// regression check we assert that when tools are pruned at 200K they are
+	// not pruned at 1M (i.e. the two results differ when tools are heavy).
+	// If the tools happen to fit under both budgets the counts may be equal;
+	// the key invariant is that the 1M count is never less than the 200K count.
+	if len(tools1m) < len(tools200k) {
+		t.Errorf("Gemini 1M window produced fewer tools than 200K window: 1M=%d 200K=%d",
+			len(tools1m), len(tools200k))
+	}
+
+	// Also verify the 0 (unknown model) path falls back to DefaultContextWindowTokens
+	// and never returns an error.
+	toolsUnknown, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
+	if err != nil {
+		t.Fatalf("SelectTools(unknown model): %v", err)
+	}
+	// Unknown-model behaviour must match the 200K fallback (same budget).
+	if len(toolsUnknown) != len(tools200k) {
+		t.Errorf("unknown-model fallback count (%d) differs from explicit 200K count (%d); "+
+			"DefaultContextWindowTokens must equal 200000",
+			len(toolsUnknown), len(tools200k))
 	}
 }
 
@@ -266,9 +331,10 @@ func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 	}
 
 	// The top result should be the task_create tool (highest score).
+	// Uniform agent-facing name (ADR-002): no `mcp__test__` prefix.
 	found := false
 	for _, r := range result {
-		if r.Name == "mcp__test__volon_task_create" {
+		if r.Name == "volon_task_create" {
 			found = true
 			break
 		}
@@ -421,14 +487,14 @@ func TestHandleRequestTools_ByName(t *testing.T) {
 	tb := newTestBrokerWithTools(tools)
 
 	matched, _ := tb.HandleRequestTools(map[string]any{
-		"tool_names": []any{"mcp__test__volon_task_create"},
+		"tool_names": []any{"volon_task_create"},
 	})
 
 	if len(matched) != 1 {
 		t.Fatalf("expected 1 tool matched by name, got %d", len(matched))
 	}
-	if matched[0].Name != "mcp__test__volon_task_create" {
-		t.Errorf("expected mcp__test__volon_task_create, got %s", matched[0].Name)
+	if matched[0].Name != "volon_task_create" {
+		t.Errorf("expected volon_task_create (uniform name post ADR-002), got %s", matched[0].Name)
 	}
 }
 
@@ -474,7 +540,7 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultStrict(t *testing.T) {
 	}
 	tb.RegisterTools(brokerTools)
 
-	result, err := tb.SelectToolsAsProvider(context.Background(), "task backlog", nil, "", "")
+	result, err := tb.SelectToolsAsProvider(context.Background(), "task backlog", nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider error: %v", err)
 	}

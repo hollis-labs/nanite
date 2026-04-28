@@ -93,6 +93,10 @@ registers:
   agent_profiles:
     - id: giphy-agent
       file: agents/giphy.yaml
+  card_rules:
+    - card_type: giphy-card
+      pattern: "giphy-block:"
+      description: Detects giphy block markers
 ui:
   bundle_dir: ui/dist
   entry: index.js
@@ -169,6 +173,9 @@ tool_overrides:
 	}
 	if len(r.AgentProfiles) != 1 || r.AgentProfiles[0].File != "agents/giphy.yaml" {
 		t.Errorf("agent_profiles: %+v", r.AgentProfiles)
+	}
+	if len(r.CardRules) != 1 || r.CardRules[0].CardType != "giphy-card" || r.CardRules[0].Pattern != "giphy-block:" {
+		t.Errorf("card_rules: %+v", r.CardRules)
 	}
 
 	if m.UI.BundleDir != "ui/dist" || m.UI.ReactVersion != "^19.0.0" {

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "envelopes-v1.schema.json",
   "title": "Nanite Envelope Manifest",
-  "description": "Defines core envelope types for Go validation and TypeScript codegen.",
+  "description": "Defines core envelope types for Go validation and TypeScript codegen. Note: runtime envelope instances carry additional fields not modelled here (e.g. `target`) — see internal/chat/envelope.go for the Envelope struct and docs/envelopes.md for the full runtime contract.",
   "type": "object",
   "required": ["core"],
   "additionalProperties": false,

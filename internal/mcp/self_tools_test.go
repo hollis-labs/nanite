@@ -407,6 +407,84 @@ func TestScratchpadToolDescriptions_RequiredSections(t *testing.T) {
 	}
 }
 
+func TestScratchpadWriteSchema_ValueHasExplicitTypes(t *testing.T) {
+	defs := selfToolDefinitions()
+	for _, d := range defs {
+		if d.Name != "nanite_scratchpad_write" {
+			continue
+		}
+		props, _ := d.InputSchema["properties"].(map[string]any)
+		valueSchema, _ := props["value"].(map[string]any)
+		anyOf, _ := valueSchema["anyOf"].([]map[string]any)
+		if len(anyOf) == 0 {
+			t.Fatal("scratchpad_write.value schema missing anyOf")
+		}
+		wantTypes := map[string]bool{
+			"string":  false,
+			"number":  false,
+			"integer": false,
+			"boolean": false,
+		}
+		for _, schema := range anyOf {
+			typ, _ := schema["type"].(string)
+			if _, ok := wantTypes[typ]; ok {
+				wantTypes[typ] = true
+			}
+		}
+		for typ, ok := range wantTypes {
+			if !ok {
+				t.Fatalf("scratchpad_write.value schema missing %q variant", typ)
+			}
+		}
+		return
+	}
+	t.Fatal("nanite_scratchpad_write not found")
+}
+
+func TestExtractStoredAssistantText(t *testing.T) {
+	raw := `{"v":1,"text":"hello from child","tier":"tool"}`
+	if got := extractStoredAssistantText(raw); got != "hello from child" {
+		t.Fatalf("extractStoredAssistantText() = %q, want %q", got, "hello from child")
+	}
+	if got := extractStoredAssistantText("not json"); got != "" {
+		t.Fatalf("extractStoredAssistantText(invalid) = %q, want empty", got)
+	}
+}
+
+func TestExtractLiteralSubagentOutput_FileReadPrompt(t *testing.T) {
+	prompt := "Read the first 5 lines of /tmp/README.md and return the content."
+	text := "I'll read the file for you.\n\n```text\nline 1\nline 2\n```\n\nSummary follows."
+	got, ok := extractLiteralSubagentOutput(prompt, text)
+	if !ok {
+		t.Fatal("expected literal extraction to succeed")
+	}
+	want := "First 5 lines of `README.md`:\n\n1. `line 1`\n2. `line 2`"
+	if got != want {
+		t.Fatalf("extractLiteralSubagentOutput() = %q, want %q", got, want)
+	}
+}
+
+func TestExtractLiteralSubagentOutput_NumberedList(t *testing.T) {
+	prompt := "Read the first 5 lines of /tmp/README.md and return the content."
+	text := "Here are the first 5 lines:\n\n1. `# NANITE`\n2. (empty line)\n3. `Nanite...`\n4. (empty line)\n5. `It provides...`\n\nSummary follows."
+	got, ok := extractLiteralSubagentOutput(prompt, text)
+	if !ok {
+		t.Fatal("expected numbered-list literal extraction to succeed")
+	}
+	want := "First 5 lines of `README.md`:\n\n1. `# NANITE`\n2. (blank line)\n3. `Nanite...`\n4. (blank line)\n5. `It provides...`"
+	if got != want {
+		t.Fatalf("extractLiteralSubagentOutput() = %q, want %q", got, want)
+	}
+}
+
+func TestExtractLiteralSubagentOutput_NonLiteralPrompt(t *testing.T) {
+	prompt := "Summarize /tmp/README.md in two bullets."
+	text := "```text\nline 1\nline 2\n```"
+	if got, ok := extractLiteralSubagentOutput(prompt, text); ok || got != "" {
+		t.Fatalf("expected no literal extraction, got %q ok=%v", got, ok)
+	}
+}
+
 // TestSelfToolsTransport_PlanCRUD exercises the full plan lifecycle via the
 // self-service tools (create → list → get → delete).
 func TestSelfToolsTransport_PlanCRUD(t *testing.T) {

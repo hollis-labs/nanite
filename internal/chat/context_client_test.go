@@ -225,6 +225,60 @@ func TestEnforceTokenBudget_RefusesOversize(t *testing.T) {
 	}
 }
 
+// TestEnforceTokenBudget_CeilingOverridePerModel verifies that the
+// ceilingOverride parameter correctly threads the per-model window size into
+// EnforceTokenBudget, so that Gemini (1M) and Anthropic (200K) sessions use
+// different ceilings. This is the regression test for CW-20260426-0031.
+func TestEnforceTokenBudget_CeilingOverridePerModel(t *testing.T) {
+	defaultCeiling := int(float64(DefaultContextWindow) * HardCeilingPct)
+	sys := "system"
+	msgs := []provider.ChatMessage{{Role: "user", Content: "hello"}}
+
+	tests := []struct {
+		name        string
+		windowSize  int  // 0 = pass 0 to EnforceTokenBudget (use built-in default)
+		wantCeiling int
+	}{
+		{
+			name:        "default (0) uses 200K * HardCeilingPct",
+			windowSize:  0,
+			wantCeiling: defaultCeiling,
+		},
+		{
+			name:        "Anthropic 200K coincides with default",
+			windowSize:  200_000,
+			wantCeiling: int(float64(200_000) * HardCeilingPct),
+		},
+		{
+			name:        "Gemini 1M ceiling is larger than 200K default",
+			windowSize:  1_000_000,
+			wantCeiling: int(float64(1_000_000) * HardCeilingPct),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var ceiling int
+			if tc.windowSize > 0 {
+				ceiling = int(float64(tc.windowSize) * HardCeilingPct)
+			}
+			_, _, bd, err := EnforceTokenBudget(sys, msgs, nil, ceiling)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if bd.Ceiling != tc.wantCeiling {
+				t.Errorf("Ceiling = %d, want %d", bd.Ceiling, tc.wantCeiling)
+			}
+		})
+	}
+
+	// Explicit assertion: Gemini ceiling must differ from the 200K default ceiling.
+	geminiCeiling := int(float64(1_000_000) * HardCeilingPct)
+	if geminiCeiling == defaultCeiling {
+		t.Errorf("Gemini ceiling %d unexpectedly equals the 200K default ceiling %d", geminiCeiling, defaultCeiling)
+	}
+}
+
 func TestPruneToolResultsInMemory(t *testing.T) {
 	big := strings.Repeat("x", 1000)
 	msgs := []provider.ChatMessage{

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -219,6 +220,26 @@ func TestLoopState_ResolveIterationLimits_ClampsRunawayCap(t *testing.T) {
 	}
 }
 
+func TestShouldDirectReturnSubagentLiteral(t *testing.T) {
+	plans := []toolPlan{{tu: chatTool("nanite_spawn_subagent")}}
+	if !shouldDirectReturnSubagentLiteral(plans, "nanite_spawn_subagent", "```text\nx\n```", false) {
+		t.Fatal("expected literal sync subagent result to short-circuit")
+	}
+	if shouldDirectReturnSubagentLiteral(plans, "nanite_spawn_subagent", "plain text", false) {
+		t.Fatal("plain text should not short-circuit")
+	}
+	if shouldDirectReturnSubagentLiteral(plans, "dev_read", "```text\nx\n```", false) {
+		t.Fatal("non-subagent tool should not short-circuit")
+	}
+	if shouldDirectReturnSubagentLiteral([]toolPlan{{tu: chatTool("nanite_spawn_subagent")}, {tu: chatTool("dev_read")}}, "nanite_spawn_subagent", "```text\nx\n```", false) {
+		t.Fatal("multi-tool turns should not short-circuit")
+	}
+}
+
+func chatTool(name string) provider.ToolUseBlock {
+	return provider.ToolUseBlock{Name: name}
+}
+
 func TestLoopState_ShouldStop_RetryBudget(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{RetryBudget: 1}, nil, false)
 	ls.recordToolCall("tool", false) // uses the budget
@@ -414,16 +435,17 @@ func TestToolMetaInfo_ConcurrencySafe(t *testing.T) {
 		tool       string
 		wantSafe   bool
 	}{
-		{"read tool", "mcp__dev__dev_read", true},
-		{"grep tool", "mcp__dev__dev_grep", true},
-		{"glob tool", "mcp__dev__dev_glob", true},
-		{"search tool", "mcp__conduit__context_search", true},
-		{"web fetch", "mcp__general__web_fetch", true},
-		{"web search", "mcp__general__web_search", true},
-		{"write tool", "mcp__dev__dev_write", false},
-		{"edit tool", "mcp__dev__dev_edit", false},
-		{"bash tool", "mcp__dev__dev_bash", false},
-		{"delete tool", "mcp__engine__engine_task_delete", false},
+		// Uniform agent-facing names per ADR-002 — no `mcp__server__` prefix.
+		{"read tool", "dev_read", true},
+		{"grep tool", "dev_grep", true},
+		{"glob tool", "dev_glob", true},
+		{"search tool", "context_search", true},
+		{"web fetch", "web_fetch", true},
+		{"web search", "web_search", true},
+		{"write tool", "dev_write", false},
+		{"edit tool", "dev_edit", false},
+		{"bash tool", "dev_bash", false},
+		{"delete tool", "engine_task_delete", false},
 	}
 
 	for _, tt := range tests {

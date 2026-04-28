@@ -12,7 +12,7 @@ name: Go Lint
 slug: go-lint
 description: Run Go linting on the project
 argument-hint: "[package-path]"
-allowed-tools: [shell, mcp__dev__read]
+allowed-tools: [shell, dev_read]
 model: haiku
 effort: low
 context: fork

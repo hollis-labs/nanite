@@ -60,6 +60,11 @@ import type {
   MemoryListResponse,
   MemoryCreateRequest,
   MemoryUpdateRequest,
+  WorkspaceRoleTrustOverride,
+  InspectorTurnsResponse,
+  InspectorTurnSnapshot,
+  Document,
+  PinnedContent,
 } from "./types";
 import type { PluginRegistryResponse } from "./plugin-loader";
 
@@ -172,6 +177,9 @@ export const api = {
   sendMessage: async (data: {
     session_id: string;
     content: string;
+    // F1 (CW-20260420-0014): optional effort scalar.
+    // Values: "low" | "normal" | "high" | "max". Omit or empty → "normal".
+    effort?: string;
   }): Promise<{ message_id: string; stream_url: string }> => {
     const res = await fetch(`${API_BASE}/messages`, {
       method: "POST",
@@ -418,6 +426,73 @@ export const api = {
     });
     if (!res.ok) throw new Error(`Failed to upload artifact: ${res.status}`);
     return res.json();
+  },
+
+  // Documents (J10, CW-20260426-0008)
+  listDocuments: async (sessionId: string): Promise<Document[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/documents`)
+    if (!res.ok) throw new Error(`Failed to list documents: ${res.status}`)
+    return res.json()
+  },
+
+  createDocument: async (
+    sessionId: string,
+    doc: { name: string; content: string; mime_type?: string; summary?: string },
+  ): Promise<Document> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...doc, included: false, full_content: false }),
+    })
+    if (!res.ok) throw new Error(`Failed to create document: ${res.status}`)
+    return res.json()
+  },
+
+  updateDocument: async (
+    id: string,
+    update: { included?: boolean; full_content?: boolean; summary?: string },
+  ): Promise<Document> => {
+    const res = await fetch(`${API_BASE}/documents/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    })
+    if (!res.ok) throw new Error(`Failed to update document: ${res.status}`)
+    return res.json()
+  },
+
+  deleteDocument: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/documents/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to delete document: ${res.status}`)
+  },
+
+  // Session context prompt (J10, CW-20260426-0008)
+  getSessionContextPrompt: async (sessionId: string): Promise<string> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`)
+    if (!res.ok) throw new Error(`Failed to get context prompt: ${res.status}`)
+    const data = await res.json()
+    return data.prompt ?? ''
+  },
+
+  setSessionContextPrompt: async (sessionId: string, prompt: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    })
+    if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`)
+  },
+
+  // Pinned content (J11, CW-20260426-0009)
+  listPins: async (sessionId: string): Promise<PinnedContent[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/pins`)
+    if (!res.ok) throw new Error(`Failed to list pins: ${res.status}`)
+    return res.json()
+  },
+
+  deletePin: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/pins/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to delete pin: ${res.status}`)
   },
 
   // Compact
@@ -736,7 +811,7 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to remove template from agent: ${res.status}`);
   },
 
-  // Fragments Engine Backlog
+  // Engine Backlog
   createFragmentsBacklogItem: async (data: {
     title: string;
     body: string;
@@ -879,7 +954,7 @@ export const api = {
     return res.text();
   },
 
-  // Fragments Engine (Sprint Planning)
+  // Engine (Sprint Planning)
   getFragmentsSprints: async (projectId?: string): Promise<{ items: FragmentsSprint[]; count: number }> => {
     const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
     const res = await fetch(`${API_BASE}/plugins/engine/sprints${params}`);
@@ -1717,6 +1792,70 @@ export const api = {
       const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update memory status: ${res.status}`);
     }
+    return res.json();
+  },
+
+  // Role trust — H1 CW-20260421-0014
+  // GET /api/workspaces/{workspace_id}/roles
+  listWorkspaceRoleTrust: async (
+    workspaceID: string,
+  ): Promise<{ workspace_id: string; trust_overrides: WorkspaceRoleTrustOverride[] }> => {
+    const res = await fetch(`${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles`);
+    if (!res.ok) throw new Error(`Failed to list role trust: ${res.status}`);
+    return res.json();
+  },
+
+  // POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust
+  setWorkspaceRoleTrust: async (
+    workspaceID: string,
+    agentProfileID: string,
+    tier: "untrusted" | "normal" | "trusted",
+  ): Promise<{ workspace_id: string; agent_profile_id: string; trust_tier: string }> => {
+    const res = await fetch(
+      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier, promoted_by: "ui" }),
+      },
+    );
+    if (!res.ok) throw new Error(`Failed to set role trust: ${res.status}`);
+    return res.json();
+  },
+
+  // DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust
+  deleteWorkspaceRoleTrust: async (
+    workspaceID: string,
+    agentProfileID: string,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) throw new Error(`Failed to delete role trust: ${res.status}`);
+    return res.json();
+  },
+
+  // Inspector (I1, CW-20260426-0004)
+  getInspectorTurns: async (
+    sessionId: string,
+    limit = 20,
+  ): Promise<InspectorTurnsResponse> => {
+    const res = await fetch(
+      `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns?limit=${limit}`,
+    );
+    if (!res.ok) throw new Error(`Failed to get inspector turns: ${res.status}`);
+    return res.json();
+  },
+
+  getInspectorTurn: async (
+    sessionId: string,
+    turnId: string,
+  ): Promise<InspectorTurnSnapshot> => {
+    const res = await fetch(
+      `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`,
+    );
+    if (!res.ok) throw new Error(`Failed to get inspector turn: ${res.status}`);
     return res.json();
   },
 };

@@ -7,11 +7,20 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
+
+// PromptTemplateReader is the narrow surface ToolService uses to detect
+// the Chat-role harness binding. *store.Store satisfies it; tests can
+// inject a fake.
+type PromptTemplateReader interface {
+	ListPromptTemplatesForAgent(agentID string) ([]store.PromptTemplate, error)
+}
 
 // ToolSelection holds the result of tool selection, including progressive
 // discovery metadata. Mirrors chat.toolSelection but is owned by the service layer.
@@ -35,7 +44,11 @@ type ToolService interface {
 	// SelectForAgent returns the tool set for an agent, applying intent
 	// extraction, permission filtering, allowlist filtering, and progressive
 	// discovery when the tool count exceeds the threshold.
-	SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string) (*ToolSelection, error)
+	//
+	// windowSize is the per-session context window in tokens (from models.dev /
+	// user settings). Pass 0 when the model is unknown — the broker falls back
+	// to DefaultContextWindowTokens so behaviour is preserved.
+	SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string, windowSize int) (*ToolSelection, error)
 
 	// Execute runs a tool call, routing through ToolClient (with permission
 	// checks) when available, falling back to direct MCPManager execution.
@@ -77,12 +90,28 @@ type BrokerDecisionLogger interface {
 	LogBrokerDecision(sessionID, intent, layerReached string, selectedTools []string, signals string) error
 }
 
+// BrokerDecisionExLogger is the Phase 5 / D3 (CW-20260419-0011) extension.
+// Implementations record every request_tools call (intent + outcome +
+// consecutive_empty + total_calls + reflection_query). *store.Store
+// satisfies it via LogBrokerDecisionEx — the adapter lives here so the
+// service layer doesn't depend on the store package's record shape.
+type BrokerDecisionExLogger interface {
+	BrokerDecisionLogger
+	LogBrokerDecisionEx(e store.BrokerDecisionEntry) error
+}
+
 // toolServiceImpl is the concrete implementation of ToolService.
 type toolServiceImpl struct {
 	toolClient     *toolclient.ToolClient
 	mcpManager     *mcp.Manager
 	agents         AgentReader
 	decisionLogger BrokerDecisionLogger
+
+	// promptTemplates is the seam used to detect the Chat-role harness
+	// binding so the static surface (dispatch.ChatToolSurface) can be
+	// enforced at boot time. Nil-safe: when unset, the chat-surface
+	// filter is a no-op and behaviour matches pre-B3.
+	promptTemplates PromptTemplateReader
 }
 
 // NewToolService creates a ToolService. Both toolClient and mcpManager may be
@@ -100,8 +129,74 @@ func (s *toolServiceImpl) SetDecisionLogger(dl BrokerDecisionLogger) {
 	s.decisionLogger = dl
 }
 
+// LogRequestToolsCall persists a single request_tools meta-tool call to
+// broker_decisions. Called by the chat service via the brokerCallPersister
+// interface. Routes through the BrokerDecisionExLogger when available
+// (so the new fields land), falling back to the legacy LogBrokerDecision
+// when the attached logger is the older shape.
+func (s *toolServiceImpl) LogRequestToolsCall(
+	sessionID, intent, outcome string,
+	consecutiveEmpty, totalCalls, loadedCount int,
+	reflectionQuery string,
+) {
+	if s.decisionLogger == nil || sessionID == "" {
+		return
+	}
+	if ex, ok := s.decisionLogger.(BrokerDecisionExLogger); ok {
+		err := ex.LogBrokerDecisionEx(store.BrokerDecisionEntry{
+			SessionID:        sessionID,
+			Intent:           intent,
+			LayerReached:     "request_tools",
+			Outcome:          outcome,
+			ConsecutiveEmpty: consecutiveEmpty,
+			TotalCalls:       totalCalls,
+			LoadedCount:      loadedCount,
+			ReflectionQuery:  reflectionQuery,
+		})
+		if err != nil {
+			slog.Warn("service/tool: failed to persist request_tools call (ex)", "err", err)
+		}
+		return
+	}
+	// Legacy fallback — at least the row lands so debug panels see it.
+	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, "request_tools", nil, outcome); err != nil {
+		slog.Warn("service/tool: failed to persist request_tools call", "err", err)
+	}
+}
+
+// SetPromptTemplateReader attaches the prompt-template reader used to
+// detect Chat-role harness binding. Wired by the container; nil-safe
+// (tests that do not exercise the chat-surface filter may leave it
+// unset).
+func (s *toolServiceImpl) SetPromptTemplateReader(r PromptTemplateReader) {
+	s.promptTemplates = r
+}
+
+// promptTemplateAdapter bridges PromptTemplateReader (returns
+// store.PromptTemplate) to dispatch.PromptTemplateLister (returns
+// dispatch.PromptTemplateRef). Lets the dispatch package stay
+// independent of internal/store.
+type promptTemplateAdapter struct {
+	r PromptTemplateReader
+}
+
+func (a *promptTemplateAdapter) ListPromptTemplatesForAgent(agentID string) ([]dispatch.PromptTemplateRef, error) {
+	if a == nil || a.r == nil {
+		return nil, nil
+	}
+	tpls, err := a.r.ListPromptTemplatesForAgent(agentID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dispatch.PromptTemplateRef, len(tpls))
+	for i, t := range tpls {
+		out[i] = dispatch.PromptTemplateRef{ID: t.ID, Slug: t.Slug}
+	}
+	return out, nil
+}
+
 // SelectForAgent implements ToolService.
-func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string) (*ToolSelection, error) {
+func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string, windowSize int) (*ToolSelection, error) {
 	intent, hints := extractIntent(userMessage)
 	slog.Debug("service/tool: extracted intent", "intent", intent, "hints", hints)
 
@@ -111,7 +206,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	seen := map[string]bool{} // dedup: Anthropic API rejects duplicate tool names
 
 	if s.toolClient != nil {
-		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
+		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID, windowSize)
 		if err != nil {
 			slog.Warn("service/tool: broker selection failed — falling back to MCP manager", "err", err)
 		} else {
@@ -123,10 +218,25 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 				}
 			}
 		}
+		// Phase 5 / D3 (CW-20260419-0011): when the toolclient has skills
+		// or a memory recaller wired, run the reasoning-augmented signal
+		// pass to capture diagnostic state (logged + persisted). The
+		// signal pass returns the same tool universe as SelectToolsAsProvider
+		// for the time being — it informs ranking, not surface composition,
+		// because the agent permission filter and chat-surface enforcement
+		// downstream of this path expect provider.ToolDefinition output.
+		// Future work: pass the augmented order into provider conversion
+		// so the LLM receives skills-prioritised tools first. (See
+		// follow-ups in the ADR-003 "Limitations" section.)
+		if s.toolClient.MemoryRecaller() != nil || len(s.toolClient.Skills()) > 0 {
+			if _, _, signals, err := s.toolClient.SelectToolsAugmented(ctx, intent, hints, workspaceID, agentID, windowSize); err == nil {
+				s.logDecisionWithSignals(sessionID, intent, "augmented", allTools, signals)
+			}
+		}
 	}
 
 	// If no MCP tools from the broker, try direct discovery from agent's configured servers.
-	mcpCount := countMCPTools(allTools)
+	mcpCount := countMCPOriginTools(s.toolClient, allTools)
 	if mcpCount == 0 && s.mcpManager != nil && s.agents != nil {
 		agent, err := s.agents.GetAgent(agentID)
 		if err == nil {
@@ -141,22 +251,48 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
+	// CW-20260421-0010 (B3): enforce the Chat-role harness static tool
+	// surface. When the agent has the chat-role-harness prompt template
+	// bound, clamp tools to dispatch.ChatToolSurface so the harness
+	// cannot leak work-execution tools (dev_*, shell_*, MCP-origin tools,
+	// etc.) into its turn. Surfaces are fixed at boot — they do not
+	// change mid-turn (harness spec §1).
+	//
+	// Boundary: this check applies ONLY to the Chat agent. Worker /
+	// Planner agents spawned via executeTask have their own profile
+	// permissions and are unaffected.
+	if s.promptTemplates != nil {
+		adapter := &promptTemplateAdapter{r: s.promptTemplates}
+		isChat, err := dispatch.IsChatRoleAgent(adapter, agentID)
+		if err != nil {
+			slog.Warn("service/tool: chat-role detection failed; surface NOT enforced", "agent", agentID, "err", err)
+		} else if isChat {
+			before := len(allTools)
+			allTools = dispatch.EnforceChatSurface(allTools)
+			slog.Info("service/tool: chat-role harness surface enforced",
+				"agent", agentID, "before", before, "after", len(allTools))
+		}
+	}
+
 	if len(allTools) == 0 {
 		slog.Warn("service/tool: 0 tools for agent — proceeding without tools", "agent", agentID)
 	} else {
 		slog.Info("service/tool: selected tools for agent", "count", len(allTools), "agent", agentID)
 	}
 
-	// Check if progressive discovery should be used.
-	mcpToolCount := countMCPTools(allTools)
+	// Check if progressive discovery should be used. With internalization
+	// (ADR-002) the agent-facing surface is uniform; we identify MCP-origin
+	// tools by asking the toolclient which names are NOT registered as
+	// builtins. The `mcp__` prefix is no longer emitted on the agent surface.
+	mcpToolCount := countMCPOriginTools(s.toolClient, allTools)
 	if mcpToolCount > ProgressiveDiscoveryThreshold && s.toolClient != nil {
 		summaries := s.toolClient.ListToolSummaries()
 		catalog := chat.BuildToolCatalog(summaries)
 
-		// Keep builtin (non-MCP) tools alongside request_tools meta-tool.
+		// Keep builtin tools alongside request_tools meta-tool.
 		builtinTools := []provider.ToolDefinition{toolclient.RequestToolsMetaTool()}
 		for _, t := range allTools {
-			if !strings.HasPrefix(t.Name, "mcp__") {
+			if s.toolClient.IsBuiltinTool(t.Name) {
 				builtinTools = append(builtinTools, t)
 			}
 		}
@@ -182,6 +318,12 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 
 // logDecision persists the broker selection decision for the debug panel.
 func (s *toolServiceImpl) logDecision(sessionID, intent, layer string, tools []provider.ToolDefinition) {
+	s.logDecisionWithSignals(sessionID, intent, layer, tools, "")
+}
+
+// logDecisionWithSignals is logDecision plus the diagnostic signals JSON.
+// Phase 5 / D3 routes the reasoning-augmented selection signals here.
+func (s *toolServiceImpl) logDecisionWithSignals(sessionID, intent, layer string, tools []provider.ToolDefinition, signals string) {
 	if s.decisionLogger == nil || sessionID == "" {
 		return
 	}
@@ -189,7 +331,7 @@ func (s *toolServiceImpl) logDecision(sessionID, intent, layer string, tools []p
 	for i, t := range tools {
 		names[i] = t.Name
 	}
-	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, layer, names, ""); err != nil {
+	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, layer, names, signals); err != nil {
 		slog.Warn("service/tool: failed to log broker decision", "err", err)
 	}
 }
@@ -283,6 +425,8 @@ func (s *toolServiceImpl) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
 
 // discoverAgentMCPTools performs direct MCP discovery from an agent's
 // configured server list. Returns the updated tool slice and seen map.
+// Tool names are uniform (ADR-002); collisions are resolved by the
+// caller's broker / Manager layer, not here.
 func (s *toolServiceImpl) discoverAgentMCPTools(
 	ctx context.Context,
 	mcpServersJSON string,
@@ -293,15 +437,16 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 	// Silently ignore bad JSON — matches existing engine behaviour.
 	_ = parseJSONStrings(mcpServersJSON, &servers)
 
-	beforeCount := countMCPTools(allTools)
+	beforeCount := countMCPOriginTools(s.toolClient, allTools)
 	for _, srv := range servers {
 		srvTools, err := s.mcpManager.DiscoverServerTools(ctx, srv)
 		if err != nil {
 			continue
 		}
 		for _, t := range srvTools {
-			name := fmt.Sprintf("mcp__%s__%s", srv, t.Name)
-			if seen[name] {
+			// Use the canonical uniform name (no `mcp__server__` prefix).
+			name := mcp.UniformToolName(srv, t.Name)
+			if name == "" || seen[name] {
 				continue
 			}
 			seen[name] = true
@@ -312,18 +457,27 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 			})
 		}
 	}
-	afterCount := countMCPTools(allTools)
+	afterCount := countMCPOriginTools(s.toolClient, allTools)
 	if afterCount > beforeCount {
 		slog.Info("service/tool: direct MCP discovery added tools from configured servers", "added", afterCount-beforeCount)
 	}
 	return allTools, seen
 }
 
-// countMCPTools counts tools with the "mcp__" prefix.
-func countMCPTools(tools []provider.ToolDefinition) int {
+// countMCPOriginTools counts tools that did NOT come from the builtin
+// registry — i.e. those that originated from an MCP server. With ADR-002
+// the agent-facing surface is uniform; we no longer have a name-prefix
+// signal to count by, so we ask the toolclient to classify each name.
+func countMCPOriginTools(tc *toolclient.ToolClient, tools []provider.ToolDefinition) int {
+	if tc == nil {
+		// Without a toolclient we cannot distinguish; treat all as MCP-origin
+		// to preserve the historical behaviour of triggering progressive
+		// discovery when the manager exposes a large tool surface.
+		return len(tools)
+	}
 	n := 0
 	for _, t := range tools {
-		if strings.HasPrefix(t.Name, "mcp__") {
+		if !tc.IsBuiltinTool(t.Name) {
 			n++
 		}
 	}

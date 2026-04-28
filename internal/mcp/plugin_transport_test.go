@@ -140,11 +140,12 @@ func TestPluginMCPTransport_ListAndCall(t *testing.T) {
 		t.Fatalf("unexpected tools: %+v", tools)
 	}
 
-	// Drive ExecuteTool end-to-end through the manager's prefixed-name API.
+	// Drive ExecuteTool end-to-end through the manager's uniform-name API
+	// (ADR-002 — agent-facing names have no `mcp__server__` prefix).
 	if err := mgr.DiscoverTools(ctx); err != nil {
 		t.Fatalf("DiscoverTools: %v", err)
 	}
-	out, err := mgr.ExecuteTool(ctx, "mcp__echo-srv__echo", map[string]any{"text": "hi"})
+	out, err := mgr.ExecuteTool(ctx, "echo", map[string]any{"text": "hi"})
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}

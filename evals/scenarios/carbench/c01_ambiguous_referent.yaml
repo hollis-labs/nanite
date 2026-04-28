@@ -1,0 +1,27 @@
+id: c01_ambiguous_referent
+benchmark: carbench
+description: >
+  Model receives an under-specified command with an ambiguous referent ("it").
+  No prior context establishes what "it" refers to. The model should ask a
+  clarifying question rather than guess and act.
+
+user_message: "Move it to the top."
+
+tools_offered: []
+prev_turns: []
+
+expected_behavior: >
+  Model recognises that "it" is undefined and asks the user what they want moved
+  before taking any action.
+
+rubric:
+  asked_clarification: true
+  contains_any:
+    - "which"
+    - "what do you mean"
+    - "could you clarify"
+    - "what would you like"
+    - "what should i move"
+    - "what are you referring to"
+    - "what item"
+    - "what exactly"

@@ -7,7 +7,11 @@ import (
 	"time"
 )
 
-// mockMCPCaller implements MCPCaller for testing.
+// mockMCPCaller implements MCPCaller for testing. Keys in responses /
+// errors are the uniform agent-facing tool name (ADR-002 — no
+// `mcp__server__` prefix). Both ExecuteTool (uniform-name lookup) and
+// ExecuteToolOnServer (explicit-server entry) route to the same mock
+// table, since the test's intent is "did the source ask for tool X".
 type mockMCPCaller struct {
 	responses map[string]string
 	errors    map[string]error
@@ -21,6 +25,10 @@ func (m *mockMCPCaller) ExecuteTool(ctx context.Context, name string, input map[
 		return response, nil
 	}
 	return "", fmt.Errorf("no mock response for tool %s", name)
+}
+
+func (m *mockMCPCaller) ExecuteToolOnServer(ctx context.Context, server, tool string, input map[string]any) (string, error) {
+	return m.ExecuteTool(ctx, tool, input)
 }
 
 func TestHadronBlueprintGate_Name(t *testing.T) {
@@ -53,7 +61,7 @@ func TestHadronBlueprintGate_SessionStart_NoMCP(t *testing.T) {
 func TestHadronBlueprintGate_SessionStart_MCPError(t *testing.T) {
 	mcp := &mockMCPCaller{
 		errors: map[string]error{
-			"mcp__hadron__hadron_blueprints_list": fmt.Errorf("connection failed"),
+			"hadron_blueprints_list": fmt.Errorf("connection failed"),
 		},
 	}
 	gate := NewHadronBlueprintGate(mcp)
@@ -95,7 +103,7 @@ func TestHadronBlueprintGate_SessionStart_Success(t *testing.T) {
 
 	mcp := &mockMCPCaller{
 		responses: map[string]string{
-			"mcp__hadron__hadron_blueprints_list": mockResponse,
+			"hadron_blueprints_list": mockResponse,
 		},
 	}
 	gate := NewHadronBlueprintGate(mcp)
@@ -150,7 +158,7 @@ func TestHadronBlueprintGate_Fetch_WithCache(t *testing.T) {
 
 	mcp := &mockMCPCaller{
 		responses: map[string]string{
-			"mcp__hadron__hadron_blueprints_list": mockResponse,
+			"hadron_blueprints_list": mockResponse,
 		},
 	}
 	gate := NewHadronBlueprintGate(mcp)
@@ -225,7 +233,7 @@ func TestHadronBlueprintGate_TokenCap(t *testing.T) {
 
 	mcp := &mockMCPCaller{
 		responses: map[string]string{
-			"mcp__hadron__hadron_blueprints_list": mockResponse,
+			"hadron_blueprints_list": mockResponse,
 		},
 	}
 	gate := NewHadronBlueprintGate(mcp)
@@ -276,7 +284,7 @@ func TestHadronBlueprintGate_RelevanceFiltering(t *testing.T) {
 
 	mcp := &mockMCPCaller{
 		responses: map[string]string{
-			"mcp__hadron__hadron_blueprints_list": mockResponse,
+			"hadron_blueprints_list": mockResponse,
 		},
 	}
 	gate := NewHadronBlueprintGate(mcp)

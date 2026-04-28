@@ -10,8 +10,13 @@ import (
 
 // MCPCaller is the interface for calling MCP tools. This matches the
 // subset of mcp.Manager that ContextBroker needs, avoiding a direct import.
+//
+// ExecuteToolOnServer is the explicit-server entry point introduced in
+// ADR-002 — sources that know the server they want to talk to use it
+// directly rather than constructing a uniform agent-facing name.
 type MCPCaller interface {
 	ExecuteTool(ctx context.Context, name string, input map[string]any) (string, error)
+	ExecuteToolOnServer(ctx context.Context, server, tool string, input map[string]any) (string, error)
 }
 
 // ConduitSource retrieves context from Vanta Conduit via MCP tools.
@@ -53,8 +58,6 @@ func (s *ConduitSource) Fetch(ctx context.Context, intent Intent, budget int) ([
 
 // fetchViaBroker calls Vanta Conduit's context_broker_fetch MCP tool.
 func (s *ConduitSource) fetchViaBroker(ctx context.Context, conduitIntent string, intent Intent, budget int) ([]ContextItem, error) {
-	toolName := fmt.Sprintf("mcp__%s__context_broker_fetch", s.ServerName)
-
 	input := map[string]any{
 		"intent":     conduitIntent,
 		"max_tokens": budget,
@@ -66,7 +69,7 @@ func (s *ConduitSource) fetchViaBroker(ctx context.Context, conduitIntent string
 		input["keywords"] = strings.Join(intent.Keywords, " ")
 	}
 
-	result, err := s.MCP.ExecuteTool(ctx, toolName, input)
+	result, err := s.MCP.ExecuteToolOnServer(ctx, s.ServerName, "context_broker_fetch", input)
 	if err != nil {
 		return nil, fmt.Errorf("context_broker_fetch: %w", err)
 	}
@@ -80,8 +83,6 @@ func (s *ConduitSource) fetchViaSearch(ctx context.Context, intent Intent, budge
 		return nil, nil
 	}
 
-	toolName := fmt.Sprintf("mcp__%s__context_search", s.ServerName)
-
 	input := map[string]any{
 		"query": strings.Join(intent.Keywords, " "),
 	}
@@ -89,7 +90,7 @@ func (s *ConduitSource) fetchViaSearch(ctx context.Context, intent Intent, budge
 		input["namespace"] = intent.Scope
 	}
 
-	result, err := s.MCP.ExecuteTool(ctx, toolName, input)
+	result, err := s.MCP.ExecuteToolOnServer(ctx, s.ServerName, "context_search", input)
 	if err != nil {
 		return nil, fmt.Errorf("context_search: %w", err)
 	}

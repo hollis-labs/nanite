@@ -60,3 +60,21 @@ func (r *BuiltinToolRegistry) Count() int {
 	}
 	return n
 }
+
+// Has reports whether a tool with the given (uniform) name is registered
+// as a builtin in any category. Used by callers that need to distinguish
+// "builtin tool" from "MCP-discovered tool" now that the agent-facing
+// surface is uniform (ADR-002) — the legacy `mcp__` prefix check that
+// callers used to perform is no longer correct.
+func (r *BuiltinToolRegistry) Has(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, tools := range r.tools {
+		for _, t := range tools {
+			if t.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}

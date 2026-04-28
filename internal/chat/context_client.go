@@ -33,9 +33,14 @@ const ToolResultPruneAge = 2
 
 // ContextClient assembles and manages context for chat turns.
 type ContextClient struct {
-	Store         *store.Store
-	BudgetPct     float64                // fraction of context window to use (default 0.75)
-	ContextBroker *contextbroker.Broker  // universal context retrieval (nil = disabled)
+	Store          *store.Store
+	BudgetPct      float64               // fraction of context window to use (default 0.75)
+	ContextBroker  *contextbroker.Broker // universal context retrieval (nil = disabled)
+	// HintDispatcher, when set, enables v2 dynamic hint selection via the
+	// hint-selector peer agent (F5 / CW-20260420-0022). nil means the assembler
+	// falls through to the v0/v1 static ThinkToolBlock path. Also requires
+	// NANITE_THINK_BLOCK_V2_ENABLED=true in the environment.
+	HintDispatcher HintDispatcher
 }
 
 // NewContextClient creates a new ContextClient with default settings.
@@ -60,8 +65,18 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	)
 
 	// 1. Build the system prompt using prompt templates.
+	// hintOpts enables v2 dynamic hint selection when the ContextClient has a
+	// HintDispatcher wired and NANITE_THINK_BLOCK_V2_ENABLED=true. nil means
+	// the assembler falls back to the v0/v1 static ThinkToolBlock path.
 	skillList := buildSkillList(cb.Store, agent.ID)
-	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList)
+	var hintOpts *HintSelectOpts
+	if cb.HintDispatcher != nil {
+		hintOpts = &HintSelectOpts{
+			Ctx:        ctx,
+			Dispatcher: cb.HintDispatcher,
+		}
+	}
+	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList, session.ID, hintOpts)
 
 	// 1b. Enrich system prompt with universal context retrieval.
 	if cb.ContextBroker != nil {
@@ -127,6 +142,7 @@ type SlotSources struct {
 	Rules            string                 // agent tags + tool allowlist (S4a expands)
 	Session          string                 // session name, mode label, workspace name
 	Context          string                 // formatted ContextBroker items where Source != "memory"
+	UserContext      string                 // J10 (CW-20260426-0008): user-authored session context prompt + included docs.
 	Messages         []provider.ChatMessage // conversation slot messages
 	EnrichmentActive bool                   // true when Context slot was populated by the broker
 }
@@ -144,9 +160,15 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	)
 
 	// System slot — think-tool block + workspace identity. Agent-specific
-	// content moves to the Agent slot.
+	// content moves to the Agent slot. v0/v1/v2 selected by feature flags.
 	var sysB strings.Builder
-	sysB.WriteString(strings.TrimLeft(thinkToolBlock, "\n"))
+	var thinkBlock string
+	if cb.HintDispatcher != nil && IsThinkBlockV2Enabled() {
+		thinkBlock = ThinkToolBlockWithDispatch(ctx, cb.HintDispatcher, "", "", "")
+	} else {
+		thinkBlock = ThinkToolBlock()
+	}
+	sysB.WriteString(strings.TrimLeft(thinkBlock, "\n"))
 	if workspace != nil && workspace.Name != "" {
 		sysB.WriteString("\n\nWorkspace: ")
 		sysB.WriteString(workspace.Name)
@@ -157,9 +179,11 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	}
 
 	// Agent slot — composed via prompt templates with skills, falling back to
-	// raw agent + mode strings when no template is assigned.
+	// raw agent + mode strings when no template is assigned. The agent slot
+	// also carries the post-compaction disclosure (P8A) when one is fresh
+	// for this session.
 	skillList := buildSkillList(cb.Store, agent.ID)
-	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList)
+	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList, session.ID)
 
 	// Rules slot — agent tags + tool allowlist. S4a expands this.
 	rules := buildRulesSlotContent(agent)
@@ -198,6 +222,15 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		chatMessages[i] = provider.ChatMessage{Role: role, Content: m.Content}
 	}
 
+	// J10 (CW-20260426-0008): user context prompt + included documents.
+	// Both are pinned and NOT compactable (SlotUserContext). The user context
+	// prompt is authored in the bottom drawer. Included documents are injected
+	// as pointers (name + summary) by default, or full content when
+	// full_content=true. This slot composes with HandoffStash (CW-20260420-0024)
+	// for compaction-survival — both are non-compactable pinned slots.
+	// J11 (CW-20260426-0009) pin tool will extend this same pattern.
+	userContextContent := buildUserContextSlot(cb.Store, session.ID)
+
 	return &SlotSources{
 		System:           sysB.String(),
 		Memory:           memoryContent,
@@ -205,9 +238,69 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		Rules:            rules,
 		Session:          sessionContent,
 		Context:          contextContent,
+		UserContext:      userContextContent,
 		Messages:         chatMessages,
 		EnrichmentActive: enrichmentActive,
 	}, nil
+}
+
+// buildUserContextSlot assembles the SlotUserContext content from:
+//  1. The session-scoped user context prompt (sessions.context_prompt).
+//  2. Any included documents (documents.included=true), injected as pointer
+//     (name + summary) or full content based on documents.full_content.
+//  3. Pinned content (pinned_content table) — session + cross_session scopes.
+//     J11 (CW-20260426-0009): pinned content rides in the 2000-token budget.
+//     Oldest pins are truncated first when over budget.
+//
+// Returns an empty string when none of the above are set. The slot is excluded
+// from the system prompt for that turn when empty (no waste of budget).
+func buildUserContextSlot(s *store.Store, sessionID string) string {
+	var parts []string
+
+	// Session context prompt.
+	if prompt, err := s.GetSessionContextPrompt(sessionID); err == nil && strings.TrimSpace(prompt) != "" {
+		parts = append(parts, "## Session Context\n"+strings.TrimSpace(prompt))
+	}
+
+	// Included documents.
+	if docs, err := s.GetIncludedDocuments(sessionID); err == nil && len(docs) > 0 {
+		var docParts []string
+		for _, doc := range docs {
+			if doc.FullContent {
+				docParts = append(docParts, fmt.Sprintf("### Document: %s\n%s", doc.Name, doc.Content))
+			} else {
+				// Pointer mode: name + summary only.
+				summary := doc.Summary
+				if summary == "" {
+					summary = fmt.Sprintf("(document ID: %s, size: %d bytes)", doc.ID, doc.SizeBytes)
+				}
+				docParts = append(docParts, fmt.Sprintf("### Document: %s (pointer)\n%s", doc.Name, summary))
+			}
+		}
+		if len(docParts) > 0 {
+			parts = append(parts, "## Session Documents\n"+strings.Join(docParts, "\n\n"))
+		}
+	}
+
+	// Pinned content (J11, CW-20260426-0009). Session + cross_session scopes.
+	// Budget: 2000 tokens shared with the above. Oldest pins truncate first.
+	// Turn-scoped pins are ephemeral and not persisted here — they are injected
+	// directly into the turn context by the reminder engine.
+	if pins, err := s.ListPinnedContent(sessionID); err == nil && len(pins) > 0 {
+		var pinParts []string
+		for _, pin := range pins {
+			label := "[pinned]"
+			if pin.Scope == store.PinScopeCrossSession {
+				label = "[pinned:cross-session]"
+			}
+			pinParts = append(pinParts, fmt.Sprintf("%s %s", label, pin.Content))
+		}
+		if len(pinParts) > 0 {
+			parts = append(parts, "## Pinned Context\n"+strings.Join(pinParts, "\n"))
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
 }
 
 // deriveIntent extracts the broker intent from the session's recent user turn.
@@ -265,7 +358,14 @@ func formatPacketItemsBySource(packet *contextbroker.ContextPacket, memoryOnly b
 // assembleAgentSlotContent composes the agent-specific portion of the prompt
 // (agent.SystemPrompt, mode addendum, skill list) without the workspace or
 // think-tool sections that live in the System slot.
-func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *store.AgentMode, skillList string) string {
+//
+// When sessionID is non-empty and a fresh CompactionContract event exists for
+// the session, the appropriate mode-anchored disclosure is appended (P8A,
+// CW-20260420-0025). Disclosure lands in the agent slot because (a) the
+// agent slot already carries mode-specific content, and (b) every system
+// prompt assembly path passes through this function or its sibling
+// assembleSystemPromptFromTemplates.
+func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *store.AgentMode, skillList, sessionID string) string {
 	vars := map[string]string{
 		"agent_name":        agent.Name,
 		"agent_description": agent.Description,
@@ -300,6 +400,11 @@ func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *s
 	}
 	if skillList != "" {
 		composed += "\n\nAvailable skills:\n" + skillList
+	}
+	if sessionID != "" {
+		if disclosure := renderCompactionDisclosure(s, sessionID); disclosure != "" {
+			composed += "\n\n" + disclosure
+		}
 	}
 	return composed
 }

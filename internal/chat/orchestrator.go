@@ -17,7 +17,7 @@ type OrchestrationPlan struct {
 	Aggregation   string    `json:"aggregation"`
 	SprintID      string    `json:"sprint_id,omitempty"`       // Engine sprint ID if created
 	TaskIDs       []string  `json:"task_ids,omitempty"`        // Engine task IDs if created
-	HasEngine     bool      `json:"has_engine"`                // whether Fragments Engine integration is available
+	HasEngine     bool      `json:"has_engine"`                // whether Engine integration is available
 	HasCortex     bool      `json:"has_cortex"`                // whether Vanta Conduit is available for knowledge
 	PlanOnly      bool      `json:"plan_only"`                 // true if no MCP services available to execute
 }
@@ -144,29 +144,27 @@ func (o *Orchestrator) Aggregate(ctx context.Context, plan *OrchestrationPlan, r
 	return orchResult, nil
 }
 
-// hasToolPrefix checks whether any registered tool starts with the given prefix.
-func (o *Orchestrator) hasToolPrefix(prefix string) bool {
+// hasToolPrefix reports whether the orchestrator has tools from a named
+// MCP server. Replaces the legacy "scan tool names for `mcp__<prefix>__`"
+// check with a direct server-presence query (ADR-002).
+func (o *Orchestrator) hasToolPrefix(serverName string) bool {
 	if o.MCPManager == nil {
 		return false
 	}
-	tools := o.MCPManager.GetAllTools()
-	target := "mcp__" + prefix
-	for _, t := range tools {
-		if strings.HasPrefix(t.Name, target) {
-			return true
-		}
-	}
-	return false
+	return o.MCPManager.HasServer(serverName)
 }
 
-// createEngineSprint creates a Fragments Engine sprint with one task per sub-task.
+// createEngineSprint creates an Engine sprint with one task per sub-task.
 func (o *Orchestrator) createEngineSprint(ctx context.Context, projectID string, decomposition *DecompositionResult) (string, []string, error) {
 	if o.MCPManager == nil {
 		return "", nil, fmt.Errorf("no MCP manager")
 	}
 
-	// Create sprint via MCP tool call.
-	sprintResult, err := o.MCPManager.ExecuteTool(ctx, "mcp__engine__engine_sprint_create", map[string]any{
+	// Create sprint via MCP tool call. Explicit-server path (ADR-002):
+	// the orchestrator knows the server it wants to talk to, so it
+	// reaches it via ExecuteToolOnServer rather than through the uniform
+	// agent-facing index.
+	sprintResult, err := o.MCPManager.ExecuteToolOnServer(ctx, "engine", "engine_sprint_create", map[string]any{
 		"project_id":  projectID,
 		"title":       "Auto-decomposed task sprint",
 		"description": fmt.Sprintf("Sprint with %d sub-tasks from task decomposition", len(decomposition.SubTasks)),
@@ -187,7 +185,7 @@ func (o *Orchestrator) createEngineSprint(ctx context.Context, projectID string,
 	// Create a task for each sub-task.
 	var taskIDs []string
 	for _, st := range decomposition.SubTasks {
-		taskResult, err := o.MCPManager.ExecuteTool(ctx, "mcp__engine__engine_task_create", map[string]any{
+		taskResult, err := o.MCPManager.ExecuteToolOnServer(ctx, "engine", "engine_task_create", map[string]any{
 			"project_id":  projectID,
 			"sprint_id":   sprintResp.ID,
 			"title":       st.Title,

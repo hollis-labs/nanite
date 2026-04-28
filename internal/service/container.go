@@ -15,20 +15,30 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
+	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/filter"
+	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
+	"github.com/hollis-labs/nanite/internal/loopdetect"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
-	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/plugin"
+	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
+	adaptercodex "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex"
+	adaptergemini "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini"
+	nanitenative "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
+	adapteropencode "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/tool/stash"
@@ -62,6 +72,19 @@ type Container struct {
 	// Subagent service — inline spawn / status / cancel for
 	// primary-agent-dispatched child agents (T9).
 	Subagent *subagent.Service
+
+	// Background service — non-session-bound, async dispatch for
+	// long-running work (P9 BackgroundJob, CW-20260420-0016). Result
+	// envelopes ride the Messaging service back to the originating
+	// session as channel=inbox notifications.
+	Background *background.Service
+
+	// Elicitation service — MCP elicitation/create mid-tool user prompts
+	// (CW-20260420-0018, G4). Write tools that need user confirmation call
+	// into this service; the service pushes an elicitation-prompt envelope
+	// to the chat surface and blocks until the user responds or the timeout
+	// fires. Nil-safe: tools auto-approve when not wired.
+	Elicitation *elicitation.Service
 
 	// Internal todo/plan system.
 	Todos TodoService
@@ -112,6 +135,19 @@ type Container struct {
 	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
 	AdapterRegistry *agent.AdapterRegistry
 
+	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
+	// nil when developer_mode is false.
+	Inspector *inspectsvc.Service
+
+	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
+	// Always non-nil; instantiated once at container boot.
+	LoopDetector *loopdetect.Detector
+
+	// ReminderEngine is the deterministic trigger engine for agent-set reminders
+	// (J11, CW-20260426-0009). Always non-nil; per-session state is keyed
+	// by sessionID inside the Engine.
+	ReminderEngine *reminders.Engine
+
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
 }
@@ -147,6 +183,16 @@ type ContainerConfig struct {
 	MaxCLIProcesses int
 }
 
+func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
+	reg := agent.NewAdapterRegistry()
+	reg.Register(adapterclaude.New().Adapter())
+	reg.Register(adaptercodex.New().Adapter())
+	reg.Register(adaptergemini.New().Adapter())
+	reg.Register(adapteropencode.New().Adapter())
+	reg.Register(nanitenative.New().Adapter())
+	return reg
+}
+
 // NewContainer wires all services together and returns a ready Container.
 func NewContainer(cfg ContainerConfig) (*Container, error) {
 	if cfg.Store == nil {
@@ -178,7 +224,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Adapter registry — adapters self-register via plugin loading.
 	// For now, the registry is created and passed through; adapter plugins
 	// will be wired when the plugin host supports adapter registration.
-	adapterRegistry := agent.NewAdapterRegistry()
+	adapterRegistry := newRuntimeAdapterRegistry()
+
+	// Ensure ~/.nanite/agents/ exists on first run (J6, CW-20260421-0006).
+	// Silently continue on error — a missing home dir is non-fatal at startup.
+	if err := agent.EnsureHomeDirs(""); err != nil {
+		slog.Warn("service container: ensure agent home dirs", "err", err)
+	}
 
 	// Discover file-based agent definitions from all priority locations.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
@@ -195,7 +247,23 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	} else {
 		slog.Warn("service container: built-in default agent", "err", defErr)
 	}
+	// POC CW-20260420-0047: mux orchestrator agent profile.
+	// MuxOrchestratorAgent returns (nil, nil) in non-devmode builds; guard
+	// the nil-def case so we don't append a nil pointer to agentDefs.
+	if muxDef, muxErr := builtin.MuxOrchestratorAgent(); muxErr != nil {
+		slog.Warn("service container: built-in mux orchestrator agent", "err", muxErr)
+	} else if muxDef != nil {
+		agentDefs = append(agentDefs, muxDef)
+	}
 	slog.Info("service container: discovered file-based agents", "count", len(agentDefs))
+
+	// J7 (CW-20260421-0011): auto-ingest discovered agent definitions into DB.
+	// File → parse → DB upsert. H1 trust: user/plugin sources → untrusted tier.
+	// Built-in definitions (Source != "user"/"plugin") retain 'normal' tier.
+	// Errors per-def are logged non-fatal via AutoIngestAgents.
+	if n := AutoIngestAgents(cfg.Store, agentDefs); n > 0 {
+		slog.Info("service container: auto-ingested agents into DB", "count", n)
+	}
 
 	agents := NewAgentService(AgentServiceConfig{
 		Agents:     cfg.Store,
@@ -224,7 +292,17 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// cfg.Store satisfies messaging.AgentRegistrar via its CreateAgent
 	// method — enables T6 auto-register-on-first-send.
 	messagingSvc := messaging.NewService(msgStore, cfg.Store.DB, agents, cfg.Store)
+	// Wire the session_events writer into the composite emitter so
+	// EmitPreCompact / EmitPostCompact persist context_pre_compact /
+	// context_post_compact rows for P8 part C (CW-20260426-0002).
+	events.WithSessionWriter(messagingSvc)
 	slog.Info("service container: messaging service enabled")
+
+	// Ensure ~/.nanite/skills/ exists on first run (J6, CW-20260421-0006).
+	// Silently continue on error — a missing home dir is non-fatal at startup.
+	if err := skill.EnsureHomeDirs(""); err != nil {
+		slog.Warn("service container: ensure skill home dirs", "err", err)
+	}
 
 	// Discover file-based skill definitions from all 5 priority locations.
 	skillDefs, err := skill.Discover(skill.DiscoverOptions{
@@ -241,6 +319,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: built-in skills", "err", bErr)
 	}
 	slog.Info("service container: discovered file-based skills", "count", len(skillDefs))
+
+	// J7 (CW-20260421-0011): auto-ingest discovered skill definitions into DB.
+	// Skills from ~/.nanite/skills/ (Source="user") land as non-builtin rows.
+	// Errors per-def are logged non-fatal via AutoIngestSkills.
+	if n := AutoIngestSkills(cfg.Store, skillDefs); n > 0 {
+		slog.Info("service container: auto-ingested skills into DB", "count", n)
+	}
 
 	skills := NewSkillService(SkillServiceConfig{
 		Skills:     cfg.Store,
@@ -335,6 +420,32 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	tools := NewToolService(cfg.ToolClient, cfg.MCP, agentReader)
 	if impl, ok := tools.(*toolServiceImpl); ok {
 		impl.SetDecisionLogger(cfg.Store)
+		// B3 (CW-20260421-0010): wire the prompt-template reader so
+		// SelectForAgent can detect Chat-role harness agents and clamp
+		// their tool surface to dispatch.ChatToolSurface.
+		impl.SetPromptTemplateReader(cfg.Store)
+	}
+
+	// Phase 5 / D3 (CW-20260419-0011): wire the reasoning-augmented broker
+	// signals onto the toolclient. Both are nil-safe — when memorySvc is
+	// nil or the skills directory is missing, the broker behaves exactly
+	// as before (keyword + token budget). Wiring at this seam keeps the
+	// toolclient package independent of memory + filesystem details.
+	if cfg.ToolClient != nil {
+		if memorySvc != nil {
+			cfg.ToolClient.SetMemoryRecaller(toolclient.NewMemoryRecaller(memorySvc))
+		}
+		skillsDir := cfg.ToolClient.Config.SkillsDir
+		if skillsDir == "" {
+			skillsDir = toolclient.DefaultSkillsPath()
+		}
+		if skillsDir != "" && skillsDir != "off" {
+			if loaded, err := toolclient.LoadSkillsFromDir(skillsDir); err == nil && len(loaded) > 0 {
+				cfg.ToolClient.SetSkills(loaded)
+			} else if err != nil {
+				slog.Warn("service container: failed to load tool-preference skills", "dir", skillsDir, "err", err)
+			}
+		}
 	}
 
 	// --- Orchestration (Wave 2) ---
@@ -350,7 +461,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// SSE stream. Nil-safe — when no stream is attached the broadcast
 	// drops silently, which is the intended MVP behavior.
 	messagingSvc.SetNotificationSink(&messagingStreamSink{streams: streams})
-
 
 	contextClient := chat.NewContextClient(cfg.Store)
 
@@ -450,6 +560,26 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	syncCatalogToRegistry(modelCatalog)
 	modelCatalog.StartRefresher(catalogCtx)
 
+	// I1 (CW-20260426-0004): inspector service — dev-mode only.
+	// Created unconditionally but only populated/queried when developer_mode=true.
+	var inspectorSvc *inspectsvc.Service
+	if us, err := cfg.Store.GetUserSettings(); err == nil && us.DeveloperMode {
+		inspectorSvc = inspectsvc.NewService()
+		slog.Info("service container: inspector service enabled (developer_mode=true)")
+	}
+
+	// I2 (CW-20260420-0029): loop detector — always-on, per-session windows.
+	// Instantiated once at container boot; shared across all sessions.
+	loopDetector := loopdetect.New()
+	slog.Info("service container: loop detector enabled (I2, fingerprint-based)")
+
+	// J11 (CW-20260426-0009): reminder engine — deterministic trigger evaluation.
+	// A single engine is shared across sessions; per-session state lives inside
+	// the engine (keyed by sessionID / reminderID). Always instantiated so the
+	// SelfToolsTransport can register creation turns even before the first eval.
+	reminderEngine := reminders.NewEngine(cfg.Store)
+	slog.Info("service container: reminder engine enabled (J11, CW-20260426-0009)")
+
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -476,6 +606,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SessionEventWriter: messagingSvc,
 		DBPath:             cfg.Store.DBPath(),
 		AdapterRegistry:    adapterRegistry,
+		// CW-20260419-0026 (E3): wire the strategy decision logger.
+		// *store.Store satisfies strategyDecisionLogger via
+		// internal/store/strategy_log.go.
+		StrategyLogger: cfg.Store,
+		// I1 (CW-20260426-0004): inspector — nil when developer_mode=false.
+		Inspector: inspectorSvc,
+		// I2 (CW-20260420-0029): loop detector — always-on.
+		LoopDetector: loopDetector,
+		// J11 (CW-20260426-0009): reminder engine — always-on.
+		ReminderEngine: reminderEngine,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed
@@ -491,12 +631,44 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
 	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, approvalEmitter, cfg.Store)
 	subagentSvc.SetStreamSink(&subagentStreamSink{streams: streams})
+	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
+	subagentSvc.SetTrustResolver(cfg.Store)
+	subagentSvc.SetEventLogger(cfg.Store)
 
 	// G-4: register the subagent-spawn-approval typed response handler so
 	// POST /api/envelopes/:id/respond dispatches to Approve/Reject.
 	chat.RegisterResponseHandler("subagent-spawn-approval", chat.NewSubagentApprovalHandler(subagentSvc))
 
-	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink + approval handler)")
+	slog.Info("service container: subagent service enabled (real chat-engine runner + status sink + approval handler + H1 trust)")
+
+	// G1 (CW-20260420-0016): background-job service. Async, non-session-
+	// bound dispatch for long-running tasks. Backend = PTY MVP (D2);
+	// agent-mux swap (D3) is a wiring change behind the same Backend
+	// interface. Result envelopes ride the messaging service back to the
+	// originating session as channel=inbox notifications.
+	backgroundSvc := background.NewService(background.NewPTYBackend(), messagingSvc)
+	slog.Info("service container: background-job service enabled (PTY backend)")
+
+	// G4 (CW-20260420-0018): elicitation service — MCP elicitation/create
+	// mid-tool user prompts. The emitter persists an elicitation-prompt
+	// envelope and streams it to the chat UI; the response handler routes
+	// user responses back to the waiting tool call.
+	elicitEmitter := NewElicitationEmitter(cfg.Store, streams)
+	elicitSvc := elicitation.New(elicitEmitter, 0) // 0 → picks up env / default (5 min)
+	chat.RegisterResponseHandler("elicitation-prompt", chat.NewElicitationResponseHandler(elicitSvc))
+	slog.Info("service container: elicitation service enabled (G4, CW-20260420-0018)")
+
+	// F5 follow-up (CW-20260420-0022): wire the HintDispatcher adapter
+	// into ContextClient so NANITE_THINK_BLOCK_V2_ENABLED=true actually
+	// fires v2 dynamic hints in production. Without this assignment the
+	// production path falls through to v1 static hints (matching the
+	// pre-Phase-7 behavior). Adapter is dispatch.Spawner-backed, slug
+	// "hint-selector"; sub-millisecond cost when v2 is disabled because
+	// the IsThinkBlockV2Enabled gate runs before the dispatcher is
+	// consulted.
+	hintSpawner := NewDispatchSpawner(subagentSvc, cfg.Store)
+	contextClient.HintDispatcher = NewHintDispatchAdapter(hintSpawner)
+	slog.Info("service container: hint dispatcher wired (F5 production wiring, CW-20260420-0022)")
 
 	// Worker manager — requires ChatService for delegation.
 	// Uses SetWorkers to break the circular dependency (ChatService <-> WorkerManager).
@@ -593,6 +765,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		MCP:                 cfg.MCP,
 		Messaging:           messagingSvc,
 		Subagent:            subagentSvc,
+		Background:          backgroundSvc,
+		Elicitation:         elicitSvc,
 		Todos:               todos,
 		Conduit:             conduitInstance,
 		Memory:              memorySvc,
@@ -613,6 +787,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		ModelSelector:       modelSelector,
 		Permissions:         permissions,
 		AdapterRegistry:     adapterRegistry,
+		Inspector:           inspectorSvc,
+		LoopDetector:        loopDetector,
+		ReminderEngine:      reminderEngine,
 		RunStore:            runStore,
 		WorkflowBroadcaster: workflowBroadcaster,
 		AppConfig:           cfg.AppConfig,

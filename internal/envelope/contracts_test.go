@@ -44,6 +44,8 @@ var knownTypes = []string{
 	"resolution-capture",
 	// CW-20260417-0485 — chat-loop terminal pause envelope.
 	"chat-loop-terminated",
+	// CW-20260420-0018 — MCP elicitation/create mid-tool user prompt.
+	"elicitation-prompt",
 }
 
 // examplePayloads provides a valid payload for each envelope type.
@@ -220,6 +222,16 @@ var examplePayloads = map[string]string{
 		"last_error": "ARG_VALIDATION_FAILED: /limit: got string, want number",
 		"last_tool": "list_tasks",
 		"timestamp": "2026-04-17T17:48:44Z"
+	}`,
+	"elicitation-prompt": `{
+		"elicitation_id": "e1c2d3a4-0000-0000-0000-000000000001",
+		"message": "Are you sure you want to send this directive to all agents?",
+		"schema_type": "boolean",
+		"schema_title": "Confirm directive broadcast",
+		"schema_description": "This will send a directive message to every connected agent in the session.",
+		"tool_call_id": "toolu_01XY",
+		"origin": "server",
+		"timeout_at": "2026-04-27T10:05:00Z"
 	}`,
 }
 

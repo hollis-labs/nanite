@@ -5,16 +5,16 @@ import {
   Building2,
   ChevronRight,
   Cpu,
-  FileText,
+  FileCode2,
   Keyboard,
   LayoutGrid,
   Palette,
   Puzzle,
+  Shield,
   SlidersHorizontal,
   Sparkles,
   User,
   Wrench,
-  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Suspense, lazy, useEffect, useState } from "react";
@@ -26,12 +26,14 @@ import {
   updateSettingsHash,
 } from "@/hooks/useHashRoute";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
+import { useSettings } from "@/hooks/useSettings";
 import { resolveIcon } from "@/lib/icons";
 import { getSlotComponent } from "@/lib/plugin-slot-lookup";
 import { useNavigationStore } from "@/stores/useNavigationStore";
 import { ActionsPanel } from "./ActionsPanel";
 import { AgentProfileManager } from "./AgentProfileManager";
 import { MemoryPanel } from "./MemoryPanel";
+import { RoleTrustPanel } from "./RoleTrustPanel";
 
 const AppearancePanel = lazy(() =>
   import("./appearance/AppearancePanel").then((m) => ({ default: m.AppearancePanel })),
@@ -39,7 +41,8 @@ const AppearancePanel = lazy(() =>
 import { ObservabilityDashboard } from "./observability/ObservabilityDashboard";
 import { PluginManager } from "./PluginManager";
 import { PreferencesPanel } from "./PreferencesPanel";
-import { PromptTemplateEditor } from "./PromptTemplateEditor";
+import { SystemPromptsViewer } from "./SystemPromptsViewer";
+import { InspectorPanel } from "./inspector/InspectorPanel";
 import { ProviderManager } from "./ProviderManager";
 import { ShortcutsPanel } from "./ShortcutsPanel";
 import { SkillsBrowser } from "./SkillsBrowser";
@@ -47,6 +50,7 @@ import { ToolDashboard } from "./ToolDashboard";
 import { WidgetManager } from "./WidgetManager";
 import { WorkspaceProjectManager } from "./WorkspaceProjectManager";
 import { ProfilePanel } from "./ProfilePanel";
+import { PanelManager } from "./PanelManager";
 
 interface NavItem {
   id: string;
@@ -59,7 +63,8 @@ interface NavGroup {
   items: NavItem[];
 }
 
-const NAV_GROUPS: NavGroup[] = [
+/** Base nav groups — developer-mode-gated entries are injected at runtime. */
+const BASE_NAV_GROUPS: NavGroup[] = [
   {
     label: "You",
     items: [
@@ -75,7 +80,8 @@ const NAV_GROUPS: NavGroup[] = [
       { id: "providers", label: "Providers", icon: Cpu },
       { id: "agents", label: "Agents", icon: Bot },
       { id: "skills", label: "Skills", icon: Sparkles },
-      { id: "prompts", label: "Prompts", icon: FileText },
+      { id: "role-trust", label: "Role Trust", icon: Shield },
+      // "System Prompts" is injected here when developer_mode=true (see SettingsPage)
       { id: "memory", label: "Memory", icon: Brain },
     ],
   },
@@ -83,7 +89,8 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Workspace",
     items: [
       { id: "workspaces", label: "Workspaces", icon: Building2 },
-      { id: "actions", label: "Actions", icon: Zap },
+      // hidden pending CW-20260421-0012 scope review (K5 / CW-20260421-0004)
+      // { id: "actions", label: "Actions", icon: Zap },
     ],
   },
   {
@@ -92,6 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: "tools", label: "Tools", icon: Wrench },
       { id: "plugins", label: "Plugins", icon: Puzzle },
       { id: "widgets", label: "Widgets", icon: LayoutGrid },
+      { id: "panels", label: "Panels", icon: SlidersHorizontal },
     ],
   },
   {
@@ -99,6 +107,20 @@ const NAV_GROUPS: NavGroup[] = [
     items: [{ id: "observability", label: "Observability", icon: Activity }],
   },
 ];
+
+/** Nav item injected into the AI group when developer_mode=true. */
+const SYSTEM_PROMPTS_NAV_ITEM: NavItem = {
+  id: "system-prompts",
+  label: "System Prompts",
+  icon: FileCode2,
+};
+
+/** Nav item injected into the System group when developer_mode=true (I1). */
+const INSPECTOR_NAV_ITEM: NavItem = {
+  id: "inspector",
+  label: "Inspector",
+  icon: Cpu,
+};
 
 function findItemInGroups(
   id: string,
@@ -117,6 +139,8 @@ export default function SettingsPage() {
   );
   const [sectionKey, setSectionKey] = useState(0);
   const pluginTabs = usePluginSlots("settings-tab");
+  const { data: settings } = useSettings();
+  const developerMode = settings?.developer_mode ?? false;
 
   const pluginItems: NavItem[] = pluginTabs.map((entry) => ({
     id: entry.id,
@@ -124,9 +148,32 @@ export default function SettingsPage() {
     icon: resolveIcon(entry.icon),
   }));
 
+  // Inject "System Prompts" into the AI group and "Inspector" into System when developer_mode is on.
+  const navGroups: NavGroup[] = BASE_NAV_GROUPS.map((group) => {
+    if (group.label === "AI") {
+      if (!developerMode) return group;
+      // Insert before "Memory" (keep logical order: Providers, Agents, Skills, System Prompts, Memory)
+      const memoryIdx = group.items.findIndex((i) => i.id === "memory");
+      const items =
+        memoryIdx >= 0
+          ? [
+              ...group.items.slice(0, memoryIdx),
+              SYSTEM_PROMPTS_NAV_ITEM,
+              ...group.items.slice(memoryIdx),
+            ]
+          : [...group.items, SYSTEM_PROMPTS_NAV_ITEM];
+      return { ...group, items };
+    }
+    if (group.label === "System" && developerMode) {
+      // Append Inspector after existing System items.
+      return { ...group, items: [...group.items, INSPECTOR_NAV_ITEM] };
+    }
+    return group;
+  });
+
   const allGroups: NavGroup[] = pluginItems.length
-    ? [...NAV_GROUPS, { label: "Plugins", items: pluginItems }]
-    : NAV_GROUPS;
+    ? [...navGroups, { label: "Plugins", items: pluginItems }]
+    : navGroups;
 
   useEffect(() => {
     setSettingsSectionCallback((section) => setActiveSection(section));
@@ -166,20 +213,26 @@ export default function SettingsPage() {
         return <AgentProfileManager />;
       case "skills":
         return <SkillsBrowser />;
-      case "prompts":
-        return <PromptTemplateEditor />;
+      case "system-prompts":
+        return developerMode ? <SystemPromptsViewer /> : <PreferencesPanel />;
       case "tools":
         return <ToolDashboard />;
       case "plugins":
         return <PluginManager />;
       case "widgets":
         return <WidgetManager />;
+      case "panels":
+        return <PanelManager />;
       case "workspaces":
         return <WorkspaceProjectManager />;
+      case "role-trust":
+        return <RoleTrustPanel />;
       case "memory":
         return <MemoryPanel />;
       case "observability":
         return <ObservabilityDashboard />;
+      case "inspector":
+        return developerMode ? <InspectorPanel /> : <PreferencesPanel />;
       default: {
         const pluginEntry = pluginTabs.find((e) => e.id === activeSection);
         if (pluginEntry?.component) {

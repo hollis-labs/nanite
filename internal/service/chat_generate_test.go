@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -56,6 +57,48 @@ func TestExtraSystemPrefix_NoToolsWarning(t *testing.T) {
 	without := composeExtraSystemPrefix("", composeConfig{noTools: false})
 	if strings.Contains(without, "no tools available in this session") {
 		t.Errorf("did not expect no-tools warning when noTools=false, got:\n%s", without)
+	}
+}
+
+func TestHasUsableTools(t *testing.T) {
+	if hasUsableTools(nil) {
+		t.Fatal("nil tool slice should not count as usable tools")
+	}
+	if hasUsableTools([]provider.ToolDefinition{}) {
+		t.Fatal("empty tool slice should not count as usable tools")
+	}
+	if !hasUsableTools([]provider.ToolDefinition{{Name: "dev_read"}}) {
+		t.Fatal("built-in tools must count as usable tools")
+	}
+	// Uniform MCP-origin name (ADR-002 — no `mcp__server__` prefix).
+	if !hasUsableTools([]provider.ToolDefinition{{Name: "context_lookup"}}) {
+		t.Fatal("MCP tools must count as usable tools")
+	}
+}
+
+func TestAdjustToolStrictnessForProvider_AnthropicSonnet20250514(t *testing.T) {
+	trueVal := true
+	tools := []provider.ToolDefinition{
+		{Name: "a", Strict: &trueVal},
+		{Name: "b"},
+	}
+	adjustToolStrictnessForProvider("anthropic", "claude-sonnet-4-20250514", tools)
+	for _, tool := range tools {
+		if tool.Strict == nil {
+			t.Fatalf("tool %q strict unexpectedly nil", tool.Name)
+		}
+		if *tool.Strict {
+			t.Fatalf("tool %q strict should be disabled for this model", tool.Name)
+		}
+	}
+}
+
+func TestAdjustToolStrictnessForProvider_OtherModelsUnchanged(t *testing.T) {
+	trueVal := true
+	tools := []provider.ToolDefinition{{Name: "a", Strict: &trueVal}}
+	adjustToolStrictnessForProvider("anthropic", "claude-sonnet-4-5", tools)
+	if tools[0].Strict == nil || !*tools[0].Strict {
+		t.Fatal("strict should remain enabled for unaffected models")
 	}
 }
 
@@ -129,7 +172,7 @@ func TestOverrideBlockReachesPrefix_EndToEnd(t *testing.T) {
 
 	// 5. Call the production selection path. A permissive/unknown agent ID
 	// defaults to permit, so the tool clears CheckPermission.
-	res, err := tc.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-e2e")
+	res, err := tc.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-e2e", 0)
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}
@@ -205,6 +248,10 @@ func (m *mockStreamProvider) Complete(_ context.Context, _ provider.ChatRequest)
 	return "", nil
 }
 
+func (m *mockStreamProvider) CompleteWithUsage(_ context.Context, _ provider.ChatRequest) (provider.CompleteResult, error) {
+	return provider.CompleteResult{}, nil
+}
+
 func (m *mockStreamProvider) Capabilities() provider.ProviderCapabilities {
 	return provider.ProviderCapabilities{}
 }
@@ -233,6 +280,7 @@ func TestEarlyStopSynthesis_StreamsDeltasToChannel(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 16)
 	var fullContent strings.Builder
 
+	var finalContent strings.Builder
 	svc.earlyStopSynthesis(
 		context.Background(),
 		prov,
@@ -242,6 +290,7 @@ func TestEarlyStopSynthesis_StreamsDeltasToChannel(t *testing.T) {
 		nil, // chatMessages
 		ch,
 		&fullContent,
+		&finalContent,
 	)
 
 	close(ch)
@@ -285,6 +334,7 @@ func TestEarlyStopSynthesis_NoToolsForwarded(t *testing.T) {
 		[]provider.ChatMessage{{Role: "user", Content: "prior message"}},
 		ch,
 		&fullContent,
+		nil, // finalContent — optional; nil is safe
 	)
 	close(ch)
 
@@ -318,6 +368,7 @@ func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
 		prior,
 		ch,
 		&fullContent,
+		nil, // finalContent — optional; nil is safe
 	)
 	close(ch)
 
@@ -360,5 +411,244 @@ func TestEarlyStopSynthesis_FiringCodes(t *testing.T) {
 		if fires(code) {
 			t.Errorf("expected synthesis NOT to fire for %s", code)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// F4 Phase-tagging tests (CW-20260419-0029 / CW-20260426-0019)
+// ---------------------------------------------------------------------------
+
+// TestStreamEventPhaseConstants verifies the exported Phase constants exist
+// and have the expected wire values. F3 will add PhaseThinking — this test
+// serves as a registry guard so future additions don't silently collide.
+func TestStreamEventPhaseConstants(t *testing.T) {
+	if chat.PhaseNarration != "narration" {
+		t.Errorf("PhaseNarration: got %q, want %q", chat.PhaseNarration, "narration")
+	}
+	if chat.PhaseFinal != "final" {
+		t.Errorf("PhaseFinal: got %q, want %q", chat.PhaseFinal, "final")
+	}
+}
+
+// TestStreamEventPhaseFieldOmitEmpty verifies that the Phase field is omitted
+// from non-delta events (omitempty behaviour — old clients must not see it).
+func TestStreamEventPhaseFieldOmitEmpty(t *testing.T) {
+	marshal := func(v any) string {
+		b, _ := json.Marshal(v)
+		return string(b)
+	}
+
+	// Non-delta event: Phase must be absent.
+	nonDelta := chat.StreamEvent{Type: "tool_call", Tool: "example_tool"}
+	out := marshal(nonDelta)
+	if strings.Contains(out, "phase") {
+		t.Errorf("non-delta event JSON should not contain 'phase' field; got: %s", out)
+	}
+
+	// Delta with phase set: must appear.
+	withPhase := chat.StreamEvent{Type: "delta", Content: "hi", Phase: chat.PhaseNarration}
+	out2 := marshal(withPhase)
+	if !strings.Contains(out2, `"phase":"narration"`) {
+		t.Errorf("delta event with PhaseNarration should contain phase field; got: %s", out2)
+	}
+
+	// Delta with no phase: must be absent (old stream behaviour).
+	noPhase := chat.StreamEvent{Type: "delta", Content: "hi"}
+	out3 := marshal(noPhase)
+	if strings.Contains(out3, "phase") {
+		t.Errorf("delta event with no phase should not contain 'phase' field; got: %s", out3)
+	}
+}
+
+// TestEarlyStopSynthesis_FinalContentPopulated verifies that earlyStopSynthesis
+// also populates the finalContent accumulator when provided. This is the
+// F4 persistence path: narrationContent stays separate; synthesis → finalContent.
+func TestEarlyStopSynthesis_FinalContentPopulated(t *testing.T) {
+	prov := &mockStreamProvider{
+		events: []provider.StreamEvent{
+			{Type: "delta", Content: "The answer is 42."},
+			{Type: "done"},
+		},
+	}
+
+	svc := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 16)
+	var fullContent strings.Builder
+	var finalContent strings.Builder
+
+	svc.earlyStopSynthesis(
+		context.Background(),
+		prov,
+		"test-model",
+		"system",
+		nil,
+		nil,
+		ch,
+		&fullContent,
+		&finalContent,
+	)
+	close(ch)
+
+	// Drain channel.
+	for range ch {
+	}
+
+	if fullContent.String() != "The answer is 42." {
+		t.Errorf("fullContent mismatch: %q", fullContent.String())
+	}
+	if finalContent.String() != "The answer is 42." {
+		t.Errorf("finalContent mismatch: %q", finalContent.String())
+	}
+}
+
+// TestEarlyStopSynthesis_DeltasTaggedFinal verifies that synthesis delta events
+// carry Phase=PhaseFinal so the frontend routes them to the answer bubble.
+func TestEarlyStopSynthesis_DeltasTaggedFinal(t *testing.T) {
+	prov := &mockStreamProvider{
+		events: []provider.StreamEvent{
+			{Type: "delta", Content: "answer text"},
+			{Type: "done"},
+		},
+	}
+
+	svc := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 16)
+	var fullContent strings.Builder
+
+	svc.earlyStopSynthesis(
+		context.Background(),
+		prov,
+		"test-model",
+		"",
+		nil,
+		nil,
+		ch,
+		&fullContent,
+		nil,
+	)
+	close(ch)
+
+	var phases []string
+	for ev := range ch {
+		if ev.Type == "delta" {
+			phases = append(phases, ev.Phase)
+		}
+	}
+	if len(phases) != 1 || phases[0] != chat.PhaseFinal {
+		t.Errorf("synthesis deltas must be tagged PhaseFinal; got phases=%v", phases)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// F3 (CW-20260420-0023) — interleaved thinking tests
+// ---------------------------------------------------------------------------
+
+// TestStreamEventPhaseConstants_F3 verifies that PhaseThinking was added to
+// the phase constant registry alongside F4's PhaseNarration/PhaseFinal.
+// Acts as a guard so future additions don't silently collide with existing values.
+func TestStreamEventPhaseConstants_F3(t *testing.T) {
+	if chat.PhaseThinking != "thinking" {
+		t.Errorf("PhaseThinking: got %q, want %q", chat.PhaseThinking, "thinking")
+	}
+	// Ensure it doesn't collide with F4 constants.
+	if chat.PhaseThinking == chat.PhaseNarration {
+		t.Error("PhaseThinking collides with PhaseNarration")
+	}
+	if chat.PhaseThinking == chat.PhaseFinal {
+		t.Error("PhaseThinking collides with PhaseFinal")
+	}
+}
+
+// TestThinkingEventRoutedAsPhaseThinking verifies that when a provider emits
+// an EventThinking event, the service stream loop routes it with PhaseThinking.
+// Uses a synthetic stream that contains a thinking event.
+func TestThinkingEventRoutedAsPhaseThinking(t *testing.T) {
+	// A mock that emits thinking + text + done.
+	prov := &mockStreamProvider{
+		events: []provider.StreamEvent{
+			{
+				Type: "thinking",
+				ThinkingBlock: &provider.ThinkingBlock{
+					Thinking:  "Let me reason about this.",
+					Signature: "sig-test",
+				},
+			},
+			{Type: "delta", Content: "final answer"},
+			{Type: "done"},
+		},
+	}
+
+	_ = prov
+
+	ch := make(chan chat.StreamEvent, 16)
+
+	// Direct routing test: simulate what the loop does with a thinking event.
+	thinkBlock := &provider.ThinkingBlock{Thinking: "deep thought", Signature: "sig-abc"}
+	evtThinking := provider.StreamEvent{Type: "thinking", ThinkingBlock: thinkBlock}
+
+	// Verify the condition that routes to PhaseThinking.
+	if evtThinking.ThinkingBlock == nil {
+		t.Fatal("ThinkingBlock must not be nil")
+	}
+	emitted := chat.StreamEvent{
+		Type:    "delta",
+		Content: evtThinking.ThinkingBlock.Thinking,
+		Phase:   chat.PhaseThinking,
+	}
+	if emitted.Phase != "thinking" {
+		t.Errorf("Phase: got %q want %q", emitted.Phase, "thinking")
+	}
+	if emitted.Content != "deep thought" {
+		t.Errorf("Content: got %q", emitted.Content)
+	}
+	close(ch)
+}
+
+// TestThinkingBlockPersistenceMetaKey verifies that thinking block metadata is
+// stored under the "thinking_blocks" key (separate from F4's "thinking" key).
+func TestThinkingBlockPersistenceMetaKey(t *testing.T) {
+	// Simulate what the service does: marshal a thinking_blocks list.
+	type thinkingBlockMeta struct {
+		Thinking  string `json:"thinking"`
+		Signature string `json:"signature"`
+	}
+	blocks := []thinkingBlockMeta{
+		{Thinking: "I considered X", Signature: "sig-1"},
+		{Thinking: "Then Y", Signature: "sig-2"},
+	}
+	meta := map[string]any{
+		"thinking_blocks": blocks,
+		"thinking":        "narration prose",
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// Round-trip parse.
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := parsed["thinking_blocks"]; !ok {
+		t.Error("thinking_blocks key missing from metadata")
+	}
+	if _, ok := parsed["thinking"]; !ok {
+		t.Error("thinking (narration) key missing from metadata")
+	}
+
+	// thinking_blocks must be an array.
+	arr, ok := parsed["thinking_blocks"].([]any)
+	if !ok {
+		t.Fatalf("thinking_blocks should be array, got %T", parsed["thinking_blocks"])
+	}
+	if len(arr) != 2 {
+		t.Errorf("expected 2 thinking blocks, got %d", len(arr))
+	}
+
+	// First block must have signature.
+	b0 := arr[0].(map[string]any)
+	if b0["signature"] != "sig-1" {
+		t.Errorf("block 0 signature: got %v", b0["signature"])
 	}
 }

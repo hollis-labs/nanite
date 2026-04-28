@@ -10,15 +10,16 @@ require (
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/trace v1.43.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.48.1
+	modernc.org/sqlite v1.49.1
 )
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.35.0
 	github.com/google/jsonschema-go v0.4.2
+	github.com/hollis-labs/go-agentmux-client v0.1.0
 	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
 	github.com/hollis-labs/go-otel v0.0.2
-	github.com/hollis-labs/go-providers v0.2.1
+	github.com/hollis-labs/go-providers v0.5.0
 	github.com/hollis-labs/go-toolbroker v0.1.0
 	github.com/hollis-labs/vanta-conduit v0.5.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
@@ -63,6 +64,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/chrispian/agent-mux v0.0.0-unpublished
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -82,12 +84,14 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.41.0
 	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.35.0
 	google.golang.org/protobuf v1.36.11 // indirect
-	modernc.org/libc v1.70.0 // indirect
+	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
 
 replace github.com/hollis-labs/go-modelsdev => ../go-modelsdev
+
+replace github.com/chrispian/agent-mux => /Users/chrispian/Projects-apps/agent-mux

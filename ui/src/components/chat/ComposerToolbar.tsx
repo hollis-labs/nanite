@@ -12,6 +12,16 @@ import type { UISlotEntry } from '@/lib/types'
 import { StatusPill } from './envelopes/primitives'
 import { LayoutMenu, LayoutMenuTrigger } from './LayoutMenu'
 
+// F1 (CW-20260420-0014) — Effort levels for the per-turn budget + reasoning dial.
+const EFFORT_LEVELS = [
+  { value: 'low',    label: 'Low',    title: 'Effort: Low — 0.5× token budget, reasoning off' },
+  { value: 'normal', label: 'Norm',   title: 'Effort: Normal — 1.0× token budget (default)' },
+  { value: 'high',   label: 'High',   title: 'Effort: High — 2.0× token budget, reasoning on' },
+  { value: 'max',    label: 'Max',    title: 'Effort: Max — 4.0× token budget, intensive reasoning' },
+] as const
+
+type EffortValue = typeof EFFORT_LEVELS[number]['value']
+
 const PROVIDER_ICONS: Record<string, string> = {
   anthropic: 'A',
   openai: 'O',
@@ -84,6 +94,9 @@ export function ComposerToolbar({
 
   const activeModel = useChatStore((s) => s.activeModel)
   const setActiveModel = useChatStore((s) => s.setActiveModel)
+  // F1 (CW-20260420-0014): effort dial state from global store.
+  const activeEffort = useChatStore((s) => s.activeEffort) as EffortValue
+  const setActiveEffort = useChatStore((s) => s.setActiveEffort)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const [modelOpen, setModelOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -210,6 +223,28 @@ export function ComposerToolbar({
               : <Terminal size={14} />
           }
         </ToolbarBtn>
+
+        {/* Effort segmented control — F1 (CW-20260420-0014) */}
+        <div className="mx-1 h-4 w-px bg-divider" />
+        <Tooltip content="Effort: per-turn token budget and reasoning dial" side="top">
+          <div className="flex items-center rounded-[6px] border border-divider overflow-hidden">
+            {EFFORT_LEVELS.map((level) => (
+              <button
+                key={level.value}
+                type="button"
+                title={level.title}
+                onClick={() => setActiveEffort(level.value)}
+                className={`px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
+                  activeEffort === level.value
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-fg-muted hover:bg-surface hover:text-fg'
+                }`}
+              >
+                {level.label}
+              </button>
+            ))}
+          </div>
+        </Tooltip>
 
         {/* Model picker */}
         <div className="mx-1 h-4 w-px bg-divider" />

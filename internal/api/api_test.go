@@ -161,7 +161,7 @@ func TestListCommands(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	var commands []map[string]string
+	var commands []map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&commands); err != nil {
 		t.Fatalf("decode commands: %v", err)
 	}
@@ -169,12 +169,13 @@ func TestListCommands(t *testing.T) {
 		t.Fatal("expected at least one command")
 	}
 
-	// Verify each command has required fields.
+	// Verify each command has required fields. Values can be strings or arrays
+	// (e.g. structured `args`), so decode as `any` and assert string fields by type.
 	for _, cmd := range commands {
-		if cmd["name"] == "" {
+		if name, _ := cmd["name"].(string); name == "" {
 			t.Error("command missing 'name' field")
 		}
-		if cmd["description"] == "" {
+		if desc, _ := cmd["description"].(string); desc == "" {
 			t.Error("command missing 'description' field")
 		}
 	}

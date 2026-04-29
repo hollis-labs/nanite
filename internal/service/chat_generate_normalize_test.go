@@ -1,6 +1,7 @@
 package service
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
@@ -40,9 +41,14 @@ func TestNormalizeToolInputSchemas_SourceMapInvariance(t *testing.T) {
 		t.Fatalf("source root was mutated: got additionalProperties=%v, expected key absent",
 			root["additionalProperties"])
 	}
-	// Properties map identity should still match the original.
-	if gotProps, _ := root["properties"].(map[string]any); &gotProps == nil {
-		t.Fatal("source root properties unexpectedly missing after normalize")
+	// Properties map identity should still match the original — the same
+	// underlying map header, not a freshly-allocated copy substituted in.
+	gotProps, ok := root["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("source root properties unexpectedly missing or wrong type after normalize")
+	}
+	if reflect.ValueOf(gotProps).Pointer() != reflect.ValueOf(props).Pointer() {
+		t.Fatal("source root properties map was replaced (expected original map identity)")
 	}
 }
 
@@ -68,9 +74,12 @@ func TestNormalizeToolInputSchemas_ProviderFacingNormalization(t *testing.T) {
 	if got == nil {
 		t.Fatal("tools[0].InputSchema is nil after normalize")
 	}
-	// Clone identity: must not be the same map as the input.
-	if &got == &root {
-		t.Fatal("tools[0].InputSchema was not cloned (same pointer as source)")
+	// Clone identity: the slice's InputSchema must point at a fresh map,
+	// not the same underlying map header the caller passed in. Map values
+	// in Go can't be compared with ==, so probe identity via the runtime
+	// pointer.
+	if reflect.ValueOf(got).Pointer() == reflect.ValueOf(root).Pointer() {
+		t.Fatal("tools[0].InputSchema was not cloned (same map identity as source)")
 	}
 	if v, ok := got["additionalProperties"]; !ok || v != false {
 		t.Fatalf("normalized root: expected additionalProperties=false, got %v (ok=%v)", v, ok)

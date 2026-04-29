@@ -499,6 +499,24 @@ func (m *Manager) GetAllToolsUnfiltered() []provider.ToolDefinition {
 	return defs
 }
 
+// LookupToolInputSchema returns the JSON Schema declared for the named
+// tool's input, or (nil, false) when no such tool is registered. The name
+// is the uniform agent-facing name (post ADR-002 flattening) — the same
+// name an LLM would pass to a tool call.
+//
+// Used by nanite_validate (B1, CW-20260429-0006) so the pre-flight
+// schema check can reach across every registered server uniformly. The
+// returned map is the raw schema and MUST NOT be mutated by callers.
+func (m *Manager) LookupToolInputSchema(uniformName string) (map[string]any, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, found := m.uniformIndex[uniformName]
+	if !found {
+		return nil, false
+	}
+	return entry.tool.InputSchema, true
+}
+
 // ToolAttribution returns the originating MCP server and the tool's
 // original name on that server, given a uniform agent-facing name.
 // Returns ok=false when the name is not a registered MCP tool. Used by

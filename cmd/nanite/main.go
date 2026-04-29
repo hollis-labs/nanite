@@ -548,6 +548,10 @@ func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToo
 	}
 	selfTools.ReflexSet = reflex.MergeReflexes(reflex.BuiltinReflexes(), userReflexes)
 	selfTools.ReflexLogger = s
+	// B1 (CW-20260429-0006): wire the manager as the cross-server schema
+	// registry so nanite_validate can pre-flight check args for any
+	// registered tool, not just self-tools.
+	selfTools.SchemaLookup = mcpManager
 	if err := mcpManager.AddServer("self", selfTools, mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
 	}

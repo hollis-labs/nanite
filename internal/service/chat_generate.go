@@ -1385,7 +1385,20 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			}
 		}
 		innerData, _ := json.Marshal(env.Data)
-		envRefs = append(envRefs, chat.EnvelopeRef{Type: env.Type, Data: json.RawMessage(innerData)})
+		// CW-20260429-0019: copy the routing-relevant fields onto the
+		// persisted ref so page reload can route the card to its intended
+		// drawer/panel. Dropping these here was the c110 regression.
+		envRefs = append(envRefs, chat.EnvelopeRef{
+			Type:                env.Type,
+			Data:                json.RawMessage(innerData),
+			ID:                  env.ID,
+			Title:               env.Title,
+			Subtitle:            env.Subtitle,
+			Target:              env.Target,
+			Mode:                env.Mode,
+			RenderTarget:        env.RenderTarget,
+			RenderTargetBlocked: env.RenderTargetBlocked,
+		})
 		// Emit envelope.rendered plugin event for each envelope attached to the response.
 		if s.pluginHost != nil {
 			envType := env.Type

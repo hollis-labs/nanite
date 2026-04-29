@@ -162,3 +162,125 @@ func TestEmptyTextNoHash(t *testing.T) {
 		t.Errorf("expected no hash for empty text, got %s", msg.Hash)
 	}
 }
+
+// TestEnvelopeRefRoundTripsRoutingFields covers CW-20260429-0019: the persisted
+// EnvelopeRef shape must carry render_target, target, mode,
+// render_target_blocked, id, title, subtitle so that on page reload the FE can
+// route a card to the correct drawer/panel. Prior to this fix the projection
+// dropped every routing hint and report-card etc. always rendered inline.
+func TestEnvelopeRefRoundTripsRoutingFields(t *testing.T) {
+	innerData, err := json.Marshal(map[string]any{
+		"title":   "Status report",
+		"metrics": []any{map[string]any{"label": "Tasks", "value": 7}},
+	})
+	if err != nil {
+		t.Fatalf("marshal inner data: %v", err)
+	}
+
+	envelopes := []EnvelopeRef{
+		{
+			Type:                "report-card",
+			Data:                json.RawMessage(innerData),
+			ID:                  "env-123",
+			Title:               "April status",
+			Subtitle:            "Sprint phase F",
+			Target:              "bottom_chat_drawer",
+			Mode:                "planning",
+			RenderTarget:        "bottom_chat_drawer",
+			RenderTargetBlocked: "untrusted_plugin_panel",
+		},
+	}
+	msg := WrapResponse("here is the report", "tool", nil, envelopes, false, false)
+
+	wireJSON := msg.MarshalContent()
+
+	// Spot-check the on-wire form retains the routing keys verbatim.
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(wireJSON), &raw); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	envs, ok := raw["envelopes"].([]any)
+	if !ok || len(envs) != 1 {
+		t.Fatalf("expected 1 envelope in wire form, got %v", raw["envelopes"])
+	}
+	first, ok := envs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("envelope[0] is not an object: %T", envs[0])
+	}
+	wantKeys := map[string]string{
+		"render_target":         "bottom_chat_drawer",
+		"render_target_blocked": "untrusted_plugin_panel",
+		"target":                "bottom_chat_drawer",
+		"mode":                  "planning",
+		"id":                    "env-123",
+		"title":                 "April status",
+		"subtitle":              "Sprint phase F",
+	}
+	for key, want := range wantKeys {
+		got, present := first[key]
+		if !present {
+			t.Errorf("wire envelope missing key %q (full envelope: %v)", key, first)
+			continue
+		}
+		if got != want {
+			t.Errorf("wire envelope[%q] = %v, want %v", key, got, want)
+		}
+	}
+
+	// Round-trip: unmarshal back into StructuredMessage and verify the typed
+	// fields are recovered.
+	var decoded StructuredMessage
+	if err := json.Unmarshal([]byte(wireJSON), &decoded); err != nil {
+		t.Fatalf("unmarshal StructuredMessage: %v", err)
+	}
+	if len(decoded.Envelopes) != 1 {
+		t.Fatalf("expected 1 envelope after unmarshal, got %d", len(decoded.Envelopes))
+	}
+	got := decoded.Envelopes[0]
+	if got.RenderTarget != "bottom_chat_drawer" {
+		t.Errorf("RenderTarget = %q, want bottom_chat_drawer", got.RenderTarget)
+	}
+	if got.RenderTargetBlocked != "untrusted_plugin_panel" {
+		t.Errorf("RenderTargetBlocked = %q, want untrusted_plugin_panel", got.RenderTargetBlocked)
+	}
+	if got.Target != "bottom_chat_drawer" {
+		t.Errorf("Target = %q, want bottom_chat_drawer", got.Target)
+	}
+	if got.Mode != "planning" {
+		t.Errorf("Mode = %q, want planning", got.Mode)
+	}
+	if got.ID != "env-123" {
+		t.Errorf("ID = %q, want env-123", got.ID)
+	}
+	if got.Title != "April status" {
+		t.Errorf("Title = %q, want April status", got.Title)
+	}
+	if got.Subtitle != "Sprint phase F" {
+		t.Errorf("Subtitle = %q, want Sprint phase F", got.Subtitle)
+	}
+}
+
+// TestEnvelopeRefOmitsEmptyRoutingFields verifies the omitempty contract:
+// an EnvelopeRef with no routing hints set should serialize to just {type, data}
+// — no empty render_target / target / mode keys should appear. This matters
+// because we don't want to bloat every persisted message with empty strings.
+func TestEnvelopeRefOmitsEmptyRoutingFields(t *testing.T) {
+	innerData, _ := json.Marshal(map[string]any{"text": "hi"})
+	envelopes := []EnvelopeRef{
+		{Type: "info-card", Data: json.RawMessage(innerData)},
+	}
+	msg := WrapResponse("plain", "tool", nil, envelopes, false, false)
+	wireJSON := msg.MarshalContent()
+
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(wireJSON), &raw); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	envs := raw["envelopes"].([]any)
+	first := envs[0].(map[string]any)
+	for _, key := range []string{"render_target", "render_target_blocked", "target", "mode", "id", "title", "subtitle"} {
+		if _, present := first[key]; present {
+			t.Errorf("expected key %q to be omitted when empty, but it was present (full envelope: %v)", key, first)
+		}
+	}
+}

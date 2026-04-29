@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
+	recoverpkg "github.com/hollis-labs/nanite/internal/recover"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -338,11 +340,20 @@ func (s *toolServiceImpl) logDecisionWithSignals(sessionID, intent, layer string
 
 // Execute implements ToolService. Unified execution path: ToolClient (with
 // permissions) → MCPManager fallback → error.
+//
+// Errors returned by the underlying tool transport are passed through the
+// recover taxonomy (CW-20260429-0007 / C1, layer 3 of the
+// self_healing_tool_surface_lens). Recoverable errors are tagged, logged
+// at INFO with structured fields, and surfaced to the agent as a JSON
+// envelope so even without C2's auto-repair the agent has actionable
+// feedback (kind, reason, suggestion, schema_uri, path). Non-recoverable
+// errors flow through unchanged with the same `Error: <prose>` shape they
+// always had.
 func (s *toolServiceImpl) Execute(ctx context.Context, agentID, toolName string, input map[string]any) (*ToolResult, error) {
 	if s.toolClient != nil {
 		result, err := s.toolClient.CallTool(ctx, agentID, toolName, input)
 		if err != nil {
-			return &ToolResult{Output: fmt.Sprintf("Error: %v", err), IsError: true}, nil
+			return classifyAndFormatToolError(err, toolName, input), nil
 		}
 		return &ToolResult{Output: result}, nil
 	}
@@ -350,7 +361,7 @@ func (s *toolServiceImpl) Execute(ctx context.Context, agentID, toolName string,
 	if s.mcpManager != nil {
 		result, err := s.mcpManager.ExecuteTool(ctx, toolName, input)
 		if err != nil {
-			return &ToolResult{Output: fmt.Sprintf("Error: %v", err), IsError: true}, nil
+			return classifyAndFormatToolError(err, toolName, input), nil
 		}
 		return &ToolResult{Output: result}, nil
 	}
@@ -359,6 +370,82 @@ func (s *toolServiceImpl) Execute(ctx context.Context, agentID, toolName string,
 		Output:  "Error: no tool client or MCP manager configured",
 		IsError: true,
 	}, nil
+}
+
+// classifyAndFormatToolError runs the C1 recover.Classify pipeline over a
+// tool-transport error and produces the agent-facing ToolResult.
+//
+// On a recoverable kind it:
+//   - logs an INFO "recoverable tool error classified" entry with the
+//     structured fields (kind, tool, path, reason, schema_uri),
+//   - returns a ToolResult whose Output is the JSON envelope shape the
+//     agent reads to choose its next call.
+//
+// On KindNone it preserves the legacy `Error: <prose>` output verbatim
+// so the byte-stable contract that existing agents (and tests) expect
+// is not broken by the classification layer.
+func classifyAndFormatToolError(err error, toolName string, input map[string]any) *ToolResult {
+	kind := recoverpkg.Classify(err)
+	if !kind.IsRecoverable() {
+		return &ToolResult{Output: fmt.Sprintf("Error: %v", err), IsError: true}
+	}
+
+	wrapped := recoverpkg.Wrap(err, toolName, input)
+	var rec *recoverpkg.RecoverableError
+	if !errors.As(wrapped, &rec) || rec == nil {
+		// Defensive: Wrap returned a recoverable kind from Classify but
+		// did not produce the expected wrapper. Fall back to the prose
+		// shape rather than dropping the error.
+		return &ToolResult{Output: fmt.Sprintf("Error: %v", err), IsError: true}
+	}
+
+	slog.Info("recoverable tool error classified",
+		"kind", rec.Kind.String(),
+		"tool", rec.ToolName,
+		"path", rec.ErrorPath,
+		"reason", rec.ErrorReason,
+		"schema_uri", rec.SchemaURI,
+	)
+
+	envelope := buildAgentErrorEnvelope(rec)
+	return &ToolResult{Output: envelope, IsError: true}
+}
+
+// buildAgentErrorEnvelope renders the agent-facing JSON shape for a
+// classified recoverable error. The shape is intentionally conservative
+// — kind / reason / suggestion / schema_uri / path / tool — because C2's
+// auto-repair pass and the future Vanta learning hint both key off this
+// payload.
+//
+// On marshalling failure (which would be a programmer bug since all
+// fields are JSON-friendly) the function falls back to the rec.Error()
+// string — the agent still gets the kind tag and reason.
+func buildAgentErrorEnvelope(rec *recoverpkg.RecoverableError) string {
+	payload := map[string]any{
+		"recoverable_error": true,
+		"kind":              rec.Kind.String(),
+		"tool":              rec.ToolName,
+	}
+	if rec.ErrorReason != "" {
+		payload["reason"] = rec.ErrorReason
+	}
+	if rec.Suggestion != "" {
+		payload["suggestion"] = rec.Suggestion
+	}
+	if rec.ErrorPath != "" {
+		payload["path"] = rec.ErrorPath
+	}
+	if rec.SchemaURI != "" {
+		payload["schema_uri"] = rec.SchemaURI
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		// Should be unreachable — every value is a string or bool — but
+		// keep a sane fallback rather than panicking on the LLM-facing
+		// path.
+		return "Error: " + rec.Error()
+	}
+	return string(raw)
 }
 
 // HandleRequestTools implements ToolService.

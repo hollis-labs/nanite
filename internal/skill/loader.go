@@ -29,3 +29,39 @@ func EnsureHomeDirs(homeDir string) error {
 	}
 	return nil
 }
+
+// HomeSkillsDir returns the absolute path to ~/.nanite/skills/. homeDir
+// overrides os.UserHomeDir() for testing; pass "" to use the real home dir.
+func HomeSkillsDir(homeDir string) (string, error) {
+	home := homeDir
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("skill: resolve home dir: %w", err)
+		}
+	}
+	return filepath.Join(home, ".nanite", "skills"), nil
+}
+
+// WriteUserSkillFile writes a markdown skill file at ~/.nanite/skills/<slug>.md.
+// The directory is created on demand. Returns the resolved absolute file path.
+// E1 (CW-20260428-0016): used by the dev-mode "fork to user override" flow,
+// which produces a mutable copy of an internal skill in the user folder.
+func WriteUserSkillFile(homeDir, slug, body string) (string, error) {
+	if slug == "" {
+		return "", fmt.Errorf("skill: slug is required")
+	}
+	dir, err := HomeSkillsDir(homeDir)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("skill: ensure user skills dir: %w", err)
+	}
+	target := filepath.Join(dir, slug+".md")
+	if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
+		return "", fmt.Errorf("skill: write %s: %w", target, err)
+	}
+	return target, nil
+}

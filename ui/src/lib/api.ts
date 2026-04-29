@@ -760,6 +760,29 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to delete skill: ${res.status}`);
   },
 
+  // E1 (CW-20260428-0016): dev-mode editor — fork an internal skill into
+  // ~/.nanite/skills/<slug>.md so the user can edit it. Backend rejects with
+  // 403 unless dev mode is on.
+  forkSkillToUser: async (
+    id: string,
+    body: { prompt?: string },
+  ): Promise<{ status: string; slug: string; path: string }> => {
+    const res = await fetch(`${API_BASE}/skills/${id}/fork-to-user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Failed to fork skill: ${res.status}`);
+    return res.json();
+  },
+
+  // E1: returns whether dev-mode is active (env var or developer_mode setting).
+  getDevMode: async (): Promise<{ dev_mode: boolean; env_flag: boolean }> => {
+    const res = await fetch(`${API_BASE}/dev-mode`);
+    if (!res.ok) throw new Error(`Failed to get dev mode: ${res.status}`);
+    return res.json();
+  },
+
   // Agent Skills (returns Skill[], not a join-table type)
   listAgentSkills: async (agentId: string): Promise<Skill[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/skills`);

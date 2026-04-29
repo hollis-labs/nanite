@@ -22,16 +22,21 @@ import (
 // values are stable wire strings — they ride the SSE event into the FE
 // inspector and into B3's confirm-card "reason" line, so renaming them is a
 // breaking change.
+//
+// Values are lowercase snake_case and self-describing: the FE renders them
+// inline ("we detected '<signal>' in your message") so they MUST be readable
+// without further massaging — no machine prefixes, no kebab-case, no
+// FE-side prefix-stripping helpers (CW-20260429-0003).
 type ModeSignal string
 
 const (
-	SignalSlashChat      ModeSignal = "slash-chat"
-	SignalSlashPlan      ModeSignal = "slash-plan"
-	SignalSlashWork      ModeSignal = "slash-work"
-	SignalImperativePlan ModeSignal = "imperative-plan-phrase"
-	SignalImperativeWork ModeSignal = "imperative-work-phrase"
-	SignalActionVerbWork ModeSignal = "action-verb-work"
-	SignalDefaultChat    ModeSignal = "default-chat"
+	SignalSlashChat      ModeSignal = "slash_chat"
+	SignalSlashPlan      ModeSignal = "slash_plan"
+	SignalSlashWork      ModeSignal = "slash_work"
+	SignalImperativePlan ModeSignal = "imperative_plan_phrase"
+	SignalImperativeWork ModeSignal = "imperative_work_phrase"
+	SignalActionVerbWork ModeSignal = "action_verb_work"
+	SignalDefaultChat    ModeSignal = "default_chat"
 )
 
 // ModeResult is the output of ClassifyMode. Suggested is one of "chat",

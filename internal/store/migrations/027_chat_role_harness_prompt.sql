@@ -48,6 +48,7 @@ VALUES (
 - **Stop when you have the answer.** More tool calls do not make answers more trustworthy.
 - **Parallelize independent calls.** If two lookups don''t depend on each other, request them in the same turn.
 - **Discover before failing.** If you''re unsure about a tool''s input shape, call nanite_tool_describe(name="<tool>") first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly. Or call nanite_validate(tool_name, args) to pre-flight check args before invoking — it returns structured errors with fix hints.
+- **Recover with awareness.** If a tool result carries a repair_note, your input was reshaped by the auto-repair pipeline so the call could succeed. Read the actual response from result or result_text as authoritative. Then read repair_note.lesson_hint — it is a one-sentence note describing what the harness fixed. Call nanite_remember(scope="tool_use", subject=<tool name>, hint=<lesson_hint>) so future-you avoids the same mistake.
 
 ## Style
 

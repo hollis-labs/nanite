@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
+	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/worktree"
@@ -321,6 +322,16 @@ func cmdServe(args []string) {
 	// J11 (CW-20260426-0009): wire the reminder engine so RegisterTurnCount
 	// calls from nanite_set_reminder hit the correct shared Engine instance.
 	selfTools.ReminderEngine = container.ReminderEngine
+
+	// D1 (CW-20260429-0009): wire the Vanta-backed learning recorder
+	// + recaller used by nanite_remember and the lesson-recall slot
+	// extension. memory.Service satisfies the learnings.LearningStore
+	// interface; when it is nil (Conduit not initialised) both wires
+	// stay nil and the self-tool returns a clear errorResult.
+	if container.Memory != nil {
+		selfTools.LearningRecorder = learnings.NewRecorder(container.Memory)
+		selfTools.LearningRecaller = learnings.NewRecaller(container.Memory)
+	}
 
 	// Restore non-terminal tasks from SQLite snapshot into coordination store.
 	if container.Tasks != nil {

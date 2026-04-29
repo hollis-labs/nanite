@@ -400,6 +400,21 @@ export const api = {
     return res.json();
   },
 
+  // F2 (CW-20260429-0002): per-session auto-switch override.
+  // override === null clears the override (session inherits user pref).
+  setSessionAutoSwitch: async (
+    sessionId: string,
+    override: boolean | null,
+  ): Promise<{ override: boolean | null }> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/auto-switch`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ override }),
+    });
+    if (!res.ok) throw new Error(`Failed to set session auto-switch: ${res.status}`);
+    return res.json();
+  },
+
   // Slash Commands
   listCommands: async (): Promise<SlashCommandDef[]> => {
     const res = await fetch(`${API_BASE}/commands`);

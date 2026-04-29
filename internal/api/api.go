@@ -73,6 +73,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// resolved via sessions.current_mode_id → modes.id.
 	mux.HandleFunc("GET /api/sessions/{id}/mode", a.handleGetSessionMode)
 	mux.HandleFunc("PATCH /api/sessions/{id}/mode", a.handleSetSessionMode)
+	// F2 (CW-20260429-0002): per-session auto-mode-switch override. Tri-state
+	// — null = inherit user pref, true = force ON, false = force OFF.
+	mux.HandleFunc("PATCH /api/sessions/{id}/auto-switch", a.handleSetSessionAutoSwitch)
 
 	// Agents
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)

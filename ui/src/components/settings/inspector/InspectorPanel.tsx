@@ -8,6 +8,7 @@
  */
 
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useInspectorTurns, useInspectorTurn } from '@/hooks/useInspector'
 import type {
   InspectorTurnSnapshot,
@@ -22,6 +23,8 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { ScopeChip } from '@/components/work/ScopeChip'
+import { useChatStore } from '@/stores/useChatStore'
+import { api } from '@/lib/api'
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -347,6 +350,8 @@ function TurnDetail({
         )}
         {activeTab === 'meta' && (
           <div className="space-y-2 text-[11px]">
+            {/* F2 (CW-20260429-0002) — SlotMode + pending mode suggestion. */}
+            <ModeSection sessionId={sessionId} slots={snap.slots ?? []} />
             {snap.strategy ? (
               <PanelCard title="Strategy">
                 <dl className="grid grid-cols-2 gap-1 text-[11px]">
@@ -380,6 +385,119 @@ function TurnDetail({
         )}
       </ScrollArea>
     </div>
+  )
+}
+
+// ─── Mode section (F2, CW-20260429-0002) ────────────────────────────────────
+//
+// Surfaces SlotMode and SlotAgent on separate labeled lines so debugging
+// "why is the agent acting like a planner?" is one inspector lookup. The
+// pendingModeSuggestion row reflects the same B2 SSE signal the mode chip
+// uses (read straight from useChatStore — no separate subscription needed).
+
+function ModeSection({
+  sessionId,
+  slots,
+}: {
+  sessionId: string
+  slots: InspectorSlotSnapshot[]
+}) {
+  // Live-updated session mode (PATCH /api/sessions/{id}/mode invalidates this
+  // query, same key the ChatHeader chip uses — staying on a single source).
+  const { data: sessionMode } = useQuery({
+    queryKey: ['session-mode', sessionId],
+    queryFn: () => api.getSessionMode(sessionId),
+    enabled: !!sessionId,
+  })
+
+  // Same SSE-fed signal the mode chip subscribes to. No new subscription.
+  const pendingSuggestion = useChatStore((s) => s.pendingModeSuggestion)
+
+  const slotByName = new Map(slots.map((s) => [s.name, s]))
+  const modeSlot = slotByName.get('mode')
+  const agentSlot = slotByName.get('agent')
+
+  return (
+    <PanelCard title="Mode">
+      <dl className="grid grid-cols-[120px_1fr] gap-x-2 gap-y-1 text-[11px]">
+        {/* SlotAgent — kept on its own line. */}
+        <dt className="text-fg-muted">SlotAgent</dt>
+        <dd className="text-fg">
+          {agentSlot ? (
+            <>
+              <span className="font-mono text-[10px] text-fg-muted">
+                {agentSlot.tokens.toLocaleString()}t
+              </span>
+              {agentSlot.cached && (
+                <span className="ml-1 text-[10px] text-green-600">cached</span>
+              )}
+            </>
+          ) : (
+            <span className="italic text-fg-muted">no slot data</span>
+          )}
+        </dd>
+
+        {/* SlotMode — split out from SlotAgent (B1 introduced the slot but the
+            inspector previously lumped it under Agent). */}
+        <dt className="text-fg-muted">SlotMode</dt>
+        <dd className="text-fg">
+          {modeSlot ? (
+            <>
+              <span className="font-mono text-[10px] text-fg-muted">
+                {modeSlot.tokens.toLocaleString()}t
+              </span>
+              {modeSlot.cached && (
+                <span className="ml-1 text-[10px] text-green-600">cached</span>
+              )}
+              {modeSlot.tokens === 0 && (
+                <span className="ml-1 italic text-fg-muted">empty (no addendum this turn)</span>
+              )}
+            </>
+          ) : (
+            <span className="italic text-fg-muted">no slot data</span>
+          )}
+        </dd>
+
+        {/* Active session mode — resolved via current_mode_id → modes.id. */}
+        <dt className="text-fg-muted">Active session mode</dt>
+        <dd className="text-fg font-mono">
+          {sessionMode ? (
+            <>
+              {sessionMode.slug}
+              <span className="ml-1 text-[10px] text-fg-muted">({sessionMode.id})</span>
+            </>
+          ) : (
+            <span className="italic text-fg-muted">none (legacy AgentMode fallback)</span>
+          )}
+        </dd>
+
+        {/* Pending classifier suggestion — B2 (CW-20260428-0010). */}
+        <dt className="text-fg-muted">Pending Mode Suggestion</dt>
+        <dd className="text-fg">
+          {pendingSuggestion ? (
+            <div className="space-y-0.5">
+              <div className="font-mono text-[10px]">
+                {pendingSuggestion.current} → {pendingSuggestion.suggested}
+              </div>
+              <div className="text-[10px] text-fg-muted">
+                confidence:{' '}
+                <span className="font-mono">
+                  {(pendingSuggestion.confidence * 100).toFixed(0)}%
+                </span>
+              </div>
+              {pendingSuggestion.signals && pendingSuggestion.signals.length > 0 && (
+                <div className="text-[10px] text-fg-muted">
+                  reason:{' '}
+                  <span className="text-fg">{pendingSuggestion.signals.join(', ')}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="italic text-fg-muted">no pending suggestion</span>
+          )}
+        </dd>
+      </dl>
+    </PanelCard>
   )
 }
 

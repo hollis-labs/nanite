@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowUp, AtSign, ChevronDown, Paperclip, Slash, Sparkles, Square, Terminal, Unlock, Zap } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
@@ -98,20 +99,58 @@ export function ComposerToolbar({
   const activeEffort = useChatStore((s) => s.activeEffort) as EffortValue
   const setActiveEffort = useChatStore((s) => s.setActiveEffort)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
-  // B3 (CW-20260428-0011): per-session auto-switch override toggle.
-  // Cycle order: inherit → off → on → inherit. "inherit" defers to the
-  // global mode_auto_switch_pref; "off" suppresses all auto-switches for
-  // this session even when the global pref is "always" or "ask"; "on"
-  // re-enables (does NOT bypass first-use). Resets on full page reload.
+  // B3 (CW-20260428-0011) + F2 (CW-20260429-0002): per-session auto-switch
+  // override toggle. Cycle order: inherit → off → on → inherit. "inherit"
+  // defers to the global mode_auto_switch_pref; "off" suppresses all
+  // auto-switches for this session even when the global pref is "always" or
+  // "ask"; "on" re-enables (does NOT bypass first-use). F2 persists this on
+  // sessions.auto_switch_override so it survives session reload.
   const autoSwitchOverride = useChatStore((s) =>
     activeSessionId ? s.autoSwitchSessionOverrides[activeSessionId] : undefined,
   )
   const setAutoSwitchOverride = useChatStore((s) => s.setAutoSwitchOverride)
+  // F2: load session row to seed the store on first render / session swap.
+  // We use the same query key the rest of the app uses so the cache is shared.
+  const { data: sessionForOverride } = useQuery({
+    queryKey: ['session', activeSessionId],
+    queryFn: () => api.getSession(activeSessionId!),
+    enabled: !!activeSessionId,
+  })
+  // The /api/sessions/{id} response is shaped {session, messages}; the
+  // existing FE type lies about that, so cast through `unknown` to read the
+  // nested session row safely without polluting the broader type.
+  const persistedOverride = (
+    sessionForOverride as unknown as { session?: { auto_switch_override?: boolean | null } } | undefined
+  )?.session?.auto_switch_override ?? null
+  useEffect(() => {
+    if (!activeSessionId) return
+    // Map persisted boolean | null → store enum.
+    if (persistedOverride === true) {
+      setAutoSwitchOverride(activeSessionId, 'on')
+    } else if (persistedOverride === false) {
+      setAutoSwitchOverride(activeSessionId, 'off')
+    } else {
+      setAutoSwitchOverride(activeSessionId, 'inherit')
+    }
+    // Only re-run when the persisted value or the active session changes —
+    // setAutoSwitchOverride is stable from zustand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, persistedOverride])
   const cycleAutoSwitch = useCallback(() => {
     if (!activeSessionId) return
-    if (autoSwitchOverride === undefined) setAutoSwitchOverride(activeSessionId, 'off')
-    else if (autoSwitchOverride === 'off') setAutoSwitchOverride(activeSessionId, 'on')
-    else setAutoSwitchOverride(activeSessionId, 'inherit')
+    // Cycle: inherit → off → on → inherit.
+    let next: 'inherit' | 'off' | 'on'
+    let payload: boolean | null
+    if (autoSwitchOverride === undefined) { next = 'off'; payload = false }
+    else if (autoSwitchOverride === 'off') { next = 'on'; payload = true }
+    else { next = 'inherit'; payload = null }
+    // Optimistic local update.
+    setAutoSwitchOverride(activeSessionId, next)
+    // Persist to the session row. Failure logs but doesn't roll back the
+    // optimistic update — the next session reload will re-seed from the row.
+    void api.setSessionAutoSwitch(activeSessionId, payload).catch((err) => {
+      console.error('[ComposerToolbar] failed to persist auto-switch override:', err)
+    })
   }, [activeSessionId, autoSwitchOverride, setAutoSwitchOverride])
   const autoSwitchTitle =
     autoSwitchOverride === 'off'

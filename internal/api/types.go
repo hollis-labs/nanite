@@ -41,6 +41,23 @@ type SetSessionModeRequest struct {
 	ModeID string `json:"mode_id,omitempty"`
 }
 
+// SetSessionAutoSwitchRequest is the body for
+// PATCH /api/sessions/{id}/auto-switch (F2, CW-20260429-0002). The Override
+// field is a tri-state pointer:
+//
+//	{"override": true}  → force ON for this session (does NOT bypass first-use)
+//	{"override": false} → force OFF for this session
+//	{"override": null}  → clear the per-session override (inherit user pref)
+type SetSessionAutoSwitchRequest struct {
+	Override *bool `json:"override"`
+}
+
+// SessionAutoSwitchResponse is the response shape for the auto-switch GET/PATCH
+// endpoints. Override mirrors the persisted column value (nil = inherit).
+type SessionAutoSwitchResponse struct {
+	Override *bool `json:"override"`
+}
+
 // --- Messages ---
 
 type SendMessageRequest struct {

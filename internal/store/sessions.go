@@ -35,6 +35,12 @@ type Session struct {
 	// Nil/empty = fall back to agent-assigned mode (back-compat with the
 	// legacy AgentMode pipeline). Resolves into a *Mode via GetSessionMode.
 	CurrentModeID *string `json:"current_mode_id,omitempty"`
+	// AutoSwitchOverride is the per-session override for the auto-mode-switch
+	// behavior (F2, CW-20260429-0002). nil = inherit user pref
+	// (user_settings.mode_auto_switch_pref). true = force ON for this session
+	// (does NOT bypass first-use prompt). false = force OFF (suppress all
+	// auto-switches even when user pref says always/ask).
+	AutoSwitchOverride *bool `json:"auto_switch_override,omitempty"`
 }
 
 // Message represents a chat message.
@@ -66,7 +72,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		        status, is_pinned, sort_order, message_count,
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
 		        last_activity, created_at, updated_at,
-		        current_mode_id
+		        current_mode_id, auto_switch_override
 		 FROM sessions
 		 WHERE workspace_id = ?`
 	if !inclArchived {
@@ -84,6 +90,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 	for rows.Next() {
 		var sess Session
 		var currentModeID sql.NullString
+		var autoSwitchOverride sql.NullBool
 		if err := rows.Scan(
 			&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
 			&sess.WorkspaceID, &sess.ProjectID,
@@ -91,13 +98,17 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 			&sess.Provider, &sess.Model,
 			&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 			&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
-			&currentModeID,
+			&currentModeID, &autoSwitchOverride,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
 		if currentModeID.Valid && currentModeID.String != "" {
 			v := currentModeID.String
 			sess.CurrentModeID = &v
+		}
+		if autoSwitchOverride.Valid {
+			v := autoSwitchOverride.Bool
+			sess.AutoSwitchOverride = &v
 		}
 		out = append(out, sess)
 	}
@@ -108,6 +119,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 func (s *Store) GetSession(id string) (*Session, error) {
 	var sess Session
 	var currentModeID sql.NullString
+	var autoSwitchOverride sql.NullBool
 	err := s.DB.QueryRow(
 		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
 		        COALESCE(workspace_id,''), COALESCE(project_id,''),
@@ -116,7 +128,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		        status, is_pinned, sort_order, message_count,
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
 		        last_activity, created_at, updated_at,
-		        current_mode_id
+		        current_mode_id, auto_switch_override
 		 FROM sessions WHERE id = ?`, id,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
@@ -125,7 +137,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
-		&currentModeID,
+		&currentModeID, &autoSwitchOverride,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", id, err)
@@ -134,7 +146,37 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		v := currentModeID.String
 		sess.CurrentModeID = &v
 	}
+	if autoSwitchOverride.Valid {
+		v := autoSwitchOverride.Bool
+		sess.AutoSwitchOverride = &v
+	}
 	return &sess, nil
+}
+
+// SetSessionAutoSwitchOverride sets (or clears) the per-session auto-switch
+// override (F2, CW-20260429-0002). Pass nil to clear (inherit user pref); pass
+// &true to force ON or &false to force OFF for this session.
+func (s *Store) SetSessionAutoSwitchOverride(id string, override *bool) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	var v interface{}
+	if override != nil {
+		v = *override
+	}
+	res, err := s.DB.Exec(
+		`UPDATE sessions SET auto_switch_override = ?, updated_at = ? WHERE id = ?`,
+		v, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("set session auto-switch override %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set session auto-switch override %s: rows affected: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("set session auto-switch override %s: session not found", id)
+	}
+	return nil
 }
 
 // CreateSession inserts a new session, auto-generating ID and short_code.

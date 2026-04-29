@@ -145,10 +145,15 @@ export function ArtifactsContent({ onTitleChange }: ArtifactsContentProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const [previewing, setPreviewing] = useState<Artifact | null>(null)
 
+  // C2 (CW-20260428-0013): refetch every 8s so newly-emitted agent artifacts
+  // surface in the right-rail without a page reload. The bottom-drawer
+  // mini-card is the immediate ephemeral surface; right-rail is durable but
+  // needs to track new arrivals on a tolerable cadence.
   const { data: artifacts = [], isLoading } = useQuery({
     queryKey: ['artifacts', activeSessionId],
     queryFn: () => api.listArtifacts(activeSessionId!),
     enabled: !!activeSessionId,
+    refetchInterval: 8000,
   })
 
   useEffect(() => {

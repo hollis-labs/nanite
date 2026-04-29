@@ -2730,10 +2730,53 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 
 // normalizeToolInputSchemas ensures every object-type node in each tool's
 // InputSchema has "additionalProperties": false, which the Anthropic API
-// requires. It modifies the underlying maps in-place (idempotent).
+// requires.
+//
+// CW-20260429-0017: each tool's InputSchema is deep-cloned BEFORE normalization
+// so the in-memory map shared with BuiltinToolRegistry / mcp.SelfToolProviderDefinitions
+// stays untouched. Without the clone, a deliberately-loose object node such as
+// `nanite_show_card.data` (declared `{type: object}` because per-type validation
+// lives in the show_card handler) would gain `additionalProperties: false` on
+// the FIRST chat call, after which every subsequent harness arg-validation pass
+// would reject any inner field as "additional properties not allowed at /data."
+// The provider-facing slice still carries the closed/normalized schema; the
+// canonical map stays loose.
 func normalizeToolInputSchemas(tools []provider.ToolDefinition) {
 	for i := range tools {
-		normalizeSchemaNode(tools[i].InputSchema)
+		clone := cloneSchemaNode(tools[i].InputSchema)
+		normalizeSchemaNode(clone)
+		tools[i].InputSchema = clone
+	}
+}
+
+// cloneSchemaNode returns a deep copy of a JSON-Schema-shaped map. Maps and
+// []any slices are copied; leaf scalars (string, number, bool, nil) and
+// non-[]any slices (e.g. []string for `enum`/`required`) are returned as-is
+// because normalizeSchemaNode never mutates them. If callers later start
+// mutating those slice types, extend this helper accordingly.
+func cloneSchemaNode(node map[string]any) map[string]any {
+	if node == nil {
+		return nil
+	}
+	out := make(map[string]any, len(node))
+	for k, v := range node {
+		out[k] = cloneSchemaValue(v)
+	}
+	return out
+}
+
+func cloneSchemaValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return cloneSchemaNode(t)
+	case []any:
+		dup := make([]any, len(t))
+		for i, elem := range t {
+			dup[i] = cloneSchemaValue(elem)
+		}
+		return dup
+	default:
+		return v
 	}
 }
 

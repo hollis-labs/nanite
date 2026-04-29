@@ -1,6 +1,7 @@
 package service
 
 import (
+	"os"
 	"sync"
 	"time"
 
@@ -87,4 +88,78 @@ func buildToolIntentClassifier(reg *provider.Registry, s *store.Store) intent.Cl
 		return llm
 	}
 	return intent.NewBrokerClassifier(rules, llm)
+}
+
+// buildRepairConfig wires the C2 LLM-augmented repair pipeline
+// (CW-20260429-0008) onto the toolService. Returns nil when the env
+// kill switch is off OR when no provider is resolvable — Execute then
+// falls through to the C1 structured envelope.
+//
+// Provider resolution: NANITE_REPAIR_PROVIDER overrides; otherwise the
+// utility provider (configured at the harness level for cheap utility
+// calls like summarization / classification); otherwise the user's
+// default chat provider; otherwise the platform default.
+//
+// Model resolution: NANITE_REPAIR_MODEL overrides; otherwise the
+// recoverpkg.DefaultRepairModel constant ("claude-haiku-4-5").
+//
+// Timeout resolution: NANITE_REPAIR_TIMEOUT_MS overrides; otherwise
+// recoverpkg.DefaultRepairTimeout. The package consts live in
+// internal/recover so we don't duplicate the values; they are the
+// SoT.
+func buildRepairConfig(reg *provider.Registry, s *store.Store, utilityProvider string) *RepairConfig {
+	if reg == nil {
+		return nil
+	}
+	// Operator-level kill switch — checked again at runtime in tool.go,
+	// but skipping the wiring here saves a wasted resolve.
+	if v := os.Getenv("NANITE_AUTO_REPAIR"); v != "" {
+		switch v {
+		case "0", "false", "FALSE", "False", "no", "NO", "off", "OFF":
+			return nil
+		}
+	}
+
+	// Provider resolution.
+	provName := os.Getenv("NANITE_REPAIR_PROVIDER")
+	if provName == "" {
+		provName = utilityProvider
+	}
+	if provName == "" && s != nil {
+		if us, err := s.GetUserSettings(); err == nil && us != nil {
+			if us.UtilityProvider != "" {
+				provName = us.UtilityProvider
+			} else if us.DefaultProvider != "" {
+				provName = us.DefaultProvider
+			}
+		}
+	}
+	if provName == "" {
+		provName = models.DefaultProvider()
+	}
+
+	prov, ok := reg.Get(provName)
+	if !ok || prov == nil {
+		return nil
+	}
+
+	// Timeout resolution. Empty / invalid env → 0 → DefaultRepairTimeout.
+	var timeout time.Duration
+	if raw := os.Getenv("NANITE_REPAIR_TIMEOUT_MS"); raw != "" {
+		if ms, err := time.ParseDuration(raw + "ms"); err == nil && ms > 0 {
+			timeout = ms
+		}
+	}
+
+	model := os.Getenv("NANITE_REPAIR_MODEL")
+
+	rc := &RepairConfig{
+		Provider: prov,
+		Model:    model, // empty → recover package default
+		Timeout:  timeout,
+	}
+	if s != nil {
+		rc.SettingsReader = s
+	}
+	return rc
 }

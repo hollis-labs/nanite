@@ -86,6 +86,14 @@ type UserSettings struct {
 	// SubagentApprovalTimeoutSeconds is the wall-time after which a pending
 	// approval is lazily auto-rejected on the next admin read. Default 86400 (24h).
 	SubagentApprovalTimeoutSeconds int `json:"subagent_approval_timeout_seconds"`
+	// AutoRepairPref governs the C2 LLM-augmented repair pipeline
+	// (CW-20260429-0008). Allowed values:
+	//   ""       — unset, treated as "always" (default policy).
+	//   "always" — auto-repair recoverable tool errors when wired.
+	//   "never"  — bypass the repair pipeline entirely.
+	// The env var NANITE_AUTO_REPAIR is an operator-level kill switch
+	// and takes precedence over this column when both disagree.
+	AutoRepairPref string `json:"auto_repair_pref"`
 }
 
 // GetUserSettings returns the singleton user settings row.
@@ -110,6 +118,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var subagentApprovalRequired bool
 	var subagentApprovalTimeoutSeconds int
 	var modeAutoSwitchPref string
+	var autoRepairPref string
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
@@ -124,7 +133,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		        tool_classifier_provider, tool_classifier_model,
 		        tool_classifier_timeout_ms, context_overflow_recovery,
 		        subagent_approval_required, subagent_approval_timeout_seconds,
-		        mode_auto_switch_pref
+		        mode_auto_switch_pref, auto_repair_pref
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
@@ -138,7 +147,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		&toolClassifierProvider, &toolClassifierModel,
 		&toolClassifierTimeoutMS, &contextOverflowRecovery,
 		&subagentApprovalRequired, &subagentApprovalTimeoutSeconds,
-		&modeAutoSwitchPref)
+		&modeAutoSwitchPref, &autoRepairPref)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -177,6 +186,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		SubagentApprovalRequired:       subagentApprovalRequired,
 		SubagentApprovalTimeoutSeconds: subagentApprovalTimeoutSeconds,
 		ModeAutoSwitchPref:             modeAutoSwitchPref,
+		AutoRepairPref:                 autoRepairPref,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -297,6 +307,16 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	default:
 		return fmt.Errorf("update user settings: unknown mode_auto_switch_pref %q (must be \"\", \"always\", \"ask\", or \"never\")", modeAutoSwitchPref)
 	}
+	// C2 (CW-20260429-0008): validate auto_repair_pref. Empty is the
+	// unset sentinel (treated as "always" by the runtime gate); otherwise
+	// must be "always" or "never".
+	autoRepairPref := us.AutoRepairPref
+	switch autoRepairPref {
+	case "", "always", "never":
+		// valid
+	default:
+		return fmt.Errorf("update user settings: unknown auto_repair_pref %q (must be \"\", \"always\", or \"never\")", autoRepairPref)
+	}
 	_, err = s.DB.Exec(
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
@@ -335,6 +355,7 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			subagent_approval_required = ?,
 			subagent_approval_timeout_seconds = ?,
 			mode_auto_switch_pref = ?,
+			auto_repair_pref = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
@@ -351,6 +372,7 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		toolClassifierTimeoutMS, us.ContextOverflowRecovery,
 		us.SubagentApprovalRequired, us.SubagentApprovalTimeoutSeconds,
 		modeAutoSwitchPref,
+		autoRepairPref,
 		now,
 	)
 	if err != nil {

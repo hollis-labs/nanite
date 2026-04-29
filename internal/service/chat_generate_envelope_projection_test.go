@@ -18,6 +18,7 @@ import (
 // card after page reload.
 func TestEnvelopeProjectionPreservesRenderTarget(t *testing.T) {
 	chat.RegisterEnvelopeType("report-card")
+	t.Cleanup(func() { chat.UnregisterEnvelopeType("report-card") })
 
 	// Mirror the show_card output: an envelope JSON block with
 	// render_target stamped from default_render_target ("bottom_chat_drawer"

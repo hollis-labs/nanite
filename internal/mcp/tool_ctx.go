@@ -72,3 +72,76 @@ func CallerProfileFromContext(ctx context.Context) (workspaceID, agentProfileID 
 	v, _ := ctx.Value(callerProfileCtxKey{}).(callerProfile)
 	return v.WorkspaceID, v.AgentProfileID
 }
+
+// turnToolUseIDsCtxKey carries the set of tool_use_id strings observed during
+// the current chat-generate loop (the "turn", from the agent's perspective).
+// Stamped by service.executeToolBatch before each tool dispatch so handlers
+// can validate agent-supplied tool_use_id references against actual calls.
+//
+// Primary consumer: self_tools_transport.callShowCard, which validates that
+// every entry in the `sources` array of a report-card / document-viewer cites
+// a real tool_use_id from this turn rather than a fabricated string. A nil
+// or absent value MUST disable the check (test paths and subagent paths run
+// with bare contexts and should not trip the gate).
+//
+// CW-20260429-0024.
+type turnToolUseIDsCtxKey struct{}
+
+// turnToolNamesCtxKey carries the set of tool names called during the current
+// turn. Sibling to turnToolUseIDsCtxKey, intended for the describe-required
+// gate (CW-20260429-0025) which checks whether nanite_tool_describe was
+// invoked this turn before a real tool call. Independent of tool_use_ids
+// because describe-then-call gates care about the verb, not the call ID.
+type turnToolNamesCtxKey struct{}
+
+// WithTurnToolUseIDs returns a new context carrying the given tool_use_id
+// set as the "turn so far" for grounding checks. Empty / nil input returns
+// ctx unchanged so callers can pass through unconditionally; downstream
+// readers treat nil as "not stamped — skip the check".
+//
+// The set is stored as []string (small, immutable, cheap) rather than
+// map[string]struct{} so the value is comparable for context.WithValue and
+// callers can range over it for actionable error messages.
+func WithTurnToolUseIDs(ctx context.Context, ids []string) context.Context {
+	if len(ids) == 0 {
+		return ctx
+	}
+	// Defensive copy — callers (executeToolBatch) hand us a slice they may
+	// continue to mutate as the loop accumulates more refs.
+	cp := make([]string, len(ids))
+	copy(cp, ids)
+	return context.WithValue(ctx, turnToolUseIDsCtxKey{}, cp)
+}
+
+// TurnToolUseIDsFromContext returns the tool_use_id set stamped by
+// WithTurnToolUseIDs, or nil if none was stamped. Callers MUST treat nil as
+// "no enforcement" (see WithTurnToolUseIDs doc comment).
+func TurnToolUseIDsFromContext(ctx context.Context) []string {
+	if ctx == nil {
+		return nil
+	}
+	v, _ := ctx.Value(turnToolUseIDsCtxKey{}).([]string)
+	return v
+}
+
+// WithTurnToolNames returns a new context carrying the set of tool names
+// called this turn. Sibling to WithTurnToolUseIDs; same nil-input semantics.
+// Intended for describe-required gating (CW-20260429-0025).
+func WithTurnToolNames(ctx context.Context, names []string) context.Context {
+	if len(names) == 0 {
+		return ctx
+	}
+	cp := make([]string, len(names))
+	copy(cp, names)
+	return context.WithValue(ctx, turnToolNamesCtxKey{}, cp)
+}
+
+// TurnToolNamesFromContext returns the tool-name set stamped by
+// WithTurnToolNames, or nil if none was stamped.
+func TurnToolNamesFromContext(ctx context.Context) []string {
+	if ctx == nil {
+		return nil
+	}
+	v, _ := ctx.Value(turnToolNamesCtxKey{}).([]string)
+	return v
+}

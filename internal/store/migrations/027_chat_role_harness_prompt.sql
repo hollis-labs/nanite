@@ -47,7 +47,7 @@ VALUES (
 - **Use the cache pointer.** Large tool results end with tool_result://<ULID>. Retrieve slices with fetch_tool_result or regex with search_tool_result.
 - **Stop when you have the answer.** More tool calls do not make answers more trustworthy.
 - **Parallelize independent calls.** If two lookups don''t depend on each other, request them in the same turn.
-- **Discover before failing.** If you''re unsure about a tool''s input shape, call nanite_tool_describe(name="<tool>") first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly.
+- **Discover before failing.** If you''re unsure about a tool''s input shape, call nanite_tool_describe(name="<tool>") first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly. Or call nanite_validate(tool_name, args) to pre-flight check args before invoking — it returns structured errors with fix hints.
 
 ## Style
 

@@ -180,6 +180,14 @@ type SelfToolsTransport struct {
 	// Nil-safe — without the engine, reminders are persisted but turn_count
 	// triggers fall back to turn 0 as the creation baseline.
 	ReminderEngine *reminders.Engine
+
+	// SchemaLookup is the cross-server tool-schema registry used by
+	// nanite_validate (B1, CW-20260429-0006). When set, the validator can
+	// resolve input schemas for tools published by ANY registered MCP
+	// server, not just the self-tools. *mcp.Manager satisfies this.
+	// Nil-safe — when unwired, nanite_validate falls back to self-tool
+	// schemas only and returns "unknown tool" for everything else.
+	SchemaLookup ToolSchemaLookup
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -236,6 +244,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callRefreshEngine(args)
 	case "nanite_show_card":
 		return st.callShowCard(ctx, args)
+	case "nanite_validate":
+		return st.callValidate(ctx, args)
 	case "nanite_giphy_search":
 		return st.callGiphySearch(args)
 	case "nanite_start_builder":

@@ -47,6 +47,7 @@ func SelfToolProviderDefinitions() []provider.ToolDefinition {
 func selfToolDefinitions() []Tool {
 	return []Tool{
 		naniteRunPythonToolDefinition(),
+		validateToolDefinition(),
 		{
 			Name: "nanite_create_skill",
 			Description: "Create a new skill that binds a set of tool names to a named category.\n\n" +

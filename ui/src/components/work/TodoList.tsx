@@ -22,9 +22,17 @@ interface TodoListProps {
   onCheck: (id: string) => void
   onUncheck: (id: string, reason?: string) => void
   onReorder: (activeId: string, overId: string) => void
+  scopeActions?: {
+    activeProjectId: string | null
+    activeSessionId: string | null
+    onPromote: (id: string, projectId: string) => void
+    onDemote: (id: string, sessionId: string) => void
+  }
+  /** When true, renders the scope chip on each todo row (used in the All filter). */
+  showScope?: boolean
 }
 
-export function TodoList({ todos, onCheck, onUncheck, onReorder }: TodoListProps) {
+export function TodoList({ todos, onCheck, onUncheck, onReorder, scopeActions, showScope }: TodoListProps) {
   const recordChange = useWorkStore((s) => s.recordChange)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -45,9 +53,16 @@ export function TodoList({ todos, onCheck, onUncheck, onReorder }: TodoListProps
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={todos.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-        <div className="space-y-1">
+        <div className="space-y-1 group">
           {todos.map((todo) => (
-            <TodoItem key={todo.id} todo={todo} onCheck={onCheck} onUncheck={onUncheck} />
+            <TodoItem
+              key={todo.id}
+              todo={todo}
+              onCheck={onCheck}
+              onUncheck={onUncheck}
+              scopeActions={scopeActions}
+              showScope={showScope}
+            />
           ))}
         </div>
       </SortableContext>

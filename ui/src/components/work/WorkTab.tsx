@@ -5,14 +5,29 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
 import { useAppStore } from '@/stores/useAppStore'
 import { useWorkStore } from '@/stores/useWorkStore'
-import { useTodos, useCreateTodo, useToggleTodo, useUpdateTodo } from '@/hooks/useTodos'
+import { useTodos, useCreateTodo, useToggleTodo, useUpdateTodo, useUpdateTodoScope } from '@/hooks/useTodos'
 import { usePlans, useCreatePlan, useUpdatePlan, useTogglePlanStep } from '@/hooks/usePlans'
+import { useReminders, useDeleteReminder, useUpdateReminderScope } from '@/hooks/useReminders'
 import { useWorkSync } from '@/hooks/useWorkSync'
 import { TodoList } from './TodoList'
 import { PlanCard } from './PlanCard'
 import { AddItemInput } from './AddItemInput'
+import { ScopeFilterChip } from './ScopeChip'
+import { ReminderItem } from './ReminderItem'
 import { arrayMove } from '@dnd-kit/sortable'
+import type { Todo } from '@/lib/types'
 
+/**
+ * Work panel — D2 (CW-20260428-0015).
+ *
+ * Surface:
+ *   - Scope filter chip: All / Session / Project.
+ *   - "All" view renders both "This Session" and "This Project" sections
+ *     for todos and reminders side by side, each with scope chips on rows.
+ *   - "Session" / "Project" filters render only the matching section.
+ *   - Each todo / reminder row exposes promote-to-project and
+ *     demote-to-session inline actions (visible on hover).
+ */
 export function WorkTab() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeProjectId = useAppStore((s) => s.activeProjectId)
@@ -20,42 +35,66 @@ export function WorkTab() {
   const setScope = useWorkStore((s) => s.setScope)
   const { dirty, changeCount, flush } = useWorkSync()
 
-  const scopeId = scope === 'session' ? activeSessionId : activeProjectId
+  const showSessionSection = scope === 'all' || scope === 'session'
+  const showProjectSection = scope === 'all' || scope === 'project'
 
-  const { data: todos = [], isLoading: todosLoading } = useTodos({
-    scope,
-    scope_id: scopeId ?? undefined,
+  // Session-scoped todos / plans (if the section is visible).
+  const { data: sessionTodos = [], isLoading: sessionTodosLoading } = useTodos({
+    scope: 'session',
+    scope_id: activeSessionId ?? undefined,
   })
-  const { data: plans = [], isLoading: plansLoading } = usePlans({
-    scope,
-    scope_id: scopeId ?? undefined,
+  const { data: sessionPlans = [], isLoading: sessionPlansLoading } = usePlans({
+    scope: 'session',
+    scope_id: activeSessionId ?? undefined,
   })
+
+  // Project-scoped todos / plans (if the section is visible).
+  const { data: projectTodos = [], isLoading: projectTodosLoading } = useTodos({
+    scope: 'project',
+    scope_id: activeProjectId ?? undefined,
+  })
+  const { data: projectPlans = [], isLoading: projectPlansLoading } = usePlans({
+    scope: 'project',
+    scope_id: activeProjectId ?? undefined,
+  })
+
+  // Reminders — listed once for the active session; the API auto-includes
+  // project-scoped reminders for the session's project.
+  const { data: reminders = [] } = useReminders(activeSessionId)
+  const sessionReminders = reminders.filter((r) => r.scope !== 'project')
+  const projectReminders = reminders.filter((r) => r.scope === 'project')
 
   const createTodo = useCreateTodo()
   const createPlan = useCreatePlan()
   const updatePlan = useUpdatePlan()
   const toggleTodo = useToggleTodo()
   const updateTodo = useUpdateTodo()
+  const updateTodoScope = useUpdateTodoScope()
   const togglePlanStep = useTogglePlanStep()
+  const deleteReminder = useDeleteReminder(activeSessionId)
+  const updateReminderScope = useUpdateReminderScope(activeSessionId)
 
   const [todosOpen, setTodosOpen] = useState(true)
   const [plansOpen, setPlansOpen] = useState(true)
+  const [remindersOpen, setRemindersOpen] = useState(true)
 
-  const sortedTodos = useMemo(() => {
-    return [...todos].sort((a, b) => {
+  // Stable sort by metadata.sort_order then created_at.
+  const sortTodos = (todos: Todo[]) =>
+    [...todos].sort((a, b) => {
       const aOrder = typeof a.metadata?.sort_order === 'number' ? a.metadata.sort_order : Infinity
       const bOrder = typeof b.metadata?.sort_order === 'number' ? b.metadata.sort_order : Infinity
       if (aOrder !== bOrder) return aOrder - bOrder
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     })
-  }, [todos])
+  const sortedSessionTodos = useMemo(() => sortTodos(sessionTodos), [sessionTodos])
+  const sortedProjectTodos = useMemo(() => sortTodos(projectTodos), [projectTodos])
 
-  const handleReorder = useCallback(
-    (activeId: string, overId: string) => {
-      const oldIndex = sortedTodos.findIndex((t) => t.id === activeId)
-      const newIndex = sortedTodos.findIndex((t) => t.id === overId)
+  const handleReorderFor = useCallback(
+    (todos: Todo[]) => (activeId: string, overId: string) => {
+      const oldIndex = todos.findIndex((t) => t.id === activeId)
+      const newIndex = todos.findIndex((t) => t.id === overId)
       if (oldIndex === -1 || newIndex === -1) return
-      const reordered = arrayMove(sortedTodos, oldIndex, newIndex)
+      const reordered = arrayMove(todos, oldIndex, newIndex)
       for (let i = 0; i < reordered.length; i++) {
         const todo = reordered[i]
         const currentOrder = typeof todo.metadata?.sort_order === 'number' ? todo.metadata.sort_order : -1
@@ -67,33 +106,54 @@ export function WorkTab() {
         }
       }
     },
-    [sortedTodos, updateTodo],
+    [updateTodo],
   )
 
-  const handleAddTodo = useCallback(
+  const handleAddSessionTodo = useCallback(
     (title: string) => {
-      if (!scopeId) return
+      if (!activeSessionId) return
       createTodo.mutate({
         title,
-        scope,
-        scope_id: scopeId ?? undefined,
+        scope: 'session',
+        scope_id: activeSessionId,
         priority: 'medium',
       })
     },
-    [scope, scopeId, createTodo],
+    [activeSessionId, createTodo],
   )
 
-  const handleAddPlan = useCallback(
+  const handleAddProjectTodo = useCallback(
     (title: string) => {
-      if (!scopeId) return
-      createPlan.mutate({ title, scope, scope_id: scopeId ?? undefined })
+      if (!activeProjectId) return
+      createTodo.mutate({
+        title,
+        scope: 'project',
+        scope_id: activeProjectId,
+        priority: 'medium',
+      })
     },
-    [scope, scopeId, createPlan],
+    [activeProjectId, createTodo],
+  )
+
+  const handleAddSessionPlan = useCallback(
+    (title: string) => {
+      if (!activeSessionId) return
+      createPlan.mutate({ title, scope: 'session', scope_id: activeSessionId })
+    },
+    [activeSessionId, createPlan],
+  )
+
+  const handleAddProjectPlan = useCallback(
+    (title: string) => {
+      if (!activeProjectId) return
+      createPlan.mutate({ title, scope: 'project', scope_id: activeProjectId })
+    },
+    [activeProjectId, createPlan],
   )
 
   const handleAddPlanStep = useCallback(
     (planId: string, title: string) => {
-      const plan = plans.find((p) => p.id === planId)
+      const plan = [...sessionPlans, ...projectPlans].find((p) => p.id === planId)
       if (!plan) return
       const newStep = {
         id: `step-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -103,46 +163,67 @@ export function WorkTab() {
       }
       updatePlan.mutate({ id: planId, updates: { steps: [...plan.steps, newStep] } })
     },
-    [plans, updatePlan],
+    [sessionPlans, projectPlans, updatePlan],
   )
 
-  const isLoading = todosLoading || plansLoading
-  const isEmpty = !isLoading && !!scopeId && todos.length === 0 && plans.length === 0
+  // Promote/demote handlers for both todos and reminders.
+  const promoteTodo = useCallback(
+    (id: string, projectId: string) => {
+      updateTodoScope.mutate({ id, scope: 'project', scopeId: projectId, projectId })
+    },
+    [updateTodoScope],
+  )
+  const demoteTodo = useCallback(
+    (id: string, sessionId: string) => {
+      updateTodoScope.mutate({ id, scope: 'session', scopeId: sessionId, projectId: '' })
+    },
+    [updateTodoScope],
+  )
+  const promoteReminder = useCallback(
+    (id: string, projectId: string) => {
+      updateReminderScope.mutate({ id, scope: 'project', projectId })
+    },
+    [updateReminderScope],
+  )
+  const demoteReminder = useCallback(
+    (id: string) => {
+      updateReminderScope.mutate({ id, scope: 'session', projectId: '' })
+    },
+    [updateReminderScope],
+  )
 
-  const activeTodos = sortedTodos.filter((t) => t.status !== 'done')
-  const doneTodos = sortedTodos.filter((t) => t.status === 'done')
+  const isLoading =
+    (showSessionSection && (sessionTodosLoading || sessionPlansLoading)) ||
+    (showProjectSection && (projectTodosLoading || projectPlansLoading))
+
+  const isEmpty =
+    !isLoading &&
+    sessionTodos.length === 0 &&
+    sessionPlans.length === 0 &&
+    sessionReminders.length === 0 &&
+    projectTodos.length === 0 &&
+    projectPlans.length === 0 &&
+    projectReminders.length === 0
+
+  const scopeActions = {
+    activeProjectId,
+    activeSessionId,
+    onPromote: promoteTodo,
+    onDemote: demoteTodo,
+  }
 
   return (
     <ScrollArea className="flex-1 min-h-0">
       <div className="p-3 space-y-3">
-        {/* Scope switcher */}
+        {/* Scope filter chip */}
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold text-fg">Work</span>
-          <div className="flex bg-bg-elevated rounded p-0.5 gap-0.5">
-            <button
-              type="button"
-              onClick={() => setScope('session')}
-              className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
-                scope === 'session' ? 'bg-surface text-fg' : 'text-fg-faint hover:text-fg-muted'
-              }`}
-            >
-              Session
-            </button>
-            <button
-              type="button"
-              onClick={() => setScope('project')}
-              className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
-                scope === 'project' ? 'bg-surface text-fg' : 'text-fg-faint hover:text-fg-muted'
-              }`}
-            >
-              Project
-            </button>
-          </div>
+          <ScopeFilterChip filter={scope} onChange={(f) => setScope(f)} />
         </div>
 
-        {/* No project prompt */}
-        {scope === 'project' && !activeProjectId && (
-          <div className="text-xs text-fg-muted text-center py-4 border border-dashed border-border-subtle rounded-md">
+        {/* No project banner — only when project section is visible and there's no project. */}
+        {showProjectSection && !activeProjectId && (
+          <div className="text-xs text-fg-muted text-center py-2 border border-dashed border-border-subtle rounded-md">
             No project found for this directory.
           </div>
         )}
@@ -165,85 +246,138 @@ export function WorkTab() {
           </Empty>
         )}
 
-        {/* Todos section */}
+        {/* Todos block — split into session + project sections per filter. */}
         {!isLoading && (
-          <div>
-            <button
-              type="button"
-              onClick={() => setTodosOpen((v) => !v)}
-              className="flex items-center gap-1.5 mb-1.5"
-            >
-              {todosOpen ? (
-                <ChevronDown className="w-2.5 h-2.5 text-fg-faint" />
-              ) : (
-                <ChevronRight className="w-2.5 h-2.5 text-fg-faint" />
-              )}
-              <span className="text-[11px] text-fg-muted uppercase tracking-wider font-semibold">
-                Todos
-              </span>
-              <span className="text-[10px] text-fg-faint bg-bg-elevated px-1.5 rounded-full">
-                {activeTodos.length}
-              </span>
-            </button>
-            {todosOpen && (
-              <>
+          <SectionToggle title="Todos" open={todosOpen} onToggle={() => setTodosOpen((v) => !v)} count={sortedSessionTodos.length + sortedProjectTodos.length}>
+            {showSessionSection && (
+              <ScopeSection label="This Session">
                 <TodoList
-                  todos={[...activeTodos, ...doneTodos]}
+                  todos={sortedSessionTodos}
                   onCheck={toggleTodo.check}
                   onUncheck={toggleTodo.uncheck}
-                  onReorder={handleReorder}
+                  onReorder={handleReorderFor(sortedSessionTodos)}
+                  scopeActions={scopeActions}
+                  showScope={scope === 'all'}
                 />
                 <div className="mt-1.5">
                   <AddItemInput
-                    placeholder="Add todo..."
-                    onAdd={handleAddTodo}
-                    disabled={!scopeId}
+                    placeholder="Add session todo..."
+                    onAdd={handleAddSessionTodo}
+                    disabled={!activeSessionId}
                   />
                 </div>
-              </>
+              </ScopeSection>
             )}
-          </div>
+            {showProjectSection && (
+              <ScopeSection label="This Project">
+                {activeProjectId ? (
+                  <>
+                    <TodoList
+                      todos={sortedProjectTodos}
+                      onCheck={toggleTodo.check}
+                      onUncheck={toggleTodo.uncheck}
+                      onReorder={handleReorderFor(sortedProjectTodos)}
+                      scopeActions={scopeActions}
+                      showScope={scope === 'all'}
+                    />
+                    <div className="mt-1.5">
+                      <AddItemInput
+                        placeholder="Add project todo..."
+                        onAdd={handleAddProjectTodo}
+                        disabled={!activeProjectId}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-fg-faint italic">No project context.</p>
+                )}
+              </ScopeSection>
+            )}
+          </SectionToggle>
         )}
 
-        {/* Plans section */}
-        {!isLoading && (
-          <div>
-            <button
-              type="button"
-              onClick={() => setPlansOpen((v) => !v)}
-              className="flex items-center gap-1.5 mb-1.5"
-            >
-              {plansOpen ? (
-                <ChevronDown className="w-2.5 h-2.5 text-fg-faint" />
-              ) : (
-                <ChevronRight className="w-2.5 h-2.5 text-fg-faint" />
-              )}
-              <span className="text-[11px] text-fg-muted uppercase tracking-wider font-semibold">
-                Plans
-              </span>
-              <span className="text-[10px] text-fg-faint bg-bg-elevated px-1.5 rounded-full">
-                {plans.length}
-              </span>
-            </button>
-            {plansOpen && (
-              <div className="space-y-2">
-                {plans.map((plan) => (
-                  <PlanCard
-                    key={plan.id}
-                    plan={plan}
-                    onStepCheck={togglePlanStep.check}
-                    onStepUncheck={togglePlanStep.uncheck}
-                    onAddStep={handleAddPlanStep}
-                  />
-                ))}
-                <AddItemInput
-                  placeholder="Add plan..."
-                  onAdd={handleAddPlan}
-                  disabled={!scopeId}
-                />
-              </div>
+        {/* Reminders block — always rendered but split by scope per filter. */}
+        {!isLoading && reminders.length > 0 && (
+          <SectionToggle title="Reminders" open={remindersOpen} onToggle={() => setRemindersOpen((v) => !v)} count={reminders.length}>
+            {showSessionSection && sessionReminders.length > 0 && (
+              <ScopeSection label="This Session">
+                <div className="space-y-1">
+                  {sessionReminders.map((r) => (
+                    <ReminderItem
+                      key={r.id}
+                      reminder={r}
+                      activeProjectId={activeProjectId}
+                      onDelete={(id) => deleteReminder.mutate(id)}
+                      onPromote={promoteReminder}
+                      onDemote={(id) => demoteReminder(id)}
+                    />
+                  ))}
+                </div>
+              </ScopeSection>
             )}
-          </div>
+            {showProjectSection && projectReminders.length > 0 && (
+              <ScopeSection label="This Project">
+                <div className="space-y-1">
+                  {projectReminders.map((r) => (
+                    <ReminderItem
+                      key={r.id}
+                      reminder={r}
+                      activeProjectId={activeProjectId}
+                      onDelete={(id) => deleteReminder.mutate(id)}
+                      onPromote={promoteReminder}
+                      onDemote={(id) => demoteReminder(id)}
+                    />
+                  ))}
+                </div>
+              </ScopeSection>
+            )}
+          </SectionToggle>
+        )}
+
+        {/* Plans block — also split. */}
+        {!isLoading && (sessionPlans.length > 0 || projectPlans.length > 0) && (
+          <SectionToggle title="Plans" open={plansOpen} onToggle={() => setPlansOpen((v) => !v)} count={sessionPlans.length + projectPlans.length}>
+            {showSessionSection && (
+              <ScopeSection label="This Session">
+                <div className="space-y-2">
+                  {sessionPlans.map((plan) => (
+                    <PlanCard
+                      key={plan.id}
+                      plan={plan}
+                      onStepCheck={togglePlanStep.check}
+                      onStepUncheck={togglePlanStep.uncheck}
+                      onAddStep={handleAddPlanStep}
+                    />
+                  ))}
+                  <AddItemInput
+                    placeholder="Add session plan..."
+                    onAdd={handleAddSessionPlan}
+                    disabled={!activeSessionId}
+                  />
+                </div>
+              </ScopeSection>
+            )}
+            {showProjectSection && activeProjectId && (
+              <ScopeSection label="This Project">
+                <div className="space-y-2">
+                  {projectPlans.map((plan) => (
+                    <PlanCard
+                      key={plan.id}
+                      plan={plan}
+                      onStepCheck={togglePlanStep.check}
+                      onStepUncheck={togglePlanStep.uncheck}
+                      onAddStep={handleAddPlanStep}
+                    />
+                  ))}
+                  <AddItemInput
+                    placeholder="Add project plan..."
+                    onAdd={handleAddProjectPlan}
+                    disabled={!activeProjectId}
+                  />
+                </div>
+              </ScopeSection>
+            )}
+          </SectionToggle>
         )}
 
         {/* Send Changes button */}
@@ -266,5 +400,39 @@ export function WorkTab() {
         </div>
       </div>
     </ScrollArea>
+  )
+}
+
+interface SectionToggleProps {
+  title: string
+  open: boolean
+  onToggle: () => void
+  count: number
+  children: React.ReactNode
+}
+
+function SectionToggle({ title, open, onToggle, count, children }: SectionToggleProps) {
+  return (
+    <div>
+      <button type="button" onClick={onToggle} className="flex items-center gap-1.5 mb-1.5">
+        {open ? (
+          <ChevronDown className="w-2.5 h-2.5 text-fg-faint" />
+        ) : (
+          <ChevronRight className="w-2.5 h-2.5 text-fg-faint" />
+        )}
+        <span className="text-[11px] text-fg-muted uppercase tracking-wider font-semibold">{title}</span>
+        <span className="text-[10px] text-fg-faint bg-bg-elevated px-1.5 rounded-full">{count}</span>
+      </button>
+      {open && <div className="space-y-3">{children}</div>}
+    </div>
+  )
+}
+
+function ScopeSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] text-fg-faint uppercase tracking-wider mb-1">{label}</div>
+      {children}
+    </div>
   )
 }

@@ -18,14 +18,15 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { X, FileText, StickyNote, MessageSquare, Plus, Trash2, Eye, EyeOff, Maximize2, Minimize2, Pin, PinOff, Inbox } from 'lucide-react'
+import { X, FileText, StickyNote, MessageSquare, Plus, Trash2, Eye, EyeOff, Maximize2, Minimize2, Pin, PinOff, Inbox, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { api } from '@/lib/api'
-import type { Document, PinnedContent } from '@/lib/types'
+import type { Document, PinnedContent, AgentStateScope } from '@/lib/types'
 import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
+import { ScopeChip, ScopeFilterChip, type ScopeFilter } from '@/components/work/ScopeChip'
 
 // ── Tab IDs ──────────────────────────────────────────────────────────────────
 
@@ -729,10 +730,14 @@ function SessionContextTab() {
 // ── Pins tab ─────────────────────────────────────────────────────────────────
 // J11 (CW-20260426-0009): lists agent-pinned content with unpin button,
 // per-pin scope label, and source-agent attribution.
+// D2 (CW-20260428-0015): groups pins by scope (Session / Project) with a
+// scope filter chip and inline promote/demote actions.
 
 function PinsTab() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const activeProjectId = useAppStore((s) => s.activeProjectId)
   const queryClient = useQueryClient()
+  const [filter, setFilter] = useState<ScopeFilter>('all')
 
   const { data: pins = [], isLoading } = useQuery({
     queryKey: ['pins', activeSessionId],
@@ -748,34 +753,39 @@ function PinsTab() {
     },
   })
 
+  const scopeMutation = useMutation({
+    mutationFn: ({ id, scope, projectId }: { id: string; scope: AgentStateScope; projectId?: string }) =>
+      api.updatePinScope(id, scope, projectId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['pins', activeSessionId] })
+    },
+  })
+
   if (!activeSessionId) {
     return <EmptyState message="No active session" />
   }
 
-  const scopeLabel = (scope: PinnedContent['scope']) => {
-    switch (scope) {
-      case 'turn': return 'Turn'
-      case 'session': return 'Session'
-      case 'cross_session': return 'Cross-session'
-      default: return scope
-    }
-  }
+  // Partition pins by scope. Filter narrows to a specific tier when set.
+  const sessionPins = pins.filter((p) => p.scope === 'session')
+  const projectPins = pins.filter((p) => p.scope === 'project')
+  const showSession = filter === 'all' || filter === 'session'
+  const showProject = filter === 'all' || filter === 'project'
 
-  const scopeColour = (scope: PinnedContent['scope']) => {
-    switch (scope) {
-      case 'turn': return 'text-fg-faint'
-      case 'session': return 'text-blue-600'
-      case 'cross_session': return 'text-violet-600'
-      default: return 'text-fg-muted'
-    }
+  const promote = (id: string) => {
+    if (!activeProjectId) return
+    scopeMutation.mutate({ id, scope: 'project', projectId: activeProjectId })
+  }
+  const demote = (id: string) => {
+    scopeMutation.mutate({ id, scope: 'session', projectId: '' })
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-1 shrink-0">
+      <div className="flex items-center justify-between px-3 py-1 shrink-0 gap-2">
         <p className="text-xs text-fg-muted">
           Pinned context — survives compaction · set by agent via <code className="font-mono text-fg-faint">nanite_pin</code>
         </p>
+        <ScopeFilterChip filter={filter} onChange={setFilter} />
       </div>
       <ScrollArea className="flex-1">
         {isLoading && (
@@ -786,39 +796,106 @@ function PinsTab() {
             No pinned content yet. The agent can pin content using <code className="font-mono">nanite_pin</code>.
           </div>
         )}
-        <div className="space-y-1 p-2">
-          {pins.map((pin) => (
-            <div
-              key={pin.id}
-              className="group flex items-start gap-2 px-2 py-2 rounded-lg border border-border bg-surface text-xs"
-            >
-              <Pin className="w-3 h-3 shrink-0 mt-0.5 text-fg-faint" />
-              <div className="flex-1 min-w-0">
-                <p className="text-fg leading-relaxed break-words">{pin.content}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className={`text-[10px] font-medium ${scopeColour(pin.scope)}`}>
-                    {scopeLabel(pin.scope)}
-                  </span>
-                  {pin.agent_id && (
-                    <span className="text-[10px] text-fg-faint">
-                      by {pin.agent_id}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => deleteMutation.mutate(pin.id)}
-                disabled={deleteMutation.isPending}
-                className="p-0.5 rounded text-fg-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100"
-                title="Unpin"
-              >
-                <PinOff className="w-3 h-3" />
-              </button>
+        {showSession && sessionPins.length > 0 && (
+          <PinsScopeSection label="This Session">
+            <div className="space-y-1">
+              {sessionPins.map((pin) => (
+                <PinRow
+                  key={pin.id}
+                  pin={pin}
+                  canPromote={!!activeProjectId}
+                  canDemote={false}
+                  onPromote={promote}
+                  onDemote={demote}
+                  onDelete={(id) => deleteMutation.mutate(id)}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+          </PinsScopeSection>
+        )}
+        {showProject && projectPins.length > 0 && (
+          <PinsScopeSection label="This Project">
+            <div className="space-y-1">
+              {projectPins.map((pin) => (
+                <PinRow
+                  key={pin.id}
+                  pin={pin}
+                  canPromote={false}
+                  canDemote
+                  onPromote={promote}
+                  onDemote={demote}
+                  onDelete={(id) => deleteMutation.mutate(id)}
+                />
+              ))}
+            </div>
+          </PinsScopeSection>
+        )}
       </ScrollArea>
+    </div>
+  )
+}
+
+function PinsScopeSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="px-2 pt-2">
+      <div className="px-1 mb-1 text-[10px] uppercase tracking-wider text-fg-faint">{label}</div>
+      {children}
+    </div>
+  )
+}
+
+interface PinRowProps {
+  pin: PinnedContent
+  canPromote: boolean
+  canDemote: boolean
+  onPromote: (id: string) => void
+  onDemote: (id: string) => void
+  onDelete: (id: string) => void
+}
+
+function PinRow({ pin, canPromote, canDemote, onPromote, onDemote, onDelete }: PinRowProps) {
+  return (
+    <div className="group flex items-start gap-2 px-2 py-2 rounded-lg border border-border bg-surface text-xs">
+      <Pin className="w-3 h-3 shrink-0 mt-0.5 text-fg-faint" />
+      <div className="flex-1 min-w-0">
+        <p className="text-fg leading-relaxed break-words">{pin.content}</p>
+        <div className="flex items-center gap-2 mt-1">
+          <ScopeChip scope={pin.scope} />
+          {pin.agent_id && (
+            <span className="text-[10px] text-fg-faint">by {pin.agent_id}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {canPromote && (
+          <button
+            type="button"
+            onClick={() => onPromote(pin.id)}
+            className="p-0.5 rounded text-fg-faint hover:text-primary"
+            title="Promote to project"
+          >
+            <ArrowUpRight className="w-3 h-3" />
+          </button>
+        )}
+        {canDemote && (
+          <button
+            type="button"
+            onClick={() => onDemote(pin.id)}
+            className="p-0.5 rounded text-fg-faint hover:text-fg"
+            title="Demote to session"
+          >
+            <ArrowDownLeft className="w-3 h-3" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onDelete(pin.id)}
+          className="p-0.5 rounded text-fg-faint hover:text-danger transition-colors"
+          title="Unpin"
+        >
+          <PinOff className="w-3 h-3" />
+        </button>
+      </div>
     </div>
   )
 }

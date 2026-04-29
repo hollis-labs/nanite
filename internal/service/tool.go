@@ -498,7 +498,10 @@ func (s *toolServiceImpl) attemptRepair(ctx context.Context, agentID, toolName s
 		}
 	}
 
-	// Run the repair LLM call.
+	// Run the repair LLM call. Measure elapsed time around the call so
+	// we get useful telemetry on the failure path too — timeouts and
+	// transport errors are exactly when latency tells us something.
+	repairStart := time.Now()
 	outcome, repairErr := recoverpkg.Repair(ctx, rec, recoverpkg.RepairOptions{
 		Provider:       s.repairConfig.Provider,
 		Model:          s.repairConfig.Model,
@@ -510,7 +513,7 @@ func (s *toolServiceImpl) attemptRepair(ctx context.Context, agentID, toolName s
 			"kind", rec.Kind.String(),
 			"tool", rec.ToolName,
 			"repair_success", false,
-			"repair_latency_ms", 0,
+			"repair_latency_ms", time.Since(repairStart).Milliseconds(),
 			"retry_success", false,
 			"err", repairErr.Error(),
 		)

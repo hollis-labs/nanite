@@ -360,7 +360,7 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callUnpin(ctx, args)
 	// --- Discovery / introspection (CW-20260429-0005, A1) ---
 	case "nanite_tool_describe":
-		return st.callToolDescribe(args)
+		return st.callToolDescribe(ctx, args)
 	// --- Learning capture (CW-20260429-0009, D1) ---
 	case "nanite_remember":
 		return st.callRemember(ctx, args)

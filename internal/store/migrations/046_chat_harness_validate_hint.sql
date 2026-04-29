@@ -1,30 +1,32 @@
 -- 046_chat_harness_validate_hint.sql
--- B1 (CW-20260429-0006): adds the pre-flight self-introspection hint to
--- the seeded chat-role-harness prompt template. Migration 027 ran
--- INSERT OR IGNORE, so already-deployed DBs carry the older text — this
--- migration UPDATEs the row in place to surface the new hint.
+-- A1 (CW-20260429-0005) + B1 (CW-20260429-0006): adds the discover-and-
+-- pre-flight self-introspection bullet to the seeded chat-role-harness
+-- prompt template on already-deployed databases. Migration 027 ran
+-- INSERT OR IGNORE, so existing installs carry the older text — this
+-- migration UPDATEs the row in place to surface the new bullet.
 --
--- The hint advertises two complementary self-tools:
---   - nanite_describe_tool(tool_name) — A1 (CW-20260429-0005, parallel)
---   - nanite_validate(tool_name, args) — B1 (this ticket)
+-- The bullet advertises two complementary self-tools:
+--   - nanite_tool_describe(name="<tool>") — A1 (CW-20260429-0005)
+--   - nanite_validate(tool_name, args)    — B1 (this ticket)
 --
--- Both sentences ship together so the prompt remains coherent
--- regardless of which ticket lands first. A1 may have written its own
--- sentence already (orchestrator will resolve conflicts post-merge).
+-- Both sentences ship together so the prompt remains coherent on every
+-- deployment cohort. The anchor is the last bullet of the pre-PR
+-- "Tool cadence" section, which is guaranteed to exist on every
+-- previously-seeded template (it has been there since migration 027
+-- first landed).
 --
--- Idempotent. Safe to re-run: the UPDATE is a literal substring replace.
--- The conditional protects against the (unlikely) case where the prompt
--- has been re-flowed and no longer contains the anchor string — we
--- silently no-op rather than corrupt the row.
+-- Idempotent. Safe to re-run: the WHERE guard skips rows that already
+-- contain the new bullet's tool name, so a second run is a no-op even
+-- if a prior run was partially applied.
 
 UPDATE prompt_templates
 SET template = REPLACE(
         template,
         '- **Parallelize independent calls.** If two lookups don''t depend on each other, request them in the same turn.',
         '- **Parallelize independent calls.** If two lookups don''t depend on each other, request them in the same turn.
-- **Pre-flight unfamiliar contracts.** When a tool''s input shape isn''t obvious from the surface description, call nanite_describe_tool(tool_name) to read its declared input schema before invoking. Or call nanite_validate(tool_name, args) to pre-flight check before invoking. It returns structured errors with fix hints.'
+- **Discover before failing.** If you''re unsure about a tool''s input shape, call nanite_tool_describe(name="<tool>") first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly. Or call nanite_validate(tool_name, args) to pre-flight check args before invoking — it returns structured errors with fix hints.'
     ),
     updated_at = datetime('now')
 WHERE id = 'blt-chat-harness-001'
   AND template LIKE '%- **Parallelize independent calls.** If two lookups don''t depend on each other, request them in the same turn.%'
-  AND template NOT LIKE '%nanite_validate(tool_name, args)%';
+  AND template NOT LIKE '%nanite_tool_describe%';

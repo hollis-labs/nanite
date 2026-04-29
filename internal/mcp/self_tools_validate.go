@@ -72,7 +72,14 @@ func validateToolDefinition() Tool {
 func (st *SelfToolsTransport) callValidate(_ context.Context, args map[string]any) (*ToolResult, error) {
 	toolName, _ := args["tool_name"].(string)
 	if toolName == "" {
-		return errorResult("tool_name is required"), nil
+		// Preserve the {valid, errors} uniform contract — a missing
+		// tool_name is exactly the kind of mistake validate is supposed
+		// to surface as a structured finding, not a hard error.
+		return validationResult(false, []envelope.StructuredError{{
+			Path:       "/tool_name",
+			Reason:     "tool_name is required and must be a non-empty string",
+			Suggestion: "pass the uniform agent-facing tool name, e.g. `nanite_show_card`",
+		}}), nil
 	}
 	rawArgs, ok := args["args"].(map[string]any)
 	if !ok {

@@ -295,7 +295,7 @@ func structuredErrorFromLeaf(ve *jsonschema.ValidationError, schemaDoc map[strin
 			if want == "array" && k.Got == "object" {
 				se.Suggestion = "wrap in `[...]`"
 			} else if want == "array" {
-				se.Suggestion = "expected array — pass `[" + k.Got + ", ...]`"
+				se.Suggestion = "wrap the value in an array: `[...]`"
 			} else if want == "string" && (k.Got == "number" || k.Got == "integer" || k.Got == "boolean") {
 				se.Suggestion = "stringify the value (use quotes)"
 			}

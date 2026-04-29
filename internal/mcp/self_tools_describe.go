@@ -162,18 +162,16 @@ var describeRelations = map[string]struct {
 // the "lesson recall during similar tool selection" surface from the
 // lens (Layer 4): the agent that calls describe to learn how to invoke
 // a tool also reads past lessons inline, with no extra round-trip.
-func (st *SelfToolsTransport) callToolDescribe(args map[string]any) (*ToolResult, error) {
+func (st *SelfToolsTransport) callToolDescribe(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	name := strArg(args, "name", "")
 	if name == "" {
 		return errorResult("name is required"), nil
 	}
 
+	// selfToolDefinitions() already includes nanite_tool_describe (see
+	// internal/mcp/self_tools.go), so a self-introspective call falls
+	// through the normal lookup path — no need to append it here.
 	defs := selfToolDefinitions()
-	// nanite_tool_describe is not in selfToolDefinitions() (it's registered
-	// alongside it via SelfToolProviderDefinitions), but we want it to
-	// describe itself too — append it here so a self-introspective call
-	// returns a useful contract rather than "not found".
-	defs = append(defs, naniteToolDescribeDefinition())
 
 	var match *Tool
 	names := make([]string, 0, len(defs))
@@ -229,7 +227,13 @@ func (st *SelfToolsTransport) callToolDescribe(args map[string]any) (*ToolResult
 	// error → the field is omitted. The agent's prompt already nudges
 	// it to call describe before unfamiliar tools, so this layer is
 	// load-bearing for the self-healing loop.
-	if hints := st.RecallToolLearnings(context.Background(), "", match.Name); len(hints) > 0 {
+	//
+	// Plumb the tool-call ctx through so cancellation/deadlines from
+	// the parent request propagate. user_id is optional — empty falls
+	// back to learnings.DefaultUserID inside RecallByToolName, so
+	// single-user dogfood Just Works.
+	userID := strArg(args, "user_id", "")
+	if hints := st.RecallToolLearnings(ctx, userID, match.Name); len(hints) > 0 {
 		surfaced := make([]map[string]any, 0, len(hints))
 		for _, h := range hints {
 			surfaced = append(surfaced, map[string]any{

@@ -111,13 +111,11 @@ func buildRepairConfig(reg *provider.Registry, s *store.Store, utilityProvider s
 	if reg == nil {
 		return nil
 	}
-	// Operator-level kill switch — checked again at runtime in tool.go,
-	// but skipping the wiring here saves a wasted resolve.
-	if v := os.Getenv("NANITE_AUTO_REPAIR"); v != "" {
-		switch v {
-		case "0", "false", "FALSE", "False", "no", "NO", "off", "OFF":
-			return nil
-		}
+	// Operator-level kill switch. Use the same parsing helper as
+	// runtime (autoRepairEnvEnabled) so wiring-time and call-time
+	// agree on what counts as "disabled" — case-insensitive, trimmed.
+	if !autoRepairEnvEnabled() {
+		return nil
 	}
 
 	// Provider resolution.

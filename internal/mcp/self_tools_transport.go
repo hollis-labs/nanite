@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -716,6 +717,20 @@ func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]
 	data, ok := args["data"].(map[string]any)
 	if !ok || data == nil {
 		return errorResult("data is required and must be a JSON object matching the per-type schema"), nil
+	}
+
+	// CW-20260429-0025 — mechanical describe-required gate. Before the
+	// per-type schema runs (which is what the agent ultimately needs to
+	// satisfy), require that nanite_tool_describe was called THIS turn
+	// for nanite_show_card OR that there's a learning mentioning the
+	// requested envelope type. This belt-and-suspenders enforcement
+	// addresses the c112 evidence where the prompt nudge from
+	// CW-20260429-0020 was ignored and the agent went straight to
+	// show_card with invented fields. Toggleable via env for test/CI.
+	if requireDescribeForShowCardEnabled() {
+		if gateErr := st.enforceDescribeBeforeShowCard(ctx, envType); gateErr != nil {
+			return errorResult(gateErr.Error()), nil
+		}
 	}
 
 	if err := envelope.ValidateData(envType, data); err != nil {
@@ -1846,6 +1861,98 @@ func validateSourcesAgainstTurn(ctx context.Context, sources []map[string]any) e
 		}
 	}
 	return nil
+}
+
+// requireDescribeForShowCardEnabled reports whether the
+// CW-20260429-0025 describe-required gate in callShowCard is active.
+// Default is ON; setting NANITE_REQUIRE_DESCRIBE_FOR_SHOW_CARD to one
+// of {"0","false","off","no"} (case-insensitive) disables it. Any
+// other value (including unset) leaves the gate enabled.
+//
+// The toggle exists so test harnesses and CI runners that don't drive
+// the full ctx-stamping path can disable the gate without rewriting
+// tool fixtures. v1 is env-only — per-user prefs are out of scope per
+// the ticket.
+func requireDescribeForShowCardEnabled() bool {
+	raw := os.Getenv("NANITE_REQUIRE_DESCRIBE_FOR_SHOW_CARD")
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "0", "false", "off", "no":
+		return false
+	}
+	return true
+}
+
+// describeRequiredErrorBody is the JSON shape emitted by the
+// CW-20260429-0025 gate when nanite_show_card is invoked without a
+// preceding nanite_tool_describe call AND no learning citing the
+// requested envelope type. Returned via errorResult so the agent's
+// tool result text is the JSON — the harness's recover.Classify
+// returns KindNone on this body so auto-repair won't try to "fix" it.
+//
+// The struct is deliberately flat: error+type+hint+describe_call_args.
+// The hint embeds the requested type so the agent can see which
+// per-type schema to read in the describe response.
+type describeRequiredErrorBody struct {
+	Error            string         `json:"error"`
+	Type             string         `json:"type"`
+	Hint             string         `json:"hint"`
+	DescribeCallArgs map[string]any `json:"describe_call_args"`
+}
+
+// enforceDescribeBeforeShowCard runs the CW-20260429-0025 gate. It
+// returns nil when the call is allowed to proceed and a non-nil error
+// (whose Error() string is the JSON body) when the agent must call
+// nanite_tool_describe first.
+//
+// Resolution order — accept on first hit:
+//  1. nanite_tool_describe was called THIS turn (read from
+//     mcp.TurnToolNamesFromContext, stamped by service.executeToolBatch
+//     under CW-20260429-0024).
+//  2. The LearningRecaller has a hint whose Summary mentions the
+//     requested envelope type. Best-effort substring match — the
+//     recaller doesn't expose per-type filtering. Empty userID is OK
+//     here; Recaller folds it to DefaultUserID.
+//
+// When ctx carries no turn-tool-names set (subagent / test paths
+// without ctx stamping) we treat that as "discovery couldn't be
+// observed" — the gate falls through to the learning check, and if
+// that also misses, the gate fires. That intentionally keeps the
+// production-path enforcement strict; tests that need the legacy
+// behavior should disable the env toggle.
+func (st *SelfToolsTransport) enforceDescribeBeforeShowCard(ctx context.Context, envType string) error {
+	// (1) Describe-this-turn check.
+	for _, name := range TurnToolNamesFromContext(ctx) {
+		if name == "nanite_tool_describe" {
+			return nil
+		}
+	}
+
+	// (2) Learning-mentions-type check. Failing-open per Recaller
+	// contract: nil recaller / store / Vanta error returns nil hints.
+	if st != nil && st.LearningRecaller != nil && envType != "" {
+		hints := st.LearningRecaller.RecallByToolName(ctx, "", "nanite_show_card")
+		for _, h := range hints {
+			if strings.Contains(h.Summary, envType) {
+				return nil
+			}
+		}
+	}
+
+	body := describeRequiredErrorBody{
+		Error: "describe_required",
+		Type:  envType,
+		Hint: fmt.Sprintf(
+			"Call nanite_tool_describe(name=\"nanite_show_card\") and read the golden example for type='%s' before invoking. The per-type schema rejects invented fields.",
+			envType),
+		DescribeCallArgs: map[string]any{"name": "nanite_show_card"},
+	}
+	jsonBytes, err := json.Marshal(body)
+	if err != nil {
+		// Defensive — Marshal of a fixed-shape struct shouldn't fail.
+		// Fall back to a prose error so the agent still gets a signal.
+		return fmt.Errorf("describe_required for envelope type %q (marshal err: %v)", envType, err)
+	}
+	return fmt.Errorf("%s", string(jsonBytes))
 }
 
 // --- nanite_run_python handler (CW-20260420-0019, D6) ---

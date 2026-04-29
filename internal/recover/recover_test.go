@@ -334,6 +334,22 @@ func TestClassify_AlreadyWrapped(t *testing.T) {
 	}
 }
 
+// TestClassify_None_DescribeRequired pins CW-20260429-0025: the
+// describe-required gate's structured error body must NOT classify as
+// recoverable. Auto-repair should not try to "guess" what the agent
+// would have learned from nanite_tool_describe — the only correct
+// remediation is the agent calling describe and reading the per-type
+// schema. Classifying as recoverable would burn LLM budget on a
+// payload-shape repair that can't help.
+func TestClassify_None_DescribeRequired(t *testing.T) {
+	// Mimic the JSON body the gate emits via errorResult. The error
+	// text is the JSON; recover.Classify reads err.Error().
+	err := errors.New(`{"error":"describe_required","type":"report-card","hint":"Call nanite_tool_describe(name=\"nanite_show_card\") and read the golden example for type='report-card' before invoking. The per-type schema rejects invented fields.","describe_call_args":{"name":"nanite_show_card"}}`)
+	if got := Classify(err); got != KindNone {
+		t.Errorf("describe_required must classify as KindNone (unrecoverable), got %q", got)
+	}
+}
+
 // TestKind_String covers the stringer surface — used in log fields and
 // JSON envelopes; must remain stable.
 func TestKind_String(t *testing.T) {

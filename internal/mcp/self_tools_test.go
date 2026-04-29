@@ -24,6 +24,12 @@ func newTestStore(t *testing.T) *store.Store {
 func newSelfTools(t *testing.T) *SelfToolsTransport {
 	t.Helper()
 	s := newTestStore(t)
+	// CW-20260429-0025: callShowCard defaults to enforcing
+	// describe-required at the boundary. Tests that don't drive the full
+	// turn-tool-names ctx stamp expect the legacy passthrough; opt them
+	// out here so the gate-specific tests can re-enable explicitly via
+	// t.Setenv. Production wiring leaves the env unset so the gate is on.
+	t.Setenv("NANITE_REQUIRE_DESCRIBE_FOR_SHOW_CARD", "0")
 	return NewSelfToolsTransport(s)
 }
 

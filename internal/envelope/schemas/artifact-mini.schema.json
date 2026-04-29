@@ -1,0 +1,37 @@
+{
+  "$id": "artifact-mini",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Artifact Mini",
+  "description": "Compact downloadable-artifact card surfaced in the bottom chat drawer. Renders name, mime, size, Download CTA, and a Dismiss button. Lifetime is transient — auto-closes after the user downloads or dismisses. Use for ephemeral 'your file is ready' surfaces. Durable session-wide artifact list lives in the right-rail Artifacts panel. (C2, CW-20260428-0013)",
+  "type": "object",
+  "required": [
+    "artifact_id",
+    "name",
+    "mime_type"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string",
+      "description": "ID of the artifact row in the artifacts table. Drives the /api/artifacts/{id}/download URL."
+    },
+    "name": {
+      "type": "string",
+      "description": "Filename shown in the card."
+    },
+    "mime_type": {
+      "type": "string",
+      "description": "MIME type, e.g. application/zip, text/markdown, image/png."
+    },
+    "size_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Size in bytes; rendered as a human-friendly KB/MB string."
+    },
+    "origin": {
+      "type": "string",
+      "description": "Optional origin attribution, e.g. 'auto', 'placed', 'uploaded'."
+    }
+  },
+  "default_render_target": "bottom_chat_drawer",
+  "additionalProperties": false
+}

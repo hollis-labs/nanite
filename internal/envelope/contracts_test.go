@@ -35,6 +35,8 @@ var knownTypes = []string{
 	"table-card",
 	"timeline-card",
 	"diff-card",
+	// C2 — compact downloadable-artifact card
+	"artifact-mini",
 	// Plugin: giphy
 	"giphy-modal",
 	// KB + ticket primitives
@@ -165,6 +167,13 @@ var examplePayloads = map[string]string{
 		"before": {"label": "Previous", "content": "timeout: 30s"},
 		"after": {"label": "Updated", "content": "timeout: 60s"},
 		"format": "code"
+	}`,
+	"artifact-mini": `{
+		"artifact_id": "art-001",
+		"name": "report.zip",
+		"mime_type": "application/zip",
+		"size_bytes": 1024,
+		"origin": "auto"
 	}`,
 	"giphy-modal": `{
 		"title": "Great Job!",

@@ -121,6 +121,13 @@ var validShowCardPayloads = map[string]map[string]any{
 		"after":  map[string]any{"label": "Updated", "content": "timeout: 60s"},
 		"format": "code",
 	},
+	"artifact-mini": {
+		"artifact_id": "art-001",
+		"name":        "report.zip",
+		"mime_type":   "application/zip",
+		"size_bytes":  float64(1024),
+		"origin":      "auto",
+	},
 }
 
 // validSources covers the grounding gate enforced for prose-bearing cards.

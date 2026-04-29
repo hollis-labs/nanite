@@ -39,6 +39,7 @@ var PassiveRenderableTypes = []string{
 	"table-card",
 	"timeline-card",
 	"diff-card",
+	"artifact-mini",
 }
 
 // passiveRenderableSet is the allow-list as a set for O(1) membership checks.

@@ -66,10 +66,25 @@ import type {
   InspectorTurnSnapshot,
   Document,
   PinnedContent,
+  DrawerPinnedCard,
+  DrawerCardType,
 } from "./types";
 import type { PluginRegistryResponse } from "./plugin-loader";
 
 const API_BASE = "/api";
+
+/**
+ * Thrown by api.pinDrawerCard when the backend returns 409 because the 10-pin
+ * cap is already full (C1, CW-20260428-0012). Callers catch this to surface
+ * the user-facing "10-tab limit; unpin one first" toast instead of a generic
+ * error message.
+ */
+export class DrawerPinCapError extends Error {
+  constructor() {
+    super("Drawer pin cap exceeded")
+    this.name = "DrawerPinCapError"
+  }
+}
 
 // The Go backend stores JSON fields as strings in SQLite.
 // These helpers parse them into typed forms for the UI and stringify on write.
@@ -520,6 +535,36 @@ export const api = {
   deletePin: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/pins/${id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error(`Failed to delete pin: ${res.status}`)
+  },
+
+  // Bottom-drawer pinned cards (C1, CW-20260428-0012)
+  // Returns 409 when the 10-pin cap is exceeded — surfaced as DrawerPinCapError
+  // so callers can render the "10-tab limit; unpin one first" toast.
+  listDrawerCards: async (sessionId: string): Promise<DrawerPinnedCard[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/drawer-cards`)
+    if (!res.ok) throw new Error(`Failed to list drawer cards: ${res.status}`)
+    return res.json()
+  },
+
+  pinDrawerCard: async (
+    sessionId: string,
+    card: { card_type: DrawerCardType; content_ref?: string; title?: string; payload?: string },
+  ): Promise<DrawerPinnedCard> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/drawer-cards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(card),
+    })
+    if (res.status === 409) {
+      throw new DrawerPinCapError()
+    }
+    if (!res.ok) throw new Error(`Failed to pin drawer card: ${res.status}`)
+    return res.json()
+  },
+
+  unpinDrawerCard: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/drawer-cards/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to unpin drawer card: ${res.status}`)
   },
 
   // Compact

@@ -5,6 +5,7 @@ import { usePermissionMode } from '@/hooks/usePermissionMode'
 import { useSettings, useSettingsMutation, useModels, useProviders } from '@/hooks/useSettings'
 import { api } from '@/lib/api'
 import type { PermissionMode, ToolCallDisplayMode } from '@/lib/types'
+import { useLayoutStore } from '@/stores/useLayoutStore'
 import { SCard, SRow, SToggle, SSelect } from './primitives'
 
 const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; description: string }[] = [
@@ -306,6 +307,12 @@ export function PreferencesPanel() {
         </div>
       </SCard>
 
+      <SCard title="Bottom Drawer" description="Defaults for the bottom chat drawer (CW-20260428-0012)">
+        <SRow label="Default tab" description="Tab activated when the drawer opens with no specific target">
+          <BottomDrawerDefaultTabSelector />
+        </SRow>
+      </SCard>
+
       <SCard title="Advanced">
         <SRow label="Developer Mode" description="Allow plugins to register custom React components">
           <SToggle
@@ -323,6 +330,23 @@ export function PreferencesPanel() {
       </SCard>
     </div>
   )
+}
+
+// C1 (CW-20260428-0012): "Default tab" dropdown for the bottom chat drawer.
+// Reads/writes useLayoutStore.defaultDrawerTab so the setting is immediately
+// reflected on next drawer open. Pinned cards are not selectable as the
+// default — that is a v2 concern (drag-to-reorder + select-from-pin).
+function BottomDrawerDefaultTabSelector() {
+  const value = useLayoutStore((s) => s.defaultDrawerTab) ?? 'scratchpad'
+  const setValue = useLayoutStore((s) => s.setDefaultDrawerTab)
+  const options = [
+    { value: 'scratchpad', label: 'Scratchpad' },
+    { value: 'documents', label: 'Documents' },
+    { value: 'context', label: 'Session Context' },
+    { value: 'pins', label: 'Pins' },
+    { value: 'cards', label: 'Cards' },
+  ]
+  return <SSelect value={value} options={options} onChange={(v) => setValue(v)} />
 }
 
 // B3 (CW-20260428-0011): tri-state selector for mode_auto_switch_pref.

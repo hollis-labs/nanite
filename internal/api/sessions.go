@@ -324,6 +324,12 @@ func (a *API) handleSetSessionMode(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// F1 (CW-20260429-0001): broadcast cross-tab so a second tab open on
+		// the same session updates its mode chip without manual refetch.
+		// Empty mode_id/mode_slug signal a clear (default chat mode).
+		if a.Services.Streams != nil {
+			a.Services.Streams.BroadcastSessionModeChanged(sessionID, "", "")
+		}
 		a.jsonResp(w, http.StatusOK, nil)
 		return
 	}
@@ -351,6 +357,14 @@ func (a *API) handleSetSessionMode(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// F1 (CW-20260429-0001): broadcast the resolved mode so other tabs on
+	// the same session pick up the change without polling. Reuses the
+	// presence pipe — same channel as session_archived / work_changed.
+	if a.Services.Streams != nil && resolved != nil {
+		a.Services.Streams.BroadcastSessionModeChanged(sessionID, resolved.ID, resolved.Slug)
+	}
+
 	a.jsonResp(w, http.StatusOK, resolved)
 }
 

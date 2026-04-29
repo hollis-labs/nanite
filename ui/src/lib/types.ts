@@ -722,11 +722,17 @@ export interface PresenceEvent {
     | "tool_resolved"
     | "cli_active"
     | "session_archived"
-    | "work_changed";
+    | "work_changed"
+    /** F1 (CW-20260429-0001): cross-tab session-mode sync. */
+    | "session_mode_changed";
   session_id: string;
   agent_id?: string;
   tool_name?: string;
   timestamp: string;
+  /** Populated for session_mode_changed; empty when the mode pointer is cleared. */
+  mode_id?: string;
+  /** Populated for session_mode_changed; empty when the mode pointer is cleared. */
+  mode_slug?: string;
 }
 
 export interface ActiveStreamInfo {

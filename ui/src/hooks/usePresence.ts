@@ -1,7 +1,78 @@
 import { useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useChatStore } from '@/stores/useChatStore'
 import type { PresenceEvent } from '@/lib/types'
+
+/**
+ * Pure dispatcher for presence events. Extracted from the hook body so it
+ * can be unit-tested without spinning up a React tree / EventSource. F1
+ * (CW-20260429-0001) — needed for testing session_mode_changed routing.
+ */
+export interface PresenceHandlers {
+  setActiveStream: (sessionId: string, info: { agentId: string; startedAt: string }) => void
+  removeActiveStream: (sessionId: string) => void
+  setPendingTool: (sessionId: string, info: { toolName: string }) => void
+  removePendingTool: (sessionId: string) => void
+  setCLIActive: (sessionId: string, info: { lastSeen: string }) => void
+  removeCLIActive: (sessionId: string) => void
+  queryClient: Pick<QueryClient, 'invalidateQueries'>
+}
+
+export function dispatchPresenceEvent(evt: PresenceEvent, h: PresenceHandlers): void {
+  switch (evt.type) {
+    case 'stream_start':
+      h.setActiveStream(evt.session_id, {
+        agentId: evt.agent_id ?? '',
+        startedAt: evt.timestamp,
+      })
+      h.removeCLIActive(evt.session_id)
+      break
+
+    case 'stream_end':
+      h.removeActiveStream(evt.session_id)
+      h.removePendingTool(evt.session_id)
+      h.removeCLIActive(evt.session_id)
+      break
+
+    case 'tool_pending':
+      h.setPendingTool(evt.session_id, {
+        toolName: evt.tool_name ?? '',
+      })
+      break
+
+    case 'tool_resolved':
+      h.removePendingTool(evt.session_id)
+      break
+
+    case 'cli_active':
+      h.setCLIActive(evt.session_id, {
+        lastSeen: evt.timestamp,
+      })
+      break
+
+    case 'session_archived':
+      h.removeActiveStream(evt.session_id)
+      h.removePendingTool(evt.session_id)
+      h.removeCLIActive(evt.session_id)
+      h.queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      break
+
+    case 'work_changed':
+      h.queryClient.invalidateQueries({ queryKey: ['todos'] })
+      h.queryClient.invalidateQueries({ queryKey: ['plans'] })
+      break
+
+    case 'session_mode_changed':
+      // F1 (CW-20260429-0001): another tab (or another client on the
+      // same tab) flipped the session mode via PATCH /api/sessions/{id}/mode.
+      // Match the invalidation pattern ChatComposer uses for the /mode
+      // slash command (mode_switched:<slug>) so the mode chip and any
+      // session-derived UI refresh from the new current_mode_id.
+      h.queryClient.invalidateQueries({ queryKey: ['session-mode', evt.session_id] })
+      h.queryClient.invalidateQueries({ queryKey: ['session', evt.session_id] })
+      break
+  }
+}
 
 /**
  * usePresence connects to the /api/presence SSE endpoint and updates
@@ -27,50 +98,15 @@ export function usePresence() {
     es.onmessage = (e: MessageEvent) => {
       try {
         const evt: PresenceEvent = JSON.parse(e.data as string)
-
-        switch (evt.type) {
-          case 'stream_start':
-            setActiveStream(evt.session_id, {
-              agentId: evt.agent_id ?? '',
-              startedAt: evt.timestamp,
-            })
-            removeCLIActive(evt.session_id)
-            break
-
-          case 'stream_end':
-            removeActiveStream(evt.session_id)
-            removePendingTool(evt.session_id)
-            removeCLIActive(evt.session_id)
-            break
-
-          case 'tool_pending':
-            setPendingTool(evt.session_id, {
-              toolName: evt.tool_name ?? '',
-            })
-            break
-
-          case 'tool_resolved':
-            removePendingTool(evt.session_id)
-            break
-
-          case 'cli_active':
-            setCLIActive(evt.session_id, {
-              lastSeen: evt.timestamp,
-            })
-            break
-
-          case 'session_archived':
-            removeActiveStream(evt.session_id)
-            removePendingTool(evt.session_id)
-            removeCLIActive(evt.session_id)
-            queryClient.invalidateQueries({ queryKey: ['sessions'] })
-            break
-
-          case 'work_changed':
-            queryClient.invalidateQueries({ queryKey: ['todos'] })
-            queryClient.invalidateQueries({ queryKey: ['plans'] })
-            break
-        }
+        dispatchPresenceEvent(evt, {
+          setActiveStream,
+          removeActiveStream,
+          setPendingTool,
+          removePendingTool,
+          setCLIActive,
+          removeCLIActive,
+          queryClient,
+        })
       } catch {
         // Ignore malformed events.
       }

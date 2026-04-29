@@ -280,13 +280,18 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	normalizeToolInputSchemas(tools)
 	adjustToolStrictnessForProvider(providerName, model, tools)
 
-	// B1 (CW-20260428-0009): apply session-mode tool_overrides at the tool
-	// surface. Only the deterministic (non-progressive) selection path is
-	// filtered today — the progressive catalog path already advertises the
-	// full superset and adds its own per-call gating; layering session-mode
-	// filtering on top of that needs a separate design pass (see
-	// followup_b1_progressive_tool_overrides).
-	if !selection.Progressive && session.CurrentModeID != nil && *session.CurrentModeID != "" {
+	// B1 (CW-20260428-0009) + F1 (CW-20260429-0001): apply session-mode
+	// tool_overrides at the tool surface. B1 wired this for the deterministic
+	// (non-progressive) selection path; F1 extends the same filter to the
+	// progressive path's seed builtins AND its catalog summaries, and stores
+	// the resolved spec on loopState so handleRequestTools can apply the same
+	// rules to tools loaded mid-turn via request_tools.
+	//
+	// Resolution helper is store.ApplyToolOverrides (deny > allow, explicit >
+	// pattern); meta-tools are exempt so the agent's escape hatches stay
+	// reachable regardless of mode policy.
+	var modeOverrideSpec store.ToolOverrideSpec
+	if session.CurrentModeID != nil && *session.CurrentModeID != "" {
 		if sm, gerr := s.store.GetMode(*session.CurrentModeID); gerr == nil && sm != nil &&
 			sm.ToolOverrides != "" && sm.ToolOverrides != "{}" {
 			spec, perr := store.ParseToolOverrides(sm.ToolOverrides)
@@ -294,24 +299,24 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				slog.Warn("chat-service: parse session-mode tool_overrides failed",
 					"session_id", sessionID, "mode_id", sm.ID, "err", perr)
 			} else {
-				names := make([]string, len(tools))
-				for i, t := range tools {
-					names[i] = t.Name
-				}
-				kept := store.ApplyToolOverrides(names, spec)
-				keep := make(map[string]bool, len(kept))
-				for _, n := range kept {
-					keep[n] = true
-				}
-				filtered := tools[:0]
-				for _, t := range tools {
-					if keep[t.Name] {
-						filtered = append(filtered, t)
-					}
-				}
-				tools = filtered
+				modeOverrideSpec = spec
 			}
 		}
+	}
+	if !isEmptySpec(modeOverrideSpec) {
+		before := len(tools)
+		tools = applyModeToolOverridesToTools(tools, modeOverrideSpec)
+		if selection.Progressive && selection.Catalog != "" && s.tools != nil {
+			// Rebuild the catalog so denied tools aren't advertised to the
+			// LLM in the progressive system prefix. Source-of-truth is the
+			// same summary list used in tool.go (ListSummaries returns the
+			// full registered set; we filter, then rebuild).
+			filteredSummaries := applyModeToolOverridesToSummaries(s.tools.ListSummaries(), modeOverrideSpec)
+			selection.Catalog = chat.BuildToolCatalog(filteredSummaries)
+		}
+		slog.Debug("chat-service: session-mode tool_overrides applied",
+			"session_id", sessionID, "progressive", selection.Progressive,
+			"tools_before", before, "tools_after", len(tools))
 	}
 
 	// Build the dynamic per-turn system prefix from tool selection. This text
@@ -543,6 +548,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// I1 (CW-20260426-0004): attach turn ID to loop state so broker/tool
 	// producers can record to the same snapshot.
 	ls.inspectorTurnID = inspectorTurnID
+
+	// F1 (CW-20260429-0001): pass the resolved session-mode tool_overrides
+	// spec into the loop so handleRequestTools can scrub progressive-loaded
+	// tools before they reach the LLM. Empty spec is a passthrough.
+	ls.modeToolOverrides = modeOverrideSpec
 
 	// I1 (CW-20260426-0004): record scope tier to inspector (B2 already shipped).
 	if s.inspector != nil && inspectorTurnID != "" {
@@ -1190,6 +1200,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					resultBlocks, ls.toolCallRefs,
 					sessionID, &ls.reflectionFired,
 					ls.inspectorTurnID,
+					ls.modeToolOverrides,
 				)
 			} else {
 				regularTools = append(regularTools, tu)
@@ -2108,6 +2119,7 @@ func (s *chatServiceImpl) handleRequestTools(
 	sessionID string,
 	reflectionFired *bool,
 	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
+	modeOverrideSpec store.ToolOverrideSpec, // F1 (CW-20260429-0001): scrub mode-denied tools loaded mid-turn
 ) ([]provider.ContentBlock, []chat.ToolCallRef) {
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
@@ -2184,6 +2196,18 @@ func (s *chatServiceImpl) handleRequestTools(
 	}
 
 	newTools, rtResult, _ := s.tools.HandleRequestTools(ctx, tu.Input)
+
+	// F1 (CW-20260429-0001): scrub mode-denied tools BEFORE they reach the
+	// LLM. Same resolution helper B1 wired at materialization (deny > allow,
+	// explicit > pattern); meta-tools are exempt. Empty spec is a passthrough.
+	if !isEmptySpec(modeOverrideSpec) {
+		filtered := applyModeToolOverridesToTools(newTools, modeOverrideSpec)
+		if len(filtered) != len(newTools) {
+			slog.Info("chat-service: request_tools filtered by session-mode tool_overrides",
+				"session_id", sessionID, "before", len(newTools), "after", len(filtered))
+		}
+		newTools = filtered
+	}
 
 	var loaded []string
 	for _, nt := range newTools {

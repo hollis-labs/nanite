@@ -202,13 +202,13 @@ func Repair(ctx context.Context, rec *RecoverableError, opts RepairOptions) (*Re
 	if timeout <= 0 {
 		timeout = DefaultRepairTimeout
 	}
-	// maxTokens is resolved here so the value is available to thread into
-	// provider.ChatRequest once go-providers exposes a MaxTokens field
-	// (CW-20260429-0028 wiring gap; see DefaultRepairMaxTokens docstring).
-	// Today the value is used only to populate the request scaffolding
-	// path; the cap is not yet honored by the provider call itself.
+	// CW-20260429-0028: cap the repair LLM's output. Without this, the
+	// non-streaming Anthropic adapter previously hardcoded 128 tokens, which
+	// silently truncated repair responses mid-JSON (chat session c113).
+	// go-providers now honors ChatRequest.MaxTokens; we set it here so the
+	// repair task gets the budget it actually needs (default 4096 — bounded
+	// because the output is a single small JSON object).
 	maxTokens := resolveRepairMaxTokens(opts)
-	_ = maxTokens // retained — see comment above; remove suppression once wired through.
 
 	var schemaDoc map[string]any
 	if opts.SchemaProvider != nil {
@@ -227,6 +227,7 @@ func Repair(ctx context.Context, rec *RecoverableError, opts RepairOptions) (*Re
 		Messages: []provider.ChatMessage{
 			{Role: "user", Content: userMsg},
 		},
+		MaxTokens: maxTokens,
 	}
 
 	start := time.Now()

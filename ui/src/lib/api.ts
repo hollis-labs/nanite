@@ -144,7 +144,13 @@ export const api = {
   getSession: async (id: string): Promise<SessionWithMessages> => {
     const res = await fetch(`${API_BASE}/sessions/${id}`);
     if (!res.ok) throw new Error(`Failed to get session: ${res.status}`);
-    return res.json();
+    // BE returns `{session: Session, messages: Message[]}`; flatten so the
+    // returned object satisfies SessionWithMessages (= Session + messages)
+    // and consumers can read `session.<field>` directly. Several callers
+    // were silently reading `undefined` before this fix (PR #93 Copilot
+    // feedback).
+    const raw = await res.json();
+    return { ...(raw.session ?? {}), messages: raw.messages ?? [] };
   },
 
   createSession: async (data: {

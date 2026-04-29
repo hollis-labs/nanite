@@ -116,12 +116,7 @@ export function ComposerToolbar({
     queryFn: () => api.getSession(activeSessionId!),
     enabled: !!activeSessionId,
   })
-  // The /api/sessions/{id} response is shaped {session, messages}; the
-  // existing FE type lies about that, so cast through `unknown` to read the
-  // nested session row safely without polluting the broader type.
-  const persistedOverride = (
-    sessionForOverride as unknown as { session?: { auto_switch_override?: boolean | null } } | undefined
-  )?.session?.auto_switch_override ?? null
+  const persistedOverride = sessionForOverride?.auto_switch_override ?? null
   useEffect(() => {
     if (!activeSessionId) return
     // Map persisted boolean | null → store enum.

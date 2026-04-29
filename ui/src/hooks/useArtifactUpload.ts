@@ -45,8 +45,16 @@ export function useArtifactUpload(sessionId: string | null): UseArtifactUploadRe
       if (!sessionId || !e.dataTransfer.files.length) return;
       setUploading(true);
       try {
+        // Per-file try/catch so one failure doesn't strand remaining files,
+        // and call sites that use `void handleDrop(e)` don't see unhandled
+        // rejections. Matches the documented "log but don't surface" contract
+        // (PR #93 Copilot feedback).
         for (const file of Array.from(e.dataTransfer.files)) {
-          await api.uploadArtifact(sessionId, file);
+          try {
+            await api.uploadArtifact(sessionId, file);
+          } catch (err) {
+            console.error("Failed to upload artifact:", file.name, err);
+          }
         }
       } finally {
         setUploading(false);

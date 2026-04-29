@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -389,19 +391,37 @@ func (a *API) handleSetSessionAutoSwitch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Decode with explicit pointer so we can distinguish "absent" from "null".
-	var req SetSessionAutoSwitchRequest
-	if err := a.decode(r, &req); err != nil {
+	// `encoding/json` decodes both `{}` (field absent) and `{"override": null}`
+	// into a nil pointer, so a plain `*bool` field can't distinguish absent
+	// from null. Decode into a raw map first, require the `override` key, then
+	// unmarshal the value — clients that omit it get a 400 instead of a silent
+	// override-clear (PR #93 Copilot feedback).
+	var raw map[string]json.RawMessage
+	if err := a.decode(r, &raw); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
+	rawOverride, present := raw["override"]
+	if !present {
+		a.errorResp(w, http.StatusBadRequest, "override field is required (use null to clear)")
+		return
+	}
+	var override *bool
+	if !bytes.Equal(bytes.TrimSpace(rawOverride), []byte("null")) {
+		var b bool
+		if err := json.Unmarshal(rawOverride, &b); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "override must be true, false, or null")
+			return
+		}
+		override = &b
+	}
 
-	if err := a.Services.Store.SetSessionAutoSwitchOverride(sessionID, req.Override); err != nil {
+	if err := a.Services.Store.SetSessionAutoSwitchOverride(sessionID, override); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	a.jsonResp(w, http.StatusOK, SessionAutoSwitchResponse{Override: req.Override})
+	a.jsonResp(w, http.StatusOK, SessionAutoSwitchResponse{Override: override})
 }
 
 // handleCompactSession runs the slot-aware compaction pipeline against the

@@ -16,14 +16,17 @@ interface TodoItemProps {
   todo: Todo
   onCheck: (id: string) => void
   onUncheck: (id: string, reason?: string) => void
-  /** D2 — when present, promote/demote actions render in the row. */
+  /** D2 — when present, promote/demote actions render in the row.
+   *  onPromote/onDemote return a Promise so the row's `busy` flag stays
+   *  set until the underlying mutation resolves (no double-submits on
+   *  slow networks). */
   scopeActions?: {
     /** Project ID for the active session — enables "promote to project". */
     activeProjectId: string | null
     /** Session ID for the active session — enables "demote to session". */
     activeSessionId: string | null
-    onPromote: (id: string, projectId: string) => void
-    onDemote: (id: string, sessionId: string) => void
+    onPromote: (id: string, projectId: string) => Promise<void>
+    onDemote: (id: string, sessionId: string) => Promise<void>
   }
   /** When true, render the scope chip inline (used in the "All" view of the Work panel). */
   showScope?: boolean
@@ -59,17 +62,23 @@ export function TodoItem({ todo, onCheck, onUncheck, scopeActions, showScope = f
   const canPromote = scopeActions?.activeProjectId && todo.scope === 'session'
   const canDemote = scopeActions?.activeSessionId && todo.scope === 'project'
 
-  const promote = () => {
+  const promote = async () => {
     if (!scopeActions?.activeProjectId) return
     setBusy(true)
-    scopeActions.onPromote(todo.id, scopeActions.activeProjectId)
-    setTimeout(() => setBusy(false), 200)
+    try {
+      await scopeActions.onPromote(todo.id, scopeActions.activeProjectId)
+    } finally {
+      setBusy(false)
+    }
   }
-  const demote = () => {
+  const demote = async () => {
     if (!scopeActions?.activeSessionId) return
     setBusy(true)
-    scopeActions.onDemote(todo.id, scopeActions.activeSessionId)
-    setTimeout(() => setBusy(false), 200)
+    try {
+      await scopeActions.onDemote(todo.id, scopeActions.activeSessionId)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (

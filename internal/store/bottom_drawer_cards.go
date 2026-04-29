@@ -73,9 +73,13 @@ func (s *Store) CountBottomDrawerPinnedCards(sessionID string) (int, error) {
 }
 
 // PinBottomDrawerCard inserts a pinned drawer card. Enforces BottomDrawerPinCap
-// and returns ErrBottomDrawerPinCapExceeded when the session already has the
-// max number of pins. ID is generated when empty. Position defaults to the
-// current count (append to end).
+// atomically — the count check and INSERT happen as a single SQL statement
+// (INSERT…SELECT…WHERE) so concurrent pin requests cannot both pass the gate
+// and exceed the cap. Position is computed inside the SQL as the current
+// COUNT(*), giving a stable append-to-end ordering.
+//
+// ID is generated when empty. Returns ErrBottomDrawerPinCapExceeded when the
+// session already has BottomDrawerPinCap pins (RowsAffected==0 path).
 func (s *Store) PinBottomDrawerCard(c *BottomDrawerPinnedCard) error {
 	if c == nil {
 		return errors.New("nil pinned card")
@@ -87,35 +91,43 @@ func (s *Store) PinBottomDrawerCard(c *BottomDrawerPinnedCard) error {
 		return errors.New("card_type required")
 	}
 
-	count, err := s.CountBottomDrawerPinnedCards(c.SessionID)
-	if err != nil {
-		return err
-	}
-	if count >= BottomDrawerPinCap {
-		return ErrBottomDrawerPinCapExceeded
-	}
-
 	if c.ID == "" {
 		c.ID = uuid.New().String()
 	}
 	if c.Payload == "" {
 		c.Payload = "{}"
 	}
-	// Default position: append to end (next slot after current count).
-	if c.Position == 0 {
-		c.Position = count
-	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	c.CreatedAt = now
 
-	_, err = s.DB.Exec(
+	result, err := s.DB.Exec(
 		`INSERT INTO bottom_drawer_pinned_cards
 		   (id, session_id, card_type, content_ref, title, payload, position, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.SessionID, c.CardType, c.ContentRef, c.Title, c.Payload, c.Position, now,
+		 SELECT ?, ?, ?, ?, ?, ?,
+		        (SELECT COUNT(*) FROM bottom_drawer_pinned_cards WHERE session_id = ?),
+		        ?
+		  WHERE (SELECT COUNT(*) FROM bottom_drawer_pinned_cards WHERE session_id = ?) < ?`,
+		c.ID, c.SessionID, c.CardType, c.ContentRef, c.Title, c.Payload,
+		c.SessionID, now, c.SessionID, BottomDrawerPinCap,
 	)
 	if err != nil {
 		return fmt.Errorf("pin bottom drawer card: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("pin bottom drawer card: rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrBottomDrawerPinCapExceeded
+	}
+
+	// Read back the in-SQL position so the caller's struct reflects the
+	// stored value (used by API responses + tests).
+	if err := s.DB.QueryRow(
+		`SELECT position FROM bottom_drawer_pinned_cards WHERE id = ?`,
+		c.ID,
+	).Scan(&c.Position); err != nil {
+		return fmt.Errorf("pin bottom drawer card: read position: %w", err)
 	}
 	return nil
 }

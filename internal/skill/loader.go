@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // EnsureHomeDirs creates the user-level skill directory (~/.nanite/skills/)
@@ -51,6 +52,16 @@ func HomeSkillsDir(homeDir string) (string, error) {
 func WriteUserSkillFile(homeDir, slug, body string) (string, error) {
 	if slug == "" {
 		return "", fmt.Errorf("skill: slug is required")
+	}
+	// Reject any slug that could escape ~/.nanite/skills/ via path traversal.
+	// The dev-mode fork endpoint reaches this path with caller-supplied data,
+	// so anything a filesystem could interpret as a separator or parent ref
+	// has to be rejected before joining.
+	if strings.ContainsAny(slug, `/\`) ||
+		strings.Contains(slug, "..") ||
+		filepath.Base(slug) != slug ||
+		filepath.IsAbs(slug) {
+		return "", fmt.Errorf("skill: invalid slug %q", slug)
 	}
 	dir, err := HomeSkillsDir(homeDir)
 	if err != nil {

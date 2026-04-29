@@ -166,28 +166,48 @@ export function WorkTab() {
     [sessionPlans, projectPlans, updatePlan],
   )
 
-  // Promote/demote handlers for both todos and reminders.
+  // Promote/demote handlers for both todos and reminders. We use mutateAsync
+  // (not mutate) so the row components can await the mutation lifecycle and
+  // keep their `busy` flag set until the request actually settles — prevents
+  // double-submits on slow networks. We swallow errors here because the
+  // mutation hooks already surface them via toast/onError.
   const promoteTodo = useCallback(
-    (id: string, projectId: string) => {
-      updateTodoScope.mutate({ id, scope: 'project', scopeId: projectId, projectId })
+    async (id: string, projectId: string) => {
+      try {
+        await updateTodoScope.mutateAsync({ id, scope: 'project', scopeId: projectId, projectId })
+      } catch {
+        /* surfaced via mutation onError */
+      }
     },
     [updateTodoScope],
   )
   const demoteTodo = useCallback(
-    (id: string, sessionId: string) => {
-      updateTodoScope.mutate({ id, scope: 'session', scopeId: sessionId, projectId: '' })
+    async (id: string, sessionId: string) => {
+      try {
+        await updateTodoScope.mutateAsync({ id, scope: 'session', scopeId: sessionId, projectId: '' })
+      } catch {
+        /* surfaced via mutation onError */
+      }
     },
     [updateTodoScope],
   )
   const promoteReminder = useCallback(
-    (id: string, projectId: string) => {
-      updateReminderScope.mutate({ id, scope: 'project', projectId })
+    async (id: string, projectId: string) => {
+      try {
+        await updateReminderScope.mutateAsync({ id, scope: 'project', projectId })
+      } catch {
+        /* surfaced via mutation onError */
+      }
     },
     [updateReminderScope],
   )
   const demoteReminder = useCallback(
-    (id: string) => {
-      updateReminderScope.mutate({ id, scope: 'session', projectId: '' })
+    async (id: string) => {
+      try {
+        await updateReminderScope.mutateAsync({ id, scope: 'session', projectId: '' })
+      } catch {
+        /* surfaced via mutation onError */
+      }
     },
     [updateReminderScope],
   )

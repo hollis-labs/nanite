@@ -13,8 +13,10 @@ export interface ReminderItemProps {
   /** Project ID for the active session — required to enable "promote to project". */
   activeProjectId: string | null
   onDelete: (id: string) => void
-  onPromote: (id: string, projectId: string) => void
-  onDemote: (id: string, sessionId: string) => void
+  /** Promote/demote handlers return a Promise so the row's `busy` flag stays
+   *  set until the mutation resolves (no double-submits on slow networks). */
+  onPromote: (id: string, projectId: string) => Promise<void>
+  onDemote: (id: string, sessionId: string) => Promise<void>
 }
 
 function formatTrigger(triggerJSON: string): string {
@@ -34,18 +36,23 @@ export function ReminderItem({ reminder, activeProjectId, onDelete, onPromote, o
   const canPromote = reminder.scope === 'session' && !!activeProjectId
   const canDemote = reminder.scope === 'project' && !!reminder.session_id
 
-  const promote = () => {
+  const promote = async () => {
     if (!activeProjectId) return
     setBusy(true)
-    onPromote(reminder.id, activeProjectId)
-    // Optimistically clear; the mutation's onSuccess refetches.
-    setTimeout(() => setBusy(false), 200)
+    try {
+      await onPromote(reminder.id, activeProjectId)
+    } finally {
+      setBusy(false)
+    }
   }
-  const demote = () => {
+  const demote = async () => {
     if (!reminder.session_id) return
     setBusy(true)
-    onDemote(reminder.id, reminder.session_id)
-    setTimeout(() => setBusy(false), 200)
+    try {
+      await onDemote(reminder.id, reminder.session_id)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (

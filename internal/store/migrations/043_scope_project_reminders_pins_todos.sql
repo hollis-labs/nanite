@@ -45,11 +45,25 @@ CREATE INDEX IF NOT EXISTS idx_pinned_content_project
 -- ─── todos ──────────────────────────────────────────────────────────────
 -- Recreate todos to swap the scope CHECK enum cleanly (drop `workspace`,
 -- add `turn`) and add `project_id`. SQLite cannot alter CHECK constraints
--- in-place, so we use the standard rename + recreate + copy pattern.
--- The original schema seeded 003_todos_and_plans.sql.
+-- in-place, so we use rename + recreate + copy.
+--
+-- Idempotency: the migration runner re-executes every boot (no
+-- schema_migrations table). Each statement here must be safe on rerun.
+--   * RENAME — second-boot failure ("already another table") is swallowed
+--     by the runner (see store.go), so the live `todos` keeps its name.
+--   * CREATE TABLE IF NOT EXISTS — no-op when the new schema exists.
+--   * INSERT OR IGNORE — PK collisions on rerun skip silently, so rows
+--     created at runtime in the new `todos` are NOT touched.
+--   * todos_legacy_d1 is intentionally NOT dropped, so subsequent runs
+--     find it for the rename-swallow + INSERT-OR-IGNORE no-op path.
+--     The legacy table is a small fixed cost preserved only to make
+--     this migration safely re-runnable.
+--
+-- IMPORTANT: no semicolons in any of these comments. splitSQL is naive
+-- and splits on the literal character regardless of comment context.
 ALTER TABLE todos RENAME TO todos_legacy_d1;
 
-CREATE TABLE todos (
+CREATE TABLE IF NOT EXISTS todos (
     id TEXT PRIMARY KEY,
     scope TEXT NOT NULL DEFAULT 'session' CHECK(scope IN ('turn', 'session', 'project')),
     scope_id TEXT NOT NULL DEFAULT '',
@@ -69,16 +83,16 @@ CREATE TABLE todos (
 -- Copy rows where the legacy scope is one of the values still allowed.
 -- Workspace-scoped rows are dropped per the clean-break policy. Nanite
 -- doesn't have any production users at workspace scope today.
-INSERT INTO todos (id, scope, scope_id, project_id, parent_id, title, description,
-                   status, priority, labels, metadata, created_by, created_at, updated_at)
+-- OR IGNORE makes this safe on rerun: rows already in `todos` (including
+-- any `turn`-scoped rows added at runtime) are skipped on PK collision.
+INSERT OR IGNORE INTO todos (id, scope, scope_id, project_id, parent_id, title, description,
+                             status, priority, labels, metadata, created_by, created_at, updated_at)
 SELECT id, scope, scope_id,
        CASE WHEN scope = 'project' THEN scope_id ELSE NULL END,
        parent_id, title, description, status, priority, labels, metadata,
        created_by, created_at, updated_at
 FROM todos_legacy_d1
 WHERE scope IN ('session', 'project');
-
-DROP TABLE todos_legacy_d1;
 
 CREATE INDEX IF NOT EXISTS idx_todos_scope ON todos(scope, scope_id);
 CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(parent_id);

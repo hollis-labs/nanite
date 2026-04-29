@@ -25,8 +25,8 @@ interface TodoListProps {
   scopeActions?: {
     activeProjectId: string | null
     activeSessionId: string | null
-    onPromote: (id: string, projectId: string) => void
-    onDemote: (id: string, sessionId: string) => void
+    onPromote: (id: string, projectId: string) => Promise<void>
+    onDemote: (id: string, sessionId: string) => Promise<void>
   }
   /** When true, renders the scope chip on each todo row (used in the All filter). */
   showScope?: boolean

@@ -138,16 +138,26 @@ func TestCallShowCard_DescribeGate_AcceptsWhenDescribeCalledThisTurn(t *testing.
 	}
 }
 
-// TestCallShowCard_DescribeGate_AcceptsWhenLearningMentionsType pins the
-// second escape hatch: a Vanta-recalled learning whose Summary mentions
-// the requested envelope type lets the call through even without
-// describe-this-turn. Uses a stub LearningStore so the gate exercises the
-// real RecallByToolName code path.
-func TestCallShowCard_DescribeGate_AcceptsWhenLearningMentionsType(t *testing.T) {
+// TestCallShowCard_DescribeGate_RejectsEvenWhenLearningMentionsType pins
+// the CW-20260429-0027 tightening: the lenient learning-bypass that
+// CW-20260429-0025 added has been removed. A prior learning whose
+// Summary mentions the requested envelope type must NOT be enough to
+// skip the describe gate — c113 evidence (2026-04-29 ~07:21Z) showed
+// the agent then invented invalid fields anyway because the learning
+// was vague. The gate now requires an actual nanite_tool_describe call
+// this turn regardless of any matching learning.
+//
+// This test is the direct successor to the deleted
+// TestCallShowCard_DescribeGate_AcceptsWhenLearningMentionsType from
+// CW-20260429-0025; what was previously a "bypass succeeds" assertion
+// is now a "bypass MUST fail" assertion.
+func TestCallShowCard_DescribeGate_RejectsEvenWhenLearningMentionsType(t *testing.T) {
 	st := newSelfTools(t)
 	enableDescribeGate(t) // overrides newSelfTools' default-OFF Setenv
 
 	// Inject a learning that mentions "report-card" in its summary.
+	// Under CW-20260429-0025 this would have bypassed the gate;
+	// under CW-20260429-0027 it must NOT.
 	st.LearningRecaller = learnings.NewRecaller(&fixedLearningStore{
 		mems: []fixedMemory{
 			{
@@ -160,8 +170,8 @@ func TestCallShowCard_DescribeGate_AcceptsWhenLearningMentionsType(t *testing.T)
 		},
 	})
 
-	// No describe in the turn names — the learning has to carry the
-	// gate by itself.
+	// No describe in the turn names — the learning must NOT carry
+	// the gate.
 	ctx := WithTurnToolNames(context.Background(), []string{"clockwork_task_list"})
 
 	args := map[string]any{
@@ -173,14 +183,80 @@ func TestCallShowCard_DescribeGate_AcceptsWhenLearningMentionsType(t *testing.T)
 	if err != nil {
 		t.Fatalf("callShowCard returned transport error: %v", err)
 	}
-	if res.IsError {
-		t.Fatalf("expected success with learning mentioning report-card, got: %s", readToolText(t, res))
+	if !res.IsError {
+		t.Fatalf("expected describe_required even with matching learning, got success: %s", readToolText(t, res))
+	}
+	if !strings.Contains(readToolText(t, res), "describe_required") {
+		t.Errorf("error body should be the describe_required JSON: %s", readToolText(t, res))
 	}
 }
 
-// TestCallShowCard_DescribeGate_RejectsWhenLearningMissesType is the
-// inverse: a learning is present but the Summary doesn't mention the
-// requested type → gate still fires.
+// TestCallShowCard_DescribeGate_C113Regression is the c113 scenario
+// (2026-04-29 ~07:21Z, session c34d0400-0733-41cf-9cf5-c7f9fcf95fa4):
+// a vague prior learning ("report-card type requires title and
+// metrics") existed from c109/c110, and under CW-20260429-0025 it
+// bypassed the gate; the agent then invented invalid fields (`trend`,
+// `context`, `sections`, `recommendations`, `period`, `generated_by`,
+// `executive_summary`) because the learning didn't carry the schema.
+//
+// CW-20260429-0027 removes the learning-bypass entirely. With the
+// agent not calling describe this turn, the gate fires regardless of
+// the learning's content, forcing a registry lookup that surfaces the
+// per-type schema with golden examples.
+func TestCallShowCard_DescribeGate_C113Regression(t *testing.T) {
+	st := newSelfTools(t)
+	enableDescribeGate(t) // overrides newSelfTools' default-OFF Setenv
+
+	// The exact vague-summary learning shape that bypassed the gate
+	// in c113.
+	st.LearningRecaller = learnings.NewRecaller(&fixedLearningStore{
+		mems: []fixedMemory{
+			{
+				Summary:    "report-card type requires title and metrics",
+				Tags:       []string{"learning", "tool:nanite_show_card"},
+				Confidence: 0.85,
+				MemoryKey:  "learning_tool_use_nanite_show_card__report_card_type_requires_ti",
+				Namespace:  "user/default/tool_use/nanite_show_card",
+			},
+		},
+	})
+
+	// No describe in the turn names — same as the c113 trace.
+	ctx := WithTurnToolNames(context.Background(), []string{"clockwork_task_list", "context_search"})
+
+	args := map[string]any{
+		"type":    "report-card",
+		"data":    cloneMap(validShowCardPayloads["report-card"]),
+		"sources": validSources,
+	}
+	res, err := st.callShowCard(ctx, args)
+	if err != nil {
+		t.Fatalf("callShowCard returned transport error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("c113 regression: gate must fire even with matching learning, got success: %s", readToolText(t, res))
+	}
+	body := readToolText(t, res)
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("error body should be JSON, got %q (parse err %v)", body, err)
+	}
+	if got := parsed["error"]; got != "describe_required" {
+		t.Errorf("expected error=describe_required, got %v (body=%s)", got, body)
+	}
+	if got := parsed["type"]; got != "report-card" {
+		t.Errorf("expected type=report-card, got %v", got)
+	}
+}
+
+// TestCallShowCard_DescribeGate_RejectsWhenLearningMissesType: the
+// inverse case from CW-20260429-0025 — a learning is present but the
+// Summary doesn't mention the requested type. Under both 0025 and
+// 0027 the gate still fires, so this test stays green; under 0027
+// it's slightly redundant with the c113 regression above (since the
+// learning content no longer matters), but kept as a guardrail
+// against accidentally re-introducing the bypass during a future
+// refactor.
 func TestCallShowCard_DescribeGate_RejectsWhenLearningMissesType(t *testing.T) {
 	st := newSelfTools(t)
 	enableDescribeGate(t) // overrides newSelfTools' default-OFF Setenv

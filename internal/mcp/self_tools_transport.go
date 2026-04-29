@@ -1884,10 +1884,10 @@ func requireDescribeForShowCardEnabled() bool {
 
 // describeRequiredErrorBody is the JSON shape emitted by the
 // CW-20260429-0025 gate when nanite_show_card is invoked without a
-// preceding nanite_tool_describe call AND no learning citing the
-// requested envelope type. Returned via errorResult so the agent's
-// tool result text is the JSON — the harness's recover.Classify
-// returns KindNone on this body so auto-repair won't try to "fix" it.
+// preceding nanite_tool_describe call this turn. Returned via
+// errorResult so the agent's tool result text is the JSON — the
+// harness's recover.Classify returns KindNone on this body so
+// auto-repair won't try to "fix" it.
 //
 // The struct is deliberately flat: error+type+hint+describe_call_args.
 // The hint embeds the requested type so the agent can see which
@@ -1899,42 +1899,36 @@ type describeRequiredErrorBody struct {
 	DescribeCallArgs map[string]any `json:"describe_call_args"`
 }
 
-// enforceDescribeBeforeShowCard runs the CW-20260429-0025 gate. It
-// returns nil when the call is allowed to proceed and a non-nil error
-// (whose Error() string is the JSON body) when the agent must call
-// nanite_tool_describe first.
+// enforceDescribeBeforeShowCard runs the CW-20260429-0025 gate, with
+// the CW-20260429-0027 tightening: the lenient learning-bypass was
+// removed because c113 evidence (2026-04-29 ~07:21Z) showed a stale
+// learning whose Summary merely mentioned the envelope type was enough
+// to skip describe — and the agent then invented invalid fields. The
+// gate now ONLY checks the per-turn describe call.
 //
-// Resolution order — accept on first hit:
-//  1. nanite_tool_describe was called THIS turn (read from
-//     mcp.TurnToolNamesFromContext, stamped by service.executeToolBatch
-//     under CW-20260429-0024).
-//  2. The LearningRecaller has a hint whose Summary mentions the
-//     requested envelope type. Best-effort substring match — the
-//     recaller doesn't expose per-type filtering. Empty userID is OK
-//     here; Recaller folds it to DefaultUserID.
+// It returns nil when the call is allowed to proceed and a non-nil
+// error (whose Error() string is the JSON body) when the agent must
+// call nanite_tool_describe first.
+//
+// Resolution: accept iff nanite_tool_describe was called THIS turn
+// (read from mcp.TurnToolNamesFromContext, stamped by
+// service.executeToolBatch under CW-20260429-0024).
 //
 // When ctx carries no turn-tool-names set (subagent / test paths
 // without ctx stamping) we treat that as "discovery couldn't be
-// observed" — the gate falls through to the learning check, and if
-// that also misses, the gate fires. That intentionally keeps the
-// production-path enforcement strict; tests that need the legacy
-// behavior should disable the env toggle.
+// observed" — the gate fires. Tests that need the legacy behavior
+// should disable the env toggle.
+//
+// Note: learnings remain useful as agent context (surfaced via
+// nanite_tool_describe's prior_learnings field per CW-20260429-0009);
+// they no longer gate behavior. nanite_tool_describe itself is cheap
+// (registry lookup, no LLM call), so requiring it per-turn-with-
+// show_card is a tiny cost.
 func (st *SelfToolsTransport) enforceDescribeBeforeShowCard(ctx context.Context, envType string) error {
-	// (1) Describe-this-turn check.
+	// Describe-this-turn check — the only check.
 	for _, name := range TurnToolNamesFromContext(ctx) {
 		if name == "nanite_tool_describe" {
 			return nil
-		}
-	}
-
-	// (2) Learning-mentions-type check. Failing-open per Recaller
-	// contract: nil recaller / store / Vanta error returns nil hints.
-	if st != nil && st.LearningRecaller != nil && envType != "" {
-		hints := st.LearningRecaller.RecallByToolName(ctx, "", "nanite_show_card")
-		for _, h := range hints {
-			if strings.Contains(h.Summary, envType) {
-				return nil
-			}
 		}
 	}
 

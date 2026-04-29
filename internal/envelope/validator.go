@@ -73,6 +73,17 @@ var (
 	schemaRawCache = map[string]map[string]any{}
 )
 
+// schemaResourceURI returns the stable in-memory URI used to register a
+// schema with the jsonschema compiler. Schemas are //go:embed-ed, so we
+// don't want the compiler synthesising a file:// URL from the process cwd
+// (which would leak filesystem layout into validation error messages and
+// vary per host — see the c107 chat-session report). The "mem://" scheme is
+// arbitrary but absolute, so the compiler treats it as already-resolved and
+// the resulting Validate error reports a stable, host-independent location.
+func schemaResourceURI(envelopeType string) string {
+	return "mem://nanite/envelope/" + envelopeType + ".schema.json"
+}
+
 // loadSchema returns a compiled schema for the given envelope type, lazily
 // compiling on first use. Errors carry the type name so the caller's error
 // message stays informative. Populates both schemaCache (compiled) and
@@ -96,11 +107,12 @@ func loadSchema(envelopeType string) (*jsonschema.Schema, error) {
 	if err := json.Unmarshal(raw, &docMap); err != nil {
 		return nil, fmt.Errorf("parse schema for %q: %w", envelopeType, err)
 	}
+	uri := schemaResourceURI(envelopeType)
 	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource(envelopeType+".schema.json", any(docMap)); err != nil {
+	if err := compiler.AddResource(uri, any(docMap)); err != nil {
 		return nil, fmt.Errorf("register schema for %q: %w", envelopeType, err)
 	}
-	compiled, err := compiler.Compile(envelopeType + ".schema.json")
+	compiled, err := compiler.Compile(uri)
 	if err != nil {
 		return nil, fmt.Errorf("compile schema for %q: %w", envelopeType, err)
 	}

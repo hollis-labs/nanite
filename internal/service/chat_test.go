@@ -261,6 +261,7 @@ func (stubBookmarkStore) UpdateBookmarkNote(string, string) error               
 type stubArtifactStore struct{}
 func (stubArtifactStore) ListArtifacts(string) ([]store.Artifact, error)                    { return nil, nil }
 func (stubArtifactStore) ListArtifactsByOrigin(string, string) ([]store.Artifact, error)    { return nil, nil }
+func (stubArtifactStore) ListArtifactsByProject(string, string) ([]store.Artifact, error)   { return nil, nil }
 func (stubArtifactStore) CreateArtifact(*store.Artifact) error                              { return nil }
 func (stubArtifactStore) GetArtifact(string) (*store.Artifact, error)                       { return nil, nil }
 

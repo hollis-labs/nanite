@@ -460,6 +460,21 @@ export const api = {
     return res.json();
   },
 
+  // F4 (CW-20260429-0004): list artifacts inherited from sibling sessions in
+  // the given project. Pass `excludeSessionId` to filter out the active
+  // session (rendered in its own "This Session" list).
+  listArtifactsByProject: async (
+    projectId: string,
+    excludeSessionId?: string,
+  ): Promise<Artifact[]> => {
+    const qs = excludeSessionId
+      ? `?exclude_session_id=${encodeURIComponent(excludeSessionId)}`
+      : "";
+    const res = await fetch(`${API_BASE}/projects/${projectId}/artifacts${qs}`);
+    if (!res.ok) throw new Error(`Failed to list project artifacts: ${res.status}`);
+    return res.json();
+  },
+
   uploadArtifact: async (sessionId: string, file: File): Promise<Artifact> => {
     const form = new FormData();
     form.append("session_id", sessionId);

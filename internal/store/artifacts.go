@@ -91,6 +91,53 @@ func (s *Store) ListArtifactsByOrigin(sessionID, origin string) ([]Artifact, err
 	return out, rows.Err()
 }
 
+// ListArtifactsByProject returns artifacts whose owning session belongs to the
+// given project. F4 (CW-20260429-0004): right-rail Artifacts panel uses this
+// to render a "This Project" inherited-artifacts section so users opening a
+// new session in a project still see prior artifacts.
+//
+// When excludeSessionID is non-empty, artifacts owned by that session are
+// excluded from the result (the FE renders the active session in its own
+// "This Session" section already, so excluding here avoids double-counting).
+func (s *Store) ListArtifactsByProject(projectID, excludeSessionID string) ([]Artifact, error) {
+	if projectID == "" {
+		return []Artifact{}, nil
+	}
+
+	query := `SELECT a.id, a.session_id, COALESCE(a.message_id,''), a.name, a.mime_type,
+		        COALESCE(a.size_bytes,0), a.storage_path, COALESCE(a.metadata,'{}'),
+		        COALESCE(a.origin,'uploaded'), COALESCE(a.source_tool_call_id,''),
+		        COALESCE(a.source_agent_id,''), COALESCE(a.source_plugin_id,''), a.created_at
+		 FROM artifacts a
+		 INNER JOIN sessions s ON s.id = a.session_id
+		 WHERE s.project_id = ?`
+	args := []any{projectID}
+	if excludeSessionID != "" {
+		query += ` AND a.session_id != ?`
+		args = append(args, excludeSessionID)
+	}
+	query += ` ORDER BY a.created_at DESC`
+
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list artifacts by project: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Artifact, 0)
+	for rows.Next() {
+		var a Artifact
+		if err := rows.Scan(&a.ID, &a.SessionID, &a.MessageID, &a.Name, &a.MimeType,
+			&a.SizeBytes, &a.StoragePath, &a.Metadata,
+			&a.Origin, &a.SourceToolCallID, &a.SourceAgentID, &a.SourcePluginID,
+			&a.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan artifact: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // CreateArtifact inserts a new artifact record.
 func (s *Store) CreateArtifact(a *Artifact) error {
 	if a.ID == "" {

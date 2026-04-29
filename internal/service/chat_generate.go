@@ -1422,6 +1422,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
+	// CW-20260429-0026: harness-side failure-footer fallback. If the per-turn
+	// tool_calls accumulator contains any Status:"error" entries AND the
+	// model didn't already acknowledge failure in the response text, append
+	// a small footer note so the user is oriented. No-op when there are no
+	// errors, when the model already acknowledged, or when disabled via
+	// NANITE_HARNESS_FAILURE_FOOTER. Mutate cleanContent so the footer is
+	// part of the persisted text (and the structured-message hash).
+	cleanContent = maybeAppendFailureFooter(cleanContent, ls.toolCallRefs)
+
 	// Structured message.
 	structured := chat.WrapResponse(cleanContent, tier, ls.toolCallRefs, envRefs, ls.wasTruncated, hasError)
 	chat.LogStructuredWarnings(structured)

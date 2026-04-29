@@ -98,6 +98,12 @@ var ChatToolSurface = []string{
 	"nanite_execute_task",
 	// Conversation search (P8B, CW-20260420-0026).
 	"nanite_chat_search",
+	// Discovery primitive (A1, CW-20260429-0005). Returns a tool's
+	// schema + golden examples. Required by the describe-required gate
+	// at callShowCard (CW-20260429-0025/0027) — without it on the Chat
+	// surface the gate produces a structured error directing the agent
+	// to a tool it can't call (c115 evidence).
+	"nanite_tool_describe",
 	// Pre-flight schema validation (B1, CW-20260429-0006). Read-only,
 	// idempotent — the agent uses it to check args before firing a
 	// high-blast-radius tool. Not a write or a panel signal, so safe to

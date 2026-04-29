@@ -49,11 +49,15 @@ import (
 // the latest Haiku 4.5 snapshot.
 const DefaultRepairModel = "claude-haiku-4-5"
 
-// DefaultRepairTimeout bounds a single repair LLM call. Haiku is fast;
-// 1500 ms is a comfortable p95 ceiling that still allows for first-byte
-// latency. The ticket called for 200-300 ms; that's tight for a full
-// JSON output. We default a little higher and let env override.
-const DefaultRepairTimeout = 1500 * time.Millisecond
+// DefaultRepairTimeout bounds a single repair LLM call. Haiku is fast,
+// but a real Anthropic API call (TCP+TLS handshake, server-side queueing,
+// and inference on a repair-sized prompt+schema payload) routinely crosses
+// 1.5s end-to-end — the prior 1500ms default fired before Anthropic could
+// respond, so the repair pipeline was effectively dead code in production.
+// 5s is a conservative ceiling that lets a typical Haiku repair complete
+// while still bounding a stuck call. Operators tune via
+// NANITE_REPAIR_TIMEOUT_MS (env override) or config (Timeout field).
+const DefaultRepairTimeout = 5000 * time.Millisecond
 
 // MaxArgsBytes caps the size of sent_args we serialize into the repair
 // prompt. Pathologically large args are truncated; the repair pass is

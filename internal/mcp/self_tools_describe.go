@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -140,6 +141,12 @@ var describeRelations = map[string]struct {
 	"nanite_execute_task": {
 		relatedTools: []string{"nanite_spawn_subagent", "nanite_background_job"},
 	},
+	// D1 (CW-20260429-0009) — nanite_remember bundles with the layer 1/2
+	// self-tools (describe + validate) because they form the
+	// discover → validate → remember cluster the harness prompt teaches.
+	"nanite_remember": {
+		relatedTools: []string{"nanite_validate", "nanite_tool_describe"},
+	},
 }
 
 // callToolDescribe handles nanite_tool_describe. It looks up the tool by
@@ -148,6 +155,13 @@ var describeRelations = map[string]struct {
 // returns a structured "tool_not_found" payload with the three closest
 // matches by Levenshtein distance — the agent can read those, pick one,
 // and re-describe in a second round-trip without guessing.
+//
+// D1 (CW-20260429-0009) — when a LearningRecaller is wired, the result
+// also includes a `prior_learnings` field with up to
+// learnings.MaxRecallHints captured lessons for the named tool. This is
+// the "lesson recall during similar tool selection" surface from the
+// lens (Layer 4): the agent that calls describe to learn how to invoke
+// a tool also reads past lessons inline, with no extra round-trip.
 func (st *SelfToolsTransport) callToolDescribe(args map[string]any) (*ToolResult, error) {
 	name := strArg(args, "name", "")
 	if name == "" {
@@ -208,6 +222,22 @@ func (st *SelfToolsTransport) callToolDescribe(args map[string]any) (*ToolResult
 	}
 	if len(rels.relatedSkills) > 0 {
 		out["related_skills"] = rels.relatedSkills
+	}
+
+	// D1 (CW-20260429-0009): surface prior tool-use learnings inline.
+	// Failing-open: nil/missing recaller, empty results, or any
+	// error → the field is omitted. The agent's prompt already nudges
+	// it to call describe before unfamiliar tools, so this layer is
+	// load-bearing for the self-healing loop.
+	if hints := st.RecallToolLearnings(context.Background(), "", match.Name); len(hints) > 0 {
+		surfaced := make([]map[string]any, 0, len(hints))
+		for _, h := range hints {
+			surfaced = append(surfaced, map[string]any{
+				"hint":       h.Summary,
+				"confidence": h.Confidence,
+			})
+		}
+		out["prior_learnings"] = surfaced
 	}
 
 	body, err := json.Marshal(out)

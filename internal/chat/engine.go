@@ -138,11 +138,16 @@ type Usage struct {
 
 // PresenceEvent is broadcast to all connected presence clients.
 type PresenceEvent struct {
-	Type      string `json:"type"`                 // stream_start, stream_end, tool_pending, tool_resolved
+	Type      string `json:"type"` // stream_start, stream_end, tool_pending, tool_resolved, session_archived, work_changed, session_mode_changed (F1)
 	SessionID string `json:"session_id"`
 	AgentID   string `json:"agent_id,omitempty"`
 	ToolName  string `json:"tool_name,omitempty"`
 	Timestamp string `json:"timestamp"`
+	// ModeID and ModeSlug are populated for `session_mode_changed` events
+	// (F1, CW-20260429-0001). Both are empty when the session pointer is
+	// cleared. FE consumers invalidate their session-mode query on receipt.
+	ModeID   string `json:"mode_id,omitempty"`
+	ModeSlug string `json:"mode_slug,omitempty"`
 }
 
 // IsCLIProvider returns true if the provider name is any CLI adapter variant

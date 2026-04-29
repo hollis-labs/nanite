@@ -54,7 +54,7 @@ func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
 		{Name: "dev_read", Description: "Read a file"},
 	}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, mode, nil, tools, "Native tool guide.", 200000)
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, mode, nil, tools, "Native tool guide.", 200000, nil)
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestAssembleSlots_NoToolsLeavesToolsSlotEmpty(t *testing.T) {
 	}
 	agent := &store.AgentProfile{ID: "no-tools-agent", Slug: "x", Status: "active"}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000)
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000, nil)
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}

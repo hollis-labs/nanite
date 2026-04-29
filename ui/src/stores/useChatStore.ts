@@ -1,5 +1,29 @@
 import { create } from 'zustand'
-import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo, CLIActiveInfo, PendingApproval, PluginEnvelopeItem } from '@/lib/types'
+import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo, CLIActiveInfo, PendingApproval, PluginEnvelopeItem, ModeSuggestion, ModeAutoSwitchOverride, ModeAutoSwitchEffective } from '@/lib/types'
+
+/**
+ * B3 (CW-20260428-0011) — pure resolver for the effective auto-switch
+ * behavior. Exported so it can be unit-tested independently of the store.
+ *
+ * Semantics:
+ *   - session override "off"      → "off"  (suppress all auto-switches)
+ *   - global pref ""  (unset)     → "firstUse"  (show 5-option card)
+ *     even when override is "on"  →  the user must make the choice once
+ *   - global pref "never"         → "off"
+ *   - global pref "always"        → "auto"
+ *   - global pref "ask"           → "ask"
+ */
+export function getAutoSwitchEffective(
+  override: ModeAutoSwitchOverride | undefined,
+  pref: '' | 'always' | 'ask' | 'never' | undefined,
+): ModeAutoSwitchEffective {
+  if (override === 'off') return 'off'
+  const p = pref ?? ''
+  if (p === '') return 'firstUse'
+  if (p === 'never') return 'off'
+  if (p === 'always') return 'auto'
+  return 'ask'
+}
 
 interface ChatState {
   // Streaming
@@ -114,6 +138,28 @@ interface ChatState {
   setPendingJump: (jump: { sessionId: string; messageId: string } | null) => void
   scrollToMessageId: string | null
   setScrollToMessageId: (id: string | null) => void
+
+  // B2 (CW-20260428-0010) — non-binding mode classifier suggestion from the
+  // backend. Populated by the SSE `mode_suggestion` event in useChat.
+  // B3 will hook into this to render the confirm-card / auto-apply UX;
+  // B2 only stages the value.
+  pendingModeSuggestion: ModeSuggestion | null
+  setPendingModeSuggestion: (s: ModeSuggestion | null) => void
+  clearModeSuggestion: () => void
+
+  // B3 (CW-20260428-0011) — per-session override for auto-mode-switching.
+  // Absence = inherit global pref. "off" suppresses all auto-switches for
+  // the session; "on" lets the global pref take effect (does NOT bypass
+  // first-use prompt). Resets on full page reload by design.
+  autoSwitchSessionOverrides: Record<string, ModeAutoSwitchOverride>
+  setAutoSwitchOverride: (sessionId: string, override: ModeAutoSwitchOverride | 'inherit') => void
+
+  // B3 (CW-20260428-0011) — lightweight chat-scoped toast (e.g. "Switched
+  // to plan mode"). Mirrors useWorkStore.toastMessage shape but separately
+  // owned so chat surfaces don't depend on the work store.
+  chatToast: { message: string; tone: 'success' | 'info' } | null
+  showChatToast: (message: string, tone?: 'success' | 'info') => void
+  dismissChatToast: () => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -395,4 +441,27 @@ export const useChatStore = create<ChatState>((set) => ({
   setPendingJump: (jump) => set({ pendingJump: jump }),
   scrollToMessageId: null,
   setScrollToMessageId: (id) => set({ scrollToMessageId: id }),
+
+  // B2 — pending mode suggestion (consumed by B3 confirm-card / auto-apply).
+  pendingModeSuggestion: null,
+  setPendingModeSuggestion: (s) => set({ pendingModeSuggestion: s }),
+  clearModeSuggestion: () => set({ pendingModeSuggestion: null }),
+
+  // B3 — per-session override map.
+  autoSwitchSessionOverrides: {},
+  setAutoSwitchOverride: (sessionId, override) =>
+    set((state) => {
+      const next = { ...state.autoSwitchSessionOverrides }
+      if (override === 'inherit') {
+        delete next[sessionId]
+      } else {
+        next[sessionId] = override
+      }
+      return { autoSwitchSessionOverrides: next }
+    }),
+
+  // B3 — chat toast slice.
+  chatToast: null,
+  showChatToast: (message, tone = 'success') => set({ chatToast: { message, tone } }),
+  dismissChatToast: () => set({ chatToast: null }),
 }))

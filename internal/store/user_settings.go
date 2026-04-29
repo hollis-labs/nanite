@@ -19,7 +19,16 @@ type UserSettings struct {
 	ToolDrawerRetention   int               `json:"tool_drawer_retention"`
 	DeveloperMode         bool              `json:"developer_mode"`
 	RecoverMode           bool              `json:"recover_mode"`
-	ExtSettings           map[string]any    `json:"ext_settings,omitempty"`
+	// ModeAutoSwitchPref is the user-level preference for auto-applying
+	// classifier mode suggestions (B3, CW-20260428-0011). Allowed:
+	//   ""       — unset, triggers first-use prompt
+	//   "always" — auto-apply suggestion + show toast
+	//   "ask"    — render compact 2-option confirm card
+	//   "never"  — discard suggestion silently
+	// The per-session chat-input toggle can override "always"/"ask" to
+	// "off" but cannot bypass the first-use prompt.
+	ModeAutoSwitchPref string `json:"mode_auto_switch_pref"`
+	ExtSettings        map[string]any `json:"ext_settings,omitempty"`
 	ToolLoadPreferences   map[string]string `json:"tool_load_preferences,omitempty"`
 	TaskBackend           string            `json:"task_backend"`
 	// AllowUnsignedPlugins permits installing plugin archives that lack a
@@ -100,6 +109,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var contextOverflowRecovery bool
 	var subagentApprovalRequired bool
 	var subagentApprovalTimeoutSeconds int
+	var modeAutoSwitchPref string
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
@@ -113,7 +123,8 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		        tool_cache_enabled, tool_classifier_mode,
 		        tool_classifier_provider, tool_classifier_model,
 		        tool_classifier_timeout_ms, context_overflow_recovery,
-		        subagent_approval_required, subagent_approval_timeout_seconds
+		        subagent_approval_required, subagent_approval_timeout_seconds,
+		        mode_auto_switch_pref
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
@@ -126,7 +137,8 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		&toolCacheEnabled, &toolClassifierMode,
 		&toolClassifierProvider, &toolClassifierModel,
 		&toolClassifierTimeoutMS, &contextOverflowRecovery,
-		&subagentApprovalRequired, &subagentApprovalTimeoutSeconds)
+		&subagentApprovalRequired, &subagentApprovalTimeoutSeconds,
+		&modeAutoSwitchPref)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
@@ -164,6 +176,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		ContextOverflowRecovery:        contextOverflowRecovery,
 		SubagentApprovalRequired:       subagentApprovalRequired,
 		SubagentApprovalTimeoutSeconds: subagentApprovalTimeoutSeconds,
+		ModeAutoSwitchPref:             modeAutoSwitchPref,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
 		if err := json.Unmarshal([]byte(chainJSON), &us.ProviderFallbackChain); err != nil {
@@ -275,6 +288,15 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	if toolClassifierTimeoutMS <= 0 {
 		toolClassifierTimeoutMS = 500
 	}
+	// B3 (CW-20260428-0011): validate mode_auto_switch_pref. Empty is the
+	// unset sentinel and is valid; otherwise must be one of the enum values.
+	modeAutoSwitchPref := us.ModeAutoSwitchPref
+	switch modeAutoSwitchPref {
+	case "", "always", "ask", "never":
+		// valid
+	default:
+		return fmt.Errorf("update user settings: unknown mode_auto_switch_pref %q (must be \"\", \"always\", \"ask\", or \"never\")", modeAutoSwitchPref)
+	}
 	_, err = s.DB.Exec(
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
@@ -312,6 +334,7 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			context_overflow_recovery = ?,
 			subagent_approval_required = ?,
 			subagent_approval_timeout_seconds = ?,
+			mode_auto_switch_pref = ?,
 			updated_at = ?
 		 WHERE id = 1`,
 		string(chainJSON), us.DefaultProvider, us.DefaultModel,
@@ -327,6 +350,7 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		us.ToolClassifierProvider, us.ToolClassifierModel,
 		toolClassifierTimeoutMS, us.ContextOverflowRecovery,
 		us.SubagentApprovalRequired, us.SubagentApprovalTimeoutSeconds,
+		modeAutoSwitchPref,
 		now,
 	)
 	if err != nil {

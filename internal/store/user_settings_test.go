@@ -327,6 +327,46 @@ func TestUserSettings_G4_UpdateRoundTrips(t *testing.T) {
 	}
 }
 
+// B3 (CW-20260428-0011): mode_auto_switch_pref defaults to "" (unset).
+func TestUserSettings_ModeAutoSwitchPref_Default(t *testing.T) {
+	s := newSeededStore(t)
+	us, err := s.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	if us.ModeAutoSwitchPref != "" {
+		t.Errorf("expected ModeAutoSwitchPref default \"\" (unset), got %q", us.ModeAutoSwitchPref)
+	}
+}
+
+func TestUserSettings_ModeAutoSwitchPref_RoundTrip(t *testing.T) {
+	s := newSeededStore(t)
+	for _, pref := range []string{"always", "ask", "never", ""} {
+		us, _ := s.GetUserSettings()
+		us.ModeAutoSwitchPref = pref
+		if err := s.UpdateUserSettings(us); err != nil {
+			t.Fatalf("UpdateUserSettings(%q): %v", pref, err)
+		}
+		got, err := s.GetUserSettings()
+		if err != nil {
+			t.Fatalf("GetUserSettings after %q: %v", pref, err)
+		}
+		if got.ModeAutoSwitchPref != pref {
+			t.Errorf("ModeAutoSwitchPref round-trip: got %q, want %q", got.ModeAutoSwitchPref, pref)
+		}
+	}
+}
+
+func TestUpdateUserSettings_InvalidModeAutoSwitchPref(t *testing.T) {
+	s := newSeededStore(t)
+	us := &UserSettings{ModeAutoSwitchPref: "sometimes"}
+	if err := s.UpdateUserSettings(us); err == nil {
+		t.Fatal("expected error for unknown mode_auto_switch_pref, got nil")
+	} else if !strings.Contains(err.Error(), "sometimes") {
+		t.Errorf("error should mention the invalid value; got: %v", err)
+	}
+}
+
 func TestUpdateUserSettings_BudgetPctClamp(t *testing.T) {
 	s := newSeededStore(t)
 

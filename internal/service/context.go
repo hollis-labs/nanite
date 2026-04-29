@@ -34,7 +34,12 @@ type ContextService interface {
 	// and telemetry. It is NOT the value callers should pass as
 	// ChatRequest.SystemPrompt; callers should pass extraSystemPrefix there
 	// directly so that static content flows exclusively through SlotBlocks.
-	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int) (*SlotAssemblyResult, error)
+	//
+	// sessionMode (B1, CW-20260428-0009) is the resolved session-level
+	// *store.Mode — pass nil when no session-mode pointer is set. Distinct
+	// from the legacy `mode *store.AgentMode` argument which still feeds the
+	// Agent slot.
+	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode) (*SlotAssemblyResult, error)
 
 	PruneAfterTurn(ctx context.Context, sessionID string) error
 }
@@ -168,8 +173,8 @@ func (s *contextServiceImpl) AssembleContext(ctx context.Context, session *store
 // stash + classifier deps are wired), the Tools slot carries a compact
 // pointer-summary by default and hydrates full defs on detected intent.
 // Otherwise it carries the full JSON-serialized defs every turn (S3a).
-func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int) (*SlotAssemblyResult, error) {
-	sources, err := s.client.AssembleSlotSources(ctx, session, agent, mode, workspace)
+func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode) (*SlotAssemblyResult, error) {
+	sources, err := s.client.AssembleSlotSources(ctx, session, agent, mode, workspace, sessionMode)
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +184,8 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	cw.SetContent(ctxpkg.SlotSystem, sources.System)
 	cw.SetContent(ctxpkg.SlotMemory, sources.Memory)
 	cw.SetContent(ctxpkg.SlotAgent, sources.Agent)
+	// B1 (CW-20260428-0009): SlotMode rides between SlotAgent and SlotRules.
+	cw.SetContent(ctxpkg.SlotMode, sources.Mode)
 	cw.SetContent(ctxpkg.SlotRules, sources.Rules)
 
 	// Tools slot: either S3b's classifier-driven pointer/hydrated content or
@@ -552,11 +559,13 @@ func hasToolBlocks(msgs []provider.ChatMessage) bool {
 // including the Tools slot — so budget enforcement doesn't undercount. The
 // prefix appears first so dynamic per-turn additions lead.
 func composeLegacySystemPrompt(sources *chat.SlotSources, toolsContent, prefix string) string {
-	parts := make([]string, 0, 8)
+	parts := make([]string, 0, 9)
 	if prefix != "" {
 		parts = append(parts, prefix)
 	}
-	for _, p := range []string{sources.System, sources.Agent, sources.Rules, toolsContent, sources.Session, sources.Memory, sources.Context, sources.UserContext} {
+	// B1 (CW-20260428-0009): SlotMode rides between Agent and Rules in slot
+	// order; mirror that here so legacy budget telemetry sees the same shape.
+	for _, p := range []string{sources.System, sources.Agent, sources.Mode, sources.Rules, toolsContent, sources.Session, sources.Memory, sources.Context, sources.UserContext} {
 		if p != "" {
 			parts = append(parts, p)
 		}

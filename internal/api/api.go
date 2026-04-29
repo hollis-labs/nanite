@@ -67,8 +67,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Retry (circuit breaker reset + re-generate)
 	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)
 
-	// Session mode switching
+	// Session mode switching (legacy: agent-scoped AgentMode pipeline).
 	mux.HandleFunc("POST /api/sessions/{id}/mode", a.handleSwitchSessionMode)
+	// Session-level mode pointer (B1, CW-20260428-0009): first-class Mode
+	// resolved via sessions.current_mode_id → modes.id.
+	mux.HandleFunc("GET /api/sessions/{id}/mode", a.handleGetSessionMode)
+	mux.HandleFunc("PATCH /api/sessions/{id}/mode", a.handleSetSessionMode)
 
 	// Agents
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)
@@ -232,6 +236,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
 	mux.HandleFunc("GET /api/settings/embedding/providers", a.handleEmbeddingProviders)
+	// B3 (CW-20260428-0011): dedicated routes for mode auto-switch pref so
+	// the FE can read/update without round-tripping the full settings doc.
+	mux.HandleFunc("GET /api/settings/mode-auto-switch", a.handleGetModeAutoSwitch)
+	mux.HandleFunc("PATCH /api/settings/mode-auto-switch", a.handleSetModeAutoSwitch)
 
 	// Plugin Config (prefixed to avoid collision with plugin CRUD routes)
 	mux.HandleFunc("GET /api/plugin-config/{id}", a.handleGetPluginConfig)

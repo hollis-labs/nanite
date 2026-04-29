@@ -10,6 +10,14 @@ const (
 	SlotSystem      = "system"
 	SlotMemory      = "memory"
 	SlotAgent       = "agent"
+	// SlotMode carries the session-level Mode addendum (B1, CW-20260428-0009).
+	// Sits between SlotAgent (identity) and SlotRules (policy) — modes
+	// modulate the agent's identity but don't override policy. Non-compactable
+	// so the active mode survives compaction the same way SlotAgent does.
+	// Distinct from the legacy AgentMode addendum that still lands inside
+	// SlotAgent — that handles the agent-scoped *store.AgentMode and stays
+	// for back-compat. SlotMode is for the session-scoped *store.Mode only.
+	SlotMode        = "mode"
 	SlotRules       = "rules"
 	SlotTools       = "tools"
 	SlotSession     = "session"
@@ -29,6 +37,7 @@ var SlotOrder = []string{
 	SlotSystem,
 	SlotMemory,
 	SlotAgent,
+	SlotMode,
 	SlotRules,
 	SlotTools,
 	SlotSession,
@@ -59,6 +68,7 @@ func DefaultCompactable() map[string]bool {
 		SlotSystem:       false,
 		SlotMemory:       true,
 		SlotAgent:        false,
+		SlotMode:         false, // B1: session-mode addendum — survives compaction.
 		SlotRules:        false,
 		SlotTools:        true,
 		SlotSession:      true,
@@ -99,6 +109,7 @@ func DefaultBudgets() map[string]int {
 		SlotSystem:       2000,
 		SlotMemory:       2000,
 		SlotAgent:        1000,
+		SlotMode:         500, // B1: session-mode addendum — small by design.
 		SlotRules:        500,
 		SlotTools:        0,    // proportional to selected tool count
 		SlotSession:      1000,

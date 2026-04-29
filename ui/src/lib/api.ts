@@ -20,6 +20,7 @@ import type {
   MCPServerConfig,
   Message,
   MessagePage,
+  Mode,
   ModelRecord,
   PermissionMode,
   PluginConfig,
@@ -346,7 +347,7 @@ export const api = {
   //   if (!res.ok) throw new Error(`Failed to delete agent mode: ${res.status}`)
   // },
 
-  // Mode
+  // Mode (legacy: agent-scoped AgentMode pipeline).
   switchMode: async (sessionId: string, mode: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`, {
       method: "POST",
@@ -354,6 +355,32 @@ export const api = {
       body: JSON.stringify({ mode }),
     });
     if (!res.ok) throw new Error(`Failed to switch mode: ${res.status}`);
+  },
+
+  // First-class reusable Modes (B1, CW-20260428-0009).
+  listModes: async (): Promise<Mode[]> => {
+    const res = await fetch(`${API_BASE}/modes`);
+    if (!res.ok) throw new Error(`Failed to list modes: ${res.status}`);
+    return res.json();
+  },
+
+  getSessionMode: async (sessionId: string): Promise<Mode | null> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`);
+    if (!res.ok) throw new Error(`Failed to get session mode: ${res.status}`);
+    return res.json();
+  },
+
+  setSessionMode: async (
+    sessionId: string,
+    body: { slug?: string; mode_id?: string } | null,
+  ): Promise<Mode | null> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    });
+    if (!res.ok) throw new Error(`Failed to set session mode: ${res.status}`);
+    return res.json();
   },
 
   // Slash Commands
@@ -584,6 +611,25 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to list embedding providers: ${res.status}`);
     const body = await res.json();
     return body.providers ?? [];
+  },
+
+  // B3 (CW-20260428-0011): mode auto-switch preference. Empty string = unset.
+  getModeAutoSwitchPref: async (): Promise<{ pref: '' | 'always' | 'ask' | 'never' }> => {
+    const res = await fetch(`${API_BASE}/settings/mode-auto-switch`);
+    if (!res.ok) throw new Error(`Failed to get mode auto-switch pref: ${res.status}`);
+    return res.json();
+  },
+
+  setModeAutoSwitchPref: async (
+    pref: '' | 'always' | 'ask' | 'never',
+  ): Promise<{ pref: string }> => {
+    const res = await fetch(`${API_BASE}/settings/mode-auto-switch`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pref }),
+    });
+    if (!res.ok) throw new Error(`Failed to set mode auto-switch pref: ${res.status}`);
+    return res.json();
   },
 
   // Session Agents

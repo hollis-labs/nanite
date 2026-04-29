@@ -2,15 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, Bot, Info, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
 import type { AgentMode, Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
-import { useChatStore } from "@/stores/useChatStore";
+import { getAutoSwitchEffective, useChatStore } from "@/stores/useChatStore";
 import { ChatMessage } from "./ChatMessage";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
 import { Envelope, EnvelopeHeader } from "./envelopes/primitives";
 import { MessageContent } from "./MessageContent";
+import { ModeSuggestionCard } from "./ModeSuggestionCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ToolWarningBanner } from "./ToolWarningBanner";
 
@@ -78,6 +80,62 @@ export function ChatTranscript({
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const queryClient = useQueryClient();
+
+  // B3 (CW-20260428-0011) — pending classifier suggestion + global pref +
+  // per-session override. Resolved into one of {auto, ask, off, firstUse}
+  // by getAutoSwitchEffective.
+  const pendingModeSuggestion = useChatStore((s) => s.pendingModeSuggestion);
+  const clearModeSuggestion = useChatStore((s) => s.clearModeSuggestion);
+  const showChatToast = useChatStore((s) => s.showChatToast);
+  const autoSwitchOverride = useChatStore((s) =>
+    activeSessionId ? s.autoSwitchSessionOverrides[activeSessionId] : undefined,
+  );
+  const { data: settings } = useSettings();
+  const modeAutoSwitchPref = settings?.mode_auto_switch_pref;
+  const effectiveAutoSwitch = getAutoSwitchEffective(autoSwitchOverride, modeAutoSwitchPref);
+
+  // Drop any stale suggestion when the user navigates to a different session.
+  useEffect(() => {
+    clearModeSuggestion();
+  }, [activeSessionId, clearModeSuggestion]);
+
+  // Effect-driven branch for "auto" (apply + toast) and "off" (discard).
+  // The "ask" / "firstUse" branches render the card below — render-side
+  // calls are avoided here to dodge React state-set-during-render warnings.
+  useEffect(() => {
+    if (!pendingModeSuggestion || !activeSessionId) return undefined;
+    if (effectiveAutoSwitch === 'off') {
+      clearModeSuggestion();
+      return undefined;
+    }
+    if (effectiveAutoSwitch === 'auto') {
+      let cancelled = false;
+      void (async () => {
+        try {
+          await api.setSessionMode(activeSessionId, { slug: pendingModeSuggestion.suggested });
+          if (cancelled) return;
+          showChatToast(`Switched to ${pendingModeSuggestion.suggested} mode`, 'success');
+          void queryClient.invalidateQueries({ queryKey: ['session-mode', activeSessionId] });
+          void queryClient.invalidateQueries({ queryKey: ['session', activeSessionId] });
+        } catch (err) {
+          console.error('[ChatTranscript] auto-switch mode failed:', err);
+        } finally {
+          if (!cancelled) clearModeSuggestion();
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+    return undefined;
+  }, [
+    pendingModeSuggestion,
+    activeSessionId,
+    effectiveAutoSwitch,
+    clearModeSuggestion,
+    showChatToast,
+    queryClient,
+  ]);
 
   // F4 (CW-20260419-0029) — narration strip + collapse-pill.
   // F3 (CW-20260420-0023) — thinking strip.
@@ -394,6 +452,19 @@ export function ChatTranscript({
           .map((error) => (
             <ErrorBanner key={error.id} error={error} onDismiss={dismissChatError} />
           ))}
+
+        {/* B3 (CW-20260428-0011): mode-suggestion confirm card. Renders only
+            when the effective behavior is "ask" (compact strip) or
+            "firstUse" (5-option card). The "auto" / "off" branches are
+            handled in the effect above. */}
+        {pendingModeSuggestion && activeSessionId &&
+          (effectiveAutoSwitch === 'ask' || effectiveAutoSwitch === 'firstUse') && (
+            <ModeSuggestionCard
+              suggestion={pendingModeSuggestion}
+              sessionId={activeSessionId}
+              variant={effectiveAutoSwitch === 'firstUse' ? 'firstUse' : 'compact'}
+            />
+          )}
 
         <div ref={bottomRef} />
       </div>

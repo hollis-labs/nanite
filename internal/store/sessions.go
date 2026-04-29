@@ -31,6 +31,10 @@ type Session struct {
 	LastActivity string `json:"last_activity"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
+	// CurrentModeID is the session-level mode pointer (B1, CW-20260428-0009).
+	// Nil/empty = fall back to agent-assigned mode (back-compat with the
+	// legacy AgentMode pipeline). Resolves into a *Mode via GetSessionMode.
+	CurrentModeID *string `json:"current_mode_id,omitempty"`
 }
 
 // Message represents a chat message.
@@ -61,7 +65,8 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		        COALESCE(provider,''), COALESCE(model,''),
 		        status, is_pinned, sort_order, message_count,
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
-		        last_activity, created_at, updated_at
+		        last_activity, created_at, updated_at,
+		        current_mode_id
 		 FROM sessions
 		 WHERE workspace_id = ?`
 	if !inclArchived {
@@ -78,6 +83,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 	out := make([]Session, 0)
 	for rows.Next() {
 		var sess Session
+		var currentModeID sql.NullString
 		if err := rows.Scan(
 			&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
 			&sess.WorkspaceID, &sess.ProjectID,
@@ -85,8 +91,13 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 			&sess.Provider, &sess.Model,
 			&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 			&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
+			&currentModeID,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		if currentModeID.Valid && currentModeID.String != "" {
+			v := currentModeID.String
+			sess.CurrentModeID = &v
 		}
 		out = append(out, sess)
 	}
@@ -96,6 +107,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 // GetSession returns a single session by ID.
 func (s *Store) GetSession(id string) (*Session, error) {
 	var sess Session
+	var currentModeID sql.NullString
 	err := s.DB.QueryRow(
 		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
 		        COALESCE(workspace_id,''), COALESCE(project_id,''),
@@ -103,7 +115,8 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		        COALESCE(provider,''), COALESCE(model,''),
 		        status, is_pinned, sort_order, message_count,
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
-		        last_activity, created_at, updated_at
+		        last_activity, created_at, updated_at,
+		        current_mode_id
 		 FROM sessions WHERE id = ?`, id,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
@@ -112,9 +125,14 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
+		&currentModeID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", id, err)
+	}
+	if currentModeID.Valid && currentModeID.String != "" {
+		v := currentModeID.String
+		sess.CurrentModeID = &v
 	}
 	return &sess, nil
 }

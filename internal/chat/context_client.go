@@ -138,7 +138,8 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 type SlotSources struct {
 	System           string                 // think-tool block + workspace identity (no agent-specific text)
 	Memory           string                 // formatted ContextBroker items where Source == "memory"
-	Agent            string                 // agent.SystemPrompt + mode.PromptAddendum + skill list
+	Agent            string                 // agent.SystemPrompt + AgentMode.PromptAddendum (legacy) + skill list
+	Mode             string                 // B1 (CW-20260428-0009): session-level *store.Mode.PromptAddendum.
 	Rules            string                 // agent tags + tool allowlist (S4a expands)
 	Session          string                 // session name, mode label, workspace name
 	Context          string                 // formatted ContextBroker items where Source != "memory"
@@ -151,7 +152,11 @@ type SlotSources struct {
 // Memory and Context are split from the ContextBroker fetch by item.Source.
 // The Tools slot is intentionally not populated here — the service layer
 // fills it from the selected tool definitions after calling this method.
-func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (*SlotSources, error) {
+//
+// sessionMode (B1, CW-20260428-0009) is the resolved session-level *store.Mode
+// — pass nil when no session mode is set; the legacy AgentMode addendum still
+// rides inside the Agent slot independently of this argument.
+func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, sessionMode *store.Mode) (*SlotSources, error) {
 	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleSlotSources")
 	defer span.End()
 	span.SetAttributes(
@@ -231,10 +236,18 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// J11 (CW-20260426-0009) pin tool will extend this same pattern.
 	userContextContent := buildUserContextSlot(cb.Store, session.ID)
 
+	// B1 (CW-20260428-0009): SlotMode carries the session-level Mode addendum.
+	// Independent of the legacy AgentMode handling inside SlotAgent.
+	var modeContent string
+	if sessionMode != nil {
+		modeContent = sessionMode.PromptAddendum
+	}
+
 	return &SlotSources{
 		System:           sysB.String(),
 		Memory:           memoryContent,
 		Agent:            agentPrompt,
+		Mode:             modeContent,
 		Rules:            rules,
 		Session:          sessionContent,
 		Context:          contextContent,

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, AtSign, ChevronDown, Paperclip, Slash, Square, Terminal, Unlock, Zap } from 'lucide-react'
+import { ArrowUp, AtSign, ChevronDown, Paperclip, Slash, Sparkles, Square, Terminal, Unlock, Zap } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useChatStore } from '@/stores/useChatStore'
 import { useAppStore } from '@/stores/useAppStore'
@@ -98,6 +98,33 @@ export function ComposerToolbar({
   const activeEffort = useChatStore((s) => s.activeEffort) as EffortValue
   const setActiveEffort = useChatStore((s) => s.setActiveEffort)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
+  // B3 (CW-20260428-0011): per-session auto-switch override toggle.
+  // Cycle order: inherit → off → on → inherit. "inherit" defers to the
+  // global mode_auto_switch_pref; "off" suppresses all auto-switches for
+  // this session even when the global pref is "always" or "ask"; "on"
+  // re-enables (does NOT bypass first-use). Resets on full page reload.
+  const autoSwitchOverride = useChatStore((s) =>
+    activeSessionId ? s.autoSwitchSessionOverrides[activeSessionId] : undefined,
+  )
+  const setAutoSwitchOverride = useChatStore((s) => s.setAutoSwitchOverride)
+  const cycleAutoSwitch = useCallback(() => {
+    if (!activeSessionId) return
+    if (autoSwitchOverride === undefined) setAutoSwitchOverride(activeSessionId, 'off')
+    else if (autoSwitchOverride === 'off') setAutoSwitchOverride(activeSessionId, 'on')
+    else setAutoSwitchOverride(activeSessionId, 'inherit')
+  }, [activeSessionId, autoSwitchOverride, setAutoSwitchOverride])
+  const autoSwitchTitle =
+    autoSwitchOverride === 'off'
+      ? 'Auto-switch: OFF (per-session override). Click to set ON.'
+      : autoSwitchOverride === 'on'
+        ? 'Auto-switch: ON (per-session override). Click to clear.'
+        : 'Auto-switch: inherit global pref. Click to override OFF for this session.'
+  const autoSwitchClass =
+    autoSwitchOverride === 'on'
+      ? 'text-primary'
+      : autoSwitchOverride === 'off'
+        ? 'text-fg-faint line-through decoration-fg-faint/50'
+        : 'text-fg-faint/60'
   const [modelOpen, setModelOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -222,6 +249,11 @@ export function ComposerToolbar({
               ? <Unlock size={14} />
               : <Terminal size={14} />
           }
+        </ToolbarBtn>
+
+        {/* B3 (CW-20260428-0011): per-session auto-switch toggle. */}
+        <ToolbarBtn onClick={cycleAutoSwitch} title={autoSwitchTitle} className={autoSwitchClass}>
+          <Sparkles size={14} />
         </ToolbarBtn>
 
         {/* Effort segmented control — F1 (CW-20260420-0014) */}

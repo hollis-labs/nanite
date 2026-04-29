@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Bot, ChevronDown, Copy, GitFork, MoreHorizontal, Users } from 'lucide-react'
+import { Bot, ChevronDown, Copy, GitFork, MoreHorizontal, Sparkles, Users } from 'lucide-react'
 import { usePluginSlots } from '@/hooks/usePluginSlots'
 import { resolveIcon } from '@/lib/icons'
 import { SourceBadge } from '@/components/agents/SourceBadge'
@@ -10,7 +10,6 @@ import { useChatStore } from '@/stores/useChatStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { api } from '@/lib/api'
 import { AgentRoster } from './AgentRoster'
-import { StatusPill } from './envelopes/primitives'
 import type { UISlotEntry } from '@/lib/types'
 
 function formatTokens(n: number): string {
@@ -21,15 +20,16 @@ function formatTokens(n: number): string {
 export function ChatHeader() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const headerChipsVisible = useLayoutStore((s) => s.headerChipsVisible)
-  const activeMode = useChatStore((s) => s.activeMode)
   const activeModel = useChatStore((s) => s.activeModel)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const queryClient = useQueryClient()
 
   const [agentDropOpen, setAgentDropOpen] = useState(false)
+  const [modeDropOpen, setModeDropOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [rosterOpen, setRosterOpen] = useState(false)
   const agentDropRef = useRef<HTMLDivElement>(null)
+  const modeDropRef = useRef<HTMLDivElement>(null)
   const moreRef = useRef<HTMLDivElement>(null)
 
   const { data: session } = useQuery({
@@ -61,6 +61,19 @@ export function ChatHeader() {
     queryFn: api.listAgents,
   })
 
+  // B1 (CW-20260428-0009): session-level Mode chip + dropdown.
+  // Backed by sessions.current_mode_id → modes.id; null = "chat" default.
+  const { data: allModes = [] } = useQuery({
+    queryKey: ['modes'],
+    queryFn: api.listModes,
+    staleTime: 60_000,
+  })
+  const { data: sessionMode } = useQuery({
+    queryKey: ['session-mode', activeSessionId],
+    queryFn: () => api.getSessionMode(activeSessionId!),
+    enabled: !!activeSessionId,
+  })
+
   const primaryAgent = sessionAgents.find((a) => a.role === 'primary')
   const primaryAgentProfile = allAgents.find((a) => a.id === primaryAgent?.agent_id)
   const activeAgentName = primaryAgentProfile?.name || 'Nanite'
@@ -79,14 +92,26 @@ export function ChatHeader() {
 
   // Close dropdowns on outside click
   useEffect(() => {
-    if (!agentDropOpen && !moreOpen) return
+    if (!agentDropOpen && !moreOpen && !modeDropOpen) return
     function onDown(e: MouseEvent) {
       if (agentDropRef.current && !agentDropRef.current.contains(e.target as Node)) setAgentDropOpen(false)
+      if (modeDropRef.current && !modeDropRef.current.contains(e.target as Node)) setModeDropOpen(false)
       if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
-  }, [agentDropOpen, moreOpen])
+  }, [agentDropOpen, moreOpen, modeDropOpen])
+
+  const setSessionModeMutation = useMutation({
+    mutationFn: async (slug: string) => {
+      if (!activeSessionId) return null
+      return api.setSessionMode(activeSessionId, { slug })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['session-mode', activeSessionId] })
+      void queryClient.invalidateQueries({ queryKey: ['session', activeSessionId] })
+    },
+  })
 
   const switchAgentMutation = useMutation({
     mutationFn: async (agentId: string) => {
@@ -164,9 +189,47 @@ export function ChatHeader() {
                 <span className="text-[14px] font-semibold text-fg">{activeAgentName}</span>
                 <ChevronDown size={11} className="shrink-0 text-fg-muted" />
               </button>
-              {activeMode && activeMode !== 'default' && (
-                <StatusPill tone="warning">{activeMode}</StatusPill>
-              )}
+              {/* Mode chip + dropdown (B1, CW-20260428-0009).
+                  Default to "chat" when no session-mode pointer is set. */}
+              <div className="relative" ref={modeDropRef}>
+                <button
+                  type="button"
+                  onClick={() => setModeDropOpen((o) => !o)}
+                  disabled={!activeSessionId}
+                  className="flex items-center gap-1 rounded-[6px] border border-border-subtle bg-bg-elevated px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-fg-secondary transition-colors hover:bg-surface hover:text-fg disabled:opacity-50"
+                >
+                  <Sparkles size={9} className="shrink-0 text-fg-muted" />
+                  <span>{sessionMode?.slug ?? 'chat'}</span>
+                  <ChevronDown size={9} className="shrink-0 text-fg-muted" />
+                </button>
+                {modeDropOpen && (
+                  <div className="absolute left-0 top-full z-50 mt-1 w-52 rounded-[10px] border border-border-subtle bg-bg-elevated py-1 shadow-2xl">
+                    <div className="px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+                      Switch mode
+                    </div>
+                    {allModes.map((mode) => {
+                      const isActive = sessionMode?.id === mode.id
+                      return (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => { setSessionModeMutation.mutate(mode.slug); setModeDropOpen(false) }}
+                          disabled={setSessionModeMutation.isPending}
+                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+                            isActive
+                              ? 'bg-surface text-fg'
+                              : 'text-fg-secondary hover:bg-surface hover:text-fg'
+                          }`}
+                        >
+                          <Sparkles className="h-3 w-3 shrink-0 text-fg-muted" />
+                          <span className="truncate">{mode.name}</span>
+                          <span className="ml-auto font-mono text-[10px] text-fg-muted">{mode.slug}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
               {primaryAgentProfile?.source && <SourceBadge source={primaryAgentProfile.source} />}
 
               {/* Agent picker dropdown */}

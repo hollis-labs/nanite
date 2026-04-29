@@ -270,6 +270,90 @@ func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetSessionMode returns the resolved session-level *store.Mode (B1,
+// CW-20260428-0009). 200 with `null` body means the session has no
+// session-mode pointer set — the legacy agent-scoped AgentMode is the active
+// mode for that session's prompts.
+func (a *API) handleGetSessionMode(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	mode, err := a.Services.Store.GetSessionMode(sessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, mode)
+}
+
+// handleSetSessionMode points a session at a specific mode by slug or mode_id
+// (B1, CW-20260428-0009). Empty body or {slug:"", mode_id:""} clears the
+// pointer. Returns the resolved mode (or null when cleared).
+func (a *API) handleSetSessionMode(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+
+	var req SetSessionModeRequest
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	// Verify session exists up front so we don't silently no-op a clear on a
+	// missing session.
+	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	// Resolve target mode ID.
+	modeID := req.ModeID
+	if modeID == "" && req.Slug != "" {
+		m, err := a.Services.Store.GetModeBySlug(req.Slug)
+		if err != nil {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if m == nil {
+			a.errorResp(w, http.StatusBadRequest, "unknown mode slug: "+req.Slug)
+			return
+		}
+		modeID = m.ID
+	}
+
+	if modeID == "" {
+		// Clear path.
+		if err := a.Services.Store.ClearSessionMode(sessionID); err != nil {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.jsonResp(w, http.StatusOK, nil)
+		return
+	}
+
+	// Verify mode_id resolves before writing the FK.
+	if req.ModeID != "" {
+		m, err := a.Services.Store.GetMode(modeID)
+		if err != nil {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if m == nil {
+			a.errorResp(w, http.StatusBadRequest, "unknown mode_id: "+modeID)
+			return
+		}
+	}
+
+	if err := a.Services.Store.SetSessionMode(sessionID, modeID); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resolved, err := a.Services.Store.GetSessionMode(sessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, resolved)
+}
+
 // handleCompactSession runs the slot-aware compaction pipeline against the
 // active conversation: drops dynamic context enrichment, summarizes the
 // oldest messages via the configured summarizer, and strips tool-result
@@ -308,7 +392,10 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		windowSize = settings.ContextWindowTokens
 	}
 
-	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, nil, workspace, []provider.ToolDefinition{}, "", windowSize)
+	// B1 (CW-20260428-0009): manual /compact path doesn't need the session-
+	// mode addendum (compaction operates on the existing window, not on a
+	// new turn). Pass nil sessionMode — same as we pass nil AgentMode here.
+	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, nil, workspace, []provider.ToolDefinition{}, "", windowSize, nil)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

@@ -41,6 +41,11 @@ export interface Session {
   // B1 (CW-20260428-0009): session-level mode pointer.
   // Null = fall back to agent-assigned legacy AgentMode.
   current_mode_id?: string | null;
+  // F2 (CW-20260429-0002): per-session auto-mode-switch override. Tri-state
+  // — null/undefined inherits user_settings.mode_auto_switch_pref; true =
+  // force ON for this session (does NOT bypass first-use prompt); false =
+  // force OFF (suppress all auto-switches even when user pref permits).
+  auto_switch_override?: boolean | null;
 }
 
 export interface SessionWithMessages extends Session {

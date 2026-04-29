@@ -354,6 +354,42 @@ func (a *API) handleSetSessionMode(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, resolved)
 }
 
+// handleSetSessionAutoSwitch sets the per-session auto-switch override for
+// classifier mode suggestions (F2, CW-20260429-0002).
+//
+//	PATCH /api/sessions/{id}/auto-switch
+//	{ "override": true | false | null }
+//
+// `null` clears the override (session inherits user_settings.mode_auto_switch_pref).
+// `true` forces ON for this session (does NOT bypass first-use prompt).
+// `false` forces OFF for this session.
+//
+// Returns the persisted override on the session row.
+func (a *API) handleSetSessionAutoSwitch(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+
+	// Verify session exists up front so we don't silently no-op on a missing
+	// session — same shape as handleSetSessionMode.
+	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	// Decode with explicit pointer so we can distinguish "absent" from "null".
+	var req SetSessionAutoSwitchRequest
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	if err := a.Services.Store.SetSessionAutoSwitchOverride(sessionID, req.Override); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusOK, SessionAutoSwitchResponse{Override: req.Override})
+}
+
 // handleCompactSession runs the slot-aware compaction pipeline against the
 // active conversation: drops dynamic context enrichment, summarizes the
 // oldest messages via the configured summarizer, and strips tool-result

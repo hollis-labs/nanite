@@ -1,0 +1,79 @@
+[
+  {
+    "title": "report-card with metrics + summary (the canonical passive renderable)",
+    "args": {
+      "type": "report-card",
+      "data": {
+        "title": "Weekly Sprint Health",
+        "metrics": [
+          { "label": "Tasks closed", "value": "12" },
+          { "label": "Tasks open", "value": "5" },
+          { "label": "Cycle time", "value": "1.8d" }
+        ],
+        "summary": "Steady cadence — no blockers carried over from last week."
+      },
+      "sources": "[{\"tool_use_id\":\"toolu_01ABC\",\"tool_name\":\"clockwork_task_list\"}]"
+    },
+    "notes": "report-card REQUIRES the sources arg as a JSON-encoded string of grounding objects. Build the sources list from tool_use_ids in THIS turn — don't fabricate."
+  },
+  {
+    "title": "info-card (simple notice — no metrics, no sources required)",
+    "args": {
+      "type": "info-card",
+      "data": {
+        "title": "Heads up",
+        "body": "The next migration window starts at 03:00 UTC.",
+        "variant": "warning"
+      }
+    },
+    "notes": "info-card takes title + body + optional variant. No sources field needed — it's a structured notice, not grounded prose."
+  },
+  {
+    "title": "metric-card (single number with trend)",
+    "args": {
+      "type": "metric-card",
+      "data": {
+        "label": "Cache hit rate",
+        "value": 0.94,
+        "unit": "%",
+        "trend": "up",
+        "previous": 0.91
+      }
+    }
+  },
+  {
+    "title": "list-card (small structured list of items)",
+    "args": {
+      "type": "list-card",
+      "data": {
+        "title": "Open PRs",
+        "items": [
+          { "label": "#42 — fix flaky test" },
+          { "label": "#43 — add nanite_tool_describe" }
+        ]
+      }
+    },
+    "notes": "Renders inline by default; pass render_target=\"bottom_chat_drawer\" to route to the long-form drawer."
+  },
+  {
+    "title": "document-viewer (long-form prose — REQUIRES sources)",
+    "args": {
+      "type": "document-viewer",
+      "data": {
+        "title": "Sprint retro notes",
+        "body_markdown": "## What went well\n\n- Lint runtime down 40%.\n\n## What didn't\n\n- Dropped the Friday deploy."
+      },
+      "sources": "[{\"tool_use_id\":\"toolu_02DEF\",\"tool_name\":\"dev_read\",\"note\":\"file: docs/retros/2026-04-25.md\"}]"
+    },
+    "notes": "document-viewer is the prose-bearing card — same grounding rule as report-card."
+  },
+  {
+    "title": "force-inline a card whose schema would default to a drawer",
+    "args": {
+      "type": "metric-card",
+      "data": { "label": "Active users", "value": 1287 },
+      "render_target": ""
+    },
+    "notes": "Empty render_target overrides the schema's default_render_target so the card renders inline in chat instead of the bottom drawer. Distinct from omitting the field (which uses the default)."
+  }
+]

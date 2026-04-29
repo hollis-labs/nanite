@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Cancel an in-flight subagent",
+    "args": { "run_id": "run-01HZ..." },
+    "notes": "Idempotent — calling on an already-terminal run is a no-op."
+  }
+]

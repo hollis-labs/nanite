@@ -1,0 +1,13 @@
+[
+  {
+    "title": "Create a planner agent profile",
+    "args": {
+      "name": "Strategic Planner",
+      "slug": "strategic-planner",
+      "system_prompt": "You break complex requests into ordered phases and acceptance criteria.",
+      "description": "Multi-step planning specialist.",
+      "default_model": "claude-opus-4-7"
+    },
+    "notes": "Use nanite_list_agents first to confirm the slug is unique."
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "title": "Spawn a sync subagent and wait for the reply inline",
+    "args": {
+      "parent_session_id": "ses-01HZ...",
+      "parent_agent_id": "agt-planner",
+      "role": "file-backend",
+      "prompt": "Audit ./internal/mcp for tools missing from the dispatch switch.",
+      "mode": "sync",
+      "timeout_seconds": 600
+    },
+    "notes": "sync blocks; async returns a run_id and replies via inbox; api returns a run_id and replies via chat."
+  },
+  {
+    "title": "Spawn an async subagent and poll later",
+    "args": {
+      "parent_session_id": "ses-01HZ...",
+      "parent_agent_id": "agt-planner",
+      "role": "researcher",
+      "prompt": "Compile a list of every passive renderable envelope and its grounding requirement.",
+      "mode": "async"
+    }
+  }
+]

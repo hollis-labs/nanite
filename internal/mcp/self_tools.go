@@ -1064,5 +1064,10 @@ the current turn for subsequent writes.
 				"required": []string{"session_id", "message"},
 			},
 		},
+		// --- Discovery / introspection (CW-20260429-0005, A1) ---
+		// nanite_tool_describe surfaces a tool's schema + golden examples
+		// so agents can introspect any internal tool when uncertain about
+		// input shape. Layer 1 of the self-healing tool surface lens.
+		naniteToolDescribeDefinition(),
 	}
 }

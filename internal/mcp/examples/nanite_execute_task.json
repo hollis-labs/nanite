@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Dispatch user request to a worker/planner role",
+    "args": {
+      "session_id": "ses-01HZ...",
+      "message": "Refactor the envelope validator to support per-version schemas."
+    },
+    "notes": "ScopeTier classifies on `message`. Pass through the user's phrasing where possible. The Chat agent receives a structured envelope back — no raw worker output leaks into chat context."
+  }
+]

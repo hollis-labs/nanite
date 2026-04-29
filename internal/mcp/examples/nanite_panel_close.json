@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Close the Workflows drawer",
+    "args": { "panel_id": "workflows" },
+    "notes": "NO-OP on a user-opened drawer. Use sparingly — closing surfaces hides info."
+  }
+]

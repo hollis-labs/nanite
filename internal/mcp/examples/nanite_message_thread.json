@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Get all messages in a thread the caller participates in",
+    "args": {
+      "thread_id": "thr-01HZ...",
+      "session_id": "ses-01HZ...",
+      "agent_id": "agt-planner"
+    },
+    "notes": "Non-participants get an empty list (no existence leak)."
+  }
+]

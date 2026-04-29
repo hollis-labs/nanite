@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Force the Engine GUI to refresh after a write",
+    "args": {},
+    "notes": "Call after task_transition / task_update so the GUI reflects new state. No params."
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "title": "Fire a reminder after 5 turns",
+    "args": {
+      "text": "Re-check the deploy status before answering further questions.",
+      "trigger": { "type": "turn_count", "n": 5 }
+    }
+  },
+  {
+    "title": "Fire at a specific time",
+    "args": {
+      "text": "Capture the standup summary in the boot prompt.",
+      "trigger": { "type": "time", "at": "2026-04-29T15:00:00Z" },
+      "scope": "session"
+    },
+    "notes": "Reminder text is injected as <system-reminder> in the next turn after the trigger fires."
+  }
+]

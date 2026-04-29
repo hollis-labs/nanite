@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Cancel an in-flight background job",
+    "args": { "job_id": "job-01HZ..." },
+    "notes": "Idempotent. Backend kills the process group; descendants are reaped."
+  }
+]

@@ -39,17 +39,16 @@ Per C1: `schema_validation`, `type_coercion`, `wrong_card_type`, `missing_option
 - **Repair without informing the caller.** Even successful repairs must surface a summary; the agent's next decision depends on knowing what got coerced.
 - **Learning hints with no recall path.** Writing to memory no one reads. If `nanite_remember` has no consumer, it's not learning, it's logging.
 
+## Golden examples convention
+
+A1's discovery surface is grounded in hand-written examples rather than auto-generated stubs. Per-tool examples live at `internal/mcp/examples/<tool_name>.json`; each file is a JSON array of `{title, args, result?, notes?}` entries. The runtime embeds these via `//go:embed` in `internal/mcp/self_tools_describe.go` so binaries stay self-contained — no filesystem dependency at runtime. Coverage is best-effort 1-per-tool at v1; a full second-example pass is tracked under E1's audit follow-ups. The curated `describeRelations` map (related-tools / related-skills) is also hand-written rather than prefix-derived, since auto-derivation devolves into "every tool with the same prefix" noise. Unknown tool names return a structured `tool_not_found` error with the three closest matches by case-insensitive Levenshtein distance, so the agent picks from a real shortlist instead of guessing.
+
 ## Cross-portfolio applicability
 
 The lens is not Nanite-specific. Mux, Clockwork, Vanta, and plugin authors can each adopt it independently — the four layers map onto any tool-calling surface. Reference the lens by Vanta key so each adoption stays linked to the same conceptual root, even when implementations diverge.
-
-<!-- Reserved for A1: Golden examples convention.
-     The A1 ticket (CW-20260429-0005) may add a "Golden examples convention"
-     section here describing how `nanite_tool_describe` exposes example payloads
-     to drive discovery + repair. Leave this anchor in place. -->
 
 ## Cross-references
 
 - **Vanta:** `decisions.nanite.architecture.self_healing_tool_surface_lens`
 - **Sprint:** SP-20260428-0002
-- **Tickets:** A1 (CW-20260429-0005), B1 (CW-20260429-0006), C1 (CW-20260429-0007), C2 (CW-20260429-0008), D1 (CW-20260429-0009), E1 (sprint retrospective), E2 (this doc — CW-20260429-0011)
+- **Tickets:** A1 (CW-20260429-0005), B1 (CW-20260429-0006), C1 (CW-20260429-0007), C2 (CW-20260429-0008), D1 (CW-20260429-0009), E1 (CW-20260429-0010), E2 (this doc — CW-20260429-0011)

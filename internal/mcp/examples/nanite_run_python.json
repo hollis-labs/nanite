@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Run a small Python snippet in the sandbox",
+    "args": {
+      "code": "import json, sys\ntotals = {'a': 1, 'b': 2}\nprint(json.dumps({'sum': sum(totals.values())}))",
+      "time_limit_seconds": 30,
+      "memory_limit_mb": 256
+    },
+    "notes": "Worker/Planner-only — NOT on the Chat-agent surface. Tool calls from inside the sandbox route through the permission engine."
+  }
+]

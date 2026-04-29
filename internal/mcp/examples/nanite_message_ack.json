@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Mark a message read",
+    "args": {
+      "session_id": "ses-01HZ...",
+      "agent_id": "agt-planner",
+      "message_id": "msg-01HZ..."
+    },
+    "notes": "Idempotent — safe to call repeatedly."
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Submit a value for the current builder step",
+    "args": {
+      "builder_name": "agent",
+      "step_name": "name",
+      "value": "Strategic Planner"
+    },
+    "notes": "Call after nanite_start_builder. Each call advances to the next step until the builder signals completion."
+  }
+]

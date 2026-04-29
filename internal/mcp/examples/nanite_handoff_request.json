@@ -1,0 +1,12 @@
+[
+  {
+    "title": "Request a handoff from departing agent to incoming agent",
+    "args": {
+      "session_id": "ses-01HZ...",
+      "from_agent_id": "agt-planner",
+      "to_agent_id": "agt-worker",
+      "requested_by": "departing"
+    },
+    "notes": "Pending until approve/reject. requested_by ∈ {departing, incoming, user}."
+  }
+]

@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Delete a non-builtin skill",
+    "args": { "id": "skl-01HZ..." },
+    "notes": "Irreversible. Builtin skills cannot be deleted — this returns an error."
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Start the agent builder",
+    "args": { "builder_name": "agent" }
+  },
+  {
+    "title": "List available builders (omit builder_name)",
+    "args": {}
+  }
+]

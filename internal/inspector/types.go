@@ -177,4 +177,6 @@ type ReminderItem struct {
 	Text string `json:"text"`
 	// TriggerJSON is the raw trigger shape for display.
 	TriggerJSON string `json:"trigger_json"`
+	// Scope is the reminder's scope (turn / session / project). D1/D2.
+	Scope string `json:"scope,omitempty"`
 }

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Eye,
   Filter,
+  GitFork,
   Plus,
   Trash2,
   Wrench,
@@ -38,12 +39,41 @@ function parseToolBindings(s: string): { server: string; tool: string }[] {
   }
 }
 
-function parseSource(settings: string): string {
+// resolveSource reads the top-level `source` column when present (J7
+// ingestion metadata), falling back to the legacy settings.source path
+// used before J7. "db" is the catch-all for rows that pre-date both paths.
+function resolveSource(skill: { source?: string; settings: string }): string {
+  if (skill.source && skill.source !== "") return skill.source;
   try {
-    const parsed = JSON.parse(settings);
+    const parsed = JSON.parse(skill.settings);
     return parsed?.source ?? "db";
   } catch {
     return "db";
+  }
+}
+
+// E2 (CW-20260428-0017): parse mode tags. Skills carry mode_ids (resolved
+// IDs) on the top-level column AND mode_slugs (raw slugs) inside settings
+// for back-compat with file-defs that haven't been ingested yet.
+function parseModeIDs(skill: { mode_ids?: string }): string[] {
+  if (!skill.mode_ids) return [];
+  try {
+    const parsed = JSON.parse(skill.mode_ids);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseModeSlugs(settings: string): string[] {
+  try {
+    const parsed = JSON.parse(settings);
+    if (parsed?.mode_slugs && Array.isArray(parsed.mode_slugs)) {
+      return parsed.mode_slugs;
+    }
+    return [];
+  } catch {
+    return [];
   }
 }
 
@@ -65,12 +95,46 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  // E2 (CW-20260428-0017): filter skills by current session mode. "all"
+  // disables the filter; otherwise we keep skills whose mode_ids contains
+  // the picked mode ID OR whose mode_ids is empty (back-compat — those
+  // skills are available everywhere).
+  const [modeFilter, setModeFilter] = useState<string>("all");
   const queryClient = useQueryClient();
 
   const { data: skills = [], isLoading } = useQuery({
     queryKey: ["skills"],
     queryFn: api.listSkills,
   });
+
+  // Modes feed the per-skill tag rendering (slug from ID) and the mode
+  // filter dropdown. The list is small and stable enough that we don't
+  // need pagination here.
+  const { data: modes = [] } = useQuery({
+    queryKey: ["modes"],
+    queryFn: api.listModes,
+  });
+
+  // Dev-mode flag drives the inline-edit affordance on internal skills.
+  const { data: devModeData } = useQuery({
+    queryKey: ["dev-mode"],
+    queryFn: api.getDevMode,
+  });
+  const devMode = devModeData?.dev_mode ?? false;
+
+  const forkMutation = useMutation({
+    mutationFn: ({ id, prompt }: { id: string; prompt?: string }) =>
+      api.forkSkillToUser(id, { prompt }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+  });
+
+  const modeByID = useMemo(() => {
+    const m = new Map<string, { id: string; slug: string; name: string }>();
+    for (const md of modes) m.set(md.id, md);
+    return m;
+  }, [modes]);
 
   const { data: skillDetail } = useQuery({
     queryKey: ["skill-detail", selectedSkill],
@@ -130,20 +194,27 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
   const sourceCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const s of skills) {
-      const src = parseSource(s.settings);
+      const src = resolveSource(s);
       counts[src] = (counts[src] || 0) + 1;
     }
     return counts;
   }, [skills]);
 
-  // Filter skills based on category and source.
+  // Filter skills based on category, source, and mode binding.
   const filteredSkills = useMemo(() => {
     return skills.filter((skill) => {
       if (categoryFilter !== "all" && skill.category !== categoryFilter) return false;
-      if (sourceFilter !== "all" && parseSource(skill.settings) !== sourceFilter) return false;
+      if (sourceFilter !== "all" && resolveSource(skill) !== sourceFilter) return false;
+      if (modeFilter !== "all") {
+        const ids = parseModeIDs(skill);
+        // Empty mode_ids → "available everywhere" (back-compat); also kept.
+        // E2 acceptance: filter "active for current mode" works for skills
+        // bound to that mode AND for skills with no binding.
+        if (ids.length > 0 && !ids.includes(modeFilter)) return false;
+      }
       return true;
     });
-  }, [skills, categoryFilter, sourceFilter]);
+  }, [skills, categoryFilter, sourceFilter, modeFilter]);
 
   // List View
   if (!selectedSkill && !showCreateForm) {
@@ -162,6 +233,19 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               {SKILL_CATEGORIES.map((category) => (
                 <option key={category} value={category}>
                   {category.charAt(0).toUpperCase() + category.slice(1)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={modeFilter}
+              onChange={(e) => setModeFilter(e.target.value)}
+              className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              title="Show only skills active for the selected mode"
+            >
+              <option value="all">All Modes</option>
+              {modes.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
                 </option>
               ))}
             </select>
@@ -234,7 +318,13 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
           <div className="grid gap-3 grid-cols-2">
             {filteredSkills.map((skill) => {
               const toolCount = parseToolBindings(skill.tool_bindings).length;
-              const source = parseSource(skill.settings);
+              const source = resolveSource(skill);
+              const ids = parseModeIDs(skill);
+              const tagSlugs =
+                ids.length > 0
+                  ? ids.map((id) => modeByID.get(id)?.slug).filter(Boolean) as string[]
+                  : parseModeSlugs(skill.settings);
+              const isInternal = source === "" || source === "builtin" || source === "seed";
               return (
                 <ContextMenu key={skill.id}>
                   <ContextMenuTrigger asChild>
@@ -264,13 +354,30 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
 
                       {/* Detail footer */}
                       <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border-subtle text-fg-secondary leading-none uppercase tracking-wide">
                             {skill.category}
                           </span>
                           {toolCount > 0 && (
                             <span className="text-[11px] text-fg-muted">
                               {toolCount} tool{toolCount !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                          {tagSlugs.map((slug) => (
+                            <span
+                              key={slug}
+                              className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-brand/10 border border-brand/20 text-brand leading-none uppercase tracking-wide"
+                              title={`mode: ${slug}`}
+                            >
+                              {slug}
+                            </span>
+                          ))}
+                          {tagSlugs.length === 0 && (
+                            <span
+                              className="text-[10px] text-fg-faint italic"
+                              title="No mode binding — available in every mode"
+                            >
+                              all modes
                             </span>
                           )}
                         </div>
@@ -290,6 +397,17 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
                       <Eye className="w-3.5 h-3.5" />
                       View Details
                     </ContextMenuItem>
+                    {devMode && isInternal && (
+                      <ContextMenuItem
+                        className="gap-2 text-xs"
+                        onClick={() => {
+                          forkMutation.mutate({ id: skill.id, prompt: skill.prompt });
+                        }}
+                      >
+                        <GitFork className="w-3.5 h-3.5" />
+                        Fork to user override
+                      </ContextMenuItem>
+                    )}
                     {!skill.is_builtin && (
                       <>
                         <ContextMenuSeparator />

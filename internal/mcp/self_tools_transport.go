@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -19,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/crossapp"
 	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/reflex"
@@ -69,6 +66,7 @@ type TodoStoreInterface interface {
 	GetTodo(id string) (*store.Todo, error)
 	ListTodos(f store.TodoFilter) ([]store.Todo, error)
 	UpdateTodo(t *store.Todo) error
+	UpdateTodoScope(id, scope, scopeID, projectID string) error
 	DeleteTodo(id string) error
 
 	CreatePlan(p *store.Plan) error
@@ -236,12 +234,10 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callNavigateEngine(args)
 	case "nanite_refresh_engine":
 		return st.callRefreshEngine(args)
-	case "nanite_show_giphy":
-		return st.callShowGiphy(args)
-	case "nanite_show_document":
-		return st.callShowDocument(args)
-	case "nanite_show_report":
-		return st.callShowReport(args)
+	case "nanite_show_card":
+		return st.callShowCard(ctx, args)
+	case "nanite_giphy_search":
+		return st.callGiphySearch(args)
 	case "nanite_start_builder":
 		return st.callStartBuilder(args)
 	case "nanite_builder_step":
@@ -582,238 +578,161 @@ func (st *SelfToolsTransport) callRefreshEngine(args map[string]any) (*ToolResul
 	return textResult("Engine GUI data refreshed."), nil
 }
 
-func (st *SelfToolsTransport) callShowGiphy(args map[string]any) (*ToolResult, error) {
-	query, _ := args["query"].(string)
-	if query == "" {
-		return errorResult("query is required"), nil
-	}
-
-	apiKey := os.Getenv("GIPHY_API_KEY")
-	if apiKey == "" {
-		// No API key — pick a demo GIF based on query keywords.
-		demoGifs := map[string]string{
-			"celebration": "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif",
-			"success":     "https://media.giphy.com/media/a0h7sAqON67nO/giphy.gif",
-			"thumbs up":   "https://media.giphy.com/media/111ebonMs90YLu/giphy.gif",
-			"mind blown":  "https://media.giphy.com/media/xT0xeJpnrWC3XWblEk/giphy.gif",
-			"happy":       "https://media.giphy.com/media/BlVnrxJgTGsUw/giphy.gif",
-			"dance":       "https://media.giphy.com/media/l0MYt5jPR6QX5APm0/giphy.gif",
-			"cat":         "https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif",
-			"dog":         "https://media.giphy.com/media/4Zo41lhzKt6iZ8xff9/giphy.gif",
-			"hamster":     "https://media.giphy.com/media/l2JhIUyUs8KDCCf3W/giphy.gif",
-			"running":     "https://media.giphy.com/media/11BAxHG7paxJcI/giphy.gif",
-			"coding":      "https://media.giphy.com/media/ZVik7pBtu9dNS/giphy.gif",
-			"coffee":      "https://media.giphy.com/media/DrJm6F9poo4aA/giphy.gif",
-			"rocket":      "https://media.giphy.com/media/mi6DsSSNKDbUY/giphy.gif",
-			"fire":        "https://media.giphy.com/media/j3IxJRLNLZz9sXR7ZA/giphy.gif",
-		}
-		// Match query words against known keys, fallback to a random one.
-		gifURL := ""
-		lowerQ := strings.ToLower(query)
-		for keyword, url := range demoGifs {
-			if strings.Contains(lowerQ, keyword) {
-				gifURL = url
-				break
-			}
-		}
-		if gifURL == "" {
-			// Pick based on hash of query for consistent but varied results.
-			keys := make([]string, 0, len(demoGifs))
-			for k := range demoGifs {
-				keys = append(keys, k)
-			}
-			h := 0
-			for _, c := range query {
-				h = h*31 + int(c)
-			}
-			if h < 0 {
-				h = -h
-			}
-			gifURL = demoGifs[keys[h%len(keys)]]
-		}
-
-		envData := map[string]any{
-			"title":   fmt.Sprintf("Here's your %s!", query),
-			"gif_url": gifURL,
-			"source":  "GIPHY (demo mode)",
-			"query":   query,
-		}
-		envJSON, _ := json.Marshal(map[string]any{
-			"kind":    "envelope",
-			"version": 1,
-			"type":    "giphy-modal",
-			"data":    envData,
-		})
-		result := fmt.Sprintf("Found a GIF for %q! (demo mode — set GIPHY_API_KEY for live search)\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", query, string(envJSON))
-		return textResult(result), nil
-	}
-
-	giphyURL := fmt.Sprintf("https://api.giphy.com/v1/gifs/search?api_key=%s&q=%s&limit=1&rating=g",
-		apiKey, url.QueryEscape(query))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, giphyURL, nil)
-	if err != nil {
-		return errorResult(fmt.Sprintf("create Giphy request: %v", err)), nil
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return errorResult(fmt.Sprintf("Giphy API error: %v", err)), nil
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-	if err != nil {
-		return errorResult(fmt.Sprintf("read Giphy response: %v", err)), nil
-	}
-
-	var giphyResp struct {
-		Data []struct {
-			Title  string `json:"title"`
-			Images struct {
-				Original struct {
-					URL string `json:"url"`
-				} `json:"original"`
-				FixedWidth struct {
-					URL string `json:"url"`
-				} `json:"fixed_width"`
-			} `json:"images"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &giphyResp); err != nil {
-		return errorResult(fmt.Sprintf("parse Giphy response: %v", err)), nil
-	}
-
-	if len(giphyResp.Data) == 0 {
-		return textResult(fmt.Sprintf("No GIFs found for %q. Try a different search term.", query)), nil
-	}
-
-	gif := giphyResp.Data[0]
-	gifURL := gif.Images.Original.URL
-	if gifURL == "" {
-		gifURL = gif.Images.FixedWidth.URL
-	}
-
-	// Build envelope data for the giphy-modal component.
-	envData := map[string]any{
-		"title":   fmt.Sprintf("Here's your %s!", query),
-		"gif_url": gifURL,
-		"source":  "GIPHY",
-		"query":   query,
-	}
-	envJSON, _ := json.Marshal(map[string]any{
-		"kind":    "envelope",
-		"version": 1,
-		"type":    "giphy-modal",
-		"data":    envData,
-	})
-
-	// Return with envelope marker for engine.go to extract.
-	result := fmt.Sprintf("Found a GIF for %q!\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", query, string(envJSON))
-	return textResult(result), nil
-}
-
 // --- envelope injection handlers ---
 
-func (st *SelfToolsTransport) callShowDocument(args map[string]any) (*ToolResult, error) {
-	title, _ := args["title"].(string)
-	content, _ := args["content"].(string)
-	if title == "" || content == "" {
-		return errorResult("title and content are required"), nil
-	}
-
-	// CW-20260419-0022 (UAT c19): the user expects LIVE data in rendered
-	// documents. Reject calls without documented sources so the LLM can't
-	// fabricate content from memory / pattern completion without at least
-	// declaring what it grounded on. This is a shallow check — it validates
-	// shape, not that the cited tool_use_ids were actually called in this
-	// generation. The deep check is tracked in the grounding-design ticket.
-	sources, sourcesErr := parseSourcesArg(args)
-	if sourcesErr != nil {
-		return errorResult(sourcesErr.Error()), nil
-	}
-
-	format := strArg(args, "format", "markdown")
-	downloadFilename := strArg(args, "download_filename", "")
-
-	envData := map[string]any{
-		"title":   title,
-		"content": content,
-		"format":  format,
-		"sources": sources,
-	}
-	if downloadFilename != "" {
-		envData["download_filename"] = downloadFilename
-		envData["download_enabled"] = true
-	}
-	if sections, _ := args["sections"].(string); sections != "" {
-		var sectionList []string
-		for _, s := range strings.Split(sections, ",") {
-			s = strings.TrimSpace(s)
-			if s != "" {
-				sectionList = append(sectionList, s)
-			}
-		}
-		envData["sections"] = sectionList
-	}
-
-	envJSON, _ := json.Marshal(map[string]any{
+// buildShowEnvelope assembles the envelope JSON shape emitted by
+// nanite_show_card. It propagates the optional `target` and `mode` args
+// onto top-level envelope fields so the FE's applyEnvelopePanelEffects can
+// route drawer-visibility from a tool result (CW-20260428-0007 / J8 v1).
+// Empty values are omitted so unknown-mode/unknown-target cases stay silent.
+//
+// renderTarget and renderTargetBlocked are resolved upstream by the caller
+// (callShowCard's trust gate) and stamped here so the wire shape stays in
+// one place. Callers without render-target plumbing pass empty strings.
+func buildShowEnvelope(envType string, data map[string]any, args map[string]any, renderTarget, renderTargetBlocked string) map[string]any {
+	env := map[string]any{
 		"kind":    "envelope",
 		"version": 1,
-		"type":    "document-viewer",
-		"data":    envData,
-	})
+		"type":    envType,
+		"data":    data,
+	}
+	if target, _ := args["target"].(string); target != "" {
+		env["target"] = target
+	}
+	if mode, _ := args["mode"].(string); mode != "" {
+		env["mode"] = mode
+	}
+	if renderTarget != "" {
+		env["render_target"] = renderTarget
+	}
+	if renderTargetBlocked != "" {
+		env["render_target_blocked"] = renderTargetBlocked
+	}
+	return env
+}
 
-	result := fmt.Sprintf("Document ready: %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", title, string(envJSON))
+// groundedShowCardTypes are the envelope types whose payload is prose the
+// agent renders from tool output. We require the `sources` arg for these
+// so the agent has to declare what it grounded the content on. Other
+// passive renderables (metric-card, table-card, etc.) carry structured
+// values that don't need this gate.
+var groundedShowCardTypes = map[string]bool{
+	"report-card":     true,
+	"document-viewer": true,
+}
+
+// callShowCard is the generic envelope-emission tool for the v1 passive-
+// renderable allow-list (CW-20260428-0019, A3 — Collab UI v1). It replaces
+// the per-type nanite_show_giphy / nanite_show_document / nanite_show_report
+// tools that existed pre-A3.
+//
+// The agent supplies the envelope `type` (any value in
+// envelope.PassiveRenderableTypes) plus a `data` object that this handler
+// validates against the per-type JSON Schema before stamping into the
+// envelope. target/mode propagation reuses buildShowEnvelope (Gap A).
+//
+// For envelope types whose body is agent-authored prose grounded in tool
+// output (report-card, document-viewer), `sources` is required and
+// validated via parseSourcesArg, then post-stamped onto data after schema
+// validation — the schemas don't currently model `sources` (and use
+// additionalProperties:false), so we add the field after the schema check
+// rather than relaxing the schemas.
+//
+// A2 — CW-20260428-0008. The handler resolves the envelope's render-target
+// here:
+//   - If the agent passed an explicit `render_target`, gate it through the
+//     same V1BuiltinPanelIDs / resolvePanelAccess trust check that protects
+//     panel_signal emission. Untrusted plugin-panel routing is dropped to
+//     inline + a render_target_blocked hint.
+//   - Otherwise read the per-type schema's `default_render_target` (built-
+//     in panel IDs only by convention) and stamp that.
+//
+// ctx is used by the trust resolver; passing context.Background() in tests
+// without TrustResolver/PanelLookup wired skips plugin-panel access (the
+// gate falls back to "untrusted" so the deny path is still exercised).
+func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	envType, _ := args["type"].(string)
+	if envType == "" {
+		return errorResult("type is required: pass an envelope type from " + strings.Join(envelope.PassiveRenderableTypes, ", ")), nil
+	}
+	if !envelope.IsPassiveRenderable(envType) {
+		return errorResult(fmt.Sprintf(
+			"envelope type %q is not addressable through nanite_show_card. Allow-list (v1): %s. "+
+				"Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), "+
+				"runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt, subagent-spawn-approval), "+
+				"and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths.",
+			envType, strings.Join(envelope.PassiveRenderableTypes, ", "))), nil
+	}
+
+	data, ok := args["data"].(map[string]any)
+	if !ok || data == nil {
+		return errorResult("data is required and must be a JSON object matching the per-type schema"), nil
+	}
+
+	if err := envelope.ValidateData(envType, data); err != nil {
+		return errorResult(fmt.Sprintf("data does not match the %q schema: %v", envType, err)), nil
+	}
+
+	if groundedShowCardTypes[envType] {
+		// CW-20260419-0022 (UAT c19): prose-bearing cards must declare what
+		// tool_use_ids ground their content. Shallow shape check; the deep
+		// "were these tool_use_ids actually called this turn" check is
+		// tracked separately.
+		sources, sourcesErr := parseSourcesArg(args)
+		if sourcesErr != nil {
+			return errorResult(sourcesErr.Error()), nil
+		}
+		data["sources"] = sources
+	}
+
+	if envType == "report-card" {
+		if _, has := data["generated_at"]; !has {
+			data["generated_at"] = time.Now().Format(time.RFC3339)
+		}
+	}
+
+	renderTarget, renderTargetBlocked := st.resolveShowCardRenderTarget(ctx, envType, args)
+
+	envJSON, _ := json.Marshal(buildShowEnvelope(envType, data, args, renderTarget, renderTargetBlocked))
+
+	label := envType
+	if title, _ := data["title"].(string); title != "" {
+		label = fmt.Sprintf("%s: %s", envType, title)
+	}
+	result := fmt.Sprintf("%s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", label, string(envJSON))
 	return textResult(result), nil
 }
 
-func (st *SelfToolsTransport) callShowReport(args map[string]any) (*ToolResult, error) {
-	title, _ := args["title"].(string)
-	metricsStr, _ := args["metrics"].(string)
-	if title == "" || metricsStr == "" {
-		return errorResult("title and metrics are required"), nil
+// resolveShowCardRenderTarget decides where the envelope should render. The
+// rules (A2 — CW-20260428-0008):
+//
+//   - Empty agent arg + no schema default → ("", "") inline.
+//   - Empty agent arg + schema default → (default, "") — schema defaults
+//     are limited to built-in IDs by convention so they bypass the gate.
+//   - Explicit agent value pointing at a built-in panel → (id, "") allowed.
+//   - Explicit agent value pointing at a plugin panel:
+//     * trust gate passes → (id, "") allowed.
+//     * trust gate fails  → ("", reason). Render falls back to inline and
+//       the FE surfaces the blocked-reason as a debug pill.
+//
+// The agent can pass render_target="" explicitly to force-inline a card
+// whose schema would otherwise route to a drawer; the empty string is
+// distinguishable from a missing arg here only because we read the raw
+// args map, but in practice both flow through the same "no override"
+// branch — that's the intended behavior.
+func (st *SelfToolsTransport) resolveShowCardRenderTarget(ctx context.Context, envType string, args map[string]any) (string, string) {
+	override, hasOverride := args["render_target"].(string)
+	if !hasOverride || override == "" {
+		return envelope.DefaultRenderTarget(envType), ""
 	}
-
-	var metrics []any
-	if err := json.Unmarshal([]byte(metricsStr), &metrics); err != nil {
-		return errorResult(fmt.Sprintf("invalid metrics JSON: %v", err)), nil
+	if V1BuiltinPanelIDs[override] {
+		return override, ""
 	}
-
-	// CW-20260419-0022 (UAT c19): see callShowDocument for rationale.
-	sources, sourcesErr := parseSourcesArg(args)
-	if sourcesErr != nil {
-		return errorResult(sourcesErr.Error()), nil
+	allowed, reason := st.resolvePanelAccess(ctx, override)
+	if allowed {
+		return override, ""
 	}
-
-	envData := map[string]any{
-		"title":        title,
-		"generated_at": time.Now().Format(time.RFC3339),
-		"metrics":      metrics,
-		"sources":      sources,
-	}
-	if summary, _ := args["summary"].(string); summary != "" {
-		envData["summary"] = summary
-	}
-	if actionsStr, _ := args["actions"].(string); actionsStr != "" {
-		var actions []any
-		if err := json.Unmarshal([]byte(actionsStr), &actions); err == nil {
-			envData["actions"] = actions
-		}
-	}
-
-	envJSON, _ := json.Marshal(map[string]any{
-		"kind":    "envelope",
-		"version": 1,
-		"type":    "report-card",
-		"data":    envData,
-	})
-
-	result := fmt.Sprintf("Report: %s\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", title, string(envJSON))
-	return textResult(result), nil
+	return "", reason
 }
 
 // --- todo/plan handlers ---
@@ -823,21 +742,40 @@ func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[strin
 		return errorResult("todo service not available"), nil
 	}
 	title, _ := args["title"].(string)
-	scope, _ := args["scope"].(string)
-	if title == "" || scope == "" {
-		return errorResult("title and scope are required"), nil
+	if title == "" {
+		return errorResult("title is required"), nil
+	}
+	scope := strArg(args, "scope", store.TodoScopeSession)
+	switch scope {
+	case store.TodoScopeTurn, store.TodoScopeSession, store.TodoScopeProject:
+	default:
+		return errorResult(fmt.Sprintf("scope must be one of turn, session, project (got %q)", scope)), nil
 	}
 
-	// CW-20260418 (c7 scope_id fix): auto-fill scope_id from ctx when the
-	// agent omits it. The LLM has no way to know its session_id so for
-	// scope=session we must source it from the context stamped by the
-	// chat tool executor. Workspace scope legitimately has no scope_id.
+	// D1 (CW-20260428-0014): resolve scope_id and project_id from the current
+	// session when the agent omits them. The LLM has no way to know its
+	// session_id or project_id; the chat tool executor stamps them on ctx.
 	scopeID := strArg(args, "scope_id", "")
-	if scope != "workspace" && scopeID == "" {
-		if sid := SessionIDFromContext(ctx); sid != "" {
-			scopeID = sid
-		} else {
-			return errorResult(fmt.Sprintf("scope_id is required for scope %q (no current session in context)", scope)), nil
+	projectID := strArg(args, "project_id", "")
+	sessionID := SessionIDFromContext(ctx)
+
+	switch scope {
+	case store.TodoScopeProject:
+		if projectID == "" {
+			projectID = st.resolveProjectIDFromSession(sessionID)
+		}
+		if projectID == "" {
+			return errorResult("scope=project requires project_id (current session has no project)"), nil
+		}
+		if scopeID == "" {
+			scopeID = projectID
+		}
+	default: // turn, session
+		if scopeID == "" {
+			if sessionID == "" {
+				return errorResult(fmt.Sprintf("scope_id is required for scope %q (no current session in context)", scope)), nil
+			}
+			scopeID = sessionID
 		}
 	}
 
@@ -845,6 +783,7 @@ func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[strin
 		Title:       title,
 		Scope:       scope,
 		ScopeID:     scopeID,
+		ProjectID:   projectID,
 		Priority:    strArg(args, "priority", "medium"),
 		Description: strArg(args, "description", ""),
 		ParentID:    strArg(args, "parent_id", ""),
@@ -859,6 +798,20 @@ func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[strin
 	st.notifyWorkChanged()
 	out, _ := json.Marshal(t)
 	return textResult(fmt.Sprintf("Created todo %q (id=%s, scope=%s)\n%s", t.Title, t.ID, t.Scope, string(out))), nil
+}
+
+// resolveProjectIDFromSession looks up the project_id for the given session.
+// Returns "" when sessionID is empty, the lookup fails, or the session has no
+// project. Used by self-tools to auto-fill project_id when the LLM omits it.
+func (st *SelfToolsTransport) resolveProjectIDFromSession(sessionID string) string {
+	if sessionID == "" || st.Store == nil {
+		return ""
+	}
+	sess, err := st.Store.GetSession(sessionID)
+	if err != nil || sess == nil {
+		return ""
+	}
+	return sess.ProjectID
 }
 
 func (st *SelfToolsTransport) callTodoUpdate(args map[string]any) (*ToolResult, error) {
@@ -904,24 +857,35 @@ func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]
 		return errorResult("todo service not available"), nil
 	}
 
-	// CW-20260418 (c7 scope_id fix): for scope=session, auto-fill scope_id
-	// from ctx when omitted so the emitted todo-list envelope carries the
-	// REAL session id. Otherwise TodoListCard lazy-fetches with scope_id=""
-	// and the drawer renders nothing. Listing itself still works fine with
-	// an empty filter, so this is best-effort — no error path.
+	// D1 (CW-20260428-0014): resolve scope_id / project_id from ctx when the
+	// agent omits them so the emitted todo-list envelope carries the real
+	// IDs. Otherwise TodoListCard lazy-fetches with empty filters and the
+	// drawer renders nothing. Listing itself still works fine with an empty
+	// filter, so this is best-effort — no error path.
 	scopeArg := strArg(args, "scope", "")
 	scopeIDArg := strArg(args, "scope_id", "")
-	if scopeArg == "session" && scopeIDArg == "" {
-		if sid := SessionIDFromContext(ctx); sid != "" {
-			scopeIDArg = sid
+	projectIDArg := strArg(args, "project_id", "")
+	sessionID := SessionIDFromContext(ctx)
+	switch scopeArg {
+	case store.TodoScopeSession, store.TodoScopeTurn:
+		if scopeIDArg == "" && sessionID != "" {
+			scopeIDArg = sessionID
+		}
+	case store.TodoScopeProject:
+		if projectIDArg == "" {
+			projectIDArg = st.resolveProjectIDFromSession(sessionID)
+		}
+		if scopeIDArg == "" {
+			scopeIDArg = projectIDArg
 		}
 	}
 
 	f := store.TodoFilter{
-		Scope:    scopeArg,
-		ScopeID:  scopeIDArg,
-		Status:   strArg(args, "status", ""),
-		Priority: strArg(args, "priority", ""),
+		Scope:     scopeArg,
+		ScopeID:   scopeIDArg,
+		ProjectID: projectIDArg,
+		Status:    strArg(args, "status", ""),
+		Priority:  strArg(args, "priority", ""),
 	}
 
 	todos, err := st.TodoStore.ListTodos(f)
@@ -1762,12 +1726,13 @@ func strArg(args map[string]any, key, def string) string {
 	return v
 }
 
-// parseSourcesArg decodes the `sources` argument for nanite_show_document /
-// nanite_show_report. Shape: JSON array of objects with at least a
-// `tool_use_id` or `tool_name` field. Enforces presence + non-empty + basic
-// per-entry shape — this is the cheap grounding check (CW-20260419-0022).
-// Validating that the cited tool_use_ids were actually invoked in this
-// generation is the deep check tracked separately.
+// parseSourcesArg decodes the `sources` argument for nanite_show_card when
+// type is report-card or document-viewer (the prose-bearing card types).
+// Shape: JSON array of objects with at least a `tool_use_id` or `tool_name`
+// field. Enforces presence + non-empty + basic per-entry shape — this is
+// the cheap grounding check (CW-20260419-0022). Validating that the cited
+// tool_use_ids were actually invoked in this generation is the deep check
+// tracked separately.
 func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 	raw, ok := args["sources"].(string)
 	if !ok || raw == "" {

@@ -20,6 +20,7 @@ import type {
   MCPServerConfig,
   Message,
   MessagePage,
+  Mode,
   ModelRecord,
   PermissionMode,
   PluginConfig,
@@ -65,10 +66,27 @@ import type {
   InspectorTurnSnapshot,
   Document,
   PinnedContent,
+  DrawerPinnedCard,
+  DrawerCardType,
+  Reminder,
+  AgentStateScope,
 } from "./types";
 import type { PluginRegistryResponse } from "./plugin-loader";
 
 const API_BASE = "/api";
+
+/**
+ * Thrown by api.pinDrawerCard when the backend returns 409 because the 10-pin
+ * cap is already full (C1, CW-20260428-0012). Callers catch this to surface
+ * the user-facing "10-tab limit; unpin one first" toast instead of a generic
+ * error message.
+ */
+export class DrawerPinCapError extends Error {
+  constructor() {
+    super("Drawer pin cap exceeded")
+    this.name = "DrawerPinCapError"
+  }
+}
 
 // The Go backend stores JSON fields as strings in SQLite.
 // These helpers parse them into typed forms for the UI and stringify on write.
@@ -346,7 +364,7 @@ export const api = {
   //   if (!res.ok) throw new Error(`Failed to delete agent mode: ${res.status}`)
   // },
 
-  // Mode
+  // Mode (legacy: agent-scoped AgentMode pipeline).
   switchMode: async (sessionId: string, mode: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`, {
       method: "POST",
@@ -354,6 +372,32 @@ export const api = {
       body: JSON.stringify({ mode }),
     });
     if (!res.ok) throw new Error(`Failed to switch mode: ${res.status}`);
+  },
+
+  // First-class reusable Modes (B1, CW-20260428-0009).
+  listModes: async (): Promise<Mode[]> => {
+    const res = await fetch(`${API_BASE}/modes`);
+    if (!res.ok) throw new Error(`Failed to list modes: ${res.status}`);
+    return res.json();
+  },
+
+  getSessionMode: async (sessionId: string): Promise<Mode | null> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`);
+    if (!res.ok) throw new Error(`Failed to get session mode: ${res.status}`);
+    return res.json();
+  },
+
+  setSessionMode: async (
+    sessionId: string,
+    body: { slug?: string; mode_id?: string } | null,
+  ): Promise<Mode | null> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    });
+    if (!res.ok) throw new Error(`Failed to set session mode: ${res.status}`);
+    return res.json();
   },
 
   // Slash Commands
@@ -483,7 +527,7 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`)
   },
 
-  // Pinned content (J11, CW-20260426-0009)
+  // Pinned content (J11, CW-20260426-0009; D1/D2, CW-20260428-0014/0015)
   listPins: async (sessionId: string): Promise<PinnedContent[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/pins`)
     if (!res.ok) throw new Error(`Failed to list pins: ${res.status}`)
@@ -493,6 +537,75 @@ export const api = {
   deletePin: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/pins/${id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error(`Failed to delete pin: ${res.status}`)
+  },
+
+  // Bottom-drawer pinned cards (C1, CW-20260428-0012)
+  // Returns 409 when the 10-pin cap is exceeded — surfaced as DrawerPinCapError
+  // so callers can render the "10-tab limit; unpin one first" toast.
+  listDrawerCards: async (sessionId: string): Promise<DrawerPinnedCard[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/drawer-cards`)
+    if (!res.ok) throw new Error(`Failed to list drawer cards: ${res.status}`)
+    return res.json()
+  },
+
+  pinDrawerCard: async (
+    sessionId: string,
+    card: { card_type: DrawerCardType; content_ref?: string; title?: string; payload?: string },
+  ): Promise<DrawerPinnedCard> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/drawer-cards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(card),
+    })
+    if (res.status === 409) {
+      throw new DrawerPinCapError()
+    }
+    if (!res.ok) throw new Error(`Failed to pin drawer card: ${res.status}`)
+    return res.json()
+  },
+
+  unpinDrawerCard: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/drawer-cards/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to unpin drawer card: ${res.status}`)
+  },
+
+  /** D2 — promote/demote a pin between session and project scope. */
+  updatePinScope: async (id: string, scope: AgentStateScope, projectId?: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/pins/${id}/scope`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, project_id: projectId ?? '' }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to update pin scope: ${res.status}`)
+    }
+  },
+
+  // Reminders (D1/D2, CW-20260428-0014/0015)
+  listReminders: async (sessionId: string): Promise<Reminder[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/reminders`)
+    if (!res.ok) throw new Error(`Failed to list reminders: ${res.status}`)
+    return res.json()
+  },
+
+  deleteReminder: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/reminders/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to delete reminder: ${res.status}`)
+  },
+
+  /** D2 — promote/demote a reminder between session and project scope. */
+  updateReminderScope: async (id: string, scope: AgentStateScope, projectId?: string): Promise<Reminder> => {
+    const res = await fetch(`${API_BASE}/reminders/${id}/scope`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, project_id: projectId ?? '' }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to update reminder scope: ${res.status}`)
+    }
+    return res.json()
   },
 
   // Compact
@@ -584,6 +697,25 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to list embedding providers: ${res.status}`);
     const body = await res.json();
     return body.providers ?? [];
+  },
+
+  // B3 (CW-20260428-0011): mode auto-switch preference. Empty string = unset.
+  getModeAutoSwitchPref: async (): Promise<{ pref: '' | 'always' | 'ask' | 'never' }> => {
+    const res = await fetch(`${API_BASE}/settings/mode-auto-switch`);
+    if (!res.ok) throw new Error(`Failed to get mode auto-switch pref: ${res.status}`);
+    return res.json();
+  },
+
+  setModeAutoSwitchPref: async (
+    pref: '' | 'always' | 'ask' | 'never',
+  ): Promise<{ pref: string }> => {
+    const res = await fetch(`${API_BASE}/settings/mode-auto-switch`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pref }),
+    });
+    if (!res.ok) throw new Error(`Failed to set mode auto-switch pref: ${res.status}`);
+    return res.json();
   },
 
   // Session Agents
@@ -712,6 +844,29 @@ export const api = {
   deleteSkill: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/skills/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`Failed to delete skill: ${res.status}`);
+  },
+
+  // E1 (CW-20260428-0016): dev-mode editor — fork an internal skill into
+  // ~/.nanite/skills/<slug>.md so the user can edit it. Backend rejects with
+  // 403 unless dev mode is on.
+  forkSkillToUser: async (
+    id: string,
+    body: { prompt?: string },
+  ): Promise<{ status: string; slug: string; path: string }> => {
+    const res = await fetch(`${API_BASE}/skills/${id}/fork-to-user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Failed to fork skill: ${res.status}`);
+    return res.json();
+  },
+
+  // E1: returns whether dev-mode is active (env var or developer_mode setting).
+  getDevMode: async (): Promise<{ dev_mode: boolean; env_flag: boolean }> => {
+    const res = await fetch(`${API_BASE}/dev-mode`);
+    if (!res.ok) throw new Error(`Failed to get dev mode: ${res.status}`);
+    return res.json();
   },
 
   // Agent Skills (returns Skill[], not a join-table type)
@@ -1074,6 +1229,25 @@ export const api = {
       method: 'DELETE',
     })
     if (!res.ok) throw new Error(`Failed to delete todo: ${res.status}`)
+  },
+
+  /** D2 — promote/demote a todo between session and project scope. */
+  updateTodoScope: async (
+    id: string,
+    scope: AgentStateScope,
+    scopeId: string,
+    projectId?: string,
+  ): Promise<Todo> => {
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/scope`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, scope_id: scopeId, project_id: projectId ?? '' }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to update todo scope: ${res.status}`)
+    }
+    return hydrateTodo(await res.json())
   },
 
   listTodoChildren: async (id: string): Promise<Todo[]> => {

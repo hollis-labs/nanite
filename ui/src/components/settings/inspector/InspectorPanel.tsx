@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
+import { ScopeChip } from '@/components/work/ScopeChip'
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -401,9 +402,10 @@ function RemindersSection({ reminders }: { reminders?: InspectorRemindersRecord 
             <p className="text-[10px] uppercase text-fg-muted font-medium mb-1">Fired this turn</p>
             <div className="space-y-1">
               {reminders.fired_this_turn.map((r) => (
-                <div key={r.id} className="rounded border border-green-300 bg-green-50 px-2 py-1 text-green-900">
+                <div key={r.id} className="rounded border border-success bg-success-muted px-2 py-1 text-fg">
                   <span className="font-medium">↑ </span>{r.text}
-                  <span className="ml-2 text-[9px] text-green-700 font-mono">{r.trigger_json}</span>
+                  {r.scope && <ScopeChip scope={r.scope} className="ml-2" />}
+                  <span className="ml-2 text-[9px] text-fg-muted font-mono">{r.trigger_json}</span>
                 </div>
               ))}
             </div>
@@ -416,6 +418,7 @@ function RemindersSection({ reminders }: { reminders?: InspectorRemindersRecord 
               {reminders.set_this_turn.map((r) => (
                 <div key={r.id} className="rounded border border-border-subtle bg-bg px-2 py-1 text-fg-muted">
                   <span className="font-mono text-[9px] text-fg-faint">{r.id}: </span>{r.text}
+                  {r.scope && <ScopeChip scope={r.scope} className="ml-2" />}
                   <span className="ml-2 text-[9px] font-mono text-fg-faint">{r.trigger_json}</span>
                 </div>
               ))}

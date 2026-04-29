@@ -143,6 +143,14 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     ),
     source: "core",
   },
+  "artifact-mini": {
+    component: lazy(() =>
+      import("@/components/chat/envelopes/ArtifactMiniCard").then((m) => ({
+        default: m.ArtifactMiniCard,
+      })),
+    ),
+    source: "core",
+  },
   "subagent-spawn-approval": {
     component: lazy(() =>
       import("@/components/chat/envelopes/SubagentSpawnApprovalCard").then((m) => ({

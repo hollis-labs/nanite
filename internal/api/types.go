@@ -33,6 +33,14 @@ type SwitchSessionModeRequest struct {
 	Mode string `json:"mode"`
 }
 
+// SetSessionModeRequest is the body for PATCH /api/sessions/{id}/mode (B1,
+// CW-20260428-0009). Either Slug or ModeID may be supplied; if both are
+// empty the session-mode pointer is cleared (fall-through to legacy AgentMode).
+type SetSessionModeRequest struct {
+	Slug   string `json:"slug,omitempty"`
+	ModeID string `json:"mode_id,omitempty"`
+}
+
 // --- Messages ---
 
 type SendMessageRequest struct {

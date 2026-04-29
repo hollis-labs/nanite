@@ -38,6 +38,9 @@ export interface Session {
   tags: string;
   last_activity: string;
   created_at: string;
+  // B1 (CW-20260428-0009): session-level mode pointer.
+  // Null = fall back to agent-assigned legacy AgentMode.
+  current_mode_id?: string | null;
 }
 
 export interface SessionWithMessages extends Session {
@@ -121,6 +124,20 @@ export interface AgentModeProfile {
   settings: string;
 }
 
+// First-class reusable Mode (B1, CW-20260428-0009).
+// Mirrors store.Mode in internal/store/modes.go.
+export interface Mode {
+  id: string;
+  slug: string;
+  name: string;
+  prompt_addendum: string;
+  tool_overrides: string;
+  settings: string;
+  is_builtin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // --- Chat Errors ---
 
 export type ChatErrorCode = "rate_limit" | "tool_error" | "provider_error" | "internal_error";
@@ -132,6 +149,19 @@ export interface ChatError {
   details?: Record<string, unknown>;
   timestamp: string;
   dismissed?: boolean;
+}
+
+/**
+ * B2 (CW-20260428-0010): non-binding mode-classifier signal emitted by the
+ * backend when the deterministic classifier disagrees with the session's
+ * current mode at high confidence. The FE stores this for B3 to consume
+ * (confirm-card / auto-apply); B2 itself does not act on it.
+ */
+export interface ModeSuggestion {
+  current: string;
+  suggested: string;
+  confidence: number;
+  signals: string[];
 }
 
 export interface StreamEvent {
@@ -148,7 +178,8 @@ export interface StreamEvent {
     | "circuit_open"
     | "session_takeover"
     | "approval_request"
-    | "plugin_envelope";
+    | "plugin_envelope"
+    | "mode_suggestion";
   /**
    * Phase classifies delta events by their narrative role (F4 / CW-20260419-0029).
    * "narration" — inter-iteration prose emitted between tool_use blocks.
@@ -375,7 +406,19 @@ export interface UserSettings {
   embedding_mode: 'disabled' | 'explicit';
   // Computed server-side; not persisted. Reflects live credential / reachability.
   embedding_status?: 'active' | 'disabled' | 'missing_credentials' | 'unreachable';
+  // B3 (CW-20260428-0011): user-level preference for auto-applying classifier
+  // mode suggestions. "" = unset (triggers first-use prompt).
+  mode_auto_switch_pref?: '' | 'always' | 'ask' | 'never';
 }
+
+// B3 (CW-20260428-0011): per-session override for auto-mode-switching.
+// Stored only in the FE chat store (not persisted) — resets on full reload.
+export type ModeAutoSwitchOverride = 'on' | 'off';
+
+// B3 (CW-20260428-0011): the resolved effective behavior for a session,
+// computed from the global pref + per-session override. Returned by
+// useChatStore.getAutoSwitchEffective.
+export type ModeAutoSwitchEffective = 'auto' | 'ask' | 'off' | 'firstUse';
 
 export interface EmbeddingProviderInfo {
   id: string;
@@ -520,6 +563,8 @@ export interface InspectorReminderItem {
   id: string;
   text: string;
   trigger_json: string;
+  /** D2 — scope tag rendered next to the reminder ID. */
+  scope?: AgentStateScope;
 }
 
 export interface InspectorRemindersRecord {
@@ -566,14 +611,33 @@ export interface Envelope {
   status?: { phase: string; progress: number };
   data?: Record<string, unknown>;
   /**
-   * J8 v1 — declarative drawer routing (CW-20260426-0006). When set, the
-   * envelope renderer opens the named drawer (using the agent_opened state
-   * for the dismiss machine) and renders the card into it instead of inline
-   * in the chat transcript. Known v1 IDs: `bottom_chat_drawer`, `work`,
-   * `workflows`. Plugin-shipped panel IDs are accepted for trusted callers.
-   * Omit to render inline in chat (current default behavior).
+   * J8 v1 — visibility hint (CW-20260426-0006). The optional panel ID to
+   * OPEN when this envelope arrives. Does NOT control where the envelope
+   * renders. Known v1 IDs: `bottom_chat_drawer`, `work`, `workflows`.
+   * Plugin-shipped panel IDs are accepted for trusted callers. Omit to
+   * skip the visibility signal. For routing the card itself, see
+   * `render_target` (A2). Both fields can be set independently.
    */
   target?: string;
+  /**
+   * A2 — placement hint (CW-20260428-0008). The optional panel ID where
+   * this envelope should RENDER. When set and the FE dismiss-machine
+   * permits, the envelope is pushed into the panel's inbox slot
+   * (`useLayoutStore.panelEnvelopes[render_target]`) and the chat shows a
+   * stub link instead of the full envelope. Empty / undefined = inline
+   * render (the historical default). The backend stamps this from the
+   * per-type schema's `default_render_target` when the agent did not
+   * provide one; explicit agent override wins.
+   */
+  render_target?: string;
+  /**
+   * A2 — debug indicator (CW-20260428-0008). When the backend rejected an
+   * explicit render_target at the trust gate, this carries a short reason
+   * code (`untrusted_plugin_panel`, `unknown_panel`, `untrusted`). The FE
+   * surfaces it as a small inline pill so the agent's blocked intent is
+   * visible. The envelope renders inline as a fallback.
+   */
+  render_target_blocked?: string;
   /**
    * J8 v1 — mode/status signal carried alongside the envelope
    * (CW-20260426-0006). When set, the FE resolves the mode against the
@@ -718,14 +782,64 @@ export interface Document {
   updated_at: string
 }
 
-// --- Pinned content (J11, CW-20260426-0009) ---
+// --- Pinned content (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
+
+export type AgentStateScope = 'turn' | 'session' | 'project'
 
 export interface PinnedContent {
   id: string
   session_id?: string | null
-  scope: 'turn' | 'session' | 'cross_session'
+  scope: AgentStateScope
+  /** Project ID — populated when scope='project'. */
+  project_id?: string
   content: string
   agent_id: string
+  created_at: string
+  updated_at: string
+}
+
+// --- Bottom drawer pinned cards (C1, CW-20260428-0012) ---
+//
+// User-pinned cards in the bottom chat drawer. Distinct from PinnedContent
+// (J11) which is the agent-context slot pin feature. card_type is one of
+// 'markdown' | 'diff' | 'image' | 'scratchpad' | 'artifact-mini' |
+// 'agent-envelope' (forward-compat strings tolerated). content_ref is a
+// type-specific pointer the FE resolves (envelope_id, artifact_id, etc.).
+// payload carries the renderable snapshot (e.g. JSON envelope) so pins survive
+// reload even when the source row has been GC'd.
+
+export type DrawerCardType =
+  | 'markdown'
+  | 'diff'
+  | 'image'
+  | 'scratchpad'
+  | 'artifact-mini'
+  | 'agent-envelope'
+  | (string & {})
+
+export interface DrawerPinnedCard {
+  id: string
+  session_id: string
+  card_type: DrawerCardType
+  content_ref: string
+  title: string
+  payload: string
+  position: number
+  created_at: string
+}
+
+// --- Reminders (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
+
+export interface Reminder {
+  id: string
+  session_id: string
+  scope: AgentStateScope
+  /** Project ID — populated when scope='project'. */
+  project_id?: string
+  text: string
+  /** Raw JSON trigger blob — see internal/reminders.Trigger. */
+  trigger_json: string
+  fired_at?: string | null
   created_at: string
   updated_at: string
 }
@@ -850,8 +964,11 @@ export type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 
 export interface Todo {
   id: string
-  scope: 'workspace' | 'project' | 'session'
+  /** D1 (CW-20260428-0014): workspace dropped, turn added. */
+  scope: AgentStateScope
   scope_id: string
+  /** Project pointer — populated when scope='project'. */
+  project_id?: string
   parent_id?: string
   title: string
   description: string
@@ -867,6 +984,8 @@ export interface Todo {
 export interface TodoFilter {
   scope?: string
   scope_id?: string
+  /** D1 — convenience filter on project_id directly. */
+  project_id?: string
   status?: TodoStatus
   priority?: TodoPriority
   parent_id?: string
@@ -1128,6 +1247,15 @@ export interface Skill {
   prompt?: string;   // markdown body; present for file-based skills
   created_at: string;
   updated_at: string;
+  // J7 ingestion metadata.
+  source?: string;        // "builtin", "user", "project", "plugin", "claude"
+  imported_at?: string;
+  origin_system?: string;
+  format?: string;
+  version?: number;
+  // E2 (CW-20260428-0017): mode binding. JSON string array of mode IDs;
+  // empty / "[]" / undefined means "available in every mode".
+  mode_ids?: string;
 }
 
 // --- Prompt Templates ---

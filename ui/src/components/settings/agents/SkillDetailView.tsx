@@ -1,7 +1,9 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
   Code2,
   Settings,
+  GitFork,
   Loader2,
   Plus,
   Server,
@@ -21,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DynamicIcon, IconPicker } from "@/components/ui/icon-picker";
+import { api } from "@/lib/api";
 import type { Skill, ToolBinding } from "@/lib/types";
 
 // ─── Constants ─────────────────────────────────────────────────────
@@ -232,6 +235,26 @@ export function SkillDetailView({
   const [editField, setEditField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const queryClient = useQueryClient();
+
+  // E1 (CW-20260428-0016): the dev-mode flag enables the inline-edit /
+  // fork affordances on internal skills. Cached at the SettingsPage level
+  // by SkillsBrowser, but we still query here so deep-links work.
+  const { data: devModeData } = useQuery({
+    queryKey: ["dev-mode"],
+    queryFn: api.getDevMode,
+  });
+  const devMode = devModeData?.dev_mode ?? false;
+  const skillSource = (skill as { source?: string }).source ?? "";
+  const isInternal =
+    skillSource === "" || skillSource === "builtin" || skillSource === "seed";
+
+  const forkMutation = useMutation({
+    mutationFn: (prompt?: string) => api.forkSkillToUser(skill.id, { prompt }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+  });
 
   const startEditing = useCallback((field: string, value: string) => {
     setEditField(field);
@@ -363,6 +386,22 @@ export function SkillDetailView({
             <p className="text-xs text-fg-muted font-mono truncate mt-0.5">{skill.slug}</p>
           </div>
         </div>
+        {devMode && isInternal && (
+          <Button
+            onClick={() => forkMutation.mutate(skill.prompt)}
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={forkMutation.isPending}
+          >
+            {forkMutation.isPending ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <GitFork className="w-3.5 h-3.5" />
+            )}
+            Fork to user override
+          </Button>
+        )}
         {!skill.is_builtin && (
           <Button
             onClick={() => setShowDeleteConfirm(true)}
@@ -374,6 +413,27 @@ export function SkillDetailView({
           </Button>
         )}
       </div>
+
+      {/* E1: dev-mode editor banner. Surfaced on internal skills when the
+          NANITE_DEVMODE env var or developer_mode setting is on; the fork
+          action is the actual affordance, this just sets expectations. */}
+      {devMode && isInternal && (
+        <div className="rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning-fg flex items-start gap-2">
+          <GitFork className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <div className="space-y-0.5">
+            <p className="font-medium">Editing internal skill — saves create a user override</p>
+            <p className="text-fg-muted text-[11px]">
+              The Fork button copies this skill into <span className="font-mono">~/.nanite/skills/{skill.slug}.md</span>;
+              folder-drop ingestion picks it up on next discovery.
+            </p>
+          </div>
+        </div>
+      )}
+      {forkMutation.data && (
+        <div className="rounded-lg border border-status-ok/40 bg-status-ok/5 px-3 py-2 text-xs text-fg-secondary">
+          Forked to <span className="font-mono">{forkMutation.data.path}</span>. Restart Nanite or wait for next ingest cycle.
+        </div>
+      )}
 
       {/* Tabs */}
       <Tabs defaultValue="details">

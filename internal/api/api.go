@@ -67,8 +67,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Retry (circuit breaker reset + re-generate)
 	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)
 
-	// Session mode switching
+	// Session mode switching (legacy: agent-scoped AgentMode pipeline).
 	mux.HandleFunc("POST /api/sessions/{id}/mode", a.handleSwitchSessionMode)
+	// Session-level mode pointer (B1, CW-20260428-0009): first-class Mode
+	// resolved via sessions.current_mode_id → modes.id.
+	mux.HandleFunc("GET /api/sessions/{id}/mode", a.handleGetSessionMode)
+	mux.HandleFunc("PATCH /api/sessions/{id}/mode", a.handleSetSessionMode)
 
 	// Agents
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)
@@ -111,6 +115,20 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Pinned content (J11, CW-20260426-0009)
 	mux.HandleFunc("GET /api/sessions/{id}/pins", a.handleListPins)
 	mux.HandleFunc("DELETE /api/pins/{id}", a.handleDeletePin)
+	// D2 (CW-20260428-0015): pin scope promote/demote.
+	mux.HandleFunc("PATCH /api/pins/{id}/scope", a.handleUpdatePinScope)
+
+	// Reminders (D1 / D2, CW-20260428-0014/0015) — exposes session +
+	// project-scoped reminders so the FE Work panel can list / promote /
+	// demote / delete them. Originating tool surface is nanite_set_reminder.
+	mux.HandleFunc("GET /api/sessions/{id}/reminders", a.handleListReminders)
+	mux.HandleFunc("DELETE /api/reminders/{id}", a.handleDeleteReminder)
+	mux.HandleFunc("PATCH /api/reminders/{id}/scope", a.handleUpdateReminderScope)
+
+	// Bottom-drawer pinned cards (C1, CW-20260428-0012)
+	mux.HandleFunc("GET /api/sessions/{id}/drawer-cards", a.handleListBottomDrawerCards)
+	mux.HandleFunc("POST /api/sessions/{id}/drawer-cards", a.handlePinBottomDrawerCard)
+	mux.HandleFunc("DELETE /api/drawer-cards/{id}", a.handleUnpinBottomDrawerCard)
 
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
@@ -167,6 +185,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/skills/{id}", a.handleGetSkill)
 	mux.HandleFunc("PUT /api/skills/{id}", a.handleUpdateSkill)
 	mux.HandleFunc("DELETE /api/skills/{id}", a.handleDeleteSkill)
+	// E1 (CW-20260428-0016): dev-mode "fork to user override" — copies an
+	// internal skill body into ~/.nanite/skills/<slug>.md.
+	mux.HandleFunc("POST /api/skills/{id}/fork-to-user", a.handleForkSkillToUser)
+	mux.HandleFunc("GET /api/dev-mode", a.handleGetDevMode)
 	mux.HandleFunc("GET /api/agents/{id}/skills", a.handleListAgentSkills)
 	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleAssignAgentSkill)
 	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRemoveAgentSkill)
@@ -232,6 +254,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
 	mux.HandleFunc("GET /api/settings/embedding/providers", a.handleEmbeddingProviders)
+	// B3 (CW-20260428-0011): dedicated routes for mode auto-switch pref so
+	// the FE can read/update without round-tripping the full settings doc.
+	mux.HandleFunc("GET /api/settings/mode-auto-switch", a.handleGetModeAutoSwitch)
+	mux.HandleFunc("PATCH /api/settings/mode-auto-switch", a.handleSetModeAutoSwitch)
 
 	// Plugin Config (prefixed to avoid collision with plugin CRUD routes)
 	mux.HandleFunc("GET /api/plugin-config/{id}", a.handleGetPluginConfig)
@@ -299,6 +325,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/todos/{id}", a.handleUpdateTodo)
 	mux.HandleFunc("DELETE /api/todos/{id}", a.handleDeleteTodo)
 	mux.HandleFunc("GET /api/todos/{id}/children", a.handleListTodoChildren)
+	// D2 (CW-20260428-0015): todo scope promote/demote.
+	mux.HandleFunc("PATCH /api/todos/{id}/scope", a.handleUpdateTodoScope)
 
 	// Plans (internal plan system)
 	mux.HandleFunc("GET /api/plans", a.handleListPlans)

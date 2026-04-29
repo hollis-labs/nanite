@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import { resolveIcon } from "@/lib/icons";
 import type { SlashCommandDef } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
+import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useWorkStore } from "@/stores/useWorkStore";
 import { ComposerToolbar } from "./ComposerToolbar";
@@ -114,6 +115,11 @@ export function ChatComposer({
   const [shellRunning, setShellRunning] = useState(false);
   const workToast = useWorkStore((s) => s.toastMessage);
   const dismissWorkToast = useWorkStore((s) => s.dismissToast);
+  // B3 (CW-20260428-0011): chat-scoped toast (e.g. mode auto-switch confirmation).
+  // The per-session auto-switch override toggle itself lives in ComposerToolbar
+  // (placed next to the shell-mode toggle); this parent only renders the toast.
+  const chatToast = useChatStore((s) => s.chatToast);
+  const dismissChatToast = useChatStore((s) => s.dismissChatToast);
   const { flushIfDirty } = useWorkSync();
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -230,9 +236,19 @@ export function ChatComposer({
         default: {
           if (!activeSessionId) return;
           try {
-            const result = await api.executeCommand(cmd.name, activeSessionId, "");
+            const result = await api.executeCommand(cmd.name, activeSessionId, cmdArgs);
             if (result.action === "message") {
               reloadMessages?.();
+            } else if (
+              result.action === "client" &&
+              typeof result.content === "string" &&
+              result.content.startsWith("mode_switched:")
+            ) {
+              // B2 (CW-20260428-0010): /mode, /chat, /plan, /work succeeded.
+              // Invalidate session-mode + session queries so the chip and any
+              // session-derived UI refresh from the new current_mode_id.
+              void queryClient.invalidateQueries({ queryKey: ["session-mode", activeSessionId] });
+              void queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
             } else if (result.action === "skill") {
               const parts = (result.content ?? "").trim().split(/\s+/);
               const slug = parts[0];
@@ -407,6 +423,13 @@ export function ChatComposer({
     const timer = setTimeout(() => dismissWorkToast(), 3000);
     return () => clearTimeout(timer);
   }, [workToast, dismissWorkToast]);
+
+  // B3 (CW-20260428-0011): autodismiss chat-scoped toast after 3s, mirroring workToast.
+  useEffect(() => {
+    if (!chatToast) return;
+    const timer = setTimeout(() => dismissChatToast(), 3000);
+    return () => clearTimeout(timer);
+  }, [chatToast, dismissChatToast]);
 
   const [pendingShellCommand, setPendingShellCommand] = useState<string | null>(null);
 
@@ -589,6 +612,34 @@ export function ChatComposer({
             <button
               type="button"
               onClick={dismissWorkToast}
+              aria-label="Dismiss"
+              className="rounded-[4px] p-0.5 text-fg-faint transition-colors hover:bg-surface-hover hover:text-fg-secondary"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+
+        {/* B3 (CW-20260428-0011): chat-scoped toast — used for auto-mode-switch */}
+        {chatToast && (
+          <div
+            className={`flex items-center gap-2 border-b border-border-subtle bg-surface px-3 py-2 text-xs ${
+              chatToast.tone === 'success'
+                ? 'shadow-[inset_3px_0_0_0_var(--color-success)]'
+                : 'shadow-[inset_3px_0_0_0_var(--color-info)]'
+            }`}
+          >
+            <span
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-white ${
+                chatToast.tone === 'success' ? 'bg-success' : 'bg-info'
+              }`}
+            >
+              <Check className="h-2.5 w-2.5" />
+            </span>
+            <span className="flex-1 text-fg">{chatToast.message}</span>
+            <button
+              type="button"
+              onClick={dismissChatToast}
               aria-label="Dismiss"
               className="rounded-[4px] p-0.5 text-fg-faint transition-colors hover:bg-surface-hover hover:text-fg-secondary"
             >

@@ -72,7 +72,23 @@ func NewCommandRegistry() *CommandRegistry {
 		{SlashCommand{Name: "compact", Description: "Compact session context", Category: "session", Source: "builtin"}, nil},
 		{SlashCommand{Name: "agent", Description: "Switch primary agent", Category: "agent", Source: "builtin"}, nil},
 		{SlashCommand{Name: "model", Description: "Switch model", Category: "config", Source: "builtin"}, nil},
-		{SlashCommand{Name: "mode", Description: "Switch agent mode", Category: "agent", Source: "builtin"}, nil},
+		// /mode is registered without a handler at construction time; the
+		// concrete handler is bound by RegisterModeCommands once the store
+		// is available (B2 / CW-20260428-0010). The placeholder keeps the
+		// command discoverable in /help for environments that haven't yet
+		// wired the mode setter.
+		{SlashCommand{
+			Name:        "mode",
+			Description: "Switch session mode (chat, plan, work, …)",
+			Category:    "mode",
+			Source:      "builtin",
+			Args: []CommandArg{{
+				Name:        "slug",
+				Description: "Mode slug (chat, plan, work, …)",
+				Required:    true,
+				Type:        "string",
+			}},
+		}, nil},
 		{SlashCommand{Name: "memory", Description: "Browse and manage memories", Category: "tools", Source: "builtin"}, nil},
 		// J10 (CW-20260426-0008): scratchpad slash command + aliases.
 		// All three names are registered so the user can type any of them.

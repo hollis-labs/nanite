@@ -4,7 +4,10 @@
   "title": "Report Card",
   "description": "A metrics report with summary and action buttons.",
   "type": "object",
-  "required": ["title", "metrics"],
+  "required": [
+    "title",
+    "metrics"
+  ],
   "properties": {
     "title": {
       "type": "string",
@@ -18,12 +21,23 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["label", "value"],
+        "required": [
+          "label",
+          "value"
+        ],
         "properties": {
-          "label": { "type": "string" },
-          "value": { "type": "string" },
-          "percent": { "type": "number" },
-          "color": { "type": "string" }
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "percent": {
+            "type": "number"
+          },
+          "color": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
@@ -37,16 +51,26 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["label", "action"],
+        "required": [
+          "label",
+          "action"
+        ],
         "properties": {
-          "label": { "type": "string" },
-          "action": { "type": "string" },
-          "id": { "type": "string" }
+          "label": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
       "description": "Action buttons shown at the bottom."
     }
   },
+  "default_render_target": "bottom_chat_drawer",
   "additionalProperties": false
 }

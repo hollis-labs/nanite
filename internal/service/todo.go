@@ -14,6 +14,7 @@ type TodoService interface {
 	GetTodo(ctx context.Context, id string) (*store.Todo, error)
 	ListTodos(ctx context.Context, f store.TodoFilter) ([]store.Todo, error)
 	UpdateTodo(ctx context.Context, id string, updates TodoUpdates) (*store.Todo, error)
+	UpdateTodoScope(ctx context.Context, id, scope, scopeID, projectID string) (*store.Todo, error)
 	DeleteTodo(ctx context.Context, id string) error
 	ListTodoChildren(ctx context.Context, parentID string) ([]store.Todo, error)
 
@@ -72,13 +73,16 @@ func (s *todoServiceImpl) CreateTodo(_ context.Context, t *store.Todo) error {
 		return fmt.Errorf("title is required")
 	}
 	if t.Scope == "" {
-		return fmt.Errorf("scope is required")
+		t.Scope = store.TodoScopeSession
 	}
 	if !validScope(t.Scope) {
-		return fmt.Errorf("invalid scope %q: must be workspace, project, or session", t.Scope)
+		return fmt.Errorf("invalid scope %q: must be turn, session, or project", t.Scope)
 	}
-	if t.Scope != "workspace" && t.ScopeID == "" {
+	if t.ScopeID == "" {
 		return fmt.Errorf("scope_id is required for scope %q", t.Scope)
+	}
+	if t.Scope == store.TodoScopeProject && t.ProjectID == "" {
+		t.ProjectID = t.ScopeID
 	}
 	// Validate parent exists if specified.
 	if t.ParentID != "" {
@@ -137,6 +141,27 @@ func (s *todoServiceImpl) UpdateTodo(_ context.Context, id string, updates TodoU
 	return existing, nil
 }
 
+// UpdateTodoScope promotes/demotes a todo between session and project scope.
+// Powers the "Promote to project" / "Demote to session" actions in D2.
+func (s *todoServiceImpl) UpdateTodoScope(_ context.Context, id, scope, scopeID, projectID string) (*store.Todo, error) {
+	if !validScope(scope) {
+		return nil, fmt.Errorf("invalid scope %q: must be turn, session, or project", scope)
+	}
+	if scope == store.TodoScopeProject && projectID == "" {
+		return nil, fmt.Errorf("project_id is required for scope=project")
+	}
+	if scope != store.TodoScopeProject && scopeID == "" {
+		return nil, fmt.Errorf("scope_id is required for scope=%q", scope)
+	}
+	if scope == store.TodoScopeProject && scopeID == "" {
+		scopeID = projectID
+	}
+	if err := s.todos.UpdateTodoScope(id, scope, scopeID, projectID); err != nil {
+		return nil, err
+	}
+	return s.todos.GetTodo(id)
+}
+
 func (s *todoServiceImpl) DeleteTodo(_ context.Context, id string) error {
 	return s.todos.DeleteTodo(id)
 }
@@ -154,7 +179,7 @@ func (s *todoServiceImpl) CreatePlan(_ context.Context, p *store.Plan) error {
 	if p.Scope == "" {
 		return fmt.Errorf("scope is required")
 	}
-	if !validScope(p.Scope) {
+	if !validPlanScope(p.Scope) {
 		return fmt.Errorf("invalid scope %q: must be workspace, project, or session", p.Scope)
 	}
 	if p.Scope != "workspace" && p.ScopeID == "" {
@@ -254,7 +279,16 @@ func (s *todoServiceImpl) ApprovePlan(_ context.Context, id string, createTodos 
 
 // --- helpers ---
 
+// validScope returns true for the D1 todo scope set (turn|session|project).
+// Workspace scope was retired in migration 043.
 func validScope(s string) bool {
+	return s == store.TodoScopeTurn || s == store.TodoScopeSession || s == store.TodoScopeProject
+}
+
+// validPlanScope retains the legacy plan scope set (workspace|project|session).
+// Plans were intentionally left out of D1's scope refactor (Out of scope:
+// "Backfill logic" — plans aren't on the D1 spec).
+func validPlanScope(s string) bool {
 	return s == "workspace" || s == "project" || s == "session"
 }
 

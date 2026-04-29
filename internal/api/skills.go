@@ -2,9 +2,39 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
+	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// devModeEnabled returns true when either the NANITE_DEVMODE env var is set
+// to a truthy value (1/true/yes/on) or the user_settings.developer_mode flag
+// is enabled. E1 (CW-20260428-0016) gates the inline-edit affordances on
+// internal skills behind this check.
+func (a *API) devModeEnabled(r *http.Request) bool {
+	if envDevModeOn() {
+		return true
+	}
+	if a.Services.Store == nil {
+		return false
+	}
+	us, err := a.Services.Store.GetUserSettings()
+	if err != nil || us == nil {
+		return false
+	}
+	return us.DeveloperMode
+}
+
+func envDevModeOn() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_DEVMODE")))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
 
 func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	var skills []store.Skill
@@ -181,4 +211,77 @@ func (a *API) handleRemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// handleGetDevMode returns whether the dev-mode editor affordances are
+// active. E1 (CW-20260428-0016): the FE checks this on render to decide
+// whether to surface the "edit internal skill" path.
+func (a *API) handleGetDevMode(w http.ResponseWriter, r *http.Request) {
+	a.jsonResp(w, http.StatusOK, map[string]any{
+		"dev_mode": a.devModeEnabled(r),
+		"env_flag": envDevModeOn(),
+	})
+}
+
+// ForkSkillToUserRequest carries the new prompt body for a "fork to user
+// override" save. The slug is derived from the URL path; the source skill
+// must exist (file-based or DB) and the request must come from a dev-mode
+// session — otherwise a 403 is returned.
+type ForkSkillToUserRequest struct {
+	Prompt string `json:"prompt"`
+}
+
+// handleForkSkillToUser writes a markdown skill file at
+// ~/.nanite/skills/<slug>.md so the user gets an editable copy of an
+// internal skill. The next discovery cycle will pick it up and the J7
+// AutoIngest pipeline overrides the DB row with the user version (since
+// user-source files take priority over builtin in Discover()).
+//
+// Refuses without dev mode. Path param {id} accepts either a real skill
+// ID (DB UUID) or the deterministic file-based "file-{slug}" form.
+func (a *API) handleForkSkillToUser(w http.ResponseWriter, r *http.Request) {
+	if !a.devModeEnabled(r) {
+		a.errorResp(w, http.StatusForbidden, "dev mode is not enabled — set NANITE_DEVMODE=1 or developer_mode=true")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		a.errorResp(w, http.StatusBadRequest, "skill id is required")
+		return
+	}
+	sk, err := a.Services.Skills.Get(r.Context(), id)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sk == nil {
+		a.errorResp(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	var req ForkSkillToUserRequest
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	body := req.Prompt
+	if strings.TrimSpace(body) == "" {
+		// Default to the existing prompt when no body is supplied — equivalent
+		// to "fork as-is for me to edit later via the file system".
+		body = sk.Prompt
+	}
+
+	target, err := skill.WriteUserSkillFile("", sk.Slug, body)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusOK, map[string]any{
+		"status":     "forked",
+		"slug":       sk.Slug,
+		"path":       target,
+		"reload":     "restart nanite or wait for next discovery cycle to re-ingest",
+		"user_owned": true,
+	})
 }

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import type { Todo, TodoFilter, TodoStatus } from '@/lib/types'
+import type { Todo, TodoFilter, TodoStatus, AgentStateScope } from '@/lib/types'
 import { useWorkStore } from '@/stores/useWorkStore'
 
 export function useTodos(filter: TodoFilter) {
@@ -52,6 +52,27 @@ export function useDeleteTodo() {
 
   return useMutation({
     mutationFn: (id: string) => api.deleteTodo(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['todos'] })
+    },
+  })
+}
+
+// D2 (CW-20260428-0015): promote/demote a todo between session and project scope.
+export function useUpdateTodoScope() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      scope,
+      scopeId,
+      projectId,
+    }: {
+      id: string
+      scope: AgentStateScope
+      scopeId: string
+      projectId?: string
+    }) => api.updateTodoScope(id, scope, scopeId, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['todos'] })
     },

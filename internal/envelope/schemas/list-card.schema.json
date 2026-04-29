@@ -4,7 +4,9 @@
   "title": "List Card",
   "description": "An ordered or unordered list with optional item actions.",
   "type": "object",
-  "required": ["items"],
+  "required": [
+    "items"
+  ],
   "properties": {
     "title": {
       "type": "string",
@@ -14,17 +16,32 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["label"],
+        "required": [
+          "label"
+        ],
         "properties": {
-          "label": { "type": "string" },
-          "description": { "type": "string" },
-          "icon": { "type": "string" },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
           "action": {
             "type": "object",
-            "required": ["label", "type"],
+            "required": [
+              "label",
+              "type"
+            ],
             "properties": {
-              "label": { "type": "string" },
-              "type": { "type": "string" }
+              "label": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -38,5 +55,6 @@
       "description": "Whether to show numbered list. Defaults to false."
     }
   },
+  "default_render_target": "bottom_chat_drawer",
   "additionalProperties": false
 }

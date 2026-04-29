@@ -4,7 +4,10 @@
   "title": "Diff Card",
   "description": "A side-by-side before/after comparison.",
   "type": "object",
-  "required": ["before", "after"],
+  "required": [
+    "before",
+    "after"
+  ],
   "properties": {
     "title": {
       "type": "string",
@@ -12,29 +15,47 @@
     },
     "before": {
       "type": "object",
-      "required": ["label", "content"],
+      "required": [
+        "label",
+        "content"
+      ],
       "properties": {
-        "label": { "type": "string" },
-        "content": { "type": "string" }
+        "label": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
       },
       "additionalProperties": false,
       "description": "The before state."
     },
     "after": {
       "type": "object",
-      "required": ["label", "content"],
+      "required": [
+        "label",
+        "content"
+      ],
       "properties": {
-        "label": { "type": "string" },
-        "content": { "type": "string" }
+        "label": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
       },
       "additionalProperties": false,
       "description": "The after state."
     },
     "format": {
       "type": "string",
-      "enum": ["text", "code"],
+      "enum": [
+        "text",
+        "code"
+      ],
       "description": "Content format. Defaults to text."
     }
   },
+  "default_render_target": "bottom_chat_drawer",
   "additionalProperties": false
 }

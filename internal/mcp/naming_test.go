@@ -160,6 +160,44 @@ func TestManager_UniformIndex_CollisionDisambiguates(t *testing.T) {
 	}
 }
 
+// TestManager_UniformIndex_SelfServerKeepsBareName verifies that the
+// in-process self transport's own `nanite_*` tools are NOT force-prefixed
+// by the reserved-namespace defense. They must land at their bare names —
+// agents invoke them by that name, and any rename makes them unreachable.
+//
+// Regression cover for the self-tool dispatch breakage introduced when
+// the namespace defense was first added without exempting the self server.
+func TestManager_UniformIndex_SelfServerKeepsBareName(t *testing.T) {
+	mgr := NewManager()
+	tools := []Tool{
+		{Name: "nanite_panel_open"},
+		{Name: "nanite_todo_list"},
+		{Name: "nanite_pin"},
+	}
+	if err := mgr.AddServer("self", &fakeTieredTransport{tools: tools}, TierBuiltin); err != nil {
+		t.Fatalf("AddServer self: %v", err)
+	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+
+	for _, want := range []string{"nanite_panel_open", "nanite_todo_list", "nanite_pin"} {
+		srv, orig, ok := mgr.ToolAttribution(want)
+		if !ok {
+			t.Errorf("%s: missing from uniform index — self-tools must keep bare names", want)
+			continue
+		}
+		if srv != "self" || orig != want {
+			t.Errorf("%s: attribution = (%q, %q), want (\"self\", %q)", want, srv, orig, want)
+		}
+	}
+	for _, forbidden := range []string{"self_nanite_panel_open", "self_nanite_todo_list", "self_nanite_pin"} {
+		if _, _, ok := mgr.ToolAttribution(forbidden); ok {
+			t.Errorf("%s should not exist — self-server tools take the bare slot", forbidden)
+		}
+	}
+}
+
 // TestManager_UniformIndex_ReservedNamespaceForcesPrefix verifies that
 // a third-party MCP publishing a `nanite_*` tool gets force-prefixed
 // (the bare slot is NOT taken; the disambiguated slot is used instead).

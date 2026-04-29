@@ -224,6 +224,75 @@ var BuiltinModes = []Mode{
 		Name:           "Writer",
 		PromptAddendum: "You are in writer mode. Focus on prose quality, narrative structure, clarity, and voice. Help with drafting, editing, and refining written content. Be direct about what works and what doesn't.",
 	},
+	{
+		Slug:           "chat",
+		Name:           "Chat",
+		PromptAddendum: "You are in chat mode. Default conversational mode — be helpful, ask clarifying questions when needed, and avoid taking large actions without user confirmation.",
+	},
+	{
+		Slug:           "plan",
+		Name:           "Plan",
+		PromptAddendum: "You are in plan mode. Help the user think through approaches, break work into steps, and produce structured plans before any implementation. Surface tradeoffs and ask before locking in design decisions.",
+	},
+	{
+		Slug:           "work",
+		Name:           "Work",
+		PromptAddendum: "You are in work mode. Execute on agreed plans efficiently. Make changes, run verification, and report concise results. Default to minimal output and trust the user's prior context.",
+	},
+}
+
+// SetSessionMode points a session at a specific mode by ID. An empty modeID
+// clears the pointer (equivalent to ClearSessionMode). Use this to flip a
+// session into chat/plan/work or any custom mode at the session scope; the
+// agent-scoped legacy AgentMode pipeline is unaffected. (B1, CW-20260428-0009)
+func (s *Store) SetSessionMode(sessionID, modeID string) error {
+	if modeID == "" {
+		return s.ClearSessionMode(sessionID)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(
+		`UPDATE sessions SET current_mode_id = ?, updated_at = ? WHERE id = ?`,
+		modeID, now, sessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("set session %s mode: %w", sessionID, err)
+	}
+	return nil
+}
+
+// ClearSessionMode removes the session-level mode pointer, restoring the
+// fall-through to the agent-scoped legacy AgentMode. (B1, CW-20260428-0009)
+func (s *Store) ClearSessionMode(sessionID string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(
+		`UPDATE sessions SET current_mode_id = NULL, updated_at = ? WHERE id = ?`,
+		now, sessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear session %s mode: %w", sessionID, err)
+	}
+	return nil
+}
+
+// GetSessionMode resolves the session's current Mode by joining sessions →
+// modes. Returns (nil, nil) when the session has no current_mode_id (caller
+// should fall back to the legacy AgentMode pipeline). (B1, CW-20260428-0009)
+func (s *Store) GetSessionMode(sessionID string) (*Mode, error) {
+	var m Mode
+	err := s.DB.QueryRow(
+		`SELECT m.id, m.slug, m.name, m.prompt_addendum, m.tool_overrides, m.settings, m.is_builtin, m.created_at, m.updated_at
+		 FROM modes m
+		 JOIN sessions s ON s.current_mode_id = m.id
+		 WHERE s.id = ?`, sessionID,
+	).Scan(&m.ID, &m.Slug, &m.Name, &m.PromptAddendum, &m.ToolOverrides, &m.Settings, &m.IsBuiltin,
+		&m.CreatedAt, &m.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get session %s mode: %w", sessionID, err)
+	}
+	return &m, nil
 }
 
 // SeedBuiltinModes inserts built-in modes if they don't exist.

@@ -91,6 +91,13 @@ core:
     component: components/chat/envelopes/primitives/DiffCard
     export: DiffCard
 
+  # C2 (CW-20260428-0013) — compact downloadable-artifact card surfaced in the
+  # bottom chat drawer. Default render-target = bottom_chat_drawer (set in
+  # the schema). Auto-closes on Download or Dismiss.
+  - type: artifact-mini
+    component: components/chat/envelopes/ArtifactMiniCard
+    export: ArtifactMiniCard
+
   # Backend-only (registered for validation, no frontend component yet)
   - type: session-task
 

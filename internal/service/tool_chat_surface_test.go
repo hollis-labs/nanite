@@ -56,7 +56,7 @@ func TestToolService_SelectForAgent_ChatSurfaceEnforcement(t *testing.T) {
 		"nanite_plan_list",
 		"nanite_scratchpad_write",
 		"nanite_message_send",
-		"nanite_show_report",
+		"nanite_show_card",
 		"nanite_execute_task",
 	}
 	rejectedTools := []string{

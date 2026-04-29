@@ -29,6 +29,9 @@ type Skill struct {
 	OriginSystem string `json:"origin_system"` // "nanite", "agentrc", "claude", etc. — free-form provenance
 	Format       string `json:"format"`        // "markdown", "yaml"
 	Version      int    `json:"version"`       // bumped on re-ingest when content changes
+	// E2 (CW-20260428-0017): mode binding. JSON array of mode IDs. Empty / "[]"
+	// = available in every mode. Slugs are translated → IDs at ingest time.
+	ModeIDs string `json:"mode_ids"`
 }
 
 // AgentSkill represents an assignment of a skill to an agent.
@@ -43,7 +46,7 @@ const skillColumns = `id, name, slug, description, category, tool_bindings, inpu
         is_builtin, settings, COALESCE(icon,''), created_at, updated_at,
         COALESCE(source,'builtin'), COALESCE(imported_at,''),
         COALESCE(origin_system,''), COALESCE(format,'markdown'), COALESCE(version,1),
-        COALESCE(prompt,'')`
+        COALESCE(prompt,''), COALESCE(mode_ids,'[]')`
 
 // scanSkill scans a row into a Skill using the canonical column order.
 func scanSkill(scanner interface{ Scan(...any) error }, sk *Skill) error {
@@ -52,7 +55,7 @@ func scanSkill(scanner interface{ Scan(...any) error }, sk *Skill) error {
 		&sk.ToolBindings, &sk.InputSchema, &sk.IsBuiltin, &sk.Settings, &sk.Icon,
 		&sk.CreatedAt, &sk.UpdatedAt,
 		&sk.Source, &sk.ImportedAt, &sk.OriginSystem, &sk.Format, &sk.Version,
-		&sk.Prompt,
+		&sk.Prompt, &sk.ModeIDs,
 	)
 }
 
@@ -123,16 +126,19 @@ func (s *Store) CreateSkill(sk *Skill) error {
 	if sk.Version == 0 {
 		sk.Version = 1
 	}
+	if sk.ModeIDs == "" {
+		sk.ModeIDs = "[]"
+	}
 
 	_, err := s.DB.Exec(
 		`INSERT INTO skills (id, name, slug, description, category, tool_bindings, input_schema,
 		                     is_builtin, settings, icon, created_at, updated_at,
-		                     source, imported_at, origin_system, format, version, prompt)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                     source, imported_at, origin_system, format, version, prompt, mode_ids)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sk.ID, sk.Name, sk.Slug, sk.Description, sk.Category,
 		sk.ToolBindings, sk.InputSchema, sk.IsBuiltin, sk.Settings, nullIfEmpty(sk.Icon),
 		now, now,
-		sk.Source, sk.ImportedAt, sk.OriginSystem, sk.Format, sk.Version, sk.Prompt,
+		sk.Source, sk.ImportedAt, sk.OriginSystem, sk.Format, sk.Version, sk.Prompt, sk.ModeIDs,
 	)
 	if err != nil {
 		return fmt.Errorf("create skill: %w", err)
@@ -145,16 +151,19 @@ func (s *Store) CreateSkill(sk *Skill) error {
 // UpdateSkill updates a skill's mutable fields.
 func (s *Store) UpdateSkill(sk *Skill) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	if sk.ModeIDs == "" {
+		sk.ModeIDs = "[]"
+	}
 	res, err := s.DB.Exec(
 		`UPDATE skills SET name = ?, slug = ?, description = ?, category = ?,
 		        tool_bindings = ?, input_schema = ?, settings = ?, icon = ?,
 		        source = ?, imported_at = ?, origin_system = ?, format = ?, version = ?,
-		        prompt = ?, updated_at = ?
+		        prompt = ?, mode_ids = ?, updated_at = ?
 		 WHERE id = ?`,
 		sk.Name, sk.Slug, sk.Description, sk.Category,
 		sk.ToolBindings, sk.InputSchema, sk.Settings, nullIfEmpty(sk.Icon),
 		sk.Source, sk.ImportedAt, sk.OriginSystem, sk.Format, sk.Version,
-		sk.Prompt, now, sk.ID,
+		sk.Prompt, sk.ModeIDs, now, sk.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update skill: %w", err)

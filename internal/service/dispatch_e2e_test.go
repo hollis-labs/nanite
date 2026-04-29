@@ -48,7 +48,7 @@ func TestB3_EndToEnd_ChatSurfaceAndEnvelopeOnlyDispatch(t *testing.T) {
 		{Name: "nanite_plan_list"},
 		{Name: "nanite_scratchpad_write"},
 		{Name: "nanite_message_send"},
-		{Name: "nanite_show_report"},
+		{Name: "nanite_show_card"},
 		{Name: "nanite_execute_task"},
 		// Rejected — Chat agent must NOT see these.
 		{Name: "dev_read"},
@@ -88,7 +88,7 @@ func TestB3_EndToEnd_ChatSurfaceAndEnvelopeOnlyDispatch(t *testing.T) {
 		"nanite_plan_list",
 		"nanite_scratchpad_write",
 		"nanite_message_send",
-		"nanite_show_report",
+		"nanite_show_card",
 		"nanite_execute_task",
 	}
 	for _, n := range wantSurface {

@@ -124,7 +124,7 @@ Workflow:
 - **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
 
 Grounded rendering:
-- ` + "`nanite_show_report`" + ` and ` + "`nanite_show_document`" + ` require a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.`
+- ` + "`nanite_show_card`" + ` with ` + "`type=\"report-card\"`" + ` or ` + "`type=\"document-viewer\"`" + ` requires a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.`
 
 // generateResponse loads context, calls the provider, streams events, and saves
 // the result. This is the refactored version of Engine.generateResponse — it
@@ -280,6 +280,40 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	normalizeToolInputSchemas(tools)
 	adjustToolStrictnessForProvider(providerName, model, tools)
 
+	// B1 (CW-20260428-0009): apply session-mode tool_overrides at the tool
+	// surface. Only the deterministic (non-progressive) selection path is
+	// filtered today — the progressive catalog path already advertises the
+	// full superset and adds its own per-call gating; layering session-mode
+	// filtering on top of that needs a separate design pass (see
+	// followup_b1_progressive_tool_overrides).
+	if !selection.Progressive && session.CurrentModeID != nil && *session.CurrentModeID != "" {
+		if sm, gerr := s.store.GetMode(*session.CurrentModeID); gerr == nil && sm != nil &&
+			sm.ToolOverrides != "" && sm.ToolOverrides != "{}" {
+			spec, perr := store.ParseToolOverrides(sm.ToolOverrides)
+			if perr != nil {
+				slog.Warn("chat-service: parse session-mode tool_overrides failed",
+					"session_id", sessionID, "mode_id", sm.ID, "err", perr)
+			} else {
+				names := make([]string, len(tools))
+				for i, t := range tools {
+					names[i] = t.Name
+				}
+				kept := store.ApplyToolOverrides(names, spec)
+				keep := make(map[string]bool, len(kept))
+				for _, n := range kept {
+					keep[n] = true
+				}
+				filtered := tools[:0]
+				for _, t := range tools {
+					if keep[t.Name] {
+						filtered = append(filtered, t)
+					}
+				}
+				tools = filtered
+			}
+		}
+	}
+
 	// Build the dynamic per-turn system prefix from tool selection. This text
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks
 	// in the provider payload) and varies per turn; static agent / rules /
@@ -334,8 +368,54 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
+	// B1 (CW-20260428-0009): resolve session-level mode (chat/plan/work or
+	// any custom *store.Mode). Order: session.current_mode_id → nil (callers
+	// fall through to the legacy AgentMode pipeline already wired into the
+	// Agent slot). Resolution is best-effort — a missing/dangling FK or store
+	// error logs and proceeds with sessionMode=nil rather than failing the turn.
+	var sessionMode *store.Mode
+	if session.CurrentModeID != nil && *session.CurrentModeID != "" {
+		if m, gerr := s.store.GetMode(*session.CurrentModeID); gerr != nil {
+			slog.Warn("chat-service: GetMode failed for session-mode pointer",
+				"session_id", sessionID, "mode_id", *session.CurrentModeID, "err", gerr)
+		} else if m != nil {
+			sessionMode = m
+		}
+	}
+
+	// B2 (CW-20260428-0010): emit a non-binding mode_suggestion event when
+	// the deterministic classifier disagrees with the session's current mode
+	// at high confidence. This is informational only — B3 wires the
+	// confirm-card / auto-apply path on top. Placed before assembleTurnContext
+	// so the suggestion races ahead of any backend slot work and the FE can
+	// stage the prompt while context is still being built.
+	if cls := classify.ClassifyMode(userContent); cls.Suggested != "" && cls.Confidence >= 0.7 {
+		currentSlug := ""
+		if sessionMode != nil {
+			currentSlug = sessionMode.Slug
+		}
+		if currentSlug == "" && mode != nil {
+			currentSlug = mode.Slug
+		}
+		if cls.Suggested != currentSlug {
+			signals := make([]string, len(cls.Signals))
+			for i, sig := range cls.Signals {
+				signals[i] = string(sig)
+			}
+			payload := map[string]any{
+				"current":    currentSlug,
+				"suggested":  cls.Suggested,
+				"confidence": cls.Confidence,
+				"signals":    signals,
+			}
+			if data, err := json.Marshal(payload); err == nil {
+				ch <- chat.StreamEvent{Type: "mode_suggestion", Data: string(data)}
+			}
+		}
+	}
+
 	// --- Assemble context (slot-based) ---
-	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, providerName, model, ch)
+	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, providerName, model, ch, sessionMode)
 	if err != nil {
 		return
 	}
@@ -385,6 +465,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					ID:          r.ID,
 					Text:        r.Text,
 					TriggerJSON: r.TriggerJSON,
+					Scope:       r.Scope,
 				})
 			}
 			s.inspector.RecordReminders(sessionID, inspectorTurnID, rec)
@@ -1682,9 +1763,10 @@ func (s *chatServiceImpl) assembleTurnContext(
 	extraSystemPrefix string,
 	providerName, model string,
 	ch chan chat.StreamEvent,
+	sessionMode *store.Mode,
 ) (*SlotAssemblyResult, error) {
 	windowSize := s.contextWindowSize(providerName, model)
-	result, err := s.context.AssembleSlots(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, windowSize)
+	result, err := s.context.AssembleSlots(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, windowSize, sessionMode)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
 			map[string]interface{}{"raw": err.Error()})

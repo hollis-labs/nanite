@@ -1,31 +1,91 @@
 /**
- * BottomChatDrawer — J10 (CW-20260426-0008)
+ * BottomChatDrawer — J10 + A2 + C1 (CW-20260428-0012)
  *
- * Three-tab bottom drawer:
- *   Tab 0 — Scratchpad (extends P4 scratchpad infrastructure)
- *   Tab 1 — Documents (sidebar list + content view, per-doc include/exclude toggle)
- *   Tab 2 — Session Context (user-authored session-scoped prompt block)
+ * Two layers of tabs:
+ *   1. Built-in tabs:  Scratchpad / Documents / Context / Pins / Cards
+ *      (Cards = the A2 transient slot for `render_target=bottom_chat_drawer`
+ *       envelopes; the latest envelope replaces the previous transient.)
+ *   2. Pinned cards:   per-session DB-backed tabs, each rendering a typed
+ *      card payload (markdown / diff / image / scratchpad / artifact-mini /
+ *      agent-envelope). Capped at BOTTOM_DRAWER_PIN_CAP.
+ *
+ * Tab strip horizontally scrolls when total tabs exceed viewport width.
+ *
+ * Default-tab setting: persisted in the layout store (`defaultDrawerTab`),
+ * editable in Settings → Bottom Drawer (PreferencesPanel). When the drawer
+ * is opened with no specific target, this tab activates.
+ *
+ * Pin lifecycle:
+ *   transient (FE-only) → user pin → POST /drawer-cards → pinned (server-side)
+ *   pinned (server-side) → user unpin → DELETE /drawer-cards/{id} → gone
+ *
+ * Pin cap: 10 per session. 11th pin → toast via showChatToast.
  *
  * Opens via:
- *   - /scratch command (bare invocation)
- *   - Agent panel_open("bottom_chat_drawer") via envelope target
+ *   - /scratch slash command (bare invocation)
+ *   - Agent panel_open("bottom_chat_drawer")
+ *   - Agent envelope.render_target = "bottom_chat_drawer" (A2)
  *   - Direct user click on drawer toggle
  *
- * Dismiss policy: follows J8 state machine (setBottomDrawerOpen in useLayoutStore).
+ * Dismiss policy: follows J8 state machine (setBottomDrawerOpen).
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react'
-import { X, FileText, StickyNote, MessageSquare, Plus, Trash2, Eye, EyeOff, Maximize2, Minimize2, Pin, PinOff } from 'lucide-react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import {
+  X,
+  FileText,
+  StickyNote,
+  MessageSquare,
+  Plus,
+  Trash2,
+  Eye,
+  EyeOff,
+  Maximize2,
+  Minimize2,
+  Pin,
+  PinOff,
+  Inbox,
+  Image as ImageIcon,
+  GitCompare,
+  Package,
+  ArrowUpRight,
+  ArrowDownLeft,
+} from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
-import { api } from '@/lib/api'
-import type { Document, PinnedContent } from '@/lib/types'
+import { useChatStore } from '@/stores/useChatStore'
+import { api, DrawerPinCapError } from '@/lib/api'
+import type {
+  Document,
+  PinnedContent,
+  Envelope,
+  DrawerCardType,
+  DrawerPinnedCard,
+  AgentStateScope,
+} from '@/lib/types'
+import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
+import { ScopeChip, ScopeFilterChip, type ScopeFilter } from '@/components/work/ScopeChip'
 
-// ── Tab IDs ──────────────────────────────────────────────────────────────────
+// ── Constants ────────────────────────────────────────────────────────────────
 
-type DrawerTab = 'scratchpad' | 'documents' | 'context' | 'pins'
+/** UI policy cap matching store.BottomDrawerPinCap. Surfaced as a constant so
+ *  tests can reference the same number. */
+export const BOTTOM_DRAWER_PIN_CAP = 10
+
+/** Built-in tab IDs. Pinned-card tab IDs are dynamic (`pin:<uuid>`). */
+const BUILTIN_TABS = ['scratchpad', 'documents', 'context', 'pins', 'cards'] as const
+type BuiltinTab = (typeof BUILTIN_TABS)[number]
+type DrawerTab = BuiltinTab | string // `pin:<uuid>` for pinned-card tabs
+
+const BUILTIN_LABELS: Record<BuiltinTab, string> = {
+  scratchpad: 'Scratchpad',
+  documents: 'Documents',
+  context: 'Session Context',
+  pins: 'Pins',
+  cards: 'Cards',
+}
 
 // ── Main component ───────────────────────────────────────────────────────────
 
@@ -42,20 +102,87 @@ export interface ScratchpadControls {
   open: () => void
 }
 
-export function BottomChatDrawer({ initialTab = 'scratchpad', onScratchpadRef }: BottomChatDrawerProps) {
+export function BottomChatDrawer({ initialTab, onScratchpadRef }: BottomChatDrawerProps) {
   const isOpen = useLayoutStore((s) => s.bottomChatDrawerOpen)
   const setOpen = useLayoutStore((s) => s.setBottomDrawerOpen)
-  const [activeTab, setActiveTab] = useState<DrawerTab>(initialTab)
+  const defaultTab = useLayoutStore((s) => s.defaultDrawerTab)
+  const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const showChatToast = useChatStore((s) => s.showChatToast)
+
+  // Pinned cards (server-backed)
+  const { data: pinnedCards = [] } = useQuery({
+    queryKey: ['drawer-cards', activeSessionId],
+    queryFn: () => api.listDrawerCards(activeSessionId!),
+    enabled: !!activeSessionId,
+  })
+
+  const queryClient = useQueryClient()
+
+  const pinMutation = useMutation({
+    mutationFn: (input: { card_type: DrawerCardType; content_ref?: string; title?: string; payload?: string }) =>
+      api.pinDrawerCard(activeSessionId!, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
+    },
+    onError: (err) => {
+      if (err instanceof DrawerPinCapError) {
+        showChatToast(`${BOTTOM_DRAWER_PIN_CAP}-tab limit; unpin one first`, 'info')
+      } else {
+        showChatToast('Failed to pin card', 'info')
+      }
+    },
+  })
+
+  const unpinMutation = useMutation({
+    mutationFn: (id: string) => api.unpinDrawerCard(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
+    },
+  })
+
+  // Active tab — defaults to `defaultTab` (per-user setting). When `initialTab`
+  // is explicitly provided (e.g. by /scratch), it wins for one open cycle.
+  const [activeTab, setActiveTab] = useState<DrawerTab>(initialTab ?? defaultTab ?? 'scratchpad')
   const [expanded, setExpanded] = useState(false)
 
   const handleClose = useCallback(() => setOpen(false, 'user'), [setOpen])
 
-  // When the drawer is opened by a /scratch command, switch to scratchpad tab.
+  // When the drawer opens, activate the requested tab (initialTab > defaultTab > scratchpad).
   useEffect(() => {
-    if (isOpen && initialTab) {
-      setActiveTab(initialTab)
+    if (isOpen) {
+      setActiveTab(initialTab ?? defaultTab ?? 'scratchpad')
     }
-  }, [isOpen, initialTab])
+  }, [isOpen, initialTab, defaultTab])
+
+  // If the active tab points at a pinned card that no longer exists (e.g. just
+  // unpinned), fall back to the default tab.
+  useEffect(() => {
+    if (activeTab.startsWith('pin:')) {
+      const pinId = activeTab.slice(4)
+      if (!pinnedCards.find((c) => c.id === pinId)) {
+        setActiveTab(defaultTab ?? 'scratchpad')
+      }
+    }
+  }, [pinnedCards, activeTab, defaultTab])
+
+  const handlePin = useCallback(
+    (input: { card_type: DrawerCardType; content_ref?: string; title?: string; payload?: string }) => {
+      if (pinnedCards.length >= BOTTOM_DRAWER_PIN_CAP) {
+        // Pre-flight check — avoid a server round-trip when we know we'll fail.
+        showChatToast(`${BOTTOM_DRAWER_PIN_CAP}-tab limit; unpin one first`, 'info')
+        return
+      }
+      pinMutation.mutate(input)
+    },
+    [pinnedCards.length, pinMutation, showChatToast],
+  )
+
+  const handleUnpin = useCallback(
+    (id: string) => {
+      unpinMutation.mutate(id)
+    },
+    [unpinMutation],
+  )
 
   if (!isOpen) return null
 
@@ -67,35 +194,62 @@ export function BottomChatDrawer({ initialTab = 'scratchpad', onScratchpadRef }:
       role="complementary"
       aria-label="Bottom drawer"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border shrink-0">
-        <div className="flex items-center gap-1">
+      {/* Header — horizontal-scroll tab strip + chrome */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border shrink-0 gap-2">
+        <div
+          className="flex items-center gap-1 overflow-x-auto scrollbar-hide min-w-0 flex-1"
+          data-testid="bottom-drawer-tabstrip"
+        >
+          {/* Built-in tabs */}
           <TabButton
             active={activeTab === 'scratchpad'}
             icon={<StickyNote className="w-3.5 h-3.5" />}
-            label="Scratchpad"
+            label={BUILTIN_LABELS.scratchpad}
             onClick={() => setActiveTab('scratchpad')}
           />
           <TabButton
             active={activeTab === 'documents'}
             icon={<FileText className="w-3.5 h-3.5" />}
-            label="Documents"
+            label={BUILTIN_LABELS.documents}
             onClick={() => setActiveTab('documents')}
           />
           <TabButton
             active={activeTab === 'context'}
             icon={<MessageSquare className="w-3.5 h-3.5" />}
-            label="Session Context"
+            label={BUILTIN_LABELS.context}
             onClick={() => setActiveTab('context')}
           />
           <TabButton
             active={activeTab === 'pins'}
             icon={<Pin className="w-3.5 h-3.5" />}
-            label="Pins"
+            label={BUILTIN_LABELS.pins}
             onClick={() => setActiveTab('pins')}
           />
+          <TabButton
+            active={activeTab === 'cards'}
+            icon={<Inbox className="w-3.5 h-3.5" />}
+            label={BUILTIN_LABELS.cards}
+            onClick={() => setActiveTab('cards')}
+          />
+
+          {/* Dynamic pinned-card tabs */}
+          {pinnedCards.length > 0 && (
+            <div className="w-px h-4 bg-border mx-1 shrink-0" aria-hidden="true" />
+          )}
+          {pinnedCards.map((card) => {
+            const tabId = `pin:${card.id}`
+            return (
+              <PinnedTabButton
+                key={card.id}
+                active={activeTab === tabId}
+                card={card}
+                onClick={() => setActiveTab(tabId)}
+                onUnpin={() => handleUnpin(card.id)}
+              />
+            )
+          })}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
@@ -123,12 +277,294 @@ export function BottomChatDrawer({ initialTab = 'scratchpad', onScratchpadRef }:
         {activeTab === 'documents' && <DocumentsTab />}
         {activeTab === 'context' && <SessionContextTab />}
         {activeTab === 'pins' && <PinsTab />}
+        {activeTab === 'cards' && <CardsTab onPin={handlePin} canPin={pinnedCards.length < BOTTOM_DRAWER_PIN_CAP} />}
+        {activeTab.startsWith('pin:') && (
+          <PinnedCardContent
+            card={pinnedCards.find((c) => c.id === activeTab.slice(4)) ?? null}
+            onUnpin={() => handleUnpin(activeTab.slice(4))}
+          />
+        )}
       </div>
     </div>
   )
 }
 
-// ── Tab button ────────────────────────────────────────────────────────────────
+// ── Cards tab ────────────────────────────────────────────────────────────────
+// A2 inbox slot — routed envelopes (envelope.render_target = "bottom_chat_drawer").
+// One transient slot — latest envelope replaces the previous. User can pin the
+// transient to promote it into a dedicated tab.
+
+function CardsTab({
+  onPin,
+  canPin,
+}: {
+  onPin: (input: { card_type: DrawerCardType; content_ref?: string; title?: string; payload?: string }) => void
+  canPin: boolean
+}) {
+  const envelopes = useLayoutStore((s) => s.panelEnvelopes['bottom_chat_drawer'] ?? [])
+  const clearPanelEnvelopes = useLayoutStore((s) => s.clearPanelEnvelopes)
+  const latest: Envelope | null = envelopes.length > 0 ? envelopes[envelopes.length - 1] : null
+  const history = envelopes.slice(0, -1).slice(-5).reverse()
+
+  const handlePinLatest = useCallback(() => {
+    if (!latest) return
+    const title = latest.title ?? latest.type ?? 'Pinned card'
+    onPin({
+      card_type: 'agent-envelope',
+      content_ref: latest.id ?? '',
+      title,
+      payload: JSON.stringify(latest),
+    })
+  }, [latest, onPin])
+
+  if (!latest) {
+    return (
+      <EmptyState message="No active card — agent-emitted cards routed to the bottom drawer will land here." />
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-3 py-1 shrink-0 gap-2">
+        <p className="text-xs text-fg-muted truncate">
+          Routed cards — transient. Pin to keep across messages.
+        </p>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handlePinLatest}
+            disabled={!canPin}
+            className="flex items-center gap-1 text-xs text-primary hover:text-primary-hover disabled:text-fg-faint disabled:cursor-not-allowed transition-colors"
+            title={canPin ? 'Pin this card' : `${BOTTOM_DRAWER_PIN_CAP}-pin cap reached`}
+          >
+            <Pin className="w-3 h-3" />
+            Pin
+          </button>
+          <button
+            type="button"
+            onClick={() => clearPanelEnvelopes('bottom_chat_drawer')}
+            className="text-xs text-fg-faint hover:text-fg-muted transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      <ScrollArea className="flex-1">
+        <div className="p-3 space-y-3">
+          <EnvelopeRenderer envelope={latest} />
+          {history.length > 0 && (
+            <div className="pt-3 border-t border-border space-y-2">
+              <p className="text-[11px] text-fg-faint uppercase tracking-wide">Earlier this session</p>
+              {history.map((env, i) => (
+                <details key={i} className="text-xs text-fg-muted">
+                  <summary className="cursor-pointer hover:text-fg">
+                    {env.title ? `${env.type}: ${env.title}` : env.type}
+                  </summary>
+                  <div className="mt-2">
+                    <EnvelopeRenderer envelope={env} />
+                  </div>
+                </details>
+              ))}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
+
+// ── Pinned card content ──────────────────────────────────────────────────────
+
+function PinnedCardContent({
+  card,
+  onUnpin,
+}: {
+  card: DrawerPinnedCard | null
+  onUnpin: () => void
+}) {
+  if (!card) {
+    return <EmptyState message="Pinned card not found" />
+  }
+
+  const payload = useMemo<unknown>(() => {
+    if (!card.payload) return null
+    try {
+      return JSON.parse(card.payload)
+    } catch {
+      return null
+    }
+  }, [card.payload])
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-3 py-1 shrink-0 gap-2">
+        <p className="text-xs text-fg-muted truncate">
+          <CardTypeIcon type={card.card_type} />
+          <span className="ml-1.5">{card.title || card.card_type}</span>
+        </p>
+        <button
+          type="button"
+          onClick={onUnpin}
+          className="flex items-center gap-1 text-xs text-fg-faint hover:text-danger transition-colors"
+          title="Unpin"
+        >
+          <PinOff className="w-3 h-3" />
+          Unpin
+        </button>
+      </div>
+      <ScrollArea className="flex-1">
+        <div className="p-3">
+          <PinnedCardBody card={card} payload={payload} />
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
+
+function PinnedCardBody({ card, payload }: { card: DrawerPinnedCard; payload: unknown }) {
+  switch (card.card_type) {
+    case 'agent-envelope':
+      if (payload && typeof payload === 'object') {
+        return <EnvelopeRenderer envelope={payload as Envelope} />
+      }
+      return <UnknownCardBody card={card} />
+
+    case 'markdown': {
+      const text = typeof payload === 'object' && payload !== null && 'content' in payload
+        ? String((payload as { content: unknown }).content ?? '')
+        : ''
+      return (
+        <pre className="text-xs font-mono text-fg-secondary whitespace-pre-wrap break-words leading-relaxed">
+          {text || <span className="text-fg-faint italic">No content</span>}
+        </pre>
+      )
+    }
+
+    case 'image': {
+      const src = typeof payload === 'object' && payload !== null && 'src' in payload
+        ? String((payload as { src: unknown }).src ?? '')
+        : ''
+      if (!src) return <UnknownCardBody card={card} />
+      return (
+        <div className="flex items-center justify-center">
+          <img src={src} alt={card.title} className="max-w-full max-h-[60vh] rounded-sm border border-border" />
+        </div>
+      )
+    }
+
+    case 'diff': {
+      const text = typeof payload === 'object' && payload !== null && 'diff' in payload
+        ? String((payload as { diff: unknown }).diff ?? '')
+        : ''
+      return (
+        <pre className="text-xs font-mono text-fg-secondary whitespace-pre-wrap break-words leading-relaxed bg-surface rounded-sm p-2 border border-border">
+          {text || <span className="text-fg-faint italic">No diff</span>}
+        </pre>
+      )
+    }
+
+    case 'scratchpad': {
+      const text = typeof payload === 'object' && payload !== null && 'content' in payload
+        ? String((payload as { content: unknown }).content ?? '')
+        : ''
+      return (
+        <pre className="text-xs font-mono text-fg whitespace-pre-wrap break-words leading-relaxed">
+          {text || <span className="text-fg-faint italic">Empty scratchpad snapshot</span>}
+        </pre>
+      )
+    }
+
+    case 'artifact-mini':
+      return <ArtifactMiniBody card={card} />
+
+    default:
+      return <UnknownCardBody card={card} />
+  }
+}
+
+function UnknownCardBody({ card }: { card: DrawerPinnedCard }) {
+  return (
+    <div className="text-xs text-fg-muted">
+      <p className="mb-2">
+        Unknown card type <code className="font-mono text-fg-faint">{card.card_type}</code>.
+      </p>
+      <pre className="bg-surface p-2 rounded-sm text-[11px] text-fg-faint break-all whitespace-pre-wrap">
+        {card.payload || '(empty payload)'}
+      </pre>
+    </div>
+  )
+}
+
+function ArtifactMiniBody({ card }: { card: DrawerPinnedCard }) {
+  // Pinned artifact-mini cards keep enough info for a download CTA without
+  // re-fetching: name / mime / size live in the payload snapshot. content_ref
+  // is the artifact ID.
+  const meta = useMemo<{ name?: string; mime_type?: string; size?: number } | null>(() => {
+    if (!card.payload) return null
+    try {
+      const parsed = JSON.parse(card.payload)
+      if (parsed && typeof parsed === 'object') {
+        return parsed as { name?: string; mime_type?: string; size?: number }
+      }
+    } catch {
+      // fall through
+    }
+    return null
+  }, [card.payload])
+
+  const downloadUrl = card.content_ref ? `/api/artifacts/${card.content_ref}/download` : ''
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-3 px-3 py-2 rounded-sm bg-bg-elevated/50 border border-border">
+        <Package className="w-4 h-4 text-fg-muted shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-fg truncate">{meta?.name ?? card.title ?? 'Artifact'}</p>
+          <div className="flex items-center gap-2 mt-0.5 text-xs text-fg-faint">
+            {meta?.mime_type && <span>{meta.mime_type}</span>}
+            {typeof meta?.size === 'number' && <span>{formatSize(meta.size)}</span>}
+          </div>
+        </div>
+        {downloadUrl && (
+          <a
+            href={downloadUrl}
+            download
+            className="text-xs text-primary hover:text-primary-hover transition-colors"
+          >
+            Download
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function CardTypeIcon({ type }: { type: DrawerCardType }) {
+  switch (type) {
+    case 'markdown':
+      return <FileText className="w-3 h-3 inline-block" />
+    case 'diff':
+      return <GitCompare className="w-3 h-3 inline-block" />
+    case 'image':
+      return <ImageIcon className="w-3 h-3 inline-block" />
+    case 'scratchpad':
+      return <StickyNote className="w-3 h-3 inline-block" />
+    case 'artifact-mini':
+      return <Package className="w-3 h-3 inline-block" />
+    case 'agent-envelope':
+      return <Inbox className="w-3 h-3 inline-block" />
+    default:
+      return <FileText className="w-3 h-3 inline-block" />
+  }
+}
+
+// ── Tab buttons ──────────────────────────────────────────────────────────────
 
 function TabButton({
   active,
@@ -145,7 +581,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors ${
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors shrink-0 ${
         active
           ? 'bg-surface text-fg font-medium'
           : 'text-fg-muted hover:text-fg hover:bg-surface/50'
@@ -154,6 +590,49 @@ function TabButton({
       {icon}
       {label}
     </button>
+  )
+}
+
+function PinnedTabButton({
+  active,
+  card,
+  onClick,
+  onUnpin,
+}: {
+  active: boolean
+  card: DrawerPinnedCard
+  onClick: () => void
+  onUnpin: () => void
+}) {
+  return (
+    <div
+      className={`group flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors shrink-0 max-w-[160px] ${
+        active
+          ? 'bg-surface text-fg font-medium'
+          : 'text-fg-muted hover:text-fg hover:bg-surface/50'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex items-center gap-1 min-w-0"
+        title={card.title || card.card_type}
+      >
+        <CardTypeIcon type={card.card_type} />
+        <span className="truncate">{card.title || card.card_type}</span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onUnpin()
+        }}
+        className="ml-0.5 p-0.5 rounded text-fg-faint opacity-0 group-hover:opacity-100 hover:text-danger transition-colors"
+        aria-label={`Unpin ${card.title || card.card_type}`}
+      >
+        <X className="w-3 h-3" />
+      </button>
+    </div>
   )
 }
 
@@ -664,10 +1143,14 @@ function SessionContextTab() {
 // ── Pins tab ─────────────────────────────────────────────────────────────────
 // J11 (CW-20260426-0009): lists agent-pinned content with unpin button,
 // per-pin scope label, and source-agent attribution.
+// D2 (CW-20260428-0015): groups pins by scope (Session / Project) with a
+// scope filter chip and inline promote/demote actions.
 
 function PinsTab() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const activeProjectId = useAppStore((s) => s.activeProjectId)
   const queryClient = useQueryClient()
+  const [filter, setFilter] = useState<ScopeFilter>('all')
 
   const { data: pins = [], isLoading } = useQuery({
     queryKey: ['pins', activeSessionId],
@@ -683,34 +1166,39 @@ function PinsTab() {
     },
   })
 
+  const scopeMutation = useMutation({
+    mutationFn: ({ id, scope, projectId }: { id: string; scope: AgentStateScope; projectId?: string }) =>
+      api.updatePinScope(id, scope, projectId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['pins', activeSessionId] })
+    },
+  })
+
   if (!activeSessionId) {
     return <EmptyState message="No active session" />
   }
 
-  const scopeLabel = (scope: PinnedContent['scope']) => {
-    switch (scope) {
-      case 'turn': return 'Turn'
-      case 'session': return 'Session'
-      case 'cross_session': return 'Cross-session'
-      default: return scope
-    }
-  }
+  // Partition pins by scope. Filter narrows to a specific tier when set.
+  const sessionPins = pins.filter((p) => p.scope === 'session')
+  const projectPins = pins.filter((p) => p.scope === 'project')
+  const showSession = filter === 'all' || filter === 'session'
+  const showProject = filter === 'all' || filter === 'project'
 
-  const scopeColour = (scope: PinnedContent['scope']) => {
-    switch (scope) {
-      case 'turn': return 'text-fg-faint'
-      case 'session': return 'text-blue-600'
-      case 'cross_session': return 'text-violet-600'
-      default: return 'text-fg-muted'
-    }
+  const promote = (id: string) => {
+    if (!activeProjectId) return
+    scopeMutation.mutate({ id, scope: 'project', projectId: activeProjectId })
+  }
+  const demote = (id: string) => {
+    scopeMutation.mutate({ id, scope: 'session', projectId: '' })
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-1 shrink-0">
+      <div className="flex items-center justify-between px-3 py-1 shrink-0 gap-2">
         <p className="text-xs text-fg-muted">
           Pinned context — survives compaction · set by agent via <code className="font-mono text-fg-faint">nanite_pin</code>
         </p>
+        <ScopeFilterChip filter={filter} onChange={setFilter} />
       </div>
       <ScrollArea className="flex-1">
         {isLoading && (
@@ -721,39 +1209,106 @@ function PinsTab() {
             No pinned content yet. The agent can pin content using <code className="font-mono">nanite_pin</code>.
           </div>
         )}
-        <div className="space-y-1 p-2">
-          {pins.map((pin) => (
-            <div
-              key={pin.id}
-              className="group flex items-start gap-2 px-2 py-2 rounded-lg border border-border bg-surface text-xs"
-            >
-              <Pin className="w-3 h-3 shrink-0 mt-0.5 text-fg-faint" />
-              <div className="flex-1 min-w-0">
-                <p className="text-fg leading-relaxed break-words">{pin.content}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className={`text-[10px] font-medium ${scopeColour(pin.scope)}`}>
-                    {scopeLabel(pin.scope)}
-                  </span>
-                  {pin.agent_id && (
-                    <span className="text-[10px] text-fg-faint">
-                      by {pin.agent_id}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => deleteMutation.mutate(pin.id)}
-                disabled={deleteMutation.isPending}
-                className="p-0.5 rounded text-fg-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100"
-                title="Unpin"
-              >
-                <PinOff className="w-3 h-3" />
-              </button>
+        {showSession && sessionPins.length > 0 && (
+          <PinsScopeSection label="This Session">
+            <div className="space-y-1">
+              {sessionPins.map((pin) => (
+                <PinRow
+                  key={pin.id}
+                  pin={pin}
+                  canPromote={!!activeProjectId}
+                  canDemote={false}
+                  onPromote={promote}
+                  onDemote={demote}
+                  onDelete={(id) => deleteMutation.mutate(id)}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+          </PinsScopeSection>
+        )}
+        {showProject && projectPins.length > 0 && (
+          <PinsScopeSection label="This Project">
+            <div className="space-y-1">
+              {projectPins.map((pin) => (
+                <PinRow
+                  key={pin.id}
+                  pin={pin}
+                  canPromote={false}
+                  canDemote
+                  onPromote={promote}
+                  onDemote={demote}
+                  onDelete={(id) => deleteMutation.mutate(id)}
+                />
+              ))}
+            </div>
+          </PinsScopeSection>
+        )}
       </ScrollArea>
+    </div>
+  )
+}
+
+function PinsScopeSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="px-2 pt-2">
+      <div className="px-1 mb-1 text-[10px] uppercase tracking-wider text-fg-faint">{label}</div>
+      {children}
+    </div>
+  )
+}
+
+interface PinRowProps {
+  pin: PinnedContent
+  canPromote: boolean
+  canDemote: boolean
+  onPromote: (id: string) => void
+  onDemote: (id: string) => void
+  onDelete: (id: string) => void
+}
+
+function PinRow({ pin, canPromote, canDemote, onPromote, onDemote, onDelete }: PinRowProps) {
+  return (
+    <div className="group flex items-start gap-2 px-2 py-2 rounded-lg border border-border bg-surface text-xs">
+      <Pin className="w-3 h-3 shrink-0 mt-0.5 text-fg-faint" />
+      <div className="flex-1 min-w-0">
+        <p className="text-fg leading-relaxed break-words">{pin.content}</p>
+        <div className="flex items-center gap-2 mt-1">
+          <ScopeChip scope={pin.scope} />
+          {pin.agent_id && (
+            <span className="text-[10px] text-fg-faint">by {pin.agent_id}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        {canPromote && (
+          <button
+            type="button"
+            onClick={() => onPromote(pin.id)}
+            className="p-0.5 rounded text-fg-faint hover:text-primary"
+            title="Promote to project"
+          >
+            <ArrowUpRight className="w-3 h-3" />
+          </button>
+        )}
+        {canDemote && (
+          <button
+            type="button"
+            onClick={() => onDemote(pin.id)}
+            className="p-0.5 rounded text-fg-faint hover:text-fg"
+            title="Demote to session"
+          >
+            <ArrowDownLeft className="w-3 h-3" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onDelete(pin.id)}
+          className="p-0.5 rounded text-fg-faint hover:text-danger transition-colors"
+          title="Unpin"
+        >
+          <PinOff className="w-3 h-3" />
+        </button>
+      </div>
     </div>
   )
 }

@@ -4,7 +4,9 @@
   "title": "Timeline Card",
   "description": "A vertical timeline of events.",
   "type": "object",
-  "required": ["events"],
+  "required": [
+    "events"
+  ],
   "properties": {
     "title": {
       "type": "string",
@@ -14,7 +16,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["timestamp", "label"],
+        "required": [
+          "timestamp",
+          "label"
+        ],
         "properties": {
           "timestamp": {
             "type": "string",
@@ -34,7 +39,11 @@
           },
           "status": {
             "type": "string",
-            "enum": ["completed", "active", "pending"],
+            "enum": [
+              "completed",
+              "active",
+              "pending"
+            ],
             "description": "Event status."
           }
         },
@@ -43,5 +52,6 @@
       "description": "Timeline events in order."
     }
   },
+  "default_render_target": "bottom_chat_drawer",
   "additionalProperties": false
 }

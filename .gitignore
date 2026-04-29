@@ -54,6 +54,7 @@ internal/server/ui_dist/assets/
 .agentrc/state/
 .agentrc/.session-unclean.flag
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 worktrees/
 /nanite
 

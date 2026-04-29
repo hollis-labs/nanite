@@ -76,12 +76,31 @@ type Envelope struct {
 	ID        string         `json:"id,omitempty"`        // set by backend after CreateEnvelopeInstance
 	Title     string         `json:"title,omitempty"`
 	Subtitle  string         `json:"subtitle,omitempty"`
-	// Target is the optional drawer ID where this envelope should be rendered
-	// (J8 v1 — CW-20260426-0006). When set, the frontend opens the named drawer
-	// and renders the card content into it without requiring an explicit panel_open
-	// call. Known v1 values: "bottom_chat_drawer", "work", "workflows". Plugin-
-	// declared drawers may introduce additional IDs. Omit to render inline in chat.
+	// Target is a visibility hint — the optional panel ID to OPEN when this
+	// envelope arrives (J8 v1 — CW-20260426-0006). It does NOT control where
+	// the envelope renders; it only signals "open this drawer". Known v1
+	// values: "bottom_chat_drawer", "work", "workflows". Plugin-declared
+	// drawers may introduce additional IDs. Omit to skip the visibility
+	// signal entirely. Independent of RenderTarget — both can be set so an
+	// envelope can render in one slot while opening a separate drawer.
 	Target    string         `json:"target,omitempty"`
+	// RenderTarget is the placement hint — the optional panel ID where the
+	// envelope should RENDER (A2 — CW-20260428-0008). When set and the FE
+	// dismiss-machine permits, the FE pushes the envelope into the named
+	// panel's inbox slot and renders a stub in the chat transcript instead
+	// of the full envelope. Empty = inline render in chat (the historical
+	// default). The runtime stamps this from the per-type schema's
+	// `default_render_target` when the agent did not provide one; explicit
+	// agent override always wins. See docs/panels/envelope-render-target.md
+	// for the full contract.
+	RenderTarget string `json:"render_target,omitempty"`
+	// RenderTargetBlocked carries a short reason code ("untrusted_plugin_panel",
+	// "unknown_panel") when the backend rejected an explicit RenderTarget at
+	// the tool boundary (e.g. an untrusted agent attempted to route to a
+	// plugin panel). RenderTarget is dropped in that case and the envelope
+	// falls back to inline; the FE surfaces this hint as a small debug pill
+	// so the agent's blocked intent is visible.
+	RenderTargetBlocked string `json:"render_target_blocked,omitempty"`
 	// Mode is the optional mode/status signal carried alongside the envelope
 	// (J8 v1 — CW-20260426-0006). When set, the frontend resolves the mode
 	// against a preset map (see ui/src/lib/panel-modes.ts) and opens the

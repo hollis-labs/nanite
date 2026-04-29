@@ -1,8 +1,9 @@
-import { useCallback } from 'react'
-import { GripVertical, Check } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import { GripVertical, Check, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Todo, TodoPriority } from '@/lib/types'
+import type { Todo, TodoPriority, AgentStateScope } from '@/lib/types'
+import { ScopeChip } from './ScopeChip'
 
 const PRIORITY_STYLE: Record<TodoPriority, string> = {
   critical: 'text-danger bg-danger/10',
@@ -15,10 +16,25 @@ interface TodoItemProps {
   todo: Todo
   onCheck: (id: string) => void
   onUncheck: (id: string, reason?: string) => void
+  /** D2 — when present, promote/demote actions render in the row.
+   *  onPromote/onDemote return a Promise so the row's `busy` flag stays
+   *  set until the underlying mutation resolves (no double-submits on
+   *  slow networks). */
+  scopeActions?: {
+    /** Project ID for the active session — enables "promote to project". */
+    activeProjectId: string | null
+    /** Session ID for the active session — enables "demote to session". */
+    activeSessionId: string | null
+    onPromote: (id: string, projectId: string) => Promise<void>
+    onDemote: (id: string, sessionId: string) => Promise<void>
+  }
+  /** When true, render the scope chip inline (used in the "All" view of the Work panel). */
+  showScope?: boolean
 }
 
-export function TodoItem({ todo, onCheck, onUncheck }: TodoItemProps) {
+export function TodoItem({ todo, onCheck, onUncheck, scopeActions, showScope = false }: TodoItemProps) {
   const isDone = todo.status === 'done'
+  const [busy, setBusy] = useState(false)
 
   const {
     attributes,
@@ -42,6 +58,28 @@ export function TodoItem({ todo, onCheck, onUncheck }: TodoItemProps) {
       onCheck(todo.id)
     }
   }, [isDone, todo.id, onCheck, onUncheck])
+
+  const canPromote = scopeActions?.activeProjectId && todo.scope === 'session'
+  const canDemote = scopeActions?.activeSessionId && todo.scope === 'project'
+
+  const promote = async () => {
+    if (!scopeActions?.activeProjectId) return
+    setBusy(true)
+    try {
+      await scopeActions.onPromote(todo.id, scopeActions.activeProjectId)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const demote = async () => {
+    if (!scopeActions?.activeSessionId) return
+    setBusy(true)
+    try {
+      await scopeActions.onDemote(todo.id, scopeActions.activeSessionId)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div
@@ -75,10 +113,39 @@ export function TodoItem({ todo, onCheck, onUncheck }: TodoItemProps) {
           {todo.title}
         </span>
 
+        {showScope && <ScopeChip scope={todo.scope as AgentStateScope} />}
+
         {todo.priority !== 'medium' && (
           <span className={`text-[9px] px-1.5 py-0.5 rounded ${PRIORITY_STYLE[todo.priority]}`}>
             {todo.priority}
           </span>
+        )}
+
+        {scopeActions && (
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+            {canPromote && (
+              <button
+                type="button"
+                onClick={promote}
+                disabled={busy}
+                className="p-0.5 rounded text-fg-faint hover:text-primary disabled:opacity-50"
+                title="Promote to project"
+              >
+                <ArrowUpRight className="w-3 h-3" />
+              </button>
+            )}
+            {canDemote && (
+              <button
+                type="button"
+                onClick={demote}
+                disabled={busy}
+                className="p-0.5 rounded text-fg-faint hover:text-fg disabled:opacity-50"
+                title="Demote to session"
+              >
+                <ArrowDownLeft className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

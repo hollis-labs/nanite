@@ -4,7 +4,10 @@
   "title": "Table Card",
   "description": "A sortable data table.",
   "type": "object",
-  "required": ["columns", "rows"],
+  "required": [
+    "columns",
+    "rows"
+  ],
   "properties": {
     "title": {
       "type": "string",
@@ -14,11 +17,20 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["key", "label"],
+        "required": [
+          "key",
+          "label"
+        ],
         "properties": {
-          "key": { "type": "string" },
-          "label": { "type": "string" },
-          "sortable": { "type": "boolean" }
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "sortable": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
       },
@@ -37,5 +49,6 @@
       "description": "Optional table caption."
     }
   },
+  "default_render_target": "bottom_chat_drawer",
   "additionalProperties": false
 }

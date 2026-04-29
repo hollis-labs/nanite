@@ -2,6 +2,28 @@ package mcp
 
 import "github.com/hollis-labs/go-providers/provider"
 
+// showEnvelopeTargetDesc and showEnvelopeModeDesc are shared input-schema
+// descriptions for the optional `target` and `mode` fields on
+// nanite_show_card. They mirror the chat.Envelope.Target / chat.Envelope.Mode
+// contract (J8 v1 — CW-20260426-0006); the FE picks them up via
+// applyEnvelopePanelEffects.
+const (
+	showEnvelopeTargetDesc = "Optional drawer ID to OPEN when this card arrives. v1 vocabulary: " +
+		"\"bottom_chat_drawer\" (long-form reference content below the chat transcript), " +
+		"\"work\" (right-rail todos/plans/sprint cards), \"workflows\" (right-rail guided-interaction templates). " +
+		"Plugin-declared drawers may add more. Visibility hint only — does NOT control where the card renders. " +
+		"For routing the card itself, use `render_target` instead."
+	showEnvelopeRenderTargetDesc = "Optional panel ID where the card SHOULD RENDER (A2 — CW-20260428-0008). " +
+		"v1 vocabulary: \"bottom_chat_drawer\", \"work\", \"workflows\" (built-in panels are always allowed); " +
+		"plugin-declared panels are accepted only when the calling agent has H1 trust — otherwise the routing is " +
+		"dropped and the card falls back to inline with a `render_target_blocked` hint. " +
+		"When omitted, the schema's `default_render_target` (if any) is used; for the 10 passive renderables that's " +
+		"\"bottom_chat_drawer\". Pass an empty string to force-inline a card whose schema would otherwise route to a drawer."
+	showEnvelopeModeDesc = "Optional workspace mode hint that travels with the envelope. " +
+		"v1 vocabulary: \"planning\" (FE preset opens [work, workflows]). " +
+		"Independent of `target` and `render_target` — all three can be set. Empty/unknown values are silent no-ops on the FE."
+)
+
 // SelfToolProviderDefinitions returns all self-service tool definitions
 // in provider.ToolDefinition format, suitable for registering as built-ins.
 func SelfToolProviderDefinitions() []provider.ToolDefinition {
@@ -181,50 +203,64 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_show_giphy",
-			Description: "Search Giphy for an animated GIF and display it in chat as a rich card (giphy-modal envelope).\n\n" +
-				"**When to use:** When the user asks for a GIF, wants to celebrate, or the conversation tone calls for a visual reaction. This is purely cosmetic.\n\n" +
-				"**When NOT to use:** Do NOT use to \"display\" real data or metrics — use nanite_show_report or nanite_show_document for that. This renders a GIF, not structured information.\n\n" +
-				"**Output shape:** Emits a giphy-modal envelope; the UI renders the first matching GIF inline in chat.",
+			Name: "nanite_giphy_search",
+			Description: "Search GIPHY for an animated GIF and return its URL plus metadata. Pure data fetch — does NOT render anything in chat.\n\n" +
+				"**When to use:** When the user asks for a GIF or the conversation tone calls for a visual reaction. Call this first to fetch the URL, then chain into nanite_show_card to render.\n\n" +
+				"**Chaining pattern:**\n" +
+				"1. nanite_giphy_search(query: \"celebration\") → {gif_url, title, attribution, alt_text}\n" +
+				"2. nanite_show_card(type: \"giphy-modal\", data: {gif_url: <step 1>, title: <step 1 title>, source: <step 1 attribution>, query: \"celebration\"})\n\n" +
+				"**Demo mode:** When the server's GIPHY_API_KEY is unset, this returns one of a curated set of demo GIFs (deterministic per query). Useful for development; production should set the key.\n\n" +
+				"**Output shape:** Single object {gif_url, title, attribution, alt_text} for limit=1 (default). For limit>1: {results: [{...}, ...]}. " +
+				"Failures return a structured-error object instead: {error: \"http_error\"|\"no_results\"|\"parse_error\", details?, query}. IsError stays false on these — the call succeeded, the search did not. Branch on `error`.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query": map[string]any{"type": "string", "description": "Search term (e.g. 'celebration', 'thumbs up', 'mind blown')"},
+					"limit": map[string]any{"type": "number", "description": "Max results (default 1, max 10). Limit=1 returns a single object; limit>1 returns {results: [...]}."},
 				},
 				"required": []string{"query"},
 			},
 		},
 		{
-			Name: "nanite_show_document",
-			Description: "Display a document in chat as a rich scrollable viewer. Use for executive summaries, reports, meeting notes, or any long-form content the user should read. " +
-				"The user expects LIVE data: you MUST ground the content in data returned from previous tool calls made during this generation. Cite those tool calls in the `sources` field. Do NOT compose from memory or pattern-completion.",
+			Name: "nanite_show_card",
+			Description: "Render a structured envelope card in chat or in a drawer. One generic surface for the v1 passive-renderable card types — replaces the older per-type nanite_show_giphy / nanite_show_document / nanite_show_report tools (CW-20260428-0019, A3).\n\n" +
+				"**When to use:** When you want to display structured content (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
+				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths and are NOT addressable here.\n\n" +
+				"**Required context:** `type` from the v1 allow-list and `data` matching the per-type schema. The handler validates `data` against `internal/envelope/schemas/<type>.schema.json` at the boundary; payloads that miss required fields, wrong types, or carry unknown keys are rejected with a structured error citing the schema field that failed.\n\n" +
+				"**Grounding:** For prose-bearing card types (`report-card`, `document-viewer`) you MUST also pass `sources` — a JSON array of `{tool_use_id, tool_name, note?}` objects citing the tool calls whose results ground the content. If you didn't fetch the data this turn, render a plain-text reply instead of an empty card.\n\n" +
+				"**Render destination:** By default the card lands wherever the schema's `default_render_target` says — for the 10 passive renderables that's the bottom drawer. Pass `render_target` to override, or `render_target=\"\"` to force-inline. `target` (visibility — open this drawer) and `mode` (workspace preset) remain independent levers; both can travel with the envelope.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"title":             map[string]any{"type": "string", "description": "Document title"},
-					"content":           map[string]any{"type": "string", "description": "Document body (HTML or markdown). Must be derived from the tool_use_ids listed in `sources`."},
-					"format":            map[string]any{"type": "string", "description": "Content format: html or markdown (default: markdown)"},
-					"sections":          map[string]any{"type": "string", "description": "Comma-separated section names for jump-nav (optional)"},
-					"download_filename": map[string]any{"type": "string", "description": "Filename for download button (optional, e.g. report.html)"},
-					"sources":           map[string]any{"type": "string", "description": "JSON array of objects documenting the grounding: [{tool_use_id, tool_name, note?}]. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the content. Minimum 1 source. If you didn't fetch the data, don't render the document — say so in plain text instead."},
+					"type": map[string]any{
+						"type":        "string",
+						"description": "Envelope type from the v1 passive-renderable allow-list. Each value validates against its own per-type schema.",
+						"enum": []string{
+							"giphy-modal",
+							"document-viewer",
+							"report-card",
+							"info-card",
+							"list-card",
+							"metric-card",
+							"progress-card",
+							"table-card",
+							"timeline-card",
+							"diff-card",
+						},
+					},
+					"data": map[string]any{
+						"type":        "object",
+						"description": "Card payload matching the schema for the chosen `type`. Schemas live at internal/envelope/schemas/<type>.schema.json — fields the schema doesn't declare are rejected (additionalProperties:false).",
+					},
+					"sources": map[string]any{
+						"type":        "string",
+						"description": "JSON array of grounding objects: [{tool_use_id, tool_name, note?}]. REQUIRED for report-card and document-viewer. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the content. If you didn't fetch the data, don't render the card.",
+					},
+					"target":        map[string]any{"type": "string", "description": showEnvelopeTargetDesc},
+					"render_target": map[string]any{"type": "string", "description": showEnvelopeRenderTargetDesc},
+					"mode":          map[string]any{"type": "string", "description": showEnvelopeModeDesc},
 				},
-				"required": []string{"title", "content", "sources"},
-			},
-		},
-		{
-			Name: "nanite_show_report",
-			Description: "Display a metrics report card in chat with labeled values, progress bars, and action buttons. Use for sprint progress, portfolio health, or status summaries. " +
-				"The user expects LIVE data: you MUST ground every metric and summary bullet in data returned from previous tool calls made during this generation. Cite those tool calls in the `sources` field. Do NOT compose from memory or pattern-completion — if you haven't fetched the numbers, don't render a card.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"title":   map[string]any{"type": "string", "description": "Report title"},
-					"metrics": map[string]any{"type": "string", "description": "JSON array of metric objects: [{label, value, percent?, color?}]. Every value must come from a tool result cited in `sources`. Colors: emerald, green, amber, red, blue, violet."},
-					"summary": map[string]any{"type": "string", "description": "Summary text (markdown). Must be derived from the tool_use_ids listed in `sources`. Optional."},
-					"actions": map[string]any{"type": "string", "description": "JSON array of action objects: [{label, action, id?}]. Optional."},
-					"sources": map[string]any{"type": "string", "description": "JSON array of objects documenting the grounding: [{tool_use_id, tool_name, note?}]. Each source must be a tool_use_id from a tool call in THIS generation whose result materially informs the report. Minimum 1 source. If you didn't fetch the data, don't render the report — say so in plain text instead."},
-				},
-				"required": []string{"title", "metrics", "sources"},
+				"required": []string{"type", "data"},
 			},
 		},
 		// Builder tools — interactive step-by-step creation flows
@@ -262,26 +298,27 @@ func selfToolDefinitions() []Tool {
 		// --- Todo/Plan tools ---
 		{
 			Name: "nanite_todo_create",
-			Description: "Create a todo item scoped to workspace, project, or session.\n\n" +
+			Description: "Create a todo item scoped to project, session, or turn (D1, CW-20260428-0014).\n\n" +
 				"**When to use:** When the user asks to track a task, action item, or follow-up. Choose the scope that matches where the work lives:\n" +
-				"- `session`: items tied to this chat conversation only (scope_id auto-filled from the current session when omitted).\n" +
-				"- `project`: items that belong to a project across sessions (scope_id = project_id).\n" +
-				"- `workspace`: global items visible in any project or session.\n\n" +
+				"- `session` (default): items tied to this chat conversation only. scope_id auto-filled from the current session when omitted.\n" +
+				"- `project`: items that belong to a project and surface in any session of the same project. scope_id = project_id (or pass project_id explicitly).\n" +
+				"- `turn`: items scoped to the current turn (rare — most callers want session).\n\n" +
 				"**When NOT to use:** Do not use for multi-step plans with dependencies — use nanite_plan_create for those.\n\n" +
-				"**Required context:** `scope` is required. For scope=session, `scope_id` is auto-filled from the current session context if omitted; for scope=project you must supply scope_id.\n\n" +
+				"**Required context:** `scope=project` requires `project_id`. For scope=session/turn, `scope_id` is auto-filled from the current session context if omitted.\n\n" +
 				"**Output shape:** \"Created todo <title> (<id>)\" on success.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"title":       map[string]any{"type": "string", "description": "Todo title"},
-					"scope":       map[string]any{"type": "string", "description": "Scope: workspace, project, or session"},
-					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
+					"scope":       map[string]any{"type": "string", "enum": []string{"turn", "session", "project"}, "description": "Scope: turn, session, or project (default: session)"},
+					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (session_id for turn/session; project_id for project). Auto-filled from the current chat session when scope is 'session'/'turn' and this field is omitted."},
+					"project_id":  map[string]any{"type": "string", "description": "Project ID — required when scope=project. Resolved from the current session's project when omitted."},
 					"priority":    map[string]any{"type": "string", "description": "Priority: low, medium, high, critical (default: medium)"},
 					"description": map[string]any{"type": "string", "description": "Detailed description (optional)"},
 					"parent_id":   map[string]any{"type": "string", "description": "Parent todo ID for nesting (optional)"},
 					"labels":      map[string]any{"type": "string", "description": "JSON array of label strings (optional)"},
 				},
-				"required": []string{"title", "scope"},
+				"required": []string{"title"},
 			},
 		},
 		{
@@ -307,14 +344,15 @@ func selfToolDefinitions() []Tool {
 			Name: "nanite_todo_list",
 			Description: "List todos with optional filters, and render an interactive todo-list card when scope is provided.\n\n" +
 				"**When to use:** When the user asks to see their todos, check what's pending, or view the task list for a session or project.\n\n" +
-				"**Scope semantics:** Pass `scope` + `scope_id` to get a correctly scoped live card. For `scope=session`, `scope_id` is auto-filled from the current session context when omitted — you do not need to supply it explicitly. For `scope=project`, supply the project_id explicitly.\n\n" +
+				"**Scope semantics:** Pass `scope` + `scope_id` to get a correctly scoped live card. For `scope=session`, `scope_id` is auto-filled from the current session context when omitted — you do not need to supply it explicitly. For `scope=project`, supply the project_id explicitly (or rely on the current session's project).\n\n" +
 				"**Output shape:** Text summary of matching todos (count + titles). When `scope` is provided, also emits an interactive todo-list envelope that the UI renders as a live card (lazy-fetches current data at render time — NOT the snapshot from this call). Do NOT emit a nanite-envelope block manually — this tool handles that automatically.\n\n" +
 				"**When NOT to use:** Do not call without `scope` if you want the interactive card — a scopeless call returns text only and emits no card.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"scope":    map[string]any{"type": "string", "description": "Filter by scope: workspace, project, or session. Required to render an interactive card."},
-					"scope_id": map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
+					"scope":    map[string]any{"type": "string", "enum": []string{"turn", "session", "project"}, "description": "Filter by scope: turn, session, or project. Required to render an interactive card."},
+					"scope_id": map[string]any{"type": "string", "description": "Scope ID (session_id for turn/session; project_id for project). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
+					"project_id": map[string]any{"type": "string", "description": "Convenience: filter by project_id directly (matches both project-scoped todos and session/turn todos whose originating session belongs to this project)."},
 					"status":   map[string]any{"type": "string", "description": "Filter by status: pending, in_progress, done, blocked (optional)"},
 					"priority": map[string]any{"type": "string", "description": "Filter by priority: low, medium, high, critical (optional)"},
 					"title":    map[string]any{"type": "string", "description": "Title shown at the top of the interactive card (optional, defaults to \"Todos\")"},
@@ -904,7 +942,7 @@ the current turn for subsequent writes.
 				"required": []string{"mode"},
 			},
 		},
-		// --- Reminders + Pin (J11, CW-20260426-0009) ---
+		// --- Reminders + Pin (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
 		{
 			Name: "nanite_set_reminder",
 			Description: "Set a deterministic reminder that fires at a future time or after N turns, " +
@@ -914,11 +952,15 @@ the current turn for subsequent writes.
 				"**Trigger shapes (v1):**\n" +
 				"- Time-based: `{\"type\":\"time\",\"at\":\"<RFC3339>\"}` — fires when the clock reaches the given time.\n" +
 				"- Turn-count: `{\"type\":\"turn_count\",\"n\":5}` — fires N turns after this call.\n\n" +
+				"**Scope (D1, CW-20260428-0014):**\n" +
+				"- `turn`: fires within the same turn it was created in.\n" +
+				"- `session` (default): fires only in the originating session.\n" +
+				"- `project`: fires in any session of the same project; requires project_id (resolved from the current session's project when omitted).\n\n" +
 				"**When NOT to use:** Do not use for calendar events, cross-system notifications, or anything requiring " +
 				"an LLM to decide when to fire — triggers are always deterministic in v1.\n\n" +
 				"**Reminder display:** When a reminder fires, its text is injected as `<system-reminder>` into the next turn's " +
 				"context and surfaced in the I1 dev-mode inspector. There is no UI toast in v1.\n\n" +
-				"**Output shape:** `{reminder_id, status: 'set', trigger}`.",
+				"**Output shape:** `{reminder_id, scope, status: 'set', trigger}`.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -936,20 +978,29 @@ the current turn for subsequent writes.
 						},
 						"required": []string{"type"},
 					},
+					"scope": map[string]any{
+						"type":        "string",
+						"enum":        []string{"turn", "session", "project"},
+						"description": "Reminder lifetime. Default: session.",
+					},
+					"project_id": map[string]any{
+						"type":        "string",
+						"description": "Project ID — required when scope=project. Auto-resolved from the current session's project when omitted.",
+					},
 				},
 				"required": []string{"text", "trigger"},
 			},
 		},
 		{
 			Name: "nanite_pin",
-			Description: "Pin content so the system keeps it in context across turns (session scope) or sessions (cross_session). " +
+			Description: "Pin content so the system keeps it in context across turns (session scope) or across sessions in a project (project scope). " +
 				"Pinned content rides in the SlotUserContext budget and is visible in the bottom drawer Pins tab.\n\n" +
 				"**When to use:** When you want to keep a piece of context visible throughout the conversation or across sessions — " +
 				"e.g. a key decision, a reference snippet, a current task description.\n\n" +
-				"**Scopes:**\n" +
+				"**Scopes (D1, CW-20260428-0014):**\n" +
 				"- `turn`: ephemeral, cleared after the current turn (not stored in DB).\n" +
-				"- `session`: survives compaction, cleared at session end. **Default.**\n" +
-				"- `cross_session`: persists until explicit unpin via nanite_unpin.\n\n" +
+				"- `session` (default): survives compaction, cleared at session end.\n" +
+				"- `project`: persists for the project; surfaces in any session of the same project. Requires project_id (resolved from the current session's project when omitted).\n\n" +
 				"**Budget:** Pinned content shares the 2000-token SlotUserContext budget. " +
 				"Oldest pins truncate first when over budget. Keep pins thin.\n\n" +
 				"**Output shape:** `{pin_id, scope, status: 'pinned'}`.",
@@ -962,8 +1013,12 @@ the current turn for subsequent writes.
 					},
 					"scope": map[string]any{
 						"type":        "string",
-						"enum":        []string{"turn", "session", "cross_session"},
+						"enum":        []string{"turn", "session", "project"},
 						"description": "Pin lifetime. Default: session.",
+					},
+					"project_id": map[string]any{
+						"type":        "string",
+						"description": "Project ID — required when scope=project. Auto-resolved from the current session's project when omitted.",
 					},
 				},
 				"required": []string{"content"},

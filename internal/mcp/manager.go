@@ -18,6 +18,13 @@ import (
 	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
+// selfServerName is the canonical name reserved for the in-process
+// self-tools transport. The reserved-namespace defense in
+// assignUniformNameLocked exempts this server so its `nanite_*` tools
+// are indexed under their bare names — the agent invokes them by that
+// name and a force-prefix would make every self-tool unreachable.
+const selfServerName = "self"
+
 // MCPTransport is the interface for MCP server connections (stdio or HTTP).
 type MCPTransport interface {
 	ListTools(ctx context.Context) ([]Tool, error)
@@ -313,6 +320,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 
 		advertised := len(tools)
 		accepted := 0
+		renames := 0
 		seen := make(map[string]struct{}, len(tools))
 		for _, t := range tools {
 			// Skip duplicates here too so the in-scope tool list mirrors the
@@ -348,6 +356,22 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 				continue
 			}
 
+			if uniform != t.Name {
+				renames++
+				// Self-server tools that get renamed are unreachable to agents
+				// (the agent invokes by bare name). Loud-detect any future
+				// regression in the namespace defense.
+				if name == selfServerName {
+					slog.Warn("mcp: self-server tool renamed at registration — agents cannot invoke it",
+						"tool", t.Name, "uniform", uniform)
+					m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
+						ServerName: name,
+						ToolName:   t.Name,
+						Reason:     "self_tool_renamed",
+					})
+				}
+			}
+
 			entry := &toolEntry{
 				serverName:  name,
 				uniformName: uniform,
@@ -364,6 +388,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 			"tier", string(tier),
 			"advertised", advertised,
 			"accepted", accepted,
+			"renames", renames,
 		)
 	}
 
@@ -525,8 +550,11 @@ func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
 		return ""
 	}
 
-	// (2) Reserved-namespace defense.
-	if IsReservedSelfToolName(bare) {
+	// (2) Reserved-namespace defense — third-party servers only.
+	// The `self` transport publishes the canonical nanite_* tools and must
+	// keep its bare names; force-prefixing them would make every self-tool
+	// unreachable to agents (they invoke by bare name).
+	if IsReservedSelfToolName(bare) && serverName != selfServerName {
 		disambig := DisambiguatedToolName(serverName, toolName)
 		if _, taken := m.uniformIndex[disambig]; taken {
 			return ""

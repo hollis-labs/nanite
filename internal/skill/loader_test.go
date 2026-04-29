@@ -43,6 +43,36 @@ func TestEnsureHomeDirs_Idempotent(t *testing.T) {
 	}
 }
 
+// TestWriteUserSkillFile_RejectsTraversalSlugs ensures that the dev-mode
+// fork-to-user-override path cannot escape ~/.nanite/skills/ via crafted
+// slug values (E1 hardening, post-PR-92 review).
+func TestWriteUserSkillFile_RejectsTraversalSlugs(t *testing.T) {
+	home := t.TempDir()
+	cases := []string{
+		"../escape",
+		"../../etc/passwd",
+		"sub/dir",
+		`back\slash`,
+		"..",
+		"/abs/path",
+		"weird..ok", // contains ".." — rejected even though no separator
+	}
+	for _, slug := range cases {
+		if _, err := WriteUserSkillFile(home, slug, "body"); err == nil {
+			t.Errorf("WriteUserSkillFile(%q) expected error, got nil", slug)
+		}
+	}
+	// Sanity check: a clean slug still works.
+	out, err := WriteUserSkillFile(home, "clean-slug", "body")
+	if err != nil {
+		t.Fatalf("WriteUserSkillFile(clean): %v", err)
+	}
+	expected := filepath.Join(home, ".nanite", "skills", "clean-slug.md")
+	if out != expected {
+		t.Errorf("path = %q, want %q", out, expected)
+	}
+}
+
 // TestDropAndLoad_EndToEnd is the primary acceptance test for J6.
 // It simulates the folder-drop flow:
 //

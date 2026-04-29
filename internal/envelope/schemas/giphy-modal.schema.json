@@ -4,7 +4,12 @@
   "title": "Giphy Modal",
   "description": "A Giphy GIF display card.",
   "type": "object",
-  "required": ["title", "gif_url", "source", "query"],
+  "required": [
+    "title",
+    "gif_url",
+    "source",
+    "query"
+  ],
   "properties": {
     "title": {
       "type": "string",
@@ -23,5 +28,6 @@
       "description": "The search query used to find this GIF."
     }
   },
+  "default_render_target": "bottom_chat_drawer",
   "additionalProperties": false
 }

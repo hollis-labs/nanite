@@ -146,6 +146,20 @@ func TestRepair_Timeout_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestDefaultRepairTimeout_AccommodatesRealAPI guards against a regression
+// where DefaultRepairTimeout drops below a value that can plausibly cover
+// a real Anthropic Haiku-class API call (TCP+TLS+queue+inference for a
+// repair-sized payload). c110 evidence (CW-20260429-0018) showed the prior
+// 1500ms default firing before Anthropic could respond. Anything under 3s
+// is a smell; if a future change tightens this, do it deliberately and
+// update this floor with rationale.
+func TestDefaultRepairTimeout_AccommodatesRealAPI(t *testing.T) {
+	const floor = 3 * time.Second
+	if DefaultRepairTimeout < floor {
+		t.Fatalf("DefaultRepairTimeout=%v is below the %v floor required to cover a real Anthropic Haiku API call; see CW-20260429-0018", DefaultRepairTimeout, floor)
+	}
+}
+
 // TestRepair_NilProvider_ReturnsError is a guard — defensive callers
 // should never pass nil but we want a clean error rather than a panic.
 func TestRepair_NilProvider_ReturnsError(t *testing.T) {

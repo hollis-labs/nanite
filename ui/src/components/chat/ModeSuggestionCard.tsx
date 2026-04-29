@@ -28,16 +28,6 @@ interface ModeSuggestionCardProps {
   variant: Variant
 }
 
-function humanizeSignal(raw: string): string {
-  // Signals come from the deterministic classifier as short slugs/phrases
-  // (e.g. "verb:plan", "kw:design"). For the human prompt we strip any
-  // "namespace:" prefix and surface what remains. If the signal is already
-  // human-friendly, this is a no-op.
-  const colon = raw.indexOf(':')
-  if (colon >= 0 && colon < raw.length - 1) return raw.slice(colon + 1)
-  return raw
-}
-
 export function ModeSuggestionCard({ suggestion, sessionId, variant }: ModeSuggestionCardProps) {
   const queryClient = useQueryClient()
   const clearModeSuggestion = useChatStore((s) => s.clearModeSuggestion)
@@ -98,7 +88,7 @@ export function ModeSuggestionCard({ suggestion, sessionId, variant }: ModeSugge
   const busy = setSessionMode.isPending || setPref.isPending
   const firstSignal = suggestion.signals?.[0]
   const subline = firstSignal
-    ? `We detected '${humanizeSignal(firstSignal)}' in your message.`
+    ? `We detected '${firstSignal}' in your message.`
     : `Confidence ${(suggestion.confidence * 100).toFixed(0)}%.`
 
   if (variant === 'compact') {

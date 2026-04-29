@@ -140,6 +140,11 @@ type BookmarkStore interface {
 type ArtifactStore interface {
 	ListArtifacts(sessionID string) ([]store.Artifact, error)
 	ListArtifactsByOrigin(sessionID, origin string) ([]store.Artifact, error)
+	// ListArtifactsByProject returns artifacts whose owning session belongs
+	// to the given project. F4 (CW-20260429-0004): backs the right-rail
+	// "This Project" inherited-artifacts section. excludeSessionID, when
+	// non-empty, excludes artifacts owned by that session from the result.
+	ListArtifactsByProject(projectID, excludeSessionID string) ([]store.Artifact, error)
 	CreateArtifact(a *store.Artifact) error
 	GetArtifact(id string) (*store.Artifact, error)
 }

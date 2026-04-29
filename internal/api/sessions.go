@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -324,6 +326,12 @@ func (a *API) handleSetSessionMode(w http.ResponseWriter, r *http.Request) {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// F1 (CW-20260429-0001): broadcast cross-tab so a second tab open on
+		// the same session updates its mode chip without manual refetch.
+		// Empty mode_id/mode_slug signal a clear (default chat mode).
+		if a.Services.Streams != nil {
+			a.Services.Streams.BroadcastSessionModeChanged(sessionID, "", "")
+		}
 		a.jsonResp(w, http.StatusOK, nil)
 		return
 	}
@@ -351,7 +359,69 @@ func (a *API) handleSetSessionMode(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// F1 (CW-20260429-0001): broadcast the resolved mode so other tabs on
+	// the same session pick up the change without polling. Reuses the
+	// presence pipe — same channel as session_archived / work_changed.
+	if a.Services.Streams != nil && resolved != nil {
+		a.Services.Streams.BroadcastSessionModeChanged(sessionID, resolved.ID, resolved.Slug)
+	}
+
 	a.jsonResp(w, http.StatusOK, resolved)
+}
+
+// handleSetSessionAutoSwitch sets the per-session auto-switch override for
+// classifier mode suggestions (F2, CW-20260429-0002).
+//
+//	PATCH /api/sessions/{id}/auto-switch
+//	{ "override": true | false | null }
+//
+// `null` clears the override (session inherits user_settings.mode_auto_switch_pref).
+// `true` forces ON for this session (does NOT bypass first-use prompt).
+// `false` forces OFF for this session.
+//
+// Returns the persisted override on the session row.
+func (a *API) handleSetSessionAutoSwitch(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+
+	// Verify session exists up front so we don't silently no-op on a missing
+	// session — same shape as handleSetSessionMode.
+	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	// `encoding/json` decodes both `{}` (field absent) and `{"override": null}`
+	// into a nil pointer, so a plain `*bool` field can't distinguish absent
+	// from null. Decode into a raw map first, require the `override` key, then
+	// unmarshal the value — clients that omit it get a 400 instead of a silent
+	// override-clear (PR #93 Copilot feedback).
+	var raw map[string]json.RawMessage
+	if err := a.decode(r, &raw); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	rawOverride, present := raw["override"]
+	if !present {
+		a.errorResp(w, http.StatusBadRequest, "override field is required (use null to clear)")
+		return
+	}
+	var override *bool
+	if !bytes.Equal(bytes.TrimSpace(rawOverride), []byte("null")) {
+		var b bool
+		if err := json.Unmarshal(rawOverride, &b); err != nil {
+			a.errorResp(w, http.StatusBadRequest, "override must be true, false, or null")
+			return
+		}
+		override = &b
+	}
+
+	if err := a.Services.Store.SetSessionAutoSwitchOverride(sessionID, override); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	a.jsonResp(w, http.StatusOK, SessionAutoSwitchResponse{Override: override})
 }
 
 // handleCompactSession runs the slot-aware compaction pipeline against the

@@ -322,3 +322,29 @@ func (a *API) handleListArtifactsByOrigin(w http.ResponseWriter, r *http.Request
 	}
 	a.jsonResp(w, http.StatusOK, artifacts)
 }
+
+// handleListArtifactsByProject returns artifacts whose owning session belongs
+// to the given project. F4 (CW-20260429-0004): backs the right-rail
+// "This Project" inherited-artifacts section.
+//
+// Optional ?exclude_session_id= query param filters out artifacts from a
+// specific session — used by the FE to avoid double-counting the active
+// session (which is shown in its own "This Session" list).
+func (a *API) handleListArtifactsByProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if projectID == "" {
+		a.errorResp(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+	excludeSessionID := r.URL.Query().Get("exclude_session_id")
+
+	artifacts, err := a.Services.Store.ListArtifactsByProject(projectID, excludeSessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if artifacts == nil {
+		artifacts = []store.Artifact{}
+	}
+	a.jsonResp(w, http.StatusOK, artifacts)
+}

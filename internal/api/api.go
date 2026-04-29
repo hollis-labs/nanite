@@ -73,6 +73,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// resolved via sessions.current_mode_id → modes.id.
 	mux.HandleFunc("GET /api/sessions/{id}/mode", a.handleGetSessionMode)
 	mux.HandleFunc("PATCH /api/sessions/{id}/mode", a.handleSetSessionMode)
+	// F2 (CW-20260429-0002): per-session auto-mode-switch override. Tri-state
+	// — null = inherit user pref, true = force ON, false = force OFF.
+	mux.HandleFunc("PATCH /api/sessions/{id}/auto-switch", a.handleSetSessionAutoSwitch)
 
 	// Agents
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)
@@ -97,6 +100,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Artifacts
 	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter
+	// F4 (CW-20260429-0004): project-inherited artifacts for the right-rail
+	// panel. Supports ?exclude_session_id= so the FE can render the active
+	// session separately without double-counting.
+	mux.HandleFunc("GET /api/projects/{id}/artifacts", a.handleListArtifactsByProject)
 	mux.HandleFunc("GET /api/artifacts/{id}/download", a.handleDownloadArtifact)
 	mux.HandleFunc("POST /api/artifacts/upload", a.handleUploadArtifact)
 	mux.HandleFunc("POST /api/artifacts/place", a.handlePlaceArtifact)

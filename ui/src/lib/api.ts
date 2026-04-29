@@ -144,7 +144,13 @@ export const api = {
   getSession: async (id: string): Promise<SessionWithMessages> => {
     const res = await fetch(`${API_BASE}/sessions/${id}`);
     if (!res.ok) throw new Error(`Failed to get session: ${res.status}`);
-    return res.json();
+    // BE returns `{session: Session, messages: Message[]}`; flatten so the
+    // returned object satisfies SessionWithMessages (= Session + messages)
+    // and consumers can read `session.<field>` directly. Several callers
+    // were silently reading `undefined` before this fix (PR #93 Copilot
+    // feedback).
+    const raw = await res.json();
+    return { ...(raw.session ?? {}), messages: raw.messages ?? [] };
   },
 
   createSession: async (data: {
@@ -400,6 +406,21 @@ export const api = {
     return res.json();
   },
 
+  // F2 (CW-20260429-0002): per-session auto-switch override.
+  // override === null clears the override (session inherits user pref).
+  setSessionAutoSwitch: async (
+    sessionId: string,
+    override: boolean | null,
+  ): Promise<{ override: boolean | null }> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/auto-switch`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ override }),
+    });
+    if (!res.ok) throw new Error(`Failed to set session auto-switch: ${res.status}`);
+    return res.json();
+  },
+
   // Slash Commands
   listCommands: async (): Promise<SlashCommandDef[]> => {
     const res = await fetch(`${API_BASE}/commands`);
@@ -457,6 +478,21 @@ export const api = {
   listArtifacts: async (sessionId: string): Promise<Artifact[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/artifacts`);
     if (!res.ok) throw new Error(`Failed to list artifacts: ${res.status}`);
+    return res.json();
+  },
+
+  // F4 (CW-20260429-0004): list artifacts inherited from sibling sessions in
+  // the given project. Pass `excludeSessionId` to filter out the active
+  // session (rendered in its own "This Session" list).
+  listArtifactsByProject: async (
+    projectId: string,
+    excludeSessionId?: string,
+  ): Promise<Artifact[]> => {
+    const qs = excludeSessionId
+      ? `?exclude_session_id=${encodeURIComponent(excludeSessionId)}`
+      : "";
+    const res = await fetch(`${API_BASE}/projects/${projectId}/artifacts${qs}`);
+    if (!res.ok) throw new Error(`Failed to list project artifacts: ${res.status}`);
     return res.json();
   },
 

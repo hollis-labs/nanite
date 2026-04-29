@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Dry-run a project install (NOT YET IMPLEMENTED)",
+    "args": { "project_dir": "/Users/me/Projects/myapp" },
+    "notes": "Returns a not-implemented error in v1. Listed for surface completeness."
+  }
+]

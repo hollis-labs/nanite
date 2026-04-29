@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Free byte budget by deleting a single key",
+    "args": { "key": "open_pr_count" },
+    "notes": "Idempotent — returns {cleared: false} when the key wasn't there."
+  }
+]

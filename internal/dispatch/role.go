@@ -98,6 +98,16 @@ var ChatToolSurface = []string{
 	"nanite_execute_task",
 	// Conversation search (P8B, CW-20260420-0026).
 	"nanite_chat_search",
+	// Pre-flight schema validation (B1, CW-20260429-0006). Read-only,
+	// idempotent — the agent uses it to check args before firing a
+	// high-blast-radius tool. Not a write or a panel signal, so safe to
+	// keep on the Chat surface.
+	"nanite_validate",
+	// Learning capture (D1, CW-20260429-0009). Persists a one-sentence
+	// lesson to durable memory. Idempotent on (scope, subject, hint),
+	// no panel signal, no surface mutation — safe on the Chat surface
+	// and load-bearing for the self-healing loop (Layer 4 of the lens).
+	"nanite_remember",
 	// Panel control (J8 v1, CW-20260426-0006). The Chat agent can open and
 	// close known UI drawers as a visibility-only signal — these tools never
 	// mutate workspace data and are gated for plugin-shipped panels via H1

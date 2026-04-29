@@ -1,0 +1,6 @@
+[
+  {
+    "title": "Approve a pending handoff",
+    "args": { "handoff_id": "hof-01HZ..." }
+  }
+]

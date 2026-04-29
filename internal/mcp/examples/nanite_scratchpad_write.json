@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Stash an interim count for later in this turn",
+    "args": { "key": "open_pr_count", "value": 12 }
+  },
+  {
+    "title": "Stash a JSON-encoded summary string",
+    "args": {
+      "key": "audit_summary",
+      "value": "{\"failed\":3,\"passed\":18}"
+    },
+    "notes": "Per-turn only — clears on turn exit. Max 8 KiB per value, 64 KiB total per turn. Encode structured data as a JSON string."
+  }
+]

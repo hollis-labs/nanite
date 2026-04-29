@@ -424,6 +424,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// SelectForAgent can detect Chat-role harness agents and clamp
 		// their tool surface to dispatch.ChatToolSurface.
 		impl.SetPromptTemplateReader(cfg.Store)
+		// C2 (CW-20260429-0008): wire the LLM-augmented repair pipeline.
+		// The repair model is selectable via NANITE_REPAIR_MODEL; the
+		// provider is picked from the user's utility provider (which
+		// is what already runs cheap classifier / summarizer calls).
+		// Nil-safe: when the provider is missing, the repair config is
+		// left nil and Execute returns the C1 envelope directly.
+		if rc := buildRepairConfig(cfg.Providers, cfg.Store, cfg.UtilityProvider); rc != nil {
+			impl.SetRepairConfig(rc)
+		}
 	}
 
 	// Phase 5 / D3 (CW-20260419-0011): wire the reasoning-augmented broker

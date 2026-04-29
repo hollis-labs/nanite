@@ -1,0 +1,10 @@
+[
+  {
+    "title": "List every skill",
+    "args": {}
+  },
+  {
+    "title": "Filter by category",
+    "args": { "category": "dev" }
+  }
+]

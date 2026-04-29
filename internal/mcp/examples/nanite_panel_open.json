@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Open the Work right-rail drawer",
+    "args": { "panel_id": "work" },
+    "notes": "v1 built-ins: bottom_chat_drawer | work | workflows. NO-OP if the user dismissed the panel since last conversational trigger."
+  }
+]

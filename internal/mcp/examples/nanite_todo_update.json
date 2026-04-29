@@ -1,0 +1,17 @@
+[
+  {
+    "title": "Mark a todo done",
+    "args": {
+      "id": "td-01HZ...",
+      "status": "done"
+    }
+  },
+  {
+    "title": "Re-prioritize and rename in one call",
+    "args": {
+      "id": "td-01HZ...",
+      "title": "Audit envelope validation failures",
+      "priority": "critical"
+    }
+  }
+]

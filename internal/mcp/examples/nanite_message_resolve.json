@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Mark a request resolved (work complete)",
+    "args": {
+      "session_id": "ses-01HZ...",
+      "agent_id": "agt-worker",
+      "message_id": "msg-01HZ..."
+    },
+    "notes": "Distinct from ack — resolved means the action requested in the message is finished."
+  }
+]

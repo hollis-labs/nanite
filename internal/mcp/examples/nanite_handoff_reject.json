@@ -1,0 +1,9 @@
+[
+  {
+    "title": "Reject a pending handoff with a reason",
+    "args": {
+      "handoff_id": "hof-01HZ...",
+      "reason": "Caller still needs to verify scope before handing off."
+    }
+  }
+]

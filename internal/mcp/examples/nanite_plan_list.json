@@ -1,0 +1,14 @@
+[
+  {
+    "title": "List session plans (defaults work for most callers)",
+    "args": { "scope": "session" }
+  },
+  {
+    "title": "List in-progress plans for a project",
+    "args": {
+      "scope": "project",
+      "scope_id": "nanite",
+      "status": "in_progress"
+    }
+  }
+]

@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/grounding"
+	"github.com/hollis-labs/nanite/internal/learnings"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/reminders"
@@ -180,6 +181,32 @@ type SelfToolsTransport struct {
 	// Nil-safe — without the engine, reminders are persisted but turn_count
 	// triggers fall back to turn 0 as the creation baseline.
 	ReminderEngine *reminders.Engine
+
+	// SchemaLookup is the cross-server tool-schema registry used by
+	// nanite_validate (B1, CW-20260429-0006). When set, the validator can
+	// resolve input schemas for tools published by ANY registered MCP
+	// server, not just the self-tools. *mcp.Manager satisfies this.
+	// Nil-safe — when unwired, nanite_validate falls back to self-tool
+	// schemas only and returns "unknown tool" for everything else.
+	SchemaLookup ToolSchemaLookup
+
+	// LearningRecorder is the Vanta-backed write surface for the D1
+	// nanite_remember self-tool (CW-20260429-0009). When unset, the
+	// tool returns a clear errorResult on every call so a wiring miss
+	// is visible rather than silently dropped.
+	LearningRecorder *learnings.Recorder
+
+	// LearningRecaller surfaces prior tool-use lessons during slot
+	// assembly. Read by the chat layer via SelfToolsTransport's
+	// RecallToolLearnings method (D1, CW-20260429-0009). Nil-safe —
+	// when unwired, the lesson-recall slot extension is a no-op.
+	LearningRecaller *learnings.Recaller
+
+	// RememberCounters tracks per-session counts of nanite_remember
+	// calls bucketed by scope (D1 telemetry requirement). Lazily
+	// constructed by NewSelfToolsTransport so SnapshotSession works
+	// without explicit wiring.
+	RememberCounters *rememberSessionCounters
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -193,10 +220,24 @@ func (st *SelfToolsTransport) notifyWorkChanged() {
 // NewSelfToolsTransport creates a SelfToolsTransport backed by the given store.
 func NewSelfToolsTransport(s *store.Store) *SelfToolsTransport {
 	return &SelfToolsTransport{
-		Store:           s,
-		BuilderRegistry: builders.DefaultRegistry(s),
-		BuilderSessions: builders.NewSessionManager(),
+		Store:            s,
+		BuilderRegistry:  builders.DefaultRegistry(s),
+		BuilderSessions:  builders.NewSessionManager(),
+		RememberCounters: newRememberSessionCounters(),
 	}
+}
+
+// RecallToolLearnings is the chat-layer slot extension for D1
+// (CW-20260429-0009): it returns up to learnings.MaxRecallHints prior
+// lessons captured for toolName. The slot assembler renders the result
+// via learnings.SystemPromptBlock and prepends it to the system prompt
+// for the turn. Nil-safe: when LearningRecaller is unwired the call
+// returns nil so the assembler appends nothing.
+func (st *SelfToolsTransport) RecallToolLearnings(ctx context.Context, userID, toolName string) []learnings.Hint {
+	if st == nil || st.LearningRecaller == nil {
+		return nil
+	}
+	return st.LearningRecaller.RecallByToolName(ctx, userID, toolName)
 }
 
 // ListTools returns all self-service tool definitions.
@@ -236,6 +277,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callRefreshEngine(args)
 	case "nanite_show_card":
 		return st.callShowCard(ctx, args)
+	case "nanite_validate":
+		return st.callValidate(ctx, args)
 	case "nanite_giphy_search":
 		return st.callGiphySearch(args)
 	case "nanite_start_builder":
@@ -315,6 +358,12 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callPin(ctx, args)
 	case "nanite_unpin":
 		return st.callUnpin(ctx, args)
+	// --- Discovery / introspection (CW-20260429-0005, A1) ---
+	case "nanite_tool_describe":
+		return st.callToolDescribe(ctx, args)
+	// --- Learning capture (CW-20260429-0009, D1) ---
+	case "nanite_remember":
+		return st.callRemember(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}

@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Look up the contract for nanite_show_card before calling it",
+    "args": { "name": "nanite_show_card" },
+    "notes": "Returns description + input_schema + golden examples. Cheaper than failing the real call repeatedly when you're unsure about input shape."
+  },
+  {
+    "title": "Self-describe the describe tool",
+    "args": { "name": "nanite_tool_describe" }
+  }
+]

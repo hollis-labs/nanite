@@ -3,14 +3,18 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
+	recoverpkg "github.com/hollis-labs/nanite/internal/recover"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -112,6 +116,51 @@ type toolServiceImpl struct {
 	// enforced at boot time. Nil-safe: when unset, the chat-surface
 	// filter is a no-op and behaviour matches pre-B3.
 	promptTemplates PromptTemplateReader
+
+	// repairConfig wires the C2 LLM-augmented repair pipeline
+	// (CW-20260429-0008). Nil-safe: when unset (or when the cost gates
+	// reject the call) Execute returns the C1 structured envelope
+	// directly and never spends a Haiku call.
+	repairConfig *RepairConfig
+
+	// transportHook lets tests replace the transport hop with a stub.
+	// Production code leaves it nil; the default callTransport then
+	// dispatches to s.toolClient or s.mcpManager.
+	transportHook func(ctx context.Context, agentID, toolName string, input map[string]any) (string, error)
+}
+
+// RepairConfig holds the wiring for the C2 LLM repair pipeline. It is
+// injected by the container; nil-safe.
+//
+// The struct is intentionally tiny — the orchestration logic lives in
+// Execute() and the LLM primitive in internal/recover. Callers that
+// want to disable repair entirely can leave repairConfig nil OR set
+// NANITE_AUTO_REPAIR=false in the environment OR persist
+// auto_repair_pref="never" in user_settings.
+type RepairConfig struct {
+	// Provider is the LLM provider used for repair calls. Typically
+	// the same provider as the user's default chat provider, resolved
+	// via *provider.Registry at container build.
+	Provider provider.Provider
+
+	// Model is the repair model name (default DefaultRepairModel
+	// from internal/recover when empty).
+	Model string
+
+	// Timeout bounds a single repair LLM call. Default
+	// recoverpkg.DefaultRepairTimeout when zero.
+	Timeout time.Duration
+
+	// SettingsReader returns the current user settings so the
+	// auto_repair_pref gate can be checked at call time. Nil-safe —
+	// when nil the gate is "always".
+	SettingsReader UserSettingsReader
+}
+
+// UserSettingsReader is the narrow surface RepairConfig needs to read
+// the auto_repair_pref column. *store.Store satisfies it.
+type UserSettingsReader interface {
+	GetUserSettings() (*store.UserSettings, error)
 }
 
 // NewToolService creates a ToolService. Both toolClient and mcpManager may be
@@ -170,6 +219,13 @@ func (s *toolServiceImpl) LogRequestToolsCall(
 // unset).
 func (s *toolServiceImpl) SetPromptTemplateReader(r PromptTemplateReader) {
 	s.promptTemplates = r
+}
+
+// SetRepairConfig attaches the C2 repair pipeline wiring. Nil-safe —
+// pass nil to disable repair entirely (the env-var and user-pref gates
+// also disable it independently).
+func (s *toolServiceImpl) SetRepairConfig(rc *RepairConfig) {
+	s.repairConfig = rc
 }
 
 // promptTemplateAdapter bridges PromptTemplateReader (returns
@@ -338,27 +394,339 @@ func (s *toolServiceImpl) logDecisionWithSignals(sessionID, intent, layer string
 
 // Execute implements ToolService. Unified execution path: ToolClient (with
 // permissions) → MCPManager fallback → error.
+//
+// Errors returned by the underlying tool transport are passed through the
+// recover taxonomy (CW-20260429-0007 / C1, layer 3 of the
+// self_healing_tool_surface_lens). Recoverable errors are tagged, logged
+// at INFO with structured fields, and surfaced to the agent as a JSON
+// envelope so even without C2's auto-repair the agent has actionable
+// feedback (kind, reason, suggestion, schema_uri, path). Non-recoverable
+// errors flow through unchanged with the same `Error: <prose>` shape they
+// always had.
+//
+// CW-20260429-0008 (C2): when a recoverable error is detected and the
+// cost gates pass, the harness dispatches a Haiku-class LLM to reshape
+// the args, retries the tool ONCE, and either returns the success
+// result wrapped with a `repair_note` (so the agent learns) or, on
+// retry failure, returns the ORIGINAL C1 envelope unchanged.
+//
+// Iteration cap is hard at 1: there is no nested repair on retry
+// failure. The repair pipeline is bypassed entirely when:
+//   - NANITE_AUTO_REPAIR=false in the environment, OR
+//   - user_settings.auto_repair_pref = "never", OR
+//   - no RepairConfig has been wired on the service.
 func (s *toolServiceImpl) Execute(ctx context.Context, agentID, toolName string, input map[string]any) (*ToolResult, error) {
+	output, callErr := s.callTransport(ctx, agentID, toolName, input)
+	if callErr == nil {
+		return &ToolResult{Output: output}, nil
+	}
+	if errors.Is(callErr, errNoTransport) {
+		return &ToolResult{
+			Output:  "Error: no tool client or MCP manager configured",
+			IsError: true,
+		}, nil
+	}
+
+	// On a recoverable error, attempt the C2 LLM repair pipeline before
+	// surfacing the C1 envelope. attemptRepair returns the C1 envelope
+	// itself when the gates reject, when no repair was possible, or when
+	// the retry failed.
+	return s.attemptRepair(ctx, agentID, toolName, input, callErr), nil
+}
+
+// errNoTransport is returned by callTransport when neither the
+// toolclient nor the MCP manager is configured. Sentinel — never
+// surfaced to the agent.
+var errNoTransport = errors.New("no tool transport")
+
+// callTransport is the single transport hop. Returns (raw output, nil)
+// on success; (zero, error) on transport error; (zero, errNoTransport)
+// when neither route is wired.
+func (s *toolServiceImpl) callTransport(ctx context.Context, agentID, toolName string, input map[string]any) (string, error) {
+	if s.transportHook != nil {
+		return s.transportHook(ctx, agentID, toolName, input)
+	}
 	if s.toolClient != nil {
-		result, err := s.toolClient.CallTool(ctx, agentID, toolName, input)
-		if err != nil {
-			return &ToolResult{Output: fmt.Sprintf("Error: %v", err), IsError: true}, nil
-		}
-		return &ToolResult{Output: result}, nil
+		return s.toolClient.CallTool(ctx, agentID, toolName, input)
 	}
-
 	if s.mcpManager != nil {
-		result, err := s.mcpManager.ExecuteTool(ctx, toolName, input)
-		if err != nil {
-			return &ToolResult{Output: fmt.Sprintf("Error: %v", err), IsError: true}, nil
-		}
-		return &ToolResult{Output: result}, nil
+		return s.mcpManager.ExecuteTool(ctx, toolName, input)
+	}
+	return "", errNoTransport
+}
+
+// attemptRepair is the C2 orchestration for a single recoverable error.
+// It returns the ToolResult the agent will see — either the repaired
+// success (wrapped with repair_note), the C1 envelope on bypass /
+// failure, or a missing-required envelope when the LLM declined to
+// fabricate values.
+//
+// IMPORTANT: iteration cap = 1. If the retry fails we return the
+// ORIGINAL C1 envelope (no nested repair, no compounded errors).
+func (s *toolServiceImpl) attemptRepair(ctx context.Context, agentID, toolName string, input map[string]any, origErr error) *ToolResult {
+	kind := recoverpkg.Classify(origErr)
+	if !kind.IsRecoverable() {
+		return &ToolResult{Output: fmt.Sprintf("Error: %v", origErr), IsError: true}
+	}
+	wrapped := recoverpkg.Wrap(origErr, toolName, input)
+	var rec *recoverpkg.RecoverableError
+	if !errors.As(wrapped, &rec) || rec == nil {
+		return &ToolResult{Output: fmt.Sprintf("Error: %v", origErr), IsError: true}
 	}
 
-	return &ToolResult{
-		Output:  "Error: no tool client or MCP manager configured",
-		IsError: true,
-	}, nil
+	slog.Info("recoverable tool error classified",
+		"kind", rec.Kind.String(),
+		"tool", rec.ToolName,
+		"path", rec.ErrorPath,
+		"reason", rec.ErrorReason,
+		"schema_uri", rec.SchemaURI,
+	)
+
+	// Gate 1: env var bypass (operator-level kill switch).
+	if !autoRepairEnvEnabled() {
+		return &ToolResult{Output: buildAgentErrorEnvelope(rec), IsError: true}
+	}
+	// Gate 2: repair pipeline must be wired.
+	if s.repairConfig == nil || s.repairConfig.Provider == nil {
+		return &ToolResult{Output: buildAgentErrorEnvelope(rec), IsError: true}
+	}
+	// Gate 3: user pref (auto_repair_pref). "never" disables.
+	if s.repairConfig.SettingsReader != nil {
+		us, err := s.repairConfig.SettingsReader.GetUserSettings()
+		if err == nil && us != nil && us.AutoRepairPref == "never" {
+			return &ToolResult{Output: buildAgentErrorEnvelope(rec), IsError: true}
+		}
+	}
+
+	// Run the repair LLM call. Measure elapsed time around the call so
+	// we get useful telemetry on the failure path too — timeouts and
+	// transport errors are exactly when latency tells us something.
+	repairStart := time.Now()
+	outcome, repairErr := recoverpkg.Repair(ctx, rec, recoverpkg.RepairOptions{
+		Provider:       s.repairConfig.Provider,
+		Model:          s.repairConfig.Model,
+		Timeout:        s.repairConfig.Timeout,
+		SchemaProvider: s,
+	})
+	if repairErr != nil {
+		slog.Info("auto_repair attempt",
+			"kind", rec.Kind.String(),
+			"tool", rec.ToolName,
+			"repair_success", false,
+			"repair_latency_ms", time.Since(repairStart).Milliseconds(),
+			"retry_success", false,
+			"err", repairErr.Error(),
+		)
+		// Timeout / transport / parse failure → fall through to C1.
+		return &ToolResult{Output: buildAgentErrorEnvelope(rec), IsError: true}
+	}
+
+	// Missing-required path: return a structural envelope explicitly
+	// listing the missing fields. No retry.
+	if !outcome.HasRepair() {
+		slog.Info("auto_repair attempt",
+			"kind", rec.Kind.String(),
+			"tool", rec.ToolName,
+			"repair_success", false,
+			"repair_latency_ms", outcome.LatencyMS,
+			"retry_success", false,
+			"missing_required", outcome.MissingRequired,
+		)
+		return &ToolResult{Output: buildMissingRequiredEnvelope(rec, outcome), IsError: true}
+	}
+
+	// Single retry — iteration cap = 1, hard.
+	output, retryErr := s.callTransport(ctx, agentID, toolName, outcome.RepairedArgs)
+	if retryErr != nil {
+		slog.Info("auto_repair attempt",
+			"kind", rec.Kind.String(),
+			"tool", rec.ToolName,
+			"repair_success", true,
+			"repair_latency_ms", outcome.LatencyMS,
+			"retry_success", false,
+			"retry_err", retryErr.Error(),
+		)
+		// Compound-error rule: surface the ORIGINAL C1 envelope, not
+		// a fresh classification of the retry error. The agent already
+		// received a structural-error fingerprint on the first call;
+		// reclassifying the retry would muddy the signal.
+		return &ToolResult{Output: buildAgentErrorEnvelope(rec), IsError: true}
+	}
+
+	slog.Info("auto_repair attempt",
+		"kind", rec.Kind.String(),
+		"tool", rec.ToolName,
+		"repair_success", true,
+		"repair_latency_ms", outcome.LatencyMS,
+		"retry_success", true,
+	)
+	return &ToolResult{Output: wrapWithRepairNote(output, rec, input, outcome), IsError: false}
+}
+
+// autoRepairEnvEnabled returns true unless NANITE_AUTO_REPAIR is set
+// to a falsy value ("0", "false", "no", "off", case-insensitive). The
+// default — when the env var is unset or set to anything else — is
+// "enabled". This matches the ticket's "default always" behaviour.
+func autoRepairEnvEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_AUTO_REPAIR")))
+	switch v {
+	case "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
+
+// classifyAndFormatToolError runs the C1 recover.Classify pipeline over a
+// tool-transport error and produces the agent-facing ToolResult.
+//
+// On a recoverable kind it:
+//   - logs an INFO "recoverable tool error classified" entry with the
+//     structured fields (kind, tool, path, reason, schema_uri),
+//   - returns a ToolResult whose Output is the JSON envelope shape the
+//     agent reads to choose its next call.
+//
+// On KindNone it preserves the legacy `Error: <prose>` output verbatim
+// so the byte-stable contract that existing agents (and tests) expect
+// is not broken by the classification layer.
+func classifyAndFormatToolError(err error, toolName string, input map[string]any) *ToolResult {
+	kind := recoverpkg.Classify(err)
+	if !kind.IsRecoverable() {
+		return &ToolResult{Output: fmt.Sprintf("Error: %v", err), IsError: true}
+	}
+
+	wrapped := recoverpkg.Wrap(err, toolName, input)
+	var rec *recoverpkg.RecoverableError
+	if !errors.As(wrapped, &rec) || rec == nil {
+		// Defensive: Wrap returned a recoverable kind from Classify but
+		// did not produce the expected wrapper. Fall back to the prose
+		// shape rather than dropping the error.
+		return &ToolResult{Output: fmt.Sprintf("Error: %v", err), IsError: true}
+	}
+
+	slog.Info("recoverable tool error classified",
+		"kind", rec.Kind.String(),
+		"tool", rec.ToolName,
+		"path", rec.ErrorPath,
+		"reason", rec.ErrorReason,
+		"schema_uri", rec.SchemaURI,
+	)
+
+	envelope := buildAgentErrorEnvelope(rec)
+	return &ToolResult{Output: envelope, IsError: true}
+}
+
+// buildAgentErrorEnvelope renders the agent-facing JSON shape for a
+// classified recoverable error. The shape is intentionally conservative
+// — kind / reason / suggestion / schema_uri / path / tool — because C2's
+// auto-repair pass and the future Vanta learning hint both key off this
+// payload.
+//
+// On marshalling failure (which would be a programmer bug since all
+// fields are JSON-friendly) the function falls back to the rec.Error()
+// string — the agent still gets the kind tag and reason.
+func buildAgentErrorEnvelope(rec *recoverpkg.RecoverableError) string {
+	payload := map[string]any{
+		"recoverable_error": true,
+		"kind":              rec.Kind.String(),
+		"tool":              rec.ToolName,
+	}
+	if rec.ErrorReason != "" {
+		payload["reason"] = rec.ErrorReason
+	}
+	if rec.Suggestion != "" {
+		payload["suggestion"] = rec.Suggestion
+	}
+	if rec.ErrorPath != "" {
+		payload["path"] = rec.ErrorPath
+	}
+	if rec.SchemaURI != "" {
+		payload["schema_uri"] = rec.SchemaURI
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		// Should be unreachable — every value is a string or bool — but
+		// keep a sane fallback rather than panicking on the LLM-facing
+		// path.
+		return "Error: " + rec.Error()
+	}
+	return string(raw)
+}
+
+// buildMissingRequiredEnvelope renders the agent-facing JSON shape when
+// the C2 repair LLM declined to fabricate a value for a required field.
+// The shape extends the C1 envelope with `missing_required` (the field
+// list) and `lesson_hint` (an explainer the agent can persist via
+// nanite_remember once D1 ships). repaired_args is intentionally absent
+// — the contract is "no fabrication".
+func buildMissingRequiredEnvelope(rec *recoverpkg.RecoverableError, outcome *recoverpkg.RepairOutcome) string {
+	payload := map[string]any{
+		"recoverable_error": true,
+		"kind":              rec.Kind.String(),
+		"tool":              rec.ToolName,
+		"missing_required":  outcome.MissingRequired,
+	}
+	if outcome.LessonHint != "" {
+		payload["lesson_hint"] = outcome.LessonHint
+	}
+	if rec.ErrorReason != "" {
+		payload["reason"] = rec.ErrorReason
+	}
+	if rec.ErrorPath != "" {
+		payload["path"] = rec.ErrorPath
+	}
+	if rec.SchemaURI != "" {
+		payload["schema_uri"] = rec.SchemaURI
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return buildAgentErrorEnvelope(rec)
+	}
+	return string(raw)
+}
+
+// wrapWithRepairNote prepends the original tool result with a
+// `repair_note` block so the calling agent sees that its input was
+// reshaped on its behalf. The shape is:
+//
+//	{"repair_note": {original_args, repaired_args, lesson_hint, kind, path, tool}, "result": <orig>}
+//
+// We embed the raw tool result as a JSON value when it parses as JSON;
+// otherwise we surface it as a string under `result_text`. This keeps
+// the JSON envelope self-describing even for tools that return prose.
+//
+// Note: the calling agent's system prompt (see migration 047) tells it
+// to read repair_note.lesson_hint and persist via nanite_remember when
+// that tool is available.
+func wrapWithRepairNote(toolOutput string, rec *recoverpkg.RecoverableError, originalArgs map[string]any, outcome *recoverpkg.RepairOutcome) string {
+	note := map[string]any{
+		"original_args": originalArgs,
+		"repaired_args": outcome.RepairedArgs,
+		"lesson_hint":   outcome.LessonHint,
+		"kind":          rec.Kind.String(),
+		"tool":          rec.ToolName,
+	}
+	if rec.ErrorPath != "" {
+		note["path"] = rec.ErrorPath
+	}
+	payload := map[string]any{
+		"repair_note": note,
+	}
+	// Try to embed the tool result as a JSON value; if it doesn't
+	// parse, fall back to a string field.
+	var resultJSON any
+	if err := json.Unmarshal([]byte(toolOutput), &resultJSON); err == nil {
+		payload["result"] = resultJSON
+	} else {
+		payload["result_text"] = toolOutput
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		// Defensive: fall back to the raw tool output — the agent
+		// will at least see the success result, just without the
+		// learning signal.
+		return toolOutput
+	}
+	return string(raw)
 }
 
 // HandleRequestTools implements ToolService.

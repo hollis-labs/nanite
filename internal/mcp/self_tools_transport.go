@@ -724,12 +724,17 @@ func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]
 
 	if groundedShowCardTypes[envType] {
 		// CW-20260419-0022 (UAT c19): prose-bearing cards must declare what
-		// tool_use_ids ground their content. Shallow shape check; the deep
-		// "were these tool_use_ids actually called this turn" check is
-		// tracked separately.
+		// tool_use_ids ground their content. Shallow shape check first.
 		sources, sourcesErr := parseSourcesArg(args)
 		if sourcesErr != nil {
 			return errorResult(sourcesErr.Error()), nil
+		}
+		// CW-20260429-0024: deep check — every cited tool_use_id must be a
+		// real ID observed in this turn's tool_calls (set stamped by
+		// service.executeToolBatch). Skipped automatically when the set is
+		// nil (test / subagent paths).
+		if turnErr := validateSourcesAgainstTurn(ctx, sources); turnErr != nil {
+			return errorResult(turnErr.Error()), nil
 		}
 		data["sources"] = sources
 	}
@@ -1779,9 +1784,9 @@ func strArg(args map[string]any, key, def string) string {
 // type is report-card or document-viewer (the prose-bearing card types).
 // Shape: JSON array of objects with at least a `tool_use_id` or `tool_name`
 // field. Enforces presence + non-empty + basic per-entry shape — this is
-// the cheap grounding check (CW-20260419-0022). Validating that the cited
-// tool_use_ids were actually invoked in this generation is the deep check
-// tracked separately.
+// the cheap grounding check (CW-20260419-0022). The deep "tool_use_id was
+// actually invoked this turn" check is layered on by validateSourcesAgainstTurn
+// (CW-20260429-0024).
 func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 	raw, ok := args["sources"].(string)
 	if !ok || raw == "" {
@@ -1802,6 +1807,45 @@ func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 		}
 	}
 	return sources, nil
+}
+
+// validateSourcesAgainstTurn rejects any source whose tool_use_id is not in
+// the set stamped onto ctx by service.executeToolBatch. The set being nil
+// (subagent / test paths that don't stamp the context) skips the check —
+// that's the explicit fallback contract for TurnToolUseIDsFromContext.
+//
+// This is the deep grounding check (CW-20260429-0024). The shallow shape
+// check still runs in parseSourcesArg; this only fires when we have a
+// known-good "what did this turn actually call" set to compare against.
+//
+// Per-entry rule: if a source carries tool_use_id, that ID must be in the
+// turn set. If a source carries only tool_name (no tool_use_id), it's
+// allowed through here — name-only validation is a separate concern (the
+// ticket calls out tool_name registry validation as out of scope).
+func validateSourcesAgainstTurn(ctx context.Context, sources []map[string]any) error {
+	turnIDs := TurnToolUseIDsFromContext(ctx)
+	if turnIDs == nil {
+		// No ctx stamping — preserve existing behavior (tests, subagents).
+		return nil
+	}
+	known := make(map[string]struct{}, len(turnIDs))
+	for _, id := range turnIDs {
+		known[id] = struct{}{}
+	}
+	for i, s := range sources {
+		id, _ := s["tool_use_id"].(string)
+		if id == "" {
+			// tool_name-only entry; out of scope for this check.
+			continue
+		}
+		if _, ok := known[id]; !ok {
+			return fmt.Errorf(
+				"source[%d].tool_use_id %q is not from this turn — known tool_use_ids: [%s]. "+
+					"Build the sources array from real tool_use_ids you observed in this turn's tool_results; do not fabricate IDs",
+				i, id, strings.Join(turnIDs, ", "))
+		}
+	}
+	return nil
 }
 
 // --- nanite_run_python handler (CW-20260420-0019, D6) ---

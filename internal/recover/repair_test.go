@@ -403,3 +403,81 @@ func TestParseRepairResponse_PlainObject_RegressionGuard(t *testing.T) {
 		t.Fatalf("expected HasRepair, got %+v", out)
 	}
 }
+
+// TestResolveRepairMaxTokens_Default returns the package default when
+// the caller leaves RepairOptions.MaxTokens at zero. Guards the
+// CW-20260429-0028 default-resolution rule.
+func TestResolveRepairMaxTokens_Default(t *testing.T) {
+	got := resolveRepairMaxTokens(RepairOptions{})
+	if got != DefaultRepairMaxTokens {
+		t.Fatalf("resolveRepairMaxTokens(zero opts) = %d, want %d", got, DefaultRepairMaxTokens)
+	}
+}
+
+// TestResolveRepairMaxTokens_Override honors a positive caller-supplied
+// MaxTokens. CW-20260429-0028.
+func TestResolveRepairMaxTokens_Override(t *testing.T) {
+	const want = 8192
+	got := resolveRepairMaxTokens(RepairOptions{MaxTokens: want})
+	if got != want {
+		t.Fatalf("resolveRepairMaxTokens(MaxTokens=%d) = %d, want %d", want, got, want)
+	}
+}
+
+// TestResolveRepairMaxTokens_NegativeFallsBack treats a negative value
+// as "unset" and falls back to the default; the resolver must never
+// return ≤ 0 (the caller would otherwise propagate an invalid cap to
+// the provider).
+func TestResolveRepairMaxTokens_NegativeFallsBack(t *testing.T) {
+	got := resolveRepairMaxTokens(RepairOptions{MaxTokens: -1})
+	if got != DefaultRepairMaxTokens {
+		t.Fatalf("resolveRepairMaxTokens(MaxTokens=-1) = %d, want %d", got, DefaultRepairMaxTokens)
+	}
+}
+
+// TestDefaultRepairMaxTokens_Reasonable guards against a regression
+// where a future edit drops DefaultRepairMaxTokens to a value too small
+// to fit a typical repair payload (repaired_args + missing_required +
+// lesson_hint). CW-20260429-0028 introduced this constant to fix the
+// c113 truncation symptom; if a future change tightens it below 1024
+// it should be a deliberate decision tied to an evidence ticket.
+func TestDefaultRepairMaxTokens_Reasonable(t *testing.T) {
+	const floor = 1024
+	if DefaultRepairMaxTokens < floor {
+		t.Fatalf("DefaultRepairMaxTokens=%d is below the %d floor required for a typical repair payload; see CW-20260429-0028", DefaultRepairMaxTokens, floor)
+	}
+}
+
+// TestRepairSystemPrompt_AntiMarkdown asserts the repair system prompt
+// carries the load-bearing anti-markdown phrase introduced in
+// CW-20260429-0028. Guards against future prompt edits silently
+// dropping the constraint that caused the c113 truncation symptom.
+func TestRepairSystemPrompt_AntiMarkdown(t *testing.T) {
+	prompt := repairSystemPrompt()
+	const sig = "single bare JSON object"
+	if !strings.Contains(prompt, sig) {
+		t.Fatalf("repair system prompt missing anti-markdown signature %q", sig)
+	}
+	if !strings.Contains(prompt, "Do NOT wrap it in markdown code fences") {
+		t.Errorf("repair system prompt missing explicit fence-forbid wording")
+	}
+}
+
+// TestRepair_HonorsCallerMaxTokens is a smoke test confirming Repair
+// accepts (and does not error on) a caller-supplied MaxTokens override.
+// The wiring into provider.ChatRequest is incomplete until go-providers
+// exposes a MaxTokens field — see the DefaultRepairMaxTokens docstring
+// — but the recover-package surface must already be in place.
+func TestRepair_HonorsCallerMaxTokens(t *testing.T) {
+	stub := &stubProvider{response: `{"repaired_args": {"a":1}, "missing_required": [], "lesson_hint": "ok"}`}
+	_, err := Repair(context.Background(), newRecoverable(), RepairOptions{
+		Provider:  stub,
+		MaxTokens: 8192,
+	})
+	if err != nil {
+		t.Fatalf("Repair with MaxTokens override failed: %v", err)
+	}
+	if stub.calls != 1 {
+		t.Errorf("expected exactly one Complete call, got %d", stub.calls)
+	}
+}

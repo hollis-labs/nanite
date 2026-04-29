@@ -59,6 +59,29 @@ const DefaultRepairModel = "claude-haiku-4-5"
 // NANITE_REPAIR_TIMEOUT_MS (env override) or config (Timeout field).
 const DefaultRepairTimeout = 5000 * time.Millisecond
 
+// DefaultRepairMaxTokens is the output-token cap the repair LLM should
+// honor when emitting its single JSON object. The repair payload is
+// bounded — repaired_args + missing_required + lesson_hint — so 4096
+// tokens is a comfortable ceiling that leaves room for a moderately
+// large repaired_args while still bounding runaway responses.
+//
+// CW-20260429-0028: c113 evidence showed the repair LLM emitting
+// truncated mid-stream responses that parseRepairResponse could not
+// reassemble even after the CW-20260429-0023 markdown-fence stripping
+// landed. Setting an explicit cap is the structural fix for the
+// truncation symptom; tightening the system prompt (see
+// repairSystemPrompt) is the complementary behavioral fix.
+//
+// NOTE — known wiring gap: at the time this constant was introduced,
+// provider.ChatRequest in github.com/hollis-labs/go-providers does not
+// expose a MaxTokens field, so this value cannot yet be threaded into
+// the outgoing provider request. The constant + RepairOptions.MaxTokens
+// scaffolding is in place so the recover-package surface is correct;
+// when go-providers gains a ChatRequest.MaxTokens field (or an
+// equivalent context-based helper), the wiring inside Repair() can be
+// completed without further API churn here.
+const DefaultRepairMaxTokens = 4096
+
 // MaxArgsBytes caps the size of sent_args we serialize into the repair
 // prompt. Pathologically large args are truncated; the repair pass is
 // for shape mistakes, not megabyte payloads.
@@ -124,11 +147,33 @@ type RepairOptions struct {
 	// Timeout bounds the repair LLM call. When zero, DefaultRepairTimeout.
 	Timeout time.Duration
 
+	// MaxTokens caps the repair LLM's output-token budget. When zero,
+	// DefaultRepairMaxTokens. Callers that know they need more headroom
+	// (e.g. a tool with an unusually large repaired_args) can override
+	// the default. CW-20260429-0028.
+	//
+	// NOTE — known wiring gap: provider.ChatRequest does not currently
+	// expose a MaxTokens field, so this value is captured by Repair()
+	// but cannot yet be threaded into the outgoing provider request. See
+	// the DefaultRepairMaxTokens docstring for the upstream-fix path.
+	MaxTokens int
+
 	// SchemaProvider supplies the schema for the failing tool. When nil
 	// the repair prompt omits the schema; the LLM still has the error
 	// path/reason and may produce a useful reshape, but the strict-mode
 	// guarantee is weaker. Production callers should always provide one.
 	SchemaProvider SchemaProvider
+}
+
+// resolveRepairMaxTokens returns the effective output-token cap for a
+// repair LLM call: the caller's override when positive, otherwise the
+// package default. Centralized so the resolution rule has a single
+// definition and a single test surface (CW-20260429-0028).
+func resolveRepairMaxTokens(opts RepairOptions) int {
+	if opts.MaxTokens > 0 {
+		return opts.MaxTokens
+	}
+	return DefaultRepairMaxTokens
 }
 
 // Repair calls a Haiku-class LLM to reshape args around a recoverable
@@ -157,6 +202,13 @@ func Repair(ctx context.Context, rec *RecoverableError, opts RepairOptions) (*Re
 	if timeout <= 0 {
 		timeout = DefaultRepairTimeout
 	}
+	// maxTokens is resolved here so the value is available to thread into
+	// provider.ChatRequest once go-providers exposes a MaxTokens field
+	// (CW-20260429-0028 wiring gap; see DefaultRepairMaxTokens docstring).
+	// Today the value is used only to populate the request scaffolding
+	// path; the cap is not yet honored by the provider call itself.
+	maxTokens := resolveRepairMaxTokens(opts)
+	_ = maxTokens // retained — see comment above; remove suppression once wired through.
 
 	var schemaDoc map[string]any
 	if opts.SchemaProvider != nil {
@@ -196,7 +248,14 @@ func Repair(ctx context.Context, rec *RecoverableError, opts RepairOptions) (*Re
 // pins the output schema, the no-fabrication rule, and the missing-
 // required fall-through. Kept short so it caches well and so the model
 // can spend its budget on the actual reshape.
+//
+// CW-20260429-0028: the OUTPUT FORMAT block was tightened to explicitly
+// forbid markdown code-fence wrapping, since c113 evidence showed Haiku
+// emitting ```json...``` -wrapped responses despite the original
+// "no markdown fences" hint. The "single bare JSON object" phrasing is a
+// load-bearing signature — guarded by TestRepairSystemPrompt_AntiMarkdown.
 func repairSystemPrompt() string {
+	const fence = "```"
 	return `You are a JSON repair assistant. The user supplies a tool name, the args they sent, the JSON Schema the args must satisfy, and the validator's error.
 
 Your job: rearrange, rename, or drop fields in sent_args so the result matches the schema.
@@ -209,7 +268,7 @@ HARD RULES — violations break the system:
 5. Wrapping a single object in an array (or unwrapping a single-element array) is allowed when the schema declares an array.
 6. Type coercion is allowed for adjacent types only: number↔integer, single-element-array↔scalar. Do NOT coerce string↔number; surface as missing_required if a number is required.
 
-OUTPUT FORMAT — respond with a single JSON object, no prose, no markdown fences:
+OUTPUT FORMAT: emit a single bare JSON object. Do NOT wrap it in markdown code fences (no ` + fence + `json, no ` + fence + `). Do NOT include preamble or explanation outside the JSON. The first character of your response must be ` + "`{`" + ` and the last must be ` + "`}`" + `. The object schema:
 {"repaired_args": <object|null>, "missing_required": [<string>...], "lesson_hint": "<short sentence>"}
 
 - repaired_args: the reshaped args object, OR null if you cannot repair without fabrication.

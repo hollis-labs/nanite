@@ -298,26 +298,27 @@ func selfToolDefinitions() []Tool {
 		// --- Todo/Plan tools ---
 		{
 			Name: "nanite_todo_create",
-			Description: "Create a todo item scoped to workspace, project, or session.\n\n" +
+			Description: "Create a todo item scoped to project, session, or turn (D1, CW-20260428-0014).\n\n" +
 				"**When to use:** When the user asks to track a task, action item, or follow-up. Choose the scope that matches where the work lives:\n" +
-				"- `session`: items tied to this chat conversation only (scope_id auto-filled from the current session when omitted).\n" +
-				"- `project`: items that belong to a project across sessions (scope_id = project_id).\n" +
-				"- `workspace`: global items visible in any project or session.\n\n" +
+				"- `session` (default): items tied to this chat conversation only. scope_id auto-filled from the current session when omitted.\n" +
+				"- `project`: items that belong to a project and surface in any session of the same project. scope_id = project_id (or pass project_id explicitly).\n" +
+				"- `turn`: items scoped to the current turn (rare — most callers want session).\n\n" +
 				"**When NOT to use:** Do not use for multi-step plans with dependencies — use nanite_plan_create for those.\n\n" +
-				"**Required context:** `scope` is required. For scope=session, `scope_id` is auto-filled from the current session context if omitted; for scope=project you must supply scope_id.\n\n" +
+				"**Required context:** `scope=project` requires `project_id`. For scope=session/turn, `scope_id` is auto-filled from the current session context if omitted.\n\n" +
 				"**Output shape:** \"Created todo <title> (<id>)\" on success.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"title":       map[string]any{"type": "string", "description": "Todo title"},
-					"scope":       map[string]any{"type": "string", "description": "Scope: workspace, project, or session"},
-					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
+					"scope":       map[string]any{"type": "string", "enum": []string{"turn", "session", "project"}, "description": "Scope: turn, session, or project (default: session)"},
+					"scope_id":    map[string]any{"type": "string", "description": "Scope ID (session_id for turn/session; project_id for project). Auto-filled from the current chat session when scope is 'session'/'turn' and this field is omitted."},
+					"project_id":  map[string]any{"type": "string", "description": "Project ID — required when scope=project. Resolved from the current session's project when omitted."},
 					"priority":    map[string]any{"type": "string", "description": "Priority: low, medium, high, critical (default: medium)"},
 					"description": map[string]any{"type": "string", "description": "Detailed description (optional)"},
 					"parent_id":   map[string]any{"type": "string", "description": "Parent todo ID for nesting (optional)"},
 					"labels":      map[string]any{"type": "string", "description": "JSON array of label strings (optional)"},
 				},
-				"required": []string{"title", "scope"},
+				"required": []string{"title"},
 			},
 		},
 		{
@@ -343,14 +344,15 @@ func selfToolDefinitions() []Tool {
 			Name: "nanite_todo_list",
 			Description: "List todos with optional filters, and render an interactive todo-list card when scope is provided.\n\n" +
 				"**When to use:** When the user asks to see their todos, check what's pending, or view the task list for a session or project.\n\n" +
-				"**Scope semantics:** Pass `scope` + `scope_id` to get a correctly scoped live card. For `scope=session`, `scope_id` is auto-filled from the current session context when omitted — you do not need to supply it explicitly. For `scope=project`, supply the project_id explicitly.\n\n" +
+				"**Scope semantics:** Pass `scope` + `scope_id` to get a correctly scoped live card. For `scope=session`, `scope_id` is auto-filled from the current session context when omitted — you do not need to supply it explicitly. For `scope=project`, supply the project_id explicitly (or rely on the current session's project).\n\n" +
 				"**Output shape:** Text summary of matching todos (count + titles). When `scope` is provided, also emits an interactive todo-list envelope that the UI renders as a live card (lazy-fetches current data at render time — NOT the snapshot from this call). Do NOT emit a nanite-envelope block manually — this tool handles that automatically.\n\n" +
 				"**When NOT to use:** Do not call without `scope` if you want the interactive card — a scopeless call returns text only and emits no card.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"scope":    map[string]any{"type": "string", "description": "Filter by scope: workspace, project, or session. Required to render an interactive card."},
-					"scope_id": map[string]any{"type": "string", "description": "Scope ID (project_id or session_id). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
+					"scope":    map[string]any{"type": "string", "enum": []string{"turn", "session", "project"}, "description": "Filter by scope: turn, session, or project. Required to render an interactive card."},
+					"scope_id": map[string]any{"type": "string", "description": "Scope ID (session_id for turn/session; project_id for project). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
+					"project_id": map[string]any{"type": "string", "description": "Convenience: filter by project_id directly (matches both project-scoped todos and session/turn todos whose originating session belongs to this project)."},
 					"status":   map[string]any{"type": "string", "description": "Filter by status: pending, in_progress, done, blocked (optional)"},
 					"priority": map[string]any{"type": "string", "description": "Filter by priority: low, medium, high, critical (optional)"},
 					"title":    map[string]any{"type": "string", "description": "Title shown at the top of the interactive card (optional, defaults to \"Todos\")"},
@@ -940,7 +942,7 @@ the current turn for subsequent writes.
 				"required": []string{"mode"},
 			},
 		},
-		// --- Reminders + Pin (J11, CW-20260426-0009) ---
+		// --- Reminders + Pin (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
 		{
 			Name: "nanite_set_reminder",
 			Description: "Set a deterministic reminder that fires at a future time or after N turns, " +
@@ -950,11 +952,15 @@ the current turn for subsequent writes.
 				"**Trigger shapes (v1):**\n" +
 				"- Time-based: `{\"type\":\"time\",\"at\":\"<RFC3339>\"}` — fires when the clock reaches the given time.\n" +
 				"- Turn-count: `{\"type\":\"turn_count\",\"n\":5}` — fires N turns after this call.\n\n" +
+				"**Scope (D1, CW-20260428-0014):**\n" +
+				"- `turn`: fires within the same turn it was created in.\n" +
+				"- `session` (default): fires only in the originating session.\n" +
+				"- `project`: fires in any session of the same project; requires project_id (resolved from the current session's project when omitted).\n\n" +
 				"**When NOT to use:** Do not use for calendar events, cross-system notifications, or anything requiring " +
 				"an LLM to decide when to fire — triggers are always deterministic in v1.\n\n" +
 				"**Reminder display:** When a reminder fires, its text is injected as `<system-reminder>` into the next turn's " +
 				"context and surfaced in the I1 dev-mode inspector. There is no UI toast in v1.\n\n" +
-				"**Output shape:** `{reminder_id, status: 'set', trigger}`.",
+				"**Output shape:** `{reminder_id, scope, status: 'set', trigger}`.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -972,20 +978,29 @@ the current turn for subsequent writes.
 						},
 						"required": []string{"type"},
 					},
+					"scope": map[string]any{
+						"type":        "string",
+						"enum":        []string{"turn", "session", "project"},
+						"description": "Reminder lifetime. Default: session.",
+					},
+					"project_id": map[string]any{
+						"type":        "string",
+						"description": "Project ID — required when scope=project. Auto-resolved from the current session's project when omitted.",
+					},
 				},
 				"required": []string{"text", "trigger"},
 			},
 		},
 		{
 			Name: "nanite_pin",
-			Description: "Pin content so the system keeps it in context across turns (session scope) or sessions (cross_session). " +
+			Description: "Pin content so the system keeps it in context across turns (session scope) or across sessions in a project (project scope). " +
 				"Pinned content rides in the SlotUserContext budget and is visible in the bottom drawer Pins tab.\n\n" +
 				"**When to use:** When you want to keep a piece of context visible throughout the conversation or across sessions — " +
 				"e.g. a key decision, a reference snippet, a current task description.\n\n" +
-				"**Scopes:**\n" +
+				"**Scopes (D1, CW-20260428-0014):**\n" +
 				"- `turn`: ephemeral, cleared after the current turn (not stored in DB).\n" +
-				"- `session`: survives compaction, cleared at session end. **Default.**\n" +
-				"- `cross_session`: persists until explicit unpin via nanite_unpin.\n\n" +
+				"- `session` (default): survives compaction, cleared at session end.\n" +
+				"- `project`: persists for the project; surfaces in any session of the same project. Requires project_id (resolved from the current session's project when omitted).\n\n" +
 				"**Budget:** Pinned content shares the 2000-token SlotUserContext budget. " +
 				"Oldest pins truncate first when over budget. Keep pins thin.\n\n" +
 				"**Output shape:** `{pin_id, scope, status: 'pinned'}`.",
@@ -998,8 +1013,12 @@ the current turn for subsequent writes.
 					},
 					"scope": map[string]any{
 						"type":        "string",
-						"enum":        []string{"turn", "session", "cross_session"},
+						"enum":        []string{"turn", "session", "project"},
 						"description": "Pin lifetime. Default: session.",
+					},
+					"project_id": map[string]any{
+						"type":        "string",
+						"description": "Project ID — required when scope=project. Auto-resolved from the current session's project when omitted.",
 					},
 				},
 				"required": []string{"content"},

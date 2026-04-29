@@ -1,7 +1,10 @@
 import { create } from 'zustand'
 import type { WorkDiff } from '@/lib/types'
 
-type WorkScope = 'session' | 'project'
+// D2 (CW-20260428-0015): the Work panel scope filter is a 3-way chip
+// (All / Session / Project). The "all" filter renders both session and
+// project sections side by side; specific scopes render only that section.
+export type WorkScope = 'all' | 'session' | 'project'
 
 interface WorkChange {
   type: 'todo_checked' | 'todo_unchecked' | 'todo_added' | 'todo_reordered' |

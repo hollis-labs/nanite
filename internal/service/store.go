@@ -212,6 +212,7 @@ type TodoStore interface {
 	GetTodo(id string) (*store.Todo, error)
 	ListTodos(f store.TodoFilter) ([]store.Todo, error)
 	UpdateTodo(t *store.Todo) error
+	UpdateTodoScope(id, scope, scopeID, projectID string) error
 	DeleteTodo(id string) error
 	ListTodoChildren(parentID string) ([]store.Todo, error)
 }
@@ -241,20 +242,22 @@ type HandoffStashStore interface {
 	UpsertHandoffStash(stash store.HandoffStash) error
 }
 
-// ReminderStore covers reminder persistence (J11, CW-20260426-0009).
+// ReminderStore covers reminder persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
 type ReminderStore interface {
 	CreateReminder(r store.Reminder) error
 	GetReminder(id string) (store.Reminder, error)
 	ListUnfiredReminders(sessionID string) ([]store.Reminder, error)
 	MarkReminderFired(id string) error
+	UpdateReminderScope(id, scope, projectID string) error
 	DeleteReminder(id string) error
 }
 
-// PinnedContentStore covers pinned content persistence (J11, CW-20260426-0009).
+// PinnedContentStore covers pinned content persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
 type PinnedContentStore interface {
 	CreatePinnedContent(p store.PinnedContent) error
 	ListPinnedContent(sessionID string) ([]store.PinnedContent, error)
 	DeletePinnedContent(id string) error
+	UpdatePinScope(id, scope, projectID string) error
 	ClearSessionPins(sessionID string) error
 }
 

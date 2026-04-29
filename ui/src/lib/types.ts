@@ -563,6 +563,8 @@ export interface InspectorReminderItem {
   id: string;
   text: string;
   trigger_json: string;
+  /** D2 — scope tag rendered next to the reminder ID. */
+  scope?: AgentStateScope;
 }
 
 export interface InspectorRemindersRecord {
@@ -780,12 +782,16 @@ export interface Document {
   updated_at: string
 }
 
-// --- Pinned content (J11, CW-20260426-0009) ---
+// --- Pinned content (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
+
+export type AgentStateScope = 'turn' | 'session' | 'project'
 
 export interface PinnedContent {
   id: string
   session_id?: string | null
-  scope: 'turn' | 'session' | 'cross_session'
+  scope: AgentStateScope
+  /** Project ID — populated when scope='project'. */
+  project_id?: string
   content: string
   agent_id: string
   created_at: string
@@ -820,6 +826,22 @@ export interface DrawerPinnedCard {
   payload: string
   position: number
   created_at: string
+}
+
+// --- Reminders (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
+
+export interface Reminder {
+  id: string
+  session_id: string
+  scope: AgentStateScope
+  /** Project ID — populated when scope='project'. */
+  project_id?: string
+  text: string
+  /** Raw JSON trigger blob — see internal/reminders.Trigger. */
+  trigger_json: string
+  fired_at?: string | null
+  created_at: string
+  updated_at: string
 }
 
 // --- Tool Call Display ---
@@ -942,8 +964,11 @@ export type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 
 export interface Todo {
   id: string
-  scope: 'workspace' | 'project' | 'session'
+  /** D1 (CW-20260428-0014): workspace dropped, turn added. */
+  scope: AgentStateScope
   scope_id: string
+  /** Project pointer — populated when scope='project'. */
+  project_id?: string
   parent_id?: string
   title: string
   description: string
@@ -959,6 +984,8 @@ export interface Todo {
 export interface TodoFilter {
   scope?: string
   scope_id?: string
+  /** D1 — convenience filter on project_id directly. */
+  project_id?: string
   status?: TodoStatus
   priority?: TodoPriority
   parent_id?: string

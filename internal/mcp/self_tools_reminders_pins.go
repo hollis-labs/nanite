@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/reminders"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // callSetReminder handles nanite_set_reminder. Validates the trigger JSON,
@@ -15,6 +15,7 @@ import (
 // reminder engine (when wired). Returns a confirmation with the new reminder ID.
 //
 // J11 (CW-20260426-0009).
+// D1 (CW-20260428-0014): supports scope and project_id parameters.
 func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	text := strArg(args, "text", "")
 	if text == "" {
@@ -46,10 +47,30 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 		return errorResult("set_reminder: no session in context"), nil
 	}
 
+	// D1 scope handling. Default to session scope. Project scope auto-fills
+	// project_id from the current session when not supplied.
+	scope := strArg(args, "scope", store.ReminderScopeSession)
+	switch scope {
+	case store.ReminderScopeTurn, store.ReminderScopeSession, store.ReminderScopeProject:
+	default:
+		return errorResult(fmt.Sprintf("scope must be one of turn, session, project (got %q)", scope)), nil
+	}
+	projectID := strArg(args, "project_id", "")
+	if scope == store.ReminderScopeProject {
+		if projectID == "" {
+			projectID = st.resolveProjectIDFromSession(sessionID)
+		}
+		if projectID == "" {
+			return errorResult("set_reminder: scope=project requires project_id (current session has no project)"), nil
+		}
+	}
+
 	id := fmt.Sprintf("rem-%d", time.Now().UnixNano())
 	r := store.Reminder{
 		ID:          id,
 		SessionID:   sessionID,
+		Scope:       scope,
+		ProjectID:   projectID,
 		Text:        text,
 		TriggerJSON: triggerJSON,
 	}
@@ -62,14 +83,17 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 		st.ReminderEngine.RegisterTurnCount(id, st.currentTurnCount(sessionID))
 	}
 
-	return textResult(fmt.Sprintf(`{"reminder_id":%q,"status":"set","trigger":%s}`, id, triggerJSON)), nil
+	return textResult(fmt.Sprintf(`{"reminder_id":%q,"scope":%q,"status":"set","trigger":%s}`, id, scope, triggerJSON)), nil
 }
 
 // callPin handles nanite_pin. Persists pinned content to the DB for session
-// and cross_session scopes. Turn-scoped pins are acknowledged but not stored
+// and project scopes. Turn-scoped pins are acknowledged but not stored
 // (they live in-memory in the engine and are cleared after the turn).
 //
 // J11 (CW-20260426-0009).
+// D1 (CW-20260428-0014): the legacy `cross_session` scope is replaced by
+// `project`, which scopes the pin to a specific project (cross-session
+// continuity within a project).
 func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	content := strArg(args, "content", "")
 	if content == "" {
@@ -77,9 +101,9 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 	}
 	scope := strArg(args, "scope", store.PinScopeSession)
 	switch scope {
-	case store.PinScopeTurn, store.PinScopeSession, store.PinScopeCrossSession:
+	case store.PinScopeTurn, store.PinScopeSession, store.PinScopeProject:
 	default:
-		return errorResult(fmt.Sprintf("scope must be one of: turn, session, cross_session (got %q)", scope)), nil
+		return errorResult(fmt.Sprintf("scope must be one of: turn, session, project (got %q)", scope)), nil
 	}
 
 	sessionID := SessionIDFromContext(ctx)
@@ -93,6 +117,18 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 		_, agentID = CallerProfileFromContext(ctx)
 	}
 
+	// Resolve project_id when scope=project. Auto-fill from the current
+	// session's project when not supplied.
+	projectID := strArg(args, "project_id", "")
+	if scope == store.PinScopeProject {
+		if projectID == "" {
+			projectID = st.resolveProjectIDFromSession(sessionID)
+		}
+		if projectID == "" {
+			return errorResult("pin: scope=project requires project_id (current session has no project)"), nil
+		}
+	}
+
 	id := fmt.Sprintf("pin-%d", time.Now().UnixNano())
 
 	// Turn-scoped pins are ephemeral — not persisted to DB.
@@ -101,15 +137,15 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 	}
 
 	p := store.PinnedContent{
-		ID:      id,
-		Scope:   scope,
-		Content: content,
-		AgentID: agentID,
+		ID:        id,
+		Scope:     scope,
+		ProjectID: projectID,
+		Content:   content,
+		AgentID:   agentID,
 	}
-	if scope == store.PinScopeSession {
-		p.SessionID = &sessionID
-	}
-	// cross_session: SessionID is nil (global across sessions).
+	// Always retain the originating session for provenance, even when the
+	// pin is project-scoped — UI displays it under "by <session>".
+	p.SessionID = &sessionID
 
 	if err := st.Store.CreatePinnedContent(p); err != nil {
 		return errorResult(fmt.Sprintf("pin: %v", err)), nil

@@ -33,3 +33,27 @@ func (a *API) handleDeletePin(w http.ResponseWriter, r *http.Request) {
 	}
 	a.jsonResp(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
 }
+
+// pinScopeReq is the body shape for PATCH /api/pins/{id}/scope (D2).
+type pinScopeReq struct {
+	Scope     string `json:"scope"`
+	ProjectID string `json:"project_id"`
+}
+
+// handleUpdatePinScope — PATCH /api/pins/{id}/scope
+// Promotes/demotes a pin between session and project scope. The FE supplies
+// project_id when moving a pin to project scope (sourced from the
+// originating session's project_id).
+func (a *API) handleUpdatePinScope(w http.ResponseWriter, r *http.Request) {
+	var req pinScopeReq
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	id := r.PathValue("id")
+	if err := a.Services.Store.UpdatePinScope(id, req.Scope, req.ProjectID); err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]any{"updated": true, "id": id, "scope": req.Scope, "project_id": req.ProjectID})
+}

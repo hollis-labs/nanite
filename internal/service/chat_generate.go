@@ -465,6 +465,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					ID:          r.ID,
 					Text:        r.Text,
 					TriggerJSON: r.TriggerJSON,
+					Scope:       r.Scope,
 				})
 			}
 			s.inspector.RecordReminders(sessionID, inspectorTurnID, rec)

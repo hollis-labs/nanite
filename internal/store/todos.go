@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -8,12 +9,31 @@ import (
 	"github.com/google/uuid"
 )
 
-// Todo represents an internal todo item scoped to workspace, project, or session.
+// Todo scope constants (D1, CW-20260428-0014).
+//
+// Workspace-scoped todos were dropped in migration 043 — workspace is
+// out of scope for the project/session/turn dimension exposed to users.
+const (
+	TodoScopeTurn    = "turn"    // lives within the current turn (still persisted)
+	TodoScopeSession = "session" // default — bound to a single session
+	TodoScopeProject = "project" // surfaces in any session of the same project
+)
+
+// Todo represents an internal todo item scoped to project, session, or turn.
+//
+// Scope semantics (D1, CW-20260428-0014):
+//   - turn    — ScopeID = session_id (turn lives inside a session).
+//   - session — ScopeID = session_id.
+//   - project — ScopeID = project_id and ProjectID is also populated.
+//
+// ProjectID is the canonical project pointer; it is populated independently
+// of ScopeID so cross-session lookups do not need to pivot through `scope`.
 type Todo struct {
 	ID          string `json:"id"`
-	Scope       string `json:"scope"`       // workspace, project, session
-	ScopeID     string `json:"scope_id"`    // empty for workspace, project_id or session_id
-	ParentID    string `json:"parent_id"`   // optional parent todo for nesting
+	Scope       string `json:"scope"`     // turn, session, project
+	ScopeID     string `json:"scope_id"`  // session_id (turn/session) or project_id (project)
+	ProjectID   string `json:"project_id,omitempty"`
+	ParentID    string `json:"parent_id"` // optional parent todo for nesting
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Status      string `json:"status"`   // pending, in_progress, done, blocked
@@ -27,12 +47,13 @@ type Todo struct {
 
 // TodoFilter controls which todos to retrieve.
 type TodoFilter struct {
-	Scope    string
-	ScopeID  string
-	Status   string
-	Priority string
-	ParentID string // use "*" to mean "has a parent" (children only)
-	Labels   string // comma-separated labels to match (any match)
+	Scope     string
+	ScopeID   string
+	ProjectID string
+	Status    string
+	Priority  string
+	ParentID  string // use "*" to mean "has a parent" (children only)
+	Labels    string // comma-separated labels to match (any match)
 }
 
 // CreateTodo inserts a new todo, auto-generating the ID if empty.
@@ -56,13 +77,20 @@ func (s *Store) CreateTodo(t *Todo) error {
 	if t.CreatedBy == "" {
 		t.CreatedBy = "user"
 	}
+	// For project-scoped todos populate ProjectID from ScopeID when caller
+	// only set ScopeID; for session/turn-scoped todos surface ScopeID as
+	// the session_id placeholder. We don't infer project_id from session
+	// here — the service layer does that hop when it has a session in hand.
+	if t.Scope == TodoScopeProject && t.ProjectID == "" {
+		t.ProjectID = t.ScopeID
+	}
 	t.CreatedAt = now
 	t.UpdatedAt = now
 
 	_, err := s.DB.Exec(
-		`INSERT INTO todos (id, scope, scope_id, parent_id, title, description, status, priority, labels, metadata, created_by, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Scope, t.ScopeID, nullIfEmpty(t.ParentID),
+		`INSERT INTO todos (id, scope, scope_id, project_id, parent_id, title, description, status, priority, labels, metadata, created_by, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Scope, t.ScopeID, nullIfEmpty(t.ProjectID), nullIfEmpty(t.ParentID),
 		t.Title, t.Description, t.Status, t.Priority,
 		t.Labels, t.Metadata, t.CreatedBy, now, now,
 	)
@@ -75,23 +103,30 @@ func (s *Store) CreateTodo(t *Todo) error {
 // GetTodo returns a single todo by ID.
 func (s *Store) GetTodo(id string) (*Todo, error) {
 	var t Todo
+	var projectID sql.NullString
 	err := s.DB.QueryRow(
-		`SELECT id, scope, scope_id, COALESCE(parent_id,''), title, description,
+		`SELECT id, scope, scope_id, project_id, COALESCE(parent_id,''), title, description,
 		        status, priority, labels, metadata, created_by, created_at, updated_at
 		 FROM todos WHERE id = ?`, id,
 	).Scan(
-		&t.ID, &t.Scope, &t.ScopeID, &t.ParentID, &t.Title, &t.Description,
+		&t.ID, &t.Scope, &t.ScopeID, &projectID, &t.ParentID, &t.Title, &t.Description,
 		&t.Status, &t.Priority, &t.Labels, &t.Metadata, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get todo %s: %w", id, err)
 	}
+	if projectID.Valid {
+		t.ProjectID = projectID.String
+	}
 	return &t, nil
 }
 
-// ListTodos returns todos matching the given filter.
+// ListTodos returns todos matching the given filter. When the filter sets
+// ProjectID without Scope, both project-scoped todos for the project AND
+// session/turn-scoped todos whose originating session belongs to that
+// project are returned — this powers the "This Project" surface (D2).
 func (s *Store) ListTodos(f TodoFilter) ([]Todo, error) {
-	query := `SELECT id, scope, scope_id, COALESCE(parent_id,''), title, description,
+	query := `SELECT id, scope, scope_id, project_id, COALESCE(parent_id,''), title, description,
 	                 status, priority, labels, metadata, created_by, created_at, updated_at
 	          FROM todos WHERE 1=1`
 	var args []any
@@ -103,6 +138,10 @@ func (s *Store) ListTodos(f TodoFilter) ([]Todo, error) {
 	if f.ScopeID != "" {
 		query += ` AND scope_id = ?`
 		args = append(args, f.ScopeID)
+	}
+	if f.ProjectID != "" {
+		query += ` AND project_id = ?`
+		args = append(args, f.ProjectID)
 	}
 	if f.Status != "" {
 		query += ` AND status = ?`
@@ -142,11 +181,15 @@ func (s *Store) ListTodos(f TodoFilter) ([]Todo, error) {
 	out := make([]Todo, 0)
 	for rows.Next() {
 		var t Todo
+		var projectID sql.NullString
 		if err := rows.Scan(
-			&t.ID, &t.Scope, &t.ScopeID, &t.ParentID, &t.Title, &t.Description,
+			&t.ID, &t.Scope, &t.ScopeID, &projectID, &t.ParentID, &t.Title, &t.Description,
 			&t.Status, &t.Priority, &t.Labels, &t.Metadata, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan todo: %w", err)
+		}
+		if projectID.Valid {
+			t.ProjectID = projectID.String
 		}
 		out = append(out, t)
 	}
@@ -154,6 +197,7 @@ func (s *Store) ListTodos(f TodoFilter) ([]Todo, error) {
 }
 
 // UpdateTodo updates mutable fields on a todo. Only non-empty fields are changed.
+// Scope and project_id may be promoted/demoted via UpdateTodoScope (D2).
 func (s *Store) UpdateTodo(t *Todo) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.DB.Exec(
@@ -167,6 +211,36 @@ func (s *Store) UpdateTodo(t *Todo) error {
 		return fmt.Errorf("update todo %s: %w", t.ID, err)
 	}
 	t.UpdatedAt = now
+	return nil
+}
+
+// UpdateTodoScope promotes/demotes a todo between session and project scope
+// (D2, CW-20260428-0015). Validates that project scope carries a project_id.
+func (s *Store) UpdateTodoScope(id, scope, scopeID, projectID string) error {
+	switch scope {
+	case TodoScopeTurn, TodoScopeSession, TodoScopeProject:
+	default:
+		return fmt.Errorf("update todo scope: invalid scope %q", scope)
+	}
+	if scope == TodoScopeProject && projectID == "" {
+		return fmt.Errorf("update todo scope: project_id is required for scope=project")
+	}
+	if scope != TodoScopeProject && scopeID == "" {
+		return fmt.Errorf("update todo scope: scope_id is required for scope=%q", scope)
+	}
+	if scope == TodoScopeProject && scopeID == "" {
+		// Mirror project_id into scope_id so legacy filter paths still work.
+		scopeID = projectID
+	}
+	_, err := s.DB.Exec(
+		`UPDATE todos SET scope = ?, scope_id = ?, project_id = ?,
+		        updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+		 WHERE id = ?`,
+		scope, scopeID, nullIfEmpty(projectID), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update todo scope: %w", err)
+	}
 	return nil
 }
 

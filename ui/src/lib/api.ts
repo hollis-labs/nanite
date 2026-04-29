@@ -68,6 +68,8 @@ import type {
   PinnedContent,
   DrawerPinnedCard,
   DrawerCardType,
+  Reminder,
+  AgentStateScope,
 } from "./types";
 import type { PluginRegistryResponse } from "./plugin-loader";
 
@@ -525,7 +527,7 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`)
   },
 
-  // Pinned content (J11, CW-20260426-0009)
+  // Pinned content (J11, CW-20260426-0009; D1/D2, CW-20260428-0014/0015)
   listPins: async (sessionId: string): Promise<PinnedContent[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/pins`)
     if (!res.ok) throw new Error(`Failed to list pins: ${res.status}`)
@@ -565,6 +567,45 @@ export const api = {
   unpinDrawerCard: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/drawer-cards/${id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error(`Failed to unpin drawer card: ${res.status}`)
+  },
+
+  /** D2 — promote/demote a pin between session and project scope. */
+  updatePinScope: async (id: string, scope: AgentStateScope, projectId?: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/pins/${id}/scope`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, project_id: projectId ?? '' }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to update pin scope: ${res.status}`)
+    }
+  },
+
+  // Reminders (D1/D2, CW-20260428-0014/0015)
+  listReminders: async (sessionId: string): Promise<Reminder[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/reminders`)
+    if (!res.ok) throw new Error(`Failed to list reminders: ${res.status}`)
+    return res.json()
+  },
+
+  deleteReminder: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/reminders/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`Failed to delete reminder: ${res.status}`)
+  },
+
+  /** D2 — promote/demote a reminder between session and project scope. */
+  updateReminderScope: async (id: string, scope: AgentStateScope, projectId?: string): Promise<Reminder> => {
+    const res = await fetch(`${API_BASE}/reminders/${id}/scope`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, project_id: projectId ?? '' }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to update reminder scope: ${res.status}`)
+    }
+    return res.json()
   },
 
   // Compact
@@ -1165,6 +1206,25 @@ export const api = {
       method: 'DELETE',
     })
     if (!res.ok) throw new Error(`Failed to delete todo: ${res.status}`)
+  },
+
+  /** D2 — promote/demote a todo between session and project scope. */
+  updateTodoScope: async (
+    id: string,
+    scope: AgentStateScope,
+    scopeId: string,
+    projectId?: string,
+  ): Promise<Todo> => {
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/scope`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, scope_id: scopeId, project_id: projectId ?? '' }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
+      throw new Error(err.error || `Failed to update todo scope: ${res.status}`)
+    }
+    return hydrateTodo(await res.json())
   },
 
   listTodoChildren: async (id: string): Promise<Todo[]> => {

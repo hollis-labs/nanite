@@ -303,8 +303,8 @@ func buildUserContextSlot(s *store.Store, sessionID string) string {
 		var pinParts []string
 		for _, pin := range pins {
 			label := "[pinned]"
-			if pin.Scope == store.PinScopeCrossSession {
-				label = "[pinned:cross-session]"
+			if pin.Scope == store.PinScopeProject {
+				label = "[pinned:project]"
 			}
 			pinParts = append(pinParts, fmt.Sprintf("%s %s", label, pin.Content))
 		}

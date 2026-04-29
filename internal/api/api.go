@@ -185,6 +185,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/skills/{id}", a.handleGetSkill)
 	mux.HandleFunc("PUT /api/skills/{id}", a.handleUpdateSkill)
 	mux.HandleFunc("DELETE /api/skills/{id}", a.handleDeleteSkill)
+	// E1 (CW-20260428-0016): dev-mode "fork to user override" — copies an
+	// internal skill body into ~/.nanite/skills/<slug>.md.
+	mux.HandleFunc("POST /api/skills/{id}/fork-to-user", a.handleForkSkillToUser)
+	mux.HandleFunc("GET /api/dev-mode", a.handleGetDevMode)
 	mux.HandleFunc("GET /api/agents/{id}/skills", a.handleListAgentSkills)
 	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleAssignAgentSkill)
 	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRemoveAgentSkill)

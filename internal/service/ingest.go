@@ -135,6 +135,11 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 
 // upsertSkillDef inserts or updates one skills row from a Definition.
 // Uses ToStoreSkill() for field mapping; sets ingestion metadata.
+//
+// E2 (CW-20260428-0017): translates def.Modes (slugs) → mode IDs and
+// stores them as a JSON array in skills.mode_ids. Unresolved slugs are
+// dropped silently — the file is the input, the DB is the runtime, and
+// a typo upstream should not crash ingestion.
 func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -145,6 +150,7 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 
 	// ToStoreSkill() maps Definition → store.Skill.
 	sk := def.ToStoreSkill()
+	sk.ModeIDs = resolveSkillModeIDs(st, def.Modes)
 
 	existing, err := st.GetSkillBySlug(def.Slug)
 	if err != nil {
@@ -167,7 +173,9 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 	}
 
 	// Update existing row; bump version when content changes.
-	contentChanged := existing.Prompt != def.Prompt || existing.ToolBindings != sk.ToolBindings
+	contentChanged := existing.Prompt != def.Prompt ||
+		existing.ToolBindings != sk.ToolBindings ||
+		existing.ModeIDs != sk.ModeIDs
 	newVersion := existing.Version
 	if contentChanged {
 		newVersion++
@@ -179,6 +187,7 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 	existing.ToolBindings = sk.ToolBindings
 	existing.Settings = sk.Settings
 	existing.Prompt = def.Prompt
+	existing.ModeIDs = sk.ModeIDs
 	existing.Source = source
 	existing.ImportedAt = now
 	existing.OriginSystem = "nanite"
@@ -189,4 +198,29 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 		return fmt.Errorf("update: %w", err)
 	}
 	return nil
+}
+
+// resolveSkillModeIDs translates a list of mode slugs to mode IDs by
+// querying the modes table. Unresolved slugs are dropped silently (logged
+// as a warning). Empty input → "[]" (back-compat: skill is available in
+// every mode). The result is the JSON-array string written to
+// skills.mode_ids.
+func resolveSkillModeIDs(st *store.Store, slugs []string) string {
+	if len(slugs) == 0 {
+		return "[]"
+	}
+	ids := make([]string, 0, len(slugs))
+	for _, slug := range slugs {
+		mode, err := st.GetModeBySlug(slug)
+		if err != nil {
+			slog.Warn("service: resolve skill mode slug", "slug", slug, "err", err)
+			continue
+		}
+		if mode == nil {
+			slog.Warn("service: skill mode slug not found", "slug", slug)
+			continue
+		}
+		ids = append(ids, mode.ID)
+	}
+	return store.MarshalSkillModeIDs(ids)
 }

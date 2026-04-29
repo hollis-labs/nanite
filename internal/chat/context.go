@@ -313,14 +313,31 @@ func ThinkToolBlockWithDispatch(ctx context.Context, dispatcher HintDispatcher, 
 	return thinkToolBlockV1
 }
 
-// buildSkillList creates a human-readable list of skills for the tool-awareness template.
+// buildSkillList creates a human-readable list of skills for the
+// tool-awareness template. When sessionID is non-empty and the session has
+// a current_mode_id, the skills are filtered through the E2 two-pass
+// pipeline (mode binding then mode tool_overrides) before rendering.
+// Empty sessionID falls back to the legacy "all assigned skills" behavior.
+// (E2, CW-20260428-0017)
 func buildSkillList(s *store.Store, agentID string) string {
+	return buildSkillListForSession(s, agentID, "")
+}
+
+// buildSkillListForSession is the mode-aware variant. The unfiltered helper
+// above is preserved for callers that have no session context (e.g.
+// background skill registration during boot).
+func buildSkillListForSession(s *store.Store, agentID, sessionID string) string {
 	skills, err := s.ListAgentSkills(agentID)
 	if err != nil {
 		slog.Warn("chat: failed to load agent skills", "err", err)
 		return ""
 	}
 
+	if len(skills) == 0 {
+		return ""
+	}
+
+	skills = filterAgentSkillsByMode(s, skills, sessionID)
 	if len(skills) == 0 {
 		return ""
 	}
@@ -337,4 +354,28 @@ func buildSkillList(s *store.Store, agentID string) string {
 	}
 
 	return sb.String()
+}
+
+// filterAgentSkillsByMode applies the E2 two-pass pipeline. Empty
+// sessionID, or a session with no current_mode_id, returns the input
+// unchanged (back-compat).
+func filterAgentSkillsByMode(s *store.Store, skills []store.Skill, sessionID string) []store.Skill {
+	if sessionID == "" {
+		return skills
+	}
+	mode, err := s.GetSessionMode(sessionID)
+	if err != nil {
+		slog.Warn("chat: get session mode for skill filter", "session_id", sessionID, "err", err)
+		return skills
+	}
+	if mode == nil {
+		return skills
+	}
+	spec, err := store.ParseToolOverrides(mode.ToolOverrides)
+	if err != nil {
+		slog.Warn("chat: parse mode tool_overrides for skill filter", "mode_id", mode.ID, "err", err)
+		// Fall through with empty spec — Pass-1 still applies.
+		spec = store.ToolOverrideSpec{}
+	}
+	return store.FilterSkillsByMode(skills, mode.ID, spec)
 }

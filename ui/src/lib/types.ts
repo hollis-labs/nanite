@@ -1247,6 +1247,15 @@ export interface Skill {
   prompt?: string;   // markdown body; present for file-based skills
   created_at: string;
   updated_at: string;
+  // J7 ingestion metadata.
+  source?: string;        // "builtin", "user", "project", "plugin", "claude"
+  imported_at?: string;
+  origin_system?: string;
+  format?: string;
+  version?: number;
+  // E2 (CW-20260428-0017): mode binding. JSON string array of mode IDs;
+  // empty / "[]" / undefined means "available in every mode".
+  mode_ids?: string;
 }
 
 // --- Prompt Templates ---

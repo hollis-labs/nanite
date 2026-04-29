@@ -116,6 +116,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/pins", a.handleListPins)
 	mux.HandleFunc("DELETE /api/pins/{id}", a.handleDeletePin)
 
+	// Bottom-drawer pinned cards (C1, CW-20260428-0012)
+	mux.HandleFunc("GET /api/sessions/{id}/drawer-cards", a.handleListBottomDrawerCards)
+	mux.HandleFunc("POST /api/sessions/{id}/drawer-cards", a.handlePinBottomDrawerCard)
+	mux.HandleFunc("DELETE /api/drawer-cards/{id}", a.handleUnpinBottomDrawerCard)
+
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
 	mux.HandleFunc("POST /api/commands/execute", a.handleExecuteCommand)

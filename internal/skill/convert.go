@@ -24,6 +24,14 @@ func SlugFromFileID(id string) string {
 
 // ToStoreSkill converts a Definition to a store.Skill.
 // The ID is deterministic: "file-{slug}".
+//
+// E2 (CW-20260428-0017): mode_ids is left empty here because resolving
+// mode slugs → mode IDs requires DB access. The ingestion path in
+// service/ingest.go resolves and persists the IDs; for the in-memory
+// file-def path, callers (e.g. SkillService) can populate mode_ids
+// after construction via a slug → ID resolver. ModeSlugs is exposed in
+// Settings JSON so the FE can render mode tags directly from file defs
+// even before ingestion completes.
 func (d *Definition) ToStoreSkill() *store.Skill {
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -37,6 +45,7 @@ func (d *Definition) ToStoreSkill() *store.Skill {
 		Icon:        "",
 		CreatedAt:   now,
 		UpdatedAt:   now,
+		ModeIDs:     "[]",
 	}
 
 	// ToolBindings as JSON array.
@@ -67,6 +76,12 @@ func (d *Definition) ToStoreSkill() *store.Skill {
 	}
 	if d.SourceRef != "" {
 		settings["source_ref"] = d.SourceRef
+	}
+	// E2: surface raw mode slugs in settings for FE rendering. The DB-side
+	// mode_ids column carries resolved IDs; this carries the slug list so
+	// the UI can render tags without joining back to modes.
+	if len(d.Modes) > 0 {
+		settings["mode_slugs"] = d.Modes
 	}
 	sk.Settings = marshalJSONOr(settings, "{}")
 	sk.Prompt = d.Prompt

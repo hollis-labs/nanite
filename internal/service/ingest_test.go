@@ -285,3 +285,60 @@ func TestAutoIngestAgents_EmptyDefsIsNoOp(t *testing.T) {
 		t.Errorf("expected 0 for nil input, got %d", n)
 	}
 }
+
+// TestAutoIngestSkills_ResolvesModeSlugsToIDs is the E2 (CW-20260428-0017)
+// happy-path: a skill frontmatter with `modes: [plan, work]` is ingested with
+// the corresponding mode IDs serialized into mode_ids. Unknown slugs are
+// dropped silently (warnings logged) so a typo doesn't crash boot.
+func TestAutoIngestSkills_ResolvesModeSlugsToIDs(t *testing.T) {
+	st := newIngestTestStore(t)
+	plan := &store.Mode{Slug: "plan", Name: "Plan"}
+	work := &store.Mode{Slug: "work", Name: "Work"}
+	if err := st.CreateMode(plan); err != nil {
+		t.Fatalf("CreateMode plan: %v", err)
+	}
+	if err := st.CreateMode(work); err != nil {
+		t.Fatalf("CreateMode work: %v", err)
+	}
+
+	defs := []*skillpkg.Definition{
+		{
+			Name:        "Plan-Bound Skill",
+			Slug:        "plan-bound",
+			Description: "only in plan",
+			Source:      "user",
+			Modes:       []string{"plan", "nonexistent"},
+		},
+		{
+			Name:   "Universal Skill",
+			Slug:   "universal-skill",
+			Source: "user",
+		},
+	}
+	if n := AutoIngestSkills(st, defs); n != 2 {
+		t.Fatalf("expected 2 ingested, got %d", n)
+	}
+
+	planSkill, err := st.GetSkillBySlug("plan-bound")
+	if err != nil {
+		t.Fatalf("GetSkillBySlug plan-bound: %v", err)
+	}
+	if planSkill == nil {
+		t.Fatal("plan-bound not in DB")
+	}
+	gotIDs := store.ParseSkillModeIDs(planSkill.ModeIDs)
+	if len(gotIDs) != 1 || gotIDs[0] != plan.ID {
+		t.Fatalf("plan-bound mode_ids: got %v, want [%q]", gotIDs, plan.ID)
+	}
+
+	universal, err := st.GetSkillBySlug("universal-skill")
+	if err != nil {
+		t.Fatalf("GetSkillBySlug universal-skill: %v", err)
+	}
+	if universal == nil {
+		t.Fatal("universal-skill not in DB")
+	}
+	if universal.ModeIDs != "[]" {
+		t.Errorf("universal mode_ids should be empty, got %q", universal.ModeIDs)
+	}
+}

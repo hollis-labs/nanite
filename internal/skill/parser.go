@@ -27,6 +27,10 @@ type Definition struct {
 	Effort       string   `yaml:"effort"`         // low, medium, high
 	Context      string   `yaml:"context"`        // "inline" (default) or "fork"
 	BrokerHints  []string `yaml:"broker-hints"`   // Nanite extension: hints for broker mode
+	// E2 (CW-20260428-0017): mode binding. Slugs of modes the skill is bound to.
+	// Empty / missing = available in every mode (back-compat). Slugs are
+	// resolved → mode IDs at ingest time by service/ingest.go.
+	Modes []string `yaml:"modes"`
 
 	// Prompt is the markdown body below the YAML frontmatter.
 	// May contain !`command` dynamic context markers.

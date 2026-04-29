@@ -68,7 +68,7 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	// hintOpts enables v2 dynamic hint selection when the ContextClient has a
 	// HintDispatcher wired and NANITE_THINK_BLOCK_V2_ENABLED=true. nil means
 	// the assembler falls back to the v0/v1 static ThinkToolBlock path.
-	skillList := buildSkillList(cb.Store, agent.ID)
+	skillList := buildSkillListForSession(cb.Store, agent.ID, session.ID)
 	var hintOpts *HintSelectOpts
 	if cb.HintDispatcher != nil {
 		hintOpts = &HintSelectOpts{
@@ -187,7 +187,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// raw agent + mode strings when no template is assigned. The agent slot
 	// also carries the post-compaction disclosure (P8A) when one is fresh
 	// for this session.
-	skillList := buildSkillList(cb.Store, agent.ID)
+	skillList := buildSkillListForSession(cb.Store, agent.ID, session.ID)
 	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList, session.ID)
 
 	// Rules slot — agent tags + tool allowlist. S4a expands this.

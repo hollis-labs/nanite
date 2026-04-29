@@ -34,9 +34,27 @@ type ToolCallRef struct {
 }
 
 // EnvelopeRef is a typed reference to an envelope embedded in the message.
+//
+// CW-20260429-0019: EnvelopeRef must round-trip the routing-relevant fields
+// (RenderTarget, Target, Mode, RenderTargetBlocked, plus the addressable
+// {ID, Title, Subtitle} surface) so that on page reload the FE can route a
+// persisted card to the correct drawer/panel. Prior to this change the
+// projection in chat_generate.go threw away every routing hint; the persisted
+// `envelopes` field was effectively `[]{type, data}` and cards always
+// rendered inline regardless of the per-type schema's default_render_target.
+//
+// JSON keys mirror chat.Envelope so the on-wire shape is consistent across
+// the parsed-envelope path and the persisted reference path.
 type EnvelopeRef struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
+	Type                string          `json:"type"`
+	Data                json.RawMessage `json:"data"`
+	ID                  string          `json:"id,omitempty"`
+	Title               string          `json:"title,omitempty"`
+	Subtitle            string          `json:"subtitle,omitempty"`
+	Target              string          `json:"target,omitempty"`
+	Mode                string          `json:"mode,omitempty"`
+	RenderTarget        string          `json:"render_target,omitempty"`
+	RenderTargetBlocked string          `json:"render_target_blocked,omitempty"`
 }
 
 // WrapResponse creates a StructuredMessage wrapping the assistant's response text.

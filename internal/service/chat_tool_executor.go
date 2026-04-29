@@ -637,8 +637,16 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// truncated view with a pointer footer. Skip truncate.Output in
 		// that case — the cache already sized the LLM-visible view and
 		// truncate.Output's 4K cap would drop the pointer footer.
+		//
+		// Meta-tools (discovery + cache-navigation) are exempt: their
+		// output is what the agent reads to *decide* its next action, and
+		// caching them produces a pointer-to-pointer dance that wastes
+		// turns. nanite_tool_describe in particular went over the 2 KiB
+		// soft cap in c114 (6813 bytes), forcing the agent through
+		// fetch/search and burning all 10 turns before it could emit a
+		// card.
 		wasCached := false
-		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) {
+		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) && !isCacheExemptTool(tu.Name) {
 			visible, cached, err := s.resultCache.StoreResult(sessionID, tu.ID, tu.Name, resultText)
 			if err != nil {
 				slog.Warn("chat-service: result cache store error", "tool", tu.Name, "err", err)
@@ -651,7 +659,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// Truncate for LLM context (handles results not caught by the cache).
 		// Skip when the cache already produced the LLM-visible view.
 		var tr truncate.Result
-		if wasCached || isScratchpadTool(tu.Name) {
+		if wasCached || isScratchpadTool(tu.Name) || isCacheExemptTool(tu.Name) {
 			// Scratchpad results are bounded by the 64 KiB turn cap enforced in
 			// loopState.scratchpadWrite — no caching or disk truncation needed.
 			tr = truncate.Result{Content: resultText}

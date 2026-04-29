@@ -99,10 +99,11 @@ var ChatToolSurface = []string{
 	// Conversation search (P8B, CW-20260420-0026).
 	"nanite_chat_search",
 	// Discovery primitive (A1, CW-20260429-0005). Returns a tool's
-	// schema + golden examples. Required by the describe-required gate
-	// at callShowCard (CW-20260429-0025/0027) — without it on the Chat
-	// surface the gate produces a structured error directing the agent
-	// to a tool it can't call (c115 evidence).
+	// schema + golden examples. Reactive recovery surface — the agent
+	// reaches for it when a tool's contract is unfamiliar or after a
+	// schema-validation failure. The describe-required preemptive gate
+	// at callShowCard (CW-20260429-0025/0027) was removed in Phase A of
+	// the architectural rebalancing per docs/architecture/agent-context-architecture.md.
 	"nanite_tool_describe",
 	// Pre-flight schema validation (B1, CW-20260429-0006). Read-only,
 	// idempotent — the agent uses it to check args before firing a

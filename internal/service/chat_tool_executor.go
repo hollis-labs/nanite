@@ -331,8 +331,10 @@ func (s *chatServiceImpl) executeToolBatch(
 	// genuinely concurrent.
 	//
 	// CW-20260429-0025: also stamp the union of tool *names* called this
-	// turn so the describe-required gate (sister ticket) can check whether
-	// nanite_tool_describe was invoked before a real tool call.
+	// turn. Originally fed the describe-required gate at callShowCard;
+	// the gate was removed in Phase A of the architectural rebalancing,
+	// but the per-turn name set is preserved as plumbing for future
+	// per-turn observability or trust checks.
 	turnIDs := make([]string, 0, len(ls.toolCallRefs)+len(plans))
 	turnNames := make([]string, 0, len(ls.toolCallRefs)+len(plans))
 	for _, ref := range ls.toolCallRefs {

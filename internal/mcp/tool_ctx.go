@@ -88,10 +88,13 @@ func CallerProfileFromContext(ctx context.Context) (workspaceID, agentProfileID 
 type turnToolUseIDsCtxKey struct{}
 
 // turnToolNamesCtxKey carries the set of tool names called during the current
-// turn. Sibling to turnToolUseIDsCtxKey, intended for the describe-required
-// gate (CW-20260429-0025) which checks whether nanite_tool_describe was
-// invoked this turn before a real tool call. Independent of tool_use_ids
-// because describe-then-call gates care about the verb, not the call ID.
+// turn. Sibling to turnToolUseIDsCtxKey. Originally introduced for the
+// describe-required gate (CW-20260429-0025); the gate was removed in Phase A
+// of the architectural rebalancing (see docs/architecture/agent-context-architecture.md),
+// but the per-turn name set is preserved as plumbing for any future per-turn
+// observability or trust check that wants to read which tools the turn actually
+// invoked. Independent of tool_use_ids because turn-tool-name checks care
+// about the verb, not the call ID.
 type turnToolNamesCtxKey struct{}
 
 // WithTurnToolUseIDs returns a new context carrying the given tool_use_id
@@ -126,7 +129,9 @@ func TurnToolUseIDsFromContext(ctx context.Context) []string {
 
 // WithTurnToolNames returns a new context carrying the set of tool names
 // called this turn. Sibling to WithTurnToolUseIDs; same nil-input semantics.
-// Intended for describe-required gating (CW-20260429-0025).
+// Originally introduced for the describe-required gate (CW-20260429-0025);
+// retained as observability plumbing after the gate was removed in Phase A
+// of the architectural rebalancing.
 func WithTurnToolNames(ctx context.Context, names []string) context.Context {
 	if len(names) == 0 {
 		return ctx

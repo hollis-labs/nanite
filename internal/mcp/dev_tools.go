@@ -161,7 +161,7 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	return []Tool{
 		{
 			Name:        "dev_read",
-			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Allowed directories: %s. Example: dev_read(path=%q)", allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
+			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Glob/search before read on unfamiliar paths — dev_read on a non-existent path wastes a round-trip. Allowed directories: %s. Example: dev_read(path=%q)", allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

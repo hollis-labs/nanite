@@ -26,7 +26,7 @@ func rememberToolDefinition() Tool {
 	return Tool{
 		Name: "nanite_remember",
 		Description: "Persist a one-sentence lesson to durable memory so future sessions surface it on similar tool selection. Layer 4 of the self-healing tool surface (CW-20260429-0009).\n\n" +
-			"**When to use:** When you receive a `repair_note` on a tool result — call this with the `lesson_hint` so the same reshape isn't needed next time. Also fine for any high-signal in-session insight worth carrying forward (a project convention you discovered, a session-specific user preference). Cheap, idempotent on the (scope, subject, hint) triple — re-writing the same lesson updates the existing entry rather than creating duplicates.\n\n" +
+			"**When to use:** When a tool result carries a `repair_note`, capture the `lesson_hint` so future-you avoids the same shape mistake. Also call this when the user explicitly teaches you something durable about a tool. Also fine for any high-signal in-session insight worth carrying forward (a project convention you discovered, a session-specific user preference). Cheap, idempotent on the (scope, subject, hint) triple — re-writing the same lesson updates the existing entry rather than creating duplicates.\n\n" +
 			"**When NOT to use:** Don't capture conversational chatter, partial guesses, or things you'd be embarrassed to read back to the user. Confidence is stamped at 0.85 — these surface in future agent context, so noise here directly degrades future grounding.\n\n" +
 			"**Scopes:**\n" +
 			"- `tool_use` (most common): a lesson about how to call a specific tool. `subject` MUST be the tool name (e.g. \"nanite_show_card\"). Surfaced when that tool is considered in a future session.\n" +

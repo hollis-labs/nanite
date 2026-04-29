@@ -252,3 +252,154 @@ func TestExtractJSONObject_StringEscapes(t *testing.T) {
 		t.Errorf("extractJSONObject = %q, want %q", got, want)
 	}
 }
+
+// TestExtractJSONObject_FencedWithLanguageTag confirms the
+// brace-counting extractor handles input that already includes a
+// markdown fence with a language tag. The leading ` ```json ` and the
+// trailing fence are not part of a JSON object so the balanced
+// extractor still finds the inner {...}.
+func TestExtractJSONObject_FencedWithLanguageTag(t *testing.T) {
+	in := "```json\n{\"a\":1,\"b\":\"x\"}\n```"
+	got := extractJSONObject(in)
+	want := `{"a":1,"b":"x"}`
+	if got != want {
+		t.Errorf("extractJSONObject = %q, want %q", got, want)
+	}
+}
+
+// TestExtractJSONObject_FencedNoLanguageTag covers the bare-fence form.
+func TestExtractJSONObject_FencedNoLanguageTag(t *testing.T) {
+	in := "```\n{\"a\":1}\n```"
+	got := extractJSONObject(in)
+	want := `{"a":1}`
+	if got != want {
+		t.Errorf("extractJSONObject = %q, want %q", got, want)
+	}
+}
+
+// TestExtractJSONObject_PlainObject is a regression guard — the helper
+// must continue to return the object on already-clean input.
+func TestExtractJSONObject_PlainObject(t *testing.T) {
+	in := `{"a":1,"b":[2,3]}`
+	got := extractJSONObject(in)
+	if got != in {
+		t.Errorf("extractJSONObject = %q, want %q", got, in)
+	}
+}
+
+// TestStripCodeFence_LanguageTag verifies stripCodeFence peels
+// ` ```json ... ``` ` cleanly.
+func TestStripCodeFence_LanguageTag(t *testing.T) {
+	in := "```json\n{\"repaired_args\": {\"a\":1}}\n```"
+	got := stripCodeFence(in)
+	want := `{"repaired_args": {"a":1}}`
+	if got != want {
+		t.Errorf("stripCodeFence = %q, want %q", got, want)
+	}
+}
+
+// TestStripCodeFence_BareFence verifies stripCodeFence peels a bare
+// ` ``` ... ``` ` block.
+func TestStripCodeFence_BareFence(t *testing.T) {
+	in := "```\n{\"a\":1}\n```"
+	got := stripCodeFence(in)
+	want := `{"a":1}`
+	if got != want {
+		t.Errorf("stripCodeFence = %q, want %q", got, want)
+	}
+}
+
+// TestStripCodeFence_NoFence returns the input unchanged when no fence
+// is present.
+func TestStripCodeFence_NoFence(t *testing.T) {
+	in := `{"a":1}`
+	got := stripCodeFence(in)
+	if got != in {
+		t.Errorf("stripCodeFence = %q, want %q", got, in)
+	}
+}
+
+// TestStripCodeFence_WithPreamble peels a fence that follows a
+// chat-style preamble like "Here is the repair: ```json ... ```".
+func TestStripCodeFence_WithPreamble(t *testing.T) {
+	in := "Here is the repair:\n```json\n{\"a\":1}\n```"
+	got := stripCodeFence(in)
+	want := `{"a":1}`
+	if got != want {
+		t.Errorf("stripCodeFence = %q, want %q", got, want)
+	}
+}
+
+// TestStripCodeFence_TrailingWhitespace tolerates whitespace after the
+// closing fence.
+func TestStripCodeFence_TrailingWhitespace(t *testing.T) {
+	in := "```json\n{\"a\":1}\n```\n\n"
+	got := stripCodeFence(in)
+	want := `{"a":1}`
+	if got != want {
+		t.Errorf("stripCodeFence = %q, want %q", got, want)
+	}
+}
+
+// TestParseRepairResponse_FencedWithLanguageTag is the primary c112
+// regression guard: the repair LLM wrapped its response in
+// ` ```json ... ``` ` despite the system prompt forbidding markdown
+// fences. parseRepairResponse must still produce a populated
+// RepairOutcome.
+func TestParseRepairResponse_FencedWithLanguageTag(t *testing.T) {
+	raw := "```json\n{\n  \"repaired_args\": {\"type\":\"report-card\",\"data\":{\"title\":\"X\",\"metrics\":[{\"label\":\"a\",\"value\":1}]}},\n  \"missing_required\": [],\n  \"lesson_hint\": \"report-card requires metrics, not sections\"\n}\n```"
+	out, err := parseRepairResponse(raw)
+	if err != nil {
+		t.Fatalf("parseRepairResponse failed on fenced JSON: %v", err)
+	}
+	if !out.HasRepair() {
+		t.Fatalf("expected HasRepair() true, got %+v", out)
+	}
+	if out.LessonHint != "report-card requires metrics, not sections" {
+		t.Errorf("unexpected lesson hint: %q", out.LessonHint)
+	}
+	if out.RepairedArgs["type"] != "report-card" {
+		t.Errorf("repaired_args.type = %v, want \"report-card\"", out.RepairedArgs["type"])
+	}
+}
+
+// TestParseRepairResponse_FencedWithPreamble covers the case where the
+// LLM emits a chat-style preamble before the fenced JSON.
+func TestParseRepairResponse_FencedWithPreamble(t *testing.T) {
+	raw := "Here is the repair:\n```json\n{\"repaired_args\": {\"a\":1}, \"missing_required\": [], \"lesson_hint\": \"ok\"}\n```"
+	out, err := parseRepairResponse(raw)
+	if err != nil {
+		t.Fatalf("parseRepairResponse failed: %v", err)
+	}
+	if !out.HasRepair() {
+		t.Fatalf("expected HasRepair, got %+v", out)
+	}
+}
+
+// TestParseRepairResponse_NoJSONObject_ErrorPreserved guards against a
+// regression where the new fence-stripping path silently hides a
+// genuinely malformed response. The "no JSON object" error must still
+// fire when there is no `{` anywhere in the input.
+func TestParseRepairResponse_NoJSONObject_ErrorPreserved(t *testing.T) {
+	_, err := parseRepairResponse("I cannot reshape this — sorry.")
+	if err == nil {
+		t.Fatalf("expected error for response with no JSON object")
+	}
+	if !strings.Contains(err.Error(), "no JSON object") {
+		t.Errorf("expected 'no JSON object' in error, got %v", err)
+	}
+}
+
+// TestParseRepairResponse_PlainObject_RegressionGuard confirms the
+// happy path still works after the stripCodeFence wrapper was
+// introduced.
+func TestParseRepairResponse_PlainObject_RegressionGuard(t *testing.T) {
+	raw := `{"repaired_args": {"a":1}, "missing_required": [], "lesson_hint": "ok"}`
+	out, err := parseRepairResponse(raw)
+	if err != nil {
+		t.Fatalf("parseRepairResponse failed on plain JSON: %v", err)
+	}
+	if !out.HasRepair() {
+		t.Fatalf("expected HasRepair, got %+v", out)
+	}
+}

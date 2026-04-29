@@ -271,8 +271,21 @@ func marshalCapped(v any, limit int) string {
 // parseRepairResponse parses the LLM's JSON output. Tolerant of
 // surrounding chatter (markdown fences, preamble) — extracts the first
 // balanced top-level object.
+//
+// The function defends against the c112 failure mode where the repair
+// LLM wraps its response in ` ```json ... ``` ` despite the system
+// prompt telling it not to: stripCodeFence is applied first, and if
+// extraction still fails we make a second pass on the raw input as a
+// belt-and-suspenders fallback.
 func parseRepairResponse(raw string) (*RepairOutcome, error) {
-	body := extractJSONObject(raw)
+	defenced := stripCodeFence(raw)
+	body := extractJSONObject(defenced)
+	if body == "" && defenced != raw {
+		// Second pass on the original (un-defenced) input — covers the
+		// pathological case where stripCodeFence misreads a nested fence
+		// and inadvertently swallows a real closing brace.
+		body = extractJSONObject(raw)
+	}
 	if body == "" {
 		return nil, fmt.Errorf("repair LLM returned no JSON object: %q", trimForLog(raw, 200))
 	}
@@ -296,6 +309,53 @@ func parseRepairResponse(raw string) (*RepairOutcome, error) {
 		out.RepairedArgs = nil
 	}
 	return out, nil
+}
+
+// stripCodeFence removes a surrounding markdown code fence from raw if
+// present. Handles both fenced-with-language-tag (` ```json `) and bare
+// (` ``` `) fences. Tolerates whitespace and a leading preamble line by
+// scanning for the first fence rather than requiring it at byte zero.
+//
+// Behavior:
+//   - If the trimmed body starts with ` ``` ` (with or without a language
+//     tag), the opening fence line (everything up to and including the
+//     first newline) is removed.
+//   - If the resulting body ends with ` ``` `, the closing fence and any
+//     trailing whitespace are removed.
+//   - If no fence is detected the input is returned unchanged.
+//
+// The helper does not validate that the inner content is JSON — that is
+// extractJSONObject's job. It only peels the markdown wrapper so the
+// brace-counting extractor sees a clean payload.
+func stripCodeFence(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	// Find the first fence in the trimmed body (or in a leading preamble).
+	idx := strings.Index(trimmed, "```")
+	if idx < 0 {
+		return raw
+	}
+	// Drop everything through the end of the opening fence line. The
+	// language tag (e.g. "json") sits between the fence and the first
+	// newline, so the simplest correct rule is to skip up to the first
+	// newline after the fence marker.
+	after := trimmed[idx+3:]
+	nl := strings.IndexByte(after, '\n')
+	if nl < 0 {
+		// Fence with no newline after it — body is a single line; nothing
+		// useful to extract, fall back to the original input.
+		return raw
+	}
+	inner := after[nl+1:]
+	// Trim trailing closing fence + whitespace.
+	inner = strings.TrimRight(inner, " \t\r\n")
+	if strings.HasSuffix(inner, "```") {
+		inner = strings.TrimSuffix(inner, "```")
+		inner = strings.TrimRight(inner, " \t\r\n")
+	}
+	if inner == "" {
+		return raw
+	}
+	return inner
 }
 
 // extractJSONObject returns the first balanced {...} substring of raw.

@@ -1,0 +1,16 @@
+[
+  {
+    "title": "Send a chat message between two agents",
+    "args": {
+      "from_session_id": "ses-01HZ...",
+      "from_agent_id": "agt-planner",
+      "to_session_id": "ses-01HZ...",
+      "to_agent_id": "agt-worker",
+      "channel": "chat",
+      "kind": "request",
+      "subject": "Please audit envelope schemas",
+      "body": "Run the contract test suite and report failures."
+    },
+    "notes": "channel = chat | inbox | alert; kind = request | reply | notification | handoff."
+  }
+]

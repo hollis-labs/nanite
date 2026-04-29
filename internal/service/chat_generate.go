@@ -124,7 +124,10 @@ Workflow:
 - **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
 
 Grounded rendering:
-- ` + "`nanite_show_card`" + ` with ` + "`type=\"report-card\"`" + ` or ` + "`type=\"document-viewer\"`" + ` requires a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.`
+- ` + "`nanite_show_card`" + ` with ` + "`type=\"report-card\"`" + ` or ` + "`type=\"document-viewer\"`" + ` requires a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.
+
+Tool contract discovery:
+- If you're unsure about a tool's input shape, call ` + "`nanite_tool_describe(name=\"<tool>\")`" + ` first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly.`
 
 // generateResponse loads context, calls the provider, streams events, and saves
 // the result. This is the refactored version of Engine.generateResponse — it

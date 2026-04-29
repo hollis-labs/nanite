@@ -1,0 +1,17 @@
+[
+  {
+    "title": "List session todos as an interactive card",
+    "args": {
+      "scope": "session"
+    },
+    "notes": "scope_id auto-fills from the current chat session. Pass `scope` to get the live card; omit it for text-only output."
+  },
+  {
+    "title": "Filter project todos by status",
+    "args": {
+      "scope": "project",
+      "project_id": "nanite",
+      "status": "in_progress"
+    }
+  }
+]

@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Signal planning mode (opens [work, workflows] preset)",
+    "args": { "mode": "planning" },
+    "notes": "v1 vocabulary: planning. Unknown modes are silent FE no-ops."
+  }
+]

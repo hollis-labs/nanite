@@ -1,0 +1,6 @@
+[
+  {
+    "title": "Remove a pin by ID",
+    "args": { "pin_id": "pin-01HZ..." }
+  }
+]

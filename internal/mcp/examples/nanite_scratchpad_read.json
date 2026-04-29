@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Read a single key",
+    "args": { "key": "open_pr_count" }
+  },
+  {
+    "title": "Read everything in the scratchpad",
+    "args": {}
+  }
+]

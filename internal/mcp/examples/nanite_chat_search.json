@@ -1,0 +1,15 @@
+[
+  {
+    "title": "Search this session's history (active + compacted)",
+    "args": { "query": "report-card validation failure" }
+  },
+  {
+    "title": "Search only compacted summaries",
+    "args": {
+      "query": "decision about envelope schemas",
+      "scope": "compacted",
+      "limit": 10
+    },
+    "notes": "Only searches THIS session — not Vanta, not external sources."
+  }
+]

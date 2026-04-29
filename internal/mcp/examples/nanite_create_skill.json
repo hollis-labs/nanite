@@ -1,0 +1,13 @@
+[
+  {
+    "title": "Create a new dev-category skill bound to a small toolset",
+    "args": {
+      "name": "Code Review Helper",
+      "slug": "code-review-helper",
+      "description": "Walks through a PR diff and surfaces inline suggestions.",
+      "category": "dev",
+      "tool_bindings": "[\"dev_read\", \"dev_grep\", \"nanite_show_card\"]"
+    },
+    "notes": "tool_bindings is a JSON array passed as a string. Use nanite_list_skills before to confirm the slug is unique."
+  }
+]

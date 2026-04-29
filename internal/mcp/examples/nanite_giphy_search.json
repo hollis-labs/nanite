@@ -1,0 +1,12 @@
+[
+  {
+    "title": "Fetch a single GIF URL for a query",
+    "args": { "query": "celebration" },
+    "notes": "Pure data fetch — does NOT render anything. Chain into nanite_show_card with type=\"giphy-modal\" to render."
+  },
+  {
+    "title": "Fetch multiple results",
+    "args": { "query": "thumbs up", "limit": 5 },
+    "notes": "limit>1 returns {results: [...]}; limit=1 (default) returns the result object directly."
+  }
+]

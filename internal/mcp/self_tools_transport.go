@@ -315,6 +315,9 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callPin(ctx, args)
 	case "nanite_unpin":
 		return st.callUnpin(ctx, args)
+	// --- Discovery / introspection (CW-20260429-0005, A1) ---
+	case "nanite_tool_describe":
+		return st.callToolDescribe(args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}

@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Install/update Nanite home assets without overwriting modified files",
+    "args": {}
+  },
+  {
+    "title": "Force-overwrite user-modified files",
+    "args": { "force": true },
+    "notes": "Only use force=true when the user explicitly asks — this destroys user customisations under ~/.nanite/."
+  }
+]

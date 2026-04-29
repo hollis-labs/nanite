@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Rename a skill",
+    "args": {
+      "id": "skl-01HZ...",
+      "name": "Code Review Helper (v2)"
+    },
+    "notes": "Partial update — only fields you pass change. Get the id from nanite_list_skills first."
+  }
+]

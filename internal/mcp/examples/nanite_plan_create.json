@@ -1,0 +1,12 @@
+[
+  {
+    "title": "Create a session-scoped plan with three ordered steps",
+    "args": {
+      "title": "Add nanite_tool_describe self-tool",
+      "scope": "session",
+      "description": "Layer 1 of the self-healing tool surface lens.",
+      "steps": "[{\"id\":\"s1\",\"title\":\"Define the tool + handler\"},{\"id\":\"s2\",\"title\":\"Add golden examples\",\"depends_on\":[\"s1\"]},{\"id\":\"s3\",\"title\":\"Update system prompt\",\"depends_on\":[\"s1\"]}]"
+    },
+    "notes": "steps is a JSON-encoded string. Each step needs id+title; depends_on is optional."
+  }
+]

@@ -1,0 +1,12 @@
+[
+  {
+    "title": "Dispatch a long-running task as a non-session-bound background job",
+    "args": {
+      "task": "Crawl the docs tree and produce a tag index of every CW-* reference.",
+      "originating_session_id": "ses-01HZ...",
+      "originating_agent_id": "agt-planner",
+      "wall_clock_seconds": 1800
+    },
+    "notes": "Returns a job_id immediately. Reply lands as an inbox notification when the job finishes — possibly after this turn ends. Only fires when the P3 ScopeTier classifier says ExecutionPattern=background."
+  }
+]

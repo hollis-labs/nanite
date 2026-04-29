@@ -1,0 +1,18 @@
+[
+  {
+    "title": "Open the Engine kanban filtered by project + status",
+    "args": {
+      "page": "kanban",
+      "project_id": "nanite",
+      "status": "todo,doing"
+    }
+  },
+  {
+    "title": "Open a single task detail by id",
+    "args": {
+      "page": "task-detail",
+      "id": "T-12345"
+    },
+    "notes": "id MUST come from a prior tool call in this turn — never invent IDs."
+  }
+]

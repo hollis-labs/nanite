@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Get the last 20 messages in a session",
+    "args": { "session_id": "ses-01HZ..." }
+  },
+  {
+    "title": "Custom catch-up depth",
+    "args": { "session_id": "ses-01HZ...", "limit": 50 }
+  }
+]

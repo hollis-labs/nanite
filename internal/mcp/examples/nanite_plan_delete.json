@@ -1,0 +1,7 @@
+[
+  {
+    "title": "Delete a plan and all its steps",
+    "args": { "id": "pln-01HZ..." },
+    "notes": "Irreversible. Get the id from nanite_plan_list first."
+  }
+]

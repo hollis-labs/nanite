@@ -1,0 +1,21 @@
+[
+  {
+    "title": "Create a session-scoped todo (the common case)",
+    "args": {
+      "title": "Audit nanite_show_card failure rate",
+      "priority": "high"
+    },
+    "notes": "scope defaults to 'session'; scope_id is auto-filled from the current chat session."
+  },
+  {
+    "title": "Create a project-scoped todo",
+    "args": {
+      "title": "Document the envelope schemas",
+      "scope": "project",
+      "project_id": "nanite",
+      "priority": "medium",
+      "labels": "[\"docs\", \"envelopes\"]"
+    },
+    "notes": "scope=project requires project_id (or it gets resolved from the session's current project)."
+  }
+]

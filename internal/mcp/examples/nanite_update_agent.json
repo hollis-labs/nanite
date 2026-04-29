@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Swap an agent's default model",
+    "args": {
+      "id": "agt-01HZ...",
+      "default_model": "claude-sonnet-4-20250514"
+    },
+    "notes": "Partial update. Get the id from nanite_list_agents first."
+  }
+]

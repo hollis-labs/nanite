@@ -5,6 +5,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Check, Terminal, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { ScratchpadControls } from "@/components/drawers/BottomChatDrawer";
+import { useArtifactUpload } from "@/hooks/useArtifactUpload";
 import { usePluginAction } from "@/hooks/usePluginAction";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
 import { useSettings } from "@/hooks/useSettings";
@@ -121,41 +122,29 @@ export function ChatComposer({
   const chatToast = useChatStore((s) => s.chatToast);
   const dismissChatToast = useChatStore((s) => s.dismissChatToast);
   const { flushIfDirty } = useWorkSync();
-  const [dragOver, setDragOver] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  // F4 (CW-20260429-0004): upload handler extracted to useArtifactUpload so
+  // the right-rail Artifacts panel dropzone can reuse the same path.
+  const {
+    uploading,
+    dragOver,
+    setDragOver,
+    handleDrop,
+    handleFileUpload: handleFileUploadFromHook,
+  } = useArtifactUpload(activeSessionId);
   const dropRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleDrop = useCallback(
-    async (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      if (!activeSessionId || !e.dataTransfer.files.length) return;
-      for (const file of Array.from(e.dataTransfer.files)) {
-        await api.uploadArtifact(activeSessionId, file);
-      }
-      queryClient.invalidateQueries({ queryKey: ["artifacts", activeSessionId] });
-    },
-    [activeSessionId, queryClient],
-  );
-
   const handleFileUpload = useCallback(
     async (files: FileList | null) => {
-      if (!files || files.length === 0 || !activeSessionId) return;
-      setUploading(true);
       try {
-        for (const file of Array.from(files)) {
-          await api.uploadArtifact(activeSessionId, file);
-        }
-        queryClient.invalidateQueries({ queryKey: ["artifacts", activeSessionId] });
-      } catch (err) {
-        console.error("Failed to upload artifact:", err);
+        await handleFileUploadFromHook(files);
       } finally {
-        setUploading(false);
+        // Composer-specific cleanup: reset the hidden <input type=file> so
+        // the same file can be re-selected after a failed/canceled upload.
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [activeSessionId, queryClient],
+    [handleFileUploadFromHook],
   );
 
   const { data: commandDefs } = useQuery({

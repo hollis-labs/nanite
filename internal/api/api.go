@@ -97,6 +97,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Artifacts
 	mux.HandleFunc("GET /api/sessions/{id}/artifacts", a.handleListArtifactsByOrigin) // supports ?origin= filter
+	// F4 (CW-20260429-0004): project-inherited artifacts for the right-rail
+	// panel. Supports ?exclude_session_id= so the FE can render the active
+	// session separately without double-counting.
+	mux.HandleFunc("GET /api/projects/{id}/artifacts", a.handleListArtifactsByProject)
 	mux.HandleFunc("GET /api/artifacts/{id}/download", a.handleDownloadArtifact)
 	mux.HandleFunc("POST /api/artifacts/upload", a.handleUploadArtifact)
 	mux.HandleFunc("POST /api/artifacts/place", a.handlePlaceArtifact)

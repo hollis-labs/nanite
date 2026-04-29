@@ -766,7 +766,9 @@ export interface Artifact {
   session_id: string;
   name: string;
   mime_type: string;
-  size: number;
+  /** Server-side field: bytes. F4 (CW-20260429-0004) — name corrected from
+   * `size` (which the BE never emits) to match the JSON shape. */
+  size_bytes: number;
   created_at: string;
 }
 

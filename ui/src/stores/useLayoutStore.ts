@@ -124,6 +124,14 @@ interface LayoutState {
   pushPanelEnvelope: (panelId: string, envelope: Envelope) => void
   /** Clear all envelopes routed to a single panel (drawer-owned policy). */
   clearPanelEnvelopes: (panelId: string) => void
+
+  // C1 (CW-20260428-0012) — bottom-drawer default-tab preference.
+  // Which built-in tab opens when the drawer is opened with no specific
+  // target. Defaults to 'scratchpad' (matches today's behavior). Pinned
+  // cards live server-side and are not selectable as the default — that's
+  // a v2 concern.
+  defaultDrawerTab: string
+  setDefaultDrawerTab: (tab: string) => void
 }
 
 function resolveTheme(theme: Theme): 'dark' | 'light' {
@@ -347,6 +355,10 @@ export const useLayoutStore = create<LayoutState>()(
           const { [panelId]: _drop, ...rest } = s.panelEnvelopes
           return { panelEnvelopes: rest }
         }),
+
+      // C1 — bottom drawer default-tab preference.
+      defaultDrawerTab: 'scratchpad',
+      setDefaultDrawerTab: (tab) => set({ defaultDrawerTab: tab }),
     }),
     {
       name: 'nanite-layout',

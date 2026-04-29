@@ -792,6 +792,36 @@ export interface PinnedContent {
   updated_at: string
 }
 
+// --- Bottom drawer pinned cards (C1, CW-20260428-0012) ---
+//
+// User-pinned cards in the bottom chat drawer. Distinct from PinnedContent
+// (J11) which is the agent-context slot pin feature. card_type is one of
+// 'markdown' | 'diff' | 'image' | 'scratchpad' | 'artifact-mini' |
+// 'agent-envelope' (forward-compat strings tolerated). content_ref is a
+// type-specific pointer the FE resolves (envelope_id, artifact_id, etc.).
+// payload carries the renderable snapshot (e.g. JSON envelope) so pins survive
+// reload even when the source row has been GC'd.
+
+export type DrawerCardType =
+  | 'markdown'
+  | 'diff'
+  | 'image'
+  | 'scratchpad'
+  | 'artifact-mini'
+  | 'agent-envelope'
+  | (string & {})
+
+export interface DrawerPinnedCard {
+  id: string
+  session_id: string
+  card_type: DrawerCardType
+  content_ref: string
+  title: string
+  payload: string
+  position: number
+  created_at: string
+}
+
 // --- Tool Call Display ---
 
 export type ToolCallDisplayMode = "indicator" | "minimal" | "compact" | "full";

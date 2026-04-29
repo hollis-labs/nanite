@@ -66,6 +66,7 @@ type TodoStoreInterface interface {
 	GetTodo(id string) (*store.Todo, error)
 	ListTodos(f store.TodoFilter) ([]store.Todo, error)
 	UpdateTodo(t *store.Todo) error
+	UpdateTodoScope(id, scope, scopeID, projectID string) error
 	DeleteTodo(id string) error
 
 	CreatePlan(p *store.Plan) error
@@ -741,21 +742,40 @@ func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[strin
 		return errorResult("todo service not available"), nil
 	}
 	title, _ := args["title"].(string)
-	scope, _ := args["scope"].(string)
-	if title == "" || scope == "" {
-		return errorResult("title and scope are required"), nil
+	if title == "" {
+		return errorResult("title is required"), nil
+	}
+	scope := strArg(args, "scope", store.TodoScopeSession)
+	switch scope {
+	case store.TodoScopeTurn, store.TodoScopeSession, store.TodoScopeProject:
+	default:
+		return errorResult(fmt.Sprintf("scope must be one of turn, session, project (got %q)", scope)), nil
 	}
 
-	// CW-20260418 (c7 scope_id fix): auto-fill scope_id from ctx when the
-	// agent omits it. The LLM has no way to know its session_id so for
-	// scope=session we must source it from the context stamped by the
-	// chat tool executor. Workspace scope legitimately has no scope_id.
+	// D1 (CW-20260428-0014): resolve scope_id and project_id from the current
+	// session when the agent omits them. The LLM has no way to know its
+	// session_id or project_id; the chat tool executor stamps them on ctx.
 	scopeID := strArg(args, "scope_id", "")
-	if scope != "workspace" && scopeID == "" {
-		if sid := SessionIDFromContext(ctx); sid != "" {
-			scopeID = sid
-		} else {
-			return errorResult(fmt.Sprintf("scope_id is required for scope %q (no current session in context)", scope)), nil
+	projectID := strArg(args, "project_id", "")
+	sessionID := SessionIDFromContext(ctx)
+
+	switch scope {
+	case store.TodoScopeProject:
+		if projectID == "" {
+			projectID = st.resolveProjectIDFromSession(sessionID)
+		}
+		if projectID == "" {
+			return errorResult("scope=project requires project_id (current session has no project)"), nil
+		}
+		if scopeID == "" {
+			scopeID = projectID
+		}
+	default: // turn, session
+		if scopeID == "" {
+			if sessionID == "" {
+				return errorResult(fmt.Sprintf("scope_id is required for scope %q (no current session in context)", scope)), nil
+			}
+			scopeID = sessionID
 		}
 	}
 
@@ -763,6 +783,7 @@ func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[strin
 		Title:       title,
 		Scope:       scope,
 		ScopeID:     scopeID,
+		ProjectID:   projectID,
 		Priority:    strArg(args, "priority", "medium"),
 		Description: strArg(args, "description", ""),
 		ParentID:    strArg(args, "parent_id", ""),
@@ -777,6 +798,20 @@ func (st *SelfToolsTransport) callTodoCreate(ctx context.Context, args map[strin
 	st.notifyWorkChanged()
 	out, _ := json.Marshal(t)
 	return textResult(fmt.Sprintf("Created todo %q (id=%s, scope=%s)\n%s", t.Title, t.ID, t.Scope, string(out))), nil
+}
+
+// resolveProjectIDFromSession looks up the project_id for the given session.
+// Returns "" when sessionID is empty, the lookup fails, or the session has no
+// project. Used by self-tools to auto-fill project_id when the LLM omits it.
+func (st *SelfToolsTransport) resolveProjectIDFromSession(sessionID string) string {
+	if sessionID == "" || st.Store == nil {
+		return ""
+	}
+	sess, err := st.Store.GetSession(sessionID)
+	if err != nil || sess == nil {
+		return ""
+	}
+	return sess.ProjectID
 }
 
 func (st *SelfToolsTransport) callTodoUpdate(args map[string]any) (*ToolResult, error) {
@@ -822,24 +857,35 @@ func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]
 		return errorResult("todo service not available"), nil
 	}
 
-	// CW-20260418 (c7 scope_id fix): for scope=session, auto-fill scope_id
-	// from ctx when omitted so the emitted todo-list envelope carries the
-	// REAL session id. Otherwise TodoListCard lazy-fetches with scope_id=""
-	// and the drawer renders nothing. Listing itself still works fine with
-	// an empty filter, so this is best-effort — no error path.
+	// D1 (CW-20260428-0014): resolve scope_id / project_id from ctx when the
+	// agent omits them so the emitted todo-list envelope carries the real
+	// IDs. Otherwise TodoListCard lazy-fetches with empty filters and the
+	// drawer renders nothing. Listing itself still works fine with an empty
+	// filter, so this is best-effort — no error path.
 	scopeArg := strArg(args, "scope", "")
 	scopeIDArg := strArg(args, "scope_id", "")
-	if scopeArg == "session" && scopeIDArg == "" {
-		if sid := SessionIDFromContext(ctx); sid != "" {
-			scopeIDArg = sid
+	projectIDArg := strArg(args, "project_id", "")
+	sessionID := SessionIDFromContext(ctx)
+	switch scopeArg {
+	case store.TodoScopeSession, store.TodoScopeTurn:
+		if scopeIDArg == "" && sessionID != "" {
+			scopeIDArg = sessionID
+		}
+	case store.TodoScopeProject:
+		if projectIDArg == "" {
+			projectIDArg = st.resolveProjectIDFromSession(sessionID)
+		}
+		if scopeIDArg == "" {
+			scopeIDArg = projectIDArg
 		}
 	}
 
 	f := store.TodoFilter{
-		Scope:    scopeArg,
-		ScopeID:  scopeIDArg,
-		Status:   strArg(args, "status", ""),
-		Priority: strArg(args, "priority", ""),
+		Scope:     scopeArg,
+		ScopeID:   scopeIDArg,
+		ProjectID: projectIDArg,
+		Status:    strArg(args, "status", ""),
+		Priority:  strArg(args, "priority", ""),
 	}
 
 	todos, err := st.TodoStore.ListTodos(f)

@@ -115,6 +115,15 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Pinned content (J11, CW-20260426-0009)
 	mux.HandleFunc("GET /api/sessions/{id}/pins", a.handleListPins)
 	mux.HandleFunc("DELETE /api/pins/{id}", a.handleDeletePin)
+	// D2 (CW-20260428-0015): pin scope promote/demote.
+	mux.HandleFunc("PATCH /api/pins/{id}/scope", a.handleUpdatePinScope)
+
+	// Reminders (D1 / D2, CW-20260428-0014/0015) — exposes session +
+	// project-scoped reminders so the FE Work panel can list / promote /
+	// demote / delete them. Originating tool surface is nanite_set_reminder.
+	mux.HandleFunc("GET /api/sessions/{id}/reminders", a.handleListReminders)
+	mux.HandleFunc("DELETE /api/reminders/{id}", a.handleDeleteReminder)
+	mux.HandleFunc("PATCH /api/reminders/{id}/scope", a.handleUpdateReminderScope)
 
 	// Slash commands
 	mux.HandleFunc("GET /api/commands", a.handleListCommands)
@@ -307,6 +316,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/todos/{id}", a.handleUpdateTodo)
 	mux.HandleFunc("DELETE /api/todos/{id}", a.handleDeleteTodo)
 	mux.HandleFunc("GET /api/todos/{id}/children", a.handleListTodoChildren)
+	// D2 (CW-20260428-0015): todo scope promote/demote.
+	mux.HandleFunc("PATCH /api/todos/{id}/scope", a.handleUpdateTodoScope)
 
 	// Plans (internal plan system)
 	mux.HandleFunc("GET /api/plans", a.handleListPlans)

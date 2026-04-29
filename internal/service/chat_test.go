@@ -134,6 +134,7 @@ func (stubReminderStore) CreateReminder(store.Reminder) error                   
 func (stubReminderStore) GetReminder(string) (store.Reminder, error)            { return store.Reminder{}, nil }
 func (stubReminderStore) ListUnfiredReminders(string) ([]store.Reminder, error) { return nil, nil }
 func (stubReminderStore) MarkReminderFired(string) error                        { return nil }
+func (stubReminderStore) UpdateReminderScope(string, string, string) error      { return nil }
 func (stubReminderStore) DeleteReminder(string) error                           { return nil }
 
 type stubPinnedContentStore struct{}
@@ -141,6 +142,7 @@ type stubPinnedContentStore struct{}
 func (stubPinnedContentStore) CreatePinnedContent(store.PinnedContent) error          { return nil }
 func (stubPinnedContentStore) ListPinnedContent(string) ([]store.PinnedContent, error) { return nil, nil }
 func (stubPinnedContentStore) DeletePinnedContent(string) error                        { return nil }
+func (stubPinnedContentStore) UpdatePinScope(string, string, string) error             { return nil }
 func (stubPinnedContentStore) ClearSessionPins(string) error                           { return nil }
 
 type stubHandoffStashStore struct{}
@@ -325,6 +327,7 @@ func (stubTodoStore) CreateTodo(*store.Todo) error                              
 func (stubTodoStore) GetTodo(string) (*store.Todo, error)                                   { return nil, nil }
 func (stubTodoStore) ListTodos(store.TodoFilter) ([]store.Todo, error)                      { return nil, nil }
 func (stubTodoStore) UpdateTodo(*store.Todo) error                                          { return nil }
+func (stubTodoStore) UpdateTodoScope(string, string, string, string) error                  { return nil }
 func (stubTodoStore) DeleteTodo(string) error                                               { return nil }
 func (stubTodoStore) ListTodoChildren(string) ([]store.Todo, error)                         { return nil, nil }
 

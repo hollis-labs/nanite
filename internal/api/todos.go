@@ -10,12 +10,13 @@ import (
 func (a *API) handleListTodos(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.TodoFilter{
-		Scope:    q.Get("scope"),
-		ScopeID:  q.Get("scope_id"),
-		Status:   q.Get("status"),
-		Priority: q.Get("priority"),
-		ParentID: q.Get("parent_id"),
-		Labels:   q.Get("labels"),
+		Scope:     q.Get("scope"),
+		ScopeID:   q.Get("scope_id"),
+		ProjectID: q.Get("project_id"),
+		Status:    q.Get("status"),
+		Priority:  q.Get("priority"),
+		ParentID:  q.Get("parent_id"),
+		Labels:    q.Get("labels"),
 	}
 	todos, err := a.Services.Todos.ListTodos(r.Context(), f)
 	if err != nil {
@@ -23,6 +24,30 @@ func (a *API) handleListTodos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusOK, todos)
+}
+
+// todoScopeReq is the body shape for PATCH /api/todos/{id}/scope (D2).
+type todoScopeReq struct {
+	Scope     string `json:"scope"`
+	ScopeID   string `json:"scope_id"`
+	ProjectID string `json:"project_id"`
+}
+
+// handleUpdateTodoScope — PATCH /api/todos/{id}/scope
+// Powers the FE "Promote to project" / "Demote to session" actions in D2.
+func (a *API) handleUpdateTodoScope(w http.ResponseWriter, r *http.Request) {
+	var req todoScopeReq
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	t, err := a.Services.Todos.UpdateTodoScope(r.Context(), r.PathValue("id"), req.Scope, req.ScopeID, req.ProjectID)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.Services.Streams.BroadcastWorkChanged()
+	a.jsonResp(w, http.StatusOK, t)
 }
 
 func (a *API) handleCreateTodo(w http.ResponseWriter, r *http.Request) {

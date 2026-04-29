@@ -4,10 +4,34 @@ import (
 	"testing"
 )
 
+// makeProjectAndSession is a small helper that creates the workspace + project +
+// session rows the post-D1 ListPinnedContent / ListUnfiredReminders queries need
+// in order to surface project-scoped rows. Returns sessionID and projectID.
+func makeProjectAndSession(t *testing.T, s *Store, sessionID, projectID string) {
+	t.Helper()
+	wsID := "ws-test-" + sessionID
+	if err := s.CreateWorkspace(&Workspace{ID: wsID, Name: "test-ws"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := s.CreateProject(&Project{ID: projectID, WorkspaceID: wsID, Name: "test-project", RepoPath: "/tmp/" + projectID}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if err := s.CreateSession(&Session{
+		ID:          sessionID,
+		ShortCode:   sessionID,
+		WorkspaceID: wsID,
+		ProjectID:   projectID,
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+}
+
 func TestPinnedContent_CRUD(t *testing.T) {
 	s := newTestStore(t)
 	sessionID := "sess-pin-test"
+	projectID := "prj-pin-test"
 	agentID := "agent-test"
+	makeProjectAndSession(t, s, sessionID, projectID)
 
 	// Create session-scoped pin.
 	sid := sessionID
@@ -22,18 +46,20 @@ func TestPinnedContent_CRUD(t *testing.T) {
 		t.Fatalf("CreatePinnedContent: %v", err)
 	}
 
-	// Create cross-session pin (nil session_id).
+	// Create project-scoped pin (D1 — replaces former cross_session).
 	err = s.CreatePinnedContent(PinnedContent{
-		ID:      "pin-2",
-		Scope:   PinScopeCrossSession,
-		Content: "Cross-session note: prefer composition over inheritance.",
-		AgentID: agentID,
+		ID:        "pin-2",
+		SessionID: &sid,
+		Scope:     PinScopeProject,
+		ProjectID: projectID,
+		Content:   "Project note: prefer composition over inheritance.",
+		AgentID:   agentID,
 	})
 	if err != nil {
-		t.Fatalf("CreatePinnedContent cross-session: %v", err)
+		t.Fatalf("CreatePinnedContent project: %v", err)
 	}
 
-	// List should return both (session pins + cross_session).
+	// List should return both (session pin + project pin via session->project resolution).
 	pins, err := s.ListPinnedContent(sessionID)
 	if err != nil {
 		t.Fatalf("ListPinnedContent: %v", err)
@@ -58,7 +84,9 @@ func TestPinnedContent_CRUD(t *testing.T) {
 func TestPinnedContent_ClearSessionPins(t *testing.T) {
 	s := newTestStore(t)
 	sessionID := "sess-clear-test"
+	projectID := "prj-clear-test"
 	agentID := "agent-test"
+	makeProjectAndSession(t, s, sessionID, projectID)
 	sid := sessionID
 
 	// Session-scoped pin.
@@ -68,12 +96,14 @@ func TestPinnedContent_ClearSessionPins(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Cross-session pin — should survive clear.
+	// Project-scoped pin — should survive ClearSessionPins.
 	if err := s.CreatePinnedContent(PinnedContent{
-		ID:      "p-cross",
-		Scope:   PinScopeCrossSession,
-		Content: "cross-session pin",
-		AgentID: agentID,
+		ID:        "p-proj",
+		SessionID: &sid,
+		Scope:     PinScopeProject,
+		ProjectID: projectID,
+		Content:   "project pin",
+		AgentID:   agentID,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -86,18 +116,74 @@ func TestPinnedContent_ClearSessionPins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only cross-session pin should remain.
+	// Only project pin should remain.
 	if len(pins) != 1 {
 		t.Errorf("expected 1 pin after clear, got %d", len(pins))
 	}
-	if pins[0].Scope != PinScopeCrossSession {
-		t.Errorf("remaining pin should be cross_session, got %q", pins[0].Scope)
+	if pins[0].Scope != PinScopeProject {
+		t.Errorf("remaining pin should be project, got %q", pins[0].Scope)
+	}
+}
+
+// TestPinnedContent_ProjectScope_CrossSession covers the D1 acceptance criterion
+// that a project-scoped pin set in one session surfaces in any other session of
+// the same project.
+func TestPinnedContent_ProjectScope_CrossSession(t *testing.T) {
+	s := newTestStore(t)
+	projectID := "prj-cross-test"
+	sessA := "sess-A"
+	sessB := "sess-B"
+	makeProjectAndSession(t, s, sessA, projectID)
+	// Add a second session in the same project (we already have the project + workspace).
+	if err := s.CreateSession(&Session{
+		ID: sessB, ShortCode: sessB, WorkspaceID: "ws-test-" + sessA, ProjectID: projectID,
+	}); err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+
+	sidA := sessA
+	if err := s.CreatePinnedContent(PinnedContent{
+		ID: "p-proj", SessionID: &sidA,
+		Scope: PinScopeProject, ProjectID: projectID,
+		Content: "project decision", AgentID: "agent-test",
+	}); err != nil {
+		t.Fatalf("CreatePinnedContent project: %v", err)
+	}
+	sidB := sessB
+	if err := s.CreatePinnedContent(PinnedContent{
+		ID: "p-sess-B", SessionID: &sidB,
+		Scope: PinScopeSession, Content: "B-only", AgentID: "agent-test",
+	}); err != nil {
+		t.Fatalf("CreatePinnedContent session: %v", err)
+	}
+
+	// Session A sees its project pin only (no session-A pin was created).
+	pinsA, _ := s.ListPinnedContent(sessA)
+	if len(pinsA) != 1 || pinsA[0].ID != "p-proj" {
+		t.Errorf("session A pins: expected [p-proj], got %+v", pinsA)
+	}
+
+	// Session B sees both: its session-pin AND the project pin.
+	pinsB, _ := s.ListPinnedContent(sessB)
+	if len(pinsB) != 2 {
+		t.Errorf("session B pins: expected 2, got %d (%+v)", len(pinsB), pinsB)
+	}
+
+	// Promote a session pin to project — UpdatePinScope.
+	if err := s.UpdatePinScope("p-sess-B", PinScopeProject, projectID); err != nil {
+		t.Fatalf("UpdatePinScope: %v", err)
+	}
+	pinsAAfter, _ := s.ListPinnedContent(sessA)
+	if len(pinsAAfter) != 2 {
+		t.Errorf("after promote: session A should see both pins, got %d", len(pinsAAfter))
 	}
 }
 
 func TestReminders_CRUD(t *testing.T) {
 	s := newTestStore(t)
 	sessionID := "sess-reminder-test"
+	projectID := "prj-reminder-test"
+	makeProjectAndSession(t, s, sessionID, projectID)
 
 	// Create reminder.
 	if err := s.CreateReminder(Reminder{
@@ -129,6 +215,9 @@ func TestReminders_CRUD(t *testing.T) {
 	if r.FiredAt != nil {
 		t.Errorf("expected FiredAt to be nil, got %v", r.FiredAt)
 	}
+	if r.Scope != ReminderScopeSession {
+		t.Errorf("expected default scope=session, got %q", r.Scope)
+	}
 
 	// Mark fired.
 	if err := s.MarkReminderFired("rem-1"); err != nil {
@@ -158,5 +247,103 @@ func TestReminders_CRUD(t *testing.T) {
 	_, err = s.GetReminder("rem-1")
 	if err == nil {
 		t.Error("expected error after delete, got nil")
+	}
+}
+
+// TestReminders_ProjectScope_CrossSession covers the D1 acceptance criterion
+// that a project-scoped reminder set in one session surfaces in any other
+// session of the same project (per the scope-resolution path).
+func TestReminders_ProjectScope_CrossSession(t *testing.T) {
+	s := newTestStore(t)
+	projectID := "prj-rem-cross"
+	sessA := "sess-rem-A"
+	sessB := "sess-rem-B"
+	makeProjectAndSession(t, s, sessA, projectID)
+	if err := s.CreateSession(&Session{
+		ID: sessB, ShortCode: sessB, WorkspaceID: "ws-test-" + sessA, ProjectID: projectID,
+	}); err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+
+	// Project-scoped reminder created from session A.
+	if err := s.CreateReminder(Reminder{
+		ID:          "rem-proj",
+		SessionID:   sessA,
+		Scope:       ReminderScopeProject,
+		ProjectID:   projectID,
+		Text:        "project-wide note",
+		TriggerJSON: `{"type":"turn_count","n":1}`,
+	}); err != nil {
+		t.Fatalf("CreateReminder project: %v", err)
+	}
+	// Session-scoped reminder created from session A — should NOT surface in B.
+	if err := s.CreateReminder(Reminder{
+		ID:          "rem-sess-A",
+		SessionID:   sessA,
+		Scope:       ReminderScopeSession,
+		Text:        "A-only",
+		TriggerJSON: `{"type":"turn_count","n":1}`,
+	}); err != nil {
+		t.Fatalf("CreateReminder session: %v", err)
+	}
+
+	listA, err := s.ListUnfiredReminders(sessA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listA) != 2 {
+		t.Errorf("session A: expected 2 reminders, got %d", len(listA))
+	}
+
+	listB, err := s.ListUnfiredReminders(sessB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listB) != 1 || listB[0].ID != "rem-proj" {
+		t.Errorf("session B: expected [rem-proj], got %+v", listB)
+	}
+
+	// Promote the session-A reminder to project — should now surface in B.
+	if err := s.UpdateReminderScope("rem-sess-A", ReminderScopeProject, projectID); err != nil {
+		t.Fatalf("UpdateReminderScope: %v", err)
+	}
+	listBAfter, _ := s.ListUnfiredReminders(sessB)
+	if len(listBAfter) != 2 {
+		t.Errorf("after promote: session B should see both reminders, got %d", len(listBAfter))
+	}
+}
+
+// TestReminders_TurnScope_DoesNotLeak verifies turn-scoped reminders behave like
+// session-scoped reminders for the purposes of cross-session listing — they do
+// NOT leak into other sessions.
+func TestReminders_TurnScope_DoesNotLeak(t *testing.T) {
+	s := newTestStore(t)
+	projectID := "prj-turn-test"
+	sessA := "sess-turn-A"
+	sessB := "sess-turn-B"
+	makeProjectAndSession(t, s, sessA, projectID)
+	if err := s.CreateSession(&Session{
+		ID: sessB, ShortCode: sessB, WorkspaceID: "ws-test-" + sessA, ProjectID: projectID,
+	}); err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+
+	if err := s.CreateReminder(Reminder{
+		ID:          "rem-turn",
+		SessionID:   sessA,
+		Scope:       ReminderScopeTurn,
+		Text:        "this turn only",
+		TriggerJSON: `{"type":"turn_count","n":1}`,
+	}); err != nil {
+		t.Fatalf("CreateReminder turn: %v", err)
+	}
+
+	listA, _ := s.ListUnfiredReminders(sessA)
+	if len(listA) != 1 {
+		t.Errorf("session A turn-scoped: expected 1 reminder, got %d", len(listA))
+	}
+	listB, _ := s.ListUnfiredReminders(sessB)
+	if len(listB) != 0 {
+		t.Errorf("session B should not see session A turn-scoped reminders, got %d", len(listB))
 	}
 }

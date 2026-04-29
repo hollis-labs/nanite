@@ -12,6 +12,7 @@ import (
 	"time"
 
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
@@ -1407,6 +1408,50 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				s.pluginHost.EmitEnvelopeRendered(sessionID, envType, envData)
 			})
 		}
+	}
+
+	// CW-20260429-0029: broadcast a plugin_envelope SSE event for every parsed
+	// envelope that carries a panel-routing hint (target/render_target/mode).
+	// The FE's useChat plugin_envelope handler calls applyEnvelopePanelEffects
+	// on each event, which is the ONLY path that opens the bottom_chat_drawer
+	// or routes to a render_target. Without this broadcast, show_card
+	// envelopes (which arrive as `<!--ENVELOPE_DATA:...-->` markers in the
+	// assistant text and reach the FE only as part of StructuredMessage)
+	// rendered correctly but never triggered the drawer-open — render_target
+	// became dead weight on the wire.
+	//
+	// Note: we do NOT call CreateEnvelopeInstance here. show_card envelopes
+	// are passive (no response routing) and are already persisted as part of
+	// the assistant message's `envelopes` field. Persistence stays the
+	// responsibility of interactive paths (approval / question-form /
+	// elicitation) where the row ID is needed for response endpoints.
+	for _, env := range envelopes {
+		if env.Target == "" && env.RenderTarget == "" && env.Mode == "" {
+			continue
+		}
+		envID := env.ID
+		if envID == "" {
+			envID = uuid.New().String()
+		}
+		innerData, err := json.Marshal(env.Data)
+		if err != nil {
+			slog.Warn("chat-service: marshal envelope data for plugin_envelope broadcast", "type", env.Type, "err", err)
+			continue
+		}
+		streamWrap, err := buildPluginEnvelopeWrap(envID, env.Type, innerData, EnvelopeRouting{
+			Target:              env.Target,
+			RenderTarget:        env.RenderTarget,
+			RenderTargetBlocked: env.RenderTargetBlocked,
+			Mode:                env.Mode,
+		})
+		if err != nil {
+			slog.Warn("chat-service: marshal plugin_envelope wrap", "type", env.Type, "err", err)
+			continue
+		}
+		s.streams.BroadcastSessionStreamEvent(sessionID, chat.StreamEvent{
+			Type:     "plugin_envelope",
+			Envelope: string(streamWrap),
+		})
 	}
 
 	// Determine tier.

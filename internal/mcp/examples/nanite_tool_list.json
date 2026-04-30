@@ -1,0 +1,12 @@
+[
+  {
+    "title": "Browse the full self-tool inventory",
+    "args": {},
+    "notes": "Returns every self-tool as {name, summary}. Cheap browse-the-surface call — use this when you're not sure which tool to reach for, then call nanite_tool_describe on the one you pick for the full schema + examples."
+  },
+  {
+    "title": "Find a tool by substring (matches name AND summary)",
+    "args": { "filter": "reminder" },
+    "notes": "Case-insensitive substring filter. Returns count:0 with an empty list when nothing matches — that's not an error, it's the agent's signal to widen the filter or call nanite_tool_describe on a guess."
+  }
+]

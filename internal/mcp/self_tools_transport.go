@@ -361,6 +361,9 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	// --- Discovery / introspection (CW-20260429-0005, A1) ---
 	case "nanite_tool_describe":
 		return st.callToolDescribe(ctx, args)
+	// --- Cheap discovery primitive (SP6, CW-20260430-0006) ---
+	case "nanite_tool_list":
+		return st.callToolList(ctx, args)
 	// --- Learning capture (CW-20260429-0009, D1) ---
 	case "nanite_remember":
 		return st.callRemember(ctx, args)

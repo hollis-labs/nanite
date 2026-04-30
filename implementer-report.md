@@ -103,8 +103,15 @@ the full `./...` run pass.
 
 ## Commit SHAs
 
-Filled in by the wrap-up commit. The orchestrator can read them from
-`git log --oneline fix/c112-regression-cluster..HEAD` after merge.
+```
+$ git log --oneline fix/c112-regression-cluster..HEAD
+ca595ad docs(sp1): implementer report for nanite_plan_step_add (CW-20260430-0001)
+f223aac feat(plans): nanite_plan_step_add — append steps without delete+recreate (CW-20260430-0001)
+```
+
+Two commits — the code change (`f223aac`) and this report (`ca595ad`).
+Both are on top of the `fix/c112-regression-cluster` tip; the
+orchestrator merges from this worktree.
 
 ## Deviations from ticket
 

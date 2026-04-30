@@ -130,6 +130,16 @@ func TestIsChatSurfaceTool_RejectsDangerousTools(t *testing.T) {
 	}
 }
 
+// TestIsChatSurfaceTool_PlanStepAddAllowed asserts the SP1 append-steps
+// tool is reachable from the Chat surface — covered by the existing
+// `nanite_plan_` prefix and not requiring a widening of ChatToolSurface.
+// CW-20260430-0001 (SP1).
+func TestIsChatSurfaceTool_PlanStepAddAllowed(t *testing.T) {
+	if !IsChatSurfaceTool("nanite_plan_step_add") {
+		t.Fatal("IsChatSurfaceTool(\"nanite_plan_step_add\") = false; expected true via the nanite_plan_ prefix")
+	}
+}
+
 // TestAssignRole_TableDriven covers the (tier, pattern) → role mapping.
 func TestAssignRole_TableDriven(t *testing.T) {
 	cases := []struct {

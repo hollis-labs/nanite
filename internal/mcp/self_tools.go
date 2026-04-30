@@ -387,6 +387,7 @@ func selfToolDefinitions() []Tool {
 			Name: "nanite_plan_update",
 			Description: "Update a plan's top-level fields or transition a single step's status.\n\n" +
 				"**When to use:** To advance a step as work progresses (e.g. pending → in_progress → done), or to rename/re-status the plan itself.\n\n" +
+				"**When NOT to use:** Do NOT use this to add a new step — it only mutates existing steps and plan-level fields. To append a new step to an existing plan, use nanite_plan_step_add (do not delete and recreate the plan).\n\n" +
 				"**Required context:** Always supply the plan `id`. Supply `step_id` to update only that step; omit it to update plan-level fields.\n\n" +
 				"**Plan status transitions:** proposed → approved → in_progress → complete (or abandoned).\n" +
 				"**Step status transitions:** pending → in_progress → done (or skipped).\n\n" +
@@ -401,6 +402,25 @@ func selfToolDefinitions() []Tool {
 					"notes":   map[string]any{"type": "string", "description": "Notes for the step (optional, only with step_id)"},
 				},
 				"required": []string{"id"},
+			},
+		},
+		{
+			Name: "nanite_plan_step_add",
+			Description: "Append one or more new steps to an existing plan without deleting or recreating it. Existing step IDs and statuses are preserved.\n\n" +
+				"**When to use:** When the user adds a new step to a plan that already exists, or when you need to extend a plan mid-flight (e.g. a discovery during execution justifies one more step). Always prefer this over nanite_plan_delete + nanite_plan_create — recreation loses step history and reorders IDs.\n\n" +
+				"**When NOT to use:** To rename, re-status, or transition an existing step, use nanite_plan_update(step_id=...). To create the very first set of steps, use nanite_plan_create.\n\n" +
+				"**Required context:** plan_id (from nanite_plan_create / nanite_plan_list / nanite_plan_get) and a non-empty `steps` array. Each step needs a `title`. The `id` is optional — when omitted, an ID is auto-assigned (e.g. s4 if your plan already has s1..s3). Supplying an ID that collides with an existing step is an error.\n\n" +
+				"**Behavior:** Steps are appended at the end in the order given. Existing steps are not reordered, renumbered, or modified. Returns the appended steps with their resolved IDs so you can immediately reference them in nanite_plan_update.\n\n" +
+				"**Output shape:** \"Appended N step(s) to plan <plan_id>\" plus a JSON object {plan_id, appended: [step...], appended_count}. The `appended` array contains each step exactly as stored, including the resolved `id`.\n\n" +
+				"**Golden example:** plan_id=\"pln-01HZ...\", steps=`[{\"title\":\"Write integration test\",\"acceptance\":\"covers happy path + plan-not-found\",\"depends_on\":[\"s2\"]}]` → appends one step at the end with auto-assigned id (e.g. s4) and the rest of the plan untouched.\n\n" +
+				"**Cross-references:** nanite_plan_create (initial plan + steps), nanite_plan_update (advance a step's status), nanite_plan_get (read step IDs before appending).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"plan_id": map[string]any{"type": "string", "description": "Plan ID to append to. Required."},
+					"steps":   map[string]any{"type": "string", "description": "JSON array of step objects: [{id?, title, status?, depends_on?, acceptance?, notes?}]. `title` is required per step; `id` is auto-assigned when omitted. Pass either a JSON array string or a real array."},
+				},
+				"required": []string{"plan_id", "steps"},
 			},
 		},
 		{

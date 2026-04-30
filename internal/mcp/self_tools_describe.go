@@ -103,16 +103,19 @@ var describeRelations = map[string]struct {
 		relatedTools: []string{"nanite_todo_create", "nanite_todo_update"},
 	},
 	"nanite_plan_create": {
-		relatedTools: []string{"nanite_plan_update", "nanite_plan_list", "nanite_plan_get", "nanite_todo_create"},
+		relatedTools: []string{"nanite_plan_update", "nanite_plan_step_add", "nanite_plan_list", "nanite_plan_get", "nanite_todo_create"},
 	},
 	"nanite_plan_update": {
-		relatedTools: []string{"nanite_plan_create", "nanite_plan_get"},
+		relatedTools: []string{"nanite_plan_step_add", "nanite_plan_create", "nanite_plan_get"},
+	},
+	"nanite_plan_step_add": {
+		relatedTools: []string{"nanite_plan_create", "nanite_plan_update", "nanite_plan_get"},
 	},
 	"nanite_plan_list": {
 		relatedTools: []string{"nanite_plan_get", "nanite_plan_create"},
 	},
 	"nanite_plan_get": {
-		relatedTools: []string{"nanite_plan_update", "nanite_plan_list"},
+		relatedTools: []string{"nanite_plan_update", "nanite_plan_step_add", "nanite_plan_list"},
 	},
 	"nanite_plan_delete": {
 		relatedTools: []string{"nanite_plan_list"},

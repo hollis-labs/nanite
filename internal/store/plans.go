@@ -172,6 +172,108 @@ func (s *Store) UpdatePlan(p *Plan) error {
 	return nil
 }
 
+// AppendPlanSteps appends one or more steps to an existing plan without
+// re-ordering or mutating any existing steps. New steps with empty IDs are
+// auto-assigned (`s<n>` where n is one past the highest existing numeric
+// suffix, or a UUID fallback when no numeric suffix exists). New step IDs
+// that collide with an existing step ID return an error rather than
+// silently overwriting.
+//
+// CW-20260430-0001 (SP1) — closes the c120 workaround where the agent
+// deleted and recreated a plan to add a single step.
+func (s *Store) AppendPlanSteps(planID string, newSteps []PlanStep) ([]PlanStep, error) {
+	if len(newSteps) == 0 {
+		return nil, fmt.Errorf("at least one step is required")
+	}
+	p, err := s.GetPlan(planID)
+	if err != nil {
+		return nil, err
+	}
+
+	existing, err := p.ParsePlanSteps()
+	if err != nil {
+		return nil, err
+	}
+
+	existingIDs := make(map[string]bool, len(existing))
+	for _, st := range existing {
+		existingIDs[st.ID] = true
+	}
+
+	appended := make([]PlanStep, 0, len(newSteps))
+	for i, ns := range newSteps {
+		if ns.Title == "" {
+			return nil, fmt.Errorf("step %d: title is required", i)
+		}
+		if ns.ID == "" {
+			ns.ID = nextStepID(existing, appended)
+		}
+		if existingIDs[ns.ID] {
+			return nil, fmt.Errorf("step %d: id %q collides with an existing step", i, ns.ID)
+		}
+		// Also dedupe within the appended batch.
+		for _, prior := range appended {
+			if prior.ID == ns.ID {
+				return nil, fmt.Errorf("step %d: id %q collides with another new step in the same call", i, ns.ID)
+			}
+		}
+		if ns.Status == "" {
+			ns.Status = "pending"
+		}
+		appended = append(appended, ns)
+	}
+
+	combined := make([]PlanStep, 0, len(existing)+len(appended))
+	combined = append(combined, existing...)
+	combined = append(combined, appended...)
+
+	if err := p.SetPlanSteps(combined); err != nil {
+		return nil, err
+	}
+	if err := s.UpdatePlan(p); err != nil {
+		return nil, err
+	}
+	return appended, nil
+}
+
+// nextStepID returns a deterministic `s<n>` ID one past the highest
+// numeric-suffixed ID seen across existing+pending steps, falling back to
+// a UUID when no suffixed IDs are detected. Designed so plans authored
+// with the conventional s1/s2/s3 scheme keep producing s4/s5/... when the
+// agent appends without supplying explicit IDs.
+func nextStepID(existing, pending []PlanStep) string {
+	maxN := 0
+	saw := false
+	scan := func(steps []PlanStep) {
+		for _, st := range steps {
+			if len(st.ID) < 2 || st.ID[0] != 's' {
+				continue
+			}
+			n := 0
+			for i := 1; i < len(st.ID); i++ {
+				c := st.ID[i]
+				if c < '0' || c > '9' {
+					n = 0
+					break
+				}
+				n = n*10 + int(c-'0')
+			}
+			if n > 0 {
+				saw = true
+				if n > maxN {
+					maxN = n
+				}
+			}
+		}
+	}
+	scan(existing)
+	scan(pending)
+	if saw {
+		return fmt.Sprintf("s%d", maxN+1)
+	}
+	return uuid.New().String()
+}
+
 // UpdatePlanStep updates a single step within a plan by step ID.
 func (s *Store) UpdatePlanStep(planID, stepID string, updates PlanStep) error {
 	p, err := s.GetPlan(planID)

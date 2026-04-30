@@ -82,7 +82,8 @@ Existing test `TestNaniteToolDescribe_AllSelfToolsHaveExamples` validates that e
 
 ## Commit SHAs
 
-To be filled in after the commit lands. (The commit will follow this report; SHA recorded post-commit if the orchestrator wants it.)
+- `37a0945` — feat(mcp): SP6 — nanite_tool_list cheap discovery primitive (CW-20260430-0006)
+  (Eight files: 1 new tool def, 1 new test file, 1 new example, 4 wire-up edits, 1 report.)
 
 ## Deviations / open questions
 

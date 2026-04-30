@@ -314,6 +314,39 @@ func TestIsChatSurfaceTool_AcceptsToolListPrimitive(t *testing.T) {
 	}
 }
 
+// TestIsChatSurfaceTool_AcceptsRemindersAndPins is the positive surface
+// check for SP2 (CW-20260430-0002). Reminders and pins were always meant
+// to be Chat-loop primitives — c120 surfaced that they could be
+// described but not called because EnforceChatSurface stripped them.
+// Each tool name is exact, sibling style to nanite_remember /
+// nanite_validate / nanite_panel_open.
+func TestIsChatSurfaceTool_AcceptsRemindersAndPins(t *testing.T) {
+	for _, name := range []string{
+		"nanite_set_reminder",
+		"nanite_pin",
+		"nanite_unpin",
+	} {
+		if !IsChatSurfaceTool(name) {
+			t.Errorf("IsChatSurfaceTool(%q) = false, want true (SP2 — reminder/pin Chat-loop primitive must be on the Chat surface)", name)
+		}
+	}
+}
+
+// TestIsChatSurfaceTool_AcceptsMemoryRecall is the positive surface
+// check for SP3 (CW-20260430-0003). nanite_memory_recall is the Layer 4
+// read-side complement to nanite_remember; without it on the Chat
+// surface, lessons captured in past sessions are dead weight.
+func TestIsChatSurfaceTool_AcceptsMemoryRecall(t *testing.T) {
+	if !IsChatSurfaceTool("nanite_memory_recall") {
+		t.Error("IsChatSurfaceTool(\"nanite_memory_recall\") = false, want true (SP3 — Layer 4 read-side complement to nanite_remember must be on the Chat surface)")
+	}
+	// Sibling sanity: the write side (nanite_remember) must already be on
+	// the surface — no Layer 4 closure if either half is missing.
+	if !IsChatSurfaceTool("nanite_remember") {
+		t.Error("IsChatSurfaceTool(\"nanite_remember\") = false, want true")
+	}
+}
+
 // TestRole_StringAndIsValid covers the enum helpers.
 func TestRole_StringAndIsValid(t *testing.T) {
 	cases := []struct {

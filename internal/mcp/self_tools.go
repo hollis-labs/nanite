@@ -1073,5 +1073,12 @@ the current turn for subsequent writes.
 		// so agents can introspect any internal tool when uncertain about
 		// input shape. Layer 1 of the self-healing tool surface lens.
 		naniteToolDescribeDefinition(),
+		// --- Cheap discovery primitive (SP6, CW-20260430-0006) ---
+		// nanite_tool_list returns name + one-line summary for every
+		// self-tool, with optional case-insensitive filter. Sister to
+		// nanite_tool_describe but ~2 orders of magnitude cheaper —
+		// agents browse the surface here, then describe a single tool
+		// for the deep dive.
+		naniteToolListDefinition(),
 	}
 }

@@ -288,6 +288,22 @@ func TestIsChatRoleAgent(t *testing.T) {
 	}
 }
 
+// TestIsChatSurfaceTool_AcceptsToolListPrimitive is the positive
+// surface check for SP6 (CW-20260430-0006). The cheap discovery
+// primitive nanite_tool_list must be on the Chat surface so the
+// agent can browse the inventory without burning turns guessing
+// tool names.
+func TestIsChatSurfaceTool_AcceptsToolListPrimitive(t *testing.T) {
+	if !IsChatSurfaceTool("nanite_tool_list") {
+		t.Error("IsChatSurfaceTool(\"nanite_tool_list\") = false, want true (SP6 cheap-discovery primitive must be on the Chat surface)")
+	}
+	// Sibling sanity check: nanite_tool_describe is the heavier
+	// counterpart and must also be on the surface.
+	if !IsChatSurfaceTool("nanite_tool_describe") {
+		t.Error("IsChatSurfaceTool(\"nanite_tool_describe\") = false, want true")
+	}
+}
+
 // TestRole_StringAndIsValid covers the enum helpers.
 func TestRole_StringAndIsValid(t *testing.T) {
 	cases := []struct {

@@ -105,6 +105,14 @@ var ChatToolSurface = []string{
 	// at callShowCard (CW-20260429-0025/0027) was removed in Phase A of
 	// the architectural rebalancing per docs/architecture/agent-context-architecture.md.
 	"nanite_tool_describe",
+	// Cheap discovery primitive (SP6, CW-20260430-0006). Returns
+	// {name, summary} for every self-tool with an optional substring
+	// filter. Sibling to nanite_tool_describe but ~2 orders of
+	// magnitude cheaper — agents browse the surface here, then call
+	// describe for the deep dive on a single tool. Reactive only — no
+	// "must call before X" gate; the agent reaches for this when
+	// unsure which tool exists, not as a precondition for action.
+	"nanite_tool_list",
 	// Pre-flight schema validation (B1, CW-20260429-0006). Read-only,
 	// idempotent — the agent uses it to check args before firing a
 	// high-blast-radius tool. Not a write or a panel signal, so safe to

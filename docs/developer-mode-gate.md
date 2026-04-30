@@ -138,12 +138,60 @@ tool list.
 
 ```go
 // cmd/nanite/main.go — initMCP()
-mcpManager.AddServer("dev", mcp.NewDevToolsTransport([...]), mcp.TierBuiltin)
+mcpManager.AddServer("dev", mcp.NewDevToolsTransport(devAllowed), mcp.TierBuiltin)
 
 // ToolClient is constructed with the real *store.Store.
 // DeveloperModeFunc is nil → developerModeEnabled() reads from the store.
 tb := toolclient.New(mcpManager, s, nil)
 ```
+
+### Filesystem allow-list (`dev_tools_allowed_paths`)
+
+The dev tools (`dev_read`, `dev_glob`, `dev_grep`, `dev_write`, `dev_edit`,
+`dev_bash`) are scoped to an allow-list of filesystem roots. Any path the
+LLM passes is checked against the list (with symlink-aware escape detection
+via `internal/pathsafe`) before the tool runs.
+
+**Default allow-list** (when no config is present):
+
+| Path | Why it's listed |
+|---|---|
+| `~/Projects-apps` | Primary workspace location for first-party projects. |
+| `~/Projects` | Legacy / secondary workspace location. |
+| `~/.nanite` | Agent framework config, role library, sandbox dirs. |
+| `~/.claude` | Per-session worktrees + Claude harness state. |
+
+`~/Projects-apps/agent-workspaces` does NOT need to be listed explicitly
+because it lives under the `~/Projects-apps` parent root.
+
+**User override:** add `dev_tools_allowed_paths` to your `~/.nanite/nanite.yaml`
+(user-level) or project-level `nanite.yaml`:
+
+```yaml
+dev_tools_allowed_paths:
+  - ~/Projects-apps
+  - ~/.nanite
+  - /opt/shared-corpus
+```
+
+Entries support a leading `~/` for the user's home. The user-supplied list
+**replaces** the defaults wholesale — set it explicitly when you want to
+narrow scope or add new roots. The path-safety escape check (symlink-aware,
+`..` traversal blocked) still runs regardless of how the list was sourced.
+
+> **Note:** the `~/.nanite/config.yaml` file used by the *agent framework*
+> (roles, agents, project registry) is a separate file from
+> `~/.nanite/nanite.yaml` (chat-harness runtime settings). The allow-list
+> belongs in `nanite.yaml`. The runtime emits a `dev tools allow-list`
+> info log at startup with the resolved list and its source
+> (`config:dev_tools_allowed_paths` or `default`).
+
+**Canonicalization:** the LLM may pass paths with a leading `~/` (e.g.
+`~/Projects-apps/nanite/coordination`). Go's `filepath` package treats `~`
+as a literal character, so the runtime expands a leading `~/` or bare `~`
+to the user's home directory at the boundary before checking the
+allow-list. Without this expansion, `filepath.Abs("~/Projects")` becomes
+`<cwd>/~/Projects`, which trips the escape check on every root.
 
 ---
 

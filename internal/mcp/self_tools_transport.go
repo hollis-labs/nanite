@@ -75,6 +75,7 @@ type TodoStoreInterface interface {
 	ListPlans(f store.PlanFilter) ([]store.Plan, error)
 	UpdatePlan(p *store.Plan) error
 	UpdatePlanStep(planID, stepID string, updates store.PlanStep) error
+	AppendPlanSteps(planID string, steps []store.PlanStep) ([]store.PlanStep, error)
 	DeletePlan(id string) error
 }
 
@@ -295,6 +296,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callPlanCreate(ctx, args)
 	case "nanite_plan_update":
 		return st.callPlanUpdate(args)
+	case "nanite_plan_step_add":
+		return st.callPlanStepAdd(args)
 	case "nanite_plan_list":
 		return st.callPlanList(ctx, args)
 	case "nanite_plan_get":
@@ -1068,6 +1071,61 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*ToolResult, 
 
 	st.notifyWorkChanged()
 	return textResult(fmt.Sprintf("Updated plan %q (id=%s, status=%s)", p.Title, p.ID, p.Status)), nil
+}
+
+// callPlanStepAdd appends one or more steps to an existing plan without
+// re-creating it. CW-20260430-0001 (SP1) — closes the c120 workaround.
+func (st *SelfToolsTransport) callPlanStepAdd(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+	planID := strArg(args, "plan_id", "")
+	if planID == "" {
+		return errorResult("plan_id is required"), nil
+	}
+
+	stepsArg, ok := args["steps"]
+	if !ok || stepsArg == nil {
+		return errorResult("steps is required (JSON array string or array)"), nil
+	}
+
+	var raw []byte
+	switch v := stepsArg.(type) {
+	case string:
+		if v == "" {
+			return errorResult("steps is required (JSON array string or array)"), nil
+		}
+		raw = []byte(v)
+	default:
+		// Allow callers that already deserialise the array.
+		marshaled, err := json.Marshal(v)
+		if err != nil {
+			return errorResult(fmt.Sprintf("steps must be a JSON array: %v", err)), nil
+		}
+		raw = marshaled
+	}
+
+	var newSteps []store.PlanStep
+	if err := json.Unmarshal(raw, &newSteps); err != nil {
+		return errorResult(fmt.Sprintf("parse steps: %v", err)), nil
+	}
+	if len(newSteps) == 0 {
+		return errorResult("steps must contain at least one step"), nil
+	}
+
+	appended, err := st.TodoStore.AppendPlanSteps(planID, newSteps)
+	if err != nil {
+		return errorResult(fmt.Sprintf("append plan steps: %v", err)), nil
+	}
+
+	st.notifyWorkChanged()
+
+	out, _ := json.Marshal(map[string]any{
+		"plan_id":         planID,
+		"appended":        appended,
+		"appended_count":  len(appended),
+	})
+	return textResult(fmt.Sprintf("Appended %d step(s) to plan %s\n%s", len(appended), planID, string(out))), nil
 }
 
 func (st *SelfToolsTransport) callPlanList(ctx context.Context, args map[string]any) (*ToolResult, error) {

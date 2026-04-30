@@ -123,6 +123,13 @@ var ChatToolSurface = []string{
 	// no panel signal, no surface mutation — safe on the Chat surface
 	// and load-bearing for the self-healing loop (Layer 4 of the lens).
 	"nanite_remember",
+	// Memory recall (SP3, CW-20260430-0003). Layer 4 read-side complement
+	// to nanite_remember — the Chat agent retrieves prior lessons /
+	// captured context relevant to the current turn. Reactive use only:
+	// after a tool failure or before retrying an unfamiliar contract, not
+	// preemptively on every turn. No "always recall before X" gate (would
+	// re-introduce the c114 describe-gate anti-pattern).
+	"nanite_memory_recall",
 	// Panel control (J8 v1, CW-20260426-0006). The Chat agent can open and
 	// close known UI drawers as a visibility-only signal — these tools never
 	// mutate workspace data and are gated for plugin-shipped panels via H1
@@ -130,6 +137,16 @@ var ChatToolSurface = []string{
 	"nanite_panel_open",
 	"nanite_panel_close",
 	"nanite_signal_mode",
+	// Reminders + pins (J11/D1, CW-20260426-0009 / CW-20260428-0014; surface
+	// gap closed by SP2, CW-20260430-0002). Always-meant-to-be-on Chat-loop
+	// primitives: deterministic time/turn-count reminders, and pin/unpin of
+	// context that should ride across turns or sessions. Without these on
+	// the Chat surface the agent can describe them but EnforceChatSurface
+	// strips them at call time, which c120 surfaced as a misattributed
+	// "MCP parser bug".
+	"nanite_set_reminder",
+	"nanite_pin",
+	"nanite_unpin",
 }
 
 // chatSurfaceMetaToolExceptions are always allowed on the Chat surface:

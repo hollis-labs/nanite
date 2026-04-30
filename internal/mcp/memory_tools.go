@@ -87,8 +87,18 @@ func memoryToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_memory_recall",
-			Description: "Recall memories from previous sessions. Use this to retrieve saved facts, decisions, preferences, or corrections relevant to the current conversation.",
+			Name: "nanite_memory_recall",
+			Description: "Retrieve durable memories — including lessons captured by `nanite_remember` and other saved facts/decisions/preferences — relevant to the current turn. Layer 4 read-side complement to `nanite_remember` in the self-healing tool surface (SP3, CW-20260430-0003).\n\n" +
+				"**When to use:** Reactively. After a tool call fails with a confusing schema/contract error, recall on the failed tool name before retrying — past-you may have left a `lesson_hint` that explains the shape mistake. Also fine when the user references a prior decision (\"the way we agreed last week\") and you need to ground the answer. The lens is reactive, not preemptive: do NOT call this on every turn or as a precondition for normal action.\n\n" +
+				"**When NOT to use:** Don't sweep memory at the start of every turn — that re-introduces the c114 describe-gate anti-pattern (preemptive recovery layer becomes a friction tax). The harness already injects relevant memories via slot extensions; explicit recall is for targeted lookups when those didn't surface what you need.\n\n" +
+				"**Contract:**\n" +
+				"- `query` (required): natural-language description of what you want to recall — used for hybrid BM25 + cosine relevance ranking.\n" +
+				"- `scope` (optional): `session`, `project`, `user`, or `all` (default `all`). `all` cascades session → project → user namespaces.\n" +
+				"- `limit` (optional): max memories returned (default 10).\n" +
+				"- `tags` (optional): filter by tags. To recall lessons captured by `nanite_remember`, pass `[\"learning\"]` or filter by `tool:<name>`.\n" +
+				"- `session_id` (optional): override session for `session`-scoped recall.\n\n" +
+				"**Output shape:** Text block — `Found N memories:` followed by an enumerated list of `{summary, origin, confidence, body, tags, namespace, key}`. Empty match returns `\"No memories found matching the query.\"`.\n\n" +
+				"**Golden example (Layer 4 read-side):** `{scope: \"all\", query: \"nanite_show_card schema\", tags: [\"learning\"], limit: 3}` — recalls the most-relevant lessons captured for `nanite_show_card` so future-you avoids the same shape mistake. See `nanite_remember` (write side) for how lessons land in the first place.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

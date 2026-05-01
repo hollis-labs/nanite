@@ -3,7 +3,6 @@ package install
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -70,51 +69,8 @@ func ResolveArchiveDir(base, projectBasename string, ts time.Time) (string, erro
 	return "", fmt.Errorf("too many archive collisions for %s/%s", projectBasename, date)
 }
 
-// ArchiveProjectAgentrc moves .agentrc/ (and .agentrc-legacy/ if present)
-// from projectDir into a new archive directory under archiveBase. Returns
-// the archive directory path.
-func ArchiveProjectAgentrc(projectDir, archiveBase, basename string, ts time.Time) (string, error) {
-	archiveDir, err := ResolveArchiveDir(archiveBase, basename, ts)
-	if err != nil {
-		return "", fmt.Errorf("resolve archive dir: %w", err)
-	}
-	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
-		return "", fmt.Errorf("mkdir archive %s: %w", archiveDir, err)
-	}
-
-	if err := moveIfExists(
-		filepath.Join(projectDir, ".agentrc"),
-		filepath.Join(archiveDir, ".agentrc"),
-	); err != nil {
-		return "", fmt.Errorf("move .agentrc: %w", err)
-	}
-	if err := moveIfExists(
-		filepath.Join(projectDir, ".agentrc-legacy"),
-		filepath.Join(archiveDir, ".agentrc-legacy"),
-	); err != nil {
-		return "", fmt.Errorf("move .agentrc-legacy: %w", err)
-	}
-
-	return archiveDir, nil
-}
-
 // exists reports whether a filesystem entry (file or directory) exists at path.
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// moveIfExists renames src to dst if src exists. Returns nil if src is missing.
-func moveIfExists(src, dst string) error {
-	_, err := os.Stat(src)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("stat %s: %w", src, err)
-	}
-	if err := os.Rename(src, dst); err != nil {
-		return fmt.Errorf("rename %s -> %s: %w", src, dst, err)
-	}
-	return nil
 }

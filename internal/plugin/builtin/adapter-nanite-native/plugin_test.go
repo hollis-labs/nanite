@@ -50,8 +50,8 @@ func TestComposeSystemPrompt_MissingRole(t *testing.T) {
 func TestReadProjectConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
-	os.WriteFile(cfgPath, []byte(`
-agentrc_version: "2.2.0"
+os.WriteFile(cfgPath, []byte(`
+nanite_version: "2.3.0"
 agents:
   test-agent:
     name: Test Agent
@@ -84,41 +84,17 @@ func TestReadProjectConfig_Missing(t *testing.T) {
 	}
 }
 
-func TestProjectConfigFallback(t *testing.T) {
+func TestProjectConfigRequiresNanite(t *testing.T) {
 	dir := t.TempDir()
-
-	// Create .agentrc/ config (no .nanite/).
-	agentrcDir := filepath.Join(dir, ".agentrc")
-	os.MkdirAll(agentrcDir, 0o755)
-	os.WriteFile(filepath.Join(agentrcDir, "config.yaml"), []byte(`
-agentrc_version: "2.2.0"
-agents:
-  fallback-agent:
-    name: Fallback Agent
-    description: Found via .agentrc fallback
-    roles: []
-`), 0o644)
-
-	cfg, configDir, err := readProjectConfigWithFallback(dir, nil)
-	if err != nil {
-		t.Fatalf("readProjectConfigWithFallback: %v", err)
-	}
-	if configDir != agentrcDir {
-		t.Errorf("expected config dir %q, got %q", agentrcDir, configDir)
-	}
-	if _, ok := cfg.Agents["fallback-agent"]; !ok {
-		t.Error("expected fallback-agent in config")
+	if _, _, err := readProjectConfigFromRoot(dir); err == nil {
+		t.Fatal("expected error when .nanite/config.yaml is missing")
 	}
 }
 
-func TestProjectConfigPrefersNanite(t *testing.T) {
+func TestProjectConfigFromRoot(t *testing.T) {
 	dir := t.TempDir()
-
-	// Create both .nanite/ and .agentrc/ configs.
 	naniteDir := filepath.Join(dir, ".nanite")
-	agentrcDir := filepath.Join(dir, ".agentrc")
 	os.MkdirAll(naniteDir, 0o755)
-	os.MkdirAll(agentrcDir, 0o755)
 
 	os.WriteFile(filepath.Join(naniteDir, "config.yaml"), []byte(`
 agents:
@@ -126,21 +102,15 @@ agents:
     name: Nanite Agent
 `), 0o644)
 
-	os.WriteFile(filepath.Join(agentrcDir, "config.yaml"), []byte(`
-agents:
-  agentrc-agent:
-    name: AgentRC Agent
-`), 0o644)
-
-	cfg, configDir, err := readProjectConfigWithFallback(dir, nil)
+	cfg, configDir, err := readProjectConfigFromRoot(dir)
 	if err != nil {
-		t.Fatalf("readProjectConfigWithFallback: %v", err)
+		t.Fatalf("readProjectConfigFromRoot: %v", err)
 	}
 	if configDir != naniteDir {
-		t.Errorf("expected .nanite/ preferred, got %q", configDir)
+		t.Errorf("expected .nanite/ dir, got %q", configDir)
 	}
 	if _, ok := cfg.Agents["nanite-agent"]; !ok {
-		t.Error("expected nanite-agent (from .nanite/) in config")
+		t.Error("expected nanite-agent in config")
 	}
 }
 

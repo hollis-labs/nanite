@@ -3,12 +3,5 @@
     "title": "Scaffold a new project's .nanite/ directory",
     "args": { "project_dir": "/Users/me/Projects/myapp" },
     "notes": "project_dir must be ABSOLUTE."
-  },
-  {
-    "title": "Migrate from legacy .agentrc/",
-    "args": {
-      "project_dir": "/Users/me/Projects/myapp",
-      "migrate_from_agentrc": true
-    }
   }
 ]

@@ -45,10 +45,9 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 		"nanite_update_agent":     false,
 		"nanite_start_builder":    false,
 		"nanite_builder_step":     false,
-		"nanite_install_home":     false,
-		"nanite_install_project":  false,
-		"nanite_install_rollback": false,
-		"nanite_install_diff":     false,
+		"nanite_install_home":    false,
+		"nanite_install_project": false,
+		"nanite_install_diff":    false,
 	}
 
 	for _, tool := range tools {

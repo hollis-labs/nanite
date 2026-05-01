@@ -499,31 +499,14 @@ func selfToolDefinitions() []Tool {
 		},
 		{
 			Name: "nanite_install_project",
-			Description: "Scaffold .nanite/ and NANITE.md in a project directory, optionally migrating from a legacy .agentrc/ layout.\n\n" +
-				"**When to use:** When onboarding a new project to Nanite, or when migrating from the older .agentrc/ convention.\n\n" +
+			Description: "Scaffold .nanite/ and NANITE.md in a project directory, or adopt an existing .nanite/ project into Nanite-managed adapter wiring.\n\n" +
+				"**When to use:** When onboarding a new project to Nanite or normalizing an existing .nanite/ project.\n\n" +
 				"**Required context:** project_dir must be an absolute path to the project root.\n\n" +
-				"**Output shape:** Summary of files created. Use nanite_install_rollback to undo if needed.",
+				"**Output shape:** Summary of files created or updated.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"project_dir":          map[string]any{"type": "string", "description": "absolute path to project dir"},
-					"migrate_from_agentrc": map[string]any{"type": "boolean", "description": "archive .agentrc/ and migrate"},
-					"archive_only":         map[string]any{"type": "boolean", "description": "archive .agentrc/ without scaffolding"},
-				},
-				"required": []string{"project_dir"},
-			},
-		},
-		{
-			Name: "nanite_install_rollback",
-			Description: "Reverse the most recent nanite_install_project migration for a project, restoring from its archive snapshot.\n\n" +
-				"**When to use:** When an install or migration went wrong and the user wants to restore the previous state.\n\n" +
-				"**Required context:** project_dir is required. archive_path is optional — if omitted, the most recent archive snapshot is used.\n\n" +
-				"**Output shape:** Summary of files restored.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"project_dir":  map[string]any{"type": "string", "description": "absolute path to project dir"},
-					"archive_path": map[string]any{"type": "string", "description": "explicit archive dir; finds most recent if empty"},
+					"project_dir": map[string]any{"type": "string", "description": "absolute path to project dir"},
 				},
 				"required": []string{"project_dir"},
 			},
@@ -531,14 +514,13 @@ func selfToolDefinitions() []Tool {
 		{
 			Name: "nanite_install_diff",
 			Description: "Dry-run a project install: show what files would be created or modified without actually changing anything.\n\n" +
-				"**When to use:** Before running nanite_install_project or a migration, to preview the impact.\n\n" +
+				"**When to use:** Before running nanite_install_project to preview the impact.\n\n" +
 				"**Note:** Not yet implemented — returns a not-implemented error.\n\n" +
 				"**Output shape:** Diff summary of would-be changes (when implemented).",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"project_dir":          map[string]any{"type": "string", "description": "absolute path to project dir"},
-					"migrate_from_agentrc": map[string]any{"type": "boolean", "description": "simulate a migration"},
+					"project_dir": map[string]any{"type": "string", "description": "absolute path to project dir"},
 				},
 				"required": []string{"project_dir"},
 			},

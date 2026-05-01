@@ -5,13 +5,11 @@
 package installcmd
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/mattn/go-isatty"
@@ -23,11 +21,6 @@ import (
 func Run(label string, args []string) {
 	fs := flag.NewFlagSet(label, flag.ExitOnError)
 	project := fs.String("project", "", "target project directory (omit to install to ~/.nanite/)")
-	migrate := fs.Bool("migrate-from-agentrc", false, "archive existing .agentrc/ and migrate to .nanite/")
-	archiveOnly := fs.Bool("archive-only", false, "archive .agentrc/ without scaffolding .nanite/ (for scratch dirs)")
-	rollback := fs.Bool("rollback", false, "reverse the most recent migration for --project")
-	resume := fs.Bool("resume", false, "continue a partial install from its state marker")
-	restart := fs.Bool("restart", false, "reverse a partial install and run a fresh migration")
 	refresh := fs.Bool("refresh", false, "re-extract embedded assets to ~/.nanite/, skipping user-modified files")
 	force := fs.Bool("force", false, "overwrite user-modified files during --refresh")
 	printDiff := fs.Bool("print-diff", false, "dry-run: show what would change (not yet implemented)")
@@ -96,80 +89,26 @@ func Run(label string, args []string) {
 		os.Exit(2)
 	}
 
-	if *rollback {
-		if err := svc.Rollback(install.RollbackOptions{ProjectDir: projectDir}); err != nil {
-			die(label, "rollback", err)
-		}
-		fmt.Printf("%s: rolled back %s\n", label, projectDir)
-		return
-	}
-
-	if *resume {
-		latest, err := latestArchiveFor(projectDir)
-		if err != nil {
-			die(label, "find latest archive", err)
-		}
-		if err := svc.Resume(install.ResumeOptions{
-			ProjectDir:  projectDir,
-			ArchivePath: latest,
-			GlobalHome:  defaultGlobalHome(),
-		}); err != nil {
-			die(label, "resume", err)
-		}
-		fmt.Printf("%s: resumed %s\n", label, projectDir)
-		return
-	}
-
-	if *restart {
-		latest, err := latestArchiveFor(projectDir)
-		if err != nil {
-			die(label, "find latest archive", err)
-		}
-		if err := svc.Restart(install.RestartOptions{
-			ProjectDir:  projectDir,
-			ArchivePath: latest,
-			GlobalHome:  defaultGlobalHome(),
-		}); err != nil {
-			die(label, "restart", err)
-		}
-		fmt.Printf("%s: restarted migration for %s\n", label, projectDir)
-		return
-	}
-
 	opts := install.InstallProjectOptions{
-		ProjectDir:         projectDir,
-		GlobalHome:         defaultGlobalHome(),
-		MigrateFromAgentrc: *migrate,
-		ArchiveOnly:        *archiveOnly,
-		Adapters:           *adapters,
-		NoAdapters:         *noAdapters,
-		Reconfigure:        *reconfigure,
-		Interactive:        isStdinTTY(),
-		Stdin:              os.Stdin,
-		Stdout:             os.Stdout,
+		ProjectDir:  projectDir,
+		GlobalHome:  defaultGlobalHome(),
+		Adapters:    *adapters,
+		NoAdapters:  *noAdapters,
+		Reconfigure: *reconfigure,
+		Interactive: isStdinTTY(),
+		Stdin:       os.Stdin,
+		Stdout:      os.Stdout,
 	}
 	report, err := svc.InstallProject(opts)
 	if err != nil {
-		if errors.Is(err, install.ErrPartialInstall) {
-			if !isStdinTTY() {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(3)
-			}
-			handlePartialInteractive(label, svc, projectDir, err)
-			return
-		}
 		die(label, "install project", err)
 	}
 
 	switch {
 	case report.FreshScaffold:
 		fmt.Printf("%s: fresh scaffold in %s\n", label, projectDir)
-	case report.Migrated:
-		fmt.Printf("%s: migrated %s (archive: %s)\n", label, projectDir, report.ArchivePath)
 	case report.Adopted:
 		fmt.Printf("%s: adopted existing .nanite/ in %s\n", label, projectDir)
-	case report.ArchiveOnly:
-		fmt.Printf("%s: archived %s (archive: %s)\n", label, projectDir, report.ArchivePath)
 	}
 
 	if len(report.Adapters) > 0 {
@@ -179,7 +118,7 @@ func Run(label string, args []string) {
 			len(report.Adapters),
 			4-len(report.Adapters),
 		)
-	} else if !report.ArchiveOnly {
+	} else {
 		fmt.Printf("%s: no CLI adapters enabled (run with --reconfigure to add them later)\n", label)
 	}
 	for _, cleanup := range report.AdapterCleanups {
@@ -191,43 +130,6 @@ func Run(label string, args []string) {
 			fmt.Printf("%s: deleted %s (was managed-section-only)\n",
 				label, filepath.Base(cleanup.FilePath))
 		}
-	}
-}
-
-func handlePartialInteractive(label string, svc *install.Service, projectDir string, detectedErr error) {
-	fmt.Fprintln(os.Stderr, detectedErr)
-	fmt.Println("How do you want to proceed?")
-	fmt.Println("  [r] Resume from last completed phase")
-	fmt.Println("  [s] Start over (restart)")
-	fmt.Println("  [c] Cancel")
-	fmt.Print("> ")
-	var choice string
-	fmt.Scanln(&choice)
-	latest, err := latestArchiveFor(projectDir)
-	if err != nil {
-		die(label, "find latest archive", err)
-	}
-	switch strings.ToLower(choice) {
-	case "r":
-		if err := svc.Resume(install.ResumeOptions{
-			ProjectDir:  projectDir,
-			ArchivePath: latest,
-			GlobalHome:  defaultGlobalHome(),
-		}); err != nil {
-			die(label, "resume", err)
-		}
-		fmt.Printf("%s: resumed %s\n", label, projectDir)
-	case "s":
-		if err := svc.Restart(install.RestartOptions{
-			ProjectDir:  projectDir,
-			ArchivePath: latest,
-			GlobalHome:  defaultGlobalHome(),
-		}); err != nil {
-			die(label, "restart", err)
-		}
-		fmt.Printf("%s: restarted %s\n", label, projectDir)
-	default:
-		fmt.Println("cancelled")
 	}
 }
 
@@ -253,40 +155,4 @@ func defaultGlobalHome() string {
 		return ""
 	}
 	return filepath.Join(home, ".nanite")
-}
-
-func latestArchiveFor(projectDir string) (string, error) {
-	base := os.Getenv("NANITE_ARCHIVE_BASE")
-	if base == "" {
-		base = install.ArchiveBase
-	}
-	expanded, err := install.ExpandArchiveBase(base)
-	if err != nil {
-		return "", err
-	}
-	entries, err := os.ReadDir(expanded)
-	if err != nil {
-		return "", fmt.Errorf("read archive base %s: %w", expanded, err)
-	}
-	basename := filepath.Base(projectDir)
-	prefix := basename + "-"
-	var latest string
-	var latestTime time.Time
-	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(latestTime) {
-			latestTime = info.ModTime()
-			latest = filepath.Join(expanded, e.Name())
-		}
-	}
-	if latest == "" {
-		return "", fmt.Errorf("no archive found for %s", basename)
-	}
-	return latest, nil
 }

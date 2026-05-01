@@ -577,7 +577,7 @@ export function ChatComposer({
         {/* DEV mode indicator — floating top-right when developer_mode=true */}
         {developerMode && (
           <div className="pointer-events-none select-none absolute top-2 right-3 z-[2]">
-            <StatusPill tone="danger" className="rounded-[4px]">
+            <StatusPill tone="danger">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-danger animate-pulse shrink-0" />
               DEV
             </StatusPill>
@@ -696,7 +696,7 @@ export function ChatComposer({
         <ComposerToolbar
           hasContent={hasContent}
           isStreaming={isStreaming}
-          onSend={handleSend}
+          onSend={() => handleSendRef.current()}
           onStop={onStop}
           onAttach={() => fileInputRef.current?.click()}
           onSlash={() => editor?.chain().focus().insertContent("/").run()}

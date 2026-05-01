@@ -194,7 +194,7 @@ All new drawer components in `ui/src/components/drawers/`. Shared subcomponents 
 1. Choice of bolder send icon (`ArrowBigUp` vs `SendHorizontal` vs `Send` filled). Eyeball at real size.
 2. `ChatAlertOverlay` exact height — fixed reference (~80px) vs content-driven. Lean toward content-driven with a min ~64px.
 3. Card-tab label fallback rule when envelope has no title — proposed: envelope-type display name + short timestamp.
-4. Drawer drag bounds — proposed: min = tab-strip-only (handle visible); max = 50% viewport height.
+4. Drawer drag bounds — min = tab-strip-only (handle visible); max = 100% viewport height. User decision: it's their screen.
 5. Submit-arrow bug repro and root-cause.
 6. Pinned-card API location coupling — `POST /drawer-cards` may implicitly assume "the bottom drawer" semantics. Read handler during impl; tweak if needed.
 

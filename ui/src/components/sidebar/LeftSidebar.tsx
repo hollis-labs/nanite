@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   EyeOff,
   MessageSquare,
+  Pencil,
   Pin,
   PinOff,
   Trash2,
@@ -44,16 +45,16 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
 import { updateSettingsHash } from "@/hooks/useHashRoute";
-import { useSettings } from "@/hooks/useSettings";
-import { useNavigationStore } from "@/stores/useNavigationStore";
-import { usePluginSlots } from "@/hooks/usePluginSlots";
 import { usePluginAction } from "@/hooks/usePluginAction";
-import { resolveIcon } from "@/lib/icons";
+import { usePluginSlots } from "@/hooks/usePluginSlots";
+import { useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
+import { resolveIcon } from "@/lib/icons";
 import type { Session } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
+import { useNavigationStore } from "@/stores/useNavigationStore";
 import { ScopeSelector } from "./ScopeSelector";
 
 function formatRelativeTime(dateStr: string): string {
@@ -92,6 +93,7 @@ export function LeftSidebar() {
   const cliActiveSessions = useChatStore((s) => s.cliActiveSessions);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const archiveMutation = useMutation({
     mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
@@ -157,6 +159,25 @@ export function LeftSidebar() {
     onSuccess: (newSession) => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       setActiveSession(newSession.id);
+    },
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api.updateSession(id, { custom_name: name } as Partial<Session>),
+    onMutate: async ({ id, name }) => {
+      await queryClient.cancelQueries({ queryKey: ["sessions", activeWorkspaceId] });
+      const prev = queryClient.getQueryData(["sessions", activeWorkspaceId]);
+      queryClient.setQueryData(["sessions", activeWorkspaceId], (old: Session[] | undefined) =>
+        old?.map((s) => (s.id === id ? { ...s, custom_name: name } : s)),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(["sessions", activeWorkspaceId], context.prev);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });
 
@@ -328,6 +349,13 @@ export function LeftSidebar() {
                           archived: session.status !== "archived",
                         })
                       }
+                      editing={editingId === session.id}
+                      onStartEdit={() => setEditingId(session.id)}
+                      onCommitEdit={(value) => {
+                        setEditingId(null);
+                        renameMutation.mutate({ id: session.id, name: value });
+                      }}
+                      onCancelEdit={() => setEditingId(null)}
                     />
                   ))}
                 </>
@@ -361,6 +389,13 @@ export function LeftSidebar() {
                           archived: session.status !== "archived",
                         })
                       }
+                      editing={editingId === session.id}
+                      onStartEdit={() => setEditingId(session.id)}
+                      onCommitEdit={(value) => {
+                        setEditingId(null);
+                        renameMutation.mutate({ id: session.id, name: value });
+                      }}
+                      onCancelEdit={() => setEditingId(null)}
                     />
                   ))}
                 </>
@@ -450,18 +485,12 @@ export function LeftSidebar() {
 function PresenceDot({ variant }: { variant: "streaming" | "tool-pending" | "cli-active" }) {
   if (variant === "streaming") {
     return (
-      <span
-        className="w-2 h-2 rounded-full bg-success shrink-0 animate-pulse"
-        title="Streaming"
-      />
+      <span className="w-2 h-2 rounded-full bg-success shrink-0 animate-pulse" title="Streaming" />
     );
   }
   if (variant === "cli-active") {
     return (
-      <span
-        className="w-2 h-2 rounded-full bg-info shrink-0 animate-pulse"
-        title="CLI active"
-      />
+      <span className="w-2 h-2 rounded-full bg-info shrink-0 animate-pulse" title="CLI active" />
     );
   }
   return (
@@ -489,6 +518,10 @@ function ChatItem({
   statusIndicator,
   onDelete,
   onArchive,
+  editing,
+  onStartEdit,
+  onCommitEdit,
+  onCancelEdit,
 }: {
   session: Session;
   isActive: boolean;
@@ -496,7 +529,11 @@ function ChatItem({
   onTogglePin: () => void;
   statusIndicator?: ReactNode;
   onDelete?: () => void;
-  onArchive?: () => void;
+  onArchive: () => void;
+  editing: boolean;
+  onStartEdit: () => void;
+  onCommitEdit: (value: string) => void;
+  onCancelEdit: () => void;
 }) {
   const displayTitle = session.custom_name || session.title || `Chat ${session.short_code}`;
   const isArchived = session.status === "archived";
@@ -510,14 +547,18 @@ function ChatItem({
         <div>
           <LeftRailSessionRow
             title={displayTitle}
-            shortCode={session.short_code}
             timeLabel={formatRelativeTime(session.last_activity)}
             active={isActive}
             archived={isArchived}
             statusIndicator={statusIndicator}
             onClick={onClick}
             onTogglePin={onTogglePin}
+            onToggleArchive={onArchive}
             pinned={session.is_pinned}
+            editing={editing}
+            onStartEdit={onStartEdit}
+            onCommitEdit={onCommitEdit}
+            onCancelEdit={onCancelEdit}
             pluginBadges={
               sidebarSlots.length > 0 ? (
                 <>
@@ -545,6 +586,10 @@ function ChatItem({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuItem onSelect={onStartEdit} className="gap-2 text-xs">
+          <Pencil className="size-3.5" />
+          Rename chat
+        </ContextMenuItem>
         <ContextMenuItem onSelect={onTogglePin} className="gap-2 text-xs">
           {session.is_pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
           {session.is_pinned ? "Unpin" : "Pin"}

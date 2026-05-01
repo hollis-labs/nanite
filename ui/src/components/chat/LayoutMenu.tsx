@@ -107,125 +107,139 @@ function RightLayerRow({
 // ── Theme + mode dropdown ─────────────────────────────────────────────────
 
 
-function ThemeDropdown() {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const { activeThemeId, setActiveTheme } = useTheme()
+function useIsDark() {
   const theme = useLayoutStore((s) => s.theme)
-  const setTheme = useLayoutStore((s) => s.setTheme)
+  return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+}
 
+function ThemeTrigger({ onClick, expanded }: { onClick: () => void; expanded: boolean }) {
+  const { activeThemeId } = useTheme()
+  const isDark = useIsDark()
   const activeBuiltin = BUILTIN_THEMES.find((t) => t.id === activeThemeId) ?? BUILTIN_THEMES[0]
   const swatchBg = activeBuiltin.tokens.light['bg-elevated'] ?? '#ffffff'
   const swatchAccent = activeBuiltin.tokens.light['primary'] ?? '#000000'
-  const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-
-  useEffect(() => {
-    if (!open) return
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
 
   return (
-    <div ref={ref} className="relative">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-2 rounded-[6px] border px-2.5 py-1.5 transition-colors min-w-[140px] ${
+        expanded ? 'border-border bg-surface' : 'border-border-subtle hover:border-border hover:bg-surface'
+      }`}
+    >
+      <div
+        className="relative overflow-hidden rounded-[3px] shrink-0"
+        style={{ width: 16, height: 16, background: swatchBg, border: '1px solid rgba(0,0,0,0.12)' }}
+      >
+        <div className="absolute bottom-[1px] inset-x-[1px] h-[4px] rounded-[1px]" style={{ background: swatchAccent }} />
+      </div>
+      <span className="font-mono text-[11px] font-semibold text-fg-secondary flex-1 text-left truncate">
+        {activeBuiltin.name.split(' ')[0]}·{isDark ? 'D' : 'L'}
+      </span>
+      <ChevronDown className="h-[10px] w-[10px] text-fg-faint shrink-0" />
+    </button>
+  )
+}
+
+function LightDarkToggle() {
+  const isDark = useIsDark()
+  const setTheme = useLayoutStore((s) => s.setTheme)
+  const Icon = isDark ? Moon : Sun
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(isDark ? 'light' : 'dark')}
+      title={isDark ? 'Switch to light' : 'Switch to dark'}
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      className="flex items-center justify-center rounded-[6px] border border-border-subtle px-2 py-1.5 text-fg-secondary transition-colors hover:border-border hover:bg-surface hover:text-fg"
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </button>
+  )
+}
+
+function ThemeOverlay({ onClose }: { onClose: () => void }) {
+  const { activeThemeId, setActiveTheme } = useTheme()
+  const isDark = useIsDark()
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-2 rounded-[6px] border px-2.5 py-1.5 transition-colors min-w-[140px] ${
-          open ? 'border-border bg-surface' : 'border-border-subtle hover:border-border hover:bg-surface'
-        }`}
+        aria-label="Close theme picker"
+        onClick={onClose}
+        className="absolute inset-0 cursor-default bg-black/40 backdrop-blur-[2px]"
+      />
+      <div
+        className="no-scrollbar relative h-[80%] w-[80%] overflow-y-auto rounded-[12px] border border-border bg-bg-elevated p-4 shadow-[0_16px_48px_rgba(15,17,22,0.32)]"
       >
-        <div
-          className="relative overflow-hidden rounded-[3px] shrink-0"
-          style={{ width: 16, height: 16, background: swatchBg, border: '1px solid rgba(0,0,0,0.12)' }}
-        >
-          <div className="absolute bottom-[1px] inset-x-[1px] h-[4px] rounded-[1px]" style={{ background: swatchAccent }} />
+        <div className="mb-3 flex items-center justify-between">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-fg-muted">
+            Theme
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-[4px] px-1.5 py-0.5 font-mono text-[10px] text-fg-muted transition-colors hover:bg-surface hover:text-fg"
+          >
+            Esc
+          </button>
         </div>
-        <span className="font-mono text-[11px] font-semibold text-fg-secondary flex-1 text-left truncate">
-          {activeBuiltin.name.split(' ')[0]}·{isDark ? 'D' : 'L'}
-        </span>
-        <ChevronDown className="h-[10px] w-[10px] text-fg-faint shrink-0" />
-      </button>
-
-      {open && (
-        <div className="absolute top-full right-0 mt-1.5 z-10 w-[320px] rounded-[10px] border border-border bg-bg-elevated p-3 shadow-[0_8px_32px_rgba(0,0,0,0.16)]">
-          {/* Light / Dark toggle */}
-          <div className="mb-3 flex rounded-[6px] border border-border-subtle bg-surface p-[3px]">
-            {(['light', 'dark'] as const).map((m) => (
+        <div className="grid grid-cols-2 gap-2">
+          {BUILTIN_THEMES.map((t) => {
+            const bg      = isDark ? (t.tokens.dark['bg-elevated']  ?? '#111') : (t.tokens.light['bg-elevated']  ?? '#fff')
+            const surface = isDark ? (t.tokens.dark['surface']      ?? '#222') : (t.tokens.light['surface']      ?? '#eee')
+            const brand   = isDark ? (t.tokens.dark['brand']        ?? '#888') : (t.tokens.light['brand']        ?? '#888')
+            const primary = isDark ? (t.tokens.dark['primary']      ?? '#fff') : (t.tokens.light['primary']      ?? '#000')
+            const fg2     = isDark ? (t.tokens.dark['fg-secondary'] ?? '#aaa') : (t.tokens.light['fg-secondary'] ?? '#555')
+            const isActive = t.id === activeThemeId
+            return (
               <button
-                key={m}
+                key={t.id}
                 type="button"
-                onClick={() => setTheme(m)}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-[4px] py-1.5 text-[11px] font-medium capitalize transition-colors ${
-                  (m === 'dark') === isDark
-                    ? 'bg-bg-elevated text-fg shadow-sm'
-                    : 'text-fg-muted hover:text-fg-secondary'
+                onClick={() => { setActiveTheme(t.id); onClose() }}
+                className={`flex items-center gap-2.5 rounded-[7px] border px-2.5 py-2 text-left transition-colors ${
+                  isActive ? 'border-primary bg-primary-muted' : 'border-border-subtle hover:border-border hover:bg-surface'
                 }`}
               >
-                {m === 'light' ? <Sun className="h-3 w-3" /> : <Moon className="h-3 w-3" />}
-                {m}
-              </button>
-            ))}
-          </div>
-
-          {/* Theme palette grid — 2 cols, palette-dot design, full name */}
-          <div className="grid grid-cols-2 gap-2">
-            {BUILTIN_THEMES.map((t) => {
-              const bg      = isDark ? (t.tokens.dark['bg-elevated']  ?? '#111') : (t.tokens.light['bg-elevated']  ?? '#fff')
-              const surface = isDark ? (t.tokens.dark['surface']      ?? '#222') : (t.tokens.light['surface']      ?? '#eee')
-              const brand   = isDark ? (t.tokens.dark['brand']        ?? '#888') : (t.tokens.light['brand']        ?? '#888')
-              const primary = isDark ? (t.tokens.dark['primary']      ?? '#fff') : (t.tokens.light['primary']      ?? '#000')
-              const fg2     = isDark ? (t.tokens.dark['fg-secondary'] ?? '#aaa') : (t.tokens.light['fg-secondary'] ?? '#555')
-              const isActive = t.id === activeThemeId
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => { setActiveTheme(t.id); setOpen(false) }}
-                  className={`flex items-center gap-2.5 rounded-[7px] border px-2.5 py-2 text-left transition-colors ${
-                    isActive ? 'border-primary bg-primary-muted' : 'border-border-subtle hover:border-border hover:bg-surface'
-                  }`}
+                <div
+                  className="shrink-0 rounded-[5px] overflow-hidden flex flex-col gap-[3px] p-[5px]"
+                  style={{ width: 48, height: 40, background: bg, border: '1px solid rgba(0,0,0,0.10)' }}
                 >
-                  {/* Mini UI card preview */}
-                  <div
-                    className="shrink-0 rounded-[5px] overflow-hidden flex flex-col gap-[3px] p-[5px]"
-                    style={{ width: 48, height: 40, background: bg, border: '1px solid rgba(0,0,0,0.10)' }}
-                  >
-                    {/* Header strip */}
-                    <div className="flex items-center gap-[3px]">
-                      <div className="w-[8px] h-[8px] rounded-[2px]" style={{ background: brand }} />
-                      <div className="h-[4px] rounded-[2px] flex-1" style={{ background: surface }} />
-                    </div>
-                    {/* Content lines */}
-                    <div className="h-[3px] rounded-[2px]" style={{ background: surface, width: '80%' }} />
-                    <div className="h-[3px] rounded-[2px]" style={{ background: surface, width: '60%' }} />
-                    {/* Composer */}
-                    <div className="mt-auto flex items-center gap-[3px]">
-                      <div className="h-[5px] rounded-[2px] flex-1" style={{ background: surface }} />
-                      <div className="w-[8px] h-[5px] rounded-[2px]" style={{ background: primary }} />
-                    </div>
+                  <div className="flex items-center gap-[3px]">
+                    <div className="w-[8px] h-[8px] rounded-[2px]" style={{ background: brand }} />
+                    <div className="h-[4px] rounded-[2px] flex-1" style={{ background: surface }} />
                   </div>
-
-                  {/* Name + color dots */}
-                  <div className="flex flex-col gap-1.5 min-w-0 flex-1">
-                    <span className={`text-[11px] font-medium leading-tight ${isActive ? 'text-primary' : 'text-fg'}`}>
-                      {t.name.split(' ')[0]}
-                    </span>
-                    {/* Color palette dots */}
-                    <div className="flex items-center gap-1">
-                      <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: brand }} title="Brand" />
-                      <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: primary }} title="Primary" />
-                      <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: fg2 }} title="Secondary" />
-                    </div>
+                  <div className="h-[3px] rounded-[2px]" style={{ background: surface, width: '80%' }} />
+                  <div className="h-[3px] rounded-[2px]" style={{ background: surface, width: '60%' }} />
+                  <div className="mt-auto flex items-center gap-[3px]">
+                    <div className="h-[5px] rounded-[2px] flex-1" style={{ background: surface }} />
+                    <div className="w-[8px] h-[5px] rounded-[2px]" style={{ background: primary }} />
                   </div>
-                </button>
-              )
-            })}
-          </div>
+                </div>
+                <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                  <span className={`text-[11px] font-medium leading-tight ${isActive ? 'text-primary' : 'text-fg'}`}>
+                    {t.name.split(' ')[0]}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: brand }} title="Brand" />
+                    <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: primary }} title="Primary" />
+                    <div className="w-3 h-3 rounded-full border border-black/10" style={{ background: fg2 }} title="Secondary" />
+                  </div>
+                </div>
+              </button>
+            )
+          })}
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -281,12 +295,7 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
     p.drawer === toolDrawerEnabled && p.chips === chipsVisible
   )?.id
 
-  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
-  useEffect(() => {
-    if (!open || !anchorRef.current) return
-    const r = anchorRef.current.getBoundingClientRect()
-    setPos({ left: r.left, bottom: window.innerHeight - r.top + 8 })
-  }, [open, anchorRef])
+  const [themeOverlayOpen, setThemeOverlayOpen] = useState(false)
 
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -301,7 +310,11 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
     return () => document.removeEventListener('mousedown', onDown)
   }, [open, onClose, anchorRef])
 
-  if (!open || !pos) return null
+  useEffect(() => {
+    if (!open) setThemeOverlayOpen(false)
+  }, [open])
+
+  if (!open) return null
 
   const allRailTabs = [
     ...CORE_RAIL_TABS,
@@ -320,11 +333,11 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[9999]"
-      style={{ left: pos.left, bottom: pos.bottom, width: 580 }}
+      className="fixed left-1/2 top-1/2 z-[9999] -translate-x-1/2 -translate-y-1/2"
+      style={{ width: 696 }}
     >
       {/* ── Main panel ── */}
-      <div className="rounded-[12px] border border-border bg-bg-elevated shadow-[0_16px_48px_rgba(15,17,22,0.18)] overflow-hidden">
+      <div className="relative rounded-[12px] border border-border bg-bg-elevated shadow-[0_16px_48px_rgba(15,17,22,0.18)] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-divider px-3 py-2.5">
           <div className="flex items-center gap-2">
@@ -334,7 +347,13 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
             </span>
             <LMKbd>⌘\</LMKbd>
           </div>
-          <ThemeDropdown />
+          <div className="flex items-center gap-1.5">
+            <ThemeTrigger
+              onClick={() => setThemeOverlayOpen((v) => !v)}
+              expanded={themeOverlayOpen}
+            />
+            <LightDarkToggle />
+          </div>
         </div>
 
         {/* 3-column body */}
@@ -343,7 +362,7 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
           style={{
             display: 'grid',
             gridTemplateColumns: `${leftColWidth}px 1fr ${rightColWidth}px`,
-            minHeight: 240,
+            minHeight: 288,
             transition: 'grid-template-columns 200ms',
           }}
         >
@@ -514,6 +533,8 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
           )
         })}
       </div>
+
+      {themeOverlayOpen && <ThemeOverlay onClose={() => setThemeOverlayOpen(false)} />}
     </div>,
     document.body,
   )

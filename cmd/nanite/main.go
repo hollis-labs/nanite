@@ -616,6 +616,12 @@ func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.Tool
 	// registry so nanite_validate can pre-flight check args for any
 	// registered tool, not just self-tools.
 	selfTools.SchemaLookup = mcpManager
+	// CW-20260501-0001: wire the manager as the cross-server tool
+	// inventory so nanite_tool_list enumerates every registered MCP
+	// tool (self, nanite-memory, dev, general, plugin) — not just the
+	// in-process self-tools. Without this, sibling-server tools like
+	// nanite_memory_recall are invisible to the discovery primitive.
+	selfTools.Inventory = mcpManager
 	if err := mcpManager.AddServer("self", selfTools, mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
 	}

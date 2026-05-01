@@ -1,16 +1,9 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
-import { Loader2, Cpu, CheckCircle2 } from 'lucide-react'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useChatStore } from '@/stores/useChatStore'
 import { useSettings } from '@/hooks/useSettings'
 import { ToolCallItem } from './ToolCallItem'
-import { StatusPill } from './envelopes/primitives'
-
-function formatRetention(minutes: number): string {
-  if (minutes < 0) return 'kept until page refresh'
-  if (minutes >= 60) return `clears after ${minutes / 60} hour${minutes > 60 ? 's' : ''} of inactivity`
-  return `clears after ${minutes} minutes of inactivity`
-}
+import { ToolCallBanner } from './ToolCallBanner'
 
 export function ToolCallDrawer() {
   const { data: settings } = useSettings()
@@ -31,10 +24,6 @@ export function ToolCallDrawer() {
   const isStreaming = useChatStore((s) => s.isStreaming)
   const isOpen = drawerState !== 'closed'
   const hasTools = toolCalls.length > 0
-  const hasRunning = toolCalls.some((tc) => tc.status === 'running')
-  const runningCount = toolCalls.filter((tc) => tc.status === 'running').length
-  const doneCount = toolCalls.filter((tc) => tc.status === 'done').length
-  const currentTool = toolCalls.find((tc) => tc.status === 'running') ?? toolCalls[toolCalls.length - 1] ?? null
 
   // Component-level visibility (separate from open/closed body state)
   const [visible, setVisible] = useState(false)
@@ -152,57 +141,12 @@ export function ToolCallDrawer() {
       <div className="relative overflow-hidden rounded-b-[10px] border border-t-0 border-border-subtle bg-bg-elevated shadow-[0_4px_12px_-6px_rgba(0,0,0,0.22),0_-2px_0_-1px_rgba(0,0,0,0.04)]">
 
         {/* ── Header row — always visible when hasTools ── */}
-        <div
-          role="button"
-          tabIndex={0}
+        <ToolCallBanner
+          toolCalls={toolCalls}
+          isOpen={isOpen}
+          retention={retention}
           onClick={handleHeaderClick}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleHeaderClick() }}
-          className={`flex select-none items-center gap-3 px-3.5 py-2.5 transition-colors ${
-            isOpen ? 'border-b border-divider cursor-default' : 'cursor-pointer hover:bg-surface'
-          }`}
-        >
-          <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] ${
-            hasRunning ? 'bg-primary-muted text-primary' : 'bg-surface text-fg-muted'
-          }`}>
-            {hasRunning ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : hasTools ? (
-              <CheckCircle2 className="h-3 w-3" />
-            ) : (
-              <Cpu className="h-3 w-3" />
-            )}
-          </span>
-
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span className={`font-mono text-[10px] font-semibold uppercase tracking-wide ${hasRunning ? 'text-primary' : 'text-fg-muted'}`}>
-              {hasRunning ? 'Running' : 'Tools'}
-            </span>
-            <StatusPill tone={hasRunning ? 'primary' : 'neutral'}>{toolCalls.length}</StatusPill>
-
-            {currentTool && (
-              <>
-                <span className="font-mono text-[10px] text-fg-faint">·</span>
-                <span className={`truncate font-mono text-[11px] ${hasRunning ? 'text-fg' : 'text-fg-secondary'}`}>
-                  {currentTool.tool}
-                </span>
-                {hasRunning && (currentTool.detail || currentTool.summary) && (
-                  <span className="truncate font-mono text-[10px] text-fg-muted">
-                    {currentTool.detail || currentTool.summary}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-
-          <div className="hidden items-center gap-1 sm:flex">
-            {runningCount > 0 && <StatusPill tone="primary">{runningCount} live</StatusPill>}
-            {!hasRunning && doneCount > 0 && <StatusPill tone="neutral">{doneCount} done</StatusPill>}
-          </div>
-
-          <span className="hidden font-mono text-[10px] text-fg-faint lg:block">
-            {formatRetention(retention)}
-          </span>
-        </div>
+        />
 
         {/* ── Tool list — only when open ── */}
         {isOpen && (

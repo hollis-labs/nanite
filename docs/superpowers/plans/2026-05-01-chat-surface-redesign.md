@@ -44,7 +44,9 @@ Foundation first (state, types, shared components) → new components built in p
 
 ---
 
-### Task 1: Layout store — add new drawer state
+### Task 2: Layout store — add new drawer state
+
+> **Plan amendment 2026-05-01:** This task was originally numbered Task 1 but **must run after Task 1 (Types)** because it imports `DynamicCardTab` from `lib/types.ts`. The section appears in this position in the file for editing-history reasons; execution order follows the task numbers. Build the Types task first, then this one.
 
 **Files:**
 
@@ -148,7 +150,9 @@ git commit -m "feat(layout): add chat-surface drawer state for redesign"
 
 ---
 
-### Task 2: Types — `DynamicCardTab` interface
+### Task 1: Types — `DynamicCardTab` interface
+
+> **Plan amendment 2026-05-01:** Renumbered from Task 2 → Task 1 because Task 2 (Layout store) imports this type. Execute this first.
 
 **Files:**
 
@@ -382,91 +386,143 @@ git commit -m "feat(chat): add shared ChatDrawerTabStrip with pagination"
 
 ### Task 4: Extract `ToolCallBanner` from `ToolCallDrawer`
 
+> **Plan amendment 2026-05-01:** This task is **faithful chrome preservation**, not a simplification. The user explicitly flagged the existing closed-state header for re-use elsewhere ("let's keep the current 'banner' condensed view component to re-use for another purpose"). The extracted `ToolCallBanner` must reproduce the existing JSX 1:1 — same status icon (Loader2 spinning / CheckCircle2 / Cpu in a colored chip), same RUNNING/TOOLS uppercase mono label, same `StatusPill` for the count, same current-tool name and detail/summary text, same right-side `live`/`done` `StatusPill` group, same retention text on `lg+` screens. Drag-resize wiring stays at the host (`ToolCallDrawer` keeps its own drag); the banner is render-only.
+
 **Files:**
 
-- Read: `ui/src/components/chat/ToolCallDrawer.tsx` (full file)
+- Read: `ui/src/components/chat/ToolCallDrawer.tsx` (full file — banner is at lines 154-205 today)
 - Create: `ui/src/components/chat/ToolCallBanner.tsx`
 - Modify: `ui/src/components/chat/ToolCallDrawer.tsx` (replace inline banner JSX with `<ToolCallBanner />`)
 
-- [ ] **Step 1: Read the full ToolCallDrawer.tsx to identify the condensed-banner JSX**
+- [ ] **Step 1: Read `ToolCallDrawer.tsx` and locate the header block at lines 154-205**
 
-```bash
-wc -l ui/src/components/chat/ToolCallDrawer.tsx
-```
+The block opens with `{/* ── Header row — always visible when hasTools ── */}` and ends at the closing `</div>` of the role="button" wrapper. It includes:
+- Status icon chip (Loader2 / CheckCircle2 / Cpu) — depends on `hasRunning` / `hasTools`
+- Mono uppercase label ("RUNNING" or "TOOLS")
+- `StatusPill` with `toolCalls.length`
+- `currentTool.tool` name + optional `currentTool.detail || currentTool.summary`
+- Right cluster: `runningCount` and `doneCount` `StatusPill`s (hidden on small screens via `sm:flex`)
+- Far-right: `formatRetention(retention)` text (hidden below `lg`)
 
-Read the file and identify the **header bar** JSX (the part shown when the drawer is collapsed — running/done counts, current tool name, controls). It's typically ~30–60 lines around the `drawerState === 'closed'` or compact-state render path.
+The `formatRetention` helper at lines 9-13 of the existing file moves to `ToolCallBanner.tsx` (or stays in the host and is passed pre-formatted; either is fine — easiest is to inline it in the banner since it's tiny and self-contained).
 
-- [ ] **Step 2: Create `ToolCallBanner.tsx` with the extracted JSX**
-
-The component is parameterized by props rather than reading the store directly, so it's reusable in contexts beyond `ToolCallDrawer`:
+- [ ] **Step 2: Create `ToolCallBanner.tsx` as a faithful render-only extraction**
 
 ```tsx
-import { Loader2, Cpu, CheckCircle2 } from 'lucide-react'
+import { Loader2, CheckCircle2, Cpu } from 'lucide-react'
 import type { ToolCall } from '@/lib/types'
+import { StatusPill } from './envelopes/primitives'
 
-interface ToolCallBannerProps {
+function formatRetention(minutes: number): string {
+  if (minutes < 0) return 'kept until page refresh'
+  if (minutes >= 60) return `clears after ${minutes / 60} hour${minutes > 60 ? 's' : ''} of inactivity`
+  return `clears after ${minutes} minutes of inactivity`
+}
+
+export interface ToolCallBannerProps {
   toolCalls: ToolCall[]
-  isStreaming: boolean
-  /** Optional click handler — when provided, the banner is interactive. */
-  onClick?: () => void
+  /** Drawer/host open state — toggles header hover & cursor styling. */
+  isOpen: boolean
+  /** Retention minutes from settings; -1 = kept until refresh. Far-right text. */
+  retention: number
+  /** Click toggles host open/closed. Wired by host. */
+  onClick: () => void
 }
 
 /**
- * Condensed running/done summary bar for tool calls.
+ * Faithful extraction of the ToolCallDrawer closed-state header chrome.
  *
- * Extracted from the original ToolCallDrawer header so the banner UI can
- * be reused elsewhere (e.g. as a fallback indicator when no drawer is
- * open). The Tools tab in ChatPrimaryDrawer renders the full ToolCallItem
- * list directly; this banner is the compact form for tight slots.
+ * This is intentionally a 1:1 lift of the existing rendering — same icon,
+ * same labels, same StatusPills, same retention hint. Reused by ToolCallDrawer
+ * during the transition window, and reserved for future tight-slot reuse
+ * elsewhere (the user flagged this as preserve-for-reuse intent in the spec).
+ *
+ * Drag-resize behavior stays at the host. This component renders only.
  */
-export function ToolCallBanner({ toolCalls, isStreaming, onClick }: ToolCallBannerProps) {
-  const running = toolCalls.filter((tc) => tc.status === 'running')
-  const done = toolCalls.filter((tc) => tc.status === 'done')
-  const current = running[0] ?? toolCalls[toolCalls.length - 1] ?? null
-
-  const Wrapper = onClick ? 'button' : 'div'
+export function ToolCallBanner({ toolCalls, isOpen, retention, onClick }: ToolCallBannerProps) {
+  const hasTools = toolCalls.length > 0
+  const hasRunning = toolCalls.some((tc) => tc.status === 'running')
+  const runningCount = toolCalls.filter((tc) => tc.status === 'running').length
+  const doneCount = toolCalls.filter((tc) => tc.status === 'done').length
+  const currentTool = toolCalls.find((tc) => tc.status === 'running') ?? toolCalls[toolCalls.length - 1] ?? null
 
   return (
-    <Wrapper
-      type={onClick ? 'button' : undefined}
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-fg-muted"
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick() }}
+      className={`flex select-none items-center gap-3 px-3.5 py-2.5 transition-colors ${
+        isOpen ? 'border-b border-divider cursor-default' : 'cursor-pointer hover:bg-surface'
+      }`}
     >
-      {running.length > 0 ? (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-      ) : done.length > 0 ? (
-        <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
-      ) : (
-        <Cpu className="h-3.5 w-3.5 shrink-0" />
-      )}
-      <span className="truncate">
-        {current ? current.tool : isStreaming ? 'Thinking…' : 'No active tools'}
+      <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] ${
+        hasRunning ? 'bg-primary-muted text-primary' : 'bg-surface text-fg-muted'
+      }`}>
+        {hasRunning ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : hasTools ? (
+          <CheckCircle2 className="h-3 w-3" />
+        ) : (
+          <Cpu className="h-3 w-3" />
+        )}
       </span>
-      <span className="ml-auto font-mono text-[10px]">
-        {running.length > 0 ? `${running.length} running · ` : ''}
-        {done.length} done
+
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className={`font-mono text-[10px] font-semibold uppercase tracking-wide ${hasRunning ? 'text-primary' : 'text-fg-muted'}`}>
+          {hasRunning ? 'Running' : 'Tools'}
+        </span>
+        <StatusPill tone={hasRunning ? 'primary' : 'neutral'}>{toolCalls.length}</StatusPill>
+
+        {currentTool && (
+          <>
+            <span className="font-mono text-[10px] text-fg-faint">·</span>
+            <span className={`truncate font-mono text-[11px] ${hasRunning ? 'text-fg' : 'text-fg-secondary'}`}>
+              {currentTool.tool}
+            </span>
+            {hasRunning && (currentTool.detail || currentTool.summary) && (
+              <span className="truncate font-mono text-[10px] text-fg-muted">
+                {currentTool.detail || currentTool.summary}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="hidden items-center gap-1 sm:flex">
+        {runningCount > 0 && <StatusPill tone="primary">{runningCount} live</StatusPill>}
+        {!hasRunning && doneCount > 0 && <StatusPill tone="neutral">{doneCount} done</StatusPill>}
+      </div>
+
+      <span className="hidden font-mono text-[10px] text-fg-faint lg:block">
+        {formatRetention(retention)}
       </span>
-    </Wrapper>
+    </div>
   )
 }
 ```
 
-- [ ] **Step 3: Replace the inline banner in `ToolCallDrawer.tsx` with `<ToolCallBanner />`**
+> If your `StatusPill` import path differs, match the existing import in `ToolCallDrawer.tsx` line 7. The component reference must be identical — do not substitute a different pill primitive.
 
-In `ToolCallDrawer.tsx`, locate the closed/compact header JSX and replace it with:
+- [ ] **Step 3: Replace the inline banner block in `ToolCallDrawer.tsx`**
+
+Delete lines 154-205 (the entire `{/* ── Header row — always visible when hasTools ── */}` block including the role="button" wrapper) and replace with:
 
 ```tsx
 import { ToolCallBanner } from './ToolCallBanner'
 
-// ... inside the component, where the closed-state banner was rendered:
+// ... inside the render, in place of the deleted block:
 <ToolCallBanner
   toolCalls={toolCalls}
-  isStreaming={isStreaming}
-  onClick={() => setDrawerState('expanded')}
+  isOpen={isOpen}
+  retention={retention}
+  onClick={handleHeaderClick}
 />
 ```
 
-Delete the old inline banner JSX and any imports that become unused (`Loader2`, `Cpu`, `CheckCircle2` — keep them only if referenced elsewhere in the file).
+After the swap, audit the imports at the top of `ToolCallDrawer.tsx`. Remove `Loader2`, `Cpu`, `CheckCircle2`, `StatusPill`, and the `formatRetention` helper if they are no longer referenced anywhere else in the file. Keep them if other parts of the drawer still use them.
+
+**Critical:** the visual output must be byte-identical (modulo unrelated whitespace) before and after this refactor. If something looks different in the running app, the extraction was not faithful — fix the props or the JSX until it matches.
 
 - [ ] **Step 4: Build + manual smoke test**
 

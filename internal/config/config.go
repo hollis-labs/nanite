@@ -35,6 +35,38 @@ type Config struct {
 	Defaults       DefaultsConfig           `yaml:"defaults"`
 	Projects       map[string]ProjectEntry  `yaml:"projects"`
 	HooksDir       string                   `yaml:"hooks_dir"`
+	// Vanta is the optional Vanta MCP server configuration (CW-20260501-0005
+	// sub-ticket 2). When URL is non-empty, the chat harness registers a
+	// `vanta` MCP server at startup so the chat agent can reach
+	// memory_recall / memory_write / knowledge_* / context_* tools. Trust
+	// tier defaults to plugin_http per docs/mcp-trust-model.md (Vanta is
+	// the user's own infrastructure).
+	Vanta          VantaConfig              `yaml:"vanta"`
+}
+
+// VantaConfig holds Vanta MCP server connection details. Loaded from
+// ~/.nanite/nanite.yaml (or project-level nanite.yaml). Token may also be
+// supplied via the NANITE_VANTA_TOKEN environment variable, which overrides
+// any value in the config file (so the secret never has to live in YAML).
+//
+// CW-20260501-0005 sub-ticket 2.
+type VantaConfig struct {
+	// URL is the Vanta MCP HTTP endpoint, e.g. "http://localhost:6810/mcp".
+	// Leave empty to disable Vanta integration.
+	URL string `yaml:"url"`
+	// Token is an optional Bearer token sent in the Authorization header on
+	// every JSON-RPC request. Set via NANITE_VANTA_TOKEN env var to keep the
+	// secret out of YAML.
+	Token string `yaml:"token"`
+	// TrustTier overrides the default trust tier for Vanta. Allowed values
+	// are the four mcp.TrustTier constants: builtin, plugin_stdio,
+	// plugin_http (default), third_party_http. Most users should leave this
+	// unset.
+	TrustTier string `yaml:"trust_tier"`
+	// ServerName overrides the registered MCP server name. Defaults to
+	// "vanta" — only set this if "vanta" collides with another registered
+	// server in your environment (rare).
+	ServerName string `yaml:"server_name"`
 }
 
 // ProjectConfig identifies the current project.
@@ -174,6 +206,21 @@ func merge(user, project *Config) *Config {
 	}
 	if project.HooksDir != "" {
 		out.HooksDir = project.HooksDir
+	}
+
+	// Vanta: per-field merge so a project file can override URL alone without
+	// resetting Token/TrustTier/ServerName the user set globally.
+	if project.Vanta.URL != "" {
+		out.Vanta.URL = project.Vanta.URL
+	}
+	if project.Vanta.Token != "" {
+		out.Vanta.Token = project.Vanta.Token
+	}
+	if project.Vanta.TrustTier != "" {
+		out.Vanta.TrustTier = project.Vanta.TrustTier
+	}
+	if project.Vanta.ServerName != "" {
+		out.Vanta.ServerName = project.Vanta.ServerName
 	}
 
 	// Executor: merge field-by-field so partial overrides work.

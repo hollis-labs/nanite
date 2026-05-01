@@ -626,6 +626,14 @@ func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.Tool
 		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
 	}
 
+	// CW-20260501-0005 sub-ticket 2: register Vanta MCP server when configured.
+	// Vanta is the durable memory/knowledge/context substrate (vanta-primary-since
+	// 2026-04-19). Trust tier defaults to plugin_http per docs/mcp-trust-model.md
+	// (Vanta is the user's own infrastructure, not third-party). Tools added to
+	// the chat surface in sub-ticket 3 (rollout); this scaffold only registers
+	// the server so AutoDiscover picks up the tool list.
+	registerVantaServer(mcpManager, cfg)
+
 	loadPersistedMCPServers(s, mcpManager)
 	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
 	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
@@ -846,6 +854,62 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 	if len(servers) > 0 {
 		slog.Info("mcp: loaded user-configured servers from database", "count", len(servers))
 	}
+}
+
+// registerVantaServer registers the Vanta MCP HTTP server when configured.
+// Reads cfg.Vanta and the NANITE_VANTA_TOKEN environment variable; the env
+// var overrides the YAML token so the secret can stay out of config files.
+//
+// Trust tier defaults to plugin_http (Vanta is the user's own infrastructure,
+// per docs/mcp-trust-model.md and the orchestrator decision in
+// CW-20260501-0005). Override with cfg.Vanta.TrustTier if needed.
+//
+// When cfg is nil or cfg.Vanta.URL is empty, the function is a no-op — Vanta
+// integration is opt-in. CW-20260501-0005 sub-ticket 2.
+func registerVantaServer(m *mcp.Manager, cfg *config.Config) {
+	if cfg == nil || strings.TrimSpace(cfg.Vanta.URL) == "" {
+		return
+	}
+
+	serverName := strings.TrimSpace(cfg.Vanta.ServerName)
+	if serverName == "" {
+		serverName = "vanta"
+	}
+
+	// Resolve tier. Default plugin_http per the trust model: Vanta is the
+	// user's own infrastructure (not third-party HTTP), but it's HTTP-based
+	// and outside the in-process builtin set, so plugin_http is the natural
+	// fit. Operators who run an in-process Vanta build can override to
+	// builtin via cfg.Vanta.TrustTier.
+	tier := mcp.TierPluginHTTP
+	if t := strings.TrimSpace(cfg.Vanta.TrustTier); t != "" {
+		tier = mcp.TrustTier(t)
+	}
+
+	// Token: env var wins over YAML so the secret stays out of config files.
+	token := strings.TrimSpace(os.Getenv(brand.Env("VANTA_TOKEN")))
+	if token == "" {
+		token = strings.TrimSpace(cfg.Vanta.Token)
+	}
+
+	headers := map[string]string{}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+
+	var err error
+	if len(headers) > 0 {
+		err = m.AddHTTPServerWithHeaders(serverName, cfg.Vanta.URL, headers, tier)
+	} else {
+		err = m.AddHTTPServer(serverName, cfg.Vanta.URL, tier)
+	}
+	if err != nil {
+		slog.Warn("mcp: failed to register vanta server",
+			"name", serverName, "url", cfg.Vanta.URL, "err", err)
+		return
+	}
+	slog.Info("mcp: registered vanta server",
+		"name", serverName, "tier", string(tier), "auth", token != "")
 }
 
 // cmdMCP dispatches MCP subcommands: serve (default), import, export.

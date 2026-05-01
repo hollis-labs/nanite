@@ -67,6 +67,7 @@ const maxHTTPErrorBodyBytes = 64 * 1024
 // It sends JSON-RPC requests to a remote MCP server URL.
 type HTTPTransport struct {
 	serverURL string
+	headers   map[string]string // optional static headers (e.g. Authorization). Read-only after construction.
 	client    *http.Client
 	nextID    atomic.Int64
 	// maxResponseBytes is 0 when the package default applies; otherwise
@@ -84,6 +85,24 @@ func NewHTTPTransport(serverURL string) *HTTPTransport {
 			Timeout: 60 * time.Second, // longer than stdio's 30s to account for network latency
 		},
 	}
+}
+
+// NewHTTPTransportWithHeaders creates an HTTP-based MCP transport that sends a
+// fixed header set on every JSON-RPC request. Used for servers that require
+// auth (Bearer token, API key) or routing headers. The headers map is copied
+// so callers may reuse or mutate their original after construction.
+//
+// CW-20260501-0005 sub-ticket 2 (Vanta MCP integration scaffold).
+func NewHTTPTransportWithHeaders(serverURL string, headers map[string]string) *HTTPTransport {
+	t := NewHTTPTransport(serverURL)
+	if len(headers) > 0 {
+		copy := make(map[string]string, len(headers))
+		for k, v := range headers {
+			copy[k] = v
+		}
+		t.headers = copy
+	}
+	return t
 }
 
 // SetMaxResponseBytes overrides the default 10 MiB response cap with a
@@ -126,6 +145,12 @@ func (t *HTTPTransport) call(ctx context.Context, method string, params any) (*J
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Apply optional static headers (e.g. Authorization for Vanta) supplied at
+	// construction. Set after Content-Type so callers can override it if
+	// needed (rare). The headers map is read-only after construction.
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := t.client.Do(req)
 	if err != nil {

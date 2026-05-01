@@ -96,6 +96,7 @@ func runPostProcessForError(
 		context.Background(),
 		plans, results, ls, ch,
 		"sess-error-honesty-1", "agent-1", "msg-1",
+		"", // modelID — empty exercises the static-floor branch (CW-20260430-0008).
 	)
 	_ = drainEvents(ch)
 	return blocks

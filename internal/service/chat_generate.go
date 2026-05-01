@@ -1232,7 +1232,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID, session.WorkspaceID)
 
 		// Post-process: stuck loop detection, truncation, envelopes, artifacts.
-		newBlocks, newRefs := s.postProcessToolResults(ctx, plans, execResults, ls, ch, sessionID, agentID, assistantMsgID)
+		// model is threaded through so truncate.OutputForModel can size the
+		// per-call MaxChars budget from the model's context window — see
+		// CW-20260430-0008 (P2 pilot conversion).
+		newBlocks, newRefs := s.postProcessToolResults(ctx, plans, execResults, ls, ch, sessionID, agentID, assistantMsgID, model)
 		resultBlocks = append(resultBlocks, newBlocks...)
 		ls.toolCallRefs = append(ls.toolCallRefs, newRefs...)
 		if ls.directReturn != "" {

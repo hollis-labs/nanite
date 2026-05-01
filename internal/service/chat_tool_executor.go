@@ -561,6 +561,12 @@ func (s *chatServiceImpl) executeSingleTool(
 // postProcessToolResults processes raw execution results: stuck loop detection,
 // truncation, envelope capture, warnings, artifact detection. Returns the final
 // result blocks and tool call refs in original order.
+//
+// modelID is the active LLM model's wire-level identifier (e.g.
+// "claude-sonnet-4-20250514"). Threaded so the truncation step can size the
+// per-call MaxChars budget against the model's context window via
+// truncate.OutputForModel — see CW-20260430-0008. Empty modelID is valid; it
+// falls through to the static MaxChars floor (matches Output's behavior).
 func (s *chatServiceImpl) postProcessToolResults(
 	ctx context.Context,
 	plans []toolPlan,
@@ -570,6 +576,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 	sessionID string,
 	agentID string,
 	assistantMsgID string,
+	modelID string,
 ) ([]provider.ContentBlock, []chat.ToolCallRef) {
 	var resultBlocks []provider.ContentBlock
 	var refs []chat.ToolCallRef
@@ -678,7 +685,12 @@ func (s *chatServiceImpl) postProcessToolResults(
 			tr = truncate.Result{Content: resultText}
 		} else {
 			canDelegate := s.orchestrator != nil && s.orchestrator.HasDecomposer()
-			tr = truncate.Output(resultText, tu.Name, truncate.WithDelegationHint(canDelegate))
+			// CW-20260430-0008 pilot: route through OutputForModel so the
+			// MaxChars cap scales with the model's context window. modelID
+			// may be empty (pre-resolution paths or stub callers); the
+			// helper falls through to the static MaxChars floor in that
+			// case — behavior identical to truncate.Output.
+			tr = truncate.OutputForModel(resultText, tu.Name, modelID, truncate.WithDelegationHint(canDelegate))
 		}
 
 		// Emit tool_result to client.

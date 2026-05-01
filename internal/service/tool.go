@@ -221,6 +221,31 @@ func (s *toolServiceImpl) SetPromptTemplateReader(r PromptTemplateReader) {
 	s.promptTemplates = r
 }
 
+// IsChatRoleAgent reports whether the given agentID has the Chat-role
+// harness prompt template assigned. Wraps dispatch.IsChatRoleAgent and
+// the prompt-template adapter so callers (e.g. chat_tool_executor) don't
+// have to reimplement the adapter.
+//
+// Returns false when the prompt-template reader is unwired (tests, early
+// init) or the lookup fails — same conservative fallback as the boot-
+// time chat-surface enforcer in SelectForAgent. The error path is logged
+// upstream.
+//
+// CW-20260501-0012: used by service.executeToolBatch to stamp the
+// caller's dispatch role onto ctx so nanite_tool_list (and any future
+// surface-aware discovery primitive) can pick the right surface filter.
+func (s *toolServiceImpl) IsChatRoleAgent(agentID string) bool {
+	if s.promptTemplates == nil || agentID == "" {
+		return false
+	}
+	adapter := &promptTemplateAdapter{r: s.promptTemplates}
+	isChat, err := dispatch.IsChatRoleAgent(adapter, agentID)
+	if err != nil {
+		return false
+	}
+	return isChat
+}
+
 // SetRepairConfig attaches the C2 repair pipeline wiring. Nil-safe —
 // pass nil to disable repair entirely (the env-var and user-pref gates
 // also disable it independently).

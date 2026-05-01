@@ -2,11 +2,14 @@
  * J10 (CW-20260426-0008) — bottom drawer enhancements regression tests.
  *
  * Tests:
- * 1. /scratch bare invocation opens the bottom drawer
- * 2. /scratch with text returns scratch_append action (server side)
- * 3. Documents are excluded from context by default
- * 4. Session context prompt slot is non-compactable (SlotUserContext)
- * 5. Bottom drawer dismiss machine integration (bottom_chat_drawer)
+ * 1. Documents are excluded from context by default
+ * 2. Working-drawer tab IDs (post-redesign)
+ * 3. Session context prompt slot is non-compactable (SlotUserContext)
+ *
+ * Migrated 2026-05-01 chat-surface redesign — the J8 source-attribution
+ * dismiss-machine assertions for `bottom_chat_drawer` were retired along
+ * with the surface itself. Right-rail dismiss-machine coverage stays in
+ * panel-dismiss-machine.test.ts.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,55 +18,13 @@ import { useLayoutStore } from "@/stores/useLayoutStore";
 // Reset store between tests.
 afterEach(() => {
   useLayoutStore.setState({
-    bottomChatDrawerOpen: false,
     panelPrefs: {
       panelEnabled: {},
       panelOrder: [],
       dismissedByUser: {},
       panelOpenSource: {},
     },
-  });
-});
-
-// ── Scratchpad slash command behaviour ────────────────────────────────────────
-
-describe("/scratch slash command", () => {
-  it("bare invocation opens the bottom drawer via user source", () => {
-    const store = useLayoutStore.getState();
-    // Simulate bare /scratch invocation (no args).
-    store.setBottomDrawerOpen(true, "user");
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
-  });
-
-  it("drawer remains closed if args-only invocation without opening", () => {
-    // args case does NOT open drawer on its own — that is handled in the
-    // handleCommand switch which calls setBottomDrawerOpen separately.
-    // Here we test that the drawer starts closed.
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(false);
-  });
-
-  it("user dismiss prevents agent re-open of bottom drawer", () => {
-    const store = useLayoutStore.getState();
-    // Agent opens, then user dismisses.
-    store.setBottomDrawerOpen(true, "agent");
-    store.setBottomDrawerOpen(false, "user");
-    // Now agent tries to re-open — should be blocked.
-    store.setBottomDrawerOpen(true, "agent");
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(false);
-  });
-
-  it("user can re-open after dismissing (clears dismiss flag)", () => {
-    const store = useLayoutStore.getState();
-    store.setBottomDrawerOpen(true, "agent");
-    store.setBottomDrawerOpen(false, "user"); // dismiss
-    store.setBottomDrawerOpen(true, "user");  // user re-opens
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
-    // After user re-open, agent should also be able to open.
-    store.setBottomDrawerOpen(false, "user");
-    // dismiss flag is set. But new user turn should clear via clearAllPanelDismissed.
-    useLayoutStore.getState().clearAllPanelDismissed();
-    store.setBottomDrawerOpen(true, "agent");
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
+    chatWorkingDrawer: { open: false, height: 200, activeTab: "scratchpad" },
   });
 });
 
@@ -99,17 +60,18 @@ describe("documents context inclusion", () => {
   });
 });
 
-// ── Bottom drawer tab ordering ────────────────────────────────────────────────
+// ── Working drawer tab structure (post-redesign) ──────────────────────────────
 
-describe("bottom drawer tab structure", () => {
-  it("drawer supports 3 tabs: scratchpad, documents, context", () => {
-    // This is a structural invariant test — verifies the tab IDs used in the
-    // BottomChatDrawer component exist as expected strings.
-    const tabs = ["scratchpad", "documents", "context"] as const;
-    expect(tabs).toHaveLength(3);
+describe("chat working drawer tab structure", () => {
+  it("drawer supports the redesigned fixed-tab IDs", () => {
+    // Structural invariant — these IDs are the source of truth in
+    // ChatWorkingDrawer.tsx FIXED_TABS and the PreferencesPanel default-tab
+    // selector. terminal-2 is dev-only; the rest are user-facing.
+    const tabs = ["scratchpad", "terminal-1", "terminal-2", "artifacts", "session-context"] as const;
+    expect(tabs).toHaveLength(5);
     expect(tabs[0]).toBe("scratchpad");
-    expect(tabs[1]).toBe("documents");
-    expect(tabs[2]).toBe("context");
+    expect(tabs[3]).toBe("artifacts");
+    expect(tabs[4]).toBe("session-context");
   });
 });
 

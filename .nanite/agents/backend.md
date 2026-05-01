@@ -123,7 +123,7 @@ ui/                          # React SPA (see frontend.md)
 |---------|----------|----------------|
 | api | `internal/api/` | HTTP handlers for all REST endpoints (100+ routes). One file per resource. Uses `http.ServeMux` method routing. |
 | chat | `internal/chat/` | Core chat engine: message handling, LLM streaming, tool-use loop, context assembly, session compaction, delegation, orchestration, slash commands, activity events. |
-| config | `internal/config/` | Loads and merges nanite YAML from user-level (`~/.nanite/nanite.yaml`) and project-level (`./nanite.yaml`). |
+| config | `internal/config/` | Loads and merges nanite YAML from user-level (XDG: `$XDG_CONFIG_HOME/nanite/config.yaml`, default `~/.config/nanite/config.yaml`) and project-level (`./nanite.yaml`). |
 | contextbroker | `internal/contextbroker/` | Universal context retrieval. Queries multiple sources (Conduit, PCC, Engine, Session) with token budget allocation and relevance ranking. |
 | filter | `internal/filter/` | Composable output filter chain applied to LLM responses (e.g., `no_emoji`). |
 | mcp | `internal/mcp/` | MCP server manager: lifecycle management for stdio/HTTP transports, built-in dev/general/self-service tools, auto-discovery, tool broker integration. |
@@ -156,7 +156,7 @@ ui/                          # React SPA (see frontend.md)
 - All routes registered centrally in `api.go:RegisterRoutes()` with method+path pattern: `"GET /api/resource"`. *File: `internal/api/api.go:32-185`*
 
 ### Configuration
-- Config loaded once at startup via `config.Load()`. Merges user-level (`~/.nanite/nanite.yaml`) with project-level (`./nanite.yaml`). Project values override user values. *File: `internal/config/config.go:58-68`*
+- Config loaded once at startup via `config.Load()`. Merges user-level (XDG: `$XDG_CONFIG_HOME/nanite/config.yaml`, default `~/.config/nanite/config.yaml`) with project-level (`./nanite.yaml`). Project values override user values. CW-20260430-0010 (Option C, 2026-05-01) moved the user-level path to the XDG-compliant location with a clean break — the legacy `~/.nanite/nanite.yaml` is no longer read. *File: `internal/config/config.go` (`Load`, `UserConfigPath`)*
 - Provider API keys from environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`. *File: `cmd/nanite/main.go:126-134`*
 - Auth from env: `NANITE_AUTH_USER`, `NANITE_AUTH_PASSWORD` (no-op when unset). *File: `internal/server/auth.go:14-16`*
 

@@ -1,6 +1,14 @@
 // Package config loads and merges nanite configuration from
-// user-level (~/.nanite/nanite.yaml) and project-level (./nanite.yaml).
+// user-level (XDG: $XDG_CONFIG_HOME/nanite/config.yaml, default
+// ~/.config/nanite/config.yaml) and project-level (./nanite.yaml).
 // Project-level values override user-level values for any field that is set.
+//
+// The user-level path follows the XDG Base Directory Specification:
+// https://specifications.freedesktop.org/basedir-spec/0.8/
+//
+// CW-20260430-0010 (Option C): the legacy ~/.nanite/nanite.yaml location is
+// no longer read. Pre-release migration is manual — copy your existing
+// config to ~/.config/nanite/config.yaml.
 package config
 
 import (
@@ -96,19 +104,46 @@ type ProjectEntry struct {
 }
 
 // Load reads and merges configuration. It first reads the user-level config
-// (~/.nanite/nanite.yaml) as a base, then overlays the project-level config
-// (./nanite.yaml relative to the working directory). Project values override
-// user values for any field that is set.
+// from the XDG-compliant location as a base, then overlays the project-level
+// config (./nanite.yaml relative to the working directory). Project values
+// override user values for any field that is set.
+//
+// User-config path resolution (XDG Base Directory Spec):
+//   - if $XDG_CONFIG_HOME is set: $XDG_CONFIG_HOME/nanite/config.yaml
+//   - otherwise:                  ~/.config/nanite/config.yaml
+//
+// A missing user-config file is not an error — Load returns the project
+// config alone (or a zero Config if neither file exists).
 func Load() (*Config, error) {
-	home, err := os.UserHomeDir()
+	userPath, err := UserConfigPath()
 	if err != nil {
 		return nil, err
 	}
 
-	userPath := filepath.Join(home, ".nanite", "nanite.yaml")
 	projectPath := "nanite.yaml" // relative to cwd
 
 	return LoadFrom(userPath, projectPath)
+}
+
+// UserConfigPath returns the resolved absolute path to the user-level config
+// file per the XDG Base Directory Specification:
+//
+//   - if $XDG_CONFIG_HOME is set and non-empty: $XDG_CONFIG_HOME/nanite/config.yaml
+//   - otherwise:                                ~/.config/nanite/config.yaml
+//
+// The file is not required to exist — callers (including Load) treat a
+// missing file as "no user config" without error. This function only
+// returns an error if the user's home directory cannot be determined and
+// $XDG_CONFIG_HOME is unset.
+func UserConfigPath() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "nanite", "config.yaml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "nanite", "config.yaml"), nil
 }
 
 // LoadFrom reads and merges configuration from explicit file paths.

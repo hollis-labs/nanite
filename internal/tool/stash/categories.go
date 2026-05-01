@@ -72,12 +72,11 @@ var BuiltinCategories = map[string]string{
 	"nanite_todo_create":      "agent",
 	"nanite_todo_list":        "agent",
 	"nanite_todo_update":      "agent",
-	"nanite_install_diff":     "agent",
-	"nanite_install_home":     "agent",
-	"nanite_install_project":  "agent",
-	"nanite_install_rollback": "agent",
-	"nanite_start_builder":    "agent",
-	"nanite_builder_step":     "agent",
+	"nanite_install_diff":    "agent",
+	"nanite_install_home":    "agent",
+	"nanite_install_project": "agent",
+	"nanite_start_builder":   "agent",
+	"nanite_builder_step":    "agent",
 
 	// Envelope card rendering — generic emission tool, reading the result is
 	// the user-facing action.

@@ -21,11 +21,11 @@ import (
 	"github.com/hollis-labs/nanite/internal/fsutil"
 )
 
-// TestStateWrite_NoPartialFileOnRenameFailure drives fsutil.AtomicWriteFile
-// through WriteState at a path whose parent is a non-empty directory,
-// exercising the rename-error branch. The target must not exist when we're
-// done (no partial file leak).
-func TestStateWrite_NoPartialFileOnRenameFailure(t *testing.T) {
+// TestAtomicWriteFile_NoPartialFileOnRenameFailure drives
+// fsutil.AtomicWriteFile at a path whose target is a non-empty directory,
+// exercising the rename-error branch. The target must not be replaced and
+// no sibling temp files should leak.
+func TestAtomicWriteFile_NoPartialFileOnRenameFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only: relies on POSIX rename-over-non-empty-dir behavior")
 	}
@@ -40,10 +40,9 @@ func TestStateWrite_NoPartialFileOnRenameFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st := NewState("p", "/tmp/p", "/tmp/archive", "2.3.0")
-	err := WriteState(target, st)
+	err := fsutil.AtomicWriteFile(target, []byte(`{"phase":"test"}`), 0o644)
 	if err == nil {
-		t.Fatal("expected error writing state over a non-empty directory")
+		t.Fatal("expected error writing over a non-empty directory")
 	}
 
 	// No stray temp files at the parent.

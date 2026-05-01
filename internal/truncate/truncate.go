@@ -162,18 +162,25 @@ func outputWithCap(text string, toolName string, maxChars int, modelID string, w
 	}
 
 	// Telemetry — log when the dynamic cap actually trims a result. Only fires
-	// when the caller went through the model-aware path AND the result was
-	// over the cap; the static path stays quiet (callers without a model
-	// already have the existing "tool result truncated" log in
-	// chat_tool_executor.go). CW-20260430-0008 pilot — operators can grep
-	// either log line to attribute trims.
-	if modelID != "" && windowTokens > 0 {
+	// when the caller went through the model-aware path AND the dynamic cap
+	// was wider/narrower than the static MaxChars floor (otherwise the trim
+	// is identical to the static path's, which has its own "tool result
+	// truncated" log in chat_tool_executor.go). `reason` attributes the trim
+	// to the chars cap or the lines cap so misleading "dynamic cap trimmed"
+	// messages don't surface when MaxLines was the actual limiter.
+	// CW-20260430-0008 pilot.
+	if modelID != "" && windowTokens > 0 && maxChars != MaxChars {
+		reason := "chars"
+		if len(text) <= maxChars && len(lines) > MaxLines {
+			reason = "lines"
+		}
 		slog.Info("truncate: dynamic cap trimmed",
 			"tool", toolName,
 			"model", modelID,
 			"window_tokens", windowTokens,
 			"effective_max_chars", maxChars,
 			"original_len", originalLen,
+			"reason", reason,
 		)
 	}
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -94,7 +95,7 @@ func emitNotifyPause(
 		Path:       firstNonEmptyPath(tu.Input),
 		Detail:     toolCallDetail(tu.Name, tu.Input),
 		DelayMS:    delay.Milliseconds(),
-		CancelHint: "Cancel within ~1.5s to skip this call.",
+		CancelHint: fmt.Sprintf("Cancel within ~%.1fs to skip this call.", delay.Seconds()),
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

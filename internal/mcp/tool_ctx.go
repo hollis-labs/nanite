@@ -178,6 +178,9 @@ func WithCallerRole(ctx context.Context, role dispatch.Role) context.Context {
 	if !role.IsValid() {
 		return ctx
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return context.WithValue(ctx, callerRoleCtxKey{}, role)
 }
 

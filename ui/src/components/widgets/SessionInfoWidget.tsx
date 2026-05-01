@@ -1,5 +1,5 @@
 import { Check, Copy, Info } from 'lucide-react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Widget, WidgetRow } from './Widget'
 import { useAppStore } from '@/stores/useAppStore'
@@ -107,12 +107,30 @@ export function SessionInfoWidget() {
 
 function ShortCodeValue({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Clear any pending reset-timer if the widget unmounts mid-feedback so we
+  // don't setCopied on an unmounted component (session switch, drawer close,
+  // etc. can all unmount within the 1.5s window).
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current)
+      }
+    }
+  }, [])
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(code)
       setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current)
+      }
+      timerRef.current = setTimeout(() => {
+        setCopied(false)
+        timerRef.current = null
+      }, 1500)
     } catch {
       // ignore — clipboard may be unavailable
     }

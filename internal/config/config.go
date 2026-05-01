@@ -52,10 +52,12 @@ type Config struct {
 	Vanta          VantaConfig              `yaml:"vanta"`
 }
 
-// VantaConfig holds Vanta MCP server connection details. Loaded from
-// ~/.nanite/nanite.yaml (or project-level nanite.yaml). Token may also be
-// supplied via the NANITE_VANTA_TOKEN environment variable, which overrides
-// any value in the config file (so the secret never has to live in YAML).
+// VantaConfig holds Vanta MCP server connection details. Loaded from the
+// user-level XDG config file ($XDG_CONFIG_HOME/nanite/config.yaml, default
+// ~/.config/nanite/config.yaml) or project-level ./nanite.yaml. Token may
+// also be supplied via the NANITE_VANTA_TOKEN environment variable, which
+// overrides any value in the config file (so the secret never has to live
+// in YAML).
 //
 // CW-20260501-0005 sub-ticket 2.
 type VantaConfig struct {

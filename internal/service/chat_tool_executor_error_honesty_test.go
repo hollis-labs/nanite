@@ -190,3 +190,82 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+// runPostProcessForErrorReturningRefs is a sibling of runPostProcessForError
+// that returns the ToolCallRef slice instead of (or in addition to) the
+// content blocks. Used to assert that ErrorReason gets populated end-to-end
+// through postProcessToolResults (CW-20260501-0013).
+func runPostProcessForErrorReturningRefs(
+	t *testing.T,
+	toolName string,
+	errText string,
+) []chat.ToolCallRef {
+	t.Helper()
+
+	svc := makeErrorHonestyService()
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	ch := make(chan chat.StreamEvent, 32)
+
+	tu := provider.ToolUseBlock{
+		ID:    "tu-error-honesty-2",
+		Name:  toolName,
+		Input: map[string]any{"query": "anything"},
+	}
+	plans := []toolPlan{{
+		tu:            tu,
+		status:        toolPlanReady,
+		originalIndex: 0,
+	}}
+	results := []toolExecResult{{
+		originalIndex: 0,
+		resultBlock: provider.ContentBlock{
+			Type: "tool_result", ToolUseID: tu.ID,
+			Content: errText, IsError: true,
+		},
+		ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name},
+		isError:   true,
+		rawOutput: errText,
+	}}
+	_, refs := svc.postProcessToolResults(
+		context.Background(),
+		plans, results, ls, ch,
+		"sess-error-honesty-2", "agent-1", "msg-1",
+		"",
+	)
+	_ = drainEvents(ch)
+	return refs
+}
+
+// CW-20260501-0013: end-to-end propagation. After postProcessToolResults
+// runs over an error result, the resulting ToolCallRef must carry the
+// verbatim error string in ErrorReason so the failure-footer can inline it.
+func TestPostProcess_ErrorReason_PopulatedOnRef(t *testing.T) {
+	const errText = "memory service not configured"
+
+	refs := runPostProcessForErrorReturningRefs(t, "nanite_memory_recall", errText)
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 ref, got %d", len(refs))
+	}
+	if refs[0].Status != "error" {
+		t.Fatalf("Status = %q, want error", refs[0].Status)
+	}
+	if refs[0].ErrorReason != errText {
+		t.Errorf("ErrorReason mismatch.\n got: %q\nwant: %q", refs[0].ErrorReason, errText)
+	}
+}
+
+// CW-20260501-0013: full pipeline — postProcessToolResults populates
+// ErrorReason → maybeAppendFailureFooter inlines it. The c121-shaped
+// reproducer asserts the entire chain.
+func TestPostProcess_C121Pipeline_ReasonInlinedInFooter(t *testing.T) {
+	const errText = "memory service not configured"
+
+	refs := runPostProcessForErrorReturningRefs(t, "nanite_memory_recall", errText)
+	got := maybeAppendFailureFooter("Sure, let me look into that.", refs)
+	if !strings.Contains(got, `"memory service not configured"`) {
+		t.Fatalf("c121 pipeline: verbatim reason missing from footer.\noutput:\n%s", got)
+	}
+	if !strings.Contains(got, "`nanite_memory_recall`") {
+		t.Fatalf("c121 pipeline: tool name missing from footer.\noutput:\n%s", got)
+	}
+}

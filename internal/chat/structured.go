@@ -26,11 +26,21 @@ type MessageFlags struct {
 }
 
 // ToolCallRef records a tool call made during the response.
+//
+// ErrorReason carries the verbatim tool error string (or block/deny/cancel
+// message) when Status is one of "error", "denied", "blocked", or "cancelled".
+// It is the same string as the matching tool_result block's Content. This is
+// what the failure-footer enrichment (CW-20260501-0013) inlines so the model
+// sees the actual reason next to the failed tool name in the harness footer,
+// raising the salience of "memory service not configured" / "query is
+// required" / etc. and reducing the H2 surface that produced the c121
+// "I don't have access to a memory recall tool" hallucination.
 type ToolCallRef struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Status      string `json:"status"`
 	HasEnvelope bool   `json:"has_envelope,omitempty"`
+	ErrorReason string `json:"error_reason,omitempty"`
 }
 
 // EnvelopeRef is a typed reference to an envelope embedded in the message.

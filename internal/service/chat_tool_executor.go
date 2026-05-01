@@ -105,7 +105,7 @@ func (s *chatServiceImpl) preCheckTools(
 			block := provider.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: blockedResult,
 			}
-			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked"}
+			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked", ErrorReason: blockedResult}
 			plan.status = toolPlanBlocked
 			plan.resultBlock = &block
 			plan.ref = &ref
@@ -133,7 +133,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 				}
-				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
 				plan.status = toolPlanDenied
 				plan.denyReason = permResult.Reason
 				plan.resultBlock = &block
@@ -177,7 +177,7 @@ func (s *chatServiceImpl) preCheckTools(
 					block := provider.ContentBlock{
 						Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 					}
-					ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+					ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
 					plan.status = toolPlanDenied
 					plan.denyReason = "user denied"
 					plan.resultBlock = &block
@@ -200,7 +200,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 				}
-				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
 				plan.status = toolPlanDenied
 				plan.denyReason = fmt.Sprintf("unknown permission decision %q", permResult.Decision)
 				plan.resultBlock = &block
@@ -228,7 +228,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: blockMsg,
 				}
-				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked"}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked", ErrorReason: blockMsg}
 				plan.status = toolPlanBlocked
 				plan.resultBlock = &block
 				plan.ref = &ref
@@ -247,7 +247,7 @@ func (s *chatServiceImpl) preCheckTools(
 			block := provider.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg, IsError: true,
 			}
-			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
 			plan.status = toolPlanDenied
 			plan.denyReason = reason
 			plan.resultBlock = &block
@@ -271,7 +271,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: errMsg, IsError: true,
 				}
-				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "error"}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "error", ErrorReason: errMsg}
 				plan.status = toolPlanBlocked
 				plan.resultBlock = &block
 				plan.ref = &ref
@@ -488,7 +488,7 @@ func (s *chatServiceImpl) executeSingleTool(
 			resultBlock: provider.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: cancelMsg, IsError: true,
 			},
-			ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "cancelled"},
+			ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "cancelled", ErrorReason: cancelMsg},
 			isError:   true,
 			rawOutput: cancelMsg,
 			duration:  time.Since(start),
@@ -785,6 +785,14 @@ func (s *chatServiceImpl) postProcessToolResults(
 			tcStatus = "error"
 		}
 		tcRef := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: tcStatus}
+		if r.isError {
+			// CW-20260501-0013: capture the verbatim error reason so the
+			// failure-footer enrichment can inline it next to the tool name.
+			// tr.Content is the LLM-visible content of the tool_result block;
+			// for errors it is the same as r.rawOutput (errors are exempt
+			// from cache + truncation per CW-20260501-0006).
+			tcRef.ErrorReason = tr.Content
+		}
 		if strings.Contains(r.rawOutput, "<!--ENVELOPE_DATA:") {
 			tcRef.HasEnvelope = true
 		}

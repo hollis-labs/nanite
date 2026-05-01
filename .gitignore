@@ -60,3 +60,6 @@ worktrees/
 
 # Vite TS-config compile shims (transient)
 ui/vite.config.ts.timestamp-*.js
+
+# Visual brainstorming companion sessions
+.superpowers/

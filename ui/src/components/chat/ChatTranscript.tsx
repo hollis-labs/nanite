@@ -346,7 +346,7 @@ export function ChatTranscript({
 
   return (
     <ScrollArea className="relative flex-1 no-scrollbar px-4 py-6" ref={scrollRef}>
-      <div className="mx-auto max-w-3xl space-y-5">
+      <div className="mx-auto w-[85%] max-w-7xl space-y-5">
         {/* Sentinel for loading older messages */}
         {hasOlderMessages && (
           <div ref={topSentinelRef} className="flex items-center justify-center py-2">

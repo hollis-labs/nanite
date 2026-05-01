@@ -165,7 +165,7 @@ export function ChatHeader() {
 
   return (
     <header className="flex h-[52px] shrink-0 border-b border-divider">
-      <div className="max-w-3xl w-full mx-auto flex items-center justify-between px-[18px]">
+      <div className="w-[85%] max-w-7xl mx-auto flex items-center justify-between px-[18px]">
       {/* ── Left ── */}
       <div className="flex items-center gap-3">
         {/* Agent info block */}

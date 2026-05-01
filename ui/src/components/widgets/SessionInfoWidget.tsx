@@ -1,4 +1,5 @@
-import { Info } from 'lucide-react'
+import { Check, Copy, Info } from 'lucide-react'
+import { type ReactNode, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Widget, WidgetRow } from './Widget'
 import { useAppStore } from '@/stores/useAppStore'
@@ -79,9 +80,11 @@ export function SessionInfoWidget() {
     : null
   const primaryAgent = sessionAgents.find((a) => a.role === 'primary')
 
-  const rows: { label: string; value: string }[] = [
+  const shortCode = `#${session.short_code}`
+
+  const rows: { label: string; value: ReactNode }[] = [
     { label: 'Title',         value: session.custom_name || session.title || 'Untitled' },
-    { label: 'Short Code',    value: `#${session.short_code}` },
+    { label: 'Short Code',    value: <ShortCodeValue code={shortCode} /> },
     ...(projectName ? [{ label: 'Project', value: projectName }] : []),
     ...(primaryAgent ? [{ label: 'Agent', value: primaryAgent.name }] : []),
     { label: 'Provider',      value: session.provider || '—' },
@@ -99,5 +102,38 @@ export function SessionInfoWidget() {
         ))}
       </div>
     </Widget>
+  )
+}
+
+function ShortCodeValue({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // ignore — clipboard may be unavailable
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{code}</span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        title={copied ? 'Copied' : 'Copy short code'}
+        aria-label={copied ? 'Copied' : 'Copy short code'}
+        className="flex size-4 items-center justify-center rounded-[3px] text-fg-muted transition-colors hover:bg-surface hover:text-fg"
+      >
+        {copied ? (
+          <Check className="size-3 text-success" strokeWidth={2.2} />
+        ) : (
+          <Copy className="size-3" strokeWidth={2} />
+        )}
+      </button>
+    </span>
   )
 }

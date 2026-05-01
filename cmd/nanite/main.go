@@ -527,43 +527,37 @@ func registerLegacyPTYAlias(registry *provider.Registry) {
 	}
 }
 
-// defaultDevToolsAllowedPaths returns the implicit allow-list for the dev_*
-// MCP tools when no user-supplied list is configured. The fallback ladder is:
+// resolveDevToolsAllowedPaths returns the effective allow-list for the dev_*
+// MCP tools.
 //
-//  1. cfg.Project.Root (the project this install is bound to), if set.
-//  2. The current working directory.
-//  3. Empty (no implicit access — agent must use config or explicit grants).
+// Trust-agent redesign (CW-20260430-0009):
 //
-// Per CW-20260430-0009 there are NO hardcoded user-specific paths
-// (e.g. ~/Projects-apps) here. System-specific defaults don't generalize
-// across machines and were the wrong layer for permission. Broader access
-// belongs in config.dev_tools_allowed_paths or in the trust-agent
-// permission redesign (CW-20260430-0009: explicit-mention grants +
-// notify-pause UX).
-func defaultDevToolsAllowedPaths(cfg *config.Config) []string {
+//  1. If cfg.DevToolsAllowedPaths is non-nil, the user-supplied list is
+//     used wholesale (matches the existing override semantics for
+//     WritePaths/ProtectedPaths) — including the explicit empty list
+//     `dev_tools_allowed_paths: []` which means "no implicit access".
+//  2. Otherwise the default is project root only (cfg.ProjectRoot() if
+//     set) — NOT cwd, NOT a hardcoded user-specific list. Wider scope
+//     comes from explicit-mention grants registered into the per-session
+//     PathGrants store at user-message ingest time (Q1-Q3 of the locked
+//     design), or from cfg.dev_tools_allowed_paths.
+//
+// The cwd fallback that used to live here was dropped per Q4: cwd-as-
+// baseline risks scope leak when the user starts a session in `~/`.
+//
+// Hardcoded user-specific defaults (`~/Projects-apps`, etc.) were
+// removed by the SP5 hot-fix (commit 151fc7b) — see audit
+// docs/audits/hardcoded-paths.md for the full disposition table.
+func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
+	if cfg != nil && cfg.DevToolsAllowedPaths != nil {
+		return cfg.ResolvedDevToolsAllowedPaths()
+	}
 	if cfg != nil {
 		if root := cfg.ProjectRoot(); root != "" {
 			return []string{root}
 		}
 	}
-	if cwd, err := os.Getwd(); err == nil && cwd != "" {
-		return []string{cwd}
-	}
 	return nil
-}
-
-// resolveDevToolsAllowedPaths returns the effective allow-list for the dev_*
-// MCP tools. When cfg.DevToolsAllowedPaths is non-nil, the user-supplied list
-// REPLACES the implicit fallback wholesale (matches the existing override
-// semantics for WritePaths/ProtectedPaths) — including the explicit empty
-// list `dev_tools_allowed_paths: []` which means "no implicit access".
-// When the field is nil/unset, fall back to project root or cwd — see
-// defaultDevToolsAllowedPaths.
-func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
-	if cfg != nil && cfg.DevToolsAllowedPaths != nil {
-		return cfg.ResolvedDevToolsAllowedPaths()
-	}
-	return defaultDevToolsAllowedPaths(cfg)
 }
 
 // devAllowedSource returns a short string describing where the dev tools
@@ -576,7 +570,7 @@ func devAllowedSource(cfg *config.Config) string {
 	if cfg != nil && cfg.ProjectRoot() != "" {
 		return "default:project_root"
 	}
-	return "default:cwd"
+	return "default:none"
 }
 
 // initMCP sets up the MCP manager with built-in and user-configured servers,

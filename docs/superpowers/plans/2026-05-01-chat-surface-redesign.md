@@ -599,7 +599,7 @@ export function ChatPrimaryDrawer() {
     }))
     const dynamic: ChatDrawerTab[] = pinnedCards.map((c) => ({
       id: `pin:${c.id}`,
-      label: c.label || 'Pinned',
+      label: c.title || 'Pinned',  // NB: DrawerPinnedCard.title, not .label
       active: drawer.activeTab === `pin:${c.id}`,
       pinnable: true,
       pinned: true,
@@ -658,7 +658,7 @@ export function ChatPrimaryDrawer() {
         onTogglePin={async (id) => {
           if (id.startsWith('pin:')) {
             const cardId = id.slice(4)
-            await api.deleteDrawerCard(cardId)
+            await api.unpinDrawerCard(cardId)  // NB: api.unpinDrawerCard (not deleteDrawerCard)
             // queryClient invalidate handled in caller wiring (ChatMain)
           }
         }}
@@ -850,7 +850,7 @@ export function ChatWorkingDrawer() {
       .sort((a, b) => a.createdAt - b.createdAt)
       .map((c) => ({
         id: c.id,
-        label: c.label,
+        label: c.title,  // NB: DrawerPinnedCard.title, not .label
         active: drawer.activeTab === c.id,
         closeable: !c.pinned,
         pinnable: true,
@@ -880,13 +880,17 @@ export function ChatWorkingDrawer() {
           if (tab.pinned) {
             // Promoted card — call DELETE; refresh pinned cards in ChatPrimaryDrawer.
             const dbId = id.slice(5) // strip 'card:' prefix
-            await api.deleteDrawerCard(dbId)
+            await api.unpinDrawerCard(dbId)  // NB: api.unpinDrawerCard
             removeCardTab(id)
           } else {
             // Promote: POST /drawer-cards via existing API.
-            await api.createDrawerCard(activeSessionId, {
-              type: tab.payload.kind ?? 'envelope',
-              label: tab.label,
+            // NB: real method is api.pinDrawerCard with these param names
+            // (card_type / content_ref / title / payload — matches the
+            // existing BottomChatDrawer.CardsTab.handlePinLatest call shape).
+            await api.pinDrawerCard(activeSessionId, {
+              card_type: tab.payload.kind ?? 'envelope',
+              content_ref: tab.id,
+              title: tab.label,
               payload: tab.payload as unknown as Record<string, unknown>,
             })
             queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
@@ -957,9 +961,15 @@ function Terminal2Tab() {
   return <div className="p-3 font-mono text-xs">Terminal 2 (dev) — interactive shell, follow-up</div>
 }
 function ArtifactsTab() {
-  // Copy `BottomChatDrawer.tsx`'s `case 'artifacts':` branch — it queries
-  // session artifacts and renders previews with download buttons.
-  return null
+  // Reuse the existing ArtifactsContent panel (the same component RightRail
+  // uses for its Artifacts tab). It already does list / preview / download /
+  // drag-drop upload. Same component in two hosts beats forking the impl.
+  // NB: BottomChatDrawer never had an 'artifacts' case — the prior plan text
+  // pointed at a branch that doesn't exist; ArtifactsContent.tsx is the real
+  // source.
+  return <ArtifactsContent />
+  // Required import:
+  //   import { ArtifactsContent } from '@/components/drawers/ArtifactsContent'
 }
 function SessionContextTab() {
   // Copy `BottomChatDrawer.tsx`'s `case 'context':` branch — user-editable

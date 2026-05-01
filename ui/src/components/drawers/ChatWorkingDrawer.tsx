@@ -35,6 +35,7 @@ import { useShellStore } from '@/stores/useShellStore'
 import { useSettings } from '@/hooks/useSettings'
 import { ChatDrawerTabStrip, type ChatDrawerTab } from '@/components/chat/ChatDrawerTabStrip'
 import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
+import { ArtifactsContent } from '@/components/drawers/ArtifactsContent'
 import { api } from '@/lib/api'
 import type { DynamicCardTab, Envelope } from '@/lib/types'
 
@@ -300,11 +301,13 @@ function Terminal2Tab() {
 // to the planner — wired up in a follow-up so we don't guess.
 
 function ArtifactsTab() {
-  return (
-    <div className="p-3 text-xs text-fg-faint italic">
-      Artifacts — pending lift from ArtifactsContent.tsx (follow-up).
-    </div>
-  )
+  // Reuse the existing ArtifactsContent panel. It's the same component the
+  // RightRail uses for the Artifacts tab — full list / preview / download
+  // / drag-drop upload behavior. Same component in two hosts is cheaper than
+  // forking the implementation. `onTitleChange` is optional and only used by
+  // hosts that surface a dynamic header title; ChatWorkingDrawer's tab strip
+  // handles the label, so we don't pass it.
+  return <ArtifactsContent />
 }
 
 // ── Session context tab ──────────────────────────────────────────────────────

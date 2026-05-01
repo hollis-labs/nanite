@@ -660,10 +660,21 @@ func (s *chatServiceImpl) postProcessToolResults(
 
 		// Truncate for LLM context (handles results not caught by the cache).
 		// Skip when the cache already produced the LLM-visible view.
+		//
+		// CW-20260501-0006: error results are exempt from truncation. Errors
+		// are short and load-bearing — the agent's recovery decision depends
+		// on reading the actual reason ("memory service not configured",
+		// "query is required", etc.). Truncating them swaps the verbatim
+		// reason for a misleading "delegate to a research agent" hint, which
+		// caused c121's "I don't have access to a memory recall tool"
+		// hallucination. The cache layer already exempts errors (see the
+		// !r.isError gate above); this matches that contract for the
+		// truncate path.
 		var tr truncate.Result
-		if wasCached || isScratchpadTool(tu.Name) || isCacheExemptTool(tu.Name) {
+		if wasCached || isScratchpadTool(tu.Name) || isCacheExemptTool(tu.Name) || r.isError {
 			// Scratchpad results are bounded by the 64 KiB turn cap enforced in
 			// loopState.scratchpadWrite — no caching or disk truncation needed.
+			// Errors pass through verbatim (load-bearing for agent recovery).
 			tr = truncate.Result{Content: resultText}
 		} else {
 			canDelegate := s.orchestrator != nil && s.orchestrator.HasDecomposer()

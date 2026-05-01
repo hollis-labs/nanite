@@ -553,15 +553,15 @@ func defaultDevToolsAllowedPaths(cfg *config.Config) []string {
 }
 
 // resolveDevToolsAllowedPaths returns the effective allow-list for the dev_*
-// MCP tools. The user-supplied list at cfg.DevToolsAllowedPaths replaces the
-// implicit fallback wholesale (matches the existing override semantics for
-// WritePaths/ProtectedPaths). When unset, the fallback is project root or
-// cwd — see defaultDevToolsAllowedPaths.
+// MCP tools. When cfg.DevToolsAllowedPaths is non-nil, the user-supplied list
+// REPLACES the implicit fallback wholesale (matches the existing override
+// semantics for WritePaths/ProtectedPaths) — including the explicit empty
+// list `dev_tools_allowed_paths: []` which means "no implicit access".
+// When the field is nil/unset, fall back to project root or cwd — see
+// defaultDevToolsAllowedPaths.
 func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
-	if cfg != nil {
-		if userPaths := cfg.ResolvedDevToolsAllowedPaths(); len(userPaths) > 0 {
-			return userPaths
-		}
+	if cfg != nil && cfg.DevToolsAllowedPaths != nil {
+		return cfg.ResolvedDevToolsAllowedPaths()
 	}
 	return defaultDevToolsAllowedPaths(cfg)
 }
@@ -570,7 +570,7 @@ func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
 // allow-list came from, purely for log observability when sessions hit a
 // path-escape error.
 func devAllowedSource(cfg *config.Config) string {
-	if cfg != nil && len(cfg.ResolvedDevToolsAllowedPaths()) > 0 {
+	if cfg != nil && cfg.DevToolsAllowedPaths != nil {
 		return "config:dev_tools_allowed_paths"
 	}
 	if cfg != nil && cfg.ProjectRoot() != "" {
@@ -880,10 +880,11 @@ func cmdMCPServe(args []string) {
 
 	// Reuse the same allow-list resolution path as the main server so the
 	// stdio MCP entry point honours config.dev_tools_allowed_paths and
-	// inherits the widened defaults (~/.nanite, ~/.claude). Failures to
-	// load the agentrc config fall back to defaults — the stdio path is
-	// invoked by external clients (Claude CLI), not the running user, so
-	// degrading gracefully here matters more than aborting.
+	// falls back to project root + cwd when the field is unset (per
+	// CW-20260430-0009 — no hardcoded user-specific defaults). Failures to
+	// load the agentrc config fall back to the same default ladder — the
+	// stdio path is invoked by external clients (Claude CLI), so degrading
+	// gracefully matters more than aborting.
 	cfg, _ := config.Load()
 	allowedPaths := resolveDevToolsAllowedPaths(cfg)
 	srv := mcpserver.New(s, *sessionID, allowedPaths)

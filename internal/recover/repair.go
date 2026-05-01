@@ -72,14 +72,10 @@ const DefaultRepairTimeout = 5000 * time.Millisecond
 // truncation symptom; tightening the system prompt (see
 // repairSystemPrompt) is the complementary behavioral fix.
 //
-// NOTE — known wiring gap: at the time this constant was introduced,
-// provider.ChatRequest in github.com/hollis-labs/go-providers does not
-// expose a MaxTokens field, so this value cannot yet be threaded into
-// the outgoing provider request. The constant + RepairOptions.MaxTokens
-// scaffolding is in place so the recover-package surface is correct;
-// when go-providers gains a ChatRequest.MaxTokens field (or an
-// equivalent context-based helper), the wiring inside Repair() can be
-// completed without further API churn here.
+// DefaultRepairMaxTokens is the per-call output ceiling threaded into
+// provider.ChatRequest.MaxTokens for the repair LLM pass. Callers can
+// override it via RepairOptions.MaxTokens (used by tests + by callers
+// that want a tighter budget for shape-only fixes).
 const DefaultRepairMaxTokens = 4096
 
 // MaxArgsBytes caps the size of sent_args we serialize into the repair

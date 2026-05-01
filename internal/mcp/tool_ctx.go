@@ -102,9 +102,10 @@ type turnToolNamesCtxKey struct{}
 // ctx unchanged so callers can pass through unconditionally; downstream
 // readers treat nil as "not stamped — skip the check".
 //
-// The set is stored as []string (small, immutable, cheap) rather than
-// map[string]struct{} so the value is comparable for context.WithValue and
-// callers can range over it for actionable error messages.
+// The set is stored as []string rather than map[string]struct{} because
+// it is small (single-digit IDs in practice), cheap to defensively copy,
+// preserves insertion order for actionable error messages, and lets
+// callers range over it without an extra allocation.
 func WithTurnToolUseIDs(ctx context.Context, ids []string) context.Context {
 	if len(ids) == 0 {
 		return ctx

@@ -105,10 +105,13 @@ func (c *Config) ProjectRoot() string {
 
 // ResolvedDevToolsAllowedPaths returns the configured DevToolsAllowedPaths
 // list with leading ~/ entries tilde-expanded to the user's home directory.
-// Empty entries are dropped. Returns nil when no list is configured so
-// callers can detect the "fall back to defaults" case.
+// Empty entries are dropped. Returns nil only when the field was never
+// configured, so callers can distinguish "unset → fall back to defaults"
+// from "explicitly empty → no allowed paths". An empty-but-configured
+// list (`dev_tools_allowed_paths: []` in YAML) returns a non-nil empty
+// slice.
 func (c *Config) ResolvedDevToolsAllowedPaths() []string {
-	if len(c.DevToolsAllowedPaths) == 0 {
+	if c.DevToolsAllowedPaths == nil {
 		return nil
 	}
 	out := make([]string, 0, len(c.DevToolsAllowedPaths))

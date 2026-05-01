@@ -1426,7 +1426,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// responsibility of interactive paths (approval / question-form /
 	// elicitation) where the row ID is needed for response endpoints.
 	for _, env := range envelopes {
-		if env.Target == "" && env.RenderTarget == "" && env.Mode == "" {
+		if env.Target == "" && env.RenderTarget == "" && env.Mode == "" && env.RenderTargetBlocked == "" {
 			continue
 		}
 		envID := env.ID

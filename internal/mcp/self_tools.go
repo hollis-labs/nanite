@@ -431,7 +431,13 @@ func selfToolDefinitions() []Tool {
 				"type": "object",
 				"properties": map[string]any{
 					"plan_id": map[string]any{"type": "string", "description": "Plan ID to append to. Required."},
-					"steps":   map[string]any{"type": "string", "description": "JSON array of step objects: [{id?, title, status?, depends_on?, acceptance?, notes?}]. `title` is required per step; `id` is auto-assigned when omitted. Pass either a JSON array string or a real array."},
+					"steps": map[string]any{
+						"description": "Step objects to append: [{id?, title, status?, depends_on?, acceptance?, notes?}]. `title` is required per step; `id` is auto-assigned when omitted. Pass either a JSON array string or a real array — the handler accepts both.",
+						"anyOf": []any{
+							map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+							map[string]any{"type": "string"},
+						},
+					},
 				},
 				"required": []string{"plan_id", "steps"},
 			},

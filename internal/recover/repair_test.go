@@ -464,10 +464,10 @@ func TestRepairSystemPrompt_AntiMarkdown(t *testing.T) {
 }
 
 // TestRepair_HonorsCallerMaxTokens is a smoke test confirming Repair
-// accepts (and does not error on) a caller-supplied MaxTokens override.
-// The wiring into provider.ChatRequest is incomplete until go-providers
-// exposes a MaxTokens field — see the DefaultRepairMaxTokens docstring
-// — but the recover-package surface must already be in place.
+// accepts a caller-supplied MaxTokens override without erroring.
+// Repair() threads this value into provider.ChatRequest.MaxTokens; this
+// test keeps the recover-package surface covered without changing its
+// existing smoke-test scope.
 func TestRepair_HonorsCallerMaxTokens(t *testing.T) {
 	stub := &stubProvider{response: `{"repaired_args": {"a":1}, "missing_required": [], "lesson_hint": "ok"}`}
 	_, err := Repair(context.Background(), newRecoverable(), RepairOptions{

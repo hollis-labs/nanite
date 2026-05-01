@@ -30,6 +30,15 @@ import (
 // Manager surface (via the ToolInventoryLookup interface) and applies
 // the chat-surface filter so the agent sees exactly what it can invoke.
 //
+// CW-20260501-0012: the chat-surface filter is no longer hard-coded —
+// the surface used is inferred from the caller's dispatch role
+// (mcp.CallerRoleFromContext), stamped on ctx by
+// service.executeToolBatch. Chat callers get the static chat-surface
+// view (CW-0001 behavior); Worker/Planner callers get the full
+// cross-server inventory (their effective surface is the agent
+// profile's own permissions, not a dispatch-side allow-list). See
+// gatherInventory for the surface-decision details.
+//
 // Reactive posture: this is a tool the agent reaches for, not a gate it
 // passes through. No "must call before X" rule. See
 // docs/architecture/agent-context-architecture.md for the rationale.
@@ -156,17 +165,41 @@ type inventoryEntry struct {
 
 // gatherInventory returns the deduplicated set of tools to consider for
 // nanite_tool_list, sourced from the cross-server MCP inventory when
-// available and falling back to the in-process self-tools when not. The
-// chat-surface filter is applied here so off-surface tools (Worker /
-// Planner / dev_*) don't leak into the agent's view of "tools I can
-// call" — see CW-20260501-0001 for the bug history.
+// available and falling back to the in-process self-tools when not.
+//
+// Surface filter (CW-20260501-0012): the filter applied here depends on
+// the calling agent's dispatch role, stamped on ctx by
+// service.executeToolBatch via mcp.WithCallerRole. The role decision is
+// inferred from caller context (the cleanest of the three options
+// considered for CW-20260501-0012 — surface-arg parameter, sibling
+// tool, or caller-context inference).
+//
+//   - dispatch.RoleChat: apply IsChatSurfaceTool — the chat agent has
+//     a static allow-list (dispatch.ChatToolSurface). Off-surface tools
+//     (dev_*, third-party MCP-origin) would mislead the discovery
+//     primitive because EnforceChatSurface drops them at boot anyway.
+//   - dispatch.RoleWorker / dispatch.RolePlanner: NO surface filter.
+//     Worker/Planner surfaces are governed by the spawned agent
+//     profile's own permissions (see dispatch/role.go ChatToolSurface
+//     comments — there is no static dispatch-side allow-list for these
+//     roles), so the discovery primitive must reflect that. Filtering
+//     here would force false negatives for dev_*/general_*/code_* and
+//     replicate the CW-20260501-0001 bug for Worker agents.
+//   - RoleInvalid (un-stamped ctx): fall back to IsChatSurfaceTool.
+//     Test paths and call sites that haven't yet been threaded through
+//     WithCallerRole get the conservative pre-CW-0012 behavior.
 //
 // Determinism: results are sorted by name so the rendered list is
 // reproducible across runs (the broker / manager iteration order is
 // not stable).
-func (st *SelfToolsTransport) gatherInventory() []inventoryEntry {
+func (st *SelfToolsTransport) gatherInventory(ctx context.Context) []inventoryEntry {
 	seen := make(map[string]struct{})
 	var out []inventoryEntry
+
+	role := CallerRoleFromContext(ctx)
+	// Worker/Planner have profile-owned permissions — no dispatch-side
+	// allow-list. Chat (and unset/invalid) get the static surface filter.
+	applyChatFilter := role != dispatch.RoleWorker && role != dispatch.RolePlanner
 
 	add := func(name, desc string) {
 		if name == "" {
@@ -175,7 +208,7 @@ func (st *SelfToolsTransport) gatherInventory() []inventoryEntry {
 		if _, dup := seen[name]; dup {
 			return
 		}
-		if !dispatch.IsChatSurfaceTool(name) {
+		if applyChatFilter && !dispatch.IsChatSurfaceTool(name) {
 			return
 		}
 		seen[name] = struct{}{}
@@ -215,7 +248,7 @@ func (st *SelfToolsTransport) gatherInventory() []inventoryEntry {
 func (st *SelfToolsTransport) callToolList(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	filter := strings.ToLower(strings.TrimSpace(strArg(args, "filter", "")))
 
-	inv := st.gatherInventory()
+	inv := st.gatherInventory(ctx)
 	type entry struct {
 		Name    string `json:"name"`
 		Summary string `json:"summary"`

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/dispatch"
 )
 
 // stubInventoryLookup is a minimal ToolInventoryLookup stub used to
@@ -513,6 +514,279 @@ func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
 		"filter": "memory",
 	})
 	t.Logf("nanite_tool_list cross-server filter=\"memory\": %d bytes", len(resF.Content[0].Text))
+}
+
+// TestNaniteToolList_WorkerSurfaceSeesOffChatTools is the positive half
+// of the CW-20260501-0012 fix: when the caller's dispatch role is
+// RoleWorker, off-chat-surface tools (dev_*, general_*, code_*, third-
+// party MCP) MUST surface in the discovery primitive. Worker agents have
+// profile-owned permissions, not a dispatch-side allow-list — filtering
+// them through IsChatSurfaceTool would replicate the CW-20260501-0001
+// bug for the Worker role.
+func TestNaniteToolList_WorkerSurfaceSeesOffChatTools(t *testing.T) {
+	st := newSelfTools(t)
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{
+				Name:        "dev_read",
+				Description: "Read a file from the developer-mode allowed paths.",
+			},
+			{
+				Name:        "dev_bash",
+				Description: "Run a bash command.",
+			},
+			{
+				Name:        "general_web_fetch",
+				Description: "Fetch a URL and return the response body.",
+			},
+			{
+				Name:        "memory_write",
+				Description: "Write a memory to the durable substrate.",
+			},
+			{
+				// On-chat-surface — should always survive.
+				Name:        "nanite_memory_recall",
+				Description: "Recall memories from Vanta.",
+			},
+		},
+	}
+
+	// Stamp Worker role on ctx — this is what executeToolBatch does for
+	// non-chat-role agents.
+	ctx := WithCallerRole(context.Background(), dispatch.RoleWorker)
+
+	res, err := st.callToolList(ctx, map[string]any{})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+
+	var out struct {
+		Tools []struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		} `json:"tools"`
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	saw := map[string]bool{}
+	for _, tool := range out.Tools {
+		saw[tool.Name] = true
+	}
+
+	// Worker MUST see off-chat-surface tools — that's the whole point.
+	for _, name := range []string{"dev_read", "dev_bash", "general_web_fetch", "memory_write"} {
+		if !saw[name] {
+			t.Errorf("Worker surface missing off-chat tool %q (CW-0012 regression — surface filter still active)", name)
+		}
+	}
+	// On-chat-surface tools also survive (worker is a superset of chat
+	// for discovery purposes).
+	if !saw["nanite_memory_recall"] {
+		t.Error("Worker surface missing nanite_memory_recall")
+	}
+}
+
+// TestNaniteToolList_ChatSurfaceFiltersOffChatTools is the negative half
+// of CW-20260501-0012: when the caller's dispatch role is RoleChat,
+// off-chat-surface tools MUST be filtered out (the pre-CW-0012
+// behavior is preserved). This pins CW-20260501-0001's contract for
+// the chat surface specifically.
+func TestNaniteToolList_ChatSurfaceFiltersOffChatTools(t *testing.T) {
+	st := newSelfTools(t)
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{
+				Name:        "dev_read",
+				Description: "Read a file. Worker-only.",
+			},
+			{
+				Name:        "general_web_fetch",
+				Description: "Fetch a URL.",
+			},
+			{
+				Name:        "memory_write",
+				Description: "Mux memory_write — third-party uniform name.",
+			},
+			{
+				Name:        "nanite_memory_recall",
+				Description: "Recall memories from Vanta.",
+			},
+		},
+	}
+
+	ctx := WithCallerRole(context.Background(), dispatch.RoleChat)
+	res, err := st.callToolList(ctx, map[string]any{})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	var out struct {
+		Tools []struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		} `json:"tools"`
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	for _, tool := range out.Tools {
+		switch tool.Name {
+		case "dev_read", "general_web_fetch", "memory_write":
+			t.Errorf("RoleChat surface leaked off-chat tool %q (CW-0001 regression)", tool.Name)
+		}
+	}
+	saw := false
+	for _, tool := range out.Tools {
+		if tool.Name == "nanite_memory_recall" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("expected nanite_memory_recall to survive the chat-surface filter")
+	}
+}
+
+// TestNaniteToolList_PlannerSurfaceMatchesWorker pins that RolePlanner
+// uses the same no-filter discovery as RoleWorker. Planner agents
+// (like Worker) have profile-owned permissions, so the discovery
+// primitive must reflect that (no dispatch-side allow-list).
+func TestNaniteToolList_PlannerSurfaceMatchesWorker(t *testing.T) {
+	makeST := func() *SelfToolsTransport {
+		st := newSelfTools(t)
+		st.Inventory = &stubInventoryLookup{
+			tools: []provider.ToolDefinition{
+				{Name: "dev_read", Description: "Read a file."},
+				{Name: "memory_write", Description: "Write a memory."},
+				{Name: "nanite_memory_recall", Description: "Recall memories from Vanta."},
+			},
+		}
+		return st
+	}
+
+	collectNames := func(ctx context.Context, st *SelfToolsTransport) map[string]bool {
+		res, err := st.callToolList(ctx, map[string]any{})
+		if err != nil {
+			t.Fatalf("call: %v", err)
+		}
+		var out struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		}
+		if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		set := map[string]bool{}
+		for _, tool := range out.Tools {
+			set[tool.Name] = true
+		}
+		return set
+	}
+
+	worker := collectNames(WithCallerRole(context.Background(), dispatch.RoleWorker), makeST())
+	planner := collectNames(WithCallerRole(context.Background(), dispatch.RolePlanner), makeST())
+
+	if len(worker) != len(planner) {
+		t.Fatalf("worker (%d) and planner (%d) surfaces differ in size", len(worker), len(planner))
+	}
+	for name := range worker {
+		if !planner[name] {
+			t.Errorf("planner surface missing %q (worker had it) — Worker/Planner must share the discovery view", name)
+		}
+	}
+}
+
+// TestNaniteToolList_UnstampedContextFallsBackToChatSurface verifies the
+// safe default: when ctx carries no caller role (e.g. test paths that
+// don't go through executeToolBatch, or early-init code), the discovery
+// primitive falls back to the chat-surface filter — preserving
+// CW-20260501-0001's behavior for any unstamped call site.
+func TestNaniteToolList_UnstampedContextFallsBackToChatSurface(t *testing.T) {
+	st := newSelfTools(t)
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{Name: "dev_read", Description: "Off-chat tool."},
+			{Name: "nanite_memory_recall", Description: "On-chat tool."},
+		},
+	}
+
+	// bare context — no WithCallerRole stamping.
+	res, err := st.callToolList(context.Background(), map[string]any{})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	var out struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	_ = json.Unmarshal([]byte(res.Content[0].Text), &out)
+
+	for _, tool := range out.Tools {
+		if tool.Name == "dev_read" {
+			t.Error("unstamped ctx must fall back to chat-surface filter; dev_read leaked")
+		}
+	}
+	saw := false
+	for _, tool := range out.Tools {
+		if tool.Name == "nanite_memory_recall" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("unstamped ctx still filters to chat surface; nanite_memory_recall should survive")
+	}
+}
+
+// TestNaniteToolList_WorkerSurfaceSizeMeasurement documents the actual
+// payload size on the Worker surface (CW-20260501-0012 acceptance
+// criterion). Worker surface includes off-chat-surface tools so payload
+// is expected to be larger than chat. Logged via t.Logf, not a hard
+// failure — same posture as TestNaniteToolList_UnfilteredSize.
+func TestNaniteToolList_WorkerSurfaceSizeMeasurement(t *testing.T) {
+	st := newSelfTools(t)
+	// Approximate a realistic worker inventory: self surface + memory
+	// tools + dev_*, general_*, code_* builtins, plus a couple plugin
+	// MCP tools.
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{Name: "nanite_memory_recall", Description: "Recall memories from Vanta."},
+			{Name: "memory_write", Description: "Write a memory to the durable substrate."},
+			{Name: "memory_get", Description: "Get a memory by key."},
+			{Name: "dev_read", Description: "Read a file from the developer-mode allowed paths."},
+			{Name: "dev_write", Description: "Write a file."},
+			{Name: "dev_edit", Description: "Edit a file via search/replace."},
+			{Name: "dev_grep", Description: "Search for a pattern across files."},
+			{Name: "dev_glob", Description: "Glob files matching a pattern."},
+			{Name: "dev_bash", Description: "Run a bash command."},
+			{Name: "general_web_fetch", Description: "Fetch a URL and return the response body."},
+			{Name: "general_json_parse", Description: "Parse a JSON string into a structured value."},
+			{Name: "general_datetime", Description: "Return the current date and time."},
+			{Name: "nanite_code_execute", Description: "Execute code in a sandboxed environment."},
+			{Name: "task_create", Description: "Create a task in the work tracker."},
+			{Name: "task_list", Description: "List tasks in the work tracker."},
+		},
+	}
+
+	chatCtx := WithCallerRole(context.Background(), dispatch.RoleChat)
+	chatRes, _ := st.callToolList(chatCtx, map[string]any{})
+	t.Logf("nanite_tool_list RoleChat unfiltered: %d bytes (count: chat-surface filtered)", len(chatRes.Content[0].Text))
+
+	workerCtx := WithCallerRole(context.Background(), dispatch.RoleWorker)
+	workerRes, _ := st.callToolList(workerCtx, map[string]any{})
+	t.Logf("nanite_tool_list RoleWorker unfiltered: %d bytes (count: cross-server inventory)", len(workerRes.Content[0].Text))
+
+	if len(workerRes.Content[0].Text) <= len(chatRes.Content[0].Text) {
+		t.Logf("note: Worker payload (%d) not larger than Chat payload (%d) — usually means the stub inventory contains few off-chat tools",
+			len(workerRes.Content[0].Text), len(chatRes.Content[0].Text))
+	}
 }
 
 // TestSafeTruncate_RuneBoundary ensures we don't cut a multi-byte

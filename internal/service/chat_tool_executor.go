@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/dispatch"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -104,7 +105,7 @@ func (s *chatServiceImpl) preCheckTools(
 			block := provider.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: blockedResult,
 			}
-			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked"}
+			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked", ErrorReason: blockedResult}
 			plan.status = toolPlanBlocked
 			plan.resultBlock = &block
 			plan.ref = &ref
@@ -132,7 +133,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 				}
-				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
 				plan.status = toolPlanDenied
 				plan.denyReason = permResult.Reason
 				plan.resultBlock = &block
@@ -176,7 +177,7 @@ func (s *chatServiceImpl) preCheckTools(
 					block := provider.ContentBlock{
 						Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 					}
-					ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+					ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
 					plan.status = toolPlanDenied
 					plan.denyReason = "user denied"
 					plan.resultBlock = &block
@@ -199,7 +200,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 				}
-				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
 				plan.status = toolPlanDenied
 				plan.denyReason = fmt.Sprintf("unknown permission decision %q", permResult.Decision)
 				plan.resultBlock = &block
@@ -227,7 +228,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: blockMsg,
 				}
-				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked"}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked", ErrorReason: blockMsg}
 				plan.status = toolPlanBlocked
 				plan.resultBlock = &block
 				plan.ref = &ref
@@ -246,7 +247,7 @@ func (s *chatServiceImpl) preCheckTools(
 			block := provider.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg, IsError: true,
 			}
-			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied"}
+			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
 			plan.status = toolPlanDenied
 			plan.denyReason = reason
 			plan.resultBlock = &block
@@ -270,7 +271,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := provider.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: errMsg, IsError: true,
 				}
-				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "error"}
+				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "error", ErrorReason: errMsg}
 				plan.status = toolPlanBlocked
 				plan.resultBlock = &block
 				plan.ref = &ref
@@ -326,6 +327,33 @@ func (s *chatServiceImpl) executeToolBatch(
 	// trust tier without changing CallTool signatures. agentID IS the
 	// agent_profiles.id for the primary agent of this session.
 	ctx = mcp.WithCallerProfile(ctx, workspaceID, agentID)
+
+	// CW-20260501-0012: stamp the caller's dispatch role so caller-context-
+	// aware discovery primitives (nanite_tool_list) can pick the right
+	// surface filter. Chat agents see the static chat-surface allow-list;
+	// Worker/Planner agents see the full cross-server inventory (their
+	// effective surface is governed by the spawned profile's permissions,
+	// not by a dispatch-side allow-list — see internal/dispatch/role.go).
+	//
+	// Detection is duck-typed against ToolService so the chat-surface
+	// filter remains a no-op for the test stubs that don't carry a
+	// prompt-template reader. The toolServiceImpl satisfies this
+	// extension; un-stamped contexts fall back to the chat-surface filter
+	// as the conservative default (preserves CW-20260501-0001 behavior).
+	if checker, ok := s.tools.(interface {
+		IsChatRoleAgent(agentID string) bool
+	}); ok {
+		if checker.IsChatRoleAgent(agentID) {
+			ctx = mcp.WithCallerRole(ctx, dispatch.RoleChat)
+		} else {
+			// Non-chat agents are spawned via dispatch and run as Worker
+			// (the default for AssignRole when not Planner). Treating the
+			// non-chat case as Worker is the right default for the surface
+			// filter — Planner shares the same "no static allow-list"
+			// contract as Worker (see dispatch/role.go).
+			ctx = mcp.WithCallerRole(ctx, dispatch.RoleWorker)
+		}
+	}
 
 	// CW-20260429-0024: stamp the union of (prior iterations' tool_use_ids
 	// from ls.toolCallRefs) and (this iteration's plan tool_use_ids) so the
@@ -460,7 +488,7 @@ func (s *chatServiceImpl) executeSingleTool(
 			resultBlock: provider.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: cancelMsg, IsError: true,
 			},
-			ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "cancelled"},
+			ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "cancelled", ErrorReason: cancelMsg},
 			isError:   true,
 			rawOutput: cancelMsg,
 			duration:  time.Since(start),
@@ -757,6 +785,14 @@ func (s *chatServiceImpl) postProcessToolResults(
 			tcStatus = "error"
 		}
 		tcRef := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: tcStatus}
+		if r.isError {
+			// CW-20260501-0013: capture the verbatim error reason so the
+			// failure-footer enrichment can inline it next to the tool name.
+			// tr.Content is the LLM-visible content of the tool_result block;
+			// for errors it is the same as r.rawOutput (errors are exempt
+			// from cache + truncation per CW-20260501-0006).
+			tcRef.ErrorReason = tr.Content
+		}
 		if strings.Contains(r.rawOutput, "<!--ENVELOPE_DATA:") {
 			tcRef.HasEnvelope = true
 		}

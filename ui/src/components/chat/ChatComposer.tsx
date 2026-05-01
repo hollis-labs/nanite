@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Check, Terminal, Upload, X } from "lucide-react";
+import { Check, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useArtifactUpload } from "@/hooks/useArtifactUpload";
 import { usePluginAction } from "@/hooks/usePluginAction";
@@ -16,6 +16,7 @@ import type { SlashCommandDef } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
+import { useShellStore } from "@/stores/useShellStore";
 import { useWorkStore } from "@/stores/useWorkStore";
 import { ComposerToolbar } from "./ComposerToolbar";
 import { StatusPill } from "./envelopes/primitives/StatusPill";
@@ -109,7 +110,15 @@ export function ChatComposer({
     setMode: setShellMode,
   } = useShellMode(activeSessionId);
   const [isShellInput, setIsShellInput] = useState(false);
-  const [shellRunning, setShellRunning] = useState(false);
+  // Wave 4 / Task 11: shell-running state moved to useShellStore so the
+  // new ChatWorkingDrawer's Terminal-1 tab can subscribe. The composer
+  // now SETS these; reading happens in Terminal1Tab.
+  const setShellRunning = useShellStore((s) => s.setShellRunning);
+  const setPendingShellCommand = useShellStore(
+    (s) => s.setPendingShellCommand,
+  );
+  const appendShellOutput = useShellStore((s) => s.appendShellOutput);
+  const pendingShellCommand = useShellStore((s) => s.pendingShellCommand);
   const workToast = useWorkStore((s) => s.toastMessage);
   const dismissWorkToast = useWorkStore((s) => s.dismissToast);
   // B3 (CW-20260428-0011): chat-scoped toast (e.g. mode auto-switch confirmation).
@@ -418,8 +427,6 @@ export function ChatComposer({
     return () => clearTimeout(timer);
   }, [chatToast, dismissChatToast]);
 
-  const [pendingShellCommand, setPendingShellCommand] = useState<string | null>(null);
-
   const executeShellCommand = useCallback(
     async (command: string, approved: boolean) => {
       if (!activeSessionId) return;
@@ -427,19 +434,41 @@ export function ChatComposer({
       try {
         const result = await api.shellExec(activeSessionId, command, approved);
         if (result.requires_approval) {
+          // pendingShellCommand surfaces the in-composer approval
+          // strip AND seeds Terminal-1's "what just queued" footer.
           setPendingShellCommand(command);
           return;
         }
         setPendingShellCommand(null);
+        // Commit the (single-shot) shell-exec result to the Terminal-1
+        // tab buffer. shellExec is a one-shot fetch — there is no
+        // streamed-chunk path today, so we append the full output and
+        // an exit-code footer at completion.
+        appendShellOutput(`$ ${command}\n`);
+        if (result.output) {
+          appendShellOutput(result.output);
+          if (!result.output.endsWith("\n")) appendShellOutput("\n");
+        }
+        if (typeof result.exit_code === "number") {
+          appendShellOutput(`[exit ${result.exit_code}]\n`);
+        }
         reloadMessages?.();
       } catch (err) {
         console.error("Shell exec failed:", err);
+        appendShellOutput(`[error] ${(err as Error).message}\n`);
+        setPendingShellCommand(null);
       } finally {
         setShellRunning(false);
         setIsShellInput(false);
       }
     },
-    [activeSessionId, reloadMessages],
+    [
+      activeSessionId,
+      appendShellOutput,
+      reloadMessages,
+      setPendingShellCommand,
+      setShellRunning,
+    ],
   );
 
   const handleShellExec = useCallback(
@@ -570,21 +599,6 @@ export function ChatComposer({
             <Upload className="h-3.5 w-3.5" />
             <span className="font-mono text-[11px] font-semibold uppercase tracking-wide">
               Drop files to attach
-            </span>
-          </div>
-        )}
-
-        {/* Shell-running banner */}
-        {shellRunning && (
-          <div className="flex items-center justify-center gap-2 border-b border-border-subtle bg-surface px-3 py-2 text-xs text-fg-muted">
-            <Terminal className="h-3.5 w-3.5" />
-            <span className="font-mono text-[11px] font-semibold uppercase tracking-wide">
-              Running command
-            </span>
-            <span className="inline-flex items-center gap-0.5" aria-hidden="true">
-              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:0ms]" />
-              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:160ms]" />
-              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:320ms]" />
             </span>
           </div>
         )}

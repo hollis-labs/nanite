@@ -209,24 +209,16 @@ export function ChatComposer({
         }
         // J10 (CW-20260426-0008): /scratch, /pad, /scratchpad slash commands.
         // These commands are intercepted client-side before hitting the server
-        // execute path. The bare-invocation case opens the bottom drawer and
-        // switches to the scratchpad tab; the with-args case appends text to
-        // the scratchpad WITHOUT sending to the agent.
+        // execute path. Both bare and with-args invocations open the working
+        // drawer to the Scratchpad tab. The "append args to scratchpad" path
+        // is a follow-up — for now both branches just surface the drawer.
         case "scratch":
         case "pad":
         case "scratchpad": {
-          const store = useLayoutStore.getState();
-          if (cmdArgs.trim()) {
-            // With text — append to scratchpad without sending to agent.
-            // Open the drawer so the user can see the append happened.
-            // TODO(Wave 4 / Task 11): wire to the new working-drawer scratchpad
-            // store directly. For now this is a no-op append; the drawer still
-            // opens so the user can paste manually.
-            store.setBottomDrawerOpen(true, "user");
-          } else {
-            // Bare invocation — open drawer to scratchpad tab.
-            store.setBottomDrawerOpen(true, "user");
-          }
+          useLayoutStore.getState().setChatWorkingDrawer({
+            open: true,
+            activeTab: "scratchpad",
+          });
           return;
         }
         default: {

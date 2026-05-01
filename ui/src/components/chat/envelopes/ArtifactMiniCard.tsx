@@ -38,11 +38,11 @@ function formatSize(bytes?: number): string {
 
 export function ArtifactMiniCard({ data }: ArtifactMiniCardProps) {
   const clearPanelEnvelopes = useLayoutStore((s) => s.clearPanelEnvelopes)
-  const setBottomDrawerOpen = useLayoutStore((s) => s.setBottomDrawerOpen)
+  const setChatWorkingDrawer = useLayoutStore((s) => s.setChatWorkingDrawer)
 
   const downloadUrl = data?.artifact_id ? `/api/artifacts/${data.artifact_id}/download` : ''
 
-  // Dismiss closes the transient card by clearing the bottom-drawer panel
+  // Dismiss closes the transient card by clearing the working-drawer panel
   // envelope list. The right-rail Artifacts panel still shows the artifact —
   // mini is ephemeral, right-rail is durable (per spec).
   const handleDismiss = useCallback(() => {
@@ -50,15 +50,14 @@ export function ArtifactMiniCard({ data }: ArtifactMiniCardProps) {
   }, [clearPanelEnvelopes])
 
   // After Download fires the browser-native flow, close the transient card and
-  // close the bottom drawer to revert to the chat surface. We use 'agent'
-  // source for the close so a user-opened drawer is preserved (J8 rule).
+  // collapse the working drawer to revert to the chat surface.
   const handleDownloadClick = useCallback(() => {
     // Defer the clear so the <a download> click completes first.
     setTimeout(() => {
       clearPanelEnvelopes('bottom_chat_drawer')
-      setBottomDrawerOpen(false, 'agent')
+      setChatWorkingDrawer({ open: false })
     }, 0)
-  }, [clearPanelEnvelopes, setBottomDrawerOpen])
+  }, [clearPanelEnvelopes, setChatWorkingDrawer])
 
   if (!data) {
     return (

@@ -89,48 +89,45 @@ export function ChatDrawerTabStrip({
         className="flex flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {tabs.map((t) => (
-          <div key={t.id} className="group relative shrink-0">
+          <div
+            key={t.id}
+            className={`group relative shrink-0 flex items-center gap-1 rounded-[6px] px-2.5 py-1 font-mono text-[11px] tracking-wide transition-colors ${
+              t.active
+                ? 'bg-surface text-fg'
+                : 'text-fg-muted hover:bg-surface hover:text-fg-secondary'
+            }`}
+          >
             <button
               type="button"
               onClick={() => onSelect(t.id)}
               title={t.label}
-              className={`flex items-center gap-1.5 rounded-[6px] px-2.5 py-1 font-mono text-[11px] tracking-wide transition-colors ${
-                t.active
-                  ? 'bg-surface text-fg'
-                  : 'text-fg-muted hover:bg-surface hover:text-fg-secondary'
-              }`}
+              className="flex items-center gap-1.5 outline-none"
             >
               <span>{truncate(t.label)}</span>
               {t.runningPip && (
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-warning animate-pulse" />
               )}
-              {t.pinnable && onTogglePin && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onTogglePin(t.id)
-                  }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
-                >
-                  {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
-                </button>
-              )}
-              {t.closeable && onClose && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onClose(t.id)
-                  }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  aria-label="Close tab"
-                >
-                  <X size={10} />
-                </button>
-              )}
             </button>
+            {t.pinnable && onTogglePin && (
+              <button
+                type="button"
+                onClick={() => onTogglePin(t.id)}
+                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
+              >
+                {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
+              </button>
+            )}
+            {t.closeable && onClose && (
+              <button
+                type="button"
+                onClick={() => onClose(t.id)}
+                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label="Close tab"
+              >
+                <X size={10} />
+              </button>
+            )}
           </div>
         ))}
       </div>

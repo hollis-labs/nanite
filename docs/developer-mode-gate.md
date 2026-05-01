@@ -169,8 +169,9 @@ access, set `dev_tools_allowed_paths` explicitly OR see the trust-agent
 permission redesign tracked in `CW-20260430-0009` (explicit-mention
 grants from chat prompts + notify-and-pause UX).
 
-**User override:** add `dev_tools_allowed_paths` to your `~/.nanite/nanite.yaml`
-(user-level) or project-level `nanite.yaml`:
+**User override:** add `dev_tools_allowed_paths` to your user-level config
+file (`~/.config/nanite/config.yaml`, or `$XDG_CONFIG_HOME/nanite/config.yaml`
+if `XDG_CONFIG_HOME` is set) or to a project-level `nanite.yaml`:
 
 ```yaml
 dev_tools_allowed_paths:
@@ -184,14 +185,17 @@ Entries support a leading `~/` for the user's home. The user-supplied list
 want to widen scope. The path-safety escape check (symlink-aware,
 `..` traversal blocked) still runs regardless of how the list was sourced.
 
-> **Note:** the `~/.nanite/config.yaml` file used by the *agent framework*
-> (roles, agents, project registry) is a separate file from
-> `~/.nanite/nanite.yaml` (chat-harness runtime settings). The allow-list
-> belongs in `nanite.yaml`. See `CW-20260430-0010` for an open ticket on
-> moving to the XDG-standard `~/.config/nanite/` location. The runtime
-> emits a `dev tools allow-list` info log at startup with the resolved
-> list and its source (`config:dev_tools_allowed_paths`,
-> `default:project_root`, or `default:cwd`).
+> **Note:** the user-level chat-harness config is the XDG-compliant
+> `~/.config/nanite/config.yaml` (CW-20260430-0010, Option C — landed
+> 2026-05-01). The legacy `~/.nanite/nanite.yaml` location is no longer read;
+> if you have a config there, copy it manually:
+> `mkdir -p ~/.config/nanite && cp ~/.nanite/nanite.yaml ~/.config/nanite/config.yaml`.
+> The `~/.nanite/config.yaml` file used by the *agent framework* (roles,
+> agents, project registry) is a separate file owned by a separate framework
+> and was not moved. The runtime emits a `dev tools allow-list` info log at
+> startup with the resolved list and its source
+> (`config:dev_tools_allowed_paths`, `default:project_root`, or
+> `default:cwd`).
 
 **Canonicalization:** the LLM may pass paths with a leading `~/` (e.g.
 `~/Projects-apps/nanite/coordination`). Go's `filepath` package treats `~`

@@ -112,6 +112,133 @@ func TestLoadFrom_MissingFiles(t *testing.T) {
 	}
 }
 
+// TestUserConfigPath_XDGEnvSet verifies that an explicitly set XDG_CONFIG_HOME
+// is honored as the parent for the nanite/config.yaml file (CW-20260430-0010,
+// Option C — XDG Base Directory Spec compliance).
+func TestUserConfigPath_XDGEnvSet(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	got, err := UserConfigPath()
+	if err != nil {
+		t.Fatalf("UserConfigPath: %v", err)
+	}
+	want := filepath.Join(dir, "nanite", "config.yaml")
+	if got != want {
+		t.Errorf("UserConfigPath() = %q, want %q", got, want)
+	}
+}
+
+// TestUserConfigPath_DefaultFallback verifies the fallback to
+// ~/.config/nanite/config.yaml when XDG_CONFIG_HOME is unset / empty.
+func TestUserConfigPath_DefaultFallback(t *testing.T) {
+	// Empty XDG_CONFIG_HOME → fall back to ~/.config (XDG spec § "If
+	// $XDG_CONFIG_HOME is either not set or empty, a default equal to
+	// $HOME/.config should be used.").
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+
+	got, err := UserConfigPath()
+	if err != nil {
+		t.Fatalf("UserConfigPath: %v", err)
+	}
+	want := filepath.Join(home, ".config", "nanite", "config.yaml")
+	if got != want {
+		t.Errorf("UserConfigPath() = %q, want %q", got, want)
+	}
+}
+
+// TestUserConfigPath_OldPathNotUsed asserts the legacy ~/.nanite/nanite.yaml
+// path is NOT what UserConfigPath() returns — Option C is a clean break with
+// no fallback to the old location.
+func TestUserConfigPath_OldPathNotUsed(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+
+	got, err := UserConfigPath()
+	if err != nil {
+		t.Fatalf("UserConfigPath: %v", err)
+	}
+	legacy := filepath.Join(home, ".nanite", "nanite.yaml")
+	if got == legacy {
+		t.Errorf("UserConfigPath() returned legacy path %q; clean break to XDG required", got)
+	}
+}
+
+// TestLoad_MissingUserConfigIsNonError verifies the long-standing behavior
+// that a missing user-config file is silently treated as "no user config"
+// (the readConfig helper short-circuits on os.IsNotExist).
+func TestLoad_MissingUserConfigIsNonError(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	tmpCwd := t.TempDir()
+	if err := os.Chdir(tmpCwd); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load with missing user/project config: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("Load returned nil config")
+	}
+	if cfg.Version != 0 {
+		t.Errorf("Version = %d, want 0 for empty config", cfg.Version)
+	}
+}
+
+// TestLoad_XDGUserConfigRead verifies Load() actually reads the user-config
+// file from the XDG location end-to-end.
+func TestLoad_XDGUserConfigRead(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	cfgDir := filepath.Join(xdg, "nanite")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	userYAML := `
+version: 1
+role: xdg-test-role
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(userYAML), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	tmpCwd := t.TempDir()
+	if err := os.Chdir(tmpCwd); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Role != "xdg-test-role" {
+		t.Errorf("Role = %q, want %q (user config not read from XDG location)", cfg.Role, "xdg-test-role")
+	}
+}
+
 func TestLoadFrom_ProjectMapMerge(t *testing.T) {
 	dir := t.TempDir()
 

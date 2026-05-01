@@ -78,7 +78,6 @@ export function ChatHeader() {
   const primaryAgentProfile = allAgents.find((a) => a.id === primaryAgent?.agent_id)
   const activeAgentName = primaryAgentProfile?.name || 'Nanite'
   const agentCount = sessionAgents.length
-  const shortCode = session?.short_code
   const toolCount = tools.length
   const modelName = session?.model || activeModel || primaryAgentProfile?.default_model || null
   const shortModel = modelName ? modelName.split('/').pop()?.replace(/-\d{8}$/, '') : null
@@ -161,7 +160,6 @@ export function ChatHeader() {
   }, [activeSessionId])
 
   const metaParts: string[] = []
-  if (shortCode) metaParts.push(`#${shortCode}`)
   if (shortModel) metaParts.push(shortModel)
   if (toolCount > 0) metaParts.push(`${toolCount} tools`)
 

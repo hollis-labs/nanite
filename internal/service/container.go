@@ -128,6 +128,11 @@ type Container struct {
 	// Permissions is the per-invocation permission engine. nil = permissions disabled.
 	Permissions *permission.Engine
 
+	// PathGrants tracks session-scoped explicit-mention path grants for
+	// the trust-agent permission redesign (CW-20260430-0009). Always
+	// non-nil; per-session state lives inside.
+	PathGrants *permission.PathGrants
+
 	// Workflow run store and SSE broadcaster. nil = workflow system disabled.
 	RunStore            *workflow.RunStore
 	WorkflowBroadcaster *workflow.Broadcaster
@@ -557,6 +562,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		permissions.SetMode(permission.ModeYolo)
 	}
 
+	// Trust-agent path grants (CW-20260430-0009). Session-scoped store
+	// for explicit-mention auto-grants registered at user-message ingest.
+	// Threaded onto the tool-execution context so dev_tools resolveAllowed
+	// can fall back to it when the static AllowedPaths list rejects.
+	pathGrants := permission.NewPathGrants()
+
 	// Model catalog — fetches pricing and context-window data from models.dev.
 	// After each successful fetch the OnRefresh hook pushes the data into the
 	// pkg/models overlay so all callers of Pricing/MaxOutputFor/ContextWindowFor
@@ -606,6 +617,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		UtilityProvider:    cfg.UtilityProvider,
 		UtilityModel:       cfg.UtilityModel,
 		Permissions:        permissions,
+		PathGrants:         pathGrants,
 		Tasks:              tasks,
 		EmbeddingStatus:    embeddingStatus,
 		EmbeddingProvider:  embeddingProviderID,
@@ -795,6 +807,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		UtilityModel:        cfg.UtilityModel,
 		ModelSelector:       modelSelector,
 		Permissions:         permissions,
+		PathGrants:          pathGrants,
 		AdapterRegistry:     adapterRegistry,
 		Inspector:           inspectorSvc,
 		LoopDetector:        loopDetector,

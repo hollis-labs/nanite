@@ -214,6 +214,13 @@ func containsManagedMarker(data []byte) bool {
 	return bytes.Contains(data, []byte("<!-- nanite:start -->"))
 }
 
+func archiveBaseOverride() string {
+	if v := os.Getenv("NANITE_ARCHIVE_BASE"); v != "" {
+		return v
+	}
+	return ArchiveBase
+}
+
 // syncAdaptersForProject runs SyncAllProjectRootsFiltered against the
 // built-in adapter registry, parsing the agents list from
 // `<projectDir>/.nanite/config.yaml`. Only the adapters whose Name() is

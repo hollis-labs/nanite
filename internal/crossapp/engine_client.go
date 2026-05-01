@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -56,8 +57,24 @@ func SendUICommand(ctx context.Context, cmd UICommand) error {
 		return fmt.Errorf("engine returned %d", resp.StatusCode)
 	}
 
-	slog.Info("crossapp: UI command sent", "type", cmd.Type, "target", cmd.Target, "params", cmd.Params)
+	slog.Info("crossapp: UI command sent",
+		"type", cmd.Type,
+		"target", cmd.Target,
+		"param_count", len(cmd.Params),
+		"param_keys", sortedKeys(cmd.Params))
 	return nil
+}
+
+func sortedKeys(params map[string]string) []string {
+	if len(params) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // pageRoutes maps friendly page names to Engine GUI hash routes.

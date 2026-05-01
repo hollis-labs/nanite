@@ -191,6 +191,15 @@ type SelfToolsTransport struct {
 	// schemas only and returns "unknown tool" for everything else.
 	SchemaLookup ToolSchemaLookup
 
+	// Inventory is the cross-server tool inventory used by
+	// nanite_tool_list (CW-20260501-0001). When set, the discovery
+	// primitive enumerates every registered MCP tool — self, memory,
+	// dev, general, plugin — rather than only the in-process self
+	// tools. *mcp.Manager satisfies this via GetAllToolsUnfiltered.
+	// Nil-safe — when unwired, nanite_tool_list falls back to
+	// selfToolDefinitions() (the legacy SP6 behavior).
+	Inventory ToolInventoryLookup
+
 	// LearningRecorder is the Vanta-backed write surface for the D1
 	// nanite_remember self-tool (CW-20260429-0009). When unset, the
 	// tool returns a clear errorResult on every call so a wiring miss
@@ -308,8 +317,6 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callInstallHome(args)
 	case "nanite_install_project":
 		return st.callInstallProject(args)
-	case "nanite_install_rollback":
-		return st.callInstallRollback(args)
 	case "nanite_install_diff":
 		return st.callInstallDiff(args)
 	case "nanite_message_send":
@@ -1222,14 +1229,9 @@ func (st *SelfToolsTransport) callInstallProject(args map[string]any) (*ToolResu
 	if projectDir == "" {
 		return errorResult("project_dir is required"), nil
 	}
-	migrate, _ := args["migrate_from_agentrc"].(bool)
-	archiveOnly, _ := args["archive_only"].(bool)
-
 	svc := install.New()
 	report, err := svc.InstallProject(install.InstallProjectOptions{
-		ProjectDir:         projectDir,
-		MigrateFromAgentrc: migrate,
-		ArchiveOnly:        archiveOnly,
+		ProjectDir: projectDir,
 	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("install project: %v", err)), nil
@@ -1239,31 +1241,13 @@ func (st *SelfToolsTransport) callInstallProject(args map[string]any) (*ToolResu
 	switch {
 	case report.FreshScaffold:
 		summary += " fresh scaffold"
-	case report.Migrated:
-		summary += fmt.Sprintf(" migrated (archive=%s)", report.ArchivePath)
 	case report.Adopted:
 		summary += " adopted existing"
-	case report.ArchiveOnly:
-		summary += fmt.Sprintf(" archive-only (archive=%s)", report.ArchivePath)
 	}
 	if len(report.Warnings) > 0 {
 		summary += "\nwarnings:\n  - " + strings.Join(report.Warnings, "\n  - ")
 	}
 	return textResult(summary), nil
-}
-
-func (st *SelfToolsTransport) callInstallRollback(args map[string]any) (*ToolResult, error) {
-	projectDir, _ := args["project_dir"].(string)
-	if projectDir == "" {
-		return errorResult("project_dir is required"), nil
-	}
-	archivePath, _ := args["archive_path"].(string)
-
-	svc := install.New()
-	if err := svc.Rollback(install.RollbackOptions{ProjectDir: projectDir, ArchivePath: archivePath}); err != nil {
-		return errorResult(fmt.Sprintf("rollback: %v", err)), nil
-	}
-	return textResult("rollback complete: " + projectDir), nil
 }
 
 func (st *SelfToolsTransport) callInstallDiff(args map[string]any) (*ToolResult, error) {

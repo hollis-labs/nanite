@@ -88,7 +88,7 @@ import {
  */
 const BUILTIN_PANELS: PanelDef[] = [
   { id: 'widgets',   label: 'Widgets',   icon: LayoutGrid, source: 'builtin', order: 0,  defaultVisible: true  },
-  { id: 'work',      label: 'Work',      icon: ListTodo,   source: 'builtin', order: 10, defaultVisible: true  },
+  { id: 'work',      label: 'Plan',      icon: ListTodo,   source: 'builtin', order: 10, defaultVisible: true  },
   { id: 'workflows', label: 'Workflows', icon: GitBranch,  source: 'builtin', order: 20, defaultVisible: true  },
   { id: 'inbox',     label: 'Inbox',     icon: Mail,       source: 'builtin', order: 30, defaultVisible: true  },
   { id: 'artifacts', label: 'Artifacts', icon: Package,    source: 'builtin', order: 40, defaultVisible: true  },
@@ -341,7 +341,7 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
 
         {/* Tab strip — horizontal scroll when many panels */}
         {finalPanelIds.length > 1 && (
-          <div className="flex border-b border-border shrink-0 overflow-x-auto scrollbar-hide">
+          <div className="flex border-b border-border shrink-0 overflow-x-auto no-scrollbar">
             {finalPanelIds.map((id) => {
               const def = panels[id]
               const Icon = def?.icon ?? Layers

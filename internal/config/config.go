@@ -1,6 +1,14 @@
 // Package config loads and merges nanite configuration from
-// user-level (~/.nanite/nanite.yaml) and project-level (./nanite.yaml).
+// user-level (XDG: $XDG_CONFIG_HOME/nanite/config.yaml, default
+// ~/.config/nanite/config.yaml) and project-level (./nanite.yaml).
 // Project-level values override user-level values for any field that is set.
+//
+// The user-level path follows the XDG Base Directory Specification:
+// https://specifications.freedesktop.org/basedir-spec/0.8/
+//
+// CW-20260430-0010 (Option C): the legacy ~/.nanite/nanite.yaml location is
+// no longer read. Pre-release migration is manual — copy your existing
+// config to ~/.config/nanite/config.yaml.
 package config
 
 import (
@@ -35,6 +43,40 @@ type Config struct {
 	Defaults       DefaultsConfig           `yaml:"defaults"`
 	Projects       map[string]ProjectEntry  `yaml:"projects"`
 	HooksDir       string                   `yaml:"hooks_dir"`
+	// Vanta is the optional Vanta MCP server configuration (CW-20260501-0005
+	// sub-ticket 2). When URL is non-empty, the chat harness registers a
+	// `vanta` MCP server at startup so the chat agent can reach
+	// memory_recall / memory_write / knowledge_* / context_* tools. Trust
+	// tier defaults to plugin_http per docs/mcp-trust-model.md (Vanta is
+	// the user's own infrastructure).
+	Vanta          VantaConfig              `yaml:"vanta"`
+}
+
+// VantaConfig holds Vanta MCP server connection details. Loaded from the
+// user-level XDG config file ($XDG_CONFIG_HOME/nanite/config.yaml, default
+// ~/.config/nanite/config.yaml) or project-level ./nanite.yaml. Token may
+// also be supplied via the NANITE_VANTA_TOKEN environment variable, which
+// overrides any value in the config file (so the secret never has to live
+// in YAML).
+//
+// CW-20260501-0005 sub-ticket 2.
+type VantaConfig struct {
+	// URL is the Vanta MCP HTTP endpoint, e.g. "http://localhost:6810/mcp".
+	// Leave empty to disable Vanta integration.
+	URL string `yaml:"url"`
+	// Token is an optional Bearer token sent in the Authorization header on
+	// every JSON-RPC request. Set via NANITE_VANTA_TOKEN env var to keep the
+	// secret out of YAML.
+	Token string `yaml:"token"`
+	// TrustTier overrides the default trust tier for Vanta. Allowed values
+	// are the four mcp.TrustTier constants: builtin, plugin_stdio,
+	// plugin_http (default), third_party_http. Most users should leave this
+	// unset.
+	TrustTier string `yaml:"trust_tier"`
+	// ServerName overrides the registered MCP server name. Defaults to
+	// "vanta" — only set this if "vanta" collides with another registered
+	// server in your environment (rare).
+	ServerName string `yaml:"server_name"`
 }
 
 // ProjectConfig identifies the current project.
@@ -64,19 +106,46 @@ type ProjectEntry struct {
 }
 
 // Load reads and merges configuration. It first reads the user-level config
-// (~/.nanite/nanite.yaml) as a base, then overlays the project-level config
-// (./nanite.yaml relative to the working directory). Project values override
-// user values for any field that is set.
+// from the XDG-compliant location as a base, then overlays the project-level
+// config (./nanite.yaml relative to the working directory). Project values
+// override user values for any field that is set.
+//
+// User-config path resolution (XDG Base Directory Spec):
+//   - if $XDG_CONFIG_HOME is set: $XDG_CONFIG_HOME/nanite/config.yaml
+//   - otherwise:                  ~/.config/nanite/config.yaml
+//
+// A missing user-config file is not an error — Load returns the project
+// config alone (or a zero Config if neither file exists).
 func Load() (*Config, error) {
-	home, err := os.UserHomeDir()
+	userPath, err := UserConfigPath()
 	if err != nil {
 		return nil, err
 	}
 
-	userPath := filepath.Join(home, ".nanite", "nanite.yaml")
 	projectPath := "nanite.yaml" // relative to cwd
 
 	return LoadFrom(userPath, projectPath)
+}
+
+// UserConfigPath returns the resolved absolute path to the user-level config
+// file per the XDG Base Directory Specification:
+//
+//   - if $XDG_CONFIG_HOME is set and non-empty: $XDG_CONFIG_HOME/nanite/config.yaml
+//   - otherwise:                                ~/.config/nanite/config.yaml
+//
+// The file is not required to exist — callers (including Load) treat a
+// missing file as "no user config" without error. This function only
+// returns an error if the user's home directory cannot be determined and
+// $XDG_CONFIG_HOME is unset.
+func UserConfigPath() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "nanite", "config.yaml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "nanite", "config.yaml"), nil
 }
 
 // LoadFrom reads and merges configuration from explicit file paths.
@@ -174,6 +243,21 @@ func merge(user, project *Config) *Config {
 	}
 	if project.HooksDir != "" {
 		out.HooksDir = project.HooksDir
+	}
+
+	// Vanta: per-field merge so a project file can override URL alone without
+	// resetting Token/TrustTier/ServerName the user set globally.
+	if project.Vanta.URL != "" {
+		out.Vanta.URL = project.Vanta.URL
+	}
+	if project.Vanta.Token != "" {
+		out.Vanta.Token = project.Vanta.Token
+	}
+	if project.Vanta.TrustTier != "" {
+		out.Vanta.TrustTier = project.Vanta.TrustTier
+	}
+	if project.Vanta.ServerName != "" {
+		out.Vanta.ServerName = project.Vanta.ServerName
 	}
 
 	// Executor: merge field-by-field so partial overrides work.

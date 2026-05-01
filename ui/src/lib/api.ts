@@ -287,7 +287,7 @@ export const api = {
 
   createProject: async (
     workspaceId: string,
-    data: { name: string; description?: string },
+    data: { name: string; description?: string; repo_path?: string },
   ): Promise<Project> => {
     const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects`, {
       method: "POST",

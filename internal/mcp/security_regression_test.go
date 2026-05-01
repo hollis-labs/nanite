@@ -454,7 +454,7 @@ func TestResolveAllowed_ReturnsEscapeErrorType(t *testing.T) {
 	}
 	dt := NewDevToolsTransport([]string{real})
 
-	_, err = dt.resolveAllowed("/etc/hosts")
+	_, err = dt.resolveAllowed(context.Background(), "/etc/hosts")
 	if err == nil {
 		t.Fatal("expected error for path outside root")
 	}

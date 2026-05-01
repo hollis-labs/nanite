@@ -3,22 +3,41 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
+
+	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/dispatch"
 )
 
 // naniteToolListDefinition is the cheap discovery primitive (SP6 —
 // CW-20260430-0006). It complements nanite_tool_describe: where describe
 // returns full per-tool detail (schema + golden examples + relations),
-// list returns just `name + one-line summary` for every self-tool, with
-// an optional substring filter. Cost target: unfiltered ≤ a few KiB,
-// filtered ≤ ~500 B — agents can browse the surface without burning
-// turns on inference-of-tool-names.
+// list returns just `name + one-line summary` for every tool on the
+// agent's surface, with an optional substring filter. Cost target:
+// unfiltered ≤ a few KiB, filtered ≤ ~500 B — agents can browse the
+// surface without burning turns on inference-of-tool-names.
 //
 // The motivating evidence is c120 (2026-04-29), where the agent burned
 // turns guessing tool names (`nanite_reminder_create` → `nanite_reminder`
 // → `nanite_set_reminder`) and its self-listing of tools missed
-// `nanite_set_reminder` entirely. With this primitive on the surface,
-// the agent has a real index it can scan rather than relying on prior.
+// `nanite_set_reminder` entirely.
+//
+// CW-20260501-0001 (SP6 follow-up): the original implementation only
+// enumerated tools defined in `self_tools.go`, which silently hid tools
+// registered on sibling MCP servers like `nanite-memory` (e.g.
+// `nanite_memory_recall`). The list now sources from the full MCP
+// Manager surface (via the ToolInventoryLookup interface) and applies
+// the chat-surface filter so the agent sees exactly what it can invoke.
+//
+// CW-20260501-0012: the chat-surface filter is no longer hard-coded —
+// the surface used is inferred from the caller's dispatch role
+// (mcp.CallerRoleFromContext), stamped on ctx by
+// service.executeToolBatch. Chat callers get the static chat-surface
+// view (CW-0001 behavior); Worker/Planner callers get the full
+// cross-server inventory (their effective surface is the agent
+// profile's own permissions, not a dispatch-side allow-list). See
+// gatherInventory for the surface-decision details.
 //
 // Reactive posture: this is a tool the agent reaches for, not a gate it
 // passes through. No "must call before X" rule. See
@@ -26,7 +45,7 @@ import (
 func naniteToolListDefinition() Tool {
 	return Tool{
 		Name: "nanite_tool_list",
-		Description: "Cheap discovery primitive — list available self-tools by name + one-line summary.\n\n" +
+		Description: "Cheap discovery primitive — list available tools by name + one-line summary.\n\n" +
 			"**Contract:** input `{filter?: string}` (optional case-insensitive substring matched against BOTH name and summary). Output `{tools: [{name, summary}], count}`.\n\n" +
 			"**When to use:** When you're not sure which tool to reach for, or you want to confirm a tool exists before calling it. Cheap browsing first; full per-tool detail (schema + examples) via `nanite_tool_describe` second.\n\n" +
 			"**Example:** `nanite_tool_list({filter:\"reminder\"}) → {tools:[{name:\"nanite_set_reminder\", summary:\"Schedule a reminder for the user at a specific time.\"}], count:1}`.\n\n" +
@@ -41,6 +60,26 @@ func naniteToolListDefinition() Tool {
 			},
 		},
 	}
+}
+
+// ToolInventoryLookup is the narrow registry surface nanite_tool_list
+// uses to enumerate every tool registered with the MCP manager,
+// regardless of which server it lives on. *mcp.Manager satisfies this
+// via GetAllToolsUnfiltered; tests can substitute a stub.
+//
+// This is the cross-server complement to ToolSchemaLookup (which
+// resolves a single tool's input schema by name). Both interfaces stay
+// narrow on purpose so SelfToolsTransport doesn't gain a hard
+// dependency on *Manager — the import direction is mcp → mcp,
+// satisfied by an interface.
+type ToolInventoryLookup interface {
+	// GetAllToolsUnfiltered returns every discovered tool across every
+	// registered MCP server, regardless of loadType. Names are uniform
+	// (post-internalization, no `mcp__server__` prefix). The slice and
+	// its elements are caller-owned; the implementation is expected to
+	// return a fresh slice on each call so the caller can mutate it
+	// without racing the manager.
+	GetAllToolsUnfiltered() []provider.ToolDefinition
 }
 
 // summaryMaxBytes caps the per-tool summary length so the unfiltered
@@ -115,32 +154,116 @@ func safeTruncate(s string, n int) string {
 	return s[:n]
 }
 
-// callToolList handles nanite_tool_list. Iterates selfToolDefinitions(),
-// builds {name, summary} pairs (summary = first-sentence of the tool's
-// description, capped at summaryMaxBytes), and applies the optional
-// filter to BOTH name and summary case-insensitively. Returns
-// `{tools, count}`. Empty match returns `count:0` and an empty list,
-// NOT an error — the agent reading the result decides whether to widen
-// the filter.
+// inventoryEntry is the {name, description} pair callToolList iterates
+// over after merging the cross-server inventory with the local self-
+// tool definitions. Keeping this minimal lets the same loop run over
+// either source (Manager-fed or selfToolDefinitions-fed).
+type inventoryEntry struct {
+	name        string
+	description string
+}
+
+// gatherInventory returns the deduplicated set of tools to consider for
+// nanite_tool_list, sourced from the cross-server MCP inventory when
+// available and falling back to the in-process self-tools when not.
+//
+// Surface filter (CW-20260501-0012): the filter applied here depends on
+// the calling agent's dispatch role, stamped on ctx by
+// service.executeToolBatch via mcp.WithCallerRole. The role decision is
+// inferred from caller context (the cleanest of the three options
+// considered for CW-20260501-0012 — surface-arg parameter, sibling
+// tool, or caller-context inference).
+//
+//   - dispatch.RoleChat: apply IsChatSurfaceTool — the chat agent has
+//     a static allow-list (dispatch.ChatToolSurface). Off-surface tools
+//     (dev_*, third-party MCP-origin) would mislead the discovery
+//     primitive because EnforceChatSurface drops them at boot anyway.
+//   - dispatch.RoleWorker / dispatch.RolePlanner: NO surface filter.
+//     Worker/Planner surfaces are governed by the spawned agent
+//     profile's own permissions (see dispatch/role.go ChatToolSurface
+//     comments — there is no static dispatch-side allow-list for these
+//     roles), so the discovery primitive must reflect that. Filtering
+//     here would force false negatives for dev_*/general_*/code_* and
+//     replicate the CW-20260501-0001 bug for Worker agents.
+//   - RoleInvalid (un-stamped ctx): fall back to IsChatSurfaceTool.
+//     Test paths and call sites that haven't yet been threaded through
+//     WithCallerRole get the conservative pre-CW-0012 behavior.
+//
+// Determinism: results are sorted by name so the rendered list is
+// reproducible across runs (the broker / manager iteration order is
+// not stable).
+func (st *SelfToolsTransport) gatherInventory(ctx context.Context) []inventoryEntry {
+	seen := make(map[string]struct{})
+	var out []inventoryEntry
+
+	role := CallerRoleFromContext(ctx)
+	// Worker/Planner have profile-owned permissions — no dispatch-side
+	// allow-list. Chat (and unset/invalid) get the static surface filter.
+	applyChatFilter := role != dispatch.RoleWorker && role != dispatch.RolePlanner
+
+	add := func(name, desc string) {
+		if name == "" {
+			return
+		}
+		if _, dup := seen[name]; dup {
+			return
+		}
+		if applyChatFilter && !dispatch.IsChatSurfaceTool(name) {
+			return
+		}
+		seen[name] = struct{}{}
+		out = append(out, inventoryEntry{name: name, description: desc})
+	}
+
+	// Primary source: the MCP manager's full inventory across every
+	// registered server (self, nanite-memory, dev, general, code,
+	// plugins). Each entry already carries the uniform agent-facing
+	// name and its description.
+	if st.Inventory != nil {
+		for _, t := range st.Inventory.GetAllToolsUnfiltered() {
+			add(t.Name, t.Description)
+		}
+	}
+
+	// Fallback / belt-and-suspenders: include selfToolDefinitions()
+	// directly. This makes the primitive useful in tests that wire a
+	// SelfToolsTransport without a manager, and ensures the self
+	// surface is visible even on the rare path where DiscoverTools
+	// hasn't run yet (early init, manager-less unit tests).
+	for _, d := range selfToolDefinitions() {
+		add(d.Name, d.Description)
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// callToolList handles nanite_tool_list. Iterates the cross-server tool
+// inventory (chat-surface filtered), builds {name, summary} pairs
+// (summary = first-sentence of the tool's description, capped at
+// summaryMaxBytes), and applies the optional filter to BOTH name and
+// summary case-insensitively. Returns `{tools, count}`. Empty match
+// returns `count:0` and an empty list, NOT an error — the agent reading
+// the result decides whether to widen the filter.
 func (st *SelfToolsTransport) callToolList(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	filter := strings.ToLower(strings.TrimSpace(strArg(args, "filter", "")))
 
-	defs := selfToolDefinitions()
+	inv := st.gatherInventory(ctx)
 	type entry struct {
 		Name    string `json:"name"`
 		Summary string `json:"summary"`
 	}
-	tools := make([]entry, 0, len(defs))
-	for _, d := range defs {
-		summary := firstSentenceSummary(d.Description)
+	tools := make([]entry, 0, len(inv))
+	for _, d := range inv {
+		summary := firstSentenceSummary(d.description)
 		if filter != "" {
-			lname := strings.ToLower(d.Name)
+			lname := strings.ToLower(d.name)
 			lsumm := strings.ToLower(summary)
 			if !strings.Contains(lname, filter) && !strings.Contains(lsumm, filter) {
 				continue
 			}
 		}
-		tools = append(tools, entry{Name: d.Name, Summary: summary})
+		tools = append(tools, entry{Name: d.name, Summary: summary})
 	}
 
 	out := map[string]any{

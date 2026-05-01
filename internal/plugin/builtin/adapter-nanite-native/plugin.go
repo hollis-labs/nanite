@@ -1,7 +1,7 @@
-// Package nanitenative implements the nanite-native adapter plugin, replacing
-// the agentrc-sync plugin. It reads agent definitions from .nanite/ (with
-// .agentrc/ fallback) and implements both agent.CLIAgentAdapter and
-// agent.AgentComposer for role/skill-based prompt composition.
+// Package nanitenative implements the nanite-native adapter plugin. It reads
+// agent definitions from .nanite/ and implements both
+// agent.CLIAgentAdapter and agent.AgentComposer for role/skill-based prompt
+// composition.
 package nanitenative
 
 import (
@@ -47,12 +47,12 @@ func init() {
 }
 
 // ---------------------------------------------------------------------------
-// Config types (backward-compatible with agentrc)
+// Config types
 // ---------------------------------------------------------------------------
 
-// naniteConfig is the structure of .nanite/config.yaml (or .agentrc/config.yaml).
+// naniteConfig is the structure of .nanite/config.yaml.
 type naniteConfig struct {
-	Version string                 `yaml:"agentrc_version"` // keep for backward compat
+	Version string                 `yaml:"nanite_version"`
 	Agents  map[string]naniteAgent `yaml:"agents"`
 }
 
@@ -103,10 +103,12 @@ func New() *Plugin {
 // Adapter returns the CLIAgentAdapter / AgentComposer for this plugin.
 func (p *Plugin) Adapter() *Adapter { return p.adapter }
 
-func (p *Plugin) ID() string             { return "adapter-nanite-native" }
-func (p *Plugin) Name() string           { return "Nanite Native Adapter" }
-func (p *Plugin) Version() string        { return "0.2.0" }
-func (p *Plugin) Description() string    { return "Syncs .nanite/ (or .agentrc/) agent definitions and provides CLIAgentAdapter + AgentComposer" }
+func (p *Plugin) ID() string      { return "adapter-nanite-native" }
+func (p *Plugin) Name() string    { return "Nanite Native Adapter" }
+func (p *Plugin) Version() string { return "0.2.0" }
+func (p *Plugin) Description() string {
+	return "Syncs .nanite/ agent definitions and provides CLIAgentAdapter + AgentComposer"
+}
 func (p *Plugin) Dependencies() []string { return nil }
 
 // Manifest exposes the embedded plugin.yaml so the host loader runs the
@@ -133,10 +135,10 @@ func (p *Plugin) Load(host plugin.Host) error {
 	}
 
 	// Read global config for role definitions.
-	globalCfg, _ := readGlobalConfigWithFallback(home, logger)
+	globalCfg := readGlobalConfigFromHome(home)
 
 	// Read project-level config.
-	projectCfg, projectConfigDir, err := readProjectConfigWithFallback(".", logger)
+	projectCfg, projectConfigDir, err := readProjectConfigFromRoot(".")
 	if err != nil {
 		logger.Info("adapter-nanite-native: no project config found", "error", err.Error())
 		p.status = plugin.PluginStatus{Loaded: true, Enabled: true, LoadedAt: time.Now()}
@@ -149,7 +151,7 @@ func (p *Plugin) Load(host plugin.Host) error {
 		return nil
 	}
 
-	rolesDir := resolveGlobalDir(home, "roles", logger)
+	rolesDir := globalDir(home, "roles")
 	configPath, _ := filepath.Abs(filepath.Join(projectConfigDir, "config.yaml"))
 
 	// Track which slugs we synced so we can disable removed agents.
@@ -196,13 +198,10 @@ func (p *Plugin) Load(host plugin.Host) error {
 	}
 
 	// Disable agents that were previously synced but are no longer in the config.
-	// Check both "nanite" and legacy "agentrc" sources.
-	for _, src := range []string{"nanite", "agentrc"} {
-		existing, err := s.ListAgentsBySource(src)
-		if err != nil {
-			logger.Warn("adapter-nanite-native: could not list existing agents", "source", src, "error", err.Error())
-			continue
-		}
+	existing, err := s.ListAgentsBySource("nanite")
+	if err != nil {
+		logger.Warn("adapter-nanite-native: could not list existing agents", "source", "nanite", "error", err.Error())
+	} else {
 		for _, a := range existing {
 			if !syncedSlugs[a.Slug] && a.Status == "active" {
 				a.Status = "disabled"
@@ -266,15 +265,15 @@ func (a *Adapter) Discover(projectDir string) ([]agent.Definition, error) {
 		return nil, fmt.Errorf("adapter-nanite-native: cannot determine home dir: %w", err)
 	}
 
-	globalCfg, _ := readGlobalConfigWithFallback(home, nil)
+	globalCfg := readGlobalConfigFromHome(home)
 
-	projectCfg, projectConfigDir, err := readProjectConfigWithFallback(projectDir, nil)
+	projectCfg, projectConfigDir, err := readProjectConfigFromRoot(projectDir)
 	if err != nil {
 		// No config file is not an error — just no agents to discover.
 		return nil, nil
 	}
 
-	rolesDir := resolveGlobalDir(home, "roles", nil)
+	rolesDir := globalDir(home, "roles")
 
 	var defs []agent.Definition
 	for slug, agentDef := range projectCfg.Agents {
@@ -350,13 +349,13 @@ func (a *Adapter) ComposePrompt(agentConfig any, projectDir string) (string, err
 		return "", fmt.Errorf("adapter-nanite-native: cannot determine home dir: %w", err)
 	}
 
-	globalCfg, _ := readGlobalConfigWithFallback(home, nil)
-	rolesDir := resolveGlobalDir(home, "roles", nil)
+	globalCfg := readGlobalConfigFromHome(home)
+	rolesDir := globalDir(home, "roles")
 
 	systemPrompt := composeSystemPrompt(globalCfg, rolesDir, agentDef.Roles)
 
 	if agentDef.Context != "" {
-		_, projectConfigDir, err := readProjectConfigWithFallback(projectDir, nil)
+		_, projectConfigDir, err := readProjectConfigFromRoot(projectDir)
 		if err == nil {
 			ctxPath := filepath.Join(projectConfigDir, agentDef.Context)
 			if data, err := os.ReadFile(ctxPath); err == nil {
@@ -368,16 +367,16 @@ func (a *Adapter) ComposePrompt(agentConfig any, projectDir string) (string, err
 	return systemPrompt, nil
 }
 
-// ListRoles reads ~/.nanite/roles/ (fallback ~/.agentrc/roles/) and returns
-// available roles with metadata from the global config.
+// ListRoles reads ~/.nanite/roles/ and returns available roles with metadata
+// from the global config.
 func (a *Adapter) ListRoles() ([]agent.RoleInfo, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("adapter-nanite-native: cannot determine home dir: %w", err)
 	}
 
-	globalCfg, _ := readGlobalConfigWithFallback(home, nil)
-	rolesDir := resolveGlobalDir(home, "roles", nil)
+	globalCfg := readGlobalConfigFromHome(home)
+	rolesDir := globalDir(home, "roles")
 
 	var roles []agent.RoleInfo
 
@@ -417,15 +416,14 @@ func (a *Adapter) ListRoles() ([]agent.RoleInfo, error) {
 	return roles, nil
 }
 
-// ListSkills reads ~/.nanite/skills/ (fallback ~/.agentrc/skills/) and returns
-// available skills.
+// ListSkills reads ~/.nanite/skills/ and returns available skills.
 func (a *Adapter) ListSkills() ([]agent.SkillInfo, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("adapter-nanite-native: cannot determine home dir: %w", err)
 	}
 
-	skillsDir := resolveGlobalDir(home, "skills", nil)
+	skillsDir := globalDir(home, "skills")
 
 	var skills []agent.SkillInfo
 
@@ -455,66 +453,26 @@ func (a *Adapter) ListSkills() ([]agent.SkillInfo, error) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// resolveGlobalDir returns the path for a global subdirectory (roles, skills)
-// preferring .nanite/ over .agentrc/.
-func resolveGlobalDir(home, subdir string, logger plugin.Logger) string {
-	primary := filepath.Join(home, ".nanite", subdir)
-	if dirExists(primary) {
-		return primary
-	}
-	fallback := filepath.Join(home, ".agentrc", subdir)
-	if dirExists(fallback) {
-		if logger != nil {
-			logger.Warn("adapter-nanite-native: using deprecated .agentrc/ path, migrate to .nanite/", "path", fallback)
-		}
-		return fallback
-	}
-	// Neither exists — return primary so callers get a clean "not found".
-	return primary
+func globalDir(home, subdir string) string {
+	return filepath.Join(home, ".nanite", subdir)
 }
 
-// readGlobalConfigWithFallback reads the global config from ~/.nanite/config.yaml
-// with fallback to ~/.agentrc/config.yaml.
-func readGlobalConfigWithFallback(home string, logger plugin.Logger) (*globalConfig, error) {
-	primary := filepath.Join(home, ".nanite", "config.yaml")
-	cfg, err := readGlobalConfig(primary)
-	if err == nil {
-		return cfg, nil
+func readGlobalConfigFromHome(home string) *globalConfig {
+	cfg, err := readGlobalConfig(filepath.Join(home, ".nanite", "config.yaml"))
+	if err != nil {
+		return &globalConfig{Roles: map[string]roleEntry{}}
 	}
-
-	fallback := filepath.Join(home, ".agentrc", "config.yaml")
-	cfg, err = readGlobalConfig(fallback)
-	if err == nil {
-		if logger != nil {
-			logger.Warn("adapter-nanite-native: using deprecated .agentrc/ path, migrate to .nanite/", "path", fallback)
-		}
-		return cfg, nil
-	}
-
-	// Neither found — return empty config.
-	return &globalConfig{Roles: map[string]roleEntry{}}, err
+	return cfg
 }
 
-// readProjectConfigWithFallback reads the project config from {dir}/.nanite/config.yaml
-// with fallback to {dir}/.agentrc/config.yaml. Returns the config, the config
-// directory path (e.g. "{dir}/.nanite"), and any error.
-func readProjectConfigWithFallback(dir string, logger plugin.Logger) (*naniteConfig, string, error) {
-	primaryDir := filepath.Join(dir, ".nanite")
-	cfg, err := readProjectConfig(filepath.Join(primaryDir, "config.yaml"))
+// readProjectConfigFromRoot reads the project config from {dir}/.nanite/config.yaml.
+func readProjectConfigFromRoot(dir string) (*naniteConfig, string, error) {
+	configDir := filepath.Join(dir, ".nanite")
+	cfg, err := readProjectConfig(filepath.Join(configDir, "config.yaml"))
 	if err == nil {
-		return cfg, primaryDir, nil
+		return cfg, configDir, nil
 	}
-
-	fallbackDir := filepath.Join(dir, ".agentrc")
-	cfg, err = readProjectConfig(filepath.Join(fallbackDir, "config.yaml"))
-	if err == nil {
-		if logger != nil {
-			logger.Warn("adapter-nanite-native: using deprecated .agentrc/ path, migrate to .nanite/", "path", fallbackDir)
-		}
-		return cfg, fallbackDir, nil
-	}
-
-	return nil, "", fmt.Errorf("no config found in .nanite/ or .agentrc/: %w", err)
+	return nil, "", fmt.Errorf("no config found in .nanite/: %w", err)
 }
 
 // readGlobalConfig reads a global config file for role definitions.

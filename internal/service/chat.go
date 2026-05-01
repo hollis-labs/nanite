@@ -96,6 +96,10 @@ type ChatServiceConfig struct {
 	// Permissions engine — nil-safe (permissions disabled).
 	Permissions *permission.Engine
 
+	// PathGrants tracks session-scoped explicit-mention path grants for
+	// the trust-agent permission redesign (CW-20260430-0009). nil-safe.
+	PathGrants *permission.PathGrants
+
 	// Task tracking service — nil-safe (task tracking disabled).
 	Tasks task.Service
 
@@ -165,6 +169,7 @@ type chatServiceImpl struct {
 	utilityProvider string
 	utilityModel    string
 	permissions    *permission.Engine
+	pathGrants     *permission.PathGrants
 
 	embeddingStatus   string
 	embeddingProvider string
@@ -254,6 +259,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		utilityProvider:     up,
 		utilityModel:        um,
 		permissions:         cfg.Permissions,
+		pathGrants:          cfg.PathGrants,
 		embeddingStatus:         cfg.EmbeddingStatus,
 		embeddingProvider:       cfg.EmbeddingProvider,
 		embeddingWarnedSessions: make(map[string]struct{}),
@@ -395,6 +401,19 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	}
 	if err := s.store.CreateMessage(userMsg); err != nil {
 		return "", fmt.Errorf("create user message: %w", err)
+	}
+
+	// Trust-agent path-mention parser (CW-20260430-0009 Q1-Q3). Scan the
+	// user's message for strict-prefix path tokens (^~/, ^/, ^./) and
+	// register session-scoped grants for the literal path AND its parent
+	// directory. Loose patterns and tool names do NOT auto-grant — those
+	// fall through to the notify-pause path.
+	if s.pathGrants != nil {
+		granted := s.pathGrants.RegisterFromUserMessage(sessionID, content)
+		if len(granted) > 0 {
+			slog.Info("permission: explicit-mention grants registered",
+				"session_id", sessionID, "count", len(granted))
+		}
 	}
 
 	// Emit message.sent plugin event with the real user message ID.

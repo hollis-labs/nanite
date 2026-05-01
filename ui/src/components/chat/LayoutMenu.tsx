@@ -256,7 +256,7 @@ const PRESETS: { id: LayoutPreset; icon: () => React.ReactNode; label: string; l
 const CORE_RAIL_TABS = [
   { id: 'widgets',   Icon: LayoutGrid, label: 'Widgets' },
   { id: 'inbox',     Icon: Mail,       label: 'Inbox' },
-  { id: 'work',      Icon: ListTodo,   label: 'Work' },
+  { id: 'work',      Icon: ListTodo,   label: 'Plan' },
   { id: 'workflows', Icon: GitBranch,  label: 'Workflows' },
   { id: 'artifacts', Icon: Package,    label: 'Artifacts' },
 ] as const

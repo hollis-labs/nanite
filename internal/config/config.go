@@ -19,6 +19,18 @@ type Config struct {
 	BootProfiles   []string                 `yaml:"boot_profiles"`
 	WritePaths     []string                 `yaml:"write_paths"`
 	ProtectedPaths []string                 `yaml:"protected_paths"`
+	// DevToolsAllowedPaths is the user-configurable allow-list of filesystem
+	// roots that the dev_* MCP tools (dev_read, dev_glob, dev_grep, dev_write,
+	// dev_edit, dev_bash) may access. Entries support a leading ~/ for the
+	// user's home directory and are tilde-expanded at load time.
+	//
+	// When unset (nil) the runtime falls back to a hardcoded default list of
+	// common project locations (see cmd/nanite/main.go). When set, the user's
+	// list REPLACES the defaults — set explicitly to widen or narrow the
+	// scope. The path-safety escape check (internal/pathsafe) still runs on
+	// every call regardless of how the allow-list was sourced; this knob
+	// only widens which roots qualify, it never disables traversal protection.
+	DevToolsAllowedPaths []string                 `yaml:"dev_tools_allowed_paths"`
 	Executor       ExecutorConfig           `yaml:"executor"`
 	Defaults       DefaultsConfig           `yaml:"defaults"`
 	Projects       map[string]ProjectEntry  `yaml:"projects"`
@@ -91,6 +103,28 @@ func (c *Config) ProjectRoot() string {
 	return expandHome(c.Project.Root)
 }
 
+// ResolvedDevToolsAllowedPaths returns the configured DevToolsAllowedPaths
+// list with leading ~/ entries tilde-expanded to the user's home directory.
+// Empty entries are dropped. Returns nil only when the field was never
+// configured, so callers can distinguish "unset → fall back to defaults"
+// from "explicitly empty → no allowed paths". An empty-but-configured
+// list (`dev_tools_allowed_paths: []` in YAML) returns a non-nil empty
+// slice.
+func (c *Config) ResolvedDevToolsAllowedPaths() []string {
+	if c.DevToolsAllowedPaths == nil {
+		return nil
+	}
+	out := make([]string, 0, len(c.DevToolsAllowedPaths))
+	for _, p := range c.DevToolsAllowedPaths {
+		expanded := expandHome(p)
+		if expanded == "" {
+			continue
+		}
+		out = append(out, expanded)
+	}
+	return out
+}
+
 // readConfig reads a single YAML config file. Returns a zero Config if the
 // file does not exist.
 func readConfig(path string) (*Config, error) {
@@ -134,6 +168,9 @@ func merge(user, project *Config) *Config {
 	}
 	if project.ProtectedPaths != nil {
 		out.ProtectedPaths = project.ProtectedPaths
+	}
+	if project.DevToolsAllowedPaths != nil {
+		out.DevToolsAllowedPaths = project.DevToolsAllowedPaths
 	}
 	if project.HooksDir != "" {
 		out.HooksDir = project.HooksDir

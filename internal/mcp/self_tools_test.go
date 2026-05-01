@@ -372,6 +372,110 @@ func TestSelfToolsTransport_PlanCreate_ErrorsWithoutSessionID(t *testing.T) {
 	}
 }
 
+// TestSelfToolsTransport_PlanStepAdd_HappyPath verifies appending steps via
+// the MCP tool surface returns success, preserves existing step IDs, and
+// emits the appended-step JSON. CW-20260430-0001 (SP1).
+func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
+	st := newSelfTools(t)
+	st.TodoStore = st.Store
+	ctx := context.Background()
+
+	// Seed a plan with one step via plan_create.
+	createRes, err := st.CallTool(ctx, "nanite_plan_create", map[string]any{
+		"title":    "step-add target",
+		"scope":    "workspace",
+		"scope_id": "",
+		"steps":    `[{"id":"s1","title":"first","status":"pending"}]`,
+	})
+	if err != nil || createRes.IsError {
+		t.Fatalf("plan_create failed: %v / %s", err, createRes.Content[0].Text)
+	}
+	plans, _ := st.Store.ListPlans(store.PlanFilter{Scope: "workspace"})
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 plan, got %d", len(plans))
+	}
+	planID := plans[0].ID
+
+	// Append two new steps.
+	addRes, err := st.CallTool(ctx, "nanite_plan_step_add", map[string]any{
+		"plan_id": planID,
+		"steps":   `[{"title":"second"},{"title":"third","depends_on":["s2"]}]`,
+	})
+	if err != nil {
+		t.Fatalf("plan_step_add: %v", err)
+	}
+	if addRes.IsError {
+		t.Fatalf("unexpected error: %s", addRes.Content[0].Text)
+	}
+	body := addRes.Content[0].Text
+	if !strings.Contains(body, "Appended 2 step(s)") {
+		t.Errorf("expected 'Appended 2 step(s)' in result, got: %s", body)
+	}
+	if !strings.Contains(body, `"appended_count":2`) {
+		t.Errorf("expected appended_count in JSON payload, got: %s", body)
+	}
+
+	// Existing step is preserved; new steps appended at the tail with s2/s3 ids.
+	got, err := st.Store.GetPlan(planID)
+	if err != nil {
+		t.Fatalf("GetPlan: %v", err)
+	}
+	gotSteps, _ := got.ParsePlanSteps()
+	if len(gotSteps) != 3 {
+		t.Fatalf("expected 3 steps after append, got %d", len(gotSteps))
+	}
+	if gotSteps[0].ID != "s1" || gotSteps[0].Title != "first" {
+		t.Errorf("existing step mutated: %+v", gotSteps[0])
+	}
+	if gotSteps[1].ID != "s2" || gotSteps[1].Title != "second" {
+		t.Errorf("second step wrong: %+v", gotSteps[1])
+	}
+	if gotSteps[2].ID != "s3" || gotSteps[2].Title != "third" {
+		t.Errorf("third step wrong: %+v", gotSteps[2])
+	}
+}
+
+// TestSelfToolsTransport_PlanStepAdd_PlanIDNotFound verifies an unknown
+// plan_id returns a structured error result rather than a panic or silent
+// no-op. CW-20260430-0001 (SP1).
+func TestSelfToolsTransport_PlanStepAdd_PlanIDNotFound(t *testing.T) {
+	st := newSelfTools(t)
+	st.TodoStore = st.Store
+	ctx := context.Background()
+
+	r, err := st.CallTool(ctx, "nanite_plan_step_add", map[string]any{
+		"plan_id": "no-such-plan",
+		"steps":   `[{"title":"orphan step"}]`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if !r.IsError {
+		t.Fatal("expected IsError=true for missing plan_id")
+	}
+	if !strings.Contains(r.Content[0].Text, "append plan steps") {
+		t.Errorf("expected handler error prefix, got: %s", r.Content[0].Text)
+	}
+}
+
+// TestSelfToolDefinitions_PlanStepAddPresent verifies the new tool ships in
+// selfToolDefinitions(). CW-20260430-0001 (SP1).
+func TestSelfToolDefinitions_PlanStepAddPresent(t *testing.T) {
+	defs := selfToolDefinitions()
+	for _, d := range defs {
+		if d.Name == "nanite_plan_step_add" {
+			// Sanity-check Bucket-2 description sections.
+			for _, want := range []string{"When to use", "When NOT to use", "Output shape", "Cross-references"} {
+				if !strings.Contains(d.Description, want) {
+					t.Errorf("nanite_plan_step_add description missing %q", want)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("nanite_plan_step_add missing from selfToolDefinitions()")
+}
+
 func TestSelfToolDefinitions_ScratchpadToolsPresent(t *testing.T) {
 	defs := selfToolDefinitions()
 	names := make(map[string]bool, len(defs))

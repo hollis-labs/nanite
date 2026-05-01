@@ -37,15 +37,50 @@ type DevToolsTransport struct {
 }
 
 // NewDevToolsTransport creates a DevToolsTransport scoped to the given paths.
+// Entries with a leading ~/ are expanded to the user's home directory before
+// being absolutized so config-supplied paths like "~/Projects-apps" work.
 func NewDevToolsTransport(allowedPaths []string) *DevToolsTransport {
 	cleaned := make([]string, 0, len(allowedPaths))
 	for _, p := range allowedPaths {
-		abs, err := filepath.Abs(p)
+		expanded := expandHome(p)
+		abs, err := filepath.Abs(expanded)
 		if err == nil {
 			cleaned = append(cleaned, abs)
 		}
 	}
 	return &DevToolsTransport{AllowedPaths: cleaned}
+}
+
+// expandHome replaces a leading ~/ or bare ~ with the user's home directory.
+// Returns the input unchanged when no leading tilde is present or when the
+// home directory cannot be resolved. This is intentionally permissive: an
+// unresolved tilde will fail downstream path-safety checks, not silently
+// accept.
+//
+// CW-20260430-0005: Go's filepath package does not expand the shell tilde,
+// so an LLM-supplied "~/Projects-apps/nanite" was being passed through
+// filepath.Abs as a literal which produced "/cwd/~/Projects-apps/nanite" and
+// blew the allow-list. Tilde expansion at the boundary fixes the
+// canonicalization gap without weakening the symlink-aware escape check.
+func expandHome(path string) string {
+	if path == "" {
+		return ""
+	}
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return home
+	}
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~"+string(filepath.Separator)) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }
 
 // resolveAllowed validates userPath against the configured allow-list using
@@ -67,6 +102,13 @@ func (d *DevToolsTransport) resolveAllowed(userPath string) (string, error) {
 	if len(d.AllowedPaths) == 0 {
 		return "", fmt.Errorf("no allowed paths configured")
 	}
+
+	// Expand a leading ~ in the user-supplied path. Go's filepath package
+	// treats ~ as a literal, but agents (and humans) commonly write
+	// ~/Projects-apps/... expecting shell-style expansion. Without this
+	// step filepath.Abs("~/Projects") becomes "/cwd/~/Projects" and trips
+	// the escape check even on roots that should accept it.
+	userPath = expandHome(userPath)
 
 	abs, err := filepath.Abs(userPath)
 	if err != nil {
@@ -161,7 +203,7 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	return []Tool{
 		{
 			Name:        "dev_read",
-			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Allowed directories: %s. Example: dev_read(path=%q)", allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
+			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Glob/search before read on unfamiliar paths — dev_read on a non-existent path wastes a round-trip. Allowed directories: %s. Example: dev_read(path=%q)", allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

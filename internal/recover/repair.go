@@ -59,6 +59,25 @@ const DefaultRepairModel = "claude-haiku-4-5"
 // NANITE_REPAIR_TIMEOUT_MS (env override) or config (Timeout field).
 const DefaultRepairTimeout = 5000 * time.Millisecond
 
+// DefaultRepairMaxTokens is the output-token cap the repair LLM should
+// honor when emitting its single JSON object. The repair payload is
+// bounded — repaired_args + missing_required + lesson_hint — so 4096
+// tokens is a comfortable ceiling that leaves room for a moderately
+// large repaired_args while still bounding runaway responses.
+//
+// CW-20260429-0028: c113 evidence showed the repair LLM emitting
+// truncated mid-stream responses that parseRepairResponse could not
+// reassemble even after the CW-20260429-0023 markdown-fence stripping
+// landed. Setting an explicit cap is the structural fix for the
+// truncation symptom; tightening the system prompt (see
+// repairSystemPrompt) is the complementary behavioral fix.
+//
+// DefaultRepairMaxTokens is the per-call output ceiling threaded into
+// provider.ChatRequest.MaxTokens for the repair LLM pass. Callers can
+// override it via RepairOptions.MaxTokens (used by tests + by callers
+// that want a tighter budget for shape-only fixes).
+const DefaultRepairMaxTokens = 4096
+
 // MaxArgsBytes caps the size of sent_args we serialize into the repair
 // prompt. Pathologically large args are truncated; the repair pass is
 // for shape mistakes, not megabyte payloads.
@@ -124,11 +143,33 @@ type RepairOptions struct {
 	// Timeout bounds the repair LLM call. When zero, DefaultRepairTimeout.
 	Timeout time.Duration
 
+	// MaxTokens caps the repair LLM's output-token budget. When zero,
+	// DefaultRepairMaxTokens. Callers that know they need more headroom
+	// (e.g. a tool with an unusually large repaired_args) can override
+	// the default. CW-20260429-0028.
+	//
+	// NOTE — known wiring gap: provider.ChatRequest does not currently
+	// expose a MaxTokens field, so this value is captured by Repair()
+	// but cannot yet be threaded into the outgoing provider request. See
+	// the DefaultRepairMaxTokens docstring for the upstream-fix path.
+	MaxTokens int
+
 	// SchemaProvider supplies the schema for the failing tool. When nil
 	// the repair prompt omits the schema; the LLM still has the error
 	// path/reason and may produce a useful reshape, but the strict-mode
 	// guarantee is weaker. Production callers should always provide one.
 	SchemaProvider SchemaProvider
+}
+
+// resolveRepairMaxTokens returns the effective output-token cap for a
+// repair LLM call: the caller's override when positive, otherwise the
+// package default. Centralized so the resolution rule has a single
+// definition and a single test surface (CW-20260429-0028).
+func resolveRepairMaxTokens(opts RepairOptions) int {
+	if opts.MaxTokens > 0 {
+		return opts.MaxTokens
+	}
+	return DefaultRepairMaxTokens
 }
 
 // Repair calls a Haiku-class LLM to reshape args around a recoverable
@@ -157,6 +198,13 @@ func Repair(ctx context.Context, rec *RecoverableError, opts RepairOptions) (*Re
 	if timeout <= 0 {
 		timeout = DefaultRepairTimeout
 	}
+	// CW-20260429-0028: cap the repair LLM's output. Without this, the
+	// non-streaming Anthropic adapter previously hardcoded 128 tokens, which
+	// silently truncated repair responses mid-JSON (chat session c113).
+	// go-providers now honors ChatRequest.MaxTokens; we set it here so the
+	// repair task gets the budget it actually needs (default 4096 — bounded
+	// because the output is a single small JSON object).
+	maxTokens := resolveRepairMaxTokens(opts)
 
 	var schemaDoc map[string]any
 	if opts.SchemaProvider != nil {
@@ -175,6 +223,7 @@ func Repair(ctx context.Context, rec *RecoverableError, opts RepairOptions) (*Re
 		Messages: []provider.ChatMessage{
 			{Role: "user", Content: userMsg},
 		},
+		MaxTokens: maxTokens,
 	}
 
 	start := time.Now()
@@ -196,7 +245,14 @@ func Repair(ctx context.Context, rec *RecoverableError, opts RepairOptions) (*Re
 // pins the output schema, the no-fabrication rule, and the missing-
 // required fall-through. Kept short so it caches well and so the model
 // can spend its budget on the actual reshape.
+//
+// CW-20260429-0028: the OUTPUT FORMAT block was tightened to explicitly
+// forbid markdown code-fence wrapping, since c113 evidence showed Haiku
+// emitting ```json...``` -wrapped responses despite the original
+// "no markdown fences" hint. The "single bare JSON object" phrasing is a
+// load-bearing signature — guarded by TestRepairSystemPrompt_AntiMarkdown.
 func repairSystemPrompt() string {
+	const fence = "```"
 	return `You are a JSON repair assistant. The user supplies a tool name, the args they sent, the JSON Schema the args must satisfy, and the validator's error.
 
 Your job: rearrange, rename, or drop fields in sent_args so the result matches the schema.
@@ -209,7 +265,7 @@ HARD RULES — violations break the system:
 5. Wrapping a single object in an array (or unwrapping a single-element array) is allowed when the schema declares an array.
 6. Type coercion is allowed for adjacent types only: number↔integer, single-element-array↔scalar. Do NOT coerce string↔number; surface as missing_required if a number is required.
 
-OUTPUT FORMAT — respond with a single JSON object, no prose, no markdown fences:
+OUTPUT FORMAT: emit a single bare JSON object. Do NOT wrap it in markdown code fences (no ` + fence + `json, no ` + fence + `). Do NOT include preamble or explanation outside the JSON. The first character of your response must be ` + "`{`" + ` and the last must be ` + "`}`" + `. The object schema:
 {"repaired_args": <object|null>, "missing_required": [<string>...], "lesson_hint": "<short sentence>"}
 
 - repaired_args: the reshaped args object, OR null if you cannot repair without fabrication.
@@ -271,8 +327,21 @@ func marshalCapped(v any, limit int) string {
 // parseRepairResponse parses the LLM's JSON output. Tolerant of
 // surrounding chatter (markdown fences, preamble) — extracts the first
 // balanced top-level object.
+//
+// The function defends against the c112 failure mode where the repair
+// LLM wraps its response in ` ```json ... ``` ` despite the system
+// prompt telling it not to: stripCodeFence is applied first, and if
+// extraction still fails we make a second pass on the raw input as a
+// belt-and-suspenders fallback.
 func parseRepairResponse(raw string) (*RepairOutcome, error) {
-	body := extractJSONObject(raw)
+	defenced := stripCodeFence(raw)
+	body := extractJSONObject(defenced)
+	if body == "" && defenced != raw {
+		// Second pass on the original (un-defenced) input — covers the
+		// pathological case where stripCodeFence misreads a nested fence
+		// and inadvertently swallows a real closing brace.
+		body = extractJSONObject(raw)
+	}
 	if body == "" {
 		return nil, fmt.Errorf("repair LLM returned no JSON object: %q", trimForLog(raw, 200))
 	}
@@ -296,6 +365,53 @@ func parseRepairResponse(raw string) (*RepairOutcome, error) {
 		out.RepairedArgs = nil
 	}
 	return out, nil
+}
+
+// stripCodeFence removes a surrounding markdown code fence from raw if
+// present. Handles both fenced-with-language-tag (` ```json `) and bare
+// (` ``` `) fences. Tolerates whitespace and a leading preamble line by
+// scanning for the first fence rather than requiring it at byte zero.
+//
+// Behavior:
+//   - If the trimmed body starts with ` ``` ` (with or without a language
+//     tag), the opening fence line (everything up to and including the
+//     first newline) is removed.
+//   - If the resulting body ends with ` ``` `, the closing fence and any
+//     trailing whitespace are removed.
+//   - If no fence is detected the input is returned unchanged.
+//
+// The helper does not validate that the inner content is JSON — that is
+// extractJSONObject's job. It only peels the markdown wrapper so the
+// brace-counting extractor sees a clean payload.
+func stripCodeFence(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	// Find the first fence in the trimmed body (or in a leading preamble).
+	idx := strings.Index(trimmed, "```")
+	if idx < 0 {
+		return raw
+	}
+	// Drop everything through the end of the opening fence line. The
+	// language tag (e.g. "json") sits between the fence and the first
+	// newline, so the simplest correct rule is to skip up to the first
+	// newline after the fence marker.
+	after := trimmed[idx+3:]
+	nl := strings.IndexByte(after, '\n')
+	if nl < 0 {
+		// Fence with no newline after it — body is a single line; nothing
+		// useful to extract, fall back to the original input.
+		return raw
+	}
+	inner := after[nl+1:]
+	// Trim trailing closing fence + whitespace.
+	inner = strings.TrimRight(inner, " \t\r\n")
+	if strings.HasSuffix(inner, "```") {
+		inner = strings.TrimSuffix(inner, "```")
+		inner = strings.TrimRight(inner, " \t\r\n")
+	}
+	if inner == "" {
+		return raw
+	}
+	return inner
 }
 
 // extractJSONObject returns the first balanced {...} substring of raw.

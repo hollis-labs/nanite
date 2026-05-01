@@ -228,8 +228,21 @@ func selfToolDefinitions() []Tool {
 			Description: "Render a structured envelope card in chat or in a drawer. One generic surface for the v1 passive-renderable card types — replaces the older per-type nanite_show_giphy / nanite_show_document / nanite_show_report tools (CW-20260428-0019, A3).\n\n" +
 				"**When to use:** When you want to display structured content (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
 				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths and are NOT addressable here.\n\n" +
+				"**Per-type required-fields cheat sheet** (full examples + optional fields via `nanite_tool_describe(name=\"nanite_show_card\")`):\n" +
+				"- `report-card`: data={title, metrics:[{label, value}, ...]} — REQUIRES sources arg. Default → bottom_chat_drawer.\n" +
+				"- `document-viewer`: data={title, content} — REQUIRES sources. body field is `content` (markdown|html), NOT `body_markdown`. Default → bottom_chat_drawer.\n" +
+				"- `info-card`: data={title, body} — optional variant: info|success|warning|danger.\n" +
+				"- `list-card`: data={items:[{label}, ...]} — items are objects with at least `label`.\n" +
+				"- `metric-card`: data={label, value} — value is string OR number; optional unit, trend (up|down|flat), previous.\n" +
+				"- `progress-card`: data={title, progress} — progress is 0–100; optional steps:[{label, done}, ...].\n" +
+				"- `table-card`: data={columns:[{key, label}, ...], rows:[{...}, ...]} — row keys match column keys.\n" +
+				"- `timeline-card`: data={events:[{timestamp, label}, ...]} — timestamp is ISO 8601; optional status: completed|active|pending.\n" +
+				"- `diff-card`: data={before:{label, content}, after:{label, content}} — optional format: text|code.\n" +
+				"- `giphy-modal`: data={gif_url, title, source, query} — typically chained from `nanite_giphy_search`.\n\n" +
+				"**Unfamiliar type or first failure?** Call `nanite_tool_describe(name=\"nanite_show_card\")` for the full set of golden examples — one per v1 type with realistic values + optional fields populated, plus reference shapes for the decision-flow / backend-only types (session-task, error-report, approval-card, proposal-card, question-form, confirmation-card). The per-type schemas use `additionalProperties: false`, so unknown field names are rejected; the examples are the fastest way to anchor on the exact field set.\n\n" +
+				"**Fetch-then-render pattern:** External-data-into-card flows are two steps. First call the data tool, then pass its result into `nanite_show_card`. Example: `nanite_giphy_search(query=\"celebration\")` → `nanite_show_card(type=\"giphy-modal\", data={gif_url: <from step 1>, ...})`.\n\n" +
+				"**Grounding for `report-card` / `document-viewer`:** these prose-bearing types require a `sources` array — each source's `tool_use_id` must come from a tool call you actually made this turn. If the user asks for one of these and you have no real data yet, **call any data tool first to get sourceable content** — don't dodge to a different envelope type. For demo / test prompts, you may synthesize the metric values; the source must still be a real `tool_use_id` from this turn.\n\n" +
 				"**Required context:** `type` from the v1 allow-list and `data` matching the per-type schema. The handler validates `data` against `internal/envelope/schemas/<type>.schema.json` at the boundary; payloads that miss required fields, wrong types, or carry unknown keys are rejected with a structured error citing the schema field that failed.\n\n" +
-				"**Grounding:** For prose-bearing card types (`report-card`, `document-viewer`) you MUST also pass `sources` — a JSON array of `{tool_use_id, tool_name, note?}` objects citing the tool calls whose results ground the content. If you didn't fetch the data this turn, render a plain-text reply instead of an empty card.\n\n" +
 				"**Render destination:** By default the card lands wherever the schema's `default_render_target` says — for the 10 passive renderables that's the bottom drawer. Pass `render_target` to override, or `render_target=\"\"` to force-inline. `target` (visibility — open this drawer) and `mode` (workspace preset) remain independent levers; both can travel with the envelope.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -387,6 +400,7 @@ func selfToolDefinitions() []Tool {
 			Name: "nanite_plan_update",
 			Description: "Update a plan's top-level fields or transition a single step's status.\n\n" +
 				"**When to use:** To advance a step as work progresses (e.g. pending → in_progress → done), or to rename/re-status the plan itself.\n\n" +
+				"**When NOT to use:** Do NOT use this to add a new step — it only mutates existing steps and plan-level fields. To append a new step to an existing plan, use nanite_plan_step_add (do not delete and recreate the plan).\n\n" +
 				"**Required context:** Always supply the plan `id`. Supply `step_id` to update only that step; omit it to update plan-level fields.\n\n" +
 				"**Plan status transitions:** proposed → approved → in_progress → complete (or abandoned).\n" +
 				"**Step status transitions:** pending → in_progress → done (or skipped).\n\n" +
@@ -401,6 +415,31 @@ func selfToolDefinitions() []Tool {
 					"notes":   map[string]any{"type": "string", "description": "Notes for the step (optional, only with step_id)"},
 				},
 				"required": []string{"id"},
+			},
+		},
+		{
+			Name: "nanite_plan_step_add",
+			Description: "Append one or more new steps to an existing plan without deleting or recreating it. Existing step IDs and statuses are preserved.\n\n" +
+				"**When to use:** When the user adds a new step to a plan that already exists, or when you need to extend a plan mid-flight (e.g. a discovery during execution justifies one more step). Always prefer this over nanite_plan_delete + nanite_plan_create — recreation loses step history and reorders IDs.\n\n" +
+				"**When NOT to use:** To rename, re-status, or transition an existing step, use nanite_plan_update(step_id=...). To create the very first set of steps, use nanite_plan_create.\n\n" +
+				"**Required context:** plan_id (from nanite_plan_create / nanite_plan_list / nanite_plan_get) and a non-empty `steps` array. Each step needs a `title`. The `id` is optional — when omitted, an ID is auto-assigned (e.g. s4 if your plan already has s1..s3). Supplying an ID that collides with an existing step is an error.\n\n" +
+				"**Behavior:** Steps are appended at the end in the order given. Existing steps are not reordered, renumbered, or modified. Returns the appended steps with their resolved IDs so you can immediately reference them in nanite_plan_update.\n\n" +
+				"**Output shape:** \"Appended N step(s) to plan <plan_id>\" plus a JSON object {plan_id, appended: [step...], appended_count}. The `appended` array contains each step exactly as stored, including the resolved `id`.\n\n" +
+				"**Golden example:** plan_id=\"pln-01HZ...\", steps=`[{\"title\":\"Write integration test\",\"acceptance\":\"covers happy path + plan-not-found\",\"depends_on\":[\"s2\"]}]` → appends one step at the end with auto-assigned id (e.g. s4) and the rest of the plan untouched.\n\n" +
+				"**Cross-references:** nanite_plan_create (initial plan + steps), nanite_plan_update (advance a step's status), nanite_plan_get (read step IDs before appending).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"plan_id": map[string]any{"type": "string", "description": "Plan ID to append to. Required."},
+					"steps": map[string]any{
+						"description": "Step objects to append: [{id?, title, status?, depends_on?, acceptance?, notes?}]. `title` is required per step; `id` is auto-assigned when omitted. Pass either a JSON array string or a real array — the handler accepts both.",
+						"anyOf": []any{
+							map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+							map[string]any{"type": "string"},
+						},
+					},
+				},
+				"required": []string{"plan_id", "steps"},
 			},
 		},
 		{
@@ -1071,5 +1110,12 @@ the current turn for subsequent writes.
 		// so agents can introspect any internal tool when uncertain about
 		// input shape. Layer 1 of the self-healing tool surface lens.
 		naniteToolDescribeDefinition(),
+		// --- Cheap discovery primitive (SP6, CW-20260430-0006) ---
+		// nanite_tool_list returns name + one-line summary for every
+		// self-tool, with optional case-insensitive filter. Sister to
+		// nanite_tool_describe but ~2 orders of magnitude cheaper —
+		// agents browse the surface here, then describe a single tool
+		// for the deep dive.
+		naniteToolListDefinition(),
 	}
 }

@@ -130,6 +130,16 @@ func TestIsChatSurfaceTool_RejectsDangerousTools(t *testing.T) {
 	}
 }
 
+// TestIsChatSurfaceTool_PlanStepAddAllowed asserts the SP1 append-steps
+// tool is reachable from the Chat surface — covered by the existing
+// `nanite_plan_` prefix and not requiring a widening of ChatToolSurface.
+// CW-20260430-0001 (SP1).
+func TestIsChatSurfaceTool_PlanStepAddAllowed(t *testing.T) {
+	if !IsChatSurfaceTool("nanite_plan_step_add") {
+		t.Fatal("IsChatSurfaceTool(\"nanite_plan_step_add\") = false; expected true via the nanite_plan_ prefix")
+	}
+}
+
 // TestAssignRole_TableDriven covers the (tier, pattern) → role mapping.
 func TestAssignRole_TableDriven(t *testing.T) {
 	cases := []struct {
@@ -285,6 +295,55 @@ func TestIsChatRoleAgent(t *testing.T) {
 				t.Errorf("IsChatRoleAgent = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestIsChatSurfaceTool_AcceptsToolListPrimitive is the positive
+// surface check for SP6 (CW-20260430-0006). The cheap discovery
+// primitive nanite_tool_list must be on the Chat surface so the
+// agent can browse the inventory without burning turns guessing
+// tool names.
+func TestIsChatSurfaceTool_AcceptsToolListPrimitive(t *testing.T) {
+	if !IsChatSurfaceTool("nanite_tool_list") {
+		t.Error("IsChatSurfaceTool(\"nanite_tool_list\") = false, want true (SP6 cheap-discovery primitive must be on the Chat surface)")
+	}
+	// Sibling sanity check: nanite_tool_describe is the heavier
+	// counterpart and must also be on the surface.
+	if !IsChatSurfaceTool("nanite_tool_describe") {
+		t.Error("IsChatSurfaceTool(\"nanite_tool_describe\") = false, want true")
+	}
+}
+
+// TestIsChatSurfaceTool_AcceptsRemindersAndPins is the positive surface
+// check for SP2 (CW-20260430-0002). Reminders and pins were always meant
+// to be Chat-loop primitives — c120 surfaced that they could be
+// described but not called because EnforceChatSurface stripped them.
+// Each tool name is exact, sibling style to nanite_remember /
+// nanite_validate / nanite_panel_open.
+func TestIsChatSurfaceTool_AcceptsRemindersAndPins(t *testing.T) {
+	for _, name := range []string{
+		"nanite_set_reminder",
+		"nanite_pin",
+		"nanite_unpin",
+	} {
+		if !IsChatSurfaceTool(name) {
+			t.Errorf("IsChatSurfaceTool(%q) = false, want true (SP2 — reminder/pin Chat-loop primitive must be on the Chat surface)", name)
+		}
+	}
+}
+
+// TestIsChatSurfaceTool_AcceptsMemoryRecall is the positive surface
+// check for SP3 (CW-20260430-0003). nanite_memory_recall is the Layer 4
+// read-side complement to nanite_remember; without it on the Chat
+// surface, lessons captured in past sessions are dead weight.
+func TestIsChatSurfaceTool_AcceptsMemoryRecall(t *testing.T) {
+	if !IsChatSurfaceTool("nanite_memory_recall") {
+		t.Error("IsChatSurfaceTool(\"nanite_memory_recall\") = false, want true (SP3 — Layer 4 read-side complement to nanite_remember must be on the Chat surface)")
+	}
+	// Sibling sanity: the write side (nanite_remember) must already be on
+	// the surface — no Layer 4 closure if either half is missing.
+	if !IsChatSurfaceTool("nanite_remember") {
+		t.Error("IsChatSurfaceTool(\"nanite_remember\") = false, want true")
 	}
 }
 

@@ -138,12 +138,67 @@ tool list.
 
 ```go
 // cmd/nanite/main.go — initMCP()
-mcpManager.AddServer("dev", mcp.NewDevToolsTransport([...]), mcp.TierBuiltin)
+mcpManager.AddServer("dev", mcp.NewDevToolsTransport(devAllowed), mcp.TierBuiltin)
 
 // ToolClient is constructed with the real *store.Store.
 // DeveloperModeFunc is nil → developerModeEnabled() reads from the store.
 tb := toolclient.New(mcpManager, s, nil)
 ```
+
+### Filesystem allow-list (`dev_tools_allowed_paths`)
+
+The dev tools (`dev_read`, `dev_glob`, `dev_grep`, `dev_write`, `dev_edit`,
+`dev_bash`) are scoped to an allow-list of filesystem roots. Any path the
+LLM passes is checked against the list (with symlink-aware escape detection
+via `internal/pathsafe`) before the tool runs.
+
+**Default allow-list** (when no config is present):
+
+The runtime falls back to a narrow, machine-agnostic list:
+
+| Source (in order) | Path | Reason |
+|---|---|---|
+| 1. `cfg.Project.Root` if set | the configured project root | Each install is bound to one project; the dev tools may operate inside it. |
+| 2. else cwd | `os.Getwd()` | The directory the process was started from. |
+| 3. else | (empty) | No implicit access; agent must use config or an explicit grant. |
+
+There are NO hardcoded user-specific defaults (e.g. no implicit
+`~/Projects-apps`, `~/.nanite`, or similar). System-specific paths don't
+generalize across machines and the wrong layer for permission. To widen
+access, set `dev_tools_allowed_paths` explicitly OR see the trust-agent
+permission redesign tracked in `CW-20260430-0009` (explicit-mention
+grants from chat prompts + notify-and-pause UX).
+
+**User override:** add `dev_tools_allowed_paths` to your `~/.nanite/nanite.yaml`
+(user-level) or project-level `nanite.yaml`:
+
+```yaml
+dev_tools_allowed_paths:
+  - ~/Projects-apps
+  - ~/.nanite
+  - /opt/shared-corpus
+```
+
+Entries support a leading `~/` for the user's home. The user-supplied list
+**replaces** the implicit fallback wholesale — set it explicitly when you
+want to widen scope. The path-safety escape check (symlink-aware,
+`..` traversal blocked) still runs regardless of how the list was sourced.
+
+> **Note:** the `~/.nanite/config.yaml` file used by the *agent framework*
+> (roles, agents, project registry) is a separate file from
+> `~/.nanite/nanite.yaml` (chat-harness runtime settings). The allow-list
+> belongs in `nanite.yaml`. See `CW-20260430-0010` for an open ticket on
+> moving to the XDG-standard `~/.config/nanite/` location. The runtime
+> emits a `dev tools allow-list` info log at startup with the resolved
+> list and its source (`config:dev_tools_allowed_paths`,
+> `default:project_root`, or `default:cwd`).
+
+**Canonicalization:** the LLM may pass paths with a leading `~/` (e.g.
+`~/Projects-apps/nanite/coordination`). Go's `filepath` package treats `~`
+as a literal character, so the runtime expands a leading `~/` or bare `~`
+to the user's home directory at the boundary before checking the
+allow-list. Without this expansion, `filepath.Abs("~/Projects")` becomes
+`<cwd>/~/Projects`, which trips the escape check on every root.
 
 ---
 

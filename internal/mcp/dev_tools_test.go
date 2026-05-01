@@ -323,3 +323,121 @@ func TestDevWrite_Basic(t *testing.T) {
 		t.Errorf("expected 'hello', got: %s", string(data))
 	}
 }
+
+// --- tilde expansion / canonicalization (CW-20260430-0005) ---
+
+// TestExpandHome_Forms verifies the boundary tilde-expansion helper that
+// fixes the canonicalization gap reported in c120: Go's filepath package
+// treats ~ as a literal character, so a user-supplied "~/Projects" was
+// passed through filepath.Abs as "/cwd/~/Projects" and tripped the escape
+// check on every root.
+func TestExpandHome_Forms(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("cannot determine home dir: %v", err)
+	}
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "bare tilde", in: "~", want: home},
+		{name: "tilde slash", in: "~/Projects", want: filepath.Join(home, "Projects")},
+		{name: "tilde slash deep", in: "~/Projects-apps/nanite/coordination", want: filepath.Join(home, "Projects-apps", "nanite", "coordination")},
+		{name: "no tilde absolute", in: "/etc/hosts", want: "/etc/hosts"},
+		{name: "no tilde relative", in: "Projects", want: "Projects"},
+		{name: "tilde-prefixed name not user", in: "~root/Projects", want: "~root/Projects"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := expandHome(tc.in)
+			if got != tc.want {
+				t.Fatalf("expandHome(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveAllowed_TildeUserPath simulates the c120 scenario: the LLM
+// passes ~/<root>/<sub> as a directory argument. Without tilde expansion,
+// filepath.Abs prepends the cwd and the path appears to escape the root.
+// After the fix the boundary expands ~ to the home directory before the
+// allow-list check runs.
+func TestResolveAllowed_TildeUserPath(t *testing.T) {
+	dir := t.TempDir()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fake "home" so we can construct ~-style paths that resolve into the
+	// allowed root without polluting the running user's actual home.
+	t.Setenv("HOME", real)
+	// On macOS UserHomeDir reads from $HOME first, so the override is
+	// enough. Re-resolve to be sure nothing cached.
+	if h, _ := os.UserHomeDir(); h != real {
+		t.Skipf("HOME override not honoured (got %q, want %q)", h, real)
+	}
+
+	// Allowed path includes a literal ~/sub entry; NewDevToolsTransport
+	// expands it so the configured root canonicalizes to <real>/sub.
+	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "sub", "file.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dt := NewDevToolsTransport([]string{"~/sub"})
+	if len(dt.AllowedPaths) != 1 {
+		t.Fatalf("expected 1 allowed path, got %d: %v", len(dt.AllowedPaths), dt.AllowedPaths)
+	}
+	if dt.AllowedPaths[0] != filepath.Join(real, "sub") {
+		t.Fatalf("expected allowed path %q, got %q", filepath.Join(real, "sub"), dt.AllowedPaths[0])
+	}
+
+	// Now exercise the canonicalization fix: a user path with leading ~/
+	// must resolve under the allowed root, not be rejected as an escape.
+	resolved, err := dt.resolveAllowed("~/sub/file.txt")
+	if err != nil {
+		t.Fatalf("expected ~/sub/file.txt to resolve, got error: %v", err)
+	}
+	want := filepath.Join(real, "sub", "file.txt")
+	if resolved != want {
+		t.Fatalf("got %q, want %q", resolved, want)
+	}
+
+	// Bare ~ — the directory itself — must also resolve when ~ is one of
+	// the allow-list roots. This is the "~/Projects escapes ~/Projects"
+	// regression call-out from the ticket; before the fix Go's filepath
+	// package made the equality check unreachable.
+	dtRoot := NewDevToolsTransport([]string{"~/sub"})
+	resolvedRoot, err := dtRoot.resolveAllowed("~/sub")
+	if err != nil {
+		t.Fatalf("expected ~/sub to resolve to its own root, got error: %v", err)
+	}
+	if resolvedRoot != filepath.Join(real, "sub") {
+		t.Fatalf("got %q, want %q", resolvedRoot, filepath.Join(real, "sub"))
+	}
+}
+
+// TestResolveAllowed_EscapeStillBlocked is the orthogonal regression:
+// widening the allow-list and adding tilde expansion must NOT weaken the
+// path-safety escape check. A path that legitimately escapes every
+// configured root still has to fail with an *pathsafe.EscapeError.
+func TestResolveAllowed_EscapeStillBlocked(t *testing.T) {
+	dir := t.TempDir()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dt := NewDevToolsTransport([]string{real})
+
+	if _, err := dt.resolveAllowed("/etc/hosts"); err == nil {
+		t.Fatal("expected escape error for /etc/hosts; allow-list widening must not weaken the safety check")
+	}
+	if _, err := dt.resolveAllowed("~/../../etc/hosts"); err == nil {
+		t.Fatal("expected escape error for tilde-prefixed traversal; expansion must run BEFORE the escape check")
+	}
+}

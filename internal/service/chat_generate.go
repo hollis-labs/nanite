@@ -12,6 +12,7 @@ import (
 	"time"
 
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
@@ -1409,6 +1410,50 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
+	// CW-20260429-0029: broadcast a plugin_envelope SSE event for every parsed
+	// envelope that carries a panel-routing hint (target/render_target/mode).
+	// The FE's useChat plugin_envelope handler calls applyEnvelopePanelEffects
+	// on each event, which is the ONLY path that opens the bottom_chat_drawer
+	// or routes to a render_target. Without this broadcast, show_card
+	// envelopes (which arrive as `<!--ENVELOPE_DATA:...-->` markers in the
+	// assistant text and reach the FE only as part of StructuredMessage)
+	// rendered correctly but never triggered the drawer-open — render_target
+	// became dead weight on the wire.
+	//
+	// Note: we do NOT call CreateEnvelopeInstance here. show_card envelopes
+	// are passive (no response routing) and are already persisted as part of
+	// the assistant message's `envelopes` field. Persistence stays the
+	// responsibility of interactive paths (approval / question-form /
+	// elicitation) where the row ID is needed for response endpoints.
+	for _, env := range envelopes {
+		if env.Target == "" && env.RenderTarget == "" && env.Mode == "" && env.RenderTargetBlocked == "" {
+			continue
+		}
+		envID := env.ID
+		if envID == "" {
+			envID = uuid.New().String()
+		}
+		innerData, err := json.Marshal(env.Data)
+		if err != nil {
+			slog.Warn("chat-service: marshal envelope data for plugin_envelope broadcast", "type", env.Type, "err", err)
+			continue
+		}
+		streamWrap, err := buildPluginEnvelopeWrap(envID, env.Type, innerData, EnvelopeRouting{
+			Target:              env.Target,
+			RenderTarget:        env.RenderTarget,
+			RenderTargetBlocked: env.RenderTargetBlocked,
+			Mode:                env.Mode,
+		})
+		if err != nil {
+			slog.Warn("chat-service: marshal plugin_envelope wrap", "type", env.Type, "err", err)
+			continue
+		}
+		s.streams.BroadcastSessionStreamEvent(sessionID, chat.StreamEvent{
+			Type:     "plugin_envelope",
+			Envelope: string(streamWrap),
+		})
+	}
+
 	// Determine tier.
 	tier := "default"
 	if len(ls.toolCallRefs) > 0 {
@@ -1421,6 +1466,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			break
 		}
 	}
+
+	// CW-20260429-0026: harness-side failure-footer fallback. If the per-turn
+	// tool_calls accumulator contains any Status:"error" entries AND the
+	// model didn't already acknowledge failure in the response text, append
+	// a small footer note so the user is oriented. No-op when there are no
+	// errors, when the model already acknowledged, or when disabled via
+	// NANITE_HARNESS_FAILURE_FOOTER. Mutate cleanContent so the footer is
+	// part of the persisted text (and the structured-message hash).
+	cleanContent = maybeAppendFailureFooter(cleanContent, ls.toolCallRefs)
 
 	// Structured message.
 	structured := chat.WrapResponse(cleanContent, tier, ls.toolCallRefs, envRefs, ls.wasTruncated, hasError)

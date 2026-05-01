@@ -5,6 +5,7 @@
       "type": "report-card",
       "data": {
         "title": "Weekly Sprint Health",
+        "generated_at": "2026-04-29T15:00:00Z",
         "metrics": [
           { "label": "Tasks closed", "value": "12" },
           { "label": "Tasks open", "value": "5" },
@@ -17,16 +18,46 @@
     "notes": "report-card REQUIRES the sources arg as a JSON-encoded string of grounding objects. Build the sources list from tool_use_ids in THIS turn — don't fabricate."
   },
   {
+    "title": "document-viewer (long-form prose — REQUIRES sources)",
+    "args": {
+      "type": "document-viewer",
+      "data": {
+        "title": "Sprint retro notes — 2026-04-25",
+        "content": "## What went well\n\n- Lint runtime down 40%.\n- Zero P1 incidents.\n\n## What didn't\n\n- Dropped the Friday deploy.\n- Two flaky tests in CI.",
+        "format": "markdown",
+        "download_filename": "retro-2026-04-25.md"
+      },
+      "sources": "[{\"tool_use_id\":\"toolu_02DEF\",\"tool_name\":\"dev_read\",\"note\":\"file: docs/retros/2026-04-25.md\"}]"
+    },
+    "notes": "document-viewer is the prose-bearing card — same grounding rule as report-card. The body field is `content` (markdown or HTML), NOT `body_markdown`."
+  },
+  {
     "title": "info-card (simple notice — no metrics, no sources required)",
     "args": {
       "type": "info-card",
       "data": {
-        "title": "Heads up",
-        "body": "The next migration window starts at 03:00 UTC.",
+        "title": "Maintenance window",
+        "body": "The next migration window starts at 03:00 UTC. Expect 5 minutes of degraded read latency.",
         "variant": "warning"
       }
     },
-    "notes": "info-card takes title + body + optional variant. No sources field needed — it's a structured notice, not grounded prose."
+    "notes": "info-card takes title + body + optional variant (info|success|warning|danger). No sources field — it's a structured notice, not grounded prose."
+  },
+  {
+    "title": "list-card (small structured list of items)",
+    "args": {
+      "type": "list-card",
+      "data": {
+        "title": "Open PRs awaiting review",
+        "items": [
+          { "label": "#142 — fix flaky retry test", "description": "auth-service" },
+          { "label": "#143 — add nanite_tool_describe coverage", "description": "nanite" },
+          { "label": "#147 — bump go-providers to v0.18", "description": "nanite" }
+        ],
+        "ordered": false
+      }
+    },
+    "notes": "Items must be objects with at least `label`. Optional per-item: description, icon, action. `ordered:true` renders a numbered list."
   },
   {
     "title": "metric-card (single number with trend)",
@@ -34,38 +65,88 @@
       "type": "metric-card",
       "data": {
         "label": "Cache hit rate",
-        "value": 0.94,
+        "value": 94.2,
         "unit": "%",
         "trend": "up",
-        "previous": 0.91
+        "previous": 91.0,
+        "description": "Last 24 hours, edge tier."
       }
-    }
+    },
+    "notes": "value accepts string OR number. trend enum: up|down|flat. Renders to bottom drawer by default; pass render_target=\"\" to inline."
   },
   {
-    "title": "list-card (small structured list of items)",
+    "title": "progress-card (progress bar with step checklist)",
     "args": {
-      "type": "list-card",
+      "type": "progress-card",
       "data": {
-        "title": "Open PRs",
-        "items": [
-          { "label": "#42 — fix flaky test" },
-          { "label": "#43 — add nanite_tool_describe" }
+        "title": "Migrating user_events table",
+        "progress": 62,
+        "status": "Backfilling shard 8 of 13",
+        "steps": [
+          { "label": "Schema applied", "done": true },
+          { "label": "Backfill historical rows", "done": false },
+          { "label": "Cut over reads", "done": false },
+          { "label": "Drop old table", "done": false }
         ]
       }
     },
-    "notes": "Renders inline by default; pass render_target=\"bottom_chat_drawer\" to route to the long-form drawer."
+    "notes": "progress is a number 0–100 (validator enforces). Each step requires `label` + `done` (boolean)."
   },
   {
-    "title": "document-viewer (long-form prose — REQUIRES sources)",
+    "title": "table-card (sortable data table)",
     "args": {
-      "type": "document-viewer",
+      "type": "table-card",
       "data": {
-        "title": "Sprint retro notes",
-        "body_markdown": "## What went well\n\n- Lint runtime down 40%.\n\n## What didn't\n\n- Dropped the Friday deploy."
-      },
-      "sources": "[{\"tool_use_id\":\"toolu_02DEF\",\"tool_name\":\"dev_read\",\"note\":\"file: docs/retros/2026-04-25.md\"}]"
+        "title": "Top error sources — last hour",
+        "columns": [
+          { "key": "service", "label": "Service", "sortable": true },
+          { "key": "errors", "label": "Errors", "sortable": true },
+          { "key": "p99_ms", "label": "P99 (ms)", "sortable": true }
+        ],
+        "rows": [
+          { "service": "checkout-api", "errors": 47, "p99_ms": 1240 },
+          { "service": "search-svc", "errors": 19, "p99_ms": 880 },
+          { "service": "auth-svc", "errors": 4, "p99_ms": 210 }
+        ],
+        "caption": "Source: Datadog metrics export, 14:00–15:00 UTC."
+      }
     },
-    "notes": "document-viewer is the prose-bearing card — same grounding rule as report-card."
+    "notes": "Each column needs `key` + `label`. Row keys must match column keys; rows are open-shape (additionalProperties allowed)."
+  },
+  {
+    "title": "timeline-card (vertical timeline of events)",
+    "args": {
+      "type": "timeline-card",
+      "data": {
+        "title": "Incident #2026-0419 timeline",
+        "events": [
+          { "timestamp": "2026-04-19T14:02:00Z", "label": "First 5xx alert", "status": "completed" },
+          { "timestamp": "2026-04-19T14:08:00Z", "label": "On-call paged", "status": "completed" },
+          { "timestamp": "2026-04-19T14:21:00Z", "label": "Root cause identified — bad config push", "description": "Rolled back commit 9f1c2a3.", "status": "completed" },
+          { "timestamp": "2026-04-19T14:33:00Z", "label": "Service recovered", "status": "active" }
+        ]
+      }
+    },
+    "notes": "Each event requires `timestamp` (ISO 8601) + `label`. status enum: completed|active|pending."
+  },
+  {
+    "title": "diff-card (side-by-side before/after comparison)",
+    "args": {
+      "type": "diff-card",
+      "data": {
+        "title": "Proposed change to retry policy",
+        "before": {
+          "label": "Current (v3.2)",
+          "content": "max_attempts: 3\nbackoff: linear\nbase_ms: 200"
+        },
+        "after": {
+          "label": "Proposed (v3.3)",
+          "content": "max_attempts: 5\nbackoff: exponential\nbase_ms: 100\njitter: true"
+        },
+        "format": "code"
+      }
+    },
+    "notes": "before and after are objects, each requiring `label` + `content`. format enum: text|code."
   },
   {
     "title": "force-inline a card whose schema would default to a drawer",
@@ -75,5 +156,94 @@
       "render_target": ""
     },
     "notes": "Empty render_target overrides the schema's default_render_target so the card renders inline in chat instead of the bottom drawer. Distinct from omitting the field (which uses the default)."
+  },
+  {
+    "title": "REFERENCE — session-task (NOT emitted via nanite_show_card; backend-only)",
+    "args": {
+      "type": "session-task",
+      "data": {
+        "task_id": "task-2026-04-29-014",
+        "title": "Run quarterly capacity audit",
+        "status": "in_progress",
+        "description": "Cross-check Datadog headroom against forecast in planning/q3-capacity.md."
+      }
+    },
+    "notes": "REFERENCE ONLY: session-task is registered for validation but NOT in the nanite_show_card allow-list. Emitted by the chat engine through a different path. Field shape shown so callers/components emitting it match the schema. status enum: pending|in_progress|completed|failed|cancelled."
+  },
+  {
+    "title": "REFERENCE — error-report (NOT emitted via nanite_show_card)",
+    "args": {
+      "type": "error-report",
+      "data": {
+        "code": "tool_error",
+        "message": "clockwork_task_list rejected: project_id not found",
+        "details": { "project_id": "proj_archived_2025", "request_id": "req_a8c4f2" },
+        "giphy_query": "confused",
+        "timestamp": "2026-04-29T15:14:22Z"
+      }
+    },
+    "notes": "REFERENCE ONLY: error-report is runtime-emitted by the harness on tool/provider failures. Field shape shown so error pipelines match the schema. All four required fields (code, message, giphy_query, timestamp) must be set."
+  },
+  {
+    "title": "REFERENCE — approval-card (decision-flow envelope; emitted by approval pipeline)",
+    "args": {
+      "type": "approval-card",
+      "data": {
+        "description": "Deploy auth-service v3.7 to production",
+        "risk_level": "medium",
+        "details": "Includes the OAuth scope-narrowing change discussed in PR #218. Rollback plan: redeploy v3.6.2 — 2 min cutover."
+      }
+    },
+    "notes": "REFERENCE ONLY: approval-card is a decision-flow envelope, not addressable through nanite_show_card. Emitted by the approval pipeline. Field shape shown for callers building approval flows. risk_level enum: low|medium|high."
+  },
+  {
+    "title": "REFERENCE — proposal-card (decision-flow envelope)",
+    "args": {
+      "type": "proposal-card",
+      "data": {
+        "type": "create_task",
+        "payload": {
+          "title": "Patch Redis client to handle MOVED redirects",
+          "priority": "high",
+          "assignee": "backend-team",
+          "due_date": "2026-05-06"
+        },
+        "schema": {
+          "title": { "type": "text", "label": "Title", "required": true },
+          "priority": { "type": "select", "label": "Priority", "options": ["low", "medium", "high", "critical"] },
+          "assignee": { "type": "text", "label": "Assignee" },
+          "due_date": { "type": "text", "label": "Due date" }
+        }
+      }
+    },
+    "notes": "REFERENCE ONLY: proposal-card carries a draft action with editable fields. Emitted by the proposal pipeline, not nanite_show_card. The outer `type` is the proposal kind (e.g. create_task); the envelope `type` is `proposal-card`."
+  },
+  {
+    "title": "REFERENCE — question-form (interactive form envelope)",
+    "args": {
+      "type": "question-form",
+      "data": {
+        "questions": [
+          { "prompt": "What environment should we deploy to?", "type": "select", "options": ["staging", "canary", "production"], "required": true, "default": "staging" },
+          { "prompt": "Skip smoke tests?", "type": "radio", "options": ["yes", "no"], "required": true, "default": "no" },
+          { "prompt": "Release notes (optional)", "type": "textarea", "required": false }
+        ]
+      }
+    },
+    "notes": "REFERENCE ONLY: question-form is the InterviewCard envelope. Emitted by the interview pipeline, not nanite_show_card. Each question requires prompt + type + required. type enum: text|textarea|select|radio|checkbox."
+  },
+  {
+    "title": "REFERENCE — confirmation-card (decision-flow envelope)",
+    "args": {
+      "type": "confirmation-card",
+      "data": {
+        "title": "Delete plan plan_q2_capacity_v1?",
+        "message": "This removes 14 archived plan steps. This action cannot be undone.",
+        "confirm_label": "Delete plan",
+        "cancel_label": "Keep it",
+        "risk": "high"
+      }
+    },
+    "notes": "REFERENCE ONLY: confirmation-card is emitted by the confirmation pipeline, not nanite_show_card. risk enum: low|medium|high — drives button styling."
   }
 ]

@@ -320,6 +320,42 @@ func (s *chatServiceImpl) executeToolBatch(
 	// agent_profiles.id for the primary agent of this session.
 	ctx = mcp.WithCallerProfile(ctx, workspaceID, agentID)
 
+	// CW-20260429-0024: stamp the union of (prior iterations' tool_use_ids
+	// from ls.toolCallRefs) and (this iteration's plan tool_use_ids) so the
+	// nanite_show_card sources gate can reject fabricated tool_use_id values.
+	// Including the current iteration matters: the agent may call
+	// nanite_show_card in the same assistant batch as the data tools whose
+	// results ground the card, citing those peer tool_use_ids. Without
+	// "this iteration" the gate would over-block and force the agent to
+	// produce sources after a follow-up turn even when the citation is
+	// genuinely concurrent.
+	//
+	// CW-20260429-0025: also stamp the union of tool *names* called this
+	// turn. Originally fed the describe-required gate at callShowCard;
+	// the gate was removed in Phase A of the architectural rebalancing,
+	// but the per-turn name set is preserved as plumbing for future
+	// per-turn observability or trust checks.
+	turnIDs := make([]string, 0, len(ls.toolCallRefs)+len(plans))
+	turnNames := make([]string, 0, len(ls.toolCallRefs)+len(plans))
+	for _, ref := range ls.toolCallRefs {
+		if ref.ID != "" {
+			turnIDs = append(turnIDs, ref.ID)
+		}
+		if ref.Name != "" {
+			turnNames = append(turnNames, ref.Name)
+		}
+	}
+	for _, p := range plans {
+		if p.tu.ID != "" {
+			turnIDs = append(turnIDs, p.tu.ID)
+		}
+		if p.tu.Name != "" {
+			turnNames = append(turnNames, p.tu.Name)
+		}
+	}
+	ctx = mcp.WithTurnToolUseIDs(ctx, turnIDs)
+	ctx = mcp.WithTurnToolNames(ctx, turnNames)
+
 	results := make([]toolExecResult, len(plans))
 
 	// Separate ready plans into concurrent and serial.
@@ -603,8 +639,16 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// truncated view with a pointer footer. Skip truncate.Output in
 		// that case — the cache already sized the LLM-visible view and
 		// truncate.Output's 4K cap would drop the pointer footer.
+		//
+		// Meta-tools (discovery + cache-navigation) are exempt: their
+		// output is what the agent reads to *decide* its next action, and
+		// caching them produces a pointer-to-pointer dance that wastes
+		// turns. nanite_tool_describe in particular went over the 2 KiB
+		// soft cap in c114 (6813 bytes), forcing the agent through
+		// fetch/search and burning all 10 turns before it could emit a
+		// card.
 		wasCached := false
-		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) {
+		if s.resultCache != nil && !r.isError && !isScratchpadTool(tu.Name) && !isCacheExemptTool(tu.Name) {
 			visible, cached, err := s.resultCache.StoreResult(sessionID, tu.ID, tu.Name, resultText)
 			if err != nil {
 				slog.Warn("chat-service: result cache store error", "tool", tu.Name, "err", err)
@@ -617,7 +661,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// Truncate for LLM context (handles results not caught by the cache).
 		// Skip when the cache already produced the LLM-visible view.
 		var tr truncate.Result
-		if wasCached || isScratchpadTool(tu.Name) {
+		if wasCached || isScratchpadTool(tu.Name) || isCacheExemptTool(tu.Name) {
 			// Scratchpad results are bounded by the 64 KiB turn cap enforced in
 			// loopState.scratchpadWrite — no caching or disk truncation needed.
 			tr = truncate.Result{Content: resultText}

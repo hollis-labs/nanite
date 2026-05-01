@@ -252,3 +252,232 @@ func TestExtractJSONObject_StringEscapes(t *testing.T) {
 		t.Errorf("extractJSONObject = %q, want %q", got, want)
 	}
 }
+
+// TestExtractJSONObject_FencedWithLanguageTag confirms the
+// brace-counting extractor handles input that already includes a
+// markdown fence with a language tag. The leading ` ```json ` and the
+// trailing fence are not part of a JSON object so the balanced
+// extractor still finds the inner {...}.
+func TestExtractJSONObject_FencedWithLanguageTag(t *testing.T) {
+	in := "```json\n{\"a\":1,\"b\":\"x\"}\n```"
+	got := extractJSONObject(in)
+	want := `{"a":1,"b":"x"}`
+	if got != want {
+		t.Errorf("extractJSONObject = %q, want %q", got, want)
+	}
+}
+
+// TestExtractJSONObject_FencedNoLanguageTag covers the bare-fence form.
+func TestExtractJSONObject_FencedNoLanguageTag(t *testing.T) {
+	in := "```\n{\"a\":1}\n```"
+	got := extractJSONObject(in)
+	want := `{"a":1}`
+	if got != want {
+		t.Errorf("extractJSONObject = %q, want %q", got, want)
+	}
+}
+
+// TestExtractJSONObject_PlainObject is a regression guard — the helper
+// must continue to return the object on already-clean input.
+func TestExtractJSONObject_PlainObject(t *testing.T) {
+	in := `{"a":1,"b":[2,3]}`
+	got := extractJSONObject(in)
+	if got != in {
+		t.Errorf("extractJSONObject = %q, want %q", got, in)
+	}
+}
+
+// TestStripCodeFence_LanguageTag verifies stripCodeFence peels
+// ` ```json ... ``` ` cleanly.
+func TestStripCodeFence_LanguageTag(t *testing.T) {
+	in := "```json\n{\"repaired_args\": {\"a\":1}}\n```"
+	got := stripCodeFence(in)
+	want := `{"repaired_args": {"a":1}}`
+	if got != want {
+		t.Errorf("stripCodeFence = %q, want %q", got, want)
+	}
+}
+
+// TestStripCodeFence_BareFence verifies stripCodeFence peels a bare
+// ` ``` ... ``` ` block.
+func TestStripCodeFence_BareFence(t *testing.T) {
+	in := "```\n{\"a\":1}\n```"
+	got := stripCodeFence(in)
+	want := `{"a":1}`
+	if got != want {
+		t.Errorf("stripCodeFence = %q, want %q", got, want)
+	}
+}
+
+// TestStripCodeFence_NoFence returns the input unchanged when no fence
+// is present.
+func TestStripCodeFence_NoFence(t *testing.T) {
+	in := `{"a":1}`
+	got := stripCodeFence(in)
+	if got != in {
+		t.Errorf("stripCodeFence = %q, want %q", got, in)
+	}
+}
+
+// TestStripCodeFence_WithPreamble peels a fence that follows a
+// chat-style preamble like "Here is the repair: ```json ... ```".
+func TestStripCodeFence_WithPreamble(t *testing.T) {
+	in := "Here is the repair:\n```json\n{\"a\":1}\n```"
+	got := stripCodeFence(in)
+	want := `{"a":1}`
+	if got != want {
+		t.Errorf("stripCodeFence = %q, want %q", got, want)
+	}
+}
+
+// TestStripCodeFence_TrailingWhitespace tolerates whitespace after the
+// closing fence.
+func TestStripCodeFence_TrailingWhitespace(t *testing.T) {
+	in := "```json\n{\"a\":1}\n```\n\n"
+	got := stripCodeFence(in)
+	want := `{"a":1}`
+	if got != want {
+		t.Errorf("stripCodeFence = %q, want %q", got, want)
+	}
+}
+
+// TestParseRepairResponse_FencedWithLanguageTag is the primary c112
+// regression guard: the repair LLM wrapped its response in
+// ` ```json ... ``` ` despite the system prompt forbidding markdown
+// fences. parseRepairResponse must still produce a populated
+// RepairOutcome.
+func TestParseRepairResponse_FencedWithLanguageTag(t *testing.T) {
+	raw := "```json\n{\n  \"repaired_args\": {\"type\":\"report-card\",\"data\":{\"title\":\"X\",\"metrics\":[{\"label\":\"a\",\"value\":1}]}},\n  \"missing_required\": [],\n  \"lesson_hint\": \"report-card requires metrics, not sections\"\n}\n```"
+	out, err := parseRepairResponse(raw)
+	if err != nil {
+		t.Fatalf("parseRepairResponse failed on fenced JSON: %v", err)
+	}
+	if !out.HasRepair() {
+		t.Fatalf("expected HasRepair() true, got %+v", out)
+	}
+	if out.LessonHint != "report-card requires metrics, not sections" {
+		t.Errorf("unexpected lesson hint: %q", out.LessonHint)
+	}
+	if out.RepairedArgs["type"] != "report-card" {
+		t.Errorf("repaired_args.type = %v, want \"report-card\"", out.RepairedArgs["type"])
+	}
+}
+
+// TestParseRepairResponse_FencedWithPreamble covers the case where the
+// LLM emits a chat-style preamble before the fenced JSON.
+func TestParseRepairResponse_FencedWithPreamble(t *testing.T) {
+	raw := "Here is the repair:\n```json\n{\"repaired_args\": {\"a\":1}, \"missing_required\": [], \"lesson_hint\": \"ok\"}\n```"
+	out, err := parseRepairResponse(raw)
+	if err != nil {
+		t.Fatalf("parseRepairResponse failed: %v", err)
+	}
+	if !out.HasRepair() {
+		t.Fatalf("expected HasRepair, got %+v", out)
+	}
+}
+
+// TestParseRepairResponse_NoJSONObject_ErrorPreserved guards against a
+// regression where the new fence-stripping path silently hides a
+// genuinely malformed response. The "no JSON object" error must still
+// fire when there is no `{` anywhere in the input.
+func TestParseRepairResponse_NoJSONObject_ErrorPreserved(t *testing.T) {
+	_, err := parseRepairResponse("I cannot reshape this — sorry.")
+	if err == nil {
+		t.Fatalf("expected error for response with no JSON object")
+	}
+	if !strings.Contains(err.Error(), "no JSON object") {
+		t.Errorf("expected 'no JSON object' in error, got %v", err)
+	}
+}
+
+// TestParseRepairResponse_PlainObject_RegressionGuard confirms the
+// happy path still works after the stripCodeFence wrapper was
+// introduced.
+func TestParseRepairResponse_PlainObject_RegressionGuard(t *testing.T) {
+	raw := `{"repaired_args": {"a":1}, "missing_required": [], "lesson_hint": "ok"}`
+	out, err := parseRepairResponse(raw)
+	if err != nil {
+		t.Fatalf("parseRepairResponse failed on plain JSON: %v", err)
+	}
+	if !out.HasRepair() {
+		t.Fatalf("expected HasRepair, got %+v", out)
+	}
+}
+
+// TestResolveRepairMaxTokens_Default returns the package default when
+// the caller leaves RepairOptions.MaxTokens at zero. Guards the
+// CW-20260429-0028 default-resolution rule.
+func TestResolveRepairMaxTokens_Default(t *testing.T) {
+	got := resolveRepairMaxTokens(RepairOptions{})
+	if got != DefaultRepairMaxTokens {
+		t.Fatalf("resolveRepairMaxTokens(zero opts) = %d, want %d", got, DefaultRepairMaxTokens)
+	}
+}
+
+// TestResolveRepairMaxTokens_Override honors a positive caller-supplied
+// MaxTokens. CW-20260429-0028.
+func TestResolveRepairMaxTokens_Override(t *testing.T) {
+	const want = 8192
+	got := resolveRepairMaxTokens(RepairOptions{MaxTokens: want})
+	if got != want {
+		t.Fatalf("resolveRepairMaxTokens(MaxTokens=%d) = %d, want %d", want, got, want)
+	}
+}
+
+// TestResolveRepairMaxTokens_NegativeFallsBack treats a negative value
+// as "unset" and falls back to the default; the resolver must never
+// return ≤ 0 (the caller would otherwise propagate an invalid cap to
+// the provider).
+func TestResolveRepairMaxTokens_NegativeFallsBack(t *testing.T) {
+	got := resolveRepairMaxTokens(RepairOptions{MaxTokens: -1})
+	if got != DefaultRepairMaxTokens {
+		t.Fatalf("resolveRepairMaxTokens(MaxTokens=-1) = %d, want %d", got, DefaultRepairMaxTokens)
+	}
+}
+
+// TestDefaultRepairMaxTokens_Reasonable guards against a regression
+// where a future edit drops DefaultRepairMaxTokens to a value too small
+// to fit a typical repair payload (repaired_args + missing_required +
+// lesson_hint). CW-20260429-0028 introduced this constant to fix the
+// c113 truncation symptom; if a future change tightens it below 1024
+// it should be a deliberate decision tied to an evidence ticket.
+func TestDefaultRepairMaxTokens_Reasonable(t *testing.T) {
+	const floor = 1024
+	if DefaultRepairMaxTokens < floor {
+		t.Fatalf("DefaultRepairMaxTokens=%d is below the %d floor required for a typical repair payload; see CW-20260429-0028", DefaultRepairMaxTokens, floor)
+	}
+}
+
+// TestRepairSystemPrompt_AntiMarkdown asserts the repair system prompt
+// carries the load-bearing anti-markdown phrase introduced in
+// CW-20260429-0028. Guards against future prompt edits silently
+// dropping the constraint that caused the c113 truncation symptom.
+func TestRepairSystemPrompt_AntiMarkdown(t *testing.T) {
+	prompt := repairSystemPrompt()
+	const sig = "single bare JSON object"
+	if !strings.Contains(prompt, sig) {
+		t.Fatalf("repair system prompt missing anti-markdown signature %q", sig)
+	}
+	if !strings.Contains(prompt, "Do NOT wrap it in markdown code fences") {
+		t.Errorf("repair system prompt missing explicit fence-forbid wording")
+	}
+}
+
+// TestRepair_HonorsCallerMaxTokens is a smoke test confirming Repair
+// accepts a caller-supplied MaxTokens override without erroring.
+// Repair() threads this value into provider.ChatRequest.MaxTokens; this
+// test keeps the recover-package surface covered without changing its
+// existing smoke-test scope.
+func TestRepair_HonorsCallerMaxTokens(t *testing.T) {
+	stub := &stubProvider{response: `{"repaired_args": {"a":1}, "missing_required": [], "lesson_hint": "ok"}`}
+	_, err := Repair(context.Background(), newRecoverable(), RepairOptions{
+		Provider:  stub,
+		MaxTokens: 8192,
+	})
+	if err != nil {
+		t.Fatalf("Repair with MaxTokens override failed: %v", err)
+	}
+	if stub.calls != 1 {
+		t.Errorf("expected exactly one Complete call, got %d", stub.calls)
+	}
+}

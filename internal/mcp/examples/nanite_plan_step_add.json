@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Append a single step to an existing plan",
+    "args": {
+      "plan_id": "pln-01HZ...",
+      "steps": "[{\"title\":\"Add integration test for append\",\"acceptance\":\"covers happy path + plan_id-not-found\",\"depends_on\":[\"s3\"]}]"
+    },
+    "notes": "id omitted → auto-assigned (e.g. s4 if the plan already had s1..s3). Returns the appended step with its resolved id; existing steps are untouched."
+  }
+]

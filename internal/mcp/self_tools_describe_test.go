@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/envelope"
 )
 
 // TestNaniteToolDescribe_RegistrationAndSelfDescribe verifies the self-tool
@@ -238,5 +240,85 @@ func TestNaniteToolDescribe_ExamplesIncludePassiveRenderableCoverage(t *testing.
 	}
 	if !types["info-card"] && !types["metric-card"] {
 		t.Error("missing at least one passive non-grounded card type (info-card or metric-card)")
+	}
+}
+
+// TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes verifies the
+// nanite_show_card golden examples cover every core envelope card type
+// the harness ships at v1: the 10 passive-renderable types reachable
+// through nanite_show_card, plus the 6 reference-shape types (decision-flow
+// and backend-only) that other emission paths use. CW-20260430-0004 (SP4)
+// added these so the agent's first-call success rate on unfamiliar
+// envelope types is anchored on a real example rather than guesswork.
+//
+// Source of truth for the type list: config/envelopes.yaml +
+// internal/envelope/schemas/<type>.schema.json.
+func TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes(t *testing.T) {
+	examples, err := loadGoldenExamples("nanite_show_card")
+	if err != nil || len(examples) == 0 {
+		t.Fatalf("nanite_show_card examples missing: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, ex := range examples {
+		if typ, _ := ex.Args["type"].(string); typ != "" {
+			seen[typ] = true
+		}
+	}
+	// The 15 core card types listed in CLAUDE.md §"Known envelope types"
+	// (excluding plugin types and runtime-only envelopes). Each must
+	// have at least one golden example so the describe path can show
+	// the agent a working data shape.
+	required := []string{
+		// Core primitives
+		"session-task",
+		"document-viewer",
+		"report-card",
+		"error-report",
+		"approval-card",
+		"proposal-card",
+		"question-form",
+		// Phase 7 primitives
+		"info-card",
+		"list-card",
+		"metric-card",
+		"progress-card",
+		"confirmation-card",
+		"table-card",
+		"timeline-card",
+		"diff-card",
+	}
+	for _, typ := range required {
+		if !seen[typ] {
+			t.Errorf("missing golden example for envelope type %q", typ)
+		}
+	}
+}
+
+// TestNaniteToolDescribe_ShowCardExamplesValidateAgainstSchemas walks
+// every golden example for nanite_show_card and validates the example's
+// `data` payload against the registered per-type schema. This guards
+// against the regression class where an example uses a field name the
+// schema doesn't accept (e.g. body_markdown vs content for
+// document-viewer) — the agent that copies the example would then hit
+// the validator and fail. CW-20260430-0004 (SP4).
+func TestNaniteToolDescribe_ShowCardExamplesValidateAgainstSchemas(t *testing.T) {
+	examples, err := loadGoldenExamples("nanite_show_card")
+	if err != nil || len(examples) == 0 {
+		t.Fatalf("nanite_show_card examples missing: %v", err)
+	}
+	for i, ex := range examples {
+		typ, _ := ex.Args["type"].(string)
+		if typ == "" {
+			t.Errorf("example %d (%q) missing `type` arg", i, ex.Title)
+			continue
+		}
+		data, ok := ex.Args["data"].(map[string]any)
+		if !ok {
+			t.Errorf("example %d (%q) missing `data` object", i, ex.Title)
+			continue
+		}
+		if err := envelope.ValidateData(typ, data); err != nil {
+			t.Errorf("example %d (%q, type=%s) failed schema validation: %v", i, ex.Title, typ, err)
+		}
 	}
 }

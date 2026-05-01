@@ -186,3 +186,94 @@ func TestProjectRoot_AbsolutePath(t *testing.T) {
 		t.Errorf("ProjectRoot() = %q, want /opt/myproject", got)
 	}
 }
+
+// TestResolvedDevToolsAllowedPaths exercises the user-configurable allow-list
+// for the dev_* MCP tools added in CW-20260430-0005. The accessor must
+// expand leading ~/ entries and return nil when the field is unset so the
+// runtime can fall back to its hardcoded defaults.
+func TestResolvedDevToolsAllowedPaths(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+
+	t.Run("nil when unset", func(t *testing.T) {
+		cfg := &Config{}
+		if got := cfg.ResolvedDevToolsAllowedPaths(); got != nil {
+			t.Errorf("ResolvedDevToolsAllowedPaths() = %v, want nil", got)
+		}
+	})
+
+	t.Run("tilde-expanded entries", func(t *testing.T) {
+		cfg := &Config{
+			DevToolsAllowedPaths: []string{
+				"~/Projects-apps",
+				"~/.nanite",
+				"/opt/shared",
+			},
+		}
+		got := cfg.ResolvedDevToolsAllowedPaths()
+		want := []string{
+			filepath.Join(home, "Projects-apps"),
+			filepath.Join(home, ".nanite"),
+			"/opt/shared",
+		}
+		if len(got) != len(want) {
+			t.Fatalf("len = %d, want %d (got %v)", len(got), len(want), got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("empty entries dropped", func(t *testing.T) {
+		cfg := &Config{
+			DevToolsAllowedPaths: []string{"", "~/.nanite", ""},
+		}
+		got := cfg.ResolvedDevToolsAllowedPaths()
+		if len(got) != 1 {
+			t.Fatalf("len = %d, want 1 (got %v)", len(got), got)
+		}
+		if got[0] != filepath.Join(home, ".nanite") {
+			t.Errorf("[0] = %q, want %q", got[0], filepath.Join(home, ".nanite"))
+		}
+	})
+}
+
+// TestLoadFrom_DevToolsAllowedPaths_Merge verifies that the project-level
+// dev_tools_allowed_paths list replaces the user-level list (not merge),
+// matching the existing override semantics for write_paths/protected_paths.
+func TestLoadFrom_DevToolsAllowedPaths_Merge(t *testing.T) {
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "user.yaml")
+	projectFile := filepath.Join(dir, "project.yaml")
+
+	userYAML := `
+dev_tools_allowed_paths:
+  - ~/Projects-apps
+  - ~/.nanite
+`
+	projectYAML := `
+dev_tools_allowed_paths:
+  - ~/Projects-apps/scoped-project
+`
+	if err := os.WriteFile(userFile, []byte(userYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectFile, []byte(projectYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(userFile, projectFile)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if len(cfg.DevToolsAllowedPaths) != 1 {
+		t.Fatalf("expected project list to replace user list, got %v", cfg.DevToolsAllowedPaths)
+	}
+	if cfg.DevToolsAllowedPaths[0] != "~/Projects-apps/scoped-project" {
+		t.Errorf("DevToolsAllowedPaths[0] = %q, want %q",
+			cfg.DevToolsAllowedPaths[0], "~/Projects-apps/scoped-project")
+	}
+}

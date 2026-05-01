@@ -59,7 +59,7 @@ func naniteToolDescribeDefinition() Tool {
 	return Tool{
 		Name: "nanite_tool_describe",
 		Description: "Return a tool's contract on demand: description, input schema, golden examples, and related tools/skills.\n\n" +
-			"**When to use:** When you are about to call an internal tool and you are unsure about its input shape — call this FIRST. It returns the schema plus 1-3 golden examples. Cheaper than failing the real call repeatedly.\n\n" +
+			"**When to use:** When you're unsure about a tool's input shape, when you've never rendered a particular envelope `type` for `nanite_show_card`, or after a call fails with a schema-validation error. Cheap (registry + embed lookup, no LLM call) — prefer it to failing-and-retrying.\n\n" +
 			"**When NOT to use:** Skip this when you have already called the tool successfully in the same session, or when the tool is from a third-party MCP server (this only describes nanite_* self-tools at v1).\n\n" +
 			"**Output shape:** {name, description, input_schema, examples: [{title, args, result?, notes?}], related_tools?: [string], related_skills?: [string]}.\n\n" +
 			"**Unknown tool name:** Returns a structured error with `closest_matches` (Levenshtein) so you can correct typos in one round-trip.",
@@ -103,16 +103,19 @@ var describeRelations = map[string]struct {
 		relatedTools: []string{"nanite_todo_create", "nanite_todo_update"},
 	},
 	"nanite_plan_create": {
-		relatedTools: []string{"nanite_plan_update", "nanite_plan_list", "nanite_plan_get", "nanite_todo_create"},
+		relatedTools: []string{"nanite_plan_update", "nanite_plan_step_add", "nanite_plan_list", "nanite_plan_get", "nanite_todo_create"},
 	},
 	"nanite_plan_update": {
-		relatedTools: []string{"nanite_plan_create", "nanite_plan_get"},
+		relatedTools: []string{"nanite_plan_step_add", "nanite_plan_create", "nanite_plan_get"},
+	},
+	"nanite_plan_step_add": {
+		relatedTools: []string{"nanite_plan_create", "nanite_plan_update", "nanite_plan_get"},
 	},
 	"nanite_plan_list": {
 		relatedTools: []string{"nanite_plan_get", "nanite_plan_create"},
 	},
 	"nanite_plan_get": {
-		relatedTools: []string{"nanite_plan_update", "nanite_plan_list"},
+		relatedTools: []string{"nanite_plan_update", "nanite_plan_step_add", "nanite_plan_list"},
 	},
 	"nanite_plan_delete": {
 		relatedTools: []string{"nanite_plan_list"},

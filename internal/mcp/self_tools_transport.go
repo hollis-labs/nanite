@@ -75,6 +75,7 @@ type TodoStoreInterface interface {
 	ListPlans(f store.PlanFilter) ([]store.Plan, error)
 	UpdatePlan(p *store.Plan) error
 	UpdatePlanStep(planID, stepID string, updates store.PlanStep) error
+	AppendPlanSteps(planID string, steps []store.PlanStep) ([]store.PlanStep, error)
 	DeletePlan(id string) error
 }
 
@@ -295,6 +296,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callPlanCreate(ctx, args)
 	case "nanite_plan_update":
 		return st.callPlanUpdate(args)
+	case "nanite_plan_step_add":
+		return st.callPlanStepAdd(args)
 	case "nanite_plan_list":
 		return st.callPlanList(ctx, args)
 	case "nanite_plan_get":
@@ -361,6 +364,9 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	// --- Discovery / introspection (CW-20260429-0005, A1) ---
 	case "nanite_tool_describe":
 		return st.callToolDescribe(ctx, args)
+	// --- Cheap discovery primitive (SP6, CW-20260430-0006) ---
+	case "nanite_tool_list":
+		return st.callToolList(ctx, args)
 	// --- Learning capture (CW-20260429-0009, D1) ---
 	case "nanite_remember":
 		return st.callRemember(ctx, args)
@@ -724,12 +730,17 @@ func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]
 
 	if groundedShowCardTypes[envType] {
 		// CW-20260419-0022 (UAT c19): prose-bearing cards must declare what
-		// tool_use_ids ground their content. Shallow shape check; the deep
-		// "were these tool_use_ids actually called this turn" check is
-		// tracked separately.
+		// tool_use_ids ground their content. Shallow shape check first.
 		sources, sourcesErr := parseSourcesArg(args)
 		if sourcesErr != nil {
 			return errorResult(sourcesErr.Error()), nil
+		}
+		// CW-20260429-0024: deep check — every cited tool_use_id must be a
+		// real ID observed in this turn's tool_calls (set stamped by
+		// service.executeToolBatch). Skipped automatically when the set is
+		// nil (test / subagent paths).
+		if turnErr := validateSourcesAgainstTurn(ctx, sources); turnErr != nil {
+			return errorResult(turnErr.Error()), nil
 		}
 		data["sources"] = sources
 	}
@@ -1060,6 +1071,61 @@ func (st *SelfToolsTransport) callPlanUpdate(args map[string]any) (*ToolResult, 
 
 	st.notifyWorkChanged()
 	return textResult(fmt.Sprintf("Updated plan %q (id=%s, status=%s)", p.Title, p.ID, p.Status)), nil
+}
+
+// callPlanStepAdd appends one or more steps to an existing plan without
+// re-creating it. CW-20260430-0001 (SP1) — closes the c120 workaround.
+func (st *SelfToolsTransport) callPlanStepAdd(args map[string]any) (*ToolResult, error) {
+	if st.TodoStore == nil {
+		return errorResult("todo service not available"), nil
+	}
+	planID := strArg(args, "plan_id", "")
+	if planID == "" {
+		return errorResult("plan_id is required"), nil
+	}
+
+	stepsArg, ok := args["steps"]
+	if !ok || stepsArg == nil {
+		return errorResult("steps is required (JSON array string or array)"), nil
+	}
+
+	var raw []byte
+	switch v := stepsArg.(type) {
+	case string:
+		if v == "" {
+			return errorResult("steps is required (JSON array string or array)"), nil
+		}
+		raw = []byte(v)
+	default:
+		// Allow callers that already deserialise the array.
+		marshaled, err := json.Marshal(v)
+		if err != nil {
+			return errorResult(fmt.Sprintf("steps must be a JSON array: %v", err)), nil
+		}
+		raw = marshaled
+	}
+
+	var newSteps []store.PlanStep
+	if err := json.Unmarshal(raw, &newSteps); err != nil {
+		return errorResult(fmt.Sprintf("parse steps: %v", err)), nil
+	}
+	if len(newSteps) == 0 {
+		return errorResult("steps must contain at least one step"), nil
+	}
+
+	appended, err := st.TodoStore.AppendPlanSteps(planID, newSteps)
+	if err != nil {
+		return errorResult(fmt.Sprintf("append plan steps: %v", err)), nil
+	}
+
+	st.notifyWorkChanged()
+
+	out, _ := json.Marshal(map[string]any{
+		"plan_id":         planID,
+		"appended":        appended,
+		"appended_count":  len(appended),
+	})
+	return textResult(fmt.Sprintf("Appended %d step(s) to plan %s\n%s", len(appended), planID, string(out))), nil
 }
 
 func (st *SelfToolsTransport) callPlanList(ctx context.Context, args map[string]any) (*ToolResult, error) {
@@ -1779,9 +1845,9 @@ func strArg(args map[string]any, key, def string) string {
 // type is report-card or document-viewer (the prose-bearing card types).
 // Shape: JSON array of objects with at least a `tool_use_id` or `tool_name`
 // field. Enforces presence + non-empty + basic per-entry shape — this is
-// the cheap grounding check (CW-20260419-0022). Validating that the cited
-// tool_use_ids were actually invoked in this generation is the deep check
-// tracked separately.
+// the cheap grounding check (CW-20260419-0022). The deep "tool_use_id was
+// actually invoked this turn" check is layered on by validateSourcesAgainstTurn
+// (CW-20260429-0024).
 func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 	raw, ok := args["sources"].(string)
 	if !ok || raw == "" {
@@ -1802,6 +1868,45 @@ func parseSourcesArg(args map[string]any) ([]map[string]any, error) {
 		}
 	}
 	return sources, nil
+}
+
+// validateSourcesAgainstTurn rejects any source whose tool_use_id is not in
+// the set stamped onto ctx by service.executeToolBatch. The set being nil
+// (subagent / test paths that don't stamp the context) skips the check —
+// that's the explicit fallback contract for TurnToolUseIDsFromContext.
+//
+// This is the deep grounding check (CW-20260429-0024). The shallow shape
+// check still runs in parseSourcesArg; this only fires when we have a
+// known-good "what did this turn actually call" set to compare against.
+//
+// Per-entry rule: if a source carries tool_use_id, that ID must be in the
+// turn set. If a source carries only tool_name (no tool_use_id), it's
+// allowed through here — name-only validation is a separate concern (the
+// ticket calls out tool_name registry validation as out of scope).
+func validateSourcesAgainstTurn(ctx context.Context, sources []map[string]any) error {
+	turnIDs := TurnToolUseIDsFromContext(ctx)
+	if turnIDs == nil {
+		// No ctx stamping — preserve existing behavior (tests, subagents).
+		return nil
+	}
+	known := make(map[string]struct{}, len(turnIDs))
+	for _, id := range turnIDs {
+		known[id] = struct{}{}
+	}
+	for i, s := range sources {
+		id, _ := s["tool_use_id"].(string)
+		if id == "" {
+			// tool_name-only entry; out of scope for this check.
+			continue
+		}
+		if _, ok := known[id]; !ok {
+			return fmt.Errorf(
+				"source[%d].tool_use_id %q is not from this turn — known tool_use_ids: [%s]. "+
+					"Build the sources array from real tool_use_ids you observed in this turn's tool_results; do not fabricate IDs",
+				i, id, strings.Join(turnIDs, ", "))
+		}
+	}
+	return nil
 }
 
 // --- nanite_run_python handler (CW-20260420-0019, D6) ---

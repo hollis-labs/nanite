@@ -197,8 +197,11 @@ func cmdServe(args []string) {
 	outputFilters.Add("no_emoji", filter.NoEmoji)
 	slog.Info("output filters registered", "filters", outputFilters.Names())
 
-	// Set up MCP manager, tool broker, and self-service tools.
-	mcpManager, tb, selfTools, muxMgr, muxSvc := initMCP(s)
+	// Set up MCP manager, tool broker, and self-service tools. cfg may be
+	// nil if the agentrc loader failed; initMCP falls back to the hardcoded
+	// default allow-list in that case so dev tools still work for the
+	// running user.
+	mcpManager, tb, selfTools, muxMgr, muxSvc := initMCP(s, cfg)
 
 	// Set up activity emitter (Volon GUI events).
 	activity := chat.NewActivityEmitter("")
@@ -524,6 +527,58 @@ func registerLegacyPTYAlias(registry *provider.Registry) {
 	}
 }
 
+// defaultDevToolsAllowedPaths returns the implicit allow-list for the dev_*
+// MCP tools when no user-supplied list is configured. The fallback ladder is:
+//
+//  1. cfg.Project.Root (the project this install is bound to), if set.
+//  2. The current working directory.
+//  3. Empty (no implicit access — agent must use config or explicit grants).
+//
+// Per CW-20260430-0009 there are NO hardcoded user-specific paths
+// (e.g. ~/Projects-apps) here. System-specific defaults don't generalize
+// across machines and were the wrong layer for permission. Broader access
+// belongs in config.dev_tools_allowed_paths or in the trust-agent
+// permission redesign (CW-20260430-0009: explicit-mention grants +
+// notify-pause UX).
+func defaultDevToolsAllowedPaths(cfg *config.Config) []string {
+	if cfg != nil {
+		if root := cfg.ProjectRoot(); root != "" {
+			return []string{root}
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		return []string{cwd}
+	}
+	return nil
+}
+
+// resolveDevToolsAllowedPaths returns the effective allow-list for the dev_*
+// MCP tools. When cfg.DevToolsAllowedPaths is non-nil, the user-supplied list
+// REPLACES the implicit fallback wholesale (matches the existing override
+// semantics for WritePaths/ProtectedPaths) — including the explicit empty
+// list `dev_tools_allowed_paths: []` which means "no implicit access".
+// When the field is nil/unset, fall back to project root or cwd — see
+// defaultDevToolsAllowedPaths.
+func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
+	if cfg != nil && cfg.DevToolsAllowedPaths != nil {
+		return cfg.ResolvedDevToolsAllowedPaths()
+	}
+	return defaultDevToolsAllowedPaths(cfg)
+}
+
+// devAllowedSource returns a short string describing where the dev tools
+// allow-list came from, purely for log observability when sessions hit a
+// path-escape error.
+func devAllowedSource(cfg *config.Config) string {
+	if cfg != nil && cfg.DevToolsAllowedPaths != nil {
+		return "config:dev_tools_allowed_paths"
+	}
+	if cfg != nil && cfg.ProjectRoot() != "" {
+		return "default:project_root"
+	}
+	return "default:cwd"
+}
+
 // initMCP sets up the MCP manager with built-in and user-configured servers,
 // runs auto-discovery, and creates the tool broker. Returns the mux Manager
 // and MuxProxy service so the caller can wire a StreamPublisher, start Run,
@@ -533,14 +588,12 @@ func registerLegacyPTYAlias(registry *provider.Registry) {
 // devmode build tag via registerMuxTransport (G5 — CW-20260421-0001).
 // In production builds registerMuxTransport is a no-op and no mux_* tools
 // appear in the tool surface.
-func initMCP(s *store.Store) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager, *service.MuxProxy) {
+func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager, *service.MuxProxy) {
 	mcpManager := mcp.NewManager()
 
-	homeDir, _ := os.UserHomeDir()
-	if err := mcpManager.AddServer("dev", mcp.NewDevToolsTransport([]string{
-		filepath.Join(homeDir, "Projects-apps"),
-		filepath.Join(homeDir, "Projects"),
-	}), mcp.TierBuiltin); err != nil {
+	devAllowed := resolveDevToolsAllowedPaths(cfg)
+	slog.Info("dev tools allow-list", "paths", devAllowed, "source", devAllowedSource(cfg))
+	if err := mcpManager.AddServer("dev", mcp.NewDevToolsTransport(devAllowed), mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "dev", "err", err)
 	}
 	if err := mcpManager.AddServer("general", mcp.NewGeneralToolsTransport(), mcp.TierBuiltin); err != nil {
@@ -825,11 +878,15 @@ func cmdMCPServe(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	homeDir, _ := os.UserHomeDir()
-	allowedPaths := []string{
-		filepath.Join(homeDir, "Projects-apps"),
-		filepath.Join(homeDir, "Projects"),
-	}
+	// Reuse the same allow-list resolution path as the main server so the
+	// stdio MCP entry point honours config.dev_tools_allowed_paths and
+	// falls back to project root + cwd when the field is unset (per
+	// CW-20260430-0009 — no hardcoded user-specific defaults). Failures to
+	// load the agentrc config fall back to the same default ladder — the
+	// stdio path is invoked by external clients (Claude CLI), so degrading
+	// gracefully matters more than aborting.
+	cfg, _ := config.Load()
+	allowedPaths := resolveDevToolsAllowedPaths(cfg)
 	srv := mcpserver.New(s, *sessionID, allowedPaths)
 	if err := srv.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "%s mcp: %v\n", brand.BinaryName, err)

@@ -548,7 +548,7 @@ export function ChatComposer({
         {/* DEV mode indicator — floating top-right when developer_mode=true */}
         {developerMode && (
           <div className="pointer-events-none select-none absolute top-2 right-3 z-[2]">
-            <StatusPill tone="danger">
+            <StatusPill tone="danger" className="rounded-[4px]">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-danger animate-pulse shrink-0" />
               DEV
             </StatusPill>
@@ -665,7 +665,7 @@ export function ChatComposer({
         )}
 
         {/* Editor */}
-        <div className="bg-bg-elevated px-[14px] pt-[10px] pb-2">
+        <div className={`bg-bg-elevated px-[14px] pt-[10px] pb-2 ${developerMode ? 'pr-[88px]' : ''}`}>
           <input
             ref={fileInputRef}
             type="file"

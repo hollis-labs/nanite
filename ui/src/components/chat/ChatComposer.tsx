@@ -3,8 +3,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Check, Terminal, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import type { ScratchpadControls } from "@/components/drawers/BottomChatDrawer";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useArtifactUpload } from "@/hooks/useArtifactUpload";
 import { usePluginAction } from "@/hooks/usePluginAction";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
@@ -90,8 +89,6 @@ interface ChatComposerProps {
   onEditorReady?: (focus: () => void) => void;
   reloadMessages?: () => void;
   drawer?: React.ReactNode;
-  /** J10 (CW-20260426-0008): ref to scratchpad controls for /scratch command. */
-  scratchpadControlsRef?: RefObject<ScratchpadControls | null>;
 }
 
 export function ChatComposer({
@@ -101,7 +98,6 @@ export function ChatComposer({
   onEditorReady,
   reloadMessages,
   drawer = null,
-  scratchpadControlsRef,
 }: ChatComposerProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
@@ -214,8 +210,10 @@ export function ChatComposer({
           if (cmdArgs.trim()) {
             // With text — append to scratchpad without sending to agent.
             // Open the drawer so the user can see the append happened.
+            // TODO(Wave 4 / Task 11): wire to the new working-drawer scratchpad
+            // store directly. For now this is a no-op append; the drawer still
+            // opens so the user can paste manually.
             store.setBottomDrawerOpen(true, "user");
-            scratchpadControlsRef?.current?.append(cmdArgs.trim());
           } else {
             // Bare invocation — open drawer to scratchpad tab.
             store.setBottomDrawerOpen(true, "user");
@@ -263,7 +261,7 @@ export function ChatComposer({
         }
       }
     },
-    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages, scratchpadControlsRef],
+    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages],
   );
 
   const handleCommandRef = useRef(handleCommand);

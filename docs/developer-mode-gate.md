@@ -159,15 +159,23 @@ The runtime falls back to a narrow, machine-agnostic list:
 | Source (in order) | Path | Reason |
 |---|---|---|
 | 1. `cfg.Project.Root` if set | the configured project root | Each install is bound to one project; the dev tools may operate inside it. |
-| 2. else cwd | `os.Getwd()` | The directory the process was started from. |
-| 3. else | (empty) | No implicit access; agent must use config or an explicit grant. |
+| 2. else | (empty) | No implicit access; agent uses config or per-session explicit-mention grants. |
 
 There are NO hardcoded user-specific defaults (e.g. no implicit
 `~/Projects-apps`, `~/.nanite`, or similar). System-specific paths don't
-generalize across machines and the wrong layer for permission. To widen
-access, set `dev_tools_allowed_paths` explicitly OR see the trust-agent
-permission redesign tracked in `CW-20260430-0009` (explicit-mention
-grants from chat prompts + notify-and-pause UX).
+generalize across machines and were the wrong layer for permission.
+
+**Trust-agent permission model (CW-20260430-0009).** The cwd fallback was
+dropped because cwd-as-baseline risks scope leak when a user starts a
+session in `~/`. To widen access:
+
+- **Set `dev_tools_allowed_paths` explicitly** for ahead-of-time config.
+- **Mention the path in the chat message.** The chat layer scans every
+  user message for strict-prefix path tokens (`^~/`, `^/`, `^./`) and
+  registers a session-scoped grant for the literal path AND its parent
+  directory. Loose patterns and tool names do NOT auto-grant — those
+  fall through to a brief notify-pause window during which the user can
+  cancel the call.
 
 **User override:** add `dev_tools_allowed_paths` to your user-level config
 file (`~/.config/nanite/config.yaml`, or `$XDG_CONFIG_HOME/nanite/config.yaml`
@@ -195,7 +203,7 @@ want to widen scope. The path-safety escape check (symlink-aware,
 > and was not moved. The runtime emits a `dev tools allow-list` info log at
 > startup with the resolved list and its source
 > (`config:dev_tools_allowed_paths`, `default:project_root`, or
-> `default:cwd`).
+> `default:none`).
 
 **Canonicalization:** the LLM may pass paths with a leading `~/` (e.g.
 `~/Projects-apps/nanite/coordination`). Go's `filepath` package treats `~`

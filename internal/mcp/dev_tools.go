@@ -15,6 +15,7 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/pathsafe"
+	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 )
@@ -95,12 +96,16 @@ func expandHome(path string) string {
 // first compute the relative path from each root to the absolute target,
 // skip roots where the target lies outside (Rel returns "../..."), and then
 // delegate the symlink-aware escape check to pathsafe.
-func (d *DevToolsTransport) resolveAllowed(userPath string) (string, error) {
+//
+// Trust-agent extension (CW-20260430-0009): when the static AllowedPaths
+// list rejects a path, we consult the session-scoped path-grant store
+// stamped on ctx via permission.WithPathGrants. Explicit-mention grants
+// (Q1-Q3 of the locked design) widen the allow-list per session without
+// requiring ahead-of-time config. The pathsafe escape check still runs on
+// the candidate so traversal protection is unaffected.
+func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string) (string, error) {
 	if userPath == "" {
 		return "", fmt.Errorf("path is required")
-	}
-	if len(d.AllowedPaths) == 0 {
-		return "", fmt.Errorf("no allowed paths configured")
 	}
 
 	// Expand a leading ~ in the user-supplied path. Go's filepath package
@@ -113,6 +118,22 @@ func (d *DevToolsTransport) resolveAllowed(userPath string) (string, error) {
 	abs, err := filepath.Abs(userPath)
 	if err != nil {
 		return "", fmt.Errorf("invalid path: %w", err)
+	}
+
+	if len(d.AllowedPaths) == 0 {
+		// No static allow-list configured. Fall through to the session-
+		// grant check; if that also rejects, we report a typed escape
+		// error rather than the legacy "no allowed paths configured"
+		// string so the caller's classification (errors.As) still works.
+		if resolved, ok := d.tryResolveViaSessionGrant(ctx, abs, userPath); ok {
+			return resolved, nil
+		}
+		return "", &pathsafe.EscapeError{
+			Root:     "",
+			Attempt:  userPath,
+			Resolved: abs,
+			Cause:    errors.New("no allowed paths configured for this session"),
+		}
 	}
 
 	var lastErr error
@@ -158,10 +179,45 @@ func (d *DevToolsTransport) resolveAllowed(userPath string) (string, error) {
 		}
 		lastErr = resolveErr
 	}
+	// Trust-agent fallback (CW-20260430-0009): the static AllowedPaths
+	// list rejected. Consult the session-scoped grant store; if a prior
+	// explicit user-message mention granted access to this path (or its
+	// parent), accept it.
+	if resolved, ok := d.tryResolveViaSessionGrant(ctx, abs, userPath); ok {
+		return resolved, nil
+	}
 	// Surface the typed *pathsafe.EscapeError from the final attempt so
 	// callers can classify with errors.As. Non-escape errors (e.g. malformed
 	// ancestor) propagate too.
 	return "", lastErr
+}
+
+// tryResolveViaSessionGrant runs the path-safety escape check using the
+// matching session grant as the "root" so the symlink-aware safety net
+// stays in the loop. Returns (cleanedAbs, true) on success; ("", false)
+// when the ctx carries no grant store, the session has no matching grant,
+// or the safety check fails.
+//
+// abs is the already-tilde-expanded, filepath.Abs'd candidate; userPath is
+// kept around for the EscapeError diagnostic when a downstream call needs
+// it (this helper does not raise such errors itself — it just signals
+// allow/no-match).
+func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, _ string) (string, bool) {
+	sessionID, checker := permission.PathGrantsFromContext(ctx)
+	if checker == nil || sessionID == "" {
+		return "", false
+	}
+	if !checker.IsPathAllowed(sessionID, abs) {
+		return "", false
+	}
+	// Resolve symlinks on the existing-ancestor of the target so the
+	// downstream open()/MkdirAll() observes the same canonical form
+	// pathsafe would. Match the per-root logic above.
+	target := abs
+	if real, evalErr := filepath.EvalSymlinks(target); evalErr == nil {
+		target = real
+	}
+	return filepath.Clean(target), true
 }
 
 // pathErrorResult formats a resolveAllowed error into an MCP tool error,
@@ -360,7 +416,7 @@ func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (
 	if path == "" {
 		return errorResult("path is required"), nil
 	}
-	resolved, err := d.resolveAllowed(path)
+	resolved, err := d.resolveAllowed(ctx, path)
 	if err != nil {
 		return pathErrorResult(path, err), nil
 	}
@@ -417,7 +473,7 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 	if len(pattern) > devGrepPatternCap {
 		return errorResult(fmt.Sprintf("pattern too long: %d bytes (max %d)", len(pattern), devGrepPatternCap)), nil
 	}
-	resolvedDir, err := d.resolveAllowed(dir)
+	resolvedDir, err := d.resolveAllowed(ctx, dir)
 	if err != nil {
 		return pathErrorResult(dir, err), nil
 	}
@@ -630,7 +686,7 @@ func (d *DevToolsTransport) callWrite(ctx context.Context, args map[string]any) 
 	if path == "" {
 		return errorResult("path is required"), nil
 	}
-	resolved, err := d.resolveAllowed(path)
+	resolved, err := d.resolveAllowed(ctx, path)
 	if err != nil {
 		return pathErrorResult(path, err), nil
 	}
@@ -661,7 +717,7 @@ func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (
 	if oldStr == newStr {
 		return errorResult("old_string and new_string must be different"), nil
 	}
-	resolved, err := d.resolveAllowed(path)
+	resolved, err := d.resolveAllowed(ctx, path)
 	if err != nil {
 		return pathErrorResult(path, err), nil
 	}
@@ -717,7 +773,7 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 	if pattern == "" || dir == "" {
 		return errorResult("pattern and directory are required"), nil
 	}
-	resolvedDir, err := d.resolveAllowed(dir)
+	resolvedDir, err := d.resolveAllowed(ctx, dir)
 	if err != nil {
 		return pathErrorResult(dir, err), nil
 	}
@@ -852,7 +908,7 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 			workDir = d.AllowedPaths[0]
 		}
 	} else {
-		resolved, err := d.resolveAllowed(workDir)
+		resolved, err := d.resolveAllowed(ctx, workDir)
 		if err != nil {
 			return pathErrorResult(workDir, err), nil
 		}

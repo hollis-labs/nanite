@@ -399,7 +399,7 @@ func TestResolveAllowed_TildeUserPath(t *testing.T) {
 
 	// Now exercise the canonicalization fix: a user path with leading ~/
 	// must resolve under the allowed root, not be rejected as an escape.
-	resolved, err := dt.resolveAllowed("~/sub/file.txt")
+	resolved, err := dt.resolveAllowed(context.Background(), "~/sub/file.txt")
 	if err != nil {
 		t.Fatalf("expected ~/sub/file.txt to resolve, got error: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestResolveAllowed_TildeUserPath(t *testing.T) {
 	// regression call-out from the ticket; before the fix Go's filepath
 	// package made the equality check unreachable.
 	dtRoot := NewDevToolsTransport([]string{"~/sub"})
-	resolvedRoot, err := dtRoot.resolveAllowed("~/sub")
+	resolvedRoot, err := dtRoot.resolveAllowed(context.Background(), "~/sub")
 	if err != nil {
 		t.Fatalf("expected ~/sub to resolve to its own root, got error: %v", err)
 	}
@@ -434,10 +434,10 @@ func TestResolveAllowed_EscapeStillBlocked(t *testing.T) {
 	}
 	dt := NewDevToolsTransport([]string{real})
 
-	if _, err := dt.resolveAllowed("/etc/hosts"); err == nil {
+	if _, err := dt.resolveAllowed(context.Background(), "/etc/hosts"); err == nil {
 		t.Fatal("expected escape error for /etc/hosts; allow-list widening must not weaken the safety check")
 	}
-	if _, err := dt.resolveAllowed("~/../../etc/hosts"); err == nil {
+	if _, err := dt.resolveAllowed(context.Background(), "~/../../etc/hosts"); err == nil {
 		t.Fatal("expected escape error for tilde-prefixed traversal; expansion must run BEFORE the escape check")
 	}
 }

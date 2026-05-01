@@ -314,6 +314,13 @@ func (s *chatServiceImpl) executeToolBatch(
 	// (which queries by the real session UUID) never finds them.
 	ctx = mcp.WithSessionID(ctx, sessionID)
 
+	// CW-20260430-0009: stamp the trust-agent session-scoped path grants
+	// so dev_tools.resolveAllowed can fall back to explicit-mention
+	// grants when the static AllowedPaths list rejects. nil-safe.
+	if s.pathGrants != nil {
+		ctx = permission.WithPathGrants(ctx, sessionID, s.pathGrants)
+	}
+
 	// H1 trust gate (CW-20260421-0014): stamp (workspace_id, agent_profile_id)
 	// so MuxTransportAdapter and self_tools_dispatch can derive the caller's
 	// trust tier without changing CallTool signatures. agentID IS the
@@ -435,6 +442,29 @@ func (s *chatServiceImpl) executeSingleTool(
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 	if mu != nil {
 		mu.Unlock()
+	}
+
+	// Trust-agent notify-pause middleware (CW-20260430-0009 Q5). For
+	// dev_* tools that touch the filesystem or shell, emit a brief
+	// inline placeholder UI ("Reading `<path>`… (cancel?)") and pause
+	// for ~1.5s. If the user cancels (ctx.Done() fires) during the
+	// window we return a clean errorResult rather than running the
+	// tool. Read-only discovery tools (dev_grep, dev_glob) are exempted
+	// inside shouldNotifyPause to avoid the rule-following-defendant
+	// pattern from docs/architecture/agent-context-architecture.md.
+	if cancelled := emitNotifyPause(ctx, tu, ch, mu, 0); cancelled {
+		cancelMsg := fmt.Sprintf("Tool %q cancelled by user during notify-pause window.", tu.Name)
+		ls.recordToolCall(tu.Name, false)
+		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: cancelMsg}
+		return toolExecResult{
+			resultBlock: provider.ContentBlock{
+				Type: "tool_result", ToolUseID: tu.ID, Content: cancelMsg, IsError: true,
+			},
+			ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "cancelled"},
+			isError:   true,
+			rawOutput: cancelMsg,
+			duration:  time.Since(start),
+		}
 	}
 
 	// Execute tool via ToolService.

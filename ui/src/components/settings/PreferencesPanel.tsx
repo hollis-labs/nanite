@@ -332,19 +332,22 @@ export function PreferencesPanel() {
   )
 }
 
-// C1 (CW-20260428-0012): "Default tab" dropdown for the bottom chat drawer.
-// Reads/writes useLayoutStore.defaultDrawerTab so the setting is immediately
-// reflected on next drawer open. Pinned cards are not selectable as the
-// default — that is a v2 concern (drag-to-reorder + select-from-pin).
+// C1 (CW-20260428-0012): "Default tab" dropdown for the chat working drawer.
+// Reads/writes useLayoutStore.defaultDrawerTab so the setting is reflected
+// on session rehydrate (the value seeds chatWorkingDrawer.activeTab). Pinned
+// or dynamic card tabs are not selectable as the default — that is a v2
+// concern (drag-to-reorder + select-from-pin).
+//
+// Tab IDs match the fixed-tab IDs in ChatWorkingDrawer.tsx. Terminal-2 is
+// dev-only there, so it's omitted here as well.
 function BottomDrawerDefaultTabSelector() {
   const value = useLayoutStore((s) => s.defaultDrawerTab) ?? 'scratchpad'
   const setValue = useLayoutStore((s) => s.setDefaultDrawerTab)
   const options = [
     { value: 'scratchpad', label: 'Scratchpad' },
-    { value: 'documents', label: 'Documents' },
-    { value: 'context', label: 'Session Context' },
-    { value: 'pins', label: 'Pins' },
-    { value: 'cards', label: 'Cards' },
+    { value: 'terminal-1', label: 'Terminal 1' },
+    { value: 'artifacts', label: 'Artifacts' },
+    { value: 'session-context', label: 'Session Context' },
   ]
   return <SSelect value={value} options={options} onChange={(v) => setValue(v)} />
 }

@@ -246,11 +246,11 @@ function ThemeOverlay({ onClose }: { onClose: () => void }) {
 
 // ── Data ───────────────────────────────────────────────────────────────────
 
-const PRESETS: { id: LayoutPreset; icon: () => React.ReactNode; label: string; left: boolean; right: boolean; drawer: boolean; chips: boolean }[] = [
-  { id: 'focus',     icon: WI.focus,   label: 'Focus',   left: false, right: false, drawer: false, chips: false },
-  { id: 'default',   icon: WI.default, label: 'Default', left: true,  right: false, drawer: false, chips: true },
-  { id: 'workspace', icon: WI.full,    label: 'Full',    left: true,  right: true,  drawer: true,  chips: true },
-  { id: 'reading',   icon: WI.reading, label: 'Reading', left: false, right: false, drawer: false, chips: true },
+const PRESETS: { id: LayoutPreset; icon: () => React.ReactNode; label: string; left: boolean; right: boolean; chips: boolean }[] = [
+  { id: 'focus',     icon: WI.focus,   label: 'Focus',   left: false, right: false, chips: false },
+  { id: 'default',   icon: WI.default, label: 'Default', left: true,  right: false, chips: true },
+  { id: 'workspace', icon: WI.full,    label: 'Full',    left: true,  right: true,  chips: true },
+  { id: 'reading',   icon: WI.reading, label: 'Reading', left: false, right: false, chips: true },
 ]
 
 const CORE_RAIL_TABS = [
@@ -272,7 +272,6 @@ interface LayoutMenuProps {
 export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
   const leftOpen          = useLayoutStore((s) => s.leftSidebarOpen)
   const rightOpen         = useLayoutStore((s) => s.rightRailOpen)
-  const toolDrawerEnabled = useLayoutStore((s) => s.toolDrawerEnabled)
   const chipsVisible      = useLayoutStore((s) => s.headerChipsVisible)
   const activeRailTab     = useLayoutStore((s) => s.rightRailTab)
   const workspaceVisible  = useLayoutStore((s) => s.leftRailWorkspaceVisible)
@@ -283,7 +282,6 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
   const toggleSearchField = useLayoutStore((s) => s.toggleLeftRailSearch)
   const toggleLeft        = useLayoutStore((s) => s.toggleLeftSidebar)
   const toggleRight       = useLayoutStore((s) => s.toggleRightRail)
-  const toggleDrawer      = useLayoutStore((s) => s.toggleToolDrawer)
   const toggleChips       = useLayoutStore((s) => s.toggleHeaderChips)
   const applyPreset       = useLayoutStore((s) => s.applyLayoutPreset)
   const setRightRail      = useLayoutStore((s) => s.setRightRail)
@@ -291,8 +289,7 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
   const pluginTabs        = usePluginSlots('right-rail-tab')
 
   const activePreset = PRESETS.find((p) =>
-    p.left === leftOpen && p.right === rightOpen &&
-    p.drawer === toolDrawerEnabled && p.chips === chipsVisible
+    p.left === leftOpen && p.right === rightOpen && p.chips === chipsVisible
   )?.id
 
   const [themeOverlayOpen, setThemeOverlayOpen] = useState(false)
@@ -425,26 +422,6 @@ export function LayoutMenu({ open, onClose, anchorRef }: LayoutMenuProps) {
               <div className="flex-1" />
               <EyeBtn on={chipsVisible} onClick={toggleChips} size={10} />
             </div>
-
-            {/* Tool drawer */}
-            {toolDrawerEnabled ? (
-              <div className="flex items-center gap-1.5 rounded-[5px] border border-divider bg-bg-elevated px-2 py-1.5">
-                <WI.drawer />
-                <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.04em] text-fg-muted flex-1">
-                  Tool Drawer
-                </span>
-                <div className="flex-1 h-px bg-divider mx-1" />
-                <EyeBtn on={true} onClick={toggleDrawer} size={10} />
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 rounded-[5px] border border-dashed border-border-subtle px-2 py-1.5 opacity-60">
-                <WI.drawer />
-                <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.04em] text-fg-faint flex-1">
-                  Drawer hidden
-                </span>
-                <EyeBtn on={false} onClick={toggleDrawer} size={10} />
-              </div>
-            )}
 
             {/* Conversation skeleton */}
             <div className="flex-1 flex flex-col gap-1.5 py-1 min-h-[40px]">

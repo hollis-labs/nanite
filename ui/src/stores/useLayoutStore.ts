@@ -438,6 +438,15 @@ export const useLayoutStore = create<LayoutState>()(
           // Transient card-tabs do not survive reload (FE-only state).
           // Pinned cards still survive via the DB-backed POST /drawer-cards path.
           state.chatWorkingDrawerCardTabs = []
+          // C1: seed the working drawer's active tab from the user's
+          // defaultDrawerTab preference. Card tabs are transient and reset
+          // above, so we never restore an active card-tab id here.
+          if (state.defaultDrawerTab) {
+            state.chatWorkingDrawer = {
+              ...state.chatWorkingDrawer,
+              activeTab: state.defaultDrawerTab,
+            }
+          }
         }
         // Listen for OS theme changes when in system mode
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

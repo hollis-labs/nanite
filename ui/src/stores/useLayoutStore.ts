@@ -1,11 +1,17 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Envelope } from '@/lib/types'
+import type { Envelope, DynamicCardTab } from '@/lib/types'
 
 type ToolDrawerState = 'closed' | 'compact' | 'expanded'
 type Theme = 'dark' | 'light' | 'system'
 type RightRailTab = 'widgets' | 'inbox' | 'artifacts' | (string & {})
 export type LayoutPreset = 'focus' | 'default' | 'workspace' | 'reading'
+
+type ChatDrawerState = {
+  open: boolean
+  height: number
+  activeTab: string
+}
 
 /**
  * J9: per-panel user preferences persisted in layout store.
@@ -132,6 +138,20 @@ interface LayoutState {
   // a v2 concern.
   defaultDrawerTab: string
   setDefaultDrawerTab: (tab: string) => void
+
+  // Chat surface redesign 2026-05-01
+  chatPrimaryDrawer: ChatDrawerState
+  chatWorkingDrawer: ChatDrawerState
+  /** FE-only state for transient card-tabs in ChatWorkingDrawer.
+   *  Populated from panelEnvelopes['bottom_chat_drawer'] reactively
+   *  and augmented with focused/pinned/createdAt metadata. */
+  chatWorkingDrawerCardTabs: DynamicCardTab[]
+
+  setChatPrimaryDrawer: (patch: Partial<ChatDrawerState>) => void
+  setChatWorkingDrawer: (patch: Partial<ChatDrawerState>) => void
+  appendChatWorkingDrawerCardTab: (tab: DynamicCardTab) => void
+  removeChatWorkingDrawerCardTab: (id: string) => void
+  focusChatWorkingDrawerCardTab: (id: string) => void
 }
 
 function resolveTheme(theme: Theme): 'dark' | 'light' {
@@ -359,6 +379,40 @@ export const useLayoutStore = create<LayoutState>()(
       // C1 — bottom drawer default-tab preference.
       defaultDrawerTab: 'scratchpad',
       setDefaultDrawerTab: (tab) => set({ defaultDrawerTab: tab }),
+
+      // Chat surface redesign 2026-05-01 — new drawer regions.
+      chatPrimaryDrawer: { open: false, height: 280, activeTab: 'documents' },
+      chatWorkingDrawer: { open: false, height: 200, activeTab: 'scratchpad' },
+      chatWorkingDrawerCardTabs: [],
+
+      setChatPrimaryDrawer: (patch) =>
+        set((s) => ({ chatPrimaryDrawer: { ...s.chatPrimaryDrawer, ...patch } })),
+      setChatWorkingDrawer: (patch) =>
+        set((s) => ({ chatWorkingDrawer: { ...s.chatWorkingDrawer, ...patch } })),
+      appendChatWorkingDrawerCardTab: (tab) =>
+        set((s) => ({
+          chatWorkingDrawerCardTabs: [...s.chatWorkingDrawerCardTabs, tab],
+          // Newly arriving focused cards become the active tab.
+          chatWorkingDrawer: tab.focused
+            ? { ...s.chatWorkingDrawer, activeTab: tab.id }
+            : s.chatWorkingDrawer,
+        })),
+      removeChatWorkingDrawerCardTab: (id) =>
+        set((s) => {
+          const next = s.chatWorkingDrawerCardTabs.filter((t) => t.id !== id)
+          // If the active tab was removed, fall back to the last fixed tab.
+          const activeWas = s.chatWorkingDrawer.activeTab === id
+          return {
+            chatWorkingDrawerCardTabs: next,
+            chatWorkingDrawer: activeWas
+              ? { ...s.chatWorkingDrawer, activeTab: 'scratchpad' }
+              : s.chatWorkingDrawer,
+          }
+        }),
+      focusChatWorkingDrawerCardTab: (id) =>
+        set((s) => ({
+          chatWorkingDrawer: { ...s.chatWorkingDrawer, activeTab: id },
+        })),
     }),
     {
       name: 'nanite-layout',
@@ -381,6 +435,9 @@ export const useLayoutStore = create<LayoutState>()(
           // on session reload. The chat-history stub stays (envelopes are in
           // the transcript) and clicking it re-routes the card.
           state.panelEnvelopes = {}
+          // Transient card-tabs do not survive reload (FE-only state).
+          // Pinned cards still survive via the DB-backed POST /drawer-cards path.
+          state.chatWorkingDrawerCardTabs = []
         }
         // Listen for OS theme changes when in system mode
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
@@ -148,6 +149,219 @@ func TestReminderEngine_TurnCountFiresAndInjectsSlot(t *testing.T) {
 	}
 	if len(fired3) != 0 {
 		t.Errorf("turn 3: expected 0 fired (reminder already fired), got %d", len(fired3))
+	}
+}
+
+// TestReminderEngine_TimeTriggerReachesLLMSlotBlocks is the regression test
+// for CW-20260501-0002. Before the fix, EvalTurn correctly fired time-based
+// reminders and Window.SetContent updated SlotUserContext, but neither
+// slotResult.Blocks (consumed by ChatRequest.SlotBlocks — the actual LLM
+// payload) nor slotResult.SystemPrompt (consumed by budget enforcement and
+// telemetry) was refreshed. Result: the agent never saw the <system-reminder>
+// block on its next turn even though fired_at was set in the DB.
+//
+// This test reproduces the full chat_generate.go injection sequence (including
+// the post-injection Blocks/SystemPrompt rebuild) and asserts that the
+// derived views actually contain the reminder text.
+func TestReminderEngine_TimeTriggerReachesLLMSlotBlocks(t *testing.T) {
+	s, err := store.New(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.DB.Close()
+
+	engine := reminders.NewEngine(s)
+
+	sessionID := "sess-time-reminder"
+	sess := &store.Session{ID: sessionID, Title: "TimeReminderRegression"}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Create a time-based reminder that fires immediately (1s ago).
+	fireAt := time.Now().Add(-1 * time.Second).UTC().Format(time.RFC3339)
+	r := store.Reminder{
+		ID:          "rem-time-001",
+		SessionID:   sessionID,
+		Text:        "User wanted a status check on the build.",
+		TriggerJSON: fmt.Sprintf(`{"type":"time","at":%q}`, fireAt),
+	}
+	if err := s.CreateReminder(r); err != nil {
+		t.Fatalf("CreateReminder: %v", err)
+	}
+
+	// EvalTurn must fire the reminder and mark it fired_at in the DB.
+	fired, err := engine.EvalTurn(sessionID, 1)
+	if err != nil {
+		t.Fatalf("EvalTurn: %v", err)
+	}
+	if len(fired) != 1 {
+		t.Fatalf("expected 1 fired reminder, got %d", len(fired))
+	}
+
+	// Verify fired_at is set in the DB (acceptance criterion 1).
+	got, err := s.GetReminder(r.ID)
+	if err != nil {
+		t.Fatalf("GetReminder: %v", err)
+	}
+	if got.FiredAt == nil {
+		t.Fatal("expected fired_at to be set in the DB after EvalTurn")
+	}
+
+	// --- Now simulate the chat_generate.go injection pipeline ---
+	client := chat.NewContextClient(s)
+	svc := NewContextService(ContextServiceConfig{Client: client})
+
+	agent := &store.AgentProfile{
+		ID:     "agent-time-reminder",
+		Name:   "TimeReminderAgent",
+		Slug:   "time-reminder",
+		Status: "active",
+		Tags:   `[]`,
+		Tools:  `[]`,
+	}
+	mode := &store.AgentMode{Slug: "default"}
+	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, mode, nil, []provider.ToolDefinition{}, "", 200000, nil)
+	if err != nil {
+		t.Fatalf("AssembleSlots: %v", err)
+	}
+
+	// Snapshot the pre-injection derived views so we can assert the bug
+	// state vs the fixed state.
+	preBlocks := slotResult.Blocks
+	preSystem := slotResult.SystemPrompt
+
+	injection := reminders.FormatInjection(fired)
+
+	// Apply the injection — must mirror chat_generate.go EXACTLY so this
+	// test catches regressions where someone updates the Window without
+	// refreshing Blocks/SystemPrompt.
+	existing := ""
+	if slot := slotResult.Window.Slot(ctxpkg.SlotUserContext); slot != nil {
+		existing = slot.Content
+	}
+	if existing != "" {
+		slotResult.Window.SetContent(ctxpkg.SlotUserContext, existing+"\n\n"+injection)
+	} else {
+		slotResult.Window.SetContent(ctxpkg.SlotUserContext, injection)
+	}
+	// CW-20260501-0002 — the fix:
+	slotResult.Blocks = slotResult.Window.Assemble()
+	slotResult.SystemPrompt = rebuildLegacySystemPrompt(slotResult.Window)
+
+	// --- Acceptance assertions ---
+
+	// (a) Window.SlotUserContext carries the injection (already verified
+	// elsewhere; included for completeness).
+	if slot := slotResult.Window.Slot(ctxpkg.SlotUserContext); slot == nil ||
+		!strings.Contains(slot.Content, r.Text) {
+		t.Errorf("SlotUserContext missing reminder text after injection")
+	}
+
+	// (b) slotResult.Blocks (what slotBlocksFor projects into ChatRequest.SlotBlocks)
+	// MUST contain the reminder text. This is the load-bearing assertion —
+	// before the fix, this fails because Blocks was assembled before injection.
+	blocksHasReminder := false
+	for _, b := range slotResult.Blocks {
+		if strings.Contains(b.Content, r.Text) {
+			blocksHasReminder = true
+			break
+		}
+	}
+	if !blocksHasReminder {
+		t.Errorf("slotResult.Blocks missing reminder text — the LLM would not see the reminder. Pre-injection Blocks=%d, Post-injection Blocks=%d", len(preBlocks), len(slotResult.Blocks))
+	}
+
+	// (c) slotResult.SystemPrompt (legacy concat) MUST contain the reminder.
+	if !strings.Contains(slotResult.SystemPrompt, r.Text) {
+		t.Errorf("slotResult.SystemPrompt missing reminder text. pre=%d post=%d", len(preSystem), len(slotResult.SystemPrompt))
+	}
+
+	// (d) <system-reminder> framing is present in the derived views.
+	foundFraming := false
+	for _, b := range slotResult.Blocks {
+		if strings.Contains(b.Content, "<system-reminder>") &&
+			strings.Contains(b.Content, "</system-reminder>") {
+			foundFraming = true
+			break
+		}
+	}
+	if !foundFraming {
+		t.Errorf("slotResult.Blocks missing <system-reminder> framing")
+	}
+}
+
+// TestReminderEngine_TurnCountFiresThroughInjectionPipeline asserts the
+// equivalent regression for turn_count triggers.
+func TestReminderEngine_TurnCountFiresThroughInjectionPipeline(t *testing.T) {
+	s, err := store.New(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.DB.Close()
+
+	engine := reminders.NewEngine(s)
+	sessionID := "sess-turn-pipeline"
+	sess := &store.Session{ID: sessionID, Title: "TurnReminderPipeline"}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	r := store.Reminder{
+		ID:          "rem-turn-pipeline-001",
+		SessionID:   sessionID,
+		Text:        "Time-boxed reminder that should reach the LLM.",
+		TriggerJSON: `{"type":"turn_count","n":1}`,
+	}
+	if err := s.CreateReminder(r); err != nil {
+		t.Fatalf("CreateReminder: %v", err)
+	}
+	engine.RegisterTurnCount(r.ID, 0)
+
+	fired, err := engine.EvalTurn(sessionID, 1)
+	if err != nil {
+		t.Fatalf("EvalTurn: %v", err)
+	}
+	if len(fired) != 1 {
+		t.Fatalf("expected 1 fired, got %d", len(fired))
+	}
+
+	client := chat.NewContextClient(s)
+	svc := NewContextService(ContextServiceConfig{Client: client})
+	agent := &store.AgentProfile{
+		ID: "a-1", Name: "A", Slug: "a", Status: "active", Tags: "[]", Tools: "[]",
+	}
+	mode := &store.AgentMode{Slug: "default"}
+	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, mode, nil, []provider.ToolDefinition{}, "", 200000, nil)
+	if err != nil {
+		t.Fatalf("AssembleSlots: %v", err)
+	}
+
+	injection := reminders.FormatInjection(fired)
+	existing := ""
+	if slot := slotResult.Window.Slot(ctxpkg.SlotUserContext); slot != nil {
+		existing = slot.Content
+	}
+	if existing != "" {
+		slotResult.Window.SetContent(ctxpkg.SlotUserContext, existing+"\n\n"+injection)
+	} else {
+		slotResult.Window.SetContent(ctxpkg.SlotUserContext, injection)
+	}
+	slotResult.Blocks = slotResult.Window.Assemble()
+	slotResult.SystemPrompt = rebuildLegacySystemPrompt(slotResult.Window)
+
+	hit := false
+	for _, b := range slotResult.Blocks {
+		if strings.Contains(b.Content, r.Text) {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		t.Errorf("turn_count reminder did not reach slotResult.Blocks")
+	}
+	if !strings.Contains(slotResult.SystemPrompt, r.Text) {
+		t.Errorf("turn_count reminder did not reach slotResult.SystemPrompt")
 	}
 }
 

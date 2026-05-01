@@ -435,6 +435,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// fired into SlotUserContext. Uses session.MessageCount as the monotonic
 	// session turn counter (no new schema field needed). Must run before the
 	// inspector records slots so the inspector sees the injected content.
+	//
+	// CW-20260501-0002: after mutating SlotUserContext we MUST refresh
+	// slotResult.Blocks (consumed by slotBlocksFor → ChatRequest.SlotBlocks,
+	// the actual LLM payload) and slotResult.SystemPrompt (used by budget
+	// enforcer, inspector telemetry, and EmitContextAssembled). Without the
+	// refresh, EvalTurn marks the reminder fired in the DB but the agent's
+	// next turn never sees the <system-reminder> block — the bug from c121.
 	var firedReminders []store.Reminder
 	if s.reminderEngine != nil && slotResult.Window != nil {
 		if fired, evalErr := s.reminderEngine.EvalTurn(sessionID, session.MessageCount); evalErr != nil {
@@ -451,6 +458,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			} else {
 				slotResult.Window.SetContent(ctxpkg.SlotUserContext, injection)
 			}
+			// Refresh derived views so the reminder reaches the LLM. The
+			// Window mutation alone only updates the in-place slot map;
+			// Blocks (already Assembled) and SystemPrompt (already concat'd)
+			// are stale until rebuilt.
+			slotResult.Blocks = slotResult.Window.Assemble()
+			slotResult.SystemPrompt = rebuildLegacySystemPrompt(slotResult.Window)
+			systemPrompt = slotResult.SystemPrompt
 		}
 	}
 
@@ -1218,7 +1232,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID, session.WorkspaceID)
 
 		// Post-process: stuck loop detection, truncation, envelopes, artifacts.
-		newBlocks, newRefs := s.postProcessToolResults(ctx, plans, execResults, ls, ch, sessionID, agentID, assistantMsgID)
+		// model is threaded through so truncate.OutputForModel can size the
+		// per-call MaxChars budget from the model's context window — see
+		// CW-20260430-0008 (P2 pilot conversion).
+		newBlocks, newRefs := s.postProcessToolResults(ctx, plans, execResults, ls, ch, sessionID, agentID, assistantMsgID, model)
 		resultBlocks = append(resultBlocks, newBlocks...)
 		ls.toolCallRefs = append(ls.toolCallRefs, newRefs...)
 		if ls.directReturn != "" {

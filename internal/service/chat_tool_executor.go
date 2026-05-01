@@ -561,6 +561,12 @@ func (s *chatServiceImpl) executeSingleTool(
 // postProcessToolResults processes raw execution results: stuck loop detection,
 // truncation, envelope capture, warnings, artifact detection. Returns the final
 // result blocks and tool call refs in original order.
+//
+// modelID is the active LLM model's wire-level identifier (e.g.
+// "claude-sonnet-4-20250514"). Threaded so the truncation step can size the
+// per-call MaxChars budget against the model's context window via
+// truncate.OutputForModel — see CW-20260430-0008. Empty modelID is valid; it
+// falls through to the static MaxChars floor (matches Output's behavior).
 func (s *chatServiceImpl) postProcessToolResults(
 	ctx context.Context,
 	plans []toolPlan,
@@ -570,6 +576,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 	sessionID string,
 	agentID string,
 	assistantMsgID string,
+	modelID string,
 ) ([]provider.ContentBlock, []chat.ToolCallRef) {
 	var resultBlocks []provider.ContentBlock
 	var refs []chat.ToolCallRef
@@ -660,14 +667,30 @@ func (s *chatServiceImpl) postProcessToolResults(
 
 		// Truncate for LLM context (handles results not caught by the cache).
 		// Skip when the cache already produced the LLM-visible view.
+		//
+		// CW-20260501-0006: error results are exempt from truncation. Errors
+		// are short and load-bearing — the agent's recovery decision depends
+		// on reading the actual reason ("memory service not configured",
+		// "query is required", etc.). Truncating them swaps the verbatim
+		// reason for a misleading "delegate to a research agent" hint, which
+		// caused c121's "I don't have access to a memory recall tool"
+		// hallucination. The cache layer already exempts errors (see the
+		// !r.isError gate above); this matches that contract for the
+		// truncate path.
 		var tr truncate.Result
-		if wasCached || isScratchpadTool(tu.Name) || isCacheExemptTool(tu.Name) {
+		if wasCached || isScratchpadTool(tu.Name) || isCacheExemptTool(tu.Name) || r.isError {
 			// Scratchpad results are bounded by the 64 KiB turn cap enforced in
 			// loopState.scratchpadWrite — no caching or disk truncation needed.
+			// Errors pass through verbatim (load-bearing for agent recovery).
 			tr = truncate.Result{Content: resultText}
 		} else {
 			canDelegate := s.orchestrator != nil && s.orchestrator.HasDecomposer()
-			tr = truncate.Output(resultText, tu.Name, truncate.WithDelegationHint(canDelegate))
+			// CW-20260430-0008 pilot: route through OutputForModel so the
+			// MaxChars cap scales with the model's context window. modelID
+			// may be empty (pre-resolution paths or stub callers); the
+			// helper falls through to the static MaxChars floor in that
+			// case — behavior identical to truncate.Output.
+			tr = truncate.OutputForModel(resultText, tu.Name, modelID, truncate.WithDelegationHint(canDelegate))
 		}
 
 		// Emit tool_result to client.

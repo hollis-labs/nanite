@@ -191,6 +191,15 @@ type SelfToolsTransport struct {
 	// schemas only and returns "unknown tool" for everything else.
 	SchemaLookup ToolSchemaLookup
 
+	// Inventory is the cross-server tool inventory used by
+	// nanite_tool_list (CW-20260501-0001). When set, the discovery
+	// primitive enumerates every registered MCP tool — self, memory,
+	// dev, general, plugin — rather than only the in-process self
+	// tools. *mcp.Manager satisfies this via GetAllToolsUnfiltered.
+	// Nil-safe — when unwired, nanite_tool_list falls back to
+	// selfToolDefinitions() (the legacy SP6 behavior).
+	Inventory ToolInventoryLookup
+
 	// LearningRecorder is the Vanta-backed write surface for the D1
 	// nanite_remember self-tool (CW-20260429-0009). When unset, the
 	// tool returns a clear errorResult on every call so a wiring miss

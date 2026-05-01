@@ -5,7 +5,20 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/go-providers/provider"
 )
+
+// stubInventoryLookup is a minimal ToolInventoryLookup stub used to
+// prove the cross-server enumeration path is exercised by callToolList
+// (CW-20260501-0001). Returns a fixed slice of tool definitions.
+type stubInventoryLookup struct {
+	tools []provider.ToolDefinition
+}
+
+func (s *stubInventoryLookup) GetAllToolsUnfiltered() []provider.ToolDefinition {
+	return s.tools
+}
 
 // TestNaniteToolList_RegistrationAndShape verifies the self-tool is
 // registered in selfToolDefinitions(), is wired through the dispatch
@@ -283,6 +296,223 @@ func TestFirstSentenceSummary(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNaniteToolList_CrossServerEnumeration is the regression test for
+// CW-20260501-0001: with a wired ToolInventoryLookup the discovery
+// primitive must surface tools registered on sibling MCP servers, not
+// just the in-process self-tools. The motivating bug was c121, where
+// the agent burned 6 list calls trying to find `nanite_memory_recall`
+// (registered on `nanite-memory`) and concluded it didn't exist.
+func TestNaniteToolList_CrossServerEnumeration(t *testing.T) {
+	st := newSelfTools(t)
+	// Stub an inventory that looks like the real composite surface:
+	// a self-tool, two memory tools, and one off-surface tool that
+	// must NOT survive the chat-surface filter.
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{
+				Name:        "nanite_memory_recall",
+				Description: "Recall memories relevant to the current turn from the durable Vanta substrate.",
+			},
+			{
+				Name:        "nanite_memory_save",
+				Description: "Save a memory for future sessions.",
+			},
+			{
+				// Self-tool advertised via the manager too — the dedup
+				// guard in gatherInventory should keep this single-entry.
+				Name:        "nanite_remember",
+				Description: "Persist a one-sentence lesson to durable memory.",
+			},
+			{
+				// Off-surface (Worker tool, dev_*) — must be filtered out.
+				Name:        "dev_read",
+				Description: "Read a file from the developer-mode allowed paths.",
+			},
+		},
+	}
+
+	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+		"filter": "memory",
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+
+	var out struct {
+		Tools []struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		} `json:"tools"`
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	saw := map[string]bool{}
+	for _, tool := range out.Tools {
+		saw[tool.Name] = true
+	}
+
+	// nanite_memory_recall MUST surface — the c121 motivating case.
+	// It's in dispatch.ChatToolSurface as a literal entry.
+	if !saw["nanite_memory_recall"] {
+		t.Error("filter=memory must surface nanite_memory_recall (the cross-server bug fix)")
+	}
+	// nanite_memory_save is on `nanite-memory` server but NOT on the
+	// Chat surface (ChatToolSurface lists nanite_memory_recall as a
+	// literal — there is no `nanite_memory_` prefix). The chat-surface
+	// filter must drop it; the agent can't invoke it from chat anyway.
+	if saw["nanite_memory_save"] {
+		t.Error("nanite_memory_save is off-surface; chat-surface filter must drop it")
+	}
+	// Sibling self-tool with `memory` in summary should surface
+	// (nanite_remember mentions "durable memory").
+	if !saw["nanite_remember"] {
+		t.Error("filter=memory must surface nanite_remember (summary contains 'memory')")
+	}
+}
+
+// TestNaniteToolList_DedupesAcrossSources verifies the same tool name
+// appearing in BOTH the manager inventory and selfToolDefinitions is
+// emitted exactly once. The manager-fed entry wins (added first), so
+// the description used is the one the manager sees.
+func TestNaniteToolList_DedupesAcrossSources(t *testing.T) {
+	st := newSelfTools(t)
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{
+				Name:        "nanite_tool_list",
+				Description: "Stub description from the manager that should win on dedup.",
+			},
+		},
+	}
+
+	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+		"filter": "nanite_tool_list",
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	var out struct {
+		Tools []struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		} `json:"tools"`
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	hits := 0
+	for _, tool := range out.Tools {
+		if tool.Name == "nanite_tool_list" {
+			hits++
+		}
+	}
+	if hits != 1 {
+		t.Errorf("nanite_tool_list appeared %d times; want exactly 1 (dedup across sources)", hits)
+	}
+}
+
+// TestNaniteToolList_FiltersOffSurfaceTools is the negative half of the
+// CW-20260501-0001 fix: tools published by the manager that are NOT on
+// the Chat agent's static surface (dispatch.IsChatSurfaceTool == false)
+// must be omitted from the list. Off-surface tools the agent can't
+// actually invoke would be a misleading discovery primitive.
+func TestNaniteToolList_FiltersOffSurfaceTools(t *testing.T) {
+	st := newSelfTools(t)
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{
+				Name:        "dev_read",
+				Description: "Read a file. Worker-only.",
+			},
+			{
+				Name:        "dev_bash",
+				Description: "Run a bash command. Worker-only.",
+			},
+			{
+				Name:        "memory_write",
+				Description: "Mux memory_write — third-party uniform name. Worker-only.",
+			},
+			{
+				// On-surface — the control case.
+				Name:        "nanite_memory_recall",
+				Description: "Recall memories from Vanta.",
+			},
+		},
+	}
+
+	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	var out struct {
+		Tools []struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		} `json:"tools"`
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	for _, tool := range out.Tools {
+		switch tool.Name {
+		case "dev_read", "dev_bash", "memory_write":
+			t.Errorf("off-surface tool %q leaked into nanite_tool_list output", tool.Name)
+		}
+	}
+
+	// Sanity check: the on-surface stub tool DID survive.
+	saw := false
+	for _, tool := range out.Tools {
+		if tool.Name == "nanite_memory_recall" {
+			saw = true
+			break
+		}
+	}
+	if !saw {
+		t.Error("expected nanite_memory_recall to survive the chat-surface filter")
+	}
+}
+
+// TestNaniteToolList_CrossServerSizeMeasurement documents the actual
+// payload size when the cross-server inventory is wired (the realistic
+// production shape). Used by CW-20260501-0001 to verify the fix doesn't
+// blow past the chat-surface ceiling tracked in CW-20260430-0007. The
+// test does NOT fail on size — see TestNaniteToolList_UnfilteredSize.
+func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
+	st := newSelfTools(t)
+	// Approximate the production composite: self surface + memory tools
+	// + a couple plugin tools. All on-surface (filtered to chat surface).
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{
+				Name:        "nanite_memory_recall",
+				Description: "Recall memories relevant to the current turn from durable storage.",
+			},
+		},
+	}
+	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	body := res.Content[0].Text
+	t.Logf("nanite_tool_list cross-server unfiltered: %d bytes", len(body))
+
+	resF, _ := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+		"filter": "memory",
+	})
+	t.Logf("nanite_tool_list cross-server filter=\"memory\": %d bytes", len(resF.Content[0].Text))
 }
 
 // TestSafeTruncate_RuneBoundary ensures we don't cut a multi-byte

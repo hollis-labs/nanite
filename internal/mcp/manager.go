@@ -179,6 +179,25 @@ func (m *Manager) AddHTTPServer(name, url string, tier TrustTier) error {
 	return nil
 }
 
+// AddHTTPServerWithHeaders registers an HTTP-based MCP server that requires
+// static headers (auth, routing) on every request. The headers map is copied
+// inside NewHTTPTransportWithHeaders. Same error contract as AddHTTPServer.
+//
+// Header values are NOT logged — only their key set — so a Bearer token doesn't
+// leak into structured logs. CW-20260501-0005 sub-ticket 2.
+func (m *Manager) AddHTTPServerWithHeaders(name, url string, headers map[string]string, tier TrustTier) error {
+	if err := m.AddServer(name, NewHTTPTransportWithHeaders(url, headers), tier); err != nil {
+		return err
+	}
+	headerKeys := make([]string, 0, len(headers))
+	for k := range headers {
+		headerKeys = append(headerKeys, k)
+	}
+	slog.Info("mcp: server using HTTP transport with headers",
+		"name", name, "url", url, "tier", string(tier), "header_keys", headerKeys)
+	return nil
+}
+
 // AddStdioServer registers a stdio-based MCP server (subprocess) with the
 // given trust tier and host-env allowlist. envAllowlist is the list of
 // environment variable names the subprocess is permitted to inherit from

@@ -12,18 +12,22 @@
 import { useMemo, useRef, useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  FileText,
-  Plus,
-  Trash2,
+  ClipboardList,
   Eye,
   EyeOff,
+  FileText,
+  GitCompare,
+  GripHorizontal,
+  Image as ImageIcon,
+  Inbox,
+  Package,
   Pin,
   PinOff,
-  Image as ImageIcon,
-  GitCompare,
-  Package,
+  Plus,
   StickyNote,
-  Inbox,
+  Trash2,
+  Wrench,
+  X,
   ArrowUpRight,
   ArrowDownLeft,
 } from 'lucide-react'
@@ -40,18 +44,9 @@ import type {
   DrawerPinnedCard,
   AgentStateScope,
 } from '@/lib/types'
-import { ChatDrawerTabStrip, type ChatDrawerTab } from '@/components/chat/ChatDrawerTabStrip'
 import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
 import { ToolCallItem } from '@/components/chat/ToolCallItem'
 import { ScopeChip, ScopeFilterChip, type ScopeFilter } from '@/components/work/ScopeChip'
-
-const FIXED_TABS: { id: string; label: string }[] = [
-  { id: 'documents', label: 'Documents' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'diffs', label: 'Diffs' },
-  { id: 'tools', label: 'Tools' },
-  { id: 'pins', label: 'Pins' },
-]
 
 export function ChatPrimaryDrawer() {
   const drawer = useLayoutStore((s) => s.chatPrimaryDrawer)
@@ -70,91 +65,208 @@ export function ChatPrimaryDrawer() {
     enabled: !!activeSessionId,
   })
 
-  const tabs: ChatDrawerTab[] = useMemo(() => {
-    const fixed: ChatDrawerTab[] = FIXED_TABS.map((t) => ({
-      id: t.id,
-      label: t.label,
-      active: drawer.activeTab === t.id,
-      runningPip: t.id === 'tools' && hasRunningTool && isStreaming,
-    }))
-    const dynamic: ChatDrawerTab[] = pinnedCards.map((c) => ({
-      id: `pin:${c.id}`,
-      label: c.title || 'Pinned',
-      active: drawer.activeTab === `pin:${c.id}`,
-      pinnable: true,
-      pinned: true,
-    }))
-    return [...fixed, ...dynamic]
-  }, [drawer.activeTab, pinnedCards, hasRunningTool, isStreaming])
+  if (!activeSessionId) return null
 
-  // Drag-resize handle. Same pattern as BottomChatDrawer's drag.
+  // Pull-tab drag mechanics — top-drawer variant. The drag-handle row is
+  // always visible at the bottom of the drawer. Drag DOWN to grow (body
+  // extends downward into the transcript area), drag UP to shrink. Auto-
+  // closes when released near 0 height. Double-click toggles open/closed.
   const dragRef = useRef<{ y: number; height: number } | null>(null)
   const onPointerDown = (e: React.PointerEvent) => {
-    dragRef.current = { y: e.clientY, height: drawer.height }
+    dragRef.current = { y: e.clientY, height: drawer.height || 240 }
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    if (!drawer.open) setDrawer({ open: true })
   }
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current
     if (!d) return
-    // Top drawer drags DOWN to grow (handle is below the body).
     const next = Math.max(0, d.height + (e.clientY - d.y))
     setDrawer({ height: next })
   }
   const onPointerUp = (e: React.PointerEvent) => {
+    if (!dragRef.current) return
     dragRef.current = null
     ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+    if (drawer.height < 24) setDrawer({ open: false, height: 240 })
+  }
+  const onDoubleClick = () => {
+    setDrawer({ open: !drawer.open, height: drawer.height || 240 })
   }
 
-  if (!activeSessionId) return null
-
   return (
-    <div className="max-w-3xl w-full mx-auto px-4">
-      <div
-        className={`relative overflow-hidden border border-border-subtle bg-bg-elevated transition-[height] ${
-          drawer.open ? '' : 'h-0'
-        }`}
-        style={{
-          height: drawer.open ? drawer.height : 0,
-          borderRadius: '0 0 10px 10px',
-        }}
-      >
-        {/* Top accent ribbon — primary color */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-primary opacity-65" />
-        {drawer.open && (
-          <DrawerBody activeTab={drawer.activeTab} pinnedCards={pinnedCards} />
-        )}
-      </div>
-      {/* Drag handle — sits on the seam between body and tab strip. Drag down
-          to grow when open. */}
+    <div className="max-w-3xl w-full mx-auto relative">
+      {/* Body — top of drawer, opens downward toward the transcript when
+          active. Mirrors the body region of the original BottomChatDrawer. */}
       {drawer.open && (
         <div
-          className="h-1.5 cursor-row-resize"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          aria-label="Resize drawer"
-          role="separator"
-        />
+          className="overflow-hidden border-x border-t border-border bg-bg-elevated"
+          style={{ height: drawer.height }}
+        >
+          <DrawerBody activeTab={drawer.activeTab} pinnedCards={pinnedCards} />
+        </div>
       )}
-      <ChatDrawerTabStrip
-        tabs={tabs}
-        dock="bottom"
-        onSelect={(id) => {
-          if (drawer.activeTab === id && drawer.open) {
-            // Click on the active tab while open = close.
-            setDrawer({ open: false })
-            return
-          }
-          setDrawer({ open: true, activeTab: id })
+
+      {/* Tab row — visible only when drawer is open.  Footer row containing
+          tabs (left, horizontally scrollable) + close button (right). The
+          original BottomChatDrawer had this as a HEADER row at the top of
+          the drawer; mirrored here to the bottom for the top-drawer layout. */}
+      {drawer.open && (
+        <div className="flex items-center justify-between gap-2 px-3 py-1.5 shrink-0 border-x border-t border-border bg-bg-elevated">
+          <div className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0 flex-1">
+            <PrimaryTabButton
+              active={drawer.activeTab === 'documents'}
+              icon={<FileText className="w-3.5 h-3.5" />}
+              label="Documents"
+              onClick={() => setDrawer({ activeTab: 'documents' })}
+            />
+            <PrimaryTabButton
+              active={drawer.activeTab === 'reports'}
+              icon={<ClipboardList className="w-3.5 h-3.5" />}
+              label="Reports"
+              onClick={() => setDrawer({ activeTab: 'reports' })}
+            />
+            <PrimaryTabButton
+              active={drawer.activeTab === 'diffs'}
+              icon={<GitCompare className="w-3.5 h-3.5" />}
+              label="Diffs"
+              onClick={() => setDrawer({ activeTab: 'diffs' })}
+            />
+            <PrimaryTabButton
+              active={drawer.activeTab === 'tools'}
+              icon={<Wrench className="w-3.5 h-3.5" />}
+              label="Tools"
+              runningPip={hasRunningTool && isStreaming}
+              onClick={() => setDrawer({ activeTab: 'tools' })}
+            />
+            <PrimaryTabButton
+              active={drawer.activeTab === 'pins'}
+              icon={<Pin className="w-3.5 h-3.5" />}
+              label="Pins"
+              onClick={() => setDrawer({ activeTab: 'pins' })}
+            />
+            {pinnedCards.length > 0 && (
+              <div className="w-px h-4 bg-border mx-1 shrink-0" aria-hidden="true" />
+            )}
+            {pinnedCards.map((card) => (
+              <PrimaryPinnedTabButton
+                key={card.id}
+                active={drawer.activeTab === `pin:${card.id}`}
+                card={card}
+                onClick={() => setDrawer({ activeTab: `pin:${card.id}` })}
+                onUnpin={async () => {
+                  await api.unpinDrawerCard(card.id)
+                  void queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
+                }}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setDrawer({ open: false })}
+              className="p-1 rounded text-fg-muted hover:text-fg hover:bg-surface transition-colors"
+              aria-label="Close drawer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Drag-handle row — ALWAYS visible at the bottom of the drawer. Brand
+          accent at bottom edge, rounded bottom corners (mirrors the bottom
+          drawer's pattern). Drag DOWN to grow; double-click to toggle. */}
+      <div
+        className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-b-2 border-b-brand rounded-b-[10px] cursor-row-resize select-none touch-none"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onDoubleClick={onDoubleClick}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Drag to resize primary drawer; double-click to toggle"
+      >
+        <GripHorizontal size={12} className="text-fg-muted pointer-events-none" />
+      </div>
+    </div>
+  )
+}
+
+// ── Tab button components ───────────────────────────────────────────────────
+// Mirrors the original BottomChatDrawer.TabButton / PinnedTabButton style.
+
+function PrimaryTabButton({
+  active,
+  icon,
+  label,
+  onClick,
+  runningPip,
+}: {
+  active: boolean
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+  runningPip?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors shrink-0 ${
+        active
+          ? 'bg-surface text-fg font-medium'
+          : 'text-fg-muted hover:text-fg hover:bg-surface/50'
+      }`}
+    >
+      {icon}
+      {label}
+      {runningPip && (
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-warning animate-pulse" />
+      )}
+    </button>
+  )
+}
+
+function PrimaryPinnedTabButton({
+  active,
+  card,
+  onClick,
+  onUnpin,
+}: {
+  active: boolean
+  card: DrawerPinnedCard
+  onClick: () => void
+  onUnpin: () => void
+}) {
+  return (
+    <div
+      className={`group flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors shrink-0 max-w-[160px] ${
+        active
+          ? 'bg-surface text-fg font-medium'
+          : 'text-fg-muted hover:text-fg hover:bg-surface/50'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex items-center gap-1 min-w-0"
+        title={card.title || card.card_type}
+      >
+        <Package className="w-3 h-3 shrink-0" />
+        <span className="truncate">{card.title || card.card_type}</span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onUnpin()
         }}
-        onTogglePin={async (id) => {
-          if (id.startsWith('pin:')) {
-            const cardId = id.slice(4)
-            await api.unpinDrawerCard(cardId)
-            void queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
-          }
-        }}
-      />
+        className="ml-0.5 p-0.5 rounded text-fg-faint opacity-0 group-hover:opacity-100 hover:text-danger transition-colors"
+        aria-label={`Unpin ${card.title || card.card_type}`}
+      >
+        <X className="w-3 h-3" />
+      </button>
     </div>
   )
 }

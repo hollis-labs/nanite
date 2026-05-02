@@ -1,30 +1,30 @@
 /**
- * ChatWorkingDrawer — Task 6 of the 2026-05-01 chat-surface redesign.
+ * ChatWorkingDrawer — bottom drawer of the 2026-05-01 chat-surface redesign.
  *
- * Working surface that lives ABOVE the composer (square bottom corners,
- * flush against it). Hosts a fixed set of tabs (Scratchpad, Terminal 1,
- * Terminal 2 [dev-only], Artifacts, Session Context) plus a dynamic set
- * of `card:<uuid>` tabs sourced from `panelEnvelopes['bottom_chat_drawer']`.
+ * Working surface that lives ABOVE the composer. Pull-tab pattern: a
+ * thin drag handle is always visible at the top of the drawer overlay;
+ * dragging it down expands the body, double-click toggles, releasing
+ * near 0 height auto-closes. The body is absolute-positioned so it
+ * overlays the transcript above instead of pushing it; transparent
+ * margins keep transcript content visible alongside.
  *
- * Mounting is deferred to Task 8 (Wave 3). This file only adds the
- * component + its companion `useShellStore`; nothing in the running app
- * references it yet.
+ * Body content is a 2-column layout: main tab content on the left,
+ * vertical tab sidebar on the right. Tabs include a fixed set
+ * (Scratchpad, Terminal 1, Terminal 2 [dev-only], Artifacts, Session
+ * Context) plus a dynamic set of `card:<uuid>` tabs sourced from
+ * `panelEnvelopes['bottom_chat_drawer']`.
  *
- * Tab body lift status (Task 6 / Step 2):
- *   - Scratchpad      — lifted verbatim from BottomChatDrawer (sans
- *                       `onControlsRef` plumbing, which is external wiring
- *                       Task 11 will revisit).
- *   - Session Context — lifted verbatim from BottomChatDrawer.
- *   - Artifacts       — placeholder. See `ArtifactsTab` note below;
- *                       BottomChatDrawer has no `case 'artifacts':`
- *                       branch to lift from. Tracked as a follow-up.
- *   - Terminal 1      — new, subscribes to `useShellStore`.
- *   - Terminal 2      — placeholder per plan (interactive shell deferred).
+ * Alert overlay: when any of `sessionTakeover` / `streamStalled` /
+ * `circuitOpen` is active, the drawer auto-opens (if closed), the body
+ * content fades + becomes non-interactive, and a centered Banner
+ * overlay is rendered with a glass backdrop. Drag is locked while the
+ * alert is up; restored to the prior open/close state on dismiss.
  *
- * The pinned-card lifecycle (transient → DB-backed) reuses the existing
- * `api.pinDrawerCard` / `api.unpinDrawerCard` endpoints. The plan's draft
- * referenced `api.createDrawerCard` / `api.deleteDrawerCard` which don't
- * exist; the rename is 1:1 against the same routes.
+ * Mounted by `ChatMain.tsx`; receives alert flags + handlers from
+ * `useChat`. Pinned-card lifecycle uses the existing
+ * `api.pinDrawerCard` / `api.unpinDrawerCard` endpoints (cap of
+ * `CHAT_DRAWER_PIN_CAP` per session, enforced server-side as
+ * `DrawerPinCapError` on HTTP 409).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -33,12 +33,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { useShellStore } from '@/stores/useShellStore'
+import { useChatStore } from '@/stores/useChatStore'
 import { useSettings } from '@/hooks/useSettings'
 import type { ChatDrawerTab } from '@/components/chat/ChatDrawerTabStrip'
 import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
 import { ArtifactsContent } from '@/components/drawers/ArtifactsContent'
 import { Banner, type BannerProps } from '@/components/chat/Banner'
-import { api } from '@/lib/api'
+import { api, DrawerPinCapError } from '@/lib/api'
+import { CHAT_DRAWER_PIN_CAP } from '@/lib/constants'
 import type { DynamicCardTab, Envelope } from '@/lib/types'
 
 const FIXED_TABS: { id: string; label: string; devOnly?: boolean }[] = [
@@ -144,7 +146,7 @@ export function ChatWorkingDrawer({
   const onPointerDown = (e: React.PointerEvent) => {
     if (alertActive) return
     dragRef.current = { y: e.clientY, height: drawer.height || 200 }
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
     if (!drawer.open) setDrawer({ open: true })
   }
   const onPointerMove = (e: React.PointerEvent) => {
@@ -157,7 +159,7 @@ export function ChatWorkingDrawer({
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragRef.current) return
     dragRef.current = null
-    ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+    e.currentTarget.releasePointerCapture(e.pointerId)
     if (alertActive) return
     if (drawer.height < 24) setDrawer({ open: false, height: 200 })
   }
@@ -206,24 +208,43 @@ export function ChatWorkingDrawer({
           }
         : null
 
+  const showChatToast = useChatStore((s) => s.showChatToast)
   const onPinToggle = useCallback(async (id: string) => {
     const tab = cardTabs.find((t) => t.id === id)
     if (!tab || !activeSessionId) return
     if (tab.pinned) {
       const dbId = id.slice(5)
-      await api.unpinDrawerCard(dbId)
-      removeCardTab(id)
+      try {
+        await api.unpinDrawerCard(dbId)
+        removeCardTab(id)
+      } catch (err) {
+        console.error('Unpin failed:', err)
+        showChatToast('Failed to unpin card', 'info')
+      }
     } else {
-      await api.pinDrawerCard(activeSessionId, {
-        card_type: 'agent-envelope',
-        content_ref: tab.payload.id ?? '',
-        title: tab.label,
-        payload: JSON.stringify(tab.payload),
-      })
-      queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
-      removeCardTab(id)
+      // Stable content_ref: prefer the envelope's own id; fall back to the
+      // dynamic-tab id (sans `card:` prefix) so pinned cards can still be
+      // correlated even when the source envelope didn't carry an id.
+      const contentRef = tab.payload.id ?? id.slice(5)
+      try {
+        await api.pinDrawerCard(activeSessionId, {
+          card_type: 'agent-envelope',
+          content_ref: contentRef,
+          title: tab.label,
+          payload: JSON.stringify(tab.payload),
+        })
+        queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
+        removeCardTab(id)
+      } catch (err) {
+        if (err instanceof DrawerPinCapError) {
+          showChatToast(`Pinned-card cap reached (${CHAT_DRAWER_PIN_CAP}). Unpin one to free a slot.`, 'info')
+        } else {
+          console.error('Pin failed:', err)
+          showChatToast('Failed to pin card', 'info')
+        }
+      }
     }
-  }, [cardTabs, activeSessionId, removeCardTab, queryClient])
+  }, [cardTabs, activeSessionId, removeCardTab, queryClient, showChatToast])
 
   return (
     // Outer wrapper: column-width container. -mb-1.5 lets the in-flow
@@ -446,8 +467,9 @@ function ScratchpadTab() {
 // read-only, monospace, auto-scroll-to-bottom.
 
 function Terminal1Tab() {
-  const output = useShellStore((s) => s.shellOutput)
+  const chunks = useShellStore((s) => s.shellChunks)
   const running = useShellStore((s) => s.shellRunning)
+  const output = useMemo(() => chunks.join(''), [chunks])
   const ref = useRef<HTMLPreElement>(null)
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight })

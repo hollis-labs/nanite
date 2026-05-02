@@ -74,7 +74,7 @@ export function ChatPrimaryDrawer() {
   const dragRef = useRef<{ y: number; height: number } | null>(null)
   const onPointerDown = (e: React.PointerEvent) => {
     dragRef.current = { y: e.clientY, height: drawer.height || 240 }
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
     if (!drawer.open) setDrawer({ open: true })
   }
   const onPointerMove = (e: React.PointerEvent) => {
@@ -86,7 +86,7 @@ export function ChatPrimaryDrawer() {
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragRef.current) return
     dragRef.current = null
-    ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+    e.currentTarget.releasePointerCapture(e.pointerId)
     if (drawer.height < 24) setDrawer({ open: false, height: 240 })
   }
   const onDoubleClick = () => {

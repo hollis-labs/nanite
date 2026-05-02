@@ -33,7 +33,7 @@ Display type reflects actual positioning behavior — `Drawer` is in-flow with r
 ### `ChatPrimaryDrawer`
 - Position: between `ChatHeader` and `ChatTranscript`.
 - Reuses today's `BottomChatDrawer` chrome with the tab strip flipped to the **bottom edge** of the drawer (becomes the handle when collapsed).
-- Closed state: tab strip only. Click a tab to expand. Drag to resize. Double-click handle or click close-arrow icon to retract.
+- Closed state (refined during Wave 6 polish): only a thin drag-handle row is visible (~h-5 / 20px), surface-colored bottom border, `:::` grip icon centered. Tabs are hidden. Drag the handle DOWN to grow the body; double-click toggles open/closed. Once the body is open, the tab row appears at the bottom with horizontally-scrollable tabs (Documents / Reports / Diffs / Tools / Pins + dynamic pin tabs) and a close X. The earlier draft of this spec called for "tab strip only" in the closed state — that was superseded by the drag-pull pattern shared with `ChatWorkingDrawer` for behavior consistency across both drawers.
 - Top-border ribbon: `--color-primary`.
 
 ### `ChatWorkingDrawer`

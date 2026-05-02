@@ -342,6 +342,18 @@ export const useLayoutStore = create<LayoutState>()(
     }),
     {
       name: 'nanite-layout',
+      // Transient state must NOT be written to localStorage. partialize
+      // returns the subset that gets persisted; everything else stays
+      // in-memory only and is reset to its initializer on each session.
+      partialize: (state) => {
+        const { panelEnvelopes, chatWorkingDrawerCardTabs, memoryModalOpen, ...persisted } = state
+        // Reference-suppression: the destructure intentionally drops these
+        // keys; explicitly read them so TS doesn't flag them as unused.
+        void panelEnvelopes
+        void chatWorkingDrawerCardTabs
+        void memoryModalOpen
+        return persisted
+      },
       migrate: () => {
         // One-time migration from conduit-layout to nanite-layout
         const old = localStorage.getItem('conduit-layout')

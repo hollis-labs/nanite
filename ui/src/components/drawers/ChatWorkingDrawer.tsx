@@ -154,11 +154,30 @@ export function ChatWorkingDrawer() {
 
   return (
     // Outer wrapper: column-width container.  -mb-1.5 lets the bottommost
-    // child (drag-handle row) tuck under the composer below by ~6px.
+    // child (the body when open, the drag handle when closed) tuck under
+    // the composer by ~6px.
     <div className="max-w-3xl w-full mx-auto relative -mb-1.5">
       <div className="w-[90%] mx-auto relative">
-        {/* Drawer body — opens upward when active. Tabs row + active-tab
-            content stack inside it; the drag-handle row sits below. */}
+        {/* Drag-handle row — ALWAYS visible, ALWAYS the top of the drawer.
+            Accent border-top (success color, distinct from composer's primary
+            accent), grip icon centered, click+drag to resize, double-click
+            to toggle. Tabs are NOT here — they live inside the body below. */}
+        <div
+          className="relative flex items-center justify-center h-7 bg-bg-elevated border-x border-border-subtle border-t-2 border-t-success cursor-row-resize select-none touch-none"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onDoubleClick={onDoubleClick}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Drag to resize working drawer; double-click to toggle"
+        >
+          <GripHorizontal size={14} className="text-fg-muted pointer-events-none" />
+        </div>
+
+        {/* Drawer body — appears BELOW the drag handle when active. Inline
+            tabs at the top, active-tab content below. */}
         {drawer.open && (
           <div
             className="overflow-hidden border-x border-border-subtle bg-bg-elevated flex flex-col"
@@ -176,24 +195,6 @@ export function ChatWorkingDrawer() {
             </div>
           </div>
         )}
-
-        {/* Drag-handle row — always visible, acts as drawer "pull tab".
-            Accent border-top (success color, distinct from composer's primary
-            accent), grip icon centered, click+drag to resize, double-click
-            to toggle. Tabs are NOT here — they live inside the body above. */}
-        <div
-          className="relative flex items-center justify-center h-7 bg-bg-elevated border-x border-border-subtle border-t-2 border-t-success cursor-row-resize select-none touch-none"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onDoubleClick={onDoubleClick}
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Drag to resize working drawer; double-click to toggle"
-        >
-          <GripHorizontal size={14} className="text-fg-muted pointer-events-none" />
-        </div>
       </div>
     </div>
   )

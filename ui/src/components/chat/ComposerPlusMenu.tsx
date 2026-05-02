@@ -151,7 +151,7 @@ export function ComposerPlusMenu({
       {open && popoverPos && createPortal(
         <div
           ref={popoverRef}
-          className="fixed z-[9999] flex flex-wrap items-center gap-1 rounded-[8px] border border-border-subtle bg-bg-elevated p-1.5 shadow-2xl min-w-[300px]"
+          className="fixed z-[9999] flex flex-wrap items-center gap-1 rounded-[8px] border border-fg-secondary/30 bg-fg p-1.5 shadow-2xl min-w-[300px]"
           style={{ left: popoverPos.left, bottom: popoverPos.bottom }}
           role="menu"
         >
@@ -161,10 +161,13 @@ export function ComposerPlusMenu({
           <LayoutMenuTrigger
             ref={layoutTriggerRef}
             open={layoutOpen}
-            onClick={onToggleLayout}
+            onClick={() => {
+              onToggleLayout()
+              setOpen(false)
+            }}
           />
 
-          <span className="mx-1 h-4 w-px bg-divider" />
+          <span className="mx-1 h-4 w-px bg-bg-elevated/20" />
 
           <button
             type="button"
@@ -173,10 +176,10 @@ export function ComposerPlusMenu({
               setOpen(false)
             }}
             disabled={uploading}
-            className="flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-surface hover:text-fg disabled:cursor-default disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs text-bg-elevated transition-colors hover:bg-fg-secondary hover:text-bg disabled:cursor-default disabled:opacity-40"
             role="menuitem"
           >
-            <Paperclip size={14} className={uploading ? 'animate-pulse text-primary' : ''} />
+            <Paperclip size={14} className={uploading ? 'animate-pulse' : ''} />
             {uploading ? 'Uploading…' : 'Attach'}
           </button>
 
@@ -186,7 +189,7 @@ export function ComposerPlusMenu({
               onSlash()
               setOpen(false)
             }}
-            className="flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-surface hover:text-fg"
+            className="flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs text-bg-elevated transition-colors hover:bg-fg-secondary hover:text-bg"
             role="menuitem"
           >
             <Slash size={14} />
@@ -199,20 +202,23 @@ export function ComposerPlusMenu({
               onMention()
               setOpen(false)
             }}
-            className="flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-surface hover:text-fg"
+            className="flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs text-bg-elevated transition-colors hover:bg-fg-secondary hover:text-bg"
             role="menuitem"
           >
             <AtSign size={14} />
             Mention
           </button>
 
-          <span className="mx-1 h-4 w-px bg-divider" />
+          <span className="mx-1 h-4 w-px bg-bg-elevated/20" />
 
           <button
             type="button"
-            onClick={onCycleShell}
+            onClick={() => {
+              onCycleShell()
+              setOpen(false)
+            }}
             title={shellTitle}
-            className={`flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs transition-colors hover:bg-surface hover:text-fg ${shellClass || 'text-fg-muted'}`}
+            className={`flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs transition-colors hover:bg-fg-secondary hover:text-bg ${shellClass || 'text-bg-elevated'}`}
             role="menuitem"
           >
             <ShellIcon size={14} className={shellMode === 'yolo' ? 'fill-current' : ''} />
@@ -221,9 +227,12 @@ export function ComposerPlusMenu({
 
           <button
             type="button"
-            onClick={onCycleAutoSwitch}
+            onClick={() => {
+              onCycleAutoSwitch()
+              setOpen(false)
+            }}
             title={autoSwitchTitle}
-            className={`flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs transition-colors hover:bg-surface hover:text-fg ${autoSwitchClass || 'text-fg-muted'}`}
+            className={`flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs transition-colors hover:bg-fg-secondary hover:text-bg ${autoSwitchClass || 'text-bg-elevated'}`}
             role="menuitem"
           >
             <Sparkles size={14} />

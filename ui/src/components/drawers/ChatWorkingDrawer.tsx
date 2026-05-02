@@ -28,7 +28,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { GripHorizontal } from 'lucide-react'
+import { GripHorizontal, Pin, PinOff, X } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
@@ -159,11 +159,11 @@ export function ChatWorkingDrawer() {
     <div className="max-w-3xl w-full mx-auto relative -mb-1.5">
       <div className="w-[90%] mx-auto relative">
         {/* Drag-handle row — ALWAYS visible, ALWAYS the top of the drawer.
-            Accent border-top (success color, distinct from composer's primary
-            accent), grip icon centered, click+drag to resize, double-click
-            to toggle. Tabs are NOT here — they live inside the body below. */}
+            Rounded top corners so the success accent stops short of the edge
+            (mirrors composer's rounded-[10px] top). Grip icon centered, h-5
+            keeps the row compact. */}
         <div
-          className="relative flex items-center justify-center h-7 bg-bg-elevated border-x border-border-subtle border-t-2 border-t-success cursor-row-resize select-none touch-none"
+          className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-t-2 border-t-success rounded-t-[10px] cursor-row-resize select-none touch-none"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -173,26 +173,70 @@ export function ChatWorkingDrawer() {
           aria-orientation="horizontal"
           aria-label="Drag to resize working drawer; double-click to toggle"
         >
-          <GripHorizontal size={14} className="text-fg-muted pointer-events-none" />
+          <GripHorizontal size={12} className="text-fg-muted pointer-events-none" />
         </div>
 
-        {/* Drawer body — appears BELOW the drag handle when active. Inline
-            tabs at the top, active-tab content below. */}
+        {/* Drawer body — appears BELOW the drag handle when active. 2-column
+            layout: main content on the left, tab sidebar (vertical, scrollable)
+            on the right. */}
         {drawer.open && (
           <div
-            className="overflow-hidden border-x border-border-subtle bg-bg-elevated flex flex-col"
+            className="overflow-hidden border-x border-border-subtle bg-bg-elevated flex"
             style={{ height: drawer.height }}
           >
-            <ChatDrawerTabStrip
-              tabs={tabs}
-              variant="inline"
-              onSelect={(id) => setDrawer({ activeTab: id })}
-              onClose={(id) => removeCardTab(id)}
-              onTogglePin={onPinToggle}
-            />
-            <div className="flex-1 min-h-0 overflow-hidden">
+            {/* Main content area — left column. */}
+            <main className="flex-1 min-w-0 overflow-hidden">
               <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
-            </div>
+            </main>
+
+            {/* Tab sidebar — right column. Vertical stack, scrollable, hidden
+                scrollbar so the column stays compact regardless of tab count. */}
+            <aside className="w-[140px] shrink-0 border-l border-border-subtle bg-surface/30 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex flex-col gap-0.5 p-1.5">
+                {tabs.map((t) => (
+                  <div
+                    key={t.id}
+                    className={`group relative flex items-center gap-1 px-2 py-1.5 rounded-[4px] font-mono text-[11px] tracking-wide transition-colors ${
+                      t.active
+                        ? 'bg-bg-elevated text-fg shadow-sm'
+                        : 'text-fg-muted hover:bg-bg-elevated/60 hover:text-fg-secondary'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setDrawer({ activeTab: t.id })}
+                      title={t.label}
+                      className="flex-1 min-w-0 flex items-center gap-1.5 outline-none text-left"
+                    >
+                      <span className="truncate">{t.label}</span>
+                      {t.runningPip && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse shrink-0" />
+                      )}
+                    </button>
+                    {t.pinnable && (
+                      <button
+                        type="button"
+                        onClick={() => onPinToggle(t.id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
+                      >
+                        {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
+                      </button>
+                    )}
+                    {t.closeable && (
+                      <button
+                        type="button"
+                        onClick={() => removeCardTab(t.id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        aria-label="Close tab"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </aside>
           </div>
         )}
       </div>

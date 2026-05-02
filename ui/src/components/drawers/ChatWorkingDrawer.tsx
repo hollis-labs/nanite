@@ -153,95 +153,101 @@ export function ChatWorkingDrawer() {
   }, [cardTabs, activeSessionId, removeCardTab, queryClient])
 
   return (
-    // Outer wrapper: column-width container.  -mb-1.5 lets the bottommost
-    // child (the body when open, the drag handle when closed) tuck under
-    // the composer by ~6px.
+    // Outer wrapper: column-width container. -mb-1.5 lets the in-flow
+    // spacer's bottom tuck under the composer by ~6px, which (because the
+    // overlay below is anchored to the wrapper's bottom) is the same edge
+    // the drag handle visually tucks under.
     <div className="max-w-3xl w-full mx-auto relative -mb-1.5">
       <div className="w-[90%] mx-auto relative">
-        {/* Drag-handle row — ALWAYS visible, ALWAYS the top of the drawer.
-            Rounded top corners so the success accent stops short of the edge
-            (mirrors composer's rounded-[10px] top). Grip icon centered, h-5
-            keeps the row compact. */}
-        <div
-          className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-t-2 border-t-brand rounded-t-[10px] cursor-row-resize select-none touch-none"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onDoubleClick={onDoubleClick}
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Drag to resize working drawer; double-click to toggle"
-        >
-          <GripHorizontal size={12} className="text-fg-muted pointer-events-none" />
-        </div>
+        {/* In-flow spacer — reserves the drag-handle's height (h-5 = 20px)
+            so the chat layout always leaves that gap above the composer.
+            The actual visible chrome lives in the absolute overlay below
+            and is painted on top of this spacer. */}
+        <div aria-hidden className="h-5 pointer-events-none" />
 
-        {/* Drawer body — when active, position:absolute overlays the
-            transcript above instead of pushing it up. The 5% margins on
-            either side of the inner wrapper stay transparent so transcript
-            content remains visible alongside the body. The body's bottom
-            sits flush with the drag-handle row's top (bottom-full of the
-            inner wrapper). */}
-        {drawer.open && (
+        {/* Absolute overlay — anchored to the inner wrapper's bottom. The
+            drag handle is the TOP of this overlay; the body sits BELOW it.
+            When open, the overlay extends UPWARD over the transcript above
+            (the body grows up), keeping the drag handle attached to the
+            overlay's top edge. The 5% margins on either side stay
+            transparent so transcript content remains visible. */}
+        <div className="absolute bottom-0 left-0 right-0 flex flex-col">
+          {/* Drag handle — always visible, top of overlay. Rounded top
+              corners + brand accent ribbon stop short of the edge. */}
           <div
-            className="absolute bottom-full left-0 right-0 overflow-hidden border-x border-border-subtle bg-bg-elevated flex shadow-lg"
-            style={{ height: drawer.height }}
+            className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-t-2 border-t-brand rounded-t-[10px] cursor-row-resize select-none touch-none"
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onDoubleClick={onDoubleClick}
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Drag to resize working drawer; double-click to toggle"
           >
-            {/* Main content area — left column. */}
-            <main className="flex-1 min-w-0 overflow-hidden">
-              <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
-            </main>
-
-            {/* Tab sidebar — right column. Vertical stack, scrollable, hidden
-                scrollbar so the column stays compact regardless of tab count. */}
-            <aside className="w-[140px] shrink-0 border-l border-border-subtle bg-surface/30 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <div className="flex flex-col gap-0.5 p-1.5">
-                {tabs.map((t) => (
-                  <div
-                    key={t.id}
-                    className={`group relative flex items-center gap-1 px-2 py-1.5 rounded-[4px] font-mono text-[11px] tracking-wide transition-colors ${
-                      t.active
-                        ? 'bg-bg-elevated text-fg shadow-sm'
-                        : 'text-fg-muted hover:bg-bg-elevated/60 hover:text-fg-secondary'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setDrawer({ activeTab: t.id })}
-                      title={t.label}
-                      className="flex-1 min-w-0 flex items-center gap-1.5 outline-none text-left"
-                    >
-                      <span className="truncate">{t.label}</span>
-                      {t.runningPip && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse shrink-0" />
-                      )}
-                    </button>
-                    {t.pinnable && (
-                      <button
-                        type="button"
-                        onClick={() => onPinToggle(t.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                        aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
-                      >
-                        {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
-                      </button>
-                    )}
-                    {t.closeable && (
-                      <button
-                        type="button"
-                        onClick={() => removeCardTab(t.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                        aria-label="Close tab"
-                      >
-                        <X size={10} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </aside>
+            <GripHorizontal size={12} className="text-fg-muted pointer-events-none" />
           </div>
-        )}
+
+          {/* Body — below drag handle when active. 2-column layout: main
+              content on the left, vertical tab sidebar on the right. */}
+          {drawer.open && (
+            <div
+              className="overflow-hidden border-x border-border-subtle bg-bg-elevated flex shadow-lg"
+              style={{ height: drawer.height }}
+            >
+              <main className="flex-1 min-w-0 overflow-hidden">
+                <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
+              </main>
+
+              <aside className="w-[140px] shrink-0 border-l border-border-subtle bg-surface/30 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="flex flex-col gap-0.5 p-1.5">
+                  {tabs.map((t) => (
+                    <div
+                      key={t.id}
+                      className={`group relative flex items-center gap-1 px-2 py-1.5 rounded-[4px] font-mono text-[11px] tracking-wide transition-colors ${
+                        t.active
+                          ? 'bg-bg-elevated text-fg shadow-sm'
+                          : 'text-fg-muted hover:bg-bg-elevated/60 hover:text-fg-secondary'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setDrawer({ activeTab: t.id })}
+                        title={t.label}
+                        className="flex-1 min-w-0 flex items-center gap-1.5 outline-none text-left"
+                      >
+                        <span className="truncate">{t.label}</span>
+                        {t.runningPip && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse shrink-0" />
+                        )}
+                      </button>
+                      {t.pinnable && (
+                        <button
+                          type="button"
+                          onClick={() => onPinToggle(t.id)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
+                        >
+                          {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
+                        </button>
+                      )}
+                      {t.closeable && (
+                        <button
+                          type="button"
+                          onClick={() => removeCardTab(t.id)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          aria-label="Close tab"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </aside>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

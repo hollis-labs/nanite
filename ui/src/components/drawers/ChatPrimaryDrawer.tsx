@@ -213,10 +213,10 @@ function PrimaryTabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors shrink-0 ${
+      className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs transition-colors shrink-0 ${
         active
-          ? 'bg-surface text-fg font-medium'
-          : 'text-fg-muted hover:text-fg hover:bg-surface/50'
+          ? 'bg-surface/60 text-fg'
+          : 'text-fg-muted hover:text-fg-secondary hover:bg-surface/40'
       }`}
     >
       {icon}
@@ -241,10 +241,10 @@ function PrimaryPinnedTabButton({
 }) {
   return (
     <div
-      className={`group flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors shrink-0 max-w-[160px] ${
+      className={`group flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors shrink-0 max-w-[160px] ${
         active
-          ? 'bg-surface text-fg font-medium'
-          : 'text-fg-muted hover:text-fg hover:bg-surface/50'
+          ? 'bg-surface/60 text-fg'
+          : 'text-fg-muted hover:text-fg-secondary hover:bg-surface/40'
       }`}
     >
       <button

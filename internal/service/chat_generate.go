@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/go-otel"
 	"github.com/google/uuid"
+	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
@@ -23,8 +23,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/messaging"
-	"github.com/hollis-labs/nanite/internal/reminders"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -900,6 +900,30 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 						s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
 					})
 				}
+				// Glass-6 (CW-20260502-0013, SP-20260502-0001): for the
+				// rate-budget refused-recovery branch, do NOT emit a fatal
+				// internal_error envelope. Surface the failure as a
+				// rate_budget_pause stream event, optionally auto-retry once
+				// after RateTracker.WaitTime, and end the turn cleanly when
+				// the budget can't recover. The session stays alive so the
+				// next user message reuses the same session_id — replaces
+				// the prior "/clear to recover" UX.
+				if triggerKind == compactTriggerRateBudget {
+					if s.pauseAndMaybeRetryRateBudget(ctx, sessionID, prov, ch, err, triggerKind, &ls.rateBudgetPauseAttempts) {
+						// Auto-retry: rerun StreamChat with the same args.
+						// Resetting compactRecoverableAttempts isn't right
+						// here — recovery already refused — but we DO need
+						// to step the iteration counter so the retry isn't
+						// counted as a fresh turn. Mirrors the recovery-ok
+						// path above.
+						ls.iteration--
+						continue
+					}
+					// Pause emitted with user_action_needed; end the turn
+					// cleanly without a fatal envelope.
+					s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
+					return
+				}
 				var msg string
 				switch triggerKind {
 				case compactTriggerRateBudget:
@@ -943,10 +967,20 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				// because the request itself is bigger than a single window.
 				slog.Warn("chat-service: compaction-recoverable error persisted after retry",
 					"session_id", sessionID, "iter", ls.iteration, "err", err)
-				msg := "Context is still too large after compaction. Use `/clear` or split the request."
+				// Glass-6 (CW-20260502-0013, SP-20260502-0001): rate-budget
+				// failures past compaction also stop killing the session. Emit
+				// rate_budget_pause and end the turn cleanly. context-overflow
+				// retains the prior user-facing internal_error envelope —
+				// Glass-6's scope is rate-budget only.
 				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
-					msg = "Request exceeds the per-minute rate budget even after compaction. Reduce or split the request, or use `/clear` to remove context."
+					if s.pauseAndMaybeRetryRateBudget(ctx, sessionID, prov, ch, err, compactTriggerRateBudget, &ls.rateBudgetPauseAttempts) {
+						ls.iteration--
+						continue
+					}
+					s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
+					return
 				}
+				msg := "Context is still too large after compaction. Use `/clear` or split the request."
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019

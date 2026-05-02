@@ -73,7 +73,7 @@ export function ChatDrawerTabStrip({
   }
 
   return (
-    <div className={`flex items-center gap-1 px-1 ${dock === 'bottom' ? 'border-t' : 'border-b'} border-border-subtle`}>
+    <div className={`flex items-center gap-1 px-1 ${dock === 'bottom' ? 'border-t-2 border-t-fg' : 'border-b-2 border-b-fg'}`}>
       {overflow.left && (
         <button
           type="button"
@@ -91,10 +91,10 @@ export function ChatDrawerTabStrip({
         {tabs.map((t) => (
           <div
             key={t.id}
-            className={`group relative shrink-0 flex items-center gap-1 rounded-[6px] px-2.5 py-1 font-mono text-[11px] tracking-wide transition-colors ${
+            className={`group relative shrink-0 flex items-center gap-1 px-2.5 py-1 font-mono text-[11px] tracking-wide transition-colors ${
               t.active
-                ? 'bg-surface text-fg'
-                : 'text-fg-muted hover:bg-surface hover:text-fg-secondary'
+                ? 'bg-bg-elevated text-fg rounded-t-[6px] border-x border-border-subtle shadow-[inset_0_2px_0_0_var(--color-fg)] -mb-[2px] z-10'
+                : 'text-fg-muted hover:bg-surface hover:text-fg-secondary rounded-[6px]'
             }`}
           >
             <button

@@ -108,30 +108,17 @@ export function ChatWorkingDrawer() {
   if (!activeSessionId) return null
 
   return (
-    <div className="max-w-3xl w-full mx-auto relative">
-      {/* Drawer body — opens upward into the transcript area when active. */}
-      {drawer.open && (
-        <div
-          className="relative overflow-hidden border-x border-t border-border-subtle bg-bg-elevated"
-          style={{
-            height: drawer.height,
-            // Rounded top, square bottom — flush with the tab strip below it.
-            borderRadius: '10px 10px 0 0',
-          }}
-        >
-          {/* Top accent ribbon — success color (differentiates from ChatPrimaryDrawer). */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-success opacity-65" />
-          <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
-        </div>
-      )}
-
-      {/* Tab strip — sits at the bottom of the drawer, ~90% composer width,
-          with a few px of negative margin so it visually tucks under the
-          composer (file-folder-tab look). */}
-      <div className="w-[90%] mx-auto -mb-1.5 relative z-10">
+    // Outer wrapper: column-width container.  -mb-1.5 lets whatever is the
+    // bottommost child (tab strip when closed, body when open) tuck under the
+    // composer below by ~6px (the "nav-style" overlap).
+    <div className="max-w-3xl w-full mx-auto relative -mb-1.5">
+      {/* Inner wrapper: 90% width matches the tab strip + open body. */}
+      <div className="w-[90%] mx-auto relative">
+        {/* Tab strip — always at the top of the drawer wrapper. Its border-b
+            is the dark "black line" the active tab visually attaches to. */}
         <ChatDrawerTabStrip
           tabs={tabs}
-          dock="bottom"
+          dock="top"
           onSelect={(id) => {
             if (drawer.activeTab === id && drawer.open) {
               setDrawer({ open: false })
@@ -163,6 +150,18 @@ export function ChatWorkingDrawer() {
             }
           }}
         />
+
+        {/* Drawer body — appears BELOW the tab strip when active. Square top
+            (flush with the tab strip's dark border-b), bordered sides, no
+            separate top accent ribbon (the strip's border-b serves). */}
+        {drawer.open && (
+          <div
+            className="overflow-hidden border-x border-border-subtle bg-bg-elevated"
+            style={{ height: drawer.height }}
+          >
+            <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
+          </div>
+        )}
       </div>
     </div>
   )

@@ -37,6 +37,7 @@ import { useSettings } from '@/hooks/useSettings'
 import type { ChatDrawerTab } from '@/components/chat/ChatDrawerTabStrip'
 import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
 import { ArtifactsContent } from '@/components/drawers/ArtifactsContent'
+import { Banner, type BannerProps } from '@/components/chat/Banner'
 import { api } from '@/lib/api'
 import type { DynamicCardTab, Envelope } from '@/lib/types'
 
@@ -48,7 +49,26 @@ const FIXED_TABS: { id: string; label: string; devOnly?: boolean }[] = [
   { id: 'session-context', label: 'Session Context' },
 ]
 
-export function ChatWorkingDrawer() {
+export interface ChatWorkingDrawerProps {
+  /** Alert flags from useChat. When any is true the drawer auto-opens
+   *  (if closed) and renders a Banner overlay over the body content. */
+  sessionTakeover?: boolean
+  streamStalled?: boolean
+  circuitOpen?: boolean
+  /** Action handlers. */
+  onReconnect?: () => void
+  onRetry?: () => void
+  onDismissCircuit?: () => void
+}
+
+export function ChatWorkingDrawer({
+  sessionTakeover = false,
+  streamStalled = false,
+  circuitOpen = false,
+  onReconnect,
+  onRetry,
+  onDismissCircuit,
+}: ChatWorkingDrawerProps = {}) {
   const drawer = useLayoutStore((s) => s.chatWorkingDrawer)
   const setDrawer = useLayoutStore((s) => s.setChatWorkingDrawer)
   const cardTabs = useLayoutStore((s) => s.chatWorkingDrawerCardTabs)
@@ -108,16 +128,27 @@ export function ChatWorkingDrawer() {
 
   if (!activeSessionId) return null
 
+  // ── Alert overlay state machine ─────────────────────────────────────────────
+  // When any alert becomes active, snapshot the drawer's open state so we can
+  // restore it on dismissal: if the drawer was closed when the alert fired,
+  // close it again when the alert clears; if it was already open, leave it.
+  const alertActive = sessionTakeover || streamStalled || circuitOpen
+  const wasOpenBeforeAlertRef = useRef<boolean | null>(null)
+
   // Pull-tab drag mechanics. The drag-handle row is always visible; users
   // drag UP to grow the drawer, DOWN to shrink. Releasing at near-0 height
   // closes the drawer and snaps height back to a reasonable default.
+  // While an alert overlay is active, the drag is locked so the drawer stays
+  // at the size it had when the alert opened.
   const dragRef = useRef<{ y: number; height: number } | null>(null)
   const onPointerDown = (e: React.PointerEvent) => {
+    if (alertActive) return
     dragRef.current = { y: e.clientY, height: drawer.height || 200 }
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
     if (!drawer.open) setDrawer({ open: true })
   }
   const onPointerMove = (e: React.PointerEvent) => {
+    if (alertActive) return
     const d = dragRef.current
     if (!d) return
     const next = Math.max(0, d.height - (e.clientY - d.y))
@@ -127,11 +158,53 @@ export function ChatWorkingDrawer() {
     if (!dragRef.current) return
     dragRef.current = null
     ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+    if (alertActive) return
     if (drawer.height < 24) setDrawer({ open: false, height: 200 })
   }
   const onDoubleClick = () => {
+    if (alertActive) return
     setDrawer({ open: !drawer.open, height: drawer.height || 200 })
   }
+
+  useEffect(() => {
+    if (alertActive && wasOpenBeforeAlertRef.current === null) {
+      wasOpenBeforeAlertRef.current = drawer.open
+      if (!drawer.open) setDrawer({ open: true })
+    } else if (!alertActive && wasOpenBeforeAlertRef.current !== null) {
+      const wasOpen = wasOpenBeforeAlertRef.current
+      wasOpenBeforeAlertRef.current = null
+      if (!wasOpen) setDrawer({ open: false })
+    }
+  }, [alertActive, drawer.open, setDrawer])
+
+  // Resolve which alert renders. Priority: takeover > circuit > stalled.
+  const bannerProps: BannerProps | null = sessionTakeover
+    ? {
+        tone: 'info',
+        title: 'This session is now active in another tab',
+        body: 'The streaming connection moved to a newer tab. Reload to reconnect here.',
+        actions: [{ label: 'Reload', onClick: () => window.location.reload(), primary: true, refresh: true }],
+      }
+    : circuitOpen
+      ? {
+          tone: 'warning',
+          title: 'Provider rate limited after multiple retries',
+          body: 'The API provider returned rate limit errors. Retry, or dismiss to keep the partial response.',
+          actions: [
+            ...(onRetry ? [{ label: 'Retry', onClick: onRetry, primary: true, refresh: true }] : []),
+            ...(onDismissCircuit ? [{ label: 'Dismiss', onClick: onDismissCircuit, dismiss: true }] : []),
+          ],
+        }
+      : streamStalled
+        ? {
+            tone: 'warning',
+            title: 'Connection appears stalled',
+            body: 'No activity from the server in the last minute. Reconnect to retry this turn.',
+            actions: onReconnect
+              ? [{ label: 'Reconnect', onClick: onReconnect, primary: true, refresh: true }]
+              : [],
+          }
+        : null
 
   const onPinToggle = useCallback(async (id: string) => {
     const tab = cardTabs.find((t) => t.id === id)
@@ -188,63 +261,88 @@ export function ChatWorkingDrawer() {
             <GripHorizontal size={12} className="text-fg-muted pointer-events-none" />
           </div>
 
-          {/* Body — below drag handle when active. 2-column layout: main
-              content on the left, vertical tab sidebar on the right. */}
+          {/* Body — below drag handle when active. 2-column layout (main
+              content on the left, vertical tab sidebar on the right). When
+              an alert/approval/notification is active, the body content is
+              dimmed + non-interactive, and a Banner overlay floats on top. */}
           {drawer.open && (
             <div
-              className="overflow-hidden border-x border-border-subtle bg-bg-elevated flex shadow-lg"
+              className="overflow-hidden border-x border-border-subtle bg-bg-elevated shadow-lg relative"
               style={{ height: drawer.height }}
             >
-              <main className="flex-1 min-w-0 overflow-hidden">
-                <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
-              </main>
+              {/* Content layer — fades when an alert is active. */}
+              <div
+                className={`flex h-full transition-opacity duration-200 ${
+                  alertActive ? 'opacity-30 pointer-events-none' : 'opacity-100'
+                }`}
+              >
+                <main className="flex-1 min-w-0 overflow-hidden">
+                  <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
+                </main>
 
-              <aside className="w-[140px] shrink-0 border-l border-border-subtle bg-surface/30 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                <div className="flex flex-col gap-0.5 p-1.5">
-                  {tabs.map((t) => (
-                    <div
-                      key={t.id}
-                      className={`group relative flex items-center gap-1 px-2 py-1.5 rounded-[4px] font-mono text-[11px] tracking-wide transition-colors ${
-                        t.active
-                          ? 'bg-bg-elevated text-fg shadow-sm'
-                          : 'text-fg-muted hover:bg-bg-elevated/60 hover:text-fg-secondary'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setDrawer({ activeTab: t.id })}
-                        title={t.label}
-                        className="flex-1 min-w-0 flex items-center gap-1.5 outline-none text-left"
+                <aside className="w-[140px] shrink-0 border-l border-border-subtle bg-surface/30 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="flex flex-col gap-0.5 p-1.5">
+                    {tabs.map((t) => (
+                      <div
+                        key={t.id}
+                        className={`group relative flex items-center gap-1 px-2 py-1.5 rounded-[4px] font-mono text-[11px] tracking-wide transition-colors ${
+                          t.active
+                            ? 'bg-bg-elevated text-fg shadow-sm'
+                            : 'text-fg-muted hover:bg-bg-elevated/60 hover:text-fg-secondary'
+                        }`}
                       >
-                        <span className="truncate">{t.label}</span>
-                        {t.runningPip && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse shrink-0" />
+                        <button
+                          type="button"
+                          onClick={() => setDrawer({ activeTab: t.id })}
+                          title={t.label}
+                          className="flex-1 min-w-0 flex items-center gap-1.5 outline-none text-left"
+                        >
+                          <span className="truncate">{t.label}</span>
+                          {t.runningPip && (
+                            <span className="h-1.5 w-1.5 rounded-full bg-warning animate-pulse shrink-0" />
+                          )}
+                        </button>
+                        {t.pinnable && (
+                          <button
+                            type="button"
+                            onClick={() => onPinToggle(t.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                            aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
+                          >
+                            {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
+                          </button>
                         )}
-                      </button>
-                      {t.pinnable && (
-                        <button
-                          type="button"
-                          onClick={() => onPinToggle(t.id)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                          aria-label={t.pinned ? 'Unpin tab' : 'Pin tab'}
-                        >
-                          {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
-                        </button>
-                      )}
-                      {t.closeable && (
-                        <button
-                          type="button"
-                          onClick={() => removeCardTab(t.id)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                          aria-label="Close tab"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                        {t.closeable && (
+                          <button
+                            type="button"
+                            onClick={() => removeCardTab(t.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                            aria-label="Close tab"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </aside>
+              </div>
+
+              {/* Banner overlay — centered when an alert is active. A glass
+                  backdrop sits between the dimmed body content and the
+                  banner. inset-1.5 leaves a 6px gap between the frost and
+                  the body's border on all four sides. bg-fg/8 keeps the
+                  frost subtle and auto-adapts to the theme (dark fg on
+                  light theme → faint dark glass; light fg on dark theme →
+                  faint light glass). */}
+              {alertActive && bannerProps && (
+                <div className="absolute inset-0 flex items-center justify-center p-6">
+                  <div className="absolute inset-1.5 rounded-[6px] bg-fg/8 backdrop-blur-[2px]" />
+                  <div className="relative w-[85%]">
+                    <Banner {...bannerProps} />
+                  </div>
                 </div>
-              </aside>
+              )}
             </div>
           )}
         </div>

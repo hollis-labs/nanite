@@ -1,6 +1,5 @@
 import { Key, MessageSquare, Puzzle, Settings } from "lucide-react";
 import { TaskThreadPanel } from "@/components/messaging/TaskThreadPanel";
-import { ChatAlertOverlay } from "@/components/drawers/ChatAlertOverlay";
 import { ChatPrimaryDrawer } from "@/components/drawers/ChatPrimaryDrawer";
 import { ChatWorkingDrawer } from "@/components/drawers/ChatWorkingDrawer";
 import { useChat } from "@/hooks/useChat";
@@ -62,17 +61,18 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
             {statusMessage}
           </div>
         )}
-        <ChatWorkingDrawer />
+        {/* TEMPORARY: hardcoded circuitOpen=true so the in-drawer alert
+            banner is always visible for visual review. Revert these props
+            before shipping (set them back to the live useChat flags below). */}
+        <ChatWorkingDrawer
+          sessionTakeover={false}
+          streamStalled={false}
+          circuitOpen={true}
+          onReconnect={() => void reconnectStalledStream()}
+          onRetry={() => void retryStream()}
+          onDismissCircuit={dismissCircuit}
+        />
         <div className="max-w-3xl w-full mx-auto px-4 pb-1 shrink-0 relative">
-          <ChatAlertOverlay
-            sessionTakeover={sessionTakeover}
-            streamStalled={streamStalled && !circuitOpen && !sessionTakeover}
-            circuitOpen={circuitOpen}
-            statusMessage={null /* handled by inline status row above; overlay only for hard alerts */}
-            onReconnect={() => void reconnectStalledStream()}
-            onRetry={() => void retryStream()}
-            onDismissCircuit={dismissCircuit}
-          />
           <ChatComposer
             onSend={sendMessage}
             isStreaming={isStreaming}

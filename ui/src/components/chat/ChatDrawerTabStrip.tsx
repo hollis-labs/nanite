@@ -17,9 +17,17 @@ export interface ChatDrawerTab {
 
 interface Props {
   tabs: ChatDrawerTab[]
-  /** Where the strip docks: 'top' (default, used by ChatWorkingDrawer) or
-   *  'bottom' (used by ChatPrimaryDrawer — strip is the handle). */
+  /** Where the strip docks: 'top' (default) or 'bottom' (used by
+   *  ChatPrimaryDrawer where the strip is the file-folder handle). */
   dock?: 'top' | 'bottom'
+  /** Visual variant.
+   *  - 'card' (default) renders the file-folder-tab look — used when the
+   *    strip lives outside a drawer body and acts as the drawer handle
+   *    (ChatPrimaryDrawer).
+   *  - 'inline' renders simpler horizontal pill tabs — used when the strip
+   *    lives INSIDE a drawer body alongside the active tab's content
+   *    (ChatWorkingDrawer). */
+  variant?: 'card' | 'inline'
   onSelect: (id: string) => void
   onClose?: (id: string) => void
   onTogglePin?: (id: string) => void
@@ -34,6 +42,7 @@ function truncate(s: string): string {
 export function ChatDrawerTabStrip({
   tabs,
   dock = 'top',
+  variant = 'card',
   onSelect,
   onClose,
   onTogglePin,
@@ -73,7 +82,11 @@ export function ChatDrawerTabStrip({
   }
 
   return (
-    <div className={`flex items-center gap-1 px-1 ${dock === 'bottom' ? 'border-t-2 border-t-fg' : 'border-b-2 border-b-fg'}`}>
+    <div className={`flex items-center gap-1 px-1 ${
+      variant === 'inline'
+        ? 'border-b border-border-subtle bg-surface/40'
+        : dock === 'bottom' ? 'border-t-2 border-t-fg' : 'border-b-2 border-b-fg'
+    }`}>
       {overflow.left && (
         <button
           type="button"
@@ -92,9 +105,13 @@ export function ChatDrawerTabStrip({
           <div
             key={t.id}
             className={`group relative shrink-0 flex items-center gap-1 px-2.5 py-1 font-mono text-[11px] tracking-wide transition-colors ${
-              t.active
-                ? 'bg-bg-elevated text-fg rounded-t-[6px] border-x border-border-subtle shadow-[inset_0_2px_0_0_var(--color-fg)] -mb-[2px] z-10'
-                : 'text-fg-muted hover:bg-surface hover:text-fg-secondary rounded-[6px]'
+              variant === 'inline'
+                ? t.active
+                  ? 'bg-bg-elevated text-fg rounded-[4px] shadow-sm'
+                  : 'text-fg-muted hover:bg-bg-elevated/60 hover:text-fg-secondary rounded-[4px]'
+                : t.active
+                  ? 'bg-bg-elevated text-fg rounded-t-[6px] border-x border-border-subtle shadow-[inset_0_2px_0_0_var(--color-fg)] -mb-[2px] z-10'
+                  : 'text-fg-muted hover:bg-surface hover:text-fg-secondary rounded-[6px]'
             }`}
           >
             <button

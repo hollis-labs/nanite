@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { GripHorizontal } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useAppStore } from '@/stores/useAppStore'
@@ -107,61 +108,92 @@ export function ChatWorkingDrawer() {
 
   if (!activeSessionId) return null
 
-  return (
-    // Outer wrapper: column-width container.  -mb-1.5 lets whatever is the
-    // bottommost child (tab strip when closed, body when open) tuck under the
-    // composer below by ~6px (the "nav-style" overlap).
-    <div className="max-w-3xl w-full mx-auto relative -mb-1.5">
-      {/* Inner wrapper: 90% width matches the tab strip + open body. */}
-      <div className="w-[90%] mx-auto relative">
-        {/* Tab strip — always at the top of the drawer wrapper. Its border-b
-            is the dark "black line" the active tab visually attaches to. */}
-        <ChatDrawerTabStrip
-          tabs={tabs}
-          dock="top"
-          onSelect={(id) => {
-            if (drawer.activeTab === id && drawer.open) {
-              setDrawer({ open: false })
-              return
-            }
-            setDrawer({ open: true, activeTab: id })
-          }}
-          onClose={(id) => removeCardTab(id)}
-          onTogglePin={async (id) => {
-            const tab = cardTabs.find((t) => t.id === id)
-            if (!tab) return
-            if (tab.pinned) {
-              // Promoted card — DELETE; refresh pinned cards in ChatPrimaryDrawer.
-              const dbId = id.slice(5) // strip 'card:' prefix
-              await api.unpinDrawerCard(dbId)
-              removeCardTab(id)
-            } else {
-              // Promote: POST /drawer-cards via existing API. The plan's
-              // shape (`type` / `label`) maps 1:1 onto the live API's
-              // `card_type` / `title` field names.
-              await api.pinDrawerCard(activeSessionId, {
-                card_type: 'agent-envelope',
-                content_ref: tab.payload.id ?? '',
-                title: tab.label,
-                payload: JSON.stringify(tab.payload),
-              })
-              queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
-              removeCardTab(id) // tab now lives in ChatPrimaryDrawer's pinned-tabs list
-            }
-          }}
-        />
+  // Pull-tab drag mechanics. The drag-handle row is always visible; users
+  // drag UP to grow the drawer, DOWN to shrink. Releasing at near-0 height
+  // closes the drawer and snaps height back to a reasonable default.
+  const dragRef = useRef<{ y: number; height: number } | null>(null)
+  const onPointerDown = (e: React.PointerEvent) => {
+    dragRef.current = { y: e.clientY, height: drawer.height || 200 }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    if (!drawer.open) setDrawer({ open: true })
+  }
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current
+    if (!d) return
+    const next = Math.max(0, d.height - (e.clientY - d.y))
+    setDrawer({ height: next })
+  }
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!dragRef.current) return
+    dragRef.current = null
+    ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+    if (drawer.height < 24) setDrawer({ open: false, height: 200 })
+  }
+  const onDoubleClick = () => {
+    setDrawer({ open: !drawer.open, height: drawer.height || 200 })
+  }
 
-        {/* Drawer body — appears BELOW the tab strip when active. Square top
-            (flush with the tab strip's dark border-b), bordered sides, no
-            separate top accent ribbon (the strip's border-b serves). */}
+  const onPinToggle = useCallback(async (id: string) => {
+    const tab = cardTabs.find((t) => t.id === id)
+    if (!tab || !activeSessionId) return
+    if (tab.pinned) {
+      const dbId = id.slice(5)
+      await api.unpinDrawerCard(dbId)
+      removeCardTab(id)
+    } else {
+      await api.pinDrawerCard(activeSessionId, {
+        card_type: 'agent-envelope',
+        content_ref: tab.payload.id ?? '',
+        title: tab.label,
+        payload: JSON.stringify(tab.payload),
+      })
+      queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
+      removeCardTab(id)
+    }
+  }, [cardTabs, activeSessionId, removeCardTab, queryClient])
+
+  return (
+    // Outer wrapper: column-width container.  -mb-1.5 lets the bottommost
+    // child (drag-handle row) tuck under the composer below by ~6px.
+    <div className="max-w-3xl w-full mx-auto relative -mb-1.5">
+      <div className="w-[90%] mx-auto relative">
+        {/* Drawer body — opens upward when active. Tabs row + active-tab
+            content stack inside it; the drag-handle row sits below. */}
         {drawer.open && (
           <div
-            className="overflow-hidden border-x border-border-subtle bg-bg-elevated"
+            className="overflow-hidden border-x border-border-subtle bg-bg-elevated flex flex-col"
             style={{ height: drawer.height }}
           >
-            <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
+            <ChatDrawerTabStrip
+              tabs={tabs}
+              variant="inline"
+              onSelect={(id) => setDrawer({ activeTab: id })}
+              onClose={(id) => removeCardTab(id)}
+              onTogglePin={onPinToggle}
+            />
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
+            </div>
           </div>
         )}
+
+        {/* Drag-handle row — always visible, acts as drawer "pull tab".
+            Accent border-top (success color, distinct from composer's primary
+            accent), grip icon centered, click+drag to resize, double-click
+            to toggle. Tabs are NOT here — they live inside the body above. */}
+        <div
+          className="relative flex items-center justify-center h-7 bg-bg-elevated border-x border-border-subtle border-t-2 border-t-success cursor-row-resize select-none touch-none"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onDoubleClick={onDoubleClick}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Drag to resize working drawer; double-click to toggle"
+        >
+          <GripHorizontal size={14} className="text-fg-muted pointer-events-none" />
+        </div>
       </div>
     </div>
   )

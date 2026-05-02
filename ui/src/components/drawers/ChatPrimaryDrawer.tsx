@@ -108,7 +108,7 @@ export function ChatPrimaryDrawer() {
   if (!activeSessionId) return null
 
   return (
-    <div className="w-[85%] max-w-7xl mx-auto px-4">
+    <div className="max-w-3xl w-full mx-auto px-4">
       <div
         className={`relative overflow-hidden border border-border-subtle bg-bg-elevated transition-[height] ${
           drawer.open ? '' : 'h-0'

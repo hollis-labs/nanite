@@ -108,7 +108,7 @@ export function ChatWorkingDrawer() {
   if (!activeSessionId) return null
 
   return (
-    <div className="w-[85%] max-w-7xl mx-auto px-4 relative">
+    <div className="max-w-3xl w-full mx-auto px-4 relative">
       <ChatDrawerTabStrip
         tabs={tabs}
         dock="top"

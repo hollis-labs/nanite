@@ -397,7 +397,7 @@ export function ComposerToolbar({
               disabled={!hasContent}
               className={`flex h-7 w-7 items-center justify-center rounded-[6px] border transition-colors ${
                 hasContent
-                  ? 'bg-accent text-accent-fg border-accent hover:bg-accent-hover hover:border-accent-hover'
+                  ? 'bg-brand text-brand-fg border-brand hover:bg-brand-hover hover:border-brand-hover'
                   : 'cursor-default bg-bg-elevated text-fg-faint border-border-subtle'
               }`}
             >

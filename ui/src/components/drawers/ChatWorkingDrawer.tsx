@@ -163,7 +163,7 @@ export function ChatWorkingDrawer() {
             (mirrors composer's rounded-[10px] top). Grip icon centered, h-5
             keeps the row compact. */}
         <div
-          className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-t-2 border-t-accent rounded-t-[10px] cursor-row-resize select-none touch-none"
+          className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-t-2 border-t-brand rounded-t-[10px] cursor-row-resize select-none touch-none"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}

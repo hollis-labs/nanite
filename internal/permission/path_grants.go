@@ -37,7 +37,6 @@
 package permission
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -317,12 +316,16 @@ func trimMarkdownAndPunct(tok string) string {
 // absolutize expands a leading ~/ to the user's home directory, then
 // applies filepath.Abs to produce a cleaned absolute path. Returns
 // (path, true) on success; ("", false) on any error.
+//
+// Home resolution goes through HomeDir (not os.UserHomeDir) so the
+// path-grant store stays consistent with dev_tools.expandHome on
+// launchd-spawned services where $HOME is unset (CW-20260502-0014).
 func absolutize(p string) (string, bool) {
 	if p == "" {
 		return "", false
 	}
 	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~"+string(filepath.Separator)) {
-		home, err := os.UserHomeDir()
+		home, err := HomeDir()
 		if err != nil {
 			return "", false
 		}

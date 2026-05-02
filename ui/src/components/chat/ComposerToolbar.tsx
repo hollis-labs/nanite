@@ -398,7 +398,7 @@ export function ComposerToolbar({
               className={`flex h-7 w-7 items-center justify-center rounded-[6px] border transition-colors ${
                 hasContent
                   ? 'bg-brand text-brand-fg border-brand hover:bg-brand-hover hover:border-brand-hover'
-                  : 'cursor-default bg-bg-elevated text-fg-faint border-border-subtle'
+                  : 'cursor-default bg-brand-muted text-brand border-brand-muted'
               }`}
             >
               <ArrowBigUp size={16} strokeWidth={2.5} />

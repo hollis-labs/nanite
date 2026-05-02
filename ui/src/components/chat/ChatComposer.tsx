@@ -569,7 +569,7 @@ export function ChatComposer({
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => void handleDrop(e)}
       >
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[2px] bg-primary opacity-85" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[2px] bg-brand opacity-85" />
 
         {/* DEV mode indicator — floating top-right when developer_mode=true */}
         {developerMode && (

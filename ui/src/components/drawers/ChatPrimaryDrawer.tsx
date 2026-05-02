@@ -111,7 +111,7 @@ export function ChatPrimaryDrawer() {
           original BottomChatDrawer had this as a HEADER row at the top of
           the drawer; mirrored here to the bottom for the top-drawer layout. */}
       {drawer.open && (
-        <div className="flex items-center justify-between gap-2 px-3 py-1.5 shrink-0 border-x border-t border-border bg-bg-elevated">
+        <div className="flex items-center justify-between gap-2 px-3 py-0.5 shrink-0 border-x border-t border-border bg-bg-elevated">
           <div className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0 flex-1">
             <PrimaryTabButton
               active={drawer.activeTab === 'documents'}
@@ -177,7 +177,7 @@ export function ChatPrimaryDrawer() {
           accent at bottom edge, rounded bottom corners (mirrors the bottom
           drawer's pattern). Drag DOWN to grow; double-click to toggle. */}
       <div
-        className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-b-2 border-b-brand rounded-b-[10px] cursor-row-resize select-none touch-none"
+        className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-b-2 border-b-surface rounded-b-[10px] cursor-row-resize select-none touch-none"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

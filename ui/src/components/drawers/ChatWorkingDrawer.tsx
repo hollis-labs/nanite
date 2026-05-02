@@ -248,7 +248,7 @@ export function ChatWorkingDrawer({
           {/* Drag handle — always visible, top of overlay. Rounded top
               corners + brand accent ribbon stop short of the edge. */}
           <div
-            className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-t-2 border-t-brand rounded-t-[10px] cursor-row-resize select-none touch-none"
+            className="relative flex items-center justify-center h-5 overflow-hidden bg-bg-elevated border-x border-border-subtle border-t-2 border-t-primary rounded-t-[10px] cursor-row-resize select-none touch-none"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}

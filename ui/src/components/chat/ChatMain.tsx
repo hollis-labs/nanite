@@ -63,7 +63,7 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           </div>
         )}
         <ChatWorkingDrawer />
-        <div className="w-[85%] max-w-7xl mx-auto px-4 pb-1 shrink-0 relative">
+        <div className="max-w-3xl w-full mx-auto px-4 pb-1 shrink-0 relative">
           <ChatAlertOverlay
             sessionTakeover={sessionTakeover}
             streamStalled={streamStalled && !circuitOpen && !sessionTakeover}

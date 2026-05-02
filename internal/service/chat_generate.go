@@ -815,6 +815,39 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"iter", ls.iteration, "tools", len(tools), "messages", len(chatMessages),
 				"tokens", breakdown.Total, "ceiling", breakdown.Ceiling)
 		}
+
+		// request_build telemetry — Glass-2 (CW-20260502-0010, SP-20260502-0001).
+		// Emits per-slot + total token counts at request build time. Feeds Glass-7
+		// (slot trim) which uses this data to identify the biggest contributor to
+		// the cacheable prefix. Walks ctxpkg.SlotOrder so new slots (e.g. Glass-3
+		// SlotHandoff) are picked up automatically — do not hardcode a slot list
+		// here. cacheable_prefix_tokens is logged as 0 for now: the actual prefix
+		// length is decided by go-providers' DefaultCacheStrategy after payload
+		// marshalling and is not exposed back to chat-service; surfacing it
+		// requires a provider-side hook.
+		slotTokens := make(map[string]int, len(ctxpkg.SlotOrder))
+		totalEstimate := 0
+		if slotResult != nil && slotResult.Window != nil {
+			for _, name := range ctxpkg.SlotOrder {
+				if sl := slotResult.Window.Slot(name); sl != nil {
+					slotTokens[name] = sl.TokenCount
+					totalEstimate += sl.TokenCount
+				}
+			}
+		}
+		rbArgs := []any{
+			"session_id", sessionID,
+			"agent_id", agentID,
+			"model", model,
+			"provider", providerName,
+			"total_estimated_request_tokens", totalEstimate,
+			"cacheable_prefix_tokens", 0,
+		}
+		for _, name := range ctxpkg.SlotOrder {
+			rbArgs = append(rbArgs, name+"_tokens", slotTokens[name])
+		}
+		slog.Info("request_build", rbArgs...)
+
 		provCh, err = prov.StreamChat(provCtx, provider.ChatRequest{
 			SystemPrompt: extraSystemPrefix,
 			SlotBlocks:   slotBlocksFor(slotResult),

@@ -41,6 +41,15 @@ type Session struct {
 	// (does NOT bypass first-use prompt). false = force OFF (suppress all
 	// auto-switches even when user pref says always/ask).
 	AutoSwitchOverride *bool `json:"auto_switch_override,omitempty"`
+	// Intent is the auto-handoff classification for this session (Glass-3,
+	// CW-20260502-0011, SP-20260502-0001). nil = unclassified. Allowed values
+	// when set: "long-running", "per-turn", "ephemeral" — enforced by the
+	// CHECK constraint on sessions.intent and by SetSessionIntent. Glass-4
+	// (CW-20260502-0015) classifies the session at start. Read via
+	// GetSessionIntent — GetSession/ListSessions deliberately do NOT include
+	// this column to keep the existing queries stable; Glass-4 will wire it
+	// into the main query when consumers need it on the hot read path.
+	Intent *string `json:"intent,omitempty"`
 }
 
 // Message represents a chat message.
@@ -175,6 +184,74 @@ func (s *Store) SetSessionAutoSwitchOverride(id string, override *bool) error {
 	}
 	if n == 0 {
 		return fmt.Errorf("set session auto-switch override %s: session not found", id)
+	}
+	return nil
+}
+
+// SessionIntent enum values for sessions.intent (Glass-3, CW-20260502-0011).
+// NULL in the DB maps to "" in the helpers below; any non-empty value must
+// match one of these (mirrors the SQL CHECK constraint in migration 052).
+const (
+	SessionIntentLongRunning = "long-running"
+	SessionIntentPerTurn     = "per-turn"
+	SessionIntentEphemeral   = "ephemeral"
+)
+
+func validSessionIntent(v string) bool {
+	switch v {
+	case SessionIntentLongRunning, SessionIntentPerTurn, SessionIntentEphemeral:
+		return true
+	}
+	return false
+}
+
+// GetSessionIntent returns the auto-handoff classification for a session
+// (Glass-3, CW-20260502-0011). Returns "" when the column is NULL
+// (unclassified — Glass-4 has not yet run for this session, or never will).
+// Returns an error only on DB failure or unknown session ID.
+func (s *Store) GetSessionIntent(sessionID string) (string, error) {
+	var intent sql.NullString
+	err := s.DB.QueryRow(
+		`SELECT intent FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&intent)
+	if err != nil {
+		return "", fmt.Errorf("get session intent %s: %w", sessionID, err)
+	}
+	if !intent.Valid {
+		return "", nil
+	}
+	return intent.String, nil
+}
+
+// SetSessionIntent writes the auto-handoff classification for a session
+// (Glass-3, CW-20260502-0011). Pass "" to clear (set NULL); pass one of
+// SessionIntent{LongRunning,PerTurn,Ephemeral} to set. Returns an error if
+// the value is non-empty and not in the enum, on DB failure, or when the
+// session does not exist.
+func (s *Store) SetSessionIntent(sessionID string, intent string) error {
+	if intent != "" && !validSessionIntent(intent) {
+		return fmt.Errorf("set session intent %s: invalid value %q (allowed: %q, %q, %q, or empty to clear)",
+			sessionID, intent,
+			SessionIntentLongRunning, SessionIntentPerTurn, SessionIntentEphemeral)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	var v interface{}
+	if intent != "" {
+		v = intent
+	}
+	res, err := s.DB.Exec(
+		`UPDATE sessions SET intent = ?, updated_at = ? WHERE id = ?`,
+		v, now, sessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("set session intent %s: %w", sessionID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set session intent %s: rows affected: %w", sessionID, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("set session intent %s: session not found", sessionID)
 	}
 	return nil
 }

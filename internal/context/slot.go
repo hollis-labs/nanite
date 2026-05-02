@@ -27,8 +27,19 @@ const (
 	// Populated from sessions.context_prompt. Composes with HandoffStash
 	// (CW-20260420-0024) — both are pinned slots that survive compaction.
 	// J11 (CW-20260426-0009) pin tool will also use this same pattern.
+	// Glass-3 (CW-20260502-0011): self-authored handoff, auto-injected post-compaction.
+	// Sits with user-pinned content but is auto-managed by the harness, not by the user.
+	// Capped at SlotHandoffMaxTokens (~1500 tokens). Non-compactable — handoff IS the
+	// continuity primitive across compaction. AutoInject=true: the harness writes into
+	// this slot; the LLM cannot strip it. Glass-4 (CW-20260502-0015) wires the actual flow.
+	SlotHandoff      = "handoff"
 	SlotConversation = "conversation" // messages — subject to compaction
 )
+
+// SlotHandoffMaxTokens caps the handoff payload at ~1500 tokens. Glass-3
+// (CW-20260502-0011): feature-sized, NOT a dumping ground. ValidateHandoff
+// in handoff.go enforces this against parsed payloads.
+const SlotHandoffMaxTokens = 1500
 
 // SlotOrder defines the assembly order. Slots are composed into the
 // provider payload in this sequence. Earlier slots are cached more
@@ -43,6 +54,7 @@ var SlotOrder = []string{
 	SlotSession,
 	SlotContext,
 	SlotUserContext,
+	SlotHandoff, // Glass-3 (CW-20260502-0011): sits with user-pinned content but is auto-managed.
 	SlotConversation,
 }
 
@@ -74,6 +86,7 @@ func DefaultCompactable() map[string]bool {
 		SlotSession:      true,
 		SlotContext:      true,
 		SlotUserContext:  false, // J10: pinned — survives compaction.
+		SlotHandoff:      false, // Glass-3 (CW-20260502-0011): handoff survives compaction; it IS the continuity primitive.
 		SlotConversation: true,
 	}
 }
@@ -84,6 +97,10 @@ type SlotFlags struct {
 	UsingTools       bool // tool call/result blocks present in conversation span
 	EnrichmentActive bool // context slot has dynamic content
 	Stale            bool // content needs refresh before next assembly
+	// AutoInject — Glass-3 (CW-20260502-0011): when true, the harness writes this
+	// slot from authoritative state (e.g. handoff cache); the LLM cannot strip it.
+	// Glass-4 will populate the handoff slot with AutoInject=true post-compaction.
+	AutoInject bool
 	// LazyLoad — Glass-5 (CW-20260502-0012): when true, the slot ships only
 	// LoadHint as content, not the full payload. The agent reaches for an
 	// explicit discovery tool (named in LoadHint) to retrieve the full content.
@@ -136,6 +153,7 @@ func DefaultBudgets() map[string]int {
 		SlotSession:      1000,
 		SlotContext:      0,    // dynamic
 		SlotUserContext:  2000, // J10: user context prompt; thin by design.
+		SlotHandoff:      SlotHandoffMaxTokens, // Glass-3 (CW-20260502-0011): feature-sized handoff, ~1500 tokens.
 		SlotConversation: 0,    // gets remainder
 	}
 }

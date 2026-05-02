@@ -61,13 +61,10 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
             {statusMessage}
           </div>
         )}
-        {/* TEMPORARY: hardcoded circuitOpen=true so the in-drawer alert
-            banner is always visible for visual review. Revert these props
-            before shipping (set them back to the live useChat flags below). */}
         <ChatWorkingDrawer
-          sessionTakeover={false}
-          streamStalled={false}
-          circuitOpen={true}
+          sessionTakeover={sessionTakeover}
+          streamStalled={streamStalled && !circuitOpen && !sessionTakeover}
+          circuitOpen={circuitOpen}
           onReconnect={() => void reconnectStalledStream()}
           onRetry={() => void retryStream()}
           onDismissCircuit={dismissCircuit}

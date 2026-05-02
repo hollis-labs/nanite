@@ -84,6 +84,27 @@ type SlotFlags struct {
 	UsingTools       bool // tool call/result blocks present in conversation span
 	EnrichmentActive bool // context slot has dynamic content
 	Stale            bool // content needs refresh before next assembly
+	// LazyLoad — Glass-5 (CW-20260502-0012): when true, the slot ships only
+	// LoadHint as content, not the full payload. The agent reaches for an
+	// explicit discovery tool (named in LoadHint) to retrieve the full content.
+	// LoadHint must be a confidence + invitation pointer, not a warning.
+	// When LazyLoad=true and LoadHint is empty, the flag is a no-op.
+	LazyLoad bool
+	// LoadHint — Glass-5 (CW-20260502-0012): pointer text shown to the agent
+	// when LazyLoad=true. Brief, named-tool-call-included, framed as
+	// invitation. Replaces Slot.Content in the assembled SlotBlock.
+	LoadHint string
+}
+
+// EffectiveContent returns the content + cache key the slot should ship
+// in this turn. When LazyLoad is set with a non-empty LoadHint the pointer
+// is shipped in place of the full content; otherwise the slot's stored
+// content is shipped as-is. Glass-5 (CW-20260502-0012).
+func (s *Slot) EffectiveContent() (content, cacheKey string) {
+	if s.Flags.LazyLoad && s.Flags.LoadHint != "" {
+		return s.Flags.LoadHint, ComputeCacheKey(s.Flags.LoadHint)
+	}
+	return s.Content, s.CacheKey
 }
 
 // SlotBlock is the output unit from ContextWindow.Assemble(). Provider

@@ -323,9 +323,27 @@ func buildSkillList(s *store.Store, agentID string) string {
 	return buildSkillListForSession(s, agentID, "")
 }
 
+// SkillEssentialCap is the soft ceiling for inline-rendered assigned skills.
+// Glass-5 (CW-20260502-0012): when an agent has more than this many mode-passing
+// assigned skills, the overflow is folded into the discoverability LoadHint
+// rather than ballooning the Agent slot. 25 is a pragmatic placeholder — large
+// enough that no real-world agent's curated set hits the cap today, small
+// enough to keep init-time tokens bounded as agents accumulate skills.
+// Tune off Glass-2 telemetry once data accumulates.
+const SkillEssentialCap = 25
+
 // buildSkillListForSession is the mode-aware variant. The unfiltered helper
 // above is preserved for callers that have no session context (e.g.
 // background skill registration during boot).
+//
+// Glass-5 (CW-20260502-0012): the rendered list is partitioned into
+// "essentials" (assigned skills passing the mode filter, capped at
+// SkillEssentialCap) and "discoverable" (everything else in the catalog).
+// Essentials are inlined; discoverable count is surfaced via a LoadHint
+// pointer at the tail of the rendered string. The pointer references real
+// MCP tools (nanite_list_skills, nanite_tool_list) and is framed as
+// invitation, not warning — the agent should feel the catalog has every
+// skill it needs and only carries what it currently uses.
 func buildSkillListForSession(s *store.Store, agentID, sessionID string) string {
 	skills, err := s.ListAgentSkills(agentID)
 	if err != nil {
@@ -333,19 +351,14 @@ func buildSkillListForSession(s *store.Store, agentID, sessionID string) string 
 		return ""
 	}
 
-	if len(skills) == 0 {
-		return ""
-	}
-
-	skills = filterAgentSkillsByMode(s, skills, sessionID)
-	if len(skills) == 0 {
-		return ""
+	rendered := filterAgentSkillsByMode(s, skills, sessionID)
+	if len(rendered) > SkillEssentialCap {
+		rendered = rendered[:SkillEssentialCap]
 	}
 
 	var sb strings.Builder
-	for _, sk := range skills {
+	for _, sk := range rendered {
 		fmt.Fprintf(&sb, "- %s: %s", sk.Name, sk.Description)
-		// Parse tool_bindings to show tools.
 		var tools []string
 		if err := json.Unmarshal([]byte(sk.ToolBindings), &tools); err == nil && len(tools) > 0 {
 			fmt.Fprintf(&sb, " [tools: %s]", strings.Join(tools, ", "))
@@ -353,7 +366,35 @@ func buildSkillListForSession(s *store.Store, agentID, sessionID string) string 
 		sb.WriteString("\n")
 	}
 
+	if hint := skillCatalogLoadHint(s, len(rendered)); hint != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(hint)
+		sb.WriteString("\n")
+	}
+
 	return sb.String()
+}
+
+// skillCatalogLoadHint returns the discoverability pointer text appended
+// after the inline essentials. Returns "" when the catalog has nothing
+// beyond what was rendered (no point hinting at zero discoverable skills).
+// Glass-5 (CW-20260502-0012).
+func skillCatalogLoadHint(s *store.Store, renderedCount int) string {
+	catalog, err := s.ListSkills()
+	if err != nil {
+		slog.Debug("chat: skillCatalogLoadHint ListSkills failed", "err", err)
+		return ""
+	}
+	discoverable := len(catalog) - renderedCount
+	if discoverable <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"[%d additional skills are available in your catalog. Browse via `nanite_list_skills(category:\"<term>\")` or `nanite_tool_list(filter:\"<term>\")` for the full tool surface — we have skills for nearly any task. If your first lookup misses, widen the search before concluding nothing matches.]",
+		discoverable,
+	)
 }
 
 // filterAgentSkillsByMode applies the E2 two-pass pipeline. Empty

@@ -176,12 +176,15 @@ export function ChatWorkingDrawer() {
           <GripHorizontal size={12} className="text-fg-muted pointer-events-none" />
         </div>
 
-        {/* Drawer body — appears BELOW the drag handle when active. 2-column
-            layout: main content on the left, tab sidebar (vertical, scrollable)
-            on the right. */}
+        {/* Drawer body — when active, position:absolute overlays the
+            transcript above instead of pushing it up. The 5% margins on
+            either side of the inner wrapper stay transparent so transcript
+            content remains visible alongside the body. The body's bottom
+            sits flush with the drag-handle row's top (bottom-full of the
+            inner wrapper). */}
         {drawer.open && (
           <div
-            className="overflow-hidden border-x border-border-subtle bg-bg-elevated flex"
+            className="absolute bottom-full left-0 right-0 overflow-hidden border-x border-border-subtle bg-bg-elevated flex shadow-lg"
             style={{ height: drawer.height }}
           >
             {/* Main content area — left column. */}
@@ -324,7 +327,7 @@ function ScratchpadTab() {
         )}
       </div>
       <textarea
-        className="flex-1 w-full resize-none bg-transparent text-sm text-fg px-3 py-2 outline-none placeholder:text-fg-faint font-mono leading-relaxed"
+        className="flex-1 w-full resize-none bg-transparent text-sm text-fg px-3 py-2 outline-none placeholder:text-fg-faint font-mono leading-relaxed [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         placeholder="Type notes here… not sent to the agent"
         value={content}
         onChange={handleChange}
@@ -349,7 +352,7 @@ function Terminal1Tab() {
     <div className="h-full overflow-hidden">
       <pre
         ref={ref}
-        className="h-full overflow-y-auto p-3 font-mono text-[11px] leading-relaxed text-fg-secondary whitespace-pre-wrap"
+        className="h-full overflow-y-auto p-3 font-mono text-[11px] leading-relaxed text-fg-secondary whitespace-pre-wrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {output ||
           (running
@@ -450,7 +453,7 @@ function SessionContextTab() {
       </div>
       <div className="flex-1 px-3 pb-1 min-h-0">
         <textarea
-          className="w-full h-full resize-none bg-transparent text-sm text-fg outline-none placeholder:text-fg-faint leading-relaxed"
+          className="w-full h-full resize-none bg-transparent text-sm text-fg outline-none placeholder:text-fg-faint leading-relaxed [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           placeholder={`Thin, pointer-style context for this session.\nExamples:\n- Skills: use /capture-decision for design decisions\n- Tools: prefer memory_write over file writes\n- Reference: planning/myproject/scope.md`}
           value={localPrompt}
           onChange={handleChange}

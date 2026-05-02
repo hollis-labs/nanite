@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AtSign,
   Paperclip,
@@ -61,9 +62,31 @@ export function ComposerPlusMenu({
   pluginButtons,
 }: ComposerPlusMenuProps) {
   const [open, setOpen] = useState(false)
+  const [popoverPos, setPopoverPos] = useState<{ left: number; bottom: number } | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   const layoutTriggerRef = useRef<HTMLButtonElement>(null)
+
+  // Compute fixed-position coordinates for the portaled popover so the
+  // composer chrome's overflow-hidden doesn't clip it. Run on open and
+  // recompute on viewport resize/scroll while open.
+  useEffect(() => {
+    if (!open) return
+    function compute() {
+      const r = triggerRef.current?.getBoundingClientRect()
+      if (!r) return
+      // Anchor: above the trigger (bottom = viewport height - trigger top).
+      // 8px gap matches the previous `mb-2`.
+      setPopoverPos({ left: r.left, bottom: window.innerHeight - r.top + 8 })
+    }
+    compute()
+    window.addEventListener('resize', compute)
+    window.addEventListener('scroll', compute, true)
+    return () => {
+      window.removeEventListener('resize', compute)
+      window.removeEventListener('scroll', compute, true)
+    }
+  }, [open])
 
   // Click-outside dismiss for the popover itself. When the LayoutMenu
   // portal opens on top, its own click-outside handler closes itself;
@@ -125,10 +148,11 @@ export function ComposerPlusMenu({
         </button>
       </Tooltip>
 
-      {open && (
+      {open && popoverPos && createPortal(
         <div
           ref={popoverRef}
-          className="absolute bottom-full left-0 z-40 mb-2 flex flex-wrap items-center gap-1 rounded-[8px] border border-border-subtle bg-bg-elevated p-1.5 shadow-2xl min-w-[300px]"
+          className="fixed z-[9999] flex flex-wrap items-center gap-1 rounded-[8px] border border-border-subtle bg-bg-elevated p-1.5 shadow-2xl min-w-[300px]"
+          style={{ left: popoverPos.left, bottom: popoverPos.bottom }}
           role="menu"
         >
           {/* Layout trigger — opens the existing centered LayoutMenu modal.
@@ -207,7 +231,8 @@ export function ComposerPlusMenu({
           </button>
 
           {pluginButtons}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

@@ -387,11 +387,18 @@ export function ChatComposer({
     content: "",
   });
 
+  const [hasContent, setHasContent] = useState(false);
+
   useEffect(() => {
     if (!editor) return;
     const handler = () => {
       const text = editor.getText();
       setIsShellInput(text.startsWith("!") && text.length >= 1);
+      // Reactively track whether the editor has any content so the send
+      // button's enabled/disabled state updates as the user types. (Without
+      // this, hasContent was computed inline and only refreshed on other
+      // re-renders — the button stayed disabled even when text was present.)
+      setHasContent(text.trim().length > 0);
     };
     editor.on("update", handler);
     return () => {
@@ -515,8 +522,6 @@ export function ChatComposer({
   }, [editor, onSend, handleShellExec, flushIfDirty]);
 
   handleSendRef.current = handleSend;
-
-  const hasContent = editor ? editor.getText().trim().length > 0 : false;
 
   const { data: settings } = useSettings();
   const developerMode = settings?.developer_mode ?? false;

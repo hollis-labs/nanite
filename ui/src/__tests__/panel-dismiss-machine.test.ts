@@ -15,8 +15,11 @@
  *   - markPanelDismissed → user_dismissed (clears source attribution).
  *   - clearAllPanelDismissed → closed (per-panel) for all dismissed panels.
  *
- * The bottom_chat_drawer surface mirrors the right-rail semantics through
- * setBottomDrawerOpen (separate state slot).
+ * Migrated 2026-05-01 chat-surface redesign — the bottom_chat_drawer surface
+ * was retired in favour of ChatWorkingDrawer. The J8 source-attribution
+ * machine no longer applies to that surface; only right-rail panels use it.
+ * Routing through `bottom_chat_drawer` (the legacy key) still opens the
+ * working drawer for back-compat, but without the dismiss-attribution gate.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -38,9 +41,9 @@ function reset() {
   useLayoutStore.setState({
     rightRailOpen: false,
     rightRailTab: "widgets",
-    bottomChatDrawerOpen: false,
     panelPrefs: { ...PRISTINE_PREFS },
     panelEnvelopes: {},
+    chatWorkingDrawer: { open: false, height: 200, activeTab: "scratchpad" },
   });
 }
 
@@ -101,43 +104,6 @@ describe("dismiss state machine — right-rail panels", () => {
   });
 });
 
-// ---- 4-state machine: bottom_chat_drawer --------------------------------
-
-describe("dismiss state machine — bottom_chat_drawer", () => {
-  it("agent open from closed transitions to agent_opened (true + source=agent)", () => {
-    useLayoutStore.getState().setBottomDrawerOpen(true, "agent");
-    const s = useLayoutStore.getState();
-    expect(s.bottomChatDrawerOpen).toBe(true);
-    expect(s.panelPrefs.panelOpenSource.bottom_chat_drawer).toBe("agent");
-  });
-
-  it("user dismiss (close with source=user) transitions to user_dismissed", () => {
-    useLayoutStore.getState().setBottomDrawerOpen(true, "agent");
-    useLayoutStore.getState().setBottomDrawerOpen(false, "user");
-    const s = useLayoutStore.getState();
-    expect(s.bottomChatDrawerOpen).toBe(false);
-    expect(s.panelPrefs.dismissedByUser.bottom_chat_drawer).toBe(true);
-    expect(s.panelPrefs.panelOpenSource.bottom_chat_drawer).toBeUndefined();
-  });
-
-  it("agent open after user dismiss is NO-OP", () => {
-    useLayoutStore.getState().setBottomDrawerOpen(true, "user");
-    useLayoutStore.getState().setBottomDrawerOpen(false, "user"); // user dismiss
-    useLayoutStore.getState().setBottomDrawerOpen(true, "agent");
-    const s = useLayoutStore.getState();
-    expect(s.bottomChatDrawerOpen).toBe(false);
-    expect(s.panelPrefs.dismissedByUser.bottom_chat_drawer).toBe(true);
-  });
-
-  it("agent close on user-opened drawer is NO-OP (user-overrides-agent)", () => {
-    useLayoutStore.getState().setBottomDrawerOpen(true, "user");
-    useLayoutStore.getState().setBottomDrawerOpen(false, "agent");
-    const s = useLayoutStore.getState();
-    expect(s.bottomChatDrawerOpen).toBe(true);
-    expect(s.panelPrefs.panelOpenSource.bottom_chat_drawer).toBe("user");
-  });
-});
-
 // ---- panel_signal SSE event routing -------------------------------------
 
 describe("applyPanelSignal", () => {
@@ -148,9 +114,9 @@ describe("applyPanelSignal", () => {
     expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
   });
 
-  it("action=open with bottom_chat_drawer routes to bottom drawer", () => {
+  it("action=open with bottom_chat_drawer opens the chat working drawer", () => {
     applyPanelSignal({ action: "open", panel_id: "bottom_chat_drawer" });
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
+    expect(useLayoutStore.getState().chatWorkingDrawer.open).toBe(true);
   });
 
   it("action=close on dismissed user-opened panel is NO-OP for agent source", () => {
@@ -186,15 +152,14 @@ describe("applyPanelSignal", () => {
 // ---- Envelope target/mode side effects ----------------------------------
 
 describe("applyEnvelopePanelEffects", () => {
-  it("envelope.target opens the named drawer with source=agent", () => {
+  it("envelope.target=bottom_chat_drawer opens the chat working drawer", () => {
     applyEnvelopePanelEffects({
       kind: "envelope",
       version: 1,
       type: "document-viewer",
       target: "bottom_chat_drawer",
     });
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
-    expect(useLayoutStore.getState().panelPrefs.panelOpenSource.bottom_chat_drawer).toBe("agent");
+    expect(useLayoutStore.getState().chatWorkingDrawer.open).toBe(true);
   });
 
   it("envelope.mode opens the preset panels", () => {
@@ -207,31 +172,6 @@ describe("applyEnvelopePanelEffects", () => {
     const s = useLayoutStore.getState();
     expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
     expect(s.panelPrefs.panelOpenSource.workflows).toBe("agent");
-  });
-
-  it("envelope can carry both target and mode (independent effects)", () => {
-    applyEnvelopePanelEffects({
-      kind: "envelope",
-      version: 1,
-      type: "document-viewer",
-      target: "bottom_chat_drawer",
-      mode: "planning",
-    });
-    const s = useLayoutStore.getState();
-    expect(s.bottomChatDrawerOpen).toBe(true);
-    expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
-    expect(s.panelPrefs.panelOpenSource.workflows).toBe("agent");
-  });
-
-  it("dismiss machine still gates envelope.target opens", () => {
-    useLayoutStore.getState().markPanelDismissed("bottom_chat_drawer");
-    applyEnvelopePanelEffects({
-      kind: "envelope",
-      version: 1,
-      type: "document-viewer",
-      target: "bottom_chat_drawer",
-    });
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(false);
   });
 });
 
@@ -251,52 +191,14 @@ describe("resolvePanelMode", () => {
   });
 });
 
-// ---- End-to-end scenario from the J8 ticket ------------------------------
-
-describe("J8 v1 concrete scenario — document in chat drawer + plan in work panel", () => {
-  it("agent loads md → bottom drawer opens; mode=planning → work+workflows open", () => {
-    // Step 1: agent emits envelope with target=bottom_chat_drawer
-    applyEnvelopePanelEffects({
-      kind: "envelope",
-      version: 1,
-      type: "document-viewer",
-      target: "bottom_chat_drawer",
-    });
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
-
-    // Step 2: agent signals mode=planning
-    applyPanelSignal({ action: "mode", mode: "planning" });
-    let s = useLayoutStore.getState();
-    expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
-    expect(s.panelPrefs.panelOpenSource.workflows).toBe("agent");
-
-    // Step 3: user dismisses Work
-    useLayoutStore.getState().markPanelDismissed("work");
-
-    // Step 4: agent's subsequent emit does NOT re-open Work
-    applyPanelSignal({ action: "open", panel_id: "work" });
-    s = useLayoutStore.getState();
-    expect(s.panelPrefs.dismissedByUser.work).toBe(true);
-    expect(s.panelPrefs.panelOpenSource.work).toBeUndefined();
-
-    // Step 5: user sends new message → dismiss state resets
-    useLayoutStore.getState().clearAllPanelDismissed();
-
-    // Step 6: agent can re-open Work
-    applyPanelSignal({ action: "open", panel_id: "work" });
-    s = useLayoutStore.getState();
-    expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
-  });
-});
-
 // ---- A2 — render_target routing -----------------------------------------
 // CW-20260428-0008. The placement field that's separate from the visibility
-// field. Pushes envelopes into the named panel's inbox slot AND opens the
-// panel; the dismiss machine still gates the open so a user-dismissed
-// drawer does not auto-open.
+// field. Pushes envelopes into the named panel's inbox slot AND (for non-
+// bottom-drawer panels) opens via the dismiss machine. Bottom-drawer routing
+// no longer participates in dismiss attribution.
 
 describe("applyEnvelopePanelEffects — render_target", () => {
-  it("pushes envelope into panelEnvelopes and opens the bottom drawer", () => {
+  it("pushes envelope into panelEnvelopes and opens the chat working drawer", () => {
     const env = {
       kind: "envelope",
       version: 1,
@@ -307,7 +209,7 @@ describe("applyEnvelopePanelEffects — render_target", () => {
     };
     applyEnvelopePanelEffects(env);
     const s = useLayoutStore.getState();
-    expect(s.bottomChatDrawerOpen).toBe(true);
+    expect(s.chatWorkingDrawer.open).toBe(true);
     expect(s.panelEnvelopes["bottom_chat_drawer"]).toHaveLength(1);
     expect(s.panelEnvelopes["bottom_chat_drawer"][0].title).toBe("Hello");
   });
@@ -324,23 +226,6 @@ describe("applyEnvelopePanelEffects — render_target", () => {
     const s = useLayoutStore.getState();
     expect(s.panelEnvelopes["work"]).toHaveLength(1);
     expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
-  });
-
-  it("dismiss machine still gates render_target opens for the bottom drawer", () => {
-    useLayoutStore.getState().markPanelDismissed("bottom_chat_drawer");
-    const env = {
-      kind: "envelope",
-      version: 1,
-      type: "info-card",
-      data: { title: "T", body: "b" },
-      render_target: "bottom_chat_drawer",
-    };
-    applyEnvelopePanelEffects(env);
-    const s = useLayoutStore.getState();
-    // Drawer stays closed (dismissed), but envelope is still pushed into
-    // the slot so a subsequent user-open lands on the freshest content.
-    expect(s.bottomChatDrawerOpen).toBe(false);
-    expect(s.panelEnvelopes["bottom_chat_drawer"]).toHaveLength(1);
   });
 
   it("multiple envelopes accumulate in arrival order (drawer policy decides display)", () => {
@@ -376,22 +261,5 @@ describe("applyEnvelopePanelEffects — render_target", () => {
     });
     useLayoutStore.getState().clearPanelEnvelopes("bottom_chat_drawer");
     expect(useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer"]).toBeUndefined();
-  });
-
-  it("envelope can carry both target and render_target (independent effects)", () => {
-    applyEnvelopePanelEffects({
-      kind: "envelope",
-      version: 1,
-      type: "info-card",
-      data: { title: "T", body: "b" },
-      target: "work",
-      render_target: "bottom_chat_drawer",
-    });
-    const s = useLayoutStore.getState();
-    expect(s.bottomChatDrawerOpen).toBe(true);
-    expect(s.panelPrefs.panelOpenSource.work).toBe("agent");
-    expect(s.panelEnvelopes["bottom_chat_drawer"]).toHaveLength(1);
-    // No envelope routed to "work" — only render_target pushes into the queue.
-    expect(s.panelEnvelopes["work"]).toBeUndefined();
   });
 });

@@ -66,6 +66,9 @@ export function Tooltip({ content, side = "right", children }: TooltipProps) {
       className="relative inline-flex"
       onMouseEnter={() => setVisible(true)}
       onMouseLeave={() => setVisible(false)}
+      // Dismiss the tooltip on click so it doesn't get stuck behind a
+      // popover that opens from the same trigger.
+      onMouseDown={() => setVisible(false)}
     >
       {children}
       {visible &&

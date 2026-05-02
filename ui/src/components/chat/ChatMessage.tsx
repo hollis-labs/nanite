@@ -482,13 +482,18 @@ export function ChatMessage({ message, isBookmarked = false, onToggleBookmark, o
 // in chat when the card has been routed to a panel inbox slot. Click
 // re-opens the panel so the user can find the routed card.
 function RenderTargetStub({ envelope }: { envelope: Envelope }) {
-  const setBottomDrawerOpen = useLayoutStore((s) => s.setBottomDrawerOpen)
+  const setChatWorkingDrawer = useLayoutStore((s) => s.setChatWorkingDrawer)
   const setPanelOpen = useLayoutStore((s) => s.setPanelOpen)
   const target = envelope.render_target ?? ''
   const label = envelope.title ? `${envelope.type}: ${envelope.title}` : envelope.type
   const handleClick = () => {
     if (target === 'bottom_chat_drawer') {
-      setBottomDrawerOpen(true, 'user')
+      // The chat working drawer is the new home for `render_target=bottom_chat_drawer`
+      // payloads (per spec — routing key kept for back-compat). The envelope
+      // has already been appended as a `card:<id>` dynamic tab; focus it if we
+      // can, otherwise just open the drawer.
+      const activeTab = envelope.id ? `card:${envelope.id}` : undefined
+      setChatWorkingDrawer({ open: true, ...(activeTab ? { activeTab } : {}) })
     } else if (target) {
       setPanelOpen(target, 'user')
     }

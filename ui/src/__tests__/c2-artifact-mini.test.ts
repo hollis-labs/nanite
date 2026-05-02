@@ -3,11 +3,16 @@
  *
  * No DOM-render harness is available in this repo, so we assert the
  * surrounding contract: types are registered for the FE generated registry,
- * the layout-store dismiss machinery the card depends on works, and the
- * size-formatter helper produces the expected human-readable output.
+ * the layout-store machinery the card depends on works, and the size-
+ * formatter helper produces the expected human-readable output.
  *
  * The DB-backed pin lifecycle that artifact-mini cards can be promoted into
  * is covered by C1 tests + the Go store table-tests.
+ *
+ * Migrated 2026-05-01 chat-surface redesign — the artifact-mini card now
+ * targets ChatWorkingDrawer (legacy `bottom_chat_drawer` routing key
+ * preserved). The card no longer participates in the J8 source-attribution
+ * gate; download closes the drawer unconditionally.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,8 +21,8 @@ import type { Envelope } from "@/lib/types";
 
 afterEach(() => {
   useLayoutStore.setState({
-    bottomChatDrawerOpen: false,
     panelEnvelopes: {},
+    chatWorkingDrawer: { open: false, height: 200, activeTab: "scratchpad" },
   });
 });
 
@@ -61,25 +66,15 @@ describe("artifact-mini render-target routing", () => {
     expect(useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer"]).toBeUndefined();
   });
 
-  it("Download path closes the drawer with agent source attribution", () => {
+  it("Download path closes the chat working drawer", () => {
     const store = useLayoutStore.getState();
-    store.setBottomDrawerOpen(true, "agent");
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
+    store.setChatWorkingDrawer({ open: true });
+    expect(useLayoutStore.getState().chatWorkingDrawer.open).toBe(true);
 
     // The card's download handler defers a close — simulate it inline.
     store.clearPanelEnvelopes("bottom_chat_drawer");
-    store.setBottomDrawerOpen(false, "agent");
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(false);
-  });
-
-  it("Download path does NOT close a user-opened drawer (J8 user-overrides-agent rule)", () => {
-    const store = useLayoutStore.getState();
-    store.setBottomDrawerOpen(true, "user");
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
-
-    // Agent-driven close on a user-opened drawer is a NO-OP.
-    store.setBottomDrawerOpen(false, "agent");
-    expect(useLayoutStore.getState().bottomChatDrawerOpen).toBe(true);
+    store.setChatWorkingDrawer({ open: false });
+    expect(useLayoutStore.getState().chatWorkingDrawer.open).toBe(false);
   });
 });
 

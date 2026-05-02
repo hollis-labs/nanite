@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, AtSign, ChevronDown, Paperclip, Slash, Sparkles, Square, Terminal, Unlock, Zap } from 'lucide-react'
+import { ArrowBigUp, ChevronDown, Square } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useChatStore } from '@/stores/useChatStore'
@@ -11,7 +11,8 @@ import { resolveIcon } from '@/lib/icons'
 import { api } from '@/lib/api'
 import type { UISlotEntry } from '@/lib/types'
 import { StatusPill } from './envelopes/primitives'
-import { LayoutMenu, LayoutMenuTrigger } from './LayoutMenu'
+import { ComposerPlusMenu } from './ComposerPlusMenu'
+import { LayoutMenu } from './LayoutMenu'
 
 // F1 (CW-20260420-0014) — Effort levels for the per-turn budget + reasoning dial.
 const EFFORT_LEVELS = [
@@ -51,27 +52,6 @@ interface ComposerToolbarProps {
   uploading?: boolean
 }
 
-function ToolbarBtn({ onClick, title, disabled, children, className = '' }: {
-  onClick?: () => void
-  title: string
-  disabled?: boolean
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <Tooltip content={title} side="top">
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        className={`flex h-7 w-7 items-center justify-center rounded-[6px] text-fg-muted transition-colors hover:bg-surface hover:text-fg disabled:opacity-40 disabled:cursor-default ${className}`}
-      >
-        {children}
-      </button>
-    </Tooltip>
-  )
-}
-
 export function ComposerToolbar({
   hasContent,
   isStreaming,
@@ -84,8 +64,12 @@ export function ComposerToolbar({
   onCycleShell,
   uploading = false,
 }: ComposerToolbarProps) {
+  // Layout menu state lives here (not inside ComposerPlusMenu) so the
+  // global `⌘\` keyboard shortcut — which dispatches a
+  // `toggle-layout-menu` window event — can still open the menu without
+  // having to first open the `+` popover.
   const [layoutOpen, setLayoutOpen] = useState(false)
-  const layoutTriggerRef = useRef<HTMLButtonElement>(null)
+  const layoutAnchorRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function onToggle() { setLayoutOpen((o) => !o) }
@@ -252,68 +236,84 @@ export function ComposerToolbar({
       ? 'text-primary'
       : ''
 
+  const cycleEffort = useCallback(() => {
+    const idx = EFFORT_LEVELS.findIndex((l) => l.value === activeEffort)
+    const next = EFFORT_LEVELS[(idx + 1) % EFFORT_LEVELS.length]
+    setActiveEffort(next.value)
+  }, [activeEffort, setActiveEffort])
+
+  const activeEffortLevel = EFFORT_LEVELS.find((l) => l.value === activeEffort)
+
   return (
     <div className="flex items-center justify-between border-t border-divider pt-2 pr-2.5 pb-4 pl-3">
-      {/* ── Left: action icons ── */}
-      <div className="relative flex items-center gap-0.5">
-        {/* Layout menu trigger */}
-        <LayoutMenuTrigger ref={layoutTriggerRef} open={layoutOpen} onClick={() => setLayoutOpen((o) => !o)} />
-        <LayoutMenu open={layoutOpen} onClose={() => setLayoutOpen(false)} anchorRef={layoutTriggerRef} />
+      {/* Layout menu — rendered at the toolbar level so the global ⌘\
+          keyboard shortcut can drive it independently of the +
+          popover's open state. The anchor div is invisible; LayoutMenu
+          centers itself via portal regardless. */}
+      <div ref={layoutAnchorRef} className="hidden" />
+      <LayoutMenu
+        open={layoutOpen}
+        onClose={() => setLayoutOpen(false)}
+        anchorRef={layoutAnchorRef}
+      />
+      {/* ── Left: + popover, effort cycle pill, model picker ── */}
+      <div className="relative flex items-center gap-2">
+        <ComposerPlusMenu
+          onAttach={onAttach}
+          onSlash={onSlash}
+          onMention={onMention}
+          shellMode={shellMode}
+          onCycleShell={onCycleShell}
+          shellTitle={shellTitle}
+          shellClass={shellClass}
+          autoSwitchOverride={autoSwitchOverride}
+          onCycleAutoSwitch={cycleAutoSwitch}
+          autoSwitchTitle={autoSwitchTitle}
+          autoSwitchClass={autoSwitchClass}
+          uploading={uploading}
+          layoutOpen={layoutOpen}
+          onToggleLayout={() => setLayoutOpen((o) => !o)}
+          pluginButtons={pluginButtons.length > 0 ? (
+            <>
+              <span className="mx-1 h-4 w-px bg-divider" />
+              {pluginButtons.map((entry) => {
+                const PluginIcon = resolveIcon(entry.icon)
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    onClick={() => handlePluginAction(entry)}
+                    className="flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs text-fg-muted transition-colors hover:bg-surface hover:text-fg"
+                    role="menuitem"
+                  >
+                    <PluginIcon size={14} />
+                    <span>{entry.label}</span>
+                  </button>
+                )
+              })}
+            </>
+          ) : null}
+        />
 
-        <div className="mx-1 h-4 w-px bg-divider" />
+        <span className="h-4 w-px bg-divider" />
 
-        <ToolbarBtn onClick={onAttach} title={uploading ? 'Uploading…' : 'Attach file'} disabled={uploading}>
-          <Paperclip size={14} className={uploading ? 'animate-pulse text-primary' : ''} />
-        </ToolbarBtn>
-
-        <ToolbarBtn onClick={onSlash} title="Slash commands (/)">
-          <Slash size={14} />
-        </ToolbarBtn>
-
-        <ToolbarBtn onClick={onMention} title="Mention file (@)">
-          <AtSign size={14} />
-        </ToolbarBtn>
-
-        <div className="mx-1 h-4 w-px bg-divider" />
-
-        <ToolbarBtn onClick={onCycleShell} title={shellTitle} className={shellClass}>
-          {shellMode === 'yolo'
-            ? <Zap size={14} className="fill-current" />
-            : shellMode === 'session'
-              ? <Unlock size={14} />
-              : <Terminal size={14} />
-          }
-        </ToolbarBtn>
-
-        {/* B3 (CW-20260428-0011): per-session auto-switch toggle. */}
-        <ToolbarBtn onClick={cycleAutoSwitch} title={autoSwitchTitle} className={autoSwitchClass}>
-          <Sparkles size={14} />
-        </ToolbarBtn>
-
-        {/* Effort segmented control — F1 (CW-20260420-0014) */}
-        <div className="mx-1 h-4 w-px bg-divider" />
-        <Tooltip content="Effort: per-turn token budget and reasoning dial" side="top">
-          <div className="flex items-center rounded-[6px] border border-divider overflow-hidden">
-            {EFFORT_LEVELS.map((level) => (
-              <button
-                key={level.value}
-                type="button"
-                title={level.title}
-                onClick={() => setActiveEffort(level.value)}
-                className={`px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
-                  activeEffort === level.value
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-fg-muted hover:bg-surface hover:text-fg'
-                }`}
-              >
-                {level.label}
-              </button>
-            ))}
-          </div>
+        {/* Effort cycle pill — uppercase, no glyph */}
+        <Tooltip
+          content={activeEffortLevel?.title ?? 'Effort: per-turn token budget and reasoning dial'}
+          side="top"
+        >
+          <button
+            type="button"
+            onClick={cycleEffort}
+            className="rounded-[6px] border border-divider px-2.5 py-0.5 font-mono text-[10.5px] uppercase tracking-wider text-fg-secondary transition-colors hover:bg-surface"
+          >
+            {(activeEffortLevel?.label ?? 'Norm').toUpperCase()}
+          </button>
         </Tooltip>
 
+        <span className="h-4 w-px bg-divider" />
+
         {/* Model picker */}
-        <div className="mx-1 h-4 w-px bg-divider" />
         <div ref={modelRef}>
           <button
             ref={buttonRef}
@@ -375,27 +375,10 @@ export function ComposerToolbar({
           )}
         </div>
 
-        {/* Plugin toolbar slots */}
-        {pluginButtons.length > 0 && (
-          <>
-            <div className="mx-1 h-4 w-px bg-divider" />
-            {pluginButtons.map((entry) => {
-              const PluginIcon = resolveIcon(entry.icon)
-              return (
-                <ToolbarBtn key={entry.id} onClick={() => handlePluginAction(entry)} title={entry.label}>
-                  <PluginIcon size={14} />
-                </ToolbarBtn>
-              )
-            })}
-          </>
-        )}
       </div>
 
-      {/* ── Right: send hint + send/stop ── */}
+      {/* ── Right: send / stop ── */}
       <div className="flex items-center gap-2">
-        {!isStreaming && (
-          <span className="font-mono text-[11px] text-fg-muted">⌘↵ to send</span>
-        )}
         {isStreaming ? (
           <Tooltip content="Stop generating" side="top">
             <button
@@ -412,13 +395,13 @@ export function ComposerToolbar({
               type="button"
               onClick={onSend}
               disabled={!hasContent}
-              className={`flex h-7 w-7 items-center justify-center rounded-[6px] transition-colors ${
+              className={`flex h-7 w-7 items-center justify-center rounded-[6px] border transition-colors ${
                 hasContent
-                  ? 'bg-primary text-primary-foreground hover:bg-primary-hover'
-                  : 'cursor-default text-fg-faint'
+                  ? 'bg-brand text-brand-fg border-brand hover:bg-brand-hover hover:border-brand-hover'
+                  : 'cursor-default bg-brand-muted text-brand border-brand-muted'
               }`}
             >
-              <ArrowUp size={15} strokeWidth={2.2} />
+              <ArrowBigUp size={16} strokeWidth={2.5} />
             </button>
           </Tooltip>
         )}

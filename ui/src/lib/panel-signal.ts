@@ -119,14 +119,21 @@ function routeEnvelopeToPanel(panelId: string, envelope: Envelope): void {
 
 /**
  * Bottom-chat-drawer is a separate UI surface from the right-rail panel host
- * (per J8 v1 ticket: "wire panel_open dispatch differently for it"). Route
- * those opens through setBottomDrawerOpen; everything else goes through
- * setPanelOpen which pipes through the right-rail tab strip.
+ * (per J8 v1 ticket: "wire panel_open dispatch differently for it"). The
+ * `bottom_chat_drawer` routing key is preserved post-redesign and now maps
+ * to the ChatWorkingDrawer (spec: "render_target=bottom_chat_drawer routing
+ * key kept"). Everything else goes through setPanelOpen which pipes through
+ * the right-rail tab strip.
+ *
+ * Note: the new chat-drawer API doesn't carry agent/user source attribution
+ * (the J8 4-state dismiss machine doesn't apply to ChatWorkingDrawer). The
+ * `source` arg is kept on the public signature so the right-rail dismiss
+ * gate still works for non-bottom-drawer panels.
  */
 function openPanelById(id: string, source: "agent" | "user"): void {
   const store = useLayoutStore.getState();
   if (id === "bottom_chat_drawer") {
-    store.setBottomDrawerOpen(true, source);
+    store.setChatWorkingDrawer({ open: true });
     return;
   }
   store.setPanelOpen(id, source);
@@ -135,7 +142,7 @@ function openPanelById(id: string, source: "agent" | "user"): void {
 function closePanelById(id: string, source: "agent" | "user"): void {
   const store = useLayoutStore.getState();
   if (id === "bottom_chat_drawer") {
-    store.setBottomDrawerOpen(false, source);
+    store.setChatWorkingDrawer({ open: false });
     return;
   }
   // Right-rail close: respect the user-overrides-agent rule. An agent close

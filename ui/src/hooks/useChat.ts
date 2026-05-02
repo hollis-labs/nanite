@@ -251,7 +251,10 @@ export function useChat(sessionId: string | null) {
     const settings = queryClient.getQueryData<UserSettings>(['settings'])
     const retention = settings ? settings.tool_drawer_retention : -1
     store().loadSessionToolCalls(sessionId, retention);
-    useLayoutStore.getState().setToolDrawerState('closed');
+    // Auto-show during streaming was previously implemented as a separate
+    // ToolCallDrawer state machine. The redesign replaces that with a
+    // running-pip on the Tools tab in ChatPrimaryDrawer (Wave 2), so no
+    // per-session reset is required here.
     store().setTextOnlyMode(false);
   }, [loadMessages, sessionId]);
 

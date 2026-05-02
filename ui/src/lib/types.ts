@@ -841,6 +841,34 @@ export interface DrawerPinnedCard {
   created_at: string
 }
 
+/**
+ * Per-tab data for transient card-tabs in ChatWorkingDrawer.
+ *
+ * Each agent-emitted envelope routed via `render_target=bottom_chat_drawer`
+ * becomes one of these tabs. `pinned: true` promotes via the existing
+ * POST /drawer-cards endpoint and survives session reload as a DB-backed
+ * pinned card; transient (pinned=false) tabs live only in the layout store
+ * for the session.
+ */
+export interface DynamicCardTab {
+  /** Stable ID. Format: `card:<uuid>`. */
+  id: string
+  /** Display label. Derived from envelope.title when present;
+   *  fallback = envelope-type display name + short timestamp. */
+  label: string
+  /** The full envelope payload — render via EnvelopeRenderer. */
+  payload: Envelope
+  /** Agent-emitted defaults true. When true, the tab promotes to active
+   *  on the next drawer-open. Manual user selection overrides until the
+   *  next focused-true arrival. */
+  focused: boolean
+  /** When true, has been promoted to a DB-backed pinned card via the
+   *  existing API. Transient tabs default false. */
+  pinned: boolean
+  /** Epoch ms. Used for stable sort order in the tab strip. */
+  createdAt: number
+}
+
 // --- Reminders (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
 
 export interface Reminder {

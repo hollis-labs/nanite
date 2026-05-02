@@ -1,27 +1,29 @@
 /**
- * C1 (CW-20260428-0012) — bottom drawer pinned-card lifecycle tests.
+ * C1 (CW-20260428-0012) — chat drawer pinned-card lifecycle tests.
  *
  * Targets the FE state surface: defaultDrawerTab persistence, transient inbox
  * slot semantics, pin-cap constant, panelEnvelopes routing. The DB-backed pin
  * lifecycle has its own Go table-tests in internal/store/bottom_drawer_cards_test.go.
+ *
+ * Migrated 2026-05-01 chat-surface redesign — old BottomChatDrawer is retired
+ * and BOTTOM_DRAWER_PIN_CAP moved to @/lib/constants as CHAT_DRAWER_PIN_CAP.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
 import { useLayoutStore } from "@/stores/useLayoutStore";
-import { BOTTOM_DRAWER_PIN_CAP } from "@/components/drawers/BottomChatDrawer";
+import { CHAT_DRAWER_PIN_CAP } from "@/lib/constants";
 import type { Envelope } from "@/lib/types";
 
 afterEach(() => {
   useLayoutStore.setState({
-    bottomChatDrawerOpen: false,
     panelEnvelopes: {},
     defaultDrawerTab: "scratchpad",
   });
 });
 
-describe("BOTTOM_DRAWER_PIN_CAP", () => {
+describe("CHAT_DRAWER_PIN_CAP", () => {
   it("matches the backend store.BottomDrawerPinCap (10)", () => {
-    expect(BOTTOM_DRAWER_PIN_CAP).toBe(10);
+    expect(CHAT_DRAWER_PIN_CAP).toBe(10);
   });
 });
 
@@ -31,12 +33,12 @@ describe("defaultDrawerTab", () => {
   });
 
   it("setter updates the value", () => {
-    useLayoutStore.getState().setDefaultDrawerTab("cards");
-    expect(useLayoutStore.getState().defaultDrawerTab).toBe("cards");
+    useLayoutStore.getState().setDefaultDrawerTab("artifacts");
+    expect(useLayoutStore.getState().defaultDrawerTab).toBe("artifacts");
   });
 
   it("accepts arbitrary built-in tab IDs", () => {
-    const ids = ["scratchpad", "documents", "context", "pins", "cards"];
+    const ids = ["scratchpad", "terminal-1", "artifacts", "session-context"];
     for (const id of ids) {
       useLayoutStore.getState().setDefaultDrawerTab(id);
       expect(useLayoutStore.getState().defaultDrawerTab).toBe(id);
@@ -81,15 +83,15 @@ describe("panelEnvelopes (transient slot)", () => {
 
 describe("tab overflow contract", () => {
   it("pinned card tab IDs use the 'pin:' namespace", () => {
-    const builtins = ["scratchpad", "documents", "context", "pins", "cards"];
+    const builtins = ["scratchpad", "terminal-1", "artifacts", "session-context"];
     const pinId = "pin:abc-123";
     expect(pinId.startsWith("pin:")).toBe(true);
     expect(builtins.includes(pinId)).toBe(false);
   });
 
-  it("can encode up to BOTTOM_DRAWER_PIN_CAP unique pin tab IDs", () => {
-    const ids = Array.from({ length: BOTTOM_DRAWER_PIN_CAP }, (_, i) => `pin:card-${i}`);
+  it("can encode up to CHAT_DRAWER_PIN_CAP unique pin tab IDs", () => {
+    const ids = Array.from({ length: CHAT_DRAWER_PIN_CAP }, (_, i) => `pin:card-${i}`);
     const unique = new Set(ids);
-    expect(unique.size).toBe(BOTTOM_DRAWER_PIN_CAP);
+    expect(unique.size).toBe(CHAT_DRAWER_PIN_CAP);
   });
 });

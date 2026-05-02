@@ -1,11 +1,16 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Envelope } from '@/lib/types'
+import type { Envelope, DynamicCardTab } from '@/lib/types'
 
-type ToolDrawerState = 'closed' | 'compact' | 'expanded'
 type Theme = 'dark' | 'light' | 'system'
 type RightRailTab = 'widgets' | 'inbox' | 'artifacts' | (string & {})
 export type LayoutPreset = 'focus' | 'default' | 'workspace' | 'reading'
+
+type ChatDrawerState = {
+  open: boolean
+  height: number
+  activeTab: string
+}
 
 /**
  * J9: per-panel user preferences persisted in layout store.
@@ -46,12 +51,9 @@ interface LayoutState {
   rightRailOpen: boolean
   rightRailTab: RightRailTab
   taskThreadOpen: boolean
-  toolDrawerEnabled: boolean
-  toolDrawerState: ToolDrawerState
   leftRailWorkspaceVisible: boolean
   leftRailNewChatVisible: boolean
   leftRailSearchVisible: boolean
-  toolDrawerHeight: number
   headerChipsVisible: boolean
   currentPage: string
   theme: Theme
@@ -59,7 +61,6 @@ interface LayoutState {
   toggleRightRail: () => void
   toggleArtifactsDrawer: () => void
   toggleTaskThread: () => void
-  toggleToolDrawer: () => void
   toggleHeaderChips: () => void
   toggleLeftRailWorkspace: () => void
   toggleLeftRailNewChat: () => void
@@ -69,8 +70,6 @@ interface LayoutState {
   setRightRailTab: (tab: RightRailTab) => void
   setArtifactsDrawer: (open: boolean) => void
   setTaskThread: (open: boolean) => void
-  setToolDrawerState: (state: ToolDrawerState) => void
-  setToolDrawerHeight: (height: number) => void
   setHeaderChipsVisible: (visible: boolean) => void
   applyLayoutPreset: (preset: LayoutPreset) => void
   setCurrentPage: (page: string) => void
@@ -102,16 +101,6 @@ interface LayoutState {
    */
   clearAllPanelDismissed: () => void
 
-  // J8 v1 — bottom_chat_drawer (CW-20260426-0006). The bottom chat drawer
-  // is a separate UI surface from the right-rail panel host; it sits below
-  // the chat transcript and surfaces long-form reference content (documents,
-  // scratchpads). It is NOT in J9's right-rail catalog (widgets/work/
-  // workflows/inbox/artifacts) so it has its own open/close state and source
-  // attribution.
-  bottomChatDrawerOpen: boolean
-  /** Open/close the bottom chat drawer with source attribution for the dismiss machine. */
-  setBottomDrawerOpen: (open: boolean, source?: 'agent' | 'user') => void
-
   // A2 v1 — per-panel envelope inbox (CW-20260428-0008). When an envelope
   // arrives with `render_target` set, applyEnvelopePanelEffects pushes it
   // into panelEnvelopes[render_target] and the panel's inbox slot picks it
@@ -125,13 +114,26 @@ interface LayoutState {
   /** Clear all envelopes routed to a single panel (drawer-owned policy). */
   clearPanelEnvelopes: (panelId: string) => void
 
-  // C1 (CW-20260428-0012) — bottom-drawer default-tab preference.
-  // Which built-in tab opens when the drawer is opened with no specific
-  // target. Defaults to 'scratchpad' (matches today's behavior). Pinned
-  // cards live server-side and are not selectable as the default — that's
-  // a v2 concern.
+  // C1 (CW-20260428-0012) — chat working drawer default-tab preference.
+  // Seeds chatWorkingDrawer.activeTab on rehydrate. Defaults to 'scratchpad'
+  // to preserve existing UX. Dynamic / pinned card tabs are not selectable
+  // as the default — that's a v2 concern.
   defaultDrawerTab: string
   setDefaultDrawerTab: (tab: string) => void
+
+  // Chat surface redesign 2026-05-01
+  chatPrimaryDrawer: ChatDrawerState
+  chatWorkingDrawer: ChatDrawerState
+  /** FE-only state for transient card-tabs in ChatWorkingDrawer.
+   *  Populated from panelEnvelopes['bottom_chat_drawer'] reactively
+   *  and augmented with focused/pinned/createdAt metadata. */
+  chatWorkingDrawerCardTabs: DynamicCardTab[]
+
+  setChatPrimaryDrawer: (patch: Partial<ChatDrawerState>) => void
+  setChatWorkingDrawer: (patch: Partial<ChatDrawerState>) => void
+  appendChatWorkingDrawerCardTab: (tab: DynamicCardTab) => void
+  removeChatWorkingDrawerCardTab: (id: string) => void
+  focusChatWorkingDrawerCardTab: (id: string) => void
 }
 
 function resolveTheme(theme: Theme): 'dark' | 'light' {
@@ -155,12 +157,9 @@ export const useLayoutStore = create<LayoutState>()(
       rightRailOpen: true,
       rightRailTab: 'widgets' as RightRailTab,
       taskThreadOpen: true,
-      toolDrawerEnabled: true,
-      toolDrawerState: 'closed' as ToolDrawerState,
       leftRailWorkspaceVisible: true,
       leftRailNewChatVisible: true,
       leftRailSearchVisible: true,
-      toolDrawerHeight: 240,
       headerChipsVisible: true,
       currentPage: 'chat',
       theme: 'dark' as Theme,
@@ -168,8 +167,6 @@ export const useLayoutStore = create<LayoutState>()(
         set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen })),
       toggleRightRail: () =>
         set((state) => ({ rightRailOpen: !state.rightRailOpen })),
-      toggleToolDrawer: () =>
-        set((state) => ({ toolDrawerEnabled: !state.toolDrawerEnabled })),
       toggleHeaderChips: () =>
         set((state) => ({ headerChipsVisible: !state.headerChipsVisible })),
       toggleLeftRailWorkspace: () =>
@@ -198,15 +195,13 @@ export const useLayoutStore = create<LayoutState>()(
         }
       },
       setTaskThread: (open) => set({ taskThreadOpen: open }),
-      setToolDrawerState: (state) => set({ toolDrawerState: state }),
-      setToolDrawerHeight: (height) => set({ toolDrawerHeight: Math.max(100, Math.min(600, height)) }),
       setHeaderChipsVisible: (visible) => set({ headerChipsVisible: visible }),
       applyLayoutPreset: (preset) => {
         const presets: Record<LayoutPreset, Partial<LayoutState>> = {
-          focus:     { leftSidebarOpen: false, rightRailOpen: false, toolDrawerEnabled: false, headerChipsVisible: false },
-          default:   { leftSidebarOpen: true,  rightRailOpen: false, toolDrawerEnabled: true,  headerChipsVisible: true  },
-          workspace: { leftSidebarOpen: true,  rightRailOpen: true,  toolDrawerEnabled: true,  headerChipsVisible: true  },
-          reading:   { leftSidebarOpen: false, rightRailOpen: false, toolDrawerEnabled: false, headerChipsVisible: true  },
+          focus:     { leftSidebarOpen: false, rightRailOpen: false, headerChipsVisible: false },
+          default:   { leftSidebarOpen: true,  rightRailOpen: false, headerChipsVisible: true  },
+          workspace: { leftSidebarOpen: true,  rightRailOpen: true,  headerChipsVisible: true  },
+          reading:   { leftSidebarOpen: false, rightRailOpen: false, headerChipsVisible: true  },
         }
         set(presets[preset] as Partial<LayoutState>)
       },
@@ -292,55 +287,6 @@ export const useLayoutStore = create<LayoutState>()(
           panelPrefs: { ...s.panelPrefs, dismissedByUser: {} },
         })),
 
-      // J8 v1 — bottom_chat_drawer state (separate from right-rail).
-      bottomChatDrawerOpen: false,
-      setBottomDrawerOpen: (open, source = 'user') =>
-        set((s) => {
-          const id = 'bottom_chat_drawer'
-          if (open) {
-            const dismissed = s.panelPrefs.dismissedByUser[id] === true
-            if (source === 'agent' && dismissed) {
-              return s // NO-OP — dismiss-gated agent open.
-            }
-            let nextDismissed = s.panelPrefs.dismissedByUser
-            if (source === 'user' && dismissed) {
-              const { [id]: _drop, ...rest } = nextDismissed
-              nextDismissed = rest
-            }
-            return {
-              bottomChatDrawerOpen: true,
-              panelPrefs: {
-                ...s.panelPrefs,
-                dismissedByUser: nextDismissed,
-                panelOpenSource: { ...s.panelPrefs.panelOpenSource, [id]: source },
-              },
-            }
-          }
-          // Close path. User-close marks dismissed; agent-close drops the source
-          // entry but does not touch dismiss state.
-          if (source === 'user') {
-            const { [id]: _drop, ...nextSource } = s.panelPrefs.panelOpenSource
-            return {
-              bottomChatDrawerOpen: false,
-              panelPrefs: {
-                ...s.panelPrefs,
-                dismissedByUser: { ...s.panelPrefs.dismissedByUser, [id]: true },
-                panelOpenSource: nextSource,
-              },
-            }
-          }
-          // Agent-close: only honored when the panel was agent-opened.
-          // Refuse to close a user-opened drawer (J8 user-overrides-agent rule).
-          if (s.panelPrefs.panelOpenSource[id] === 'user') {
-            return s
-          }
-          const { [id]: _drop, ...nextSource } = s.panelPrefs.panelOpenSource
-          return {
-            bottomChatDrawerOpen: false,
-            panelPrefs: { ...s.panelPrefs, panelOpenSource: nextSource },
-          }
-        }),
-
       // A2 v1 panel-envelope inbox (CW-20260428-0008).
       panelEnvelopes: {} as Record<string, Envelope[]>,
       pushPanelEnvelope: (panelId, envelope) =>
@@ -356,12 +302,58 @@ export const useLayoutStore = create<LayoutState>()(
           return { panelEnvelopes: rest }
         }),
 
-      // C1 — bottom drawer default-tab preference.
+      // C1 — chat working drawer default-tab preference.
       defaultDrawerTab: 'scratchpad',
       setDefaultDrawerTab: (tab) => set({ defaultDrawerTab: tab }),
+
+      // Chat surface redesign 2026-05-01 — new drawer regions.
+      chatPrimaryDrawer: { open: false, height: 280, activeTab: 'documents' },
+      chatWorkingDrawer: { open: false, height: 200, activeTab: 'scratchpad' },
+      chatWorkingDrawerCardTabs: [],
+
+      setChatPrimaryDrawer: (patch) =>
+        set((s) => ({ chatPrimaryDrawer: { ...s.chatPrimaryDrawer, ...patch } })),
+      setChatWorkingDrawer: (patch) =>
+        set((s) => ({ chatWorkingDrawer: { ...s.chatWorkingDrawer, ...patch } })),
+      appendChatWorkingDrawerCardTab: (tab) =>
+        set((s) => ({
+          chatWorkingDrawerCardTabs: [...s.chatWorkingDrawerCardTabs, tab],
+          // Newly arriving focused cards become the active tab.
+          chatWorkingDrawer: tab.focused
+            ? { ...s.chatWorkingDrawer, activeTab: tab.id }
+            : s.chatWorkingDrawer,
+        })),
+      removeChatWorkingDrawerCardTab: (id) =>
+        set((s) => {
+          const next = s.chatWorkingDrawerCardTabs.filter((t) => t.id !== id)
+          // If the active tab was removed, fall back to the last fixed tab.
+          const activeWas = s.chatWorkingDrawer.activeTab === id
+          return {
+            chatWorkingDrawerCardTabs: next,
+            chatWorkingDrawer: activeWas
+              ? { ...s.chatWorkingDrawer, activeTab: 'scratchpad' }
+              : s.chatWorkingDrawer,
+          }
+        }),
+      focusChatWorkingDrawerCardTab: (id) =>
+        set((s) => ({
+          chatWorkingDrawer: { ...s.chatWorkingDrawer, activeTab: id },
+        })),
     }),
     {
       name: 'nanite-layout',
+      // Transient state must NOT be written to localStorage. partialize
+      // returns the subset that gets persisted; everything else stays
+      // in-memory only and is reset to its initializer on each session.
+      partialize: (state) => {
+        const { panelEnvelopes, chatWorkingDrawerCardTabs, memoryModalOpen, ...persisted } = state
+        // Reference-suppression: the destructure intentionally drops these
+        // keys; explicitly read them so TS doesn't flag them as unused.
+        void panelEnvelopes
+        void chatWorkingDrawerCardTabs
+        void memoryModalOpen
+        return persisted
+      },
       migrate: () => {
         // One-time migration from conduit-layout to nanite-layout
         const old = localStorage.getItem('conduit-layout')
@@ -381,6 +373,18 @@ export const useLayoutStore = create<LayoutState>()(
           // on session reload. The chat-history stub stays (envelopes are in
           // the transcript) and clicking it re-routes the card.
           state.panelEnvelopes = {}
+          // Transient card-tabs do not survive reload (FE-only state).
+          // Pinned cards still survive via the DB-backed POST /drawer-cards path.
+          state.chatWorkingDrawerCardTabs = []
+          // C1: seed the working drawer's active tab from the user's
+          // defaultDrawerTab preference. Card tabs are transient and reset
+          // above, so we never restore an active card-tab id here.
+          if (state.defaultDrawerTab) {
+            state.chatWorkingDrawer = {
+              ...state.chatWorkingDrawer,
+              activeTab: state.defaultDrawerTab,
+            }
+          }
         }
         // Listen for OS theme changes when in system mode
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

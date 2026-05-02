@@ -2,9 +2,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Check, Terminal, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import type { ScratchpadControls } from "@/components/drawers/BottomChatDrawer";
+import { Check, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useArtifactUpload } from "@/hooks/useArtifactUpload";
 import { usePluginAction } from "@/hooks/usePluginAction";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
@@ -17,6 +16,7 @@ import type { SlashCommandDef } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useChatStore } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
+import { useShellStore } from "@/stores/useShellStore";
 import { useWorkStore } from "@/stores/useWorkStore";
 import { ComposerToolbar } from "./ComposerToolbar";
 import { StatusPill } from "./envelopes/primitives/StatusPill";
@@ -90,8 +90,6 @@ interface ChatComposerProps {
   onEditorReady?: (focus: () => void) => void;
   reloadMessages?: () => void;
   drawer?: React.ReactNode;
-  /** J10 (CW-20260426-0008): ref to scratchpad controls for /scratch command. */
-  scratchpadControlsRef?: RefObject<ScratchpadControls | null>;
 }
 
 export function ChatComposer({
@@ -101,7 +99,6 @@ export function ChatComposer({
   onEditorReady,
   reloadMessages,
   drawer = null,
-  scratchpadControlsRef,
 }: ChatComposerProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
@@ -113,7 +110,15 @@ export function ChatComposer({
     setMode: setShellMode,
   } = useShellMode(activeSessionId);
   const [isShellInput, setIsShellInput] = useState(false);
-  const [shellRunning, setShellRunning] = useState(false);
+  // Wave 4 / Task 11: shell-running state moved to useShellStore so the
+  // new ChatWorkingDrawer's Terminal-1 tab can subscribe. The composer
+  // now SETS these; reading happens in Terminal1Tab.
+  const setShellRunning = useShellStore((s) => s.setShellRunning);
+  const setPendingShellCommand = useShellStore(
+    (s) => s.setPendingShellCommand,
+  );
+  const appendShellOutput = useShellStore((s) => s.appendShellOutput);
+  const pendingShellCommand = useShellStore((s) => s.pendingShellCommand);
   const workToast = useWorkStore((s) => s.toastMessage);
   const dismissWorkToast = useWorkStore((s) => s.dismissToast);
   // B3 (CW-20260428-0011): chat-scoped toast (e.g. mode auto-switch confirmation).
@@ -204,22 +209,16 @@ export function ChatComposer({
         }
         // J10 (CW-20260426-0008): /scratch, /pad, /scratchpad slash commands.
         // These commands are intercepted client-side before hitting the server
-        // execute path. The bare-invocation case opens the bottom drawer and
-        // switches to the scratchpad tab; the with-args case appends text to
-        // the scratchpad WITHOUT sending to the agent.
+        // execute path. Both bare and with-args invocations open the working
+        // drawer to the Scratchpad tab. The "append args to scratchpad" path
+        // is a follow-up — for now both branches just surface the drawer.
         case "scratch":
         case "pad":
         case "scratchpad": {
-          const store = useLayoutStore.getState();
-          if (cmdArgs.trim()) {
-            // With text — append to scratchpad without sending to agent.
-            // Open the drawer so the user can see the append happened.
-            store.setBottomDrawerOpen(true, "user");
-            scratchpadControlsRef?.current?.append(cmdArgs.trim());
-          } else {
-            // Bare invocation — open drawer to scratchpad tab.
-            store.setBottomDrawerOpen(true, "user");
-          }
+          useLayoutStore.getState().setChatWorkingDrawer({
+            open: true,
+            activeTab: "scratchpad",
+          });
           return;
         }
         default: {
@@ -263,7 +262,7 @@ export function ChatComposer({
         }
       }
     },
-    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages, scratchpadControlsRef],
+    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages],
   );
 
   const handleCommandRef = useRef(handleCommand);
@@ -388,11 +387,18 @@ export function ChatComposer({
     content: "",
   });
 
+  const [hasContent, setHasContent] = useState(false);
+
   useEffect(() => {
     if (!editor) return;
     const handler = () => {
       const text = editor.getText();
       setIsShellInput(text.startsWith("!") && text.length >= 1);
+      // Reactively track whether the editor has any content so the send
+      // button's enabled/disabled state updates as the user types. (Without
+      // this, hasContent was computed inline and only refreshed on other
+      // re-renders — the button stayed disabled even when text was present.)
+      setHasContent(text.trim().length > 0);
     };
     editor.on("update", handler);
     return () => {
@@ -420,8 +426,6 @@ export function ChatComposer({
     return () => clearTimeout(timer);
   }, [chatToast, dismissChatToast]);
 
-  const [pendingShellCommand, setPendingShellCommand] = useState<string | null>(null);
-
   const executeShellCommand = useCallback(
     async (command: string, approved: boolean) => {
       if (!activeSessionId) return;
@@ -429,19 +433,41 @@ export function ChatComposer({
       try {
         const result = await api.shellExec(activeSessionId, command, approved);
         if (result.requires_approval) {
+          // pendingShellCommand surfaces the in-composer approval
+          // strip AND seeds Terminal-1's "what just queued" footer.
           setPendingShellCommand(command);
           return;
         }
         setPendingShellCommand(null);
+        // Commit the (single-shot) shell-exec result to the Terminal-1
+        // tab buffer. shellExec is a one-shot fetch — there is no
+        // streamed-chunk path today, so we append the full output and
+        // an exit-code footer at completion.
+        appendShellOutput(`$ ${command}\n`);
+        if (result.output) {
+          appendShellOutput(result.output);
+          if (!result.output.endsWith("\n")) appendShellOutput("\n");
+        }
+        if (typeof result.exit_code === "number") {
+          appendShellOutput(`[exit ${result.exit_code}]\n`);
+        }
         reloadMessages?.();
       } catch (err) {
         console.error("Shell exec failed:", err);
+        appendShellOutput(`[error] ${(err as Error).message}\n`);
+        setPendingShellCommand(null);
       } finally {
         setShellRunning(false);
         setIsShellInput(false);
       }
     },
-    [activeSessionId, reloadMessages],
+    [
+      activeSessionId,
+      appendShellOutput,
+      reloadMessages,
+      setPendingShellCommand,
+      setShellRunning,
+    ],
   );
 
   const handleShellExec = useCallback(
@@ -497,8 +523,6 @@ export function ChatComposer({
 
   handleSendRef.current = handleSend;
 
-  const hasContent = editor ? editor.getText().trim().length > 0 : false;
-
   const { data: settings } = useSettings();
   const developerMode = settings?.developer_mode ?? false;
 
@@ -507,7 +531,7 @@ export function ChatComposer({
   const handlePluginAction = usePluginAction();
 
   return (
-    <div className="shrink-0 px-4 pb-4 pt-2">
+    <div className="shrink-0 pb-2 pt-2">
       {composerAboveSlots.length > 0 && (
         <div className="mb-1 flex items-center gap-1">
           {composerAboveSlots.map((entry) => {
@@ -545,7 +569,7 @@ export function ChatComposer({
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => void handleDrop(e)}
       >
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[2px] bg-primary opacity-85" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[2px] bg-brand opacity-85" />
 
         {/* DEV mode indicator — floating top-right when developer_mode=true */}
         {developerMode && (
@@ -572,21 +596,6 @@ export function ChatComposer({
             <Upload className="h-3.5 w-3.5" />
             <span className="font-mono text-[11px] font-semibold uppercase tracking-wide">
               Drop files to attach
-            </span>
-          </div>
-        )}
-
-        {/* Shell-running banner */}
-        {shellRunning && (
-          <div className="flex items-center justify-center gap-2 border-b border-border-subtle bg-surface px-3 py-2 text-xs text-fg-muted">
-            <Terminal className="h-3.5 w-3.5" />
-            <span className="font-mono text-[11px] font-semibold uppercase tracking-wide">
-              Running command
-            </span>
-            <span className="inline-flex items-center gap-0.5" aria-hidden="true">
-              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:0ms]" />
-              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:160ms]" />
-              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-fg-muted [animation-delay:320ms]" />
             </span>
           </div>
         )}
@@ -667,7 +676,7 @@ export function ChatComposer({
         )}
 
         {/* Editor */}
-        <div className="bg-bg-elevated px-[14px] pt-[10px] pb-2">
+        <div className={`bg-bg-elevated px-[14px] pt-[10px] pb-2 ${developerMode ? 'pr-[88px]' : ''}`}>
           <input
             ref={fileInputRef}
             type="file"
@@ -684,7 +693,7 @@ export function ChatComposer({
         <ComposerToolbar
           hasContent={hasContent}
           isStreaming={isStreaming}
-          onSend={handleSend}
+          onSend={() => handleSendRef.current()}
           onStop={onStop}
           onAttach={() => fileInputRef.current?.click()}
           onSlash={() => editor?.chain().focus().insertContent("/").run()}

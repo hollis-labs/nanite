@@ -1,7 +1,7 @@
-import { AlertTriangle, Key, MessageSquare, Puzzle, RefreshCw, Settings, X } from "lucide-react";
-import { useRef } from "react";
+import { Key, MessageSquare, Puzzle, Settings } from "lucide-react";
 import { TaskThreadPanel } from "@/components/messaging/TaskThreadPanel";
-import { BottomChatDrawer, type ScratchpadControls } from "@/components/drawers/BottomChatDrawer";
+import { ChatPrimaryDrawer } from "@/components/drawers/ChatPrimaryDrawer";
+import { ChatWorkingDrawer } from "@/components/drawers/ChatWorkingDrawer";
 import { useChat } from "@/hooks/useChat";
 import { useTaskContext } from "@/hooks/useTaskContext";
 import { useAppStore } from "@/stores/useAppStore";
@@ -9,7 +9,6 @@ import { useLayoutStore } from "@/stores/useLayoutStore";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
 import { ChatTranscript } from "./ChatTranscript";
-import { ToolCallDrawer } from "./ToolCallDrawer";
 
 interface ChatMainProps {
   onEditorReady?: (focus: () => void) => void;
@@ -19,7 +18,6 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const taskThreadOpen = useLayoutStore((s) => s.taskThreadOpen);
   const toggleTaskThread = useLayoutStore((s) => s.toggleTaskThread);
-  const scratchpadControlsRef = useRef<ScratchpadControls | null>(null);
   const {
     messages,
     isStreaming,
@@ -46,9 +44,9 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
 
   return (
     <div className="flex-1 flex min-w-0">
-      <main className="flex-1 flex flex-col min-w-0 bg-bg">
+      <main className="flex-1 flex flex-col min-w-0 bg-bg relative">
         <ChatHeader />
-        <ToolCallDrawer />
+        <ChatPrimaryDrawer />
         <ChatTranscript
           messages={messages}
           isStreaming={isStreaming}
@@ -58,116 +56,28 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           hasOlderMessages={hasOlderMessages}
           loadingOlder={loadingOlder}
         />
-        {sessionTakeover && (
-          <div className="max-w-3xl w-full mx-auto px-4 mb-2">
-            <div className="rounded-[8px] border border-info-muted bg-info-muted p-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-info mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-info">
-                    This session is now active in another tab
-                  </p>
-                  <p className="text-xs text-fg-muted mt-1">
-                    The streaming connection was moved to a newer tab. Reload this page to reconnect
-                    here.
-                  </p>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => window.location.reload()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-surface text-fg-secondary hover:bg-surface-hover transition-colors"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      Reconnect
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        {streamStalled && !circuitOpen && !sessionTakeover && (
-          <div className="max-w-3xl w-full mx-auto px-4 mb-2">
-            <div className="rounded-[8px] border border-warning-muted bg-warning-muted p-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-warning">
-                    Connection appears stalled
-                  </p>
-                  <p className="text-xs text-fg-muted mt-1">
-                    No activity from the server in the last minute. The stream may be stuck.
-                    Click reconnect to retry this turn with a fresh connection.
-                  </p>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      type="button"
-                      onClick={() => void reconnectStalledStream()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-surface text-fg-secondary hover:bg-surface-hover transition-colors"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      Reconnect
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        {circuitOpen && (
-          <div className="max-w-3xl w-full mx-auto px-4 mb-2">
-            <div className="rounded-[8px] border border-warning-muted bg-warning-muted p-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-warning mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-warning">
-                    Provider rate limited after multiple retries
-                  </p>
-                  <p className="text-xs text-fg-muted mt-1">
-                    The API provider has been returning rate limit errors. You can retry or dismiss to
-                    keep the partial response.
-                  </p>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => void retryStream()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-surface text-fg-secondary hover:bg-surface-hover transition-colors"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      Retry
-                    </button>
-                    <button
-                      onClick={dismissCircuit}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-medium bg-surface text-fg-secondary hover:bg-surface-hover transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        {statusMessage && (
+        {statusMessage && !sessionTakeover && !streamStalled && !circuitOpen && (
           <div className="max-w-3xl w-full mx-auto px-4 py-1.5 text-xs text-warning animate-pulse">
             {statusMessage}
           </div>
         )}
-        <div className="max-w-3xl w-full mx-auto px-4 pb-4 shrink-0">
+        <ChatWorkingDrawer
+          sessionTakeover={sessionTakeover}
+          streamStalled={streamStalled && !circuitOpen && !sessionTakeover}
+          circuitOpen={circuitOpen}
+          onReconnect={() => void reconnectStalledStream()}
+          onRetry={() => void retryStream()}
+          onDismissCircuit={dismissCircuit}
+        />
+        <div className="max-w-3xl w-full mx-auto px-4 pb-1 shrink-0 relative">
           <ChatComposer
             onSend={sendMessage}
             isStreaming={isStreaming}
             onStop={stopStreaming}
             onEditorReady={onEditorReady}
             reloadMessages={loadMessages}
-            scratchpadControlsRef={scratchpadControlsRef}
           />
         </div>
-        {/* J10 (CW-20260426-0008): bottom chat drawer — scratchpad, documents, session context */}
-        <BottomChatDrawer
-          onScratchpadRef={(controls) => {
-            scratchpadControlsRef.current = controls;
-          }}
-        />
       </main>
       {isTaskSession && taskId && (
         <TaskThreadPanel taskId={taskId} open={taskThreadOpen} onToggle={toggleTaskThread} />

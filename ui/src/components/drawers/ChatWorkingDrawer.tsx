@@ -108,54 +108,61 @@ export function ChatWorkingDrawer() {
   if (!activeSessionId) return null
 
   return (
-    <div className="max-w-3xl w-full mx-auto px-4 relative">
-      <ChatDrawerTabStrip
-        tabs={tabs}
-        dock="top"
-        onSelect={(id) => {
-          if (drawer.activeTab === id && drawer.open) {
-            setDrawer({ open: false })
-            return
-          }
-          setDrawer({ open: true, activeTab: id })
-        }}
-        onClose={(id) => removeCardTab(id)}
-        onTogglePin={async (id) => {
-          const tab = cardTabs.find((t) => t.id === id)
-          if (!tab) return
-          if (tab.pinned) {
-            // Promoted card — DELETE; refresh pinned cards in ChatPrimaryDrawer.
-            const dbId = id.slice(5) // strip 'card:' prefix
-            await api.unpinDrawerCard(dbId)
-            removeCardTab(id)
-          } else {
-            // Promote: POST /drawer-cards via existing API. The plan's
-            // shape (`type` / `label`) maps 1:1 onto the live API's
-            // `card_type` / `title` field names.
-            await api.pinDrawerCard(activeSessionId, {
-              card_type: 'agent-envelope',
-              content_ref: tab.payload.id ?? '',
-              title: tab.label,
-              payload: JSON.stringify(tab.payload),
-            })
-            queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
-            removeCardTab(id) // tab now lives in ChatPrimaryDrawer's pinned-tabs list
-          }
-        }}
-      />
-      <div
-        className="overflow-hidden border-x border-b border-border-subtle bg-bg-elevated"
-        style={{
-          height: drawer.open ? drawer.height : 0,
-          // Square bottom corners — flush against composer.
-          borderRadius: '10px 10px 0 0',
-        }}
-      >
-        {/* Top accent ribbon — success color (differentiates from ChatPrimaryDrawer) */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-success opacity-65" />
-        {drawer.open && (
+    <div className="max-w-3xl w-full mx-auto relative">
+      {/* Drawer body — opens upward into the transcript area when active. */}
+      {drawer.open && (
+        <div
+          className="relative overflow-hidden border-x border-t border-border-subtle bg-bg-elevated"
+          style={{
+            height: drawer.height,
+            // Rounded top, square bottom — flush with the tab strip below it.
+            borderRadius: '10px 10px 0 0',
+          }}
+        >
+          {/* Top accent ribbon — success color (differentiates from ChatPrimaryDrawer). */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-success opacity-65" />
           <DrawerBody activeTab={drawer.activeTab} cardTabs={cardTabs} />
-        )}
+        </div>
+      )}
+
+      {/* Tab strip — sits at the bottom of the drawer, ~90% composer width,
+          with a few px of negative margin so it visually tucks under the
+          composer (file-folder-tab look). */}
+      <div className="w-[90%] mx-auto -mb-1.5 relative z-10">
+        <ChatDrawerTabStrip
+          tabs={tabs}
+          dock="bottom"
+          onSelect={(id) => {
+            if (drawer.activeTab === id && drawer.open) {
+              setDrawer({ open: false })
+              return
+            }
+            setDrawer({ open: true, activeTab: id })
+          }}
+          onClose={(id) => removeCardTab(id)}
+          onTogglePin={async (id) => {
+            const tab = cardTabs.find((t) => t.id === id)
+            if (!tab) return
+            if (tab.pinned) {
+              // Promoted card — DELETE; refresh pinned cards in ChatPrimaryDrawer.
+              const dbId = id.slice(5) // strip 'card:' prefix
+              await api.unpinDrawerCard(dbId)
+              removeCardTab(id)
+            } else {
+              // Promote: POST /drawer-cards via existing API. The plan's
+              // shape (`type` / `label`) maps 1:1 onto the live API's
+              // `card_type` / `title` field names.
+              await api.pinDrawerCard(activeSessionId, {
+                card_type: 'agent-envelope',
+                content_ref: tab.payload.id ?? '',
+                title: tab.label,
+                payload: JSON.stringify(tab.payload),
+              })
+              queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
+              removeCardTab(id) // tab now lives in ChatPrimaryDrawer's pinned-tabs list
+            }
+          }}
+        />
       </div>
     </div>
   )

@@ -395,10 +395,10 @@ export function ComposerToolbar({
               type="button"
               onClick={onSend}
               disabled={!hasContent}
-              className={`flex h-7 w-7 items-center justify-center rounded-[6px] transition-colors ${
+              className={`flex h-7 w-7 items-center justify-center rounded-[6px] border transition-colors ${
                 hasContent
-                  ? 'bg-primary text-primary-foreground hover:bg-primary-hover'
-                  : 'cursor-default text-fg-faint'
+                  ? 'bg-primary text-primary-foreground border-primary hover:bg-primary-hover hover:border-primary-hover'
+                  : 'cursor-default bg-bg-elevated text-fg-faint border-border-subtle'
               }`}
             >
               <ArrowBigUp size={16} strokeWidth={2.5} />

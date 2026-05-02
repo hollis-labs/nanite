@@ -433,7 +433,17 @@ func initProviders(devMode bool) *provider.Registry {
 	}
 	apiProviders := []apiProvSpec{
 		{"anthropic", "anthropic-001",
-			func() provider.Provider { return provider.NewAnthropic() },
+			func() provider.Provider {
+				ap := provider.NewAnthropic()
+				if v := os.Getenv("NANITE_PROVIDER_RATE_BUDGET_TPM"); v != "" {
+					if n, err := strconv.Atoi(v); err == nil && n > 0 {
+						ap.RateTracker.UpdateLimit(n)
+						slog.Info("provider: rate-budget override applied via env",
+							"provider", "anthropic", "tpm", n)
+					}
+				}
+				return ap
+			},
 			func(p provider.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
 		{"openai", "openai-001",
 			func() provider.Provider { return provider.NewOpenAI() },

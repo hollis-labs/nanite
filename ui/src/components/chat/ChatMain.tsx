@@ -58,12 +58,12 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           loadingOlder={loadingOlder}
         />
         {statusMessage && !sessionTakeover && !streamStalled && !circuitOpen && (
-          <div className="w-[85%] max-w-7xl mx-auto px-4 py-1.5 text-xs text-warning animate-pulse">
+          <div className="max-w-3xl w-full mx-auto px-4 py-1.5 text-xs text-warning animate-pulse">
             {statusMessage}
           </div>
         )}
         <ChatWorkingDrawer />
-        <div className="w-[85%] max-w-7xl mx-auto px-4 pb-2 shrink-0 relative">
+        <div className="w-[85%] max-w-7xl mx-auto px-4 pb-1 shrink-0 relative">
           <ChatAlertOverlay
             sessionTakeover={sessionTakeover}
             streamStalled={streamStalled && !circuitOpen && !sessionTakeover}

@@ -327,10 +327,14 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	// broker is registered with uniform names by mcp.Manager, so t.Name
 	// here is already the agent-facing name.
 	//
-	// Strict defaults to true for all broker-registered tools so malformed
-	// tool calls fail at the provider boundary instead of wasting retry turns.
-	// Tools that require a permissive schema (rare) can opt out by setting
-	// Strict: pointer-to-false in their ToolDefinition before registration.
+	// Strict defaults to nil (non-strict) for all broker-registered tools.
+	// Tools that benefit from Anthropic server-side input-schema enforcement
+	// can opt in explicitly by setting Strict to strictTrue (declared above)
+	// at registration time. See decisions.nanite.tools.strict_default_off in
+	// Vanta for the full rationale: strict was being applied blanket-fashion
+	// to all tools, which conflated input-shape validation (where strict
+	// adds value) with high-blast-radius permissions (which belong at
+	// project/session/agent-profile scope, not at the schema level).
 	for _, t := range tools {
 		name := t.Name
 		// Dev-tool gate: skip dev tools when developer_mode is off.

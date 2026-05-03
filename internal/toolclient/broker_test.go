@@ -525,9 +525,10 @@ func namesOf(tools []provider.ToolDefinition) []string {
 	return names
 }
 
-// --- Strict tool use tests (CW-20260420-0007) ---
+// --- Strict tool use tests (CW-20260420-0007;
+// flipped to default-off per decisions.nanite.tools.strict_default_off) ---
 
-func TestSelectToolsAsProvider_BrokerToolsDefaultStrict(t *testing.T) {
+func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 	cfg := DefaultConfig()
 	tb := New(nil, nil, cfg)
 

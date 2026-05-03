@@ -192,7 +192,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// prompt body itself was deduplicated (~557 → ~485 tokens) by removing
 	// two Capability-section bullets that Phase A's architecture
 	// (docs/architecture/agent-context-architecture.md) had relocated
-	// to tool descriptions. See migration 052 for the in-place DB update.
+	// to tool descriptions. See migration 053 for the in-place DB update.
 	// If the agent observably loses capability after this trim, revert and
 	// re-evaluate.
 	skillList := buildSkillListForSession(cb.Store, agent.ID, session.ID)

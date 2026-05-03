@@ -1,4 +1,4 @@
--- 052_chat_harness_capability_dedup.sql
+-- 053_chat_harness_capability_dedup.sql
 -- Glass-7 (CW-20260502-0016, SP-20260502-0001) — slot trim of SlotAgent.
 --
 -- Removes two Capability-section bullets that Phase A''s own architecture

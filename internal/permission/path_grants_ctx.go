@@ -8,8 +8,15 @@ import "context"
 //
 // Threading the lookup through ctx (rather than a global) keeps tests
 // hermetic and lets the dev_tools transport stay a value type.
+//
+// LookupPath returns the same boolean as IsPathAllowed plus the match
+// kind ("literal", "ancestor", "none") for diagnostic surfaces. BucketSize
+// reports how many grants are registered for the session, used to
+// distinguish "no bucket" misses from "bucket exists but no match" misses.
 type PathGrantChecker interface {
 	IsPathAllowed(sessionID, candidate string) bool
+	LookupPath(sessionID, candidate string) (bool, LookupKind)
+	BucketSize(sessionID string) int
 }
 
 // pathGrantCtxKey carries the (sessionID, checker) pair so dev_tools

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -207,12 +208,37 @@ func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string)
 // kept around for the EscapeError diagnostic when a downstream call needs
 // it (this helper does not raise such errors itself — it just signals
 // allow/no-match).
+//
+// Emits a structured INFO log on every call regardless of outcome so the
+// path-grant resolution boundary is observable in production. Without
+// this, a silent miss looks identical to a silent never-stamped-ctx —
+// the c138 reproduction (Glass-8 partial regression) was invisible until
+// this log was added. Tool calls are low-frequency enough that volume
+// is not a concern.
 func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, _ string) (string, bool) {
 	sessionID, checker := permission.PathGrantsFromContext(ctx)
-	if checker == nil || sessionID == "" {
-		return "", false
+	hadChecker := checker != nil
+
+	var (
+		bucketSize int
+		matched    bool
+		kind       = permission.LookupKindNone
+	)
+	if hadChecker && sessionID != "" {
+		bucketSize = checker.BucketSize(sessionID)
+		matched, kind = checker.LookupPath(sessionID, abs)
 	}
-	if !checker.IsPathAllowed(sessionID, abs) {
+
+	slog.Info("permission: dev_tools grant-resolution",
+		"session_id", sessionID,
+		"had_checker", hadChecker,
+		"candidate_abs", abs,
+		"bucket_size", bucketSize,
+		"match_found", matched,
+		"match_kind", string(kind),
+	)
+
+	if !matched {
 		return "", false
 	}
 	// Resolve symlinks on the existing-ancestor of the target so the
@@ -256,19 +282,45 @@ func (d *DevToolsTransport) exampleRootPath() string {
 	return "/path/to/project"
 }
 
+// tildeAcceptanceNote returns the shared LLM-facing instruction included
+// in every dev_* tool description: paths beginning with ~/ are accepted
+// and expanded server-side to the session user's actual home directory,
+// and the agent must pass user-supplied ~/ paths verbatim rather than
+// fabricating an absolute path with a guessed username.
+//
+// Background (CW-fix-dev-glob-grant): smoke sessions surfaced a
+// non-deterministic LLM failure where the agent, faced with "must start
+// with /" and a user message containing ~/Projects-apps, would convert
+// the tilde to /Users/<fabricated-name>/Projects-apps. The path-grant
+// store had the correct grants registered against the real user's home,
+// so the lookup missed and dev_* failed. Telling the agent up-front
+// that ~/ is acceptable removes the impulse to invent.
+func tildeAcceptanceNote() string {
+	home, err := permission.HomeDir()
+	homeHint := "the session user's home directory"
+	if err == nil && home != "" {
+		homeHint = home + " (the session user's home directory)"
+	}
+	return fmt.Sprintf("Paths starting with ~/ are accepted and expanded server-side to %s. "+
+		"When the user mentions a ~/ path, pass it VERBATIM (e.g. ~/Projects-apps); "+
+		"do NOT substitute a username — fabricated paths like /Users/<name>/... where <name> is guessed will fail.",
+		homeHint)
+}
+
 // ListTools returns the dev tools with descriptions derived from the
 // configured AllowedPaths so LLM-facing content reflects the actual workspace.
 func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	exRoot := d.exampleRootPath()
 	allowedDirs := d.allowedDirsSummary()
+	tildeNote := tildeAcceptanceNote()
 	return []Tool{
 		{
 			Name:        "dev_read",
-			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Glob/search before read on unfamiliar paths — dev_read on a non-existent path wastes a round-trip. Allowed directories: %s. Example: dev_read(path=%q)", allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
+			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. Paths must be absolute (start with / or ~/). %s Glob/search before read on unfamiliar paths — dev_read on a non-existent path wastes a round-trip. Allowed directories: %s. Example: dev_read(path=%q)", tildeNote, allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute file path (must start with /). Example: %s", filepath.Join(exRoot, "README.md"))},
+					"path":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute file path (must start with / or ~/). Example: %s", filepath.Join(exRoot, "README.md"))},
 					"offset": map[string]any{"type": "integer", "description": "Start line (1-based, default 1)"},
 					"limit":  map[string]any{"type": "integer", "description": "Number of lines to return (default 200)"},
 				},
@@ -277,12 +329,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_grep",
-			Description: fmt.Sprintf("Search file contents matching a regex pattern within a directory. Returns matches with surrounding context lines. Both pattern and directory are required. Directory must be an absolute path. Example: dev_grep(pattern=\"func main\", directory=%q)", exRoot),
+			Description: fmt.Sprintf("Search file contents matching a regex pattern within a directory. Returns matches with surrounding context lines. Both pattern and directory are required. Directory must be an absolute path (start with / or ~/). %s Example: dev_grep(pattern=\"func main\", directory=%q)", tildeNote, exRoot),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"pattern":   map[string]any{"type": "string", "description": "Regex pattern to search for. Example: TODO|FIXME"},
-					"directory": map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in. Example: %s", exRoot)},
+					"directory": map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in (must start with / or ~/). Example: %s", exRoot)},
 					"glob":      map[string]any{"type": "string", "description": "File glob filter (e.g. *.go, *.ts). Default: all files"},
 					"context":   map[string]any{"type": "integer", "description": "Lines of context around matches (default 2)"},
 				},
@@ -291,11 +343,11 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_write",
-			Description: fmt.Sprintf("Write content to a file. Creates parent directories if needed. Overwrites existing content. Path must be absolute. Example: dev_write(path=%q, content=\"# Notes\\nContent here\")", filepath.Join(exRoot, "notes.md")),
+			Description: fmt.Sprintf("Write content to a file. Creates parent directories if needed. Overwrites existing content. Path must be absolute (start with / or ~/). %s Example: dev_write(path=%q, content=\"# Notes\\nContent here\")", tildeNote, filepath.Join(exRoot, "notes.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":    map[string]any{"type": "string", "description": "Absolute file path to write (must start with /)"},
+					"path":    map[string]any{"type": "string", "description": "Absolute file path to write (must start with / or ~/)"},
 					"content": map[string]any{"type": "string", "description": "File content to write"},
 				},
 				"required": []string{"path", "content"},
@@ -303,12 +355,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_glob",
-			Description: fmt.Sprintf("Find files matching a glob pattern within a directory. The 'pattern' and 'directory' are SEPARATE parameters — do NOT combine them. Pattern is relative to directory. Supports ** for recursive matching. Results sorted by modification time (newest first). Example: dev_glob(pattern=\"**/*.md\", directory=%q)", filepath.Join(exRoot, "docs")),
+			Description: fmt.Sprintf("Find files matching a glob pattern within a directory. The 'pattern' and 'directory' are SEPARATE parameters — do NOT combine them. Pattern is relative to directory. Supports ** for recursive matching. Results sorted by modification time (newest first). Directory must be absolute (start with / or ~/). %s Example: dev_glob(pattern=\"**/*.md\", directory=%q)", tildeNote, filepath.Join(exRoot, "docs")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"pattern":     map[string]any{"type": "string", "description": "Glob pattern RELATIVE to directory. Examples: **/*.md, *.go, src/**/*.ts. Do NOT include the directory path in the pattern."},
-					"directory":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in. Must start with /. Example: %s", exRoot)},
+					"directory":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in (must start with / or ~/). Example: %s", exRoot)},
 					"max_results": map[string]any{"type": "integer", "description": "Maximum results to return (default 50)"},
 				},
 				"required": []string{"pattern", "directory"},
@@ -316,11 +368,11 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_edit",
-			Description: fmt.Sprintf("Edit a file by finding and replacing a string. The old_string must appear in the file. If replace_all is false (default), old_string must appear exactly once. Path must be absolute. Example: dev_edit(path=%q, old_string=\"port: 8080\", new_string=\"port: 9090\")", filepath.Join(exRoot, "config.yaml")),
+			Description: fmt.Sprintf("Edit a file by finding and replacing a string. The old_string must appear in the file. If replace_all is false (default), old_string must appear exactly once. Path must be absolute (start with / or ~/). %s Example: dev_edit(path=%q, old_string=\"port: 8080\", new_string=\"port: 9090\")", tildeNote, filepath.Join(exRoot, "config.yaml")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":        map[string]any{"type": "string", "description": "Absolute file path to edit (must start with /)"},
+					"path":        map[string]any{"type": "string", "description": "Absolute file path to edit (must start with / or ~/)"},
 					"old_string":  map[string]any{"type": "string", "description": "Exact text to find and replace (must exist in the file)"},
 					"new_string":  map[string]any{"type": "string", "description": "Replacement text"},
 					"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences (default false — requires old_string to be unique)"},
@@ -330,12 +382,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_bash",
-			Description: fmt.Sprintf("Execute a shell command and return stdout + stderr. Use for git, ls, find, build commands, etc. Working directory must be absolute and in allowed paths. Example: dev_bash(command=\"git log --oneline -5\", working_dir=%q)", exRoot),
+			Description: fmt.Sprintf("Execute a shell command and return stdout + stderr. Use for git, ls, find, build commands, etc. Working directory must be absolute and in allowed paths (start with / or ~/). %s Example: dev_bash(command=\"git log --oneline -5\", working_dir=%q)", tildeNote, exRoot),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command":     map[string]any{"type": "string", "description": "Shell command to execute. Example: ls -la, git status, go build ./..."},
-					"working_dir": map[string]any{"type": "string", "description": "Absolute working directory (must be in allowed paths). Defaults to first allowed path if omitted."},
+					"working_dir": map[string]any{"type": "string", "description": "Absolute working directory (must start with / or ~/, and be in allowed paths). Defaults to first allowed path if omitted."},
 					"timeout":     map[string]any{"type": "integer", "description": "Timeout in seconds (default 30, max 120)"},
 				},
 				"required": []string{"command"},

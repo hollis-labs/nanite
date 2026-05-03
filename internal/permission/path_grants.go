@@ -122,34 +122,49 @@ func (g *PathGrants) RegisterFromUserMessage(sessionID, message string) []string
 	return cleaned
 }
 
-// IsPathAllowed reports whether sessionID has been granted access to
-// candidate. The check accepts the literal cleaned-absolute candidate
-// AND any granted root that is an ancestor of the candidate. This
-// matches the Q2 promise: a grant for "/foo/bar.go" implies the literal
-// file plus its parent directory "/foo/" — and a tool call against
-// "/foo/anything" hits the parent grant.
+// LookupKind classifies how a candidate matched the session's grant
+// bucket. "none" — no match. "literal" — exact-path hit on a granted
+// entry. "ancestor" — granted root is a directory ancestor of the
+// candidate. Used by callers (notably the dev_tools observability log)
+// that need to distinguish miss reasons; IsPathAllowed wraps it for
+// callers that only care about the boolean.
+type LookupKind string
+
+const (
+	LookupKindNone     LookupKind = "none"
+	LookupKindLiteral  LookupKind = "literal"
+	LookupKindAncestor LookupKind = "ancestor"
+)
+
+// LookupPath reports whether sessionID has been granted access to
+// candidate, and classifies the match kind for diagnostic surfaces.
+// The check accepts the literal cleaned-absolute candidate AND any
+// granted root that is an ancestor of the candidate. This matches the
+// Q2 promise: a grant for "/foo/bar.go" implies the literal file plus
+// its parent directory "/foo/" — and a tool call against "/foo/anything"
+// hits the parent grant.
 //
-// Returns false if sessionID is empty, candidate is empty, or no grant
-// matches.
-func (g *PathGrants) IsPathAllowed(sessionID, candidate string) bool {
+// Returns (false, LookupKindNone) when sessionID is empty, candidate is
+// empty, the bucket is empty, or no grant matches.
+func (g *PathGrants) LookupPath(sessionID, candidate string) (bool, LookupKind) {
 	if g == nil || sessionID == "" || candidate == "" {
-		return false
+		return false, LookupKindNone
 	}
 	abs, ok := absolutize(candidate)
 	if !ok {
-		return false
+		return false, LookupKindNone
 	}
 
 	g.mu.RLock()
 	bucket := g.grants[sessionID]
 	g.mu.RUnlock()
 	if len(bucket) == 0 {
-		return false
+		return false, LookupKindNone
 	}
 
 	// Direct hit on the cleaned absolute path.
 	if _, ok := bucket[abs]; ok {
-		return true
+		return true, LookupKindLiteral
 	}
 	// Ancestor hit: any granted root that is a directory ancestor of abs.
 	for granted := range bucket {
@@ -157,7 +172,7 @@ func (g *PathGrants) IsPathAllowed(sessionID, candidate string) bool {
 			continue
 		}
 		if abs == granted {
-			return true
+			return true, LookupKindLiteral
 		}
 		// Treat granted as a directory; the candidate must lie strictly
 		// inside it. This intentionally does NOT recurse beyond what's
@@ -165,10 +180,30 @@ func (g *PathGrants) IsPathAllowed(sessionID, candidate string) bool {
 		// literal AND its parent in, so a single-level descent is the
 		// natural matching shape.
 		if strings.HasPrefix(abs, ensureTrailingSep(granted)) {
-			return true
+			return true, LookupKindAncestor
 		}
 	}
-	return false
+	return false, LookupKindNone
+}
+
+// IsPathAllowed reports whether sessionID has been granted access to
+// candidate. Wraps LookupPath for callers that only need the boolean.
+func (g *PathGrants) IsPathAllowed(sessionID, candidate string) bool {
+	matched, _ := g.LookupPath(sessionID, candidate)
+	return matched
+}
+
+// BucketSize returns the number of grants registered for sessionID. Zero
+// when the session has no bucket or the store is nil. Used by diagnostic
+// surfaces (notably the dev_tools resolution log) to distinguish a
+// "no bucket" miss from a "bucket exists but no entry matched" miss.
+func (g *PathGrants) BucketSize(sessionID string) int {
+	if g == nil || sessionID == "" {
+		return 0
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return len(g.grants[sessionID])
 }
 
 // Clear removes all grants for sessionID. Called at session end.

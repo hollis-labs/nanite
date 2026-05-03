@@ -193,6 +193,51 @@ func TestDevTools_PathGrants_C127TildeMention_NoHOME(t *testing.T) {
 	}
 }
 
+// TestDevTools_TildeAcceptanceInDescriptions guards the LLM-facing
+// instruction surface that prevents the c140/c141 username-hallucination
+// regression. Background: when the user's message contains ~/Projects-apps
+// and the dev_* tool description says "must start with /", Sonnet 4 has
+// been observed to convert the tilde into /Users/<fabricated-name>/...
+// instead of passing it verbatim. The descriptions must (a) explicitly
+// advertise that ~/ paths are accepted, (b) tell the agent to pass them
+// VERBATIM, and (c) warn against substituting a username. If any of the
+// six dev_* tools loses this language, this test goes red — the smoke
+// failure mode it prevents is non-deterministic and very expensive to
+// re-discover via live chat.
+func TestDevTools_TildeAcceptanceInDescriptions(t *testing.T) {
+	dt := NewDevToolsTransport(nil)
+	tools, err := dt.ListTools(context.Background())
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) == 0 {
+		t.Fatal("ListTools returned no tools")
+	}
+	expectedNames := map[string]bool{
+		"dev_read": true, "dev_grep": true, "dev_write": true,
+		"dev_glob": true, "dev_edit": true, "dev_bash": true,
+	}
+	for _, tool := range tools {
+		if !expectedNames[tool.Name] {
+			continue
+		}
+		desc := tool.Description
+		// (a) tilde acceptance advertised
+		if !strings.Contains(desc, "~/") {
+			t.Errorf("%s description missing ~/ acceptance language: %s", tool.Name, desc)
+		}
+		// (b) "VERBATIM" caps to make the instruction stick under
+		//     non-deterministic sampling
+		if !strings.Contains(desc, "VERBATIM") {
+			t.Errorf("%s description missing VERBATIM nudge: %s", tool.Name, desc)
+		}
+		// (c) explicit anti-fabrication guidance
+		if !strings.Contains(desc, "do NOT substitute") {
+			t.Errorf("%s description missing anti-fabrication guidance: %s", tool.Name, desc)
+		}
+	}
+}
+
 // TestDevTools_PathGrants_DevReadFlow exercises the path-grant fallback
 // through the public CallTool surface (dev_read), confirming the
 // integration is wired all the way through CallTool → callRead →

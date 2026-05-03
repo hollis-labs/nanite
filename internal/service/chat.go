@@ -412,7 +412,7 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 		granted := s.pathGrants.RegisterFromUserMessage(sessionID, content)
 		if len(granted) > 0 {
 			slog.Info("permission: explicit-mention grants registered",
-				"session_id", sessionID, "count", len(granted))
+				"session_id", sessionID, "count", len(granted), "paths", granted)
 		}
 	}
 

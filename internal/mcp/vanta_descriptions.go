@@ -1,23 +1,21 @@
 package mcp
 
-// Vanta tool descriptions (Bucket 2 chat-surface descriptions)
+// Vanta tool descriptions (chat-surface-shaped overrides)
 //
-// CW-20260501-0005 sub-ticket 2 — scaffold for the chat-surface integration of
-// Vanta MCP tools (memory_*, knowledge_*, context_*). This file holds curated,
-// chat-surface-shaped descriptions that override Vanta's own tools/list
-// description when the tool is presented to the chat agent.
+// CW-20260501-0005 sub-ticket 2 — curated descriptions that override Vanta's
+// upstream tools/list text when a Vanta MCP tool (memory_*, knowledge_*,
+// context_*) is described to a chat agent. This file is a registry, not a
+// gate: adding an entry here does not load or expose a tool. Whether the
+// agent can actually invoke a tool is governed by the agent profile's
+// permissions and the project/session preload policy — not by this map.
 //
-// Why override? Vanta's tool descriptions are written for the broader Mux/Vanta
-// surface (CLI users, plugin authors, sub-agent orchestrators). The chat agent
-// has different needs — fewer turns, reactive recovery posture, no preemptive
-// "always recall before X" gates. A bespoke description per Bucket 2 of
+// Why override? Vanta's own descriptions target the broader Mux/Vanta surface
+// (CLI users, plugin authors, sub-agent orchestrators) where preemptive
+// recall gates and longer-horizon framing make sense. Chat agents need
+// fewer turns, reactive recovery posture, and no "always X before Y" rules.
+// A bespoke description per Bucket 2 of
 // docs/architecture/agent-context-architecture.md ("elevator pitch + skill
-// pointer") fits the chat surface better than a generic Vanta description.
-//
-// Sub-ticket 3 (rollout) will wire this map into the tool-description path
-// when the tool is exposed on ChatToolSurface. This file is **registry only**
-// — adding a description here does not by itself put the tool on the chat
-// surface.
+// pointer") matches that posture.
 //
 // Authoring rules (for future entries):
 //   - One paragraph elevator pitch (what + when to use).

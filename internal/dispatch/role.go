@@ -1,8 +1,6 @@
 package dispatch
 
 import (
-	"strings"
-
 	"github.com/hollis-labs/nanite/internal/classify"
 )
 
@@ -37,17 +35,6 @@ func (r Role) String() string {
 // IsValid reports whether r is a known role.
 func (r Role) IsValid() bool { return r >= RoleChat && r <= RolePlanner }
 
-// ChatHarnessTemplateSlug is the prompt-template slug seeded by migration
-// 027 that marks an agent as wearing the Chat-role harness identity.
-// Agents bound to this template have their tool surface clamped to
-// ChatToolSurface.
-const ChatHarnessTemplateSlug = "chat-role-harness"
-
-// ChatHarnessTemplateID is the deterministic ID for the seeded harness
-// prompt template (migration 027). Detection uses the slug as primary
-// signal; the ID is documented here for cross-reference.
-const ChatHarnessTemplateID = "blt-chat-harness-001"
-
 // WorkerRoleSlug is the agent slug spawned for Worker-role dispatch.
 // Matches the agent profile shipped in config/agents/worker.yaml.
 const WorkerRoleSlug = "worker"
@@ -58,160 +45,6 @@ const WorkerRoleSlug = "worker"
 // alongside the harness three-role model when a separate Planner identity
 // is needed.
 const PlannerRoleSlug = "planner"
-
-// ChatToolSurface is the fixed allow-list of tool-name prefixes the Chat
-// agent may invoke. Worker/Planner surfaces are NOT pinned here — they
-// are governed by the spawned agent profile's own permissions, exactly
-// as before. Only the harness side is enforced.
-//
-// The list is intentionally small: todos, plans, scratchpad, peer_query
-// (messaging), narration (envelope renderers), plus the executeTask
-// primitive itself. Meta-tools (cache fetch/search, request_tools) are
-// always allowed regardless of surface — the LLM needs them to recover
-// truncated tool results.
-//
-// Each entry is a prefix. A tool name passes when it equals or starts
-// with any entry. This keeps the surface stable as the underlying
-// nanite_todo_*, nanite_plan_*, nanite_scratchpad_*, nanite_message_*,
-// nanite_show_*, and nanite_execute_task tools evolve.
-//
-// Post MCP internalization (CW-20260427-0017, ADR-002) the surface
-// guarantee is "exact prefix match against this list". MCP-origin tools
-// no longer carry a `mcp__server__` prefix to reject by name — they are
-// kept off the Chat surface because they don't share any prefix in this
-// list (e.g. an MCP-published `task_create` or `memory_write` simply
-// fails the `nanite_*` / meta-tool checks below and is filtered out).
-var ChatToolSurface = []string{
-	// Todos primitive.
-	"nanite_todo_",
-	// Plans primitive.
-	"nanite_plan_",
-	// Scratchpad primitive (per-turn key/value buffer).
-	"nanite_scratchpad_",
-	// Peer query / messaging primitive.
-	"nanite_message_",
-	"nanite_handoff_",
-	// Narration primitive (envelope renderers).
-	"nanite_show_",
-	// The dispatch primitive itself.
-	"nanite_execute_task",
-	// Conversation search (P8B, CW-20260420-0026).
-	"nanite_chat_search",
-	// Discovery primitive (A1, CW-20260429-0005). Returns a tool's
-	// schema + golden examples. Reactive recovery surface — the agent
-	// reaches for it when a tool's contract is unfamiliar or after a
-	// schema-validation failure. The describe-required preemptive gate
-	// at callShowCard (CW-20260429-0025/0027) was removed in Phase A of
-	// the architectural rebalancing per docs/architecture/agent-context-architecture.md.
-	"nanite_tool_describe",
-	// Cheap discovery primitive (SP6, CW-20260430-0006). Returns
-	// {name, summary} for every self-tool with an optional substring
-	// filter. Sibling to nanite_tool_describe but ~2 orders of
-	// magnitude cheaper — agents browse the surface here, then call
-	// describe for the deep dive on a single tool. Reactive only — no
-	// "must call before X" gate; the agent reaches for this when
-	// unsure which tool exists, not as a precondition for action.
-	"nanite_tool_list",
-	// Pre-flight schema validation (B1, CW-20260429-0006). Read-only,
-	// idempotent — the agent uses it to check args before firing a
-	// high-blast-radius tool. Not a write or a panel signal, so safe to
-	// keep on the Chat surface.
-	"nanite_validate",
-	// Learning capture (D1, CW-20260429-0009). Persists a one-sentence
-	// lesson to durable memory. Idempotent on (scope, subject, hint),
-	// no panel signal, no surface mutation — safe on the Chat surface
-	// and load-bearing for the self-healing loop (Layer 4 of the lens).
-	"nanite_remember",
-	// Memory recall (SP3, CW-20260430-0003). Layer 4 read-side complement
-	// to nanite_remember — the Chat agent retrieves prior lessons /
-	// captured context relevant to the current turn. Reactive use only:
-	// after a tool failure or before retrying an unfamiliar contract, not
-	// preemptively on every turn. No "always recall before X" gate (would
-	// re-introduce the c114 describe-gate anti-pattern).
-	"nanite_memory_recall",
-	// Panel control (J8 v1, CW-20260426-0006). The Chat agent can open and
-	// close known UI drawers as a visibility-only signal — these tools never
-	// mutate workspace data and are gated for plugin-shipped panels via H1
-	// trust resolution at handler time.
-	"nanite_panel_open",
-	"nanite_panel_close",
-	"nanite_signal_mode",
-	// Reminders + pins (J11/D1, CW-20260426-0009 / CW-20260428-0014; surface
-	// gap closed by SP2, CW-20260430-0002). Always-meant-to-be-on Chat-loop
-	// primitives: deterministic time/turn-count reminders, and pin/unpin of
-	// context that should ride across turns or sessions. Without these on
-	// the Chat surface the agent can describe them but EnforceChatSurface
-	// strips them at call time, which c120 surfaced as a misattributed
-	// "MCP parser bug".
-	"nanite_set_reminder",
-	"nanite_pin",
-	"nanite_unpin",
-}
-
-// chatSurfaceMetaToolExceptions are always allowed on the Chat surface:
-// meta-tools that the loop relies on for cache recovery and progressive
-// tool discovery. Listed by exact name (not prefix).
-var chatSurfaceMetaToolExceptions = map[string]bool{
-	"fetch_tool_result":  true,
-	"search_tool_result": true,
-	"request_tools":      true,
-}
-
-// IsChatSurfaceTool reports whether a tool name is permitted on the
-// Chat agent's static surface.
-func IsChatSurfaceTool(name string) bool {
-	if chatSurfaceMetaToolExceptions[name] {
-		return true
-	}
-	for _, prefix := range ChatToolSurface {
-		if name == prefix || strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// PromptTemplateLister is the narrow store surface used to detect the
-// Chat-role harness binding without coupling this package to the full
-// store. *store.Store satisfies it; tests can implement a stub.
-type PromptTemplateLister interface {
-	// ListPromptTemplatesForAgent returns templates assigned to agentID.
-	// The dispatch package only reads the slug field of each entry, but
-	// returning the concrete store row keeps callers — production and
-	// tests — from synthesizing a parallel type.
-	ListPromptTemplatesForAgent(agentID string) ([]PromptTemplateRef, error)
-}
-
-// PromptTemplateRef is the minimal projection IsChatRoleAgent reads from
-// a prompt-template row. Mirrors store.PromptTemplate's exposed fields
-// so the production conversion is a struct copy at the call site.
-type PromptTemplateRef struct {
-	ID   string
-	Slug string
-}
-
-// IsChatRoleAgent reports whether the agent identified by agentID has
-// the Chat-role harness prompt template assigned (slug
-// "chat-role-harness", seeded by migration 027). When the lister is nil
-// or returns an error, IsChatRoleAgent returns false so callers fall
-// back to the un-enforced path rather than blocking on a transient DB
-// failure. The error is returned for caller-side telemetry; the bool
-// is the load-bearing signal.
-func IsChatRoleAgent(lister PromptTemplateLister, agentID string) (bool, error) {
-	if lister == nil || agentID == "" {
-		return false, nil
-	}
-	tpls, err := lister.ListPromptTemplatesForAgent(agentID)
-	if err != nil {
-		return false, err
-	}
-	for _, t := range tpls {
-		if t.Slug == ChatHarnessTemplateSlug || t.ID == ChatHarnessTemplateID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
 
 // RoleAssignment is the dispatch decision returned by AssignRole. It
 // carries the target role plus the agent slug to spawn for that role.

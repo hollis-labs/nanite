@@ -40,10 +40,9 @@ func SelfToolProviderDefinitions() []provider.ToolDefinition {
 }
 
 // selfToolDefinitions returns all self-service tool definitions.
-// NOTE: nanite_run_python is included here so it appears in the worker/planner
-// surface, but it is intentionally NOT added to dispatch.ChatToolSurface and
-// does not match any prefix in ChatToolSurface — EnforceChatSurface will
-// filter it out for Chat agents. (CW-20260420-0019, D6)
+// NOTE: nanite_run_python is included here so it appears in the
+// worker/planner surface; reach for chat agents is governed by the
+// agent profile's permissions.
 func selfToolDefinitions() []Tool {
 	return []Tool{
 		naniteRunPythonToolDefinition(),

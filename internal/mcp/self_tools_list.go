@@ -7,16 +7,15 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/nanite/internal/dispatch"
 )
 
 // naniteToolListDefinition is the cheap discovery primitive (SP6 —
 // CW-20260430-0006). It complements nanite_tool_describe: where describe
 // returns full per-tool detail (schema + golden examples + relations),
-// list returns just `name + one-line summary` for every tool on the
-// agent's surface, with an optional substring filter. Cost target:
-// unfiltered ≤ a few KiB, filtered ≤ ~500 B — agents can browse the
-// surface without burning turns on inference-of-tool-names.
+// list returns just `name + one-line summary` for the full self-tool
+// inventory, with an optional substring filter. Cost target: unfiltered
+// ≤ a few KiB, filtered ≤ ~500 B — agents can browse the catalog without
+// burning turns on inference-of-tool-names.
 //
 // The motivating evidence is c120 (2026-04-29), where the agent burned
 // turns guessing tool names (`nanite_reminder_create` → `nanite_reminder`
@@ -27,17 +26,15 @@ import (
 // enumerated tools defined in `self_tools.go`, which silently hid tools
 // registered on sibling MCP servers like `nanite-memory` (e.g.
 // `nanite_memory_recall`). The list now sources from the full MCP
-// Manager surface (via the ToolInventoryLookup interface) and applies
-// the chat-surface filter so the agent sees exactly what it can invoke.
+// Manager surface (via the ToolInventoryLookup interface).
 //
-// CW-20260501-0012: the chat-surface filter is no longer hard-coded —
-// the surface used is inferred from the caller's dispatch role
-// (mcp.CallerRoleFromContext), stamped on ctx by
-// service.executeToolBatch. Chat callers get the static chat-surface
-// view (CW-0001 behavior); Worker/Planner callers get the full
-// cross-server inventory (their effective surface is the agent
-// profile's own permissions, not a dispatch-side allow-list). See
-// gatherInventory for the surface-decision details.
+// Output is the FULL inventory regardless of caller — this primitive is
+// a catalog, not a permission check. Whether any specific tool is
+// actually reachable for the calling agent is governed elsewhere: the
+// agent profile's tool permissions, the dev-mode gate, and project /
+// session preload policy. Agents (and humans reading the result) should
+// not infer per-agent reach from the presence or absence of a tool in
+// this output.
 //
 // Reactive posture: this is a tool the agent reaches for, not a gate it
 // passes through. No "must call before X" rule. See
@@ -45,9 +42,9 @@ import (
 func naniteToolListDefinition() Tool {
 	return Tool{
 		Name: "nanite_tool_list",
-		Description: "Cheap discovery primitive — list available tools by name + one-line summary.\n\n" +
+		Description: "Lists registered self-tools by name and one-line summary. Returns the full inventory regardless of caller — actual reachability for any specific tool is governed by agent permissions, the dev-mode gate, and project/session policy, not by this output.\n\n" +
 			"**Contract:** input `{filter?: string}` (optional case-insensitive substring matched against BOTH name and summary). Output `{tools: [{name, summary}], count}`.\n\n" +
-			"**When to use:** When you're not sure which tool to reach for, or you want to confirm a tool exists before calling it. Cheap browsing first; full per-tool detail (schema + examples) via `nanite_tool_describe` second.\n\n" +
+			"**When to use:** Browse the catalog when you're not sure which tool to reach for, or confirm a tool name exists before calling it. Use `nanite_tool_describe` next for the full schema of a specific tool, and `request_tools` to load a tool for use in the current turn.\n\n" +
 			"**Example:** `nanite_tool_list({filter:\"reminder\"}) → {tools:[{name:\"nanite_set_reminder\", summary:\"Schedule a reminder for the user at a specific time.\"}], count:1}`.\n\n" +
 			"**See also:** `nanite_tool_describe(name=\"<tool>\")` for the full contract (schema, golden examples, related tools) of any single tool returned here.",
 		InputSchema: map[string]any{
@@ -167,48 +164,25 @@ type inventoryEntry struct {
 // nanite_tool_list, sourced from the cross-server MCP inventory when
 // available and falling back to the in-process self-tools when not.
 //
-// Surface filter (CW-20260501-0012): the filter applied here depends on
-// the calling agent's dispatch role, stamped on ctx by
-// service.executeToolBatch via mcp.WithCallerRole. The role decision is
-// inferred from caller context (the cleanest of the three options
-// considered for CW-20260501-0012 — surface-arg parameter, sibling
-// tool, or caller-context inference).
-//
-//   - dispatch.RoleChat: apply IsChatSurfaceTool — the chat agent has
-//     a static allow-list (dispatch.ChatToolSurface). Off-surface tools
-//     (dev_*, third-party MCP-origin) would mislead the discovery
-//     primitive because EnforceChatSurface drops them at boot anyway.
-//   - dispatch.RoleWorker / dispatch.RolePlanner: NO surface filter.
-//     Worker/Planner surfaces are governed by the spawned agent
-//     profile's own permissions (see dispatch/role.go ChatToolSurface
-//     comments — there is no static dispatch-side allow-list for these
-//     roles), so the discovery primitive must reflect that. Filtering
-//     here would force false negatives for dev_*/general_*/code_* and
-//     replicate the CW-20260501-0001 bug for Worker agents.
-//   - RoleInvalid (un-stamped ctx): fall back to IsChatSurfaceTool.
-//     Test paths and call sites that haven't yet been threaded through
-//     WithCallerRole get the conservative pre-CW-0012 behavior.
+// Output is the full inventory regardless of caller. Per-agent reach
+// (permissions, dev-mode gate, project/session policy) is enforced
+// elsewhere; this function is a registry view, not a filter. ctx is
+// reserved for future per-call signals (request-scoped logging,
+// cancellation when an inventory source becomes async); the current
+// implementation is fully synchronous.
 //
 // Determinism: results are sorted by name so the rendered list is
 // reproducible across runs (the broker / manager iteration order is
 // not stable).
-func (st *SelfToolsTransport) gatherInventory(ctx context.Context) []inventoryEntry {
+func (st *SelfToolsTransport) gatherInventory(_ context.Context) []inventoryEntry {
 	seen := make(map[string]struct{})
 	var out []inventoryEntry
-
-	role := CallerRoleFromContext(ctx)
-	// Worker/Planner have profile-owned permissions — no dispatch-side
-	// allow-list. Chat (and unset/invalid) get the static surface filter.
-	applyChatFilter := role != dispatch.RoleWorker && role != dispatch.RolePlanner
 
 	add := func(name, desc string) {
 		if name == "" {
 			return
 		}
 		if _, dup := seen[name]; dup {
-			return
-		}
-		if applyChatFilter && !dispatch.IsChatSurfaceTool(name) {
 			return
 		}
 		seen[name] = struct{}{}
@@ -239,12 +213,12 @@ func (st *SelfToolsTransport) gatherInventory(ctx context.Context) []inventoryEn
 }
 
 // callToolList handles nanite_tool_list. Iterates the cross-server tool
-// inventory (chat-surface filtered), builds {name, summary} pairs
-// (summary = first-sentence of the tool's description, capped at
-// summaryMaxBytes), and applies the optional filter to BOTH name and
-// summary case-insensitively. Returns `{tools, count}`. Empty match
-// returns `count:0` and an empty list, NOT an error — the agent reading
-// the result decides whether to widen the filter.
+// inventory, builds {name, summary} pairs (summary = first-sentence of
+// the tool's description, capped at summaryMaxBytes), and applies the
+// optional filter to BOTH name and summary case-insensitively. Returns
+// `{tools, count}`. Empty match returns `count:0` and an empty list, NOT
+// an error — the agent reading the result decides whether to widen the
+// filter.
 func (st *SelfToolsTransport) callToolList(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	filter := strings.ToLower(strings.TrimSpace(strArg(args, "filter", "")))
 

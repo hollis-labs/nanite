@@ -2,8 +2,6 @@ package mcp
 
 import (
 	"context"
-
-	"github.com/hollis-labs/nanite/internal/dispatch"
 )
 
 // sessionCtxKey is the key used to attach the current chat session ID to
@@ -156,42 +154,3 @@ func TurnToolNamesFromContext(ctx context.Context) []string {
 	return v
 }
 
-// callerRoleCtxKey carries the dispatch.Role of the agent whose tool call
-// is in flight. CW-20260501-0012: nanite_tool_list reads this to choose
-// the right surface filter — chat agents see the static chat-surface
-// allow-list (dispatch.IsChatSurfaceTool), worker/planner agents see the
-// full cross-server inventory (their effective surface is governed by
-// the spawned profile's own permissions, not by a dispatch-side
-// allow-list — see dispatch/role.go ChatToolSurface comments).
-//
-// Stamped by service.executeToolBatch using IsChatRoleAgent detection
-// against the agent's prompt-template binding. Nil-safe — when unset,
-// CallerRoleFromContext returns RoleInvalid and the discovery primitive
-// falls back to the conservative chat-surface filter (preserves
-// CW-20260501-0001's behavior on un-stamped contexts).
-type callerRoleCtxKey struct{}
-
-// WithCallerRole returns a new context carrying the caller's dispatch
-// role. RoleInvalid input returns ctx unchanged so callers can pass
-// through unconditionally without a nil check.
-func WithCallerRole(ctx context.Context, role dispatch.Role) context.Context {
-	if !role.IsValid() {
-		return ctx
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, callerRoleCtxKey{}, role)
-}
-
-// CallerRoleFromContext returns the dispatch.Role stamped by
-// WithCallerRole, or dispatch.RoleInvalid if none. Discovery primitives
-// (e.g. nanite_tool_list) MUST treat RoleInvalid as "fall back to the
-// chat-surface filter" — the safe default for un-stamped contexts.
-func CallerRoleFromContext(ctx context.Context) dispatch.Role {
-	if ctx == nil {
-		return dispatch.RoleInvalid
-	}
-	v, _ := ctx.Value(callerRoleCtxKey{}).(dispatch.Role)
-	return v
-}

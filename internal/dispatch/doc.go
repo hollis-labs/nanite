@@ -33,7 +33,7 @@
 // # Boundaries
 //
 // This package owns:
-//   - Role enum + ChatToolSurface allow-list.
+//   - Role enum (Chat / Worker / Planner).
 //   - AssignRole mapping: ScopeTier × ExecutionPattern → role + role slug.
 //   - ExecuteTask primitive and its dependency surface (Spawner interface).
 //

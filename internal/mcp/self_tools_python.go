@@ -511,10 +511,11 @@ func applySandboxSysProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
-// naniteRunPythonToolDefinition returns the tool definition for nanite_run_python.
-// This tool is intentionally NOT added to ChatToolSurface — it belongs on
-// Worker/Planner surfaces only. The Chat agent dispatches work via nanite_execute_task;
-// it does not execute code directly.
+// naniteRunPythonToolDefinition returns the tool definition for
+// nanite_run_python. The tool belongs on Worker/Planner surfaces only;
+// the Chat agent dispatches work via nanite_execute_task and does not
+// execute code directly. Reach is gated by the agent profile's
+// permissions.
 func naniteRunPythonToolDefinition() Tool {
 	return Tool{
 		Name: "nanite_run_python",

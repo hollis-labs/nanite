@@ -148,6 +148,12 @@ func (stubPinnedContentStore) ClearSessionPins(string) error                    
 type stubHandoffStashStore struct{}
 
 func (stubHandoffStashStore) UpsertHandoffStash(store.HandoffStash) error { return nil }
+func (stubHandoffStashStore) GetHandoffStash(string, string) (store.HandoffStash, error) {
+	return store.HandoffStash{}, store.ErrHandoffStashNotFound
+}
+func (stubHandoffStashStore) GetLatestStashForSession(string) (store.HandoffStash, error) {
+	return store.HandoffStash{}, store.ErrHandoffStashNotFound
+}
 
 type stubCompactionEventStore struct{}
 

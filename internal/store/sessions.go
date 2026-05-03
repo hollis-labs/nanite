@@ -41,14 +41,14 @@ type Session struct {
 	// (does NOT bypass first-use prompt). false = force OFF (suppress all
 	// auto-switches even when user pref says always/ask).
 	AutoSwitchOverride *bool `json:"auto_switch_override,omitempty"`
-	// Intent is the auto-handoff classification for this session (Glass-3,
-	// CW-20260502-0011, SP-20260502-0001). nil = unclassified. Allowed values
-	// when set: "long-running", "per-turn", "ephemeral" — enforced by the
-	// CHECK constraint on sessions.intent and by SetSessionIntent. Glass-4
-	// (CW-20260502-0015) classifies the session at start. Read via
-	// GetSessionIntent — GetSession/ListSessions deliberately do NOT include
-	// this column to keep the existing queries stable; Glass-4 will wire it
-	// into the main query when consumers need it on the hot read path.
+	// Intent is the session-intent classification (Glass-3, CW-20260502-0011;
+	// Glass-4, CW-20260502-0015). nil/"" = unclassified. Allowed values when
+	// set: "long-running", "per-turn", "ephemeral" — enforced by the CHECK
+	// constraint on sessions.intent and by SetSessionIntent. Populated by the
+	// Glass-4 classifier at session create. Read from sessions.intent column
+	// by GetSession and ListSessions; SetSessionIntent writes it. The
+	// dedicated GetSessionIntent helper is still available for callers that
+	// only need the column without loading the full Session struct.
 	Intent *string `json:"intent,omitempty"`
 }
 

@@ -92,5 +92,5 @@ expected pattern.
 - Sentinel: `provider.ErrRequestExceedsRateBudget` from go-providers.
 - Sibling pattern: `internal/service/chat_notify_pause.go` (notify_pause
   trust-agent middleware event).
-- Upstream fix: Glass-4 SlotHandoff (CW-20260502-0014) — preserves intent
+- Upstream fix: Glass-4 SlotHandoff (CW-20260502-0015) — preserves intent
   across compaction so the recoverable pause has good state to resume to.

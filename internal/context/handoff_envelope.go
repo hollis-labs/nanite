@@ -44,8 +44,10 @@ func MarshalHandoffEnvelope(payload HandoffPayload) ([]byte, error) {
 
 // ParseHandoffEnvelope decodes a stored handoff_stashes.payload row into a
 // validated HandoffPayload. Returns ErrHandoffEnvelopeWrongSchema when the
-// row is not a Glass-4 envelope (legacy P7 rows trip this — readers should
-// fall back to the legacy P7 path or skip the row).
+// row is well-formed JSON but not a Glass-4 envelope (legacy P7 rows trip
+// this — readers should fall back to the legacy P7 path or skip the row).
+// Returns ErrHandoffMalformed when the bytes do not parse as JSON at all,
+// so callers can distinguish corruption from a schema mismatch.
 func ParseHandoffEnvelope(raw []byte) (*HandoffPayload, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("%w: empty payload", ErrHandoffMalformed)
@@ -53,7 +55,10 @@ func ParseHandoffEnvelope(raw []byte) (*HandoffPayload, error) {
 	var probe struct {
 		Schema string `json:"schema"`
 	}
-	if err := json.Unmarshal(raw, &probe); err != nil || probe.Schema == "" {
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrHandoffMalformed, err)
+	}
+	if probe.Schema == "" {
 		return nil, ErrHandoffEnvelopeWrongSchema
 	}
 	if probe.Schema != HandoffEnvelopeSchemaGlass4 {
@@ -78,8 +83,9 @@ func ParseHandoffEnvelope(raw []byte) (*HandoffPayload, error) {
 // agent reads this as the first thing in its post-compaction context window.
 //
 // Wording choices matter: "loaded" (not "found" or "available") tells the
-// agent the content is authoritative; "use handoff_pointers_expand" names
-// the discovery tool so the agent doesn't have to guess.
+// agent the content is authoritative; "use nanite_handoff_pointers_expand"
+// names the discovery tool with both required args (session_id, cache_key)
+// so the agent doesn't have to guess and the call doesn't fail validation.
 func RenderHandoffForSlot(p HandoffPayload) string {
 	var b strings.Builder
 	b.WriteString("Your handoff from before compaction is loaded. ")
@@ -97,7 +103,7 @@ func RenderHandoffForSlot(p HandoffPayload) string {
 	}
 
 	if len(p.ActivePointers) > 0 {
-		b.WriteString("Active pointers (use `handoff_pointers_expand({cache_key:...})` to retrieve heavy artifacts):\n")
+		b.WriteString("Active pointers (use `nanite_handoff_pointers_expand({session_id, cache_key})` to retrieve heavy artifacts; both args are required):\n")
 		for _, ptr := range p.ActivePointers {
 			b.WriteString("- ")
 			b.WriteString(ptr.Label)

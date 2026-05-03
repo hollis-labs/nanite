@@ -62,6 +62,29 @@ func TestParseHandoffEnvelope_RejectsUnknownSchema(t *testing.T) {
 	}
 }
 
+// TestParseHandoffEnvelope_RejectsMalformedJSON pins the A1 distinction:
+// invalid JSON returns ErrHandoffMalformed (corruption signal), not
+// ErrHandoffEnvelopeWrongSchema (well-formed-but-not-glass-4 signal).
+// Without this, ReadLatestGlass4Handoff and similar callers silently swallow
+// corrupted rows as "not a Glass-4 envelope" and lose the corruption signal.
+func TestParseHandoffEnvelope_RejectsMalformedJSON(t *testing.T) {
+	cases := [][]byte{
+		[]byte(`not json at all`),
+		[]byte(`{"schema":`),                   // truncated
+		[]byte(`{"schema":"glass-4","payload"`), // truncated mid-key
+		[]byte(`{schema:"glass-4"}`),            // unquoted key
+	}
+	for i, raw := range cases {
+		_, err := ParseHandoffEnvelope(raw)
+		if !errors.Is(err, ErrHandoffMalformed) {
+			t.Errorf("case %d: expected ErrHandoffMalformed for malformed JSON, got %v", i, err)
+		}
+		if errors.Is(err, ErrHandoffEnvelopeWrongSchema) {
+			t.Errorf("case %d: malformed JSON should NOT trip ErrHandoffEnvelopeWrongSchema, got %v", i, err)
+		}
+	}
+}
+
 func TestMarshalHandoffEnvelope_RejectsInvalidPayload(t *testing.T) {
 	// Missing required field next_step_anchor.
 	bad := HandoffPayload{SessionIntent: "x"}
@@ -88,7 +111,13 @@ func TestRenderHandoffForSlot_HasAllExpectedSections(t *testing.T) {
 		"Recent decisions:",
 		"locked schema discriminator",
 		"Active pointers",
-		"handoff_pointers_expand",
+		// Must reference the actual self-tool name (nanite_-prefixed), not
+		// the bare handoff_pointers_expand — the unprefixed form does not
+		// exist in the registry and the agent's call would fail. Both
+		// session_id and cache_key are required by the tool schema.
+		"nanite_handoff_pointers_expand",
+		"session_id",
+		"cache_key",
 		"k1",
 		"Next step anchor:",
 		"verify the compaction transcript",

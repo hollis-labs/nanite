@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"unicode/utf8"
 
 	"github.com/hollis-labs/go-providers/provider"
 
@@ -115,12 +116,21 @@ func lastUserMessageText(msgs []provider.ChatMessage) string {
 // boundary when possible. Appends an ellipsis when truncation occurred so
 // the post-compaction agent knows the anchor is incomplete and can ask
 // for clarification rather than acting on a half-sentence.
+//
+// maxChars is interpreted as a byte budget; we walk back to a UTF-8 rune
+// boundary before slicing so non-ASCII content (emoji, CJK, Cyrillic) never
+// produces an invalid string. Mirrors the pattern in
+// internal/context/window.go::truncateSlot.
 func truncateForHandoff(s string, maxChars int) string {
 	if len(s) <= maxChars {
 		return s
 	}
-	cut := s[:maxChars]
-	if i := lastSpaceWithin(cut, maxChars/2); i > 0 {
+	cutoff := maxChars
+	for cutoff > 0 && !utf8.RuneStart(s[cutoff]) {
+		cutoff--
+	}
+	cut := s[:cutoff]
+	if i := lastSpaceWithin(cut, len(cut)/2); i > 0 {
 		cut = cut[:i]
 	}
 	return cut + "…"

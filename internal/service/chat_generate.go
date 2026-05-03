@@ -84,22 +84,6 @@ func hasUsableTools(tools []provider.ToolDefinition) bool {
 	return len(tools) > 0
 }
 
-// adjustToolStrictnessForProvider disables strict tool schemas for provider/model
-// combinations that reject the "strict" field outright. Keep the broker-level
-// default strict-on behavior intact; this is a last-mile compatibility shim.
-func adjustToolStrictnessForProvider(providerName, model string, tools []provider.ToolDefinition) {
-	if providerName != "anthropic" {
-		return
-	}
-	if model != "claude-sonnet-4-20250514" {
-		return
-	}
-	strictFalse := false
-	for i := range tools {
-		tools[i].Strict = &strictFalse
-	}
-}
-
 // generateResponseTimeout is the maximum wall-clock time a single
 // generateResponse goroutine is allowed to run before being cancelled.
 const generateResponseTimeout = 5 * time.Minute
@@ -282,7 +266,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 	tools := selection.Tools
 	normalizeToolInputSchemas(tools)
-	adjustToolStrictnessForProvider(providerName, model, tools)
 
 	// B1 (CW-20260428-0009) + F1 (CW-20260429-0001): apply session-mode
 	// tool_overrides at the tool surface. B1 wired this for the deterministic

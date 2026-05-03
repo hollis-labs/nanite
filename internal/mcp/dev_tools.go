@@ -943,6 +943,30 @@ func globMatchParts(patParts, pathParts []string) bool {
 	return globMatchParts(patParts[1:], pathParts[1:])
 }
 
+// deriveDefaultWorkingDir returns a sensible default working_dir for
+// dev_bash when the agent omits the argument. Cascade:
+//
+//  1. Session path-grant best-dir (most specific existing-directory
+//     grant for the chat session — typically the directory the user
+//     just mentioned with ~/ or / in their message)
+//  2. Static AllowedPaths[0] (the configured allow-list root)
+//  3. Empty string — caller must surface a guidance error
+//
+// Returning empty signals "no allowed default available"; callBash
+// turns that into a clean error rather than silently falling back to
+// the sandbox CWD.
+func (d *DevToolsTransport) deriveDefaultWorkingDir(ctx context.Context) string {
+	if sessionID, checker := permission.PathGrantsFromContext(ctx); checker != nil && sessionID != "" {
+		if best := checker.BestSessionDir(sessionID); best != "" {
+			return best
+		}
+	}
+	if len(d.AllowedPaths) > 0 {
+		return d.AllowedPaths[0]
+	}
+	return ""
+}
+
 // devBashSessionID is the session ID used for dev_bash sandbox scoping. All
 // dev_bash invocations share one session so callers can observe consistent
 // resource limits and denylist behavior; the underlying command still runs
@@ -959,21 +983,34 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 		return errorResult("command is required"), nil
 	}
 
+	// CW-fix-dev-glob-grant Stage B: unify the dev_* permission gate.
+	// Previously, an empty working_dir skipped resolveAllowed entirely
+	// and relied on sandbox CWD enforcement as the sole authority,
+	// which gave dev_bash a different permission model than every
+	// other dev_* tool. The c138/c140/c141 reproduction surfaced this
+	// when dev_bash silently "succeeded" via the bypass while dev_glob
+	// failed under the same user intent. Now: if the agent omits
+	// working_dir, derive a default from the session path-grant store
+	// (most-specific existing-dir grant) or the static AllowedPaths,
+	// and run resolveAllowed on the chosen value uniformly. The
+	// sandbox CWD enforcement remains as redundancy, not an alternate
+	// permission path.
 	workDir, _ := args["working_dir"].(string)
 	if workDir == "" {
-		if len(d.AllowedPaths) > 0 {
-			workDir = d.AllowedPaths[0]
+		workDir = d.deriveDefaultWorkingDir(ctx)
+		if workDir == "" {
+			return errorResult("dev_bash: no working_dir provided and no allowed path available for this session — supply working_dir explicitly, or have the user mention a path with ~/ or / so a session grant is registered"), nil
 		}
-	} else {
-		resolved, err := d.resolveAllowed(ctx, workDir)
-		if err != nil {
-			return pathErrorResult(workDir, err), nil
-		}
-		workDir = resolved
 	}
-	_ = workDir // sandbox scopes CWD to its own directory; working_dir is
-	// accepted for compatibility and is validated above but the sandbox
-	// enforces its own sandboxDir regardless.
+	resolved, err := d.resolveAllowed(ctx, workDir)
+	if err != nil {
+		return pathErrorResult(workDir, err), nil
+	}
+	workDir = resolved
+	_ = workDir // sandbox scopes CWD to its own directory; the
+	// path-grant gate above is the authoritative allow check, and
+	// the sandbox enforces its own sandboxDir as belt-and-braces
+	// redundancy.
 
 	timeout := intArg(args, "timeout", 30)
 	if timeout < 1 {
@@ -1004,7 +1041,6 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 	})
 
 	var result *sandbox.ExecResult
-	var err error
 	select {
 	case <-ctx.Done():
 		// Caller cancellation. The sandbox subprocess is still bounded by its

@@ -17,6 +17,7 @@ type PathGrantChecker interface {
 	IsPathAllowed(sessionID, candidate string) bool
 	LookupPath(sessionID, candidate string) (bool, LookupKind)
 	BucketSize(sessionID string) int
+	BestSessionDir(sessionID string) string
 }
 
 // pathGrantCtxKey carries the (sessionID, checker) pair so dev_tools

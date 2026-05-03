@@ -238,6 +238,69 @@ func TestDevTools_TildeAcceptanceInDescriptions(t *testing.T) {
 	}
 }
 
+// TestDevBash_NoWorkingDir_UsesSessionGrant exercises Stage B's
+// permission-gate unification (CW-fix-dev-glob-grant): when the agent
+// omits working_dir, callBash must derive a default from the session
+// path-grant store and route through resolveAllowed rather than
+// silently falling through to sandbox CWD enforcement. Pre-fix:
+// dev_bash with empty working_dir bypassed the path-grant gate
+// entirely and "succeeded" via the sandbox, masking the lookup miss
+// that simultaneously failed dev_glob (the c138 reproduction shape).
+// Post-fix: the grant gate runs uniformly; dev_bash either resolves
+// against a session grant or returns a clean guidance error.
+func TestDevBash_NoWorkingDir_UsesSessionGrant(t *testing.T) {
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	grants := permission.NewPathGrants()
+	if got := grants.RegisterFromUserMessage("sess-bash", "please poke around in "+tmpDir); len(got) == 0 {
+		t.Fatalf("registration produced no grants for tempdir %q", tmpDir)
+	}
+	ctx := permission.WithPathGrants(context.Background(), "sess-bash", grants)
+
+	// AllowedPaths empty → only the session grant can authorise the call.
+	dt := NewDevToolsTransport(nil)
+	res, err := dt.CallTool(ctx, "dev_bash", map[string]any{
+		"command": "echo unified-gate",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected dev_bash to succeed via session grant fallback, got error: %s",
+			res.Content[0].Text)
+	}
+	if !strings.Contains(res.Content[0].Text, "unified-gate") {
+		t.Errorf("expected stdout to contain 'unified-gate', got: %s", res.Content[0].Text)
+	}
+}
+
+// TestDevBash_NoWorkingDir_NoGrantsNoAllowedPaths_ErrorsCleanly is the
+// Stage B negative case: with no session path-grant AND no static
+// AllowedPaths, the empty-working_dir path must surface a guidance
+// error instead of silently dispatching to the sandbox. This
+// regression-locks the Stage B bypass closure: any future code that
+// re-introduces a sandbox-only fallback for empty working_dir will
+// trip this test.
+func TestDevBash_NoWorkingDir_NoGrantsNoAllowedPaths_ErrorsCleanly(t *testing.T) {
+	dt := NewDevToolsTransport(nil)
+	res, err := dt.CallTool(context.Background(), "dev_bash", map[string]any{
+		"command": "echo should-not-run",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected dev_bash to error when no grants and no allowed paths are available")
+	}
+	got := res.Content[0].Text
+	if !strings.Contains(got, "no working_dir") || !strings.Contains(got, "no allowed path") {
+		t.Errorf("expected guidance error mentioning no working_dir + no allowed path, got: %s", got)
+	}
+}
+
 // TestDevTools_PathGrants_DevReadFlow exercises the path-grant fallback
 // through the public CallTool surface (dev_read), confirming the
 // integration is wired all the way through CallTool → callRead →

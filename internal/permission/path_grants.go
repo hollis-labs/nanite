@@ -37,7 +37,9 @@
 package permission
 
 import (
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -204,6 +206,49 @@ func (g *PathGrants) BucketSize(sessionID string) int {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return len(g.grants[sessionID])
+}
+
+// BestSessionDir returns the longest grant for sessionID that exists on
+// disk as a directory, or empty string when no such grant exists.
+//
+// Used by dev_bash to derive a default working_dir when the agent omits
+// it, so the path-grant gate runs uniformly across dev_* tools (no
+// silent sandbox-only bypass). Specificity is encoded as path length:
+// the literal user-mentioned path is longer than its registered parent,
+// so a mention like ~/foo/bar.go yields the file's parent directory
+// (the bucket also contains the parent registration). Returning the
+// longest existing-directory match is the most-specific dir the user
+// has signalled intent toward.
+//
+// Order rationale: registration always co-stamps the literal AND its
+// parent (path_grants.go RegisterFromUserMessage). Sorting by length
+// descending therefore prefers the most specific path first. The
+// IsDir() filter falls through to the parent automatically when the
+// literal itself is a file.
+func (g *PathGrants) BestSessionDir(sessionID string) string {
+	if g == nil || sessionID == "" {
+		return ""
+	}
+	g.mu.RLock()
+	bucket := g.grants[sessionID]
+	candidates := make([]string, 0, len(bucket))
+	for p := range bucket {
+		candidates = append(candidates, p)
+	}
+	g.mu.RUnlock()
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return len(candidates[i]) > len(candidates[j])
+	})
+	for _, p := range candidates {
+		info, err := os.Stat(p)
+		if err == nil && info.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // Clear removes all grants for sessionID. Called at session end.

@@ -3,7 +3,6 @@ package dispatch
 import (
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/classify"
 )
 
@@ -170,26 +169,6 @@ func IsChatSurfaceTool(name string) bool {
 		}
 	}
 	return false
-}
-
-// EnforceChatSurface filters tools to the Chat agent's static surface.
-// Intended for boot-time tool resolution: the Chat harness assigns a
-// fixed surface that does not change mid-turn (harness spec §1).
-//
-// Worker/Planner surfaces are out of scope here — they are governed by
-// the spawned profile's own permissions. This filter applies only when
-// IsChatRoleAgent reports true for the agent in question.
-func EnforceChatSurface(tools []provider.ToolDefinition) []provider.ToolDefinition {
-	if len(tools) == 0 {
-		return tools
-	}
-	out := make([]provider.ToolDefinition, 0, len(tools))
-	for _, t := range tools {
-		if IsChatSurfaceTool(t.Name) {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // PromptTemplateLister is the narrow store surface used to detect the

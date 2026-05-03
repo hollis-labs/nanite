@@ -155,13 +155,9 @@ func (tb *ToolClient) IsBuiltinTool(name string) bool {
 	return tb.Builtins.Has(name)
 }
 
-// strictTrue is a pointer to true used as the default Strict value for
-// broker-registered tools. Strict mode causes Anthropic to validate tool
-// inputs against the declared schema at call time, surfacing malformed calls
-// early rather than wasting retry turns.
-//
-// Opt-out: pass a *bool pointing to false in provider.ToolDefinition.Strict
-// when registering a builtin that is intentionally schema-loose (rare).
+// strictTrue is a pointer to true, retained for tools that explicitly opt into
+// Anthropic server-side input-schema enforcement. Default for new tools is nil
+// (non-strict). See decisions.nanite.tools.strict_default_off in Vanta.
 var strictTrue = func() *bool { v := true; return &v }()
 
 // RegisterTools registers tool definitions with the underlying broker.
@@ -348,7 +344,7 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 			Name:        name,
 			Description: t.Description,
 			InputSchema: t.InputSchema,
-			Strict:      strictTrue, // default-on; nil in ToolDefinition also means strict
+			Strict:      nil,
 		})
 	}
 

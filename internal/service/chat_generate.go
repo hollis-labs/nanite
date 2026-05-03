@@ -824,6 +824,28 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			rateLimitTPM = rl.RateLimitTPM()
 		}
 		cacheablePrefixTokens := 0
+		// Known limitation — shared-singleton race on cache hints.
+		// `prov` here is a singleton fetched from the provider registry, and
+		// SetCacheHints (line ~253 in this file, plus the rate-budget pre-flight
+		// pathway in StreamChat) mutates state on the shared instance rather
+		// than on the per-call ChatRequest. Between the SetCacheHints call for
+		// session A and EstimateCacheablePrefix / StreamChat for session A, a
+		// concurrent session B can call SetCacheHints and overwrite hints out
+		// from under us.
+		//
+		// Effect: `cacheable_prefix_tokens` reported in the request_build
+		// telemetry below — and the rate-budget pre-flight estimate that
+		// already lived on this code path before Glass-2 — can both be wrong
+		// under concurrency. Off-by-one on telemetry is acceptable; off-by-one
+		// on the rate-budget gate is the more important reason this race is
+		// load-bearing to fix at the structural layer.
+		//
+		// Fix is tracked at limitations.nanite.cache_hints_shared_singleton_race
+		// in Vanta. Structural resolution: move cache hints into
+		// provider.ChatRequest (per-call parameter) and deprecate SetCacheHints
+		// — touches the go-providers interface and every caller, so out of
+		// cleanup scope. Until then, telemetry consumers should treat
+		// cacheable_prefix_tokens as best-effort, not authoritative.
 		if cp, ok := prov.(provider.Cacheable); ok {
 			cacheablePrefixTokens = cp.EstimateCacheablePrefix(provCtx, provider.ChatRequest{
 				SystemPrompt: extraSystemPrefix,

@@ -242,9 +242,12 @@ type ProviderStore interface {
 	HasProviderAPIKey(id string) (bool, error)
 }
 
-// HandoffStashStore covers session handoff stash persistence (P7, CW-20260420-0024).
+// HandoffStashStore covers session handoff stash persistence + retrieval
+// (P7, CW-20260420-0024 — write; Glass-4, CW-20260502-0015 — read).
 type HandoffStashStore interface {
 	UpsertHandoffStash(stash store.HandoffStash) error
+	GetHandoffStash(sessionID, stashID string) (store.HandoffStash, error)
+	GetLatestStashForSession(sessionID string) (store.HandoffStash, error)
 }
 
 // ReminderStore covers reminder persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).

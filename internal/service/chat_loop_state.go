@@ -202,6 +202,15 @@ type loopState struct {
 	// guard design is tracked in CW-20260419-0018 (kept open for the deep fix).
 	compactRecoverableAttempts int
 
+	// Glass-6 (CW-20260502-0013, SP-20260502-0001) — number of
+	// rate_budget_pause events already emitted for the active turn. Capped at
+	// 1 auto-retry: the first pause emits suggested_action="auto_retry",
+	// sleeps the WaitTime window, and re-runs StreamChat once. A second
+	// pause flips suggested_action="user_action_needed" and ends the turn
+	// cleanly without a fatal `error` event. The session stays alive — see
+	// chat_rate_budget_pause.go for the event semantics.
+	rateBudgetPauseAttempts int
+
 	// P4 Scratchpad — per-turn writable key/value buffer (CW-20260419-0025).
 	// Evicted automatically: loopState is created fresh per generateResponse call.
 	scratchpad      map[string]any

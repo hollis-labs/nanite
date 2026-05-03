@@ -377,6 +377,11 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	// --- Learning capture (CW-20260429-0009, D1) ---
 	case "nanite_remember":
 		return st.callRemember(ctx, args)
+	// --- Self-handoff (Glass-4, CW-20260502-0015) ---
+	case "nanite_handoff_stash":
+		return st.callHandoffStash(ctx, args)
+	case "nanite_handoff_pointers_expand":
+		return st.callHandoffPointersExpand(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}

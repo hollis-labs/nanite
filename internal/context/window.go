@@ -136,32 +136,43 @@ func (cw *ContextWindow) Assemble() []SlotBlock {
 
 	for _, name := range SlotOrder {
 		s := cw.slots[name]
-		if s.Content == "" {
+		if s.Content == "" && !(s.Flags.LazyLoad && s.Flags.LoadHint != "") {
 			continue
 		}
 
-		// Enforce per-slot budget ceiling for static slots.
+		// Enforce per-slot budget ceiling for static slots. LazyLoad is a
+		// pointer-sized payload by definition; ceiling is checked against
+		// the underlying full content (which the consumer would have to
+		// load to materialize), not the pointer.
 		if s.MaxTokens > 0 && s.TokenCount > s.MaxTokens {
 			cw.truncateSlot(s)
 		}
 
+		// Glass-5 (CW-20260502-0012): when LazyLoad+LoadHint is set, ship
+		// the pointer instead of the full payload. Cache key tracks the
+		// rendered pointer so toggling LazyLoad invalidates the slot
+		// cache cleanly.
+		content, cacheKey := s.EffectiveContent()
+
 		prev, hasPrev := cw.PrevHashes[name]
-		changed := !hasPrev || prev != s.CacheKey
+		changed := !hasPrev || prev != cacheKey
 		cw.CacheHits[name] = !changed
 
 		blocks = append(blocks, SlotBlock{
 			SlotName: name,
-			Content:  s.Content,
-			CacheKey: s.CacheKey,
+			Content:  content,
+			CacheKey: cacheKey,
 			Changed:  changed,
 		})
 	}
 
-	// Update PrevHashes for next turn.
+	// Update PrevHashes for next turn. Track the effective (rendered)
+	// cache key so a LazyLoad↔full toggle is visible to the cache layer.
 	newHashes := make(map[string]string, len(cw.slots))
 	for name, s := range cw.slots {
-		if s.Content != "" {
-			newHashes[name] = s.CacheKey
+		_, cacheKey := s.EffectiveContent()
+		if cacheKey != "" {
+			newHashes[name] = cacheKey
 		}
 	}
 	cw.PrevHashes = newHashes

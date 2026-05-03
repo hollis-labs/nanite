@@ -75,6 +75,27 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		_ = err
 	}
 
+	// Glass-4 (CW-20260502-0015): classify session intent for auto-handoff.
+	// Deterministic-first per feedback.design_philosophy. Failure to classify
+	// is non-fatal (intent stays NULL — no handoff flow for this session).
+	if agent, err := a.Services.Store.GetAgent(agentID); err == nil {
+		var sessionMode *store.Mode
+		if m, err := a.Services.Store.GetSessionMode(sess.ID); err == nil {
+			sessionMode = m
+		}
+		signals := service.SignalsFromSession(sess, agent, sessionMode)
+		intent := service.ClassifySessionIntent(r.Context(), signals)
+		if err := a.Services.Store.SetSessionIntent(sess.ID, intent); err != nil {
+			slog.Warn("api: session intent classify+set failed (non-fatal)",
+				"session_id", sess.ID, "intent", intent, "err", err)
+		} else {
+			slog.Info("api: session intent classified",
+				"session_id", sess.ID, "intent", intent, "score", service.ScoreIntent(signals))
+			intentVal := intent
+			sess.Intent = &intentVal
+		}
+	}
+
 	// Emit session creation event (fire-and-forget).
 	if a.Services.Activity != nil {
 		safego.Go(r.Context(), "api.sessions.activity.session-created", func() {

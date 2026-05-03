@@ -119,6 +119,80 @@ func TestDevTools_PathGrants_StaticListStillRejects(t *testing.T) {
 	}
 }
 
+// TestDevTools_PathGrants_C127TildeMention_NoHOME is the regression
+// guard for CW-20260502-0014 (Glass-8). Reproduces the c127 acceptance-
+// smoke failure shape: nanite-api-service runs under launchd with no
+// HOME in its environment, the user mentions "~/Projects-apps", and the
+// agent invokes a dev_* tool with a tilde-prefixed path arg. Without
+// the HomeDir fallback, the literal tilde flows through resolveAllowed
+// and the path-grant store never registers the mention.
+//
+// This test mirrors the live failure exactly:
+//
+//   - $HOME unset (launchd default-environment posture)
+//   - AllowedPaths empty (fresh chat session, no project root configured)
+//   - User message contains "~/Projects-apps"
+//   - Agent's tool call passes the literal "~/Projects-apps" string
+//
+// Pre-fix: resolveAllowed produces an EscapeError with Attempt = literal
+// "~/Projects-apps" and Cause = "no allowed paths configured for this
+// session", matching c127 verbatim.
+//
+// Post-fix: HomeDir falls back to user.Current(), absolutize and
+// expandHome both expand to the same canonical path, the parent-dir
+// grant matches, and resolveAllowed accepts the call.
+func TestDevTools_PathGrants_C127TildeMention_NoHOME(t *testing.T) {
+	prev, hadHome := os.LookupEnv("HOME")
+	t.Cleanup(func() {
+		if hadHome {
+			os.Setenv("HOME", prev)
+		} else {
+			os.Unsetenv("HOME")
+		}
+	})
+	os.Unsetenv("HOME")
+
+	home, err := permission.HomeDir()
+	if err != nil {
+		t.Skipf("HomeDir fallback unavailable on this platform: %v", err)
+	}
+	expandedDir := filepath.Join(home, "Projects-apps")
+
+	// Ingest-side: simulate chat.HandleMessage's path-grant parser firing
+	// for the c127 user message.
+	grants := permission.NewPathGrants()
+	registered := grants.RegisterFromUserMessage(
+		"c127",
+		"Quick test — list the contents of ~/Projects-apps, just top level, first 10 entries.",
+	)
+	if len(registered) == 0 {
+		t.Fatal("RegisterFromUserMessage returned no grants on HOME-less env — absolutize fell through")
+	}
+	foundExpanded := false
+	for _, p := range registered {
+		if p == expandedDir {
+			foundExpanded = true
+		}
+	}
+	if !foundExpanded {
+		t.Errorf("registered grants %v do not include expanded path %q", registered, expandedDir)
+	}
+
+	// Tool-call side: AllowedPaths empty (c127's environment), ctx stamped,
+	// agent passes the literal "~/Projects-apps". expandHome must agree
+	// with absolutize on the canonical form.
+	dt := NewDevToolsTransport(nil)
+	ctx := permission.WithPathGrants(context.Background(), "c127", grants)
+
+	resolved, err := dt.resolveAllowed(ctx, "~/Projects-apps")
+	if err != nil {
+		t.Fatalf("resolveAllowed(~/Projects-apps) failed after HOME-less fallback: %v", err)
+	}
+	if !strings.HasSuffix(resolved, "Projects-apps") {
+		t.Errorf("resolved = %q, want suffix Projects-apps", resolved)
+	}
+}
+
 // TestDevTools_PathGrants_DevReadFlow exercises the path-grant fallback
 // through the public CallTool surface (dev_read), confirming the
 // integration is wired all the way through CallTool → callRead →

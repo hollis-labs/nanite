@@ -34,7 +34,6 @@
 //
 // This package owns:
 //   - Role enum + ChatToolSurface allow-list.
-//   - EnforceChatSurface filter (boot-time tool-surface enforcement).
 //   - AssignRole mapping: ScopeTier × ExecutionPattern → role + role slug.
 //   - ExecuteTask primitive and its dependency surface (Spawner interface).
 //

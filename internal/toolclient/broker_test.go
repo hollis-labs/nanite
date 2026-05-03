@@ -525,15 +525,16 @@ func namesOf(tools []provider.ToolDefinition) []string {
 	return names
 }
 
-// --- Strict tool use tests (CW-20260420-0007) ---
+// --- Strict tool use tests (CW-20260420-0007;
+// flipped to default-off per decisions.nanite.tools.strict_default_off) ---
 
-func TestSelectToolsAsProvider_BrokerToolsDefaultStrict(t *testing.T) {
+func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 	cfg := DefaultConfig()
 	tb := New(nil, nil, cfg)
 
 	// Register tools directly with the LocalBroker so SelectToolsAsProvider
 	// returns them. SelectToolsAsProvider converts broker.ToolDefinition →
-	// provider.ToolDefinition and must set Strict: strictTrue on each result.
+	// provider.ToolDefinition and must leave Strict nil (default-off).
 	brokerTools := []broker.ToolDefinition{
 		{Name: "volon_task_create", Server: "volon", Description: "Create a task in the backlog"},
 		{Name: "conduit_context_view", Server: "conduit", Description: "View a context packet"},
@@ -548,14 +549,10 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultStrict(t *testing.T) {
 		t.Fatal("expected at least one tool in result — broker did not select any tools")
 	}
 
-	// All broker-registered tools in the result must have Strict set to *true.
+	// All broker-registered tools in the result must have Strict nil (default-off).
 	for _, d := range result.Tools {
-		if d.Strict == nil {
-			t.Errorf("tool %q: Strict is nil, want *true (strict default-on)", d.Name)
-			continue
-		}
-		if !*d.Strict {
-			t.Errorf("tool %q: Strict is false, want true (strict default-on)", d.Name)
+		if d.Strict != nil {
+			t.Errorf("tool %q: Strict = %v, want nil (strict default-off)", d.Name, *d.Strict)
 		}
 	}
 }

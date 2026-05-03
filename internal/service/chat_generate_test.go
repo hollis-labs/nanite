@@ -76,32 +76,6 @@ func TestHasUsableTools(t *testing.T) {
 	}
 }
 
-func TestAdjustToolStrictnessForProvider_AnthropicSonnet20250514(t *testing.T) {
-	trueVal := true
-	tools := []provider.ToolDefinition{
-		{Name: "a", Strict: &trueVal},
-		{Name: "b"},
-	}
-	adjustToolStrictnessForProvider("anthropic", "claude-sonnet-4-20250514", tools)
-	for _, tool := range tools {
-		if tool.Strict == nil {
-			t.Fatalf("tool %q strict unexpectedly nil", tool.Name)
-		}
-		if *tool.Strict {
-			t.Fatalf("tool %q strict should be disabled for this model", tool.Name)
-		}
-	}
-}
-
-func TestAdjustToolStrictnessForProvider_OtherModelsUnchanged(t *testing.T) {
-	trueVal := true
-	tools := []provider.ToolDefinition{{Name: "a", Strict: &trueVal}}
-	adjustToolStrictnessForProvider("anthropic", "claude-sonnet-4-5", tools)
-	if tools[0].Strict == nil || !*tools[0].Strict {
-		t.Fatal("strict should remain enabled for unaffected models")
-	}
-}
-
 // TestExtraSystemPrefix_ProgressiveCatalog verifies the progressive catalog
 // is included before the native tool guide when progressiveActive is true.
 func TestExtraSystemPrefix_ProgressiveCatalog(t *testing.T) {

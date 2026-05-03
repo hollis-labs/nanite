@@ -155,13 +155,9 @@ func (tb *ToolClient) IsBuiltinTool(name string) bool {
 	return tb.Builtins.Has(name)
 }
 
-// strictTrue is a pointer to true used as the default Strict value for
-// broker-registered tools. Strict mode causes Anthropic to validate tool
-// inputs against the declared schema at call time, surfacing malformed calls
-// early rather than wasting retry turns.
-//
-// Opt-out: pass a *bool pointing to false in provider.ToolDefinition.Strict
-// when registering a builtin that is intentionally schema-loose (rare).
+// strictTrue is a pointer to true, retained for tools that explicitly opt into
+// Anthropic server-side input-schema enforcement. Default for new tools is nil
+// (non-strict). See decisions.nanite.tools.strict_default_off in Vanta.
 var strictTrue = func() *bool { v := true; return &v }()
 
 // RegisterTools registers tool definitions with the underlying broker.
@@ -331,10 +327,14 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	// broker is registered with uniform names by mcp.Manager, so t.Name
 	// here is already the agent-facing name.
 	//
-	// Strict defaults to true for all broker-registered tools so malformed
-	// tool calls fail at the provider boundary instead of wasting retry turns.
-	// Tools that require a permissive schema (rare) can opt out by setting
-	// Strict: pointer-to-false in their ToolDefinition before registration.
+	// Strict defaults to nil (non-strict) for all broker-registered tools.
+	// Tools that benefit from Anthropic server-side input-schema enforcement
+	// can opt in explicitly by setting Strict to strictTrue (declared above)
+	// at registration time. See decisions.nanite.tools.strict_default_off in
+	// Vanta for the full rationale: strict was being applied blanket-fashion
+	// to all tools, which conflated input-shape validation (where strict
+	// adds value) with high-blast-radius permissions (which belong at
+	// project/session/agent-profile scope, not at the schema level).
 	for _, t := range tools {
 		name := t.Name
 		// Dev-tool gate: skip dev tools when developer_mode is off.
@@ -348,7 +348,7 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 			Name:        name,
 			Description: t.Description,
 			InputSchema: t.InputSchema,
-			Strict:      strictTrue, // default-on; nil in ToolDefinition also means strict
+			Strict:      nil,
 		})
 	}
 

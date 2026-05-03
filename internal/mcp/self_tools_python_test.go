@@ -539,18 +539,6 @@ result = r["sum"]
 	}
 }
 
-// TestSelfToolsTransport_RunPython_NotOnChatSurface verifies that
-// nanite_run_python is filtered from the Chat agent's static surface.
-// This is the critical harness-enforcement check for CW-20260420-0019.
-func TestSelfToolsTransport_RunPython_NotOnChatSurface(t *testing.T) {
-	// Import the dispatch package surface function via the existing test pattern.
-	// We verify by calling IsChatSurfaceTool directly — same as the role_test.
-	from := "nanite_run_python"
-	if isChatSurfaceTool(from) {
-		t.Errorf("nanite_run_python must NOT be on the Chat surface (IsChatSurfaceTool returned true)")
-	}
-}
-
 // TestSelfToolsTransport_RunPython_PresentInSelfToolDefinitions verifies the
 // tool definition appears in the worker/planner surface registry.
 func TestSelfToolsTransport_RunPython_PresentInSelfToolDefinitions(t *testing.T) {
@@ -573,36 +561,6 @@ func TestSelfToolsTransport_RunPython_PresentInSelfToolDefinitions(t *testing.T)
 	if !found {
 		t.Error("nanite_run_python not found in selfToolDefinitions()")
 	}
-}
-
-// isChatSurfaceTool is a local bridge to dispatch.IsChatSurfaceTool.
-// We inline the check here to avoid an import cycle, using the same logic.
-func isChatSurfaceTool(name string) bool {
-	chatSurfaceMetaExceptions := map[string]bool{
-		"fetch_tool_result":  true,
-		"search_tool_result": true,
-		"request_tools":      true,
-	}
-	if chatSurfaceMetaExceptions[name] {
-		return true
-	}
-	// Mirror of ChatToolSurface from dispatch/role.go.
-	prefixes := []string{
-		"nanite_todo_",
-		"nanite_plan_",
-		"nanite_scratchpad_",
-		"nanite_message_",
-		"nanite_handoff_",
-		"nanite_show_",
-		"nanite_execute_task",
-		"nanite_chat_search",
-	}
-	for _, prefix := range prefixes {
-		if name == prefix || strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 // TestRunPythonSandbox_CapsClamped verifies the harness clamps out-of-range

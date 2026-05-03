@@ -1904,9 +1904,8 @@ func validateSourcesAgainstTurn(ctx context.Context, sources []map[string]any) e
 // in an isolated subprocess sandbox with a dual-FD tool-call channel that
 // routes through the permission engine on every tool invocation.
 //
-// This tool is Worker/Planner-only; it is intentionally absent from
-// ChatToolSurface (see internal/dispatch/role.go — no "nanite_run_python"
-// prefix in the allow-list, and the Chat-surface enforcement test asserts it).
+// This tool is Worker/Planner-only; chat-agent reach is governed by the
+// agent profile's own permissions.
 func (st *SelfToolsTransport) callRunPython(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	code := strArg(args, "code", "")
 	if code == "" {

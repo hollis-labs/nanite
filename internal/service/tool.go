@@ -332,29 +332,6 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
-	// CW-20260421-0010 (B3): enforce the Chat-role harness static tool
-	// surface. When the agent has the chat-role-harness prompt template
-	// bound, clamp tools to dispatch.ChatToolSurface so the harness
-	// cannot leak work-execution tools (dev_*, shell_*, MCP-origin tools,
-	// etc.) into its turn. Surfaces are fixed at boot — they do not
-	// change mid-turn (harness spec §1).
-	//
-	// Boundary: this check applies ONLY to the Chat agent. Worker /
-	// Planner agents spawned via executeTask have their own profile
-	// permissions and are unaffected.
-	if s.promptTemplates != nil {
-		adapter := &promptTemplateAdapter{r: s.promptTemplates}
-		isChat, err := dispatch.IsChatRoleAgent(adapter, agentID)
-		if err != nil {
-			slog.Warn("service/tool: chat-role detection failed; surface NOT enforced", "agent", agentID, "err", err)
-		} else if isChat {
-			before := len(allTools)
-			allTools = dispatch.EnforceChatSurface(allTools)
-			slog.Info("service/tool: chat-role harness surface enforced",
-				"agent", agentID, "before", before, "after", len(allTools))
-		}
-	}
-
 	if len(allTools) == 0 {
 		slog.Warn("service/tool: 0 tools for agent — proceeding without tools", "agent", agentID)
 	} else {

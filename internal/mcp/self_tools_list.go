@@ -12,10 +12,10 @@ import (
 // naniteToolListDefinition is the cheap discovery primitive (SP6 —
 // CW-20260430-0006). It complements nanite_tool_describe: where describe
 // returns full per-tool detail (schema + golden examples + relations),
-// list returns just `name + one-line summary` for every tool on the
-// agent's surface, with an optional substring filter. Cost target:
-// unfiltered ≤ a few KiB, filtered ≤ ~500 B — agents can browse the
-// surface without burning turns on inference-of-tool-names.
+// list returns just `name + one-line summary` for the full self-tool
+// inventory, with an optional substring filter. Cost target: unfiltered
+// ≤ a few KiB, filtered ≤ ~500 B — agents can browse the catalog without
+// burning turns on inference-of-tool-names.
 //
 // The motivating evidence is c120 (2026-04-29), where the agent burned
 // turns guessing tool names (`nanite_reminder_create` → `nanite_reminder`
@@ -28,15 +28,23 @@ import (
 // `nanite_memory_recall`). The list now sources from the full MCP
 // Manager surface (via the ToolInventoryLookup interface).
 //
+// Output is the FULL inventory regardless of caller — this primitive is
+// a catalog, not a permission check. Whether any specific tool is
+// actually reachable for the calling agent is governed elsewhere: the
+// agent profile's tool permissions, the dev-mode gate, and project /
+// session preload policy. Agents (and humans reading the result) should
+// not infer per-agent reach from the presence or absence of a tool in
+// this output.
+//
 // Reactive posture: this is a tool the agent reaches for, not a gate it
 // passes through. No "must call before X" rule. See
 // docs/architecture/agent-context-architecture.md for the rationale.
 func naniteToolListDefinition() Tool {
 	return Tool{
 		Name: "nanite_tool_list",
-		Description: "Cheap discovery primitive — list available tools by name + one-line summary.\n\n" +
+		Description: "Lists registered self-tools by name and one-line summary. Returns the full inventory regardless of caller — actual reachability for any specific tool is governed by agent permissions, the dev-mode gate, and project/session policy, not by this output.\n\n" +
 			"**Contract:** input `{filter?: string}` (optional case-insensitive substring matched against BOTH name and summary). Output `{tools: [{name, summary}], count}`.\n\n" +
-			"**When to use:** When you're not sure which tool to reach for, or you want to confirm a tool exists before calling it. Cheap browsing first; full per-tool detail (schema + examples) via `nanite_tool_describe` second.\n\n" +
+			"**When to use:** Browse the catalog when you're not sure which tool to reach for, or confirm a tool name exists before calling it. Use `nanite_tool_describe` next for the full schema of a specific tool, and `request_tools` to load a tool for use in the current turn.\n\n" +
 			"**Example:** `nanite_tool_list({filter:\"reminder\"}) → {tools:[{name:\"nanite_set_reminder\", summary:\"Schedule a reminder for the user at a specific time.\"}], count:1}`.\n\n" +
 			"**See also:** `nanite_tool_describe(name=\"<tool>\")` for the full contract (schema, golden examples, related tools) of any single tool returned here.",
 		InputSchema: map[string]any{
@@ -156,14 +164,17 @@ type inventoryEntry struct {
 // nanite_tool_list, sourced from the cross-server MCP inventory when
 // available and falling back to the in-process self-tools when not.
 //
-// All callers see the full cross-server inventory; per-agent reach is
-// governed by the agent profile's own permissions, not by a dispatch-
-// side allow-list applied here.
+// Output is the full inventory regardless of caller. Per-agent reach
+// (permissions, dev-mode gate, project/session policy) is enforced
+// elsewhere; this function is a registry view, not a filter. ctx is
+// reserved for future per-call signals (request-scoped logging,
+// cancellation when an inventory source becomes async); the current
+// implementation is fully synchronous.
 //
 // Determinism: results are sorted by name so the rendered list is
 // reproducible across runs (the broker / manager iteration order is
 // not stable).
-func (st *SelfToolsTransport) gatherInventory(ctx context.Context) []inventoryEntry {
+func (st *SelfToolsTransport) gatherInventory(_ context.Context) []inventoryEntry {
 	seen := make(map[string]struct{})
 	var out []inventoryEntry
 

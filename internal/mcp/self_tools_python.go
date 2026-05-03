@@ -512,17 +512,14 @@ func applySandboxSysProcAttr(cmd *exec.Cmd) {
 }
 
 // naniteRunPythonToolDefinition returns the tool definition for
-// nanite_run_python. The tool belongs on Worker/Planner surfaces only;
-// the Chat agent dispatches work via nanite_execute_task and does not
-// execute code directly. Reach is gated by the agent profile's
-// permissions.
+// nanite_run_python. Reach for any caller (Chat, Planner, Worker, or a
+// custom agent profile) is governed by the agent profile's tool
+// permissions and the dev-mode gate, not by a hard-coded surface
+// restriction in this definition.
 func naniteRunPythonToolDefinition() Tool {
 	return Tool{
 		Name: "nanite_run_python",
 		Description: `Execute a Python script in an isolated sandbox, with access to Nanite tools via tool_call().
-
-**Surface restriction**: Worker/Planner only. NOT available on the Chat surface.
-The Chat agent dispatches via nanite_execute_task; it does not execute code directly.
 
 **When to use:**
 - Pagination loops: iterate over tool_call() results across multiple pages.

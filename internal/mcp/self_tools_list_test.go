@@ -437,6 +437,67 @@ func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
 	t.Logf("nanite_tool_list cross-server filter=\"memory\": %d bytes", len(resF.Content[0].Text))
 }
 
+// TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed pins the
+// runtime-chat-surface-filter removal contract (CW for the surface
+// filter, addressed in the runtime-filter PR): output is the FULL
+// inventory regardless of name prefix. Earlier revisions filtered to
+// `nanite_*` names on certain agent roles; that filter is gone, and
+// without a positive test future code could quietly re-introduce it.
+//
+// The probe registers a non-nanite_*-prefixed tool (`dev_read`, the
+// canonical dev-mode shell tool) on the manager-fed inventory and asserts
+// it appears in unfiltered nanite_tool_list output. Reach for any caller
+// to actually call dev_read is governed elsewhere (agent permissions +
+// dev-mode gate); the catalog primitive must surface it regardless.
+func TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed(t *testing.T) {
+	st := newSelfTools(t)
+	st.Inventory = &stubInventoryLookup{
+		tools: []provider.ToolDefinition{
+			{
+				Name:        "dev_read",
+				Description: "Read a file from the workspace (dev-mode shell tool).",
+			},
+			{
+				Name:        "web_fetch",
+				Description: "Fetch a URL and return its body.",
+			},
+		},
+	}
+
+	// Unfiltered call — full inventory mode.
+	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+
+	var out struct {
+		Tools []struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		} `json:"tools"`
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	saw := map[string]bool{}
+	for _, tool := range out.Tools {
+		saw[tool.Name] = true
+	}
+
+	// Non-nanite_*-prefixed tools must appear — full inventory contract.
+	if !saw["dev_read"] {
+		t.Error("nanite_tool_list must surface non-nanite_*-prefixed tools (dev_read missing — runtime surface filter regression?)")
+	}
+	if !saw["web_fetch"] {
+		t.Error("nanite_tool_list must surface non-nanite_*-prefixed tools (web_fetch missing — runtime surface filter regression?)")
+	}
+}
+
 // TestSafeTruncate_RuneBoundary ensures we don't cut a multi-byte
 // glyph in half on the byte cap path.
 func TestSafeTruncate_RuneBoundary(t *testing.T) {

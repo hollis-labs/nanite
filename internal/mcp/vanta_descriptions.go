@@ -15,7 +15,7 @@ package mcp
 // pointer") fits the chat surface better than a generic Vanta description.
 //
 // Sub-ticket 3 (rollout) will wire this map into the tool-description path
-// when the tool is exposed on ChatToolSurface. This file is **registry only**
+// when the tool is exposed to the chat agent. This file is **registry only**
 // — adding a description here does not by itself put the tool on the chat
 // surface.
 //

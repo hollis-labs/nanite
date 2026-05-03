@@ -12,19 +12,11 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	recoverpkg "github.com/hollis-labs/nanite/internal/recover"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
-
-// PromptTemplateReader is the narrow surface ToolService uses to detect
-// the Chat-role harness binding. *store.Store satisfies it; tests can
-// inject a fake.
-type PromptTemplateReader interface {
-	ListPromptTemplatesForAgent(agentID string) ([]store.PromptTemplate, error)
-}
 
 // ToolSelection holds the result of tool selection, including progressive
 // discovery metadata. Mirrors chat.toolSelection but is owned by the service layer.
@@ -110,12 +102,6 @@ type toolServiceImpl struct {
 	mcpManager     *mcp.Manager
 	agents         AgentReader
 	decisionLogger BrokerDecisionLogger
-
-	// promptTemplates is the seam used to detect the Chat-role harness
-	// binding so the static surface (dispatch.ChatToolSurface) can be
-	// enforced at boot time. Nil-safe: when unset, the chat-surface
-	// filter is a no-op and behaviour matches pre-B3.
-	promptTemplates PromptTemplateReader
 
 	// repairConfig wires the C2 LLM-augmented repair pipeline
 	// (CW-20260429-0008). Nil-safe: when unset (or when the cost gates
@@ -213,67 +199,11 @@ func (s *toolServiceImpl) LogRequestToolsCall(
 	}
 }
 
-// SetPromptTemplateReader attaches the prompt-template reader used to
-// detect Chat-role harness binding. Wired by the container; nil-safe
-// (tests that do not exercise the chat-surface filter may leave it
-// unset).
-func (s *toolServiceImpl) SetPromptTemplateReader(r PromptTemplateReader) {
-	s.promptTemplates = r
-}
-
-// IsChatRoleAgent reports whether the given agentID has the Chat-role
-// harness prompt template assigned. Wraps dispatch.IsChatRoleAgent and
-// the prompt-template adapter so callers (e.g. chat_tool_executor) don't
-// have to reimplement the adapter.
-//
-// Returns false when the prompt-template reader is unwired (tests, early
-// init) or the lookup fails — same conservative fallback as the boot-
-// time chat-surface enforcer in SelectForAgent. The error path is logged
-// upstream.
-//
-// CW-20260501-0012: used by service.executeToolBatch to stamp the
-// caller's dispatch role onto ctx so nanite_tool_list (and any future
-// surface-aware discovery primitive) can pick the right surface filter.
-func (s *toolServiceImpl) IsChatRoleAgent(agentID string) bool {
-	if s.promptTemplates == nil || agentID == "" {
-		return false
-	}
-	adapter := &promptTemplateAdapter{r: s.promptTemplates}
-	isChat, err := dispatch.IsChatRoleAgent(adapter, agentID)
-	if err != nil {
-		return false
-	}
-	return isChat
-}
-
 // SetRepairConfig attaches the C2 repair pipeline wiring. Nil-safe —
 // pass nil to disable repair entirely (the env-var and user-pref gates
 // also disable it independently).
 func (s *toolServiceImpl) SetRepairConfig(rc *RepairConfig) {
 	s.repairConfig = rc
-}
-
-// promptTemplateAdapter bridges PromptTemplateReader (returns
-// store.PromptTemplate) to dispatch.PromptTemplateLister (returns
-// dispatch.PromptTemplateRef). Lets the dispatch package stay
-// independent of internal/store.
-type promptTemplateAdapter struct {
-	r PromptTemplateReader
-}
-
-func (a *promptTemplateAdapter) ListPromptTemplatesForAgent(agentID string) ([]dispatch.PromptTemplateRef, error) {
-	if a == nil || a.r == nil {
-		return nil, nil
-	}
-	tpls, err := a.r.ListPromptTemplatesForAgent(agentID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]dispatch.PromptTemplateRef, len(tpls))
-	for i, t := range tpls {
-		out[i] = dispatch.PromptTemplateRef{ID: t.ID, Slug: t.Slug}
-	}
-	return out, nil
 }
 
 // SelectForAgent implements ToolService.
@@ -304,11 +234,11 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		// pass to capture diagnostic state (logged + persisted). The
 		// signal pass returns the same tool universe as SelectToolsAsProvider
 		// for the time being — it informs ranking, not surface composition,
-		// because the agent permission filter and chat-surface enforcement
-		// downstream of this path expect provider.ToolDefinition output.
-		// Future work: pass the augmented order into provider conversion
-		// so the LLM receives skills-prioritised tools first. (See
-		// follow-ups in the ADR-003 "Limitations" section.)
+		// because the agent permission filter downstream of this path
+		// expects provider.ToolDefinition output. Future work: pass the
+		// augmented order into provider conversion so the LLM receives
+		// skills-prioritised tools first. (See follow-ups in the ADR-003
+		// "Limitations" section.)
 		if s.toolClient.MemoryRecaller() != nil || len(s.toolClient.Skills()) > 0 {
 			if _, _, signals, err := s.toolClient.SelectToolsAugmented(ctx, intent, hints, workspaceID, agentID, windowSize); err == nil {
 				s.logDecisionWithSignals(sessionID, intent, "augmented", allTools, signals)

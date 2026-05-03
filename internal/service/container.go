@@ -425,10 +425,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	tools := NewToolService(cfg.ToolClient, cfg.MCP, agentReader)
 	if impl, ok := tools.(*toolServiceImpl); ok {
 		impl.SetDecisionLogger(cfg.Store)
-		// B3 (CW-20260421-0010): wire the prompt-template reader so
-		// SelectForAgent can detect Chat-role harness agents and clamp
-		// their tool surface to dispatch.ChatToolSurface.
-		impl.SetPromptTemplateReader(cfg.Store)
 		// C2 (CW-20260429-0008): wire the LLM-augmented repair pipeline.
 		// The repair model is selectable via NANITE_REPAIR_MODEL; the
 		// provider is picked from the user's utility provider (which

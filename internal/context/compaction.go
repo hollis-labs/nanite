@@ -202,6 +202,15 @@ func stageDropEnrichment(ctx context.Context, p *CompactionPipeline) (bool, erro
 
 // --- Stage: Summarize oldest messages ---
 
+// SummarizeMinTokens is the negative-savings guard threshold for
+// stageSummarizeOldest (Glass-4, CW-20260502-0015). Below this, the
+// summarizer's own output (typically 100-200 tokens for the prompt
+// envelope plus the summary itself) costs more than the span being
+// compacted. Smoke-test forensics on the Glass series showed
+// `saved:-48`, `saved:-147` runs on tiny blocks — those are bugs in
+// disguise (compaction making things worse). The guard skips them.
+const SummarizeMinTokens = 200
+
 func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, error) {
 	if p.Summarizer == nil {
 		slog.Warn("compaction: no summarizer configured, skipping summary stage")
@@ -210,6 +219,17 @@ func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, err
 	if conv := p.Window.Slot(SlotConversation); conv != nil && !conv.Compactable {
 		return false, nil
 	}
+
+	// Glass-4 (CW-20260502-0015): defer-to-handoff short-circuit.
+	// When SlotHandoff carries content, the self-authored handoff IS the
+	// continuity primitive — summarizing the older turns adds noise on top
+	// of an already-curated payload. Skip; the post-compaction agent reads
+	// the handoff slot and resumes from next_step_anchor.
+	if h := p.Window.Slot(SlotHandoff); h != nil && h.Content != "" {
+		slog.Info("compaction: summarize_oldest skipped — SlotHandoff present (Glass-4)")
+		return false, nil
+	}
+
 	msgs := p.ConversationMessages
 	if len(msgs) <= 2 {
 		return false, nil // nothing worth summarizing
@@ -229,6 +249,24 @@ func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, err
 	compactSpan := msgs[:spanEnd]
 	keepSpan := msgs[spanEnd:]
 
+	// Glass-4 (CW-20260502-0015): negative-savings guard. Estimate the
+	// span's token cost BEFORE invoking the summarizer; below
+	// SummarizeMinTokens the summary's envelope-plus-output will cost
+	// more than the span, producing the saved:-N runs the smoke
+	// forensics flagged.
+	oldTokens := 0
+	for _, m := range compactSpan {
+		oldTokens += p.Estimator.Estimate(m.Content)
+		for _, b := range m.ContentBlocks {
+			oldTokens += p.Estimator.Estimate(b.Text) + p.Estimator.Estimate(b.Content)
+		}
+	}
+	if oldTokens < SummarizeMinTokens {
+		slog.Info("compaction: summarize_oldest skipped — span below negative-savings threshold (Glass-4)",
+			"span_tokens", oldTokens, "threshold", SummarizeMinTokens, "messages", len(compactSpan))
+		return false, nil
+	}
+
 	// Build mode-aware summarization prompt.
 	sysPrompt := summarySystemPrompt(p.Mode)
 
@@ -237,14 +275,6 @@ func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, err
 		return false, fmt.Errorf("summarize oldest: %w", err)
 	}
 
-	// Compute tokens saved.
-	oldTokens := 0
-	for _, m := range compactSpan {
-		oldTokens += p.Estimator.Estimate(m.Content)
-		for _, b := range m.ContentBlocks {
-			oldTokens += p.Estimator.Estimate(b.Text) + p.Estimator.Estimate(b.Content)
-		}
-	}
 	newTokens := p.Estimator.Estimate(summary)
 
 	// Replace span with summary message + kept messages.

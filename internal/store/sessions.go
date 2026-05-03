@@ -81,7 +81,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		        status, is_pinned, sort_order, message_count,
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
 		        last_activity, created_at, updated_at,
-		        current_mode_id, auto_switch_override
+		        current_mode_id, auto_switch_override, intent
 		 FROM sessions
 		 WHERE workspace_id = ?`
 	if !inclArchived {
@@ -100,6 +100,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		var sess Session
 		var currentModeID sql.NullString
 		var autoSwitchOverride sql.NullBool
+		var intent sql.NullString
 		if err := rows.Scan(
 			&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
 			&sess.WorkspaceID, &sess.ProjectID,
@@ -107,7 +108,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 			&sess.Provider, &sess.Model,
 			&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 			&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
-			&currentModeID, &autoSwitchOverride,
+			&currentModeID, &autoSwitchOverride, &intent,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
@@ -119,6 +120,10 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 			v := autoSwitchOverride.Bool
 			sess.AutoSwitchOverride = &v
 		}
+		if intent.Valid && intent.String != "" {
+			v := intent.String
+			sess.Intent = &v
+		}
 		out = append(out, sess)
 	}
 	return out, rows.Err()
@@ -129,6 +134,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 	var sess Session
 	var currentModeID sql.NullString
 	var autoSwitchOverride sql.NullBool
+	var intent sql.NullString
 	err := s.DB.QueryRow(
 		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
 		        COALESCE(workspace_id,''), COALESCE(project_id,''),
@@ -137,7 +143,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		        status, is_pinned, sort_order, message_count,
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
 		        last_activity, created_at, updated_at,
-		        current_mode_id, auto_switch_override
+		        current_mode_id, auto_switch_override, intent
 		 FROM sessions WHERE id = ?`, id,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
@@ -146,7 +152,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
-		&currentModeID, &autoSwitchOverride,
+		&currentModeID, &autoSwitchOverride, &intent,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", id, err)
@@ -158,6 +164,10 @@ func (s *Store) GetSession(id string) (*Session, error) {
 	if autoSwitchOverride.Valid {
 		v := autoSwitchOverride.Bool
 		sess.AutoSwitchOverride = &v
+	}
+	if intent.Valid && intent.String != "" {
+		v := intent.String
+		sess.Intent = &v
 	}
 	return &sess, nil
 }

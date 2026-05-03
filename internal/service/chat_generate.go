@@ -804,10 +804,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// (slot trim) which uses this data to identify the biggest contributor to
 		// the cacheable prefix. Walks ctxpkg.SlotOrder so new slots (e.g. Glass-3
 		// SlotHandoff) are picked up automatically — do not hardcode a slot list
-		// here. cacheable_prefix_tokens is logged as 0 for now: the actual prefix
-		// length is decided by go-providers' DefaultCacheStrategy after payload
-		// marshalling and is not exposed back to chat-service; surfacing it
-		// requires a provider-side hook.
+		// here. cacheable_prefix_tokens comes from the optional provider.Cacheable
+		// interface (go-providers): the provider builds the same payload it would
+		// send and reports the offset of the last cache_control marker / 4. Same
+		// heuristic as the rate-budget pre-flight; 0 when the provider doesn't
+		// implement Cacheable or has no cache hints set.
 		slotTokens := make(map[string]int, len(ctxpkg.SlotOrder))
 		totalEstimate := 0
 		if slotResult != nil && slotResult.Window != nil {
@@ -822,6 +823,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if rl, ok := prov.(provider.RateLimited); ok {
 			rateLimitTPM = rl.RateLimitTPM()
 		}
+		cacheablePrefixTokens := 0
+		if cp, ok := prov.(provider.Cacheable); ok {
+			cacheablePrefixTokens = cp.EstimateCacheablePrefix(provCtx, provider.ChatRequest{
+				SystemPrompt: extraSystemPrefix,
+				SlotBlocks:   slotBlocksFor(slotResult),
+				Messages:     chatMessages,
+				Model:        model,
+				Tools:        tools,
+			})
+		}
 		rbArgs := []any{
 			"session_id", sessionID,
 			"agent_id", agentID,
@@ -829,7 +840,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			"provider", providerName,
 			"total_estimated_request_tokens", totalEstimate,
 			"rate_limit_tpm_observed", rateLimitTPM,
-			"cacheable_prefix_tokens", 0,
+			"cacheable_prefix_tokens", cacheablePrefixTokens,
 		}
 		for _, name := range ctxpkg.SlotOrder {
 			rbArgs = append(rbArgs, name+"_tokens", slotTokens[name])

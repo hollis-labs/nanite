@@ -187,6 +187,14 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// raw agent + mode strings when no template is assigned. The agent slot
 	// also carries the post-compaction disclosure (P8A) when one is fresh
 	// for this session.
+	//
+	// Glass-7 (CW-20260502-0016, SP-20260502-0001): the chat-role-harness
+	// prompt body itself was deduplicated (~557 → ~485 tokens) by removing
+	// two Capability-section bullets that Phase A's architecture
+	// (docs/architecture/agent-context-architecture.md) had relocated
+	// to tool descriptions. See migration 052 for the in-place DB update.
+	// If the agent observably loses capability after this trim, revert and
+	// re-evaluate.
 	skillList := buildSkillListForSession(cb.Store, agent.ID, session.ID)
 	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList, session.ID)
 

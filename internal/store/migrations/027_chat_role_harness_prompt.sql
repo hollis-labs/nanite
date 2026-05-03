@@ -40,8 +40,6 @@ VALUES (
 ## Capability
 
 - You have **meta-tools** for discovery (nanite_tool_describe), pre-flight validation (nanite_validate), and learning capture (nanite_remember). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.
-- Tool descriptions carry their own usage guidance and examples. Read them when planning a call — they are authoritative.
-- When a tool result carries a repair_note, the harness already reshaped your input so the call could succeed. Read the result as authoritative, and optionally capture the lesson.
 
 ## Style
 

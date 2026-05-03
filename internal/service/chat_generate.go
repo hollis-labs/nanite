@@ -804,10 +804,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// (slot trim) which uses this data to identify the biggest contributor to
 		// the cacheable prefix. Walks ctxpkg.SlotOrder so new slots (e.g. Glass-3
 		// SlotHandoff) are picked up automatically — do not hardcode a slot list
-		// here. cacheable_prefix_tokens is logged as 0 for now: the actual prefix
-		// length is decided by go-providers' DefaultCacheStrategy after payload
-		// marshalling and is not exposed back to chat-service; surfacing it
-		// requires a provider-side hook.
+		// here. cacheable_prefix_tokens comes from the optional provider.Cacheable
+		// interface (go-providers): the provider builds the same payload it would
+		// send and reports the offset of the last cache_control marker / 4. Same
+		// heuristic as the rate-budget pre-flight; 0 when the provider doesn't
+		// implement Cacheable or has no cache hints set.
 		slotTokens := make(map[string]int, len(ctxpkg.SlotOrder))
 		totalEstimate := 0
 		if slotResult != nil && slotResult.Window != nil {
@@ -822,6 +823,38 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if rl, ok := prov.(provider.RateLimited); ok {
 			rateLimitTPM = rl.RateLimitTPM()
 		}
+		cacheablePrefixTokens := 0
+		// Known limitation — shared-singleton race on cache hints.
+		// `prov` here is a singleton fetched from the provider registry, and
+		// SetCacheHints (line ~253 in this file, plus the rate-budget pre-flight
+		// pathway in StreamChat) mutates state on the shared instance rather
+		// than on the per-call ChatRequest. Between the SetCacheHints call for
+		// session A and EstimateCacheablePrefix / StreamChat for session A, a
+		// concurrent session B can call SetCacheHints and overwrite hints out
+		// from under us.
+		//
+		// Effect: `cacheable_prefix_tokens` reported in the request_build
+		// telemetry below — and the rate-budget pre-flight estimate that
+		// already lived on this code path before Glass-2 — can both be wrong
+		// under concurrency. Off-by-one on telemetry is acceptable; off-by-one
+		// on the rate-budget gate is the more important reason this race is
+		// load-bearing to fix at the structural layer.
+		//
+		// Fix is tracked at limitations.nanite.cache_hints_shared_singleton_race
+		// in Vanta. Structural resolution: move cache hints into
+		// provider.ChatRequest (per-call parameter) and deprecate SetCacheHints
+		// — touches the go-providers interface and every caller, so out of
+		// cleanup scope. Until then, telemetry consumers should treat
+		// cacheable_prefix_tokens as best-effort, not authoritative.
+		if cp, ok := prov.(provider.Cacheable); ok {
+			cacheablePrefixTokens = cp.EstimateCacheablePrefix(provCtx, provider.ChatRequest{
+				SystemPrompt: extraSystemPrefix,
+				SlotBlocks:   slotBlocksFor(slotResult),
+				Messages:     chatMessages,
+				Model:        model,
+				Tools:        tools,
+			})
+		}
 		rbArgs := []any{
 			"session_id", sessionID,
 			"agent_id", agentID,
@@ -829,7 +862,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			"provider", providerName,
 			"total_estimated_request_tokens", totalEstimate,
 			"rate_limit_tpm_observed", rateLimitTPM,
-			"cacheable_prefix_tokens", 0,
+			"cacheable_prefix_tokens", cacheablePrefixTokens,
 		}
 		for _, name := range ctxpkg.SlotOrder {
 			rbArgs = append(rbArgs, name+"_tokens", slotTokens[name])

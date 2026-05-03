@@ -224,6 +224,46 @@ func TestPathGrants_TildeExpansion(t *testing.T) {
 	}
 }
 
+// TestPathGrants_TildeExpansion_NoHOME is the c127 regression
+// (CW-20260502-0014). Reproduces the launchd-spawned service env where
+// $HOME is absent: register and lookup must still agree on the canonical
+// expanded path via the user.Current() fallback in HomeDir, otherwise
+// the literal "~/Projects-apps" flows through and the parent-dir grant
+// never matches the agent's expanded tool-call argument.
+func TestPathGrants_TildeExpansion_NoHOME(t *testing.T) {
+	prev, hadHome := os.LookupEnv("HOME")
+	t.Cleanup(func() {
+		if hadHome {
+			os.Setenv("HOME", prev)
+		} else {
+			os.Unsetenv("HOME")
+		}
+	})
+	os.Unsetenv("HOME")
+
+	home, err := HomeDir()
+	if err != nil {
+		t.Skipf("HomeDir fallback unavailable on this platform: %v", err)
+	}
+	expanded := filepath.Join(home, "Projects-apps")
+
+	g := NewPathGrants()
+	granted := g.RegisterFromUserMessage("c127",
+		"Quick test — list the contents of ~/Projects-apps, just top level, first 10 entries.")
+	if len(granted) == 0 {
+		t.Fatal("RegisterFromUserMessage returned no grants — absolutize fell through on HOME-less env")
+	}
+
+	if !g.IsPathAllowed("c127", expanded) {
+		t.Errorf("IsPathAllowed(c127, %q) = false; ListGrants = %v", expanded, g.ListGrants("c127"))
+	}
+	// Parent-dir grant: the home directory itself should be reachable,
+	// matching Q2 of the locked design.
+	if !g.IsPathAllowed("c127", home) {
+		t.Errorf("IsPathAllowed(c127, %q) = false; parent-dir grant missing", home)
+	}
+}
+
 // TestPathGrants_ContextHelpers covers WithPathGrants /
 // PathGrantsFromContext round-trip.
 func TestPathGrants_ContextHelpers(t *testing.T) {

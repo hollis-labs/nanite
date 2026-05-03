@@ -63,19 +63,24 @@ func NewDevToolsTransport(allowedPaths []string) *DevToolsTransport {
 // filepath.Abs as a literal which produced "/cwd/~/Projects-apps/nanite" and
 // blew the allow-list. Tilde expansion at the boundary fixes the
 // canonicalization gap without weakening the symlink-aware escape check.
+//
+// CW-20260502-0014: routes through permission.HomeDir so $HOME-less
+// launchd-spawned services still expand ~/ via the passwd record. Without
+// this fallback the literal tilde flowed straight into the EscapeError and
+// the path-grant store never registered ~/ mentions (c127 reproduction).
 func expandHome(path string) string {
 	if path == "" {
 		return ""
 	}
 	if path == "~" {
-		home, err := os.UserHomeDir()
+		home, err := permission.HomeDir()
 		if err != nil {
 			return path
 		}
 		return home
 	}
 	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~"+string(filepath.Separator)) {
-		home, err := os.UserHomeDir()
+		home, err := permission.HomeDir()
 		if err != nil {
 			return path
 		}

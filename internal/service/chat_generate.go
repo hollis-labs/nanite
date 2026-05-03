@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/go-otel"
 	"github.com/google/uuid"
+	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
@@ -23,8 +23,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/messaging"
-	"github.com/hollis-labs/nanite/internal/reminders"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -815,6 +815,39 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"iter", ls.iteration, "tools", len(tools), "messages", len(chatMessages),
 				"tokens", breakdown.Total, "ceiling", breakdown.Ceiling)
 		}
+
+		// request_build telemetry — Glass-2 (CW-20260502-0010, SP-20260502-0001).
+		// Emits per-slot + total token counts at request build time. Feeds Glass-7
+		// (slot trim) which uses this data to identify the biggest contributor to
+		// the cacheable prefix. Walks ctxpkg.SlotOrder so new slots (e.g. Glass-3
+		// SlotHandoff) are picked up automatically — do not hardcode a slot list
+		// here. cacheable_prefix_tokens is logged as 0 for now: the actual prefix
+		// length is decided by go-providers' DefaultCacheStrategy after payload
+		// marshalling and is not exposed back to chat-service; surfacing it
+		// requires a provider-side hook.
+		slotTokens := make(map[string]int, len(ctxpkg.SlotOrder))
+		totalEstimate := 0
+		if slotResult != nil && slotResult.Window != nil {
+			for _, name := range ctxpkg.SlotOrder {
+				if sl := slotResult.Window.Slot(name); sl != nil {
+					slotTokens[name] = sl.TokenCount
+					totalEstimate += sl.TokenCount
+				}
+			}
+		}
+		rbArgs := []any{
+			"session_id", sessionID,
+			"agent_id", agentID,
+			"model", model,
+			"provider", providerName,
+			"total_estimated_request_tokens", totalEstimate,
+			"cacheable_prefix_tokens", 0,
+		}
+		for _, name := range ctxpkg.SlotOrder {
+			rbArgs = append(rbArgs, name+"_tokens", slotTokens[name])
+		}
+		slog.Info("request_build", rbArgs...)
+
 		provCh, err = prov.StreamChat(provCtx, provider.ChatRequest{
 			SystemPrompt: extraSystemPrefix,
 			SlotBlocks:   slotBlocksFor(slotResult),
@@ -900,6 +933,30 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 						s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
 					})
 				}
+				// Glass-6 (CW-20260502-0013, SP-20260502-0001): for the
+				// rate-budget refused-recovery branch, do NOT emit a fatal
+				// internal_error envelope. Surface the failure as a
+				// rate_budget_pause stream event, optionally auto-retry once
+				// after RateTracker.WaitTime, and end the turn cleanly when
+				// the budget can't recover. The session stays alive so the
+				// next user message reuses the same session_id — replaces
+				// the prior "/clear to recover" UX.
+				if triggerKind == compactTriggerRateBudget {
+					if s.pauseAndMaybeRetryRateBudget(ctx, sessionID, prov, ch, err, triggerKind, &ls.rateBudgetPauseAttempts) {
+						// Auto-retry: rerun StreamChat with the same args.
+						// Resetting compactRecoverableAttempts isn't right
+						// here — recovery already refused — but we DO need
+						// to step the iteration counter so the retry isn't
+						// counted as a fresh turn. Mirrors the recovery-ok
+						// path above.
+						ls.iteration--
+						continue
+					}
+					// Pause emitted with user_action_needed; end the turn
+					// cleanly without a fatal envelope.
+					s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
+					return
+				}
 				var msg string
 				switch triggerKind {
 				case compactTriggerRateBudget:
@@ -943,10 +1000,20 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				// because the request itself is bigger than a single window.
 				slog.Warn("chat-service: compaction-recoverable error persisted after retry",
 					"session_id", sessionID, "iter", ls.iteration, "err", err)
-				msg := "Context is still too large after compaction. Use `/clear` or split the request."
+				// Glass-6 (CW-20260502-0013, SP-20260502-0001): rate-budget
+				// failures past compaction also stop killing the session. Emit
+				// rate_budget_pause and end the turn cleanly. context-overflow
+				// retains the prior user-facing internal_error envelope —
+				// Glass-6's scope is rate-budget only.
 				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
-					msg = "Request exceeds the per-minute rate budget even after compaction. Reduce or split the request, or use `/clear` to remove context."
+					if s.pauseAndMaybeRetryRateBudget(ctx, sessionID, prov, ch, err, compactTriggerRateBudget, &ls.rateBudgetPauseAttempts) {
+						ls.iteration--
+						continue
+					}
+					s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
+					return
 				}
+				msg := "Context is still too large after compaction. Use `/clear` or split the request."
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				s.persistPartialAssistant(sessionID, assistantMsgID, agentID, fullContent.String()) // CW-20260419-0019
@@ -1725,16 +1792,35 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 		return chatMessages, tools, false
 	}
 
+	// Glass-4 (CW-20260502-0015): for long-running sessions we suppress the
+	// P7 deterministic stash write so the latest handoff_stashes row stays
+	// the Glass-4 self-authored envelope. Per-turn / ephemeral / unclassified
+	// sessions still take the legacy P7 path. Glass-4 stash itself is written
+	// proactively by the agent's `handoff_stash` self-tool during normal
+	// turns, OR (fallback) at compaction time below before stages run.
+	sess, _ := s.store.GetSession(sessionID)
+	longRunning := IsLongRunning(sess)
+
+	if longRunning {
+		if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
+			slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
+				"session_id", sessionID, "err", err)
+		}
+	}
+
 	pipeline := &ctxpkg.CompactionPipeline{
 		Window:               result.Window,
 		Estimator:            ctxpkg.DefaultEstimator{},
 		Summarizer:           summarizer,
 		Mode:                 classifyModeFromAgentTags(agent),
 		ConversationMessages: chatMessages,
-		// P7 HandoffStash: snapshot scratchpad state pre-compaction.
+		// P7 HandoffStash: snapshot scratchpad state pre-compaction. Skipped
+		// when Glass-4 owns this session's handoff (long-running).
 		SessionID:          sessionID,
-		StashWriter:        storeStashWriter{s: s.store},
 		ScratchpadSnapshot: scratchpadSnapshot,
+	}
+	if !longRunning {
+		pipeline.StashWriter = storeStashWriter{s: s.store}
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -1771,6 +1857,19 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	tokensAfter := result.Window.UsedTokens()
 	chatMessages = pipeline.ConversationMessages
 	result.Messages = chatMessages
+
+	// Glass-4 (CW-20260502-0015): post-compaction handoff inject. Reads the
+	// latest Glass-4 envelope for this session and populates SlotHandoff
+	// (AutoInject=true). No-op for non-long-running sessions or sessions
+	// without a Glass-4 stash. Runs before Assemble() so SlotHandoff content
+	// is in the freshly-built block list.
+	if longRunning {
+		if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
+			slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
+				"session_id", sessionID, "err", err)
+		}
+	}
+
 	result.Blocks = result.Window.Assemble()
 	result.NeedsCompaction = result.Window.NeedsCompaction()
 	result.SystemPrompt = rebuildLegacySystemPrompt(result.Window)
@@ -1962,6 +2061,22 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 
 	settings, _ := s.store.GetUserSettings()
 	summarizer := s.buildSummarizer(settings)
+
+	// Glass-4 (CW-20260502-0015): same long-running suppression as the
+	// recovery path. The pre-loop gate sees no scratchpad, so the legacy
+	// P7 payload would be empty anyway — but keeping the discipline
+	// uniform across both compaction paths is what makes the post-compaction
+	// reader's "latest stash is the Glass-4 envelope" invariant hold.
+	sess, _ := s.store.GetSession(sessionID)
+	longRunning := IsLongRunning(sess)
+
+	if longRunning {
+		if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
+			slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
+				"session_id", sessionID, "err", err)
+		}
+	}
+
 	pipeline := &ctxpkg.CompactionPipeline{
 		Window:               result.Window,
 		Estimator:            ctxpkg.DefaultEstimator{},
@@ -1969,9 +2084,12 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 		Mode:                 classifyModeFromAgentTags(agent),
 		ConversationMessages: chatMessages,
 		// P7 HandoffStash: pre-loop compaction has no scratchpad yet.
+		// Skipped when Glass-4 owns this session's handoff (long-running).
 		SessionID:          sessionID,
-		StashWriter:        storeStashWriter{s: s.store},
 		ScratchpadSnapshot: map[string]any{},
+	}
+	if !longRunning {
+		pipeline.StashWriter = storeStashWriter{s: s.store}
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -1990,6 +2108,17 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	tokensAfter := result.Window.UsedTokens()
 	chatMessages = pipeline.ConversationMessages
 	result.Messages = chatMessages
+
+	// Glass-4 (CW-20260502-0015): post-compaction handoff inject — same
+	// flow as recoverFromContextOverflow. See InjectGlass4HandoffSlot for
+	// the no-op gates.
+	if longRunning {
+		if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
+			slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
+				"session_id", sessionID, "err", err)
+		}
+	}
+
 	result.Blocks = result.Window.Assemble()
 	result.NeedsCompaction = result.Window.NeedsCompaction()
 	result.SystemPrompt = rebuildLegacySystemPrompt(result.Window)

@@ -1,0 +1,36 @@
+[
+  {
+    "title": "Stash a handoff at a natural checkpoint in a long-running session",
+    "args": {
+      "session_id": "sess-9b3f",
+      "session_intent": "Implementing Glass-4 keystone — chat continuity across compaction",
+      "next_step_anchor": "Run E2E test with NANITE_PROVIDER_RATE_BUDGET_TPM=15000 and capture transcript",
+      "recent_decisions": [
+        "Schema discriminator {schema:'glass-4'} envelopes Glass-4 stashes in handoff_stashes",
+        "Long-running sessions skip P7 deterministic stash; Glass-4 self-authored is canonical",
+        "Summarizer defers to handoff when SlotHandoff is populated"
+      ],
+      "active_pointers": [
+        {
+          "label": "implementer-report",
+          "purpose": "Latest progress notes; read post-compaction to resume from where we left off",
+          "cache_key": "01HJ8N7XK5R8M3Y6PZQWA9V2BC"
+        }
+      ]
+    },
+    "result": {
+      "cache_key": "0a4b6c8e-1f2d-4a5b-9c8d-2e3f4a5b6c7d",
+      "validated": true
+    },
+    "notes": "Use when you reach a coherent stopping point — decision locked, phase complete, or just before a long-running search. The cache_key is stable and can be referenced by future stashes in active_pointers."
+  },
+  {
+    "title": "Minimal stash — only required fields",
+    "args": {
+      "session_id": "sess-9b3f",
+      "session_intent": "Triaging compaction event regressions",
+      "next_step_anchor": "Pick the next failing case from the smoke transcript and reproduce it locally"
+    },
+    "notes": "session_intent and next_step_anchor are required; recent_decisions and active_pointers are optional. Keep all fields under their per-field cap (200/100/100/etc tokens) and the total under 1500 tokens."
+  }
+]

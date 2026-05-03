@@ -1,0 +1,19 @@
+[
+  {
+    "title": "Retrieve the full handoff payload by cache_key referenced from SlotHandoff",
+    "args": {
+      "session_id": "sess-9b3f",
+      "cache_key": "0a4b6c8e-1f2d-4a5b-9c8d-2e3f4a5b6c7d"
+    },
+    "result": {
+      "session_intent": "Implementing Glass-4 keystone — chat continuity across compaction",
+      "next_step_anchor": "Run E2E test with NANITE_PROVIDER_RATE_BUDGET_TPM=15000 and capture transcript",
+      "recent_decisions": [
+        "Schema discriminator {schema:'glass-4'} envelopes Glass-4 stashes",
+        "Long-running sessions skip P7 deterministic stash"
+      ],
+      "active_pointers": []
+    },
+    "notes": "Call this when you see a `cache_key=...` in SlotHandoff's `Active pointers` block and need the full body the pointer summarized. The session_id must match the session that authored the stash."
+  }
+]

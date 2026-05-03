@@ -818,12 +818,17 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 			}
 		}
+		rateLimitTPM := 0
+		if rl, ok := prov.(provider.RateLimited); ok {
+			rateLimitTPM = rl.RateLimitTPM()
+		}
 		rbArgs := []any{
 			"session_id", sessionID,
 			"agent_id", agentID,
 			"model", model,
 			"provider", providerName,
 			"total_estimated_request_tokens", totalEstimate,
+			"rate_limit_tpm_observed", rateLimitTPM,
 			"cacheable_prefix_tokens", 0,
 		}
 		for _, name := range ctxpkg.SlotOrder {

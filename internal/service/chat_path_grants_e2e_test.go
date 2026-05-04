@@ -160,3 +160,108 @@ func TestChat_PathGrants_DevGlobE2E(t *testing.T) {
 		t.Errorf("expected had_checker:true in grant-resolution log, got: %s", logs)
 	}
 }
+
+// TestE2E_WorkerInheritsParentGrant exercises the full integration of
+// the lineage-aware grant lookup: a parent chat session registers a
+// path grant, a worker session is associated via RegisterLineage (the
+// same call ChatRunner makes at spawn time), and the worker's dev_glob
+// — dispatched through executeToolBatch under the worker session ID —
+// resolves successfully via the parent's grant.
+//
+// Asserts the new grant-resolution log surfaces match_kind:ancestor_session
+// and the matching parent in match_via_session_id, so the c146 surface
+// the SP-20260501-0003 acceptance smoke uncovered ("worker can't act on
+// the path the user mentioned to chat") is regression-locked end-to-end.
+func TestE2E_WorkerInheritsParentGrant(t *testing.T) {
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "hello.md"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const parentSessionID = "sess-parent-e2e"
+	const workerSessionID = "sess-worker-e2e"
+
+	grants := permission.NewPathGrants()
+	registered := grants.RegisterFromUserMessage(
+		parentSessionID,
+		"Use nanite_execute_task to spawn a Worker that lists "+tmpDir+", first 10 entries.",
+	)
+	if len(registered) == 0 {
+		t.Fatalf("setup: RegisterFromUserMessage returned no grants")
+	}
+
+	// Stamp the (worker → parent) lineage the way ChatRunner.Run does at
+	// spawn time. Without this the worker's bucket is empty and the
+	// dev_glob below would fail — exactly the c146 reproduction.
+	grants.RegisterLineage(workerSessionID, parentSessionID)
+	t.Cleanup(func() { grants.ClearLineage(workerSessionID) })
+
+	mgr := mcp.NewManager()
+	if err := mgr.AddServer("dev", mcp.NewDevToolsTransport(nil), mcp.TierBuiltin); err != nil {
+		t.Fatalf("AddServer: %v", err)
+	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+	tools := NewToolService(nil, mgr, nil)
+
+	prev := slog.Default()
+	sink := &safeBuf{}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(sink, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	svc := &chatServiceImpl{
+		streams:      NewStreamManager(),
+		tools:        tools,
+		store:        &e2eStore{},
+		pathGrants:   grants,
+		argValidator: newArgValidator(),
+	}
+
+	plans := []toolPlan{{
+		tu: provider.ToolUseBlock{
+			ID:    "tu-glob-worker",
+			Name:  "dev_glob",
+			Input: map[string]any{"pattern": "*.md", "directory": tmpDir},
+		},
+		status: toolPlanReady,
+	}}
+
+	ls := newLoopState(chat.AgentConstraints{}, nil, false)
+	ch := make(chan chat.StreamEvent, 64)
+	go func() {
+		for range ch {
+		}
+	}()
+	defer close(ch)
+
+	// Dispatch under the WORKER session ID. Pre-fix this fails with
+	// bucket_size:0; post-fix it resolves via the lineage walk to parent.
+	results := svc.executeToolBatch(
+		context.Background(), plans, ls, "agent-worker", ch, workerSessionID, "ws-test",
+	)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	got := results[0]
+	if got.isError {
+		t.Fatalf("worker dev_glob errored — lineage-aware grant lookup did not fire.\n  output: %s",
+			got.rawOutput)
+	}
+	if !strings.Contains(got.rawOutput, "hello.md") {
+		t.Errorf("expected hello.md in output, got: %s", got.rawOutput)
+	}
+
+	logs := sink.String()
+	if !strings.Contains(logs, `"match_kind":"ancestor_session"`) {
+		t.Errorf("expected match_kind:ancestor_session in grant-resolution log, got: %s", logs)
+	}
+	if !strings.Contains(logs, `"match_via_session_id":"`+parentSessionID+`"`) {
+		t.Errorf("expected match_via_session_id:%q in grant-resolution log, got: %s",
+			parentSessionID, logs)
+	}
+}

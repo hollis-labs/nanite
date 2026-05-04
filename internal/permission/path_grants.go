@@ -37,12 +37,19 @@
 package permission
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 )
+
+// lineageMaxHops bounds how many parent links LookupPath will walk before
+// giving up. Workers are typically one hop deep; this cap protects against
+// pathological cycles that should never exist in production but would
+// otherwise spin LookupPath if the lineage map were ever corrupted.
+const lineageMaxHops = 4
 
 // PathGrants tracks session-scoped, explicit-mention path grants.
 type PathGrants struct {
@@ -51,12 +58,20 @@ type PathGrants struct {
 	// session. The set is represented as a map[string]struct{} so the
 	// IsPathAllowed prefix check can iterate without sorting.
 	grants map[string]map[string]struct{}
+	// lineage[childSessionID] = parentSessionID. Stamped at worker spawn
+	// time by the dispatch wiring layer. Lets LookupPath fall through to
+	// the parent's grant bucket when the worker's own bucket misses, so
+	// explicit-mention grants the user issued in the chat thread can be
+	// honored by spawned workers without making profile permissions
+	// inheritable. Cleared at worker spawn-finish (defer in the runner).
+	lineage map[string]string
 }
 
 // NewPathGrants returns an empty grant store.
 func NewPathGrants() *PathGrants {
 	return &PathGrants{
-		grants: make(map[string]map[string]struct{}),
+		grants:  make(map[string]map[string]struct{}),
+		lineage: make(map[string]string),
 	}
 }
 
@@ -133,9 +148,10 @@ func (g *PathGrants) RegisterFromUserMessage(sessionID, message string) []string
 type LookupKind string
 
 const (
-	LookupKindNone     LookupKind = "none"
-	LookupKindLiteral  LookupKind = "literal"
-	LookupKindAncestor LookupKind = "ancestor"
+	LookupKindNone            LookupKind = "none"
+	LookupKindLiteral         LookupKind = "literal"
+	LookupKindAncestor        LookupKind = "ancestor"
+	LookupKindAncestorSession LookupKind = "ancestor_session"
 )
 
 // LookupPath reports whether sessionID has been granted access to
@@ -146,29 +162,80 @@ const (
 // its parent directory "/foo/" — and a tool call against "/foo/anything"
 // hits the parent grant.
 //
-// Returns (false, LookupKindNone) when sessionID is empty, candidate is
-// empty, the bucket is empty, or no grant matches.
-func (g *PathGrants) LookupPath(sessionID, candidate string) (bool, LookupKind) {
+// On a miss against the session's own bucket, LookupPath walks the
+// session lineage chain (RegisterLineage) up to lineageMaxHops and
+// retries the same literal/ancestor check against each parent's bucket.
+// A hit via lineage returns kind=LookupKindAncestorSession and the
+// matching parent's session ID in viaSessionID. This is how a spawned
+// worker session resolves grants the user explicitly issued in the
+// parent chat thread, without making profile permissions inheritable.
+//
+// Returns (false, LookupKindNone, "") when sessionID is empty, candidate
+// is empty, neither the session's own bucket nor any walked ancestor
+// matches.
+func (g *PathGrants) LookupPath(sessionID, candidate string) (bool, LookupKind, string) {
 	if g == nil || sessionID == "" || candidate == "" {
-		return false, LookupKindNone
+		return false, LookupKindNone, ""
 	}
 	abs, ok := absolutize(candidate)
 	if !ok {
-		return false, LookupKindNone
+		return false, LookupKindNone, ""
 	}
 
 	g.mu.RLock()
-	bucket := g.grants[sessionID]
-	g.mu.RUnlock()
+	defer g.mu.RUnlock()
+
+	// Own bucket first — keep the existing literal/ancestor classification
+	// so callers that already grant against their own session see the same
+	// kind value as before this change.
+	if matched, kind := lookupInBucket(g.grants[sessionID], abs); matched {
+		return true, kind, ""
+	}
+
+	// Lineage walk. Re-classify any hit against an ancestor bucket as
+	// ancestor_session so callers can distinguish "this session's own
+	// grant" from "inherited via parent chain" in the diagnostic log.
+	visited := map[string]struct{}{sessionID: {}}
+	cursor := sessionID
+	for hop := 0; hop < lineageMaxHops; hop++ {
+		parent, ok := g.lineage[cursor]
+		if !ok || parent == "" {
+			return false, LookupKindNone, ""
+		}
+		if _, dup := visited[parent]; dup {
+			// Cycle: the lineage map should be acyclic (worker → chat
+			// is a one-shot pointer cleared on spawn-finish), but bail
+			// rather than spin if it ever isn't.
+			return false, LookupKindNone, ""
+		}
+		visited[parent] = struct{}{}
+		if matched, _ := lookupInBucket(g.grants[parent], abs); matched {
+			return true, LookupKindAncestorSession, parent
+		}
+		cursor = parent
+	}
+	// Walk hit the depth cap without resolving. Production lineage chains
+	// should be one or two hops; logging at warn surfaces a misuse without
+	// failing the tool call (the dev_* call will report a clean miss).
+	slog.Warn("permission: path-grant lineage walk capped",
+		"session_id", sessionID,
+		"candidate_abs", abs,
+		"max_hops", lineageMaxHops,
+	)
+	return false, LookupKindNone, ""
+}
+
+// lookupInBucket runs the existing literal + ancestor check against a
+// single session's grant bucket. Returns (false, LookupKindNone) on an
+// empty bucket so callers can chain it across the lineage walk without
+// duplicating the empty-check.
+func lookupInBucket(bucket map[string]struct{}, abs string) (bool, LookupKind) {
 	if len(bucket) == 0 {
 		return false, LookupKindNone
 	}
-
-	// Direct hit on the cleaned absolute path.
 	if _, ok := bucket[abs]; ok {
 		return true, LookupKindLiteral
 	}
-	// Ancestor hit: any granted root that is a directory ancestor of abs.
 	for granted := range bucket {
 		if granted == "" {
 			continue
@@ -176,11 +243,6 @@ func (g *PathGrants) LookupPath(sessionID, candidate string) (bool, LookupKind) 
 		if abs == granted {
 			return true, LookupKindLiteral
 		}
-		// Treat granted as a directory; the candidate must lie strictly
-		// inside it. This intentionally does NOT recurse beyond what's
-		// already in the bucket — the registration step put both the
-		// literal AND its parent in, so a single-level descent is the
-		// natural matching shape.
 		if strings.HasPrefix(abs, ensureTrailingSep(granted)) {
 			return true, LookupKindAncestor
 		}
@@ -191,8 +253,40 @@ func (g *PathGrants) LookupPath(sessionID, candidate string) (bool, LookupKind) 
 // IsPathAllowed reports whether sessionID has been granted access to
 // candidate. Wraps LookupPath for callers that only need the boolean.
 func (g *PathGrants) IsPathAllowed(sessionID, candidate string) bool {
-	matched, _ := g.LookupPath(sessionID, candidate)
+	matched, _, _ := g.LookupPath(sessionID, candidate)
 	return matched
+}
+
+// RegisterLineage records that childSessionID is a spawned descendant of
+// parentSessionID for the purpose of grant lookup. After this call,
+// LookupPath(childSessionID, candidate) will fall through to
+// parentSessionID's bucket on a miss against the child's own bucket.
+//
+// Nil-safe; no-op when either ID is empty. Replacing an existing entry
+// is allowed (last-writer-wins) — production callers use a fresh worker
+// session ID per spawn so the second-write case is theoretical.
+//
+// Cleared by ClearLineage at spawn-finish so the entry's lifetime is
+// exactly the worker's lifetime.
+func (g *PathGrants) RegisterLineage(childSessionID, parentSessionID string) {
+	if g == nil || childSessionID == "" || parentSessionID == "" {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.lineage[childSessionID] = parentSessionID
+}
+
+// ClearLineage drops the lineage entry for sessionID. Nil-safe. Called
+// via defer at worker spawn-finish so the entry is cleaned up even if
+// the spawn errors out.
+func (g *PathGrants) ClearLineage(sessionID string) {
+	if g == nil || sessionID == "" {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.lineage, sessionID)
 }
 
 // BucketSize returns the number of grants registered for sessionID. Zero

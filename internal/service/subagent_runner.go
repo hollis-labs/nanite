@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
@@ -111,6 +112,14 @@ type ChatRunner struct {
 	store  sessionStoreForRunner
 	db     *sql.DB
 
+	// pathGrants is the session-scoped grant store. The runner stamps a
+	// (childSession → parentSession) lineage entry at spawn time and
+	// clears it via defer at spawn-finish so dev_* lookups against the
+	// worker session can fall through to the parent's explicit-mention
+	// grants. nil-safe — RegisterLineage / ClearLineage no-op when the
+	// store is unset (tests that don't exercise lineage leave it nil).
+	pathGrants *permission.PathGrants
+
 	// Test-only override hooks. Production wiring leaves these nil; the
 	// runner falls back to r.chat.generateResponse and the real DB UPDATE.
 	invoker   chatInvoker
@@ -119,8 +128,12 @@ type ChatRunner struct {
 
 // NewChatRunner constructs a runner. All deps are required in production;
 // tests can leave fields unset when they don't exercise that code path.
-func NewChatRunner(c *chatServiceImpl, agents agentSlugResolver, st sessionStoreForRunner, db *sql.DB) *ChatRunner {
-	return &ChatRunner{chat: c, agents: agents, store: st, db: db}
+// pathGrants is the session-scoped grant store used to register the
+// (worker → parent) lineage at spawn time so the worker's dev_* tool
+// calls can resolve paths the user explicitly granted in the parent
+// chat. nil-safe.
+func NewChatRunner(c *chatServiceImpl, agents agentSlugResolver, st sessionStoreForRunner, db *sql.DB, pathGrants *permission.PathGrants) *ChatRunner {
+	return &ChatRunner{chat: c, agents: agents, store: st, db: db, pathGrants: pathGrants}
 }
 
 // invokeChat delegates to the test override or the real generateResponse.
@@ -225,6 +238,16 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 		return nil, err
 	}
 	run.ChildSessionID = childID
+
+	// Path-grant lineage: stamp (worker → parent) so the worker session's
+	// dev_* lookups can fall through to grants the user explicitly issued
+	// in the parent chat thread (e.g. the ~/Projects-apps/nanite mention
+	// that prompted nanite_execute_task). Profile permissions stay
+	// isolated; this only widens the session-scoped explicit-mention
+	// grant store, which is naturally scoped to the conversation thread.
+	// Cleared via defer so the entry's lifetime is exactly the worker's.
+	r.pathGrants.RegisterLineage(childID, run.ParentSessionID)
+	defer r.pathGrants.ClearLineage(childID)
 
 	// Persist the prompt as a user message on the child session.
 	// generateResponse's context assembly loads the provider message

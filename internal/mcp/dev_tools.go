@@ -220,13 +220,14 @@ func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, 
 	hadChecker := checker != nil
 
 	var (
-		bucketSize int
-		matched    bool
-		kind       = permission.LookupKindNone
+		bucketSize    int
+		matched       bool
+		kind          = permission.LookupKindNone
+		viaSessionID  string
 	)
 	if hadChecker && sessionID != "" {
 		bucketSize = checker.BucketSize(sessionID)
-		matched, kind = checker.LookupPath(sessionID, abs)
+		matched, kind, viaSessionID = checker.LookupPath(sessionID, abs)
 	}
 
 	slog.Info("permission: dev_tools grant-resolution",
@@ -236,6 +237,7 @@ func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, 
 		"bucket_size", bucketSize,
 		"match_found", matched,
 		"match_kind", string(kind),
+		"match_via_session_id", viaSessionID,
 	)
 
 	if !matched {

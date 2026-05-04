@@ -10,12 +10,15 @@ import "context"
 // hermetic and lets the dev_tools transport stay a value type.
 //
 // LookupPath returns the same boolean as IsPathAllowed plus the match
-// kind ("literal", "ancestor", "none") for diagnostic surfaces. BucketSize
-// reports how many grants are registered for the session, used to
-// distinguish "no bucket" misses from "bucket exists but no match" misses.
+// kind ("literal", "ancestor", "ancestor_session", "none") and, when the
+// hit was via a parent-session lineage walk, the matching ancestor's
+// session ID (empty otherwise). BucketSize reports how many grants are
+// registered for the session itself (own bucket only — ancestor buckets
+// are not counted), used to distinguish "no bucket" misses from "bucket
+// exists but no match" misses in diagnostic surfaces.
 type PathGrantChecker interface {
 	IsPathAllowed(sessionID, candidate string) bool
-	LookupPath(sessionID, candidate string) (bool, LookupKind)
+	LookupPath(sessionID, candidate string) (bool, LookupKind, string)
 	BucketSize(sessionID string) int
 	BestSessionDir(sessionID string) string
 }

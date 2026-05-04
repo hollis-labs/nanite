@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 )
@@ -179,5 +180,105 @@ func TestLineage_RegisterLineage_EmptyIDs(t *testing.T) {
 	}
 	if g.IsPathAllowed("worker", "/tmp/foo.txt") {
 		t.Error("empty parent ID should not register lineage")
+	}
+}
+
+// TestLineage_BestSessionDir_WalksAncestor (CW-20260504-0003) — a worker
+// session whose own bucket is empty inherits the parent's most-specific
+// existing-dir grant via the lineage walk. Mirror of LookupPath's
+// lineage walk; required for dev_bash to derive a sensible default
+// working_dir for the worker.
+func TestLineage_BestSessionDir_WalksAncestor(t *testing.T) {
+	tmp := t.TempDir() // exists on disk as a directory
+	g := NewPathGrants()
+	g.RegisterFromUserMessage("parent", "see "+tmp)
+	g.RegisterLineage("worker", "parent")
+
+	// Worker's own bucket is empty.
+	if got := g.BucketSize("worker"); got != 0 {
+		t.Fatalf("setup: expected empty worker bucket, got %d", got)
+	}
+	// BestSessionDir for the worker walks lineage and returns the
+	// parent's tempdir grant (which exists as a directory).
+	if got := g.BestSessionDir("worker"); got != tmp {
+		t.Errorf("BestSessionDir(worker) = %q, want %q (via lineage)", got, tmp)
+	}
+	// Sanity: parent itself returns the same.
+	if got := g.BestSessionDir("parent"); got != tmp {
+		t.Errorf("BestSessionDir(parent) = %q, want %q (own bucket)", got, tmp)
+	}
+}
+
+// TestLineage_BestSessionDir_OwnBeatsAncestor — when both worker and
+// parent have grants for an existing directory, the worker's own
+// most-specific grant wins (preserves the existing "longest wins"
+// semantics). Lineage candidates are unioned but the sort still picks
+// the longest existing-dir.
+func TestLineage_BestSessionDir_OwnBeatsAncestor(t *testing.T) {
+	parentDir := t.TempDir()                              // shorter path
+	workerDir := t.TempDir() + "/deeper-grant-fixture"    // longer path
+	if err := os.MkdirAll(workerDir, 0o755); err != nil { // ensure exists as dir
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	g := NewPathGrants()
+	g.RegisterFromUserMessage("parent", "see "+parentDir)
+	g.RegisterFromUserMessage("worker", "see "+workerDir)
+	g.RegisterLineage("worker", "parent")
+
+	if got := g.BestSessionDir("worker"); got != workerDir {
+		t.Errorf("BestSessionDir(worker) = %q, want %q (own bucket, longer)", got, workerDir)
+	}
+}
+
+// TestLineage_BestSessionDir_NoLineage_StaysEmpty — a worker without
+// registered lineage doesn't accidentally pick up another session's
+// default. Lineage is opt-in; without a stamp BestSessionDir falls
+// through to an empty result.
+func TestLineage_BestSessionDir_NoLineage_StaysEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	g := NewPathGrants()
+	g.RegisterFromUserMessage("parent", "see "+tmp)
+	// No RegisterLineage call.
+
+	if got := g.BestSessionDir("orphan-worker"); got != "" {
+		t.Errorf("BestSessionDir(orphan-worker) = %q, want \"\" (no lineage)", got)
+	}
+}
+
+// TestLineage_BestSessionDir_DepthCap — the lineage walk in
+// BestSessionDir is bounded by the same depth cap as LookupPath;
+// candidates beyond the cap are not considered.
+func TestLineage_BestSessionDir_DepthCap(t *testing.T) {
+	tmp := t.TempDir()
+	g := NewPathGrants()
+	chainDepth := lineageMaxHops + 2
+	deepest := fmt.Sprintf("s%d", chainDepth)
+	g.RegisterFromUserMessage(deepest, "see "+tmp)
+	for i := 0; i < chainDepth; i++ {
+		g.RegisterLineage(fmt.Sprintf("s%d", i), fmt.Sprintf("s%d", i+1))
+	}
+
+	// Lookup from s0 should hit the cap before reaching deepest.
+	if got := g.BestSessionDir("s0"); got != "" {
+		t.Errorf("BestSessionDir(s0) = %q, want \"\" (deepest grant beyond depth cap)", got)
+	}
+}
+
+// TestLineage_BestSessionDir_ClearedAfterSpawn — once ClearLineage runs
+// (spawn-finish defer), the worker's BestSessionDir no longer reaches
+// the parent. Cleanup invariant identical to LookupPath's.
+func TestLineage_BestSessionDir_ClearedAfterSpawn(t *testing.T) {
+	tmp := t.TempDir()
+	g := NewPathGrants()
+	g.RegisterFromUserMessage("parent", "see "+tmp)
+	g.RegisterLineage("worker", "parent")
+
+	if got := g.BestSessionDir("worker"); got != tmp {
+		t.Fatalf("setup: BestSessionDir(worker) = %q, want %q before clear", got, tmp)
+	}
+	g.ClearLineage("worker")
+	if got := g.BestSessionDir("worker"); got != "" {
+		t.Errorf("after ClearLineage, BestSessionDir(worker) = %q, want \"\"", got)
 	}
 }

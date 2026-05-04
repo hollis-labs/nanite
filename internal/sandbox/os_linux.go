@@ -61,7 +61,7 @@ var bwrapRoBindCandidates = []string{
 //     beta gap (gap #3) — see docs/audits/2026-04-10-sandbox-hardening.
 //   - --die-with-parent and --new-session prevent orphan escape and TTY
 //     hijacking (gap #5 partial).
-func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cleanup func(), err error) {
+func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, networkAllow []string) (cleanup func(), err error) {
 	bwrapPath, lookErr := exec.LookPath("bwrap")
 	if lookErr != nil {
 		bwrapWarnOnce.Do(func() {
@@ -73,6 +73,20 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cl
 	absDir, err := filepath.Abs(sandboxDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox dir: %w", err)
+	}
+
+	// CW-20260504-0003: optional caller-supplied working directory. Bound
+	// read+write inside the bwrap namespace alongside the legacy
+	// sandboxDir bind so commands can operate on user-granted paths.
+	// The upstream permission gate (e.g. dev_tools resolveAllowed) is
+	// the authoritative allow check; this binding is the OS-level
+	// enforcement boundary.
+	var absExtra string
+	if extraWritePath != "" {
+		absExtra, err = filepath.Abs(extraWritePath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve working dir: %w", err)
+		}
 	}
 
 	// Build bwrap argument list.
@@ -95,6 +109,12 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cl
 		"--dev", "/dev", //         minimal /dev
 		"--proc", "/proc", //       /proc view (scoped by --unshare-pid)
 	)
+	if absExtra != "" && absExtra != absDir {
+		// Bind the caller's working dir read+write inside the namespace
+		// so the command can operate on it. Skipped if it equals
+		// sandboxDir (avoid duplicate --bind, which bwrap would error on).
+		bwrapArgs = append(bwrapArgs, "--bind", absExtra, absExtra)
+	}
 
 	// Namespace isolation. --unshare-user-try degrades on kernels that
 	// disable unprivileged user namespaces (common in hardened distros);

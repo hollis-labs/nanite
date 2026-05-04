@@ -1009,10 +1009,13 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 		return pathErrorResult(workDir, err), nil
 	}
 	workDir = resolved
-	_ = workDir // sandbox scopes CWD to its own directory; the
-	// path-grant gate above is the authoritative allow check, and
-	// the sandbox enforces its own sandboxDir as belt-and-braces
-	// redundancy.
+	// CW-20260504-0003: pass workDir through to the sandbox so the
+	// command actually executes in the user-granted directory. The
+	// path-grant gate above is the authoritative allow check; the
+	// sandbox profile (seatbelt on darwin, bwrap on linux) treats
+	// workDir as an additional permitted write subpath. Without this
+	// the agent's "git status in ~/foo" silently ran in the sandbox
+	// scoping dir and reported "fatal: not a git repository" (c150).
 
 	timeout := intArg(args, "timeout", 30)
 	if timeout < 1 {
@@ -1034,10 +1037,11 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 	done := make(chan execOutcome, 1)
 	safego.Go(ctx, "mcp.dev_bash.exec", func() {
 		res, err := execFn(sandbox.AgentExecOpts{
-			SessionID: devBashSessionID,
-			Command:   "sh",
-			Args:      []string{"-c", command},
-			Timeout:   time.Duration(timeout) * time.Second,
+			SessionID:  devBashSessionID,
+			Command:    "sh",
+			Args:       []string{"-c", command},
+			Timeout:    time.Duration(timeout) * time.Second,
+			WorkingDir: workDir,
 		})
 		done <- execOutcome{res: res, err: err}
 	})

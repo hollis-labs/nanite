@@ -58,13 +58,30 @@ func validateSeatbeltLiteral(field, value string) error {
 // Any interpolated value is validated via validateSeatbeltLiteral before
 // being written to the profile. Invalid values return a non-nil error and
 // the caller must refuse to spawn the sandbox.
-func seatbeltProfile(sandboxDir string, networkAllow []string) (string, error) {
+//
+// CW-20260504-0003: extraWritePath, when non-empty, is appended to the
+// file-write allow list as an additional subpath. Used by AgentExec to
+// permit writes under a caller-supplied working_dir that's been gated
+// by the upstream permission layer (e.g. the dev_tools path-grant store).
+// Reads are unrestricted under (allow default), so this only affects
+// the write boundary.
+func seatbeltProfile(sandboxDir string, extraWritePath string, networkAllow []string) (string, error) {
 	absDir, err := filepath.Abs(sandboxDir)
 	if err != nil {
 		absDir = sandboxDir
 	}
 	if err := validateSeatbeltLiteral("sandboxDir", absDir); err != nil {
 		return "", err
+	}
+	var absExtra string
+	if extraWritePath != "" {
+		absExtra, err = filepath.Abs(extraWritePath)
+		if err != nil {
+			absExtra = extraWritePath
+		}
+		if err := validateSeatbeltLiteral("extraWritePath", absExtra); err != nil {
+			return "", err
+		}
 	}
 	// Even though the current profile only uses a fixed "localhost:*" host
 	// pattern for network rules, validate every networkAllow entry so that a
@@ -86,6 +103,9 @@ func seatbeltProfile(sandboxDir string, networkAllow []string) (string, error) {
 	b.WriteString("  (require-not\n")
 	b.WriteString("    (require-any\n")
 	fmt.Fprintf(&b, "      (subpath \"%s\")\n", absDir)
+	if absExtra != "" {
+		fmt.Fprintf(&b, "      (subpath \"%s\")\n", absExtra)
+	}
 	b.WriteString("      (subpath \"/private/tmp\")\n")
 	b.WriteString("      (subpath \"/tmp\")\n")
 	b.WriteString("      (literal \"/dev/null\")\n")
@@ -116,8 +136,12 @@ func seatbeltProfile(sandboxDir string, networkAllow []string) (string, error) {
 // The original command becomes an argument to sandbox-exec.
 // The returned cleanup function removes the temporary seatbelt profile file
 // and should be called after the command finishes.
-func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, networkAllow []string) (cleanup func(), err error) {
-	profile, err := seatbeltProfile(sandboxDir, networkAllow)
+//
+// CW-20260504-0003: extraWritePath, when non-empty, is added to the seatbelt
+// profile's file-write allow list (in addition to sandboxDir + /tmp).
+// Pass an empty string to preserve legacy sandbox-only write behavior.
+func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, networkAllow []string) (cleanup func(), err error) {
+	profile, err := seatbeltProfile(sandboxDir, extraWritePath, networkAllow)
 	if err != nil {
 		return nil, fmt.Errorf("build seatbelt profile: %w", err)
 	}

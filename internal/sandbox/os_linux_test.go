@@ -21,7 +21,7 @@ func TestBwrapArgs_NarrowedMounts(t *testing.T) {
 	}
 
 	cmd := exec.Command("/bin/true")
-	cleanup, err := applyOSSandbox(cmd, t.TempDir(), nil)
+	cleanup, err := applyOSSandbox(cmd, t.TempDir(), "", nil)
 	if err != nil {
 		t.Fatalf("applyOSSandbox: %v", err)
 	}

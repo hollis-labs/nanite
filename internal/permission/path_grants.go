@@ -319,24 +319,56 @@ func (g *PathGrants) BucketSize(sessionID string) int {
 // descending therefore prefers the most specific path first. The
 // IsDir() filter falls through to the parent automatically when the
 // literal itself is a file.
+//
+// CW-20260504-0003: walks the lineage chain (depth-bounded by
+// lineageMaxHops) so a spawned worker session whose own bucket is
+// empty inherits the parent chat session's most-specific default
+// directory. Mirrors the LookupPath lineage walk so workers can default
+// their dev_bash cwd to the path the user originally granted in the
+// parent thread.
 func (g *PathGrants) BestSessionDir(sessionID string) string {
 	if g == nil || sessionID == "" {
 		return ""
 	}
+
 	g.mu.RLock()
-	bucket := g.grants[sessionID]
-	candidates := make([]string, 0, len(bucket))
-	for p := range bucket {
+	candidates := make([]string, 0)
+	for p := range g.grants[sessionID] {
 		candidates = append(candidates, p)
 	}
+	visited := map[string]struct{}{sessionID: {}}
+	cursor := sessionID
+	for hop := 0; hop < lineageMaxHops; hop++ {
+		parent, ok := g.lineage[cursor]
+		if !ok || parent == "" {
+			break
+		}
+		if _, dup := visited[parent]; dup {
+			break // defensive cycle guard
+		}
+		visited[parent] = struct{}{}
+		for p := range g.grants[parent] {
+			candidates = append(candidates, p)
+		}
+		cursor = parent
+	}
 	g.mu.RUnlock()
+
 	if len(candidates) == 0 {
 		return ""
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		return len(candidates[i]) > len(candidates[j])
 	})
+	// Dedupe in-place while preserving sort order — a literal granted by
+	// both the worker and the parent (rare, but possible) shouldn't be
+	// stat'd twice.
+	seen := make(map[string]struct{}, len(candidates))
 	for _, p := range candidates {
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
 		info, err := os.Stat(p)
 		if err == nil && info.IsDir() {
 			return p

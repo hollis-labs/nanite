@@ -230,14 +230,21 @@ func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, 
 		matched, kind, viaSessionID = checker.LookupPath(sessionID, abs)
 	}
 
+	// INFO log carries diagnostic flags only — no sensitive path text — so
+	// production logs can correlate by session_id + classification without
+	// recording every user file path. The full candidate path is emitted at
+	// DEBUG so investigators can opt in via log-level when chasing a miss.
 	slog.Info("permission: dev_tools grant-resolution",
 		"session_id", sessionID,
 		"had_checker", hadChecker,
-		"candidate_abs", abs,
 		"bucket_size", bucketSize,
 		"match_found", matched,
 		"match_kind", string(kind),
 		"match_via_session_id", viaSessionID,
+	)
+	slog.Debug("permission: dev_tools grant-resolution (path detail)",
+		"session_id", sessionID,
+		"candidate_abs", abs,
 	)
 
 	if !matched {
@@ -297,16 +304,15 @@ func (d *DevToolsTransport) exampleRootPath() string {
 // store had the correct grants registered against the real user's home,
 // so the lookup missed and dev_* failed. Telling the agent up-front
 // that ~/ is acceptable removes the impulse to invent.
+//
+// The phrasing is intentionally generic ("the session user's home
+// directory") rather than embedding the resolved absolute home path —
+// the description ships in the tool inventory prompt and we don't want
+// to leak host filesystem layout to the model.
 func tildeAcceptanceNote() string {
-	home, err := permission.HomeDir()
-	homeHint := "the session user's home directory"
-	if err == nil && home != "" {
-		homeHint = home + " (the session user's home directory)"
-	}
-	return fmt.Sprintf("Paths starting with ~/ are accepted and expanded server-side to %s. "+
-		"When the user mentions a ~/ path, pass it VERBATIM (e.g. ~/Projects-apps); "+
-		"do NOT substitute a username — fabricated paths like /Users/<name>/... where <name> is guessed will fail.",
-		homeHint)
+	return "Paths starting with ~/ are accepted and expanded server-side to the session user's home directory. " +
+		"When the user mentions a ~/ path, pass it VERBATIM (e.g. ~/Projects-apps); " +
+		"do NOT substitute a username — fabricated paths like /Users/<name>/... where <name> is guessed will fail."
 }
 
 // ListTools returns the dev tools with descriptions derived from the
